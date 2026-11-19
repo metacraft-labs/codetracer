@@ -9,6 +9,4918 @@
   ],
   "schemaVersion": 1,
   "captures": {
+    "agent-harbor-composer-add-context-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 476.1875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 973.421875,
+          "y": 476.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-add-context-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 476.1875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 973.421875,
+          "y": 476.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-add-context-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 638.1875
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 285.421875,
+          "y": 638.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-add-context-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 638.1875
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 285.421875,
+          "y": 638.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-context-edited-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 324.1875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 973.421875,
+          "y": 324.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-context-edited-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 324.1875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 973.421875,
+          "y": 324.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-context-edited-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 486.1875
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 285.421875,
+          "y": 486.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-context-edited-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 486.1875
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 285.421875,
+          "y": 486.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-gaze-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 354.1875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 973.421875,
+          "y": 354.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-gaze-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 354.1875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 973.421875,
+          "y": 354.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-gaze-paused-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 324.1875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 973.421875,
+          "y": 324.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-gaze-paused-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 324.1875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 973.421875,
+          "y": 324.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-gaze-paused-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 516.1875
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 285.421875,
+          "y": 516.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-gaze-paused-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 516.1875
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 285.421875,
+          "y": 516.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-gaze-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 516.1875
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 285.421875,
+          "y": 516.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-gaze-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 516.1875
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 285.421875,
+          "y": 516.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-launch-invalid-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 749.96875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 960.453125,
+          "y": 749.96875,
+          "w": 68.546875,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-launch-invalid-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 749.96875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 960.453125,
+          "y": 749.96875,
+          "w": 68.546875,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-launch-invalid-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 850
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 54
+        },
+        "composer-send": {
+          "x": 272.453125,
+          "y": 850,
+          "w": 68.546875,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-launch-invalid-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 850
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 54
+        },
+        "composer-send": {
+          "x": 272.453125,
+          "y": 850,
+          "w": 68.546875,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-launch-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 694.1875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 960.453125,
+          "y": 694.1875,
+          "w": 68.546875,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-launch-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 694.1875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 960.453125,
+          "y": 694.1875,
+          "w": 68.546875,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-launch-scheduled-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 850
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 960.453125,
+          "y": 850,
+          "w": 68.546875,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-launch-scheduled-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 850
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 960.453125,
+          "y": 850,
+          "w": 68.546875,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-launch-scheduled-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 850
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 54
+        },
+        "composer-send": {
+          "x": 272.453125,
+          "y": 850,
+          "w": 68.546875,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-launch-scheduled-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 850
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 54
+        },
+        "composer-send": {
+          "x": 272.453125,
+          "y": 850,
+          "w": 68.546875,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-launch-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 850
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 54
+        },
+        "composer-send": {
+          "x": 272.453125,
+          "y": 850,
+          "w": 68.546875,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-launch-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 850
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 54
+        },
+        "composer-send": {
+          "x": 272.453125,
+          "y": 850,
+          "w": 68.546875,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-launched-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 341.1875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-launched-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 341.1875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-launched-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 599.375
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-launched-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 599.375
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-long-names-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 340.375
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 973.421875,
+          "y": 340.375,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-long-names-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 340.375
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 973.421875,
+          "y": 340.375,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-long-names-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 574.375
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 285.421875,
+          "y": 574.375,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-long-names-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 574.375
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 285.421875,
+          "y": 574.375,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-multi-line-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 408.1875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 973.421875,
+          "y": 408.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-multi-line-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 408.1875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 973.421875,
+          "y": 408.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-multi-line-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 618.1875
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 285.421875,
+          "y": 618.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-multi-line-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 618.1875
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 285.421875,
+          "y": 618.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-new-initiative-invalid-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 699.375
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 920.125,
+          "y": 699.375,
+          "w": 108.875,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-new-initiative-invalid-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 699.375
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 920.125,
+          "y": 699.375,
+          "w": 108.875,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-new-initiative-invalid-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 850
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 54
+        },
+        "composer-send": {
+          "x": 232.125,
+          "y": 850,
+          "w": 108.875,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-new-initiative-invalid-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 850
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 54
+        },
+        "composer-send": {
+          "x": 232.125,
+          "y": 850,
+          "w": 108.875,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-new-initiative-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 603.1875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 920.125,
+          "y": 603.1875,
+          "w": 108.875,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-new-initiative-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 603.1875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 920.125,
+          "y": 603.1875,
+          "w": 108.875,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-new-initiative-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 789.1875
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 54
+        },
+        "composer-send": {
+          "x": 232.125,
+          "y": 789.1875,
+          "w": 108.875,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-new-initiative-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 789.1875
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 54
+        },
+        "composer-send": {
+          "x": 232.125,
+          "y": 789.1875,
+          "w": 108.875,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-no-session-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 294.1875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 973.421875,
+          "y": 294.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-no-session-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 294.1875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 973.421875,
+          "y": 294.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-no-session-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 382.375
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 285.421875,
+          "y": 382.375,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-no-session-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 382.375
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 285.421875,
+          "y": 382.375,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-recent-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 380
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-recent-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 380
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-recent-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 404
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 54
+        }
+      }
+    },
+    "agent-harbor-composer-recent-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 404
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 54
+        }
+      }
+    },
+    "agent-harbor-composer-redirected-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 324.1875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 973.421875,
+          "y": 324.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-redirected-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 324.1875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 973.421875,
+          "y": 324.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-redirected-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 502.375
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 285.421875,
+          "y": 502.375,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-redirected-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 502.375
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 285.421875,
+          "y": 502.375,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-route-failed-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 324.1875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 973.421875,
+          "y": 324.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-route-failed-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 324.1875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 973.421875,
+          "y": 324.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-route-failed-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 510.1875
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 54
+        },
+        "composer-send": {
+          "x": 285.421875,
+          "y": 510.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-route-failed-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 510.1875
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 54
+        },
+        "composer-send": {
+          "x": 285.421875,
+          "y": 510.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-routed-manager-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 324.1875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 973.421875,
+          "y": 324.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-routed-manager-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 324.1875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 973.421875,
+          "y": 324.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-routed-manager-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 502.375
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 285.421875,
+          "y": 502.375,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-routed-manager-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 502.375
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 285.421875,
+          "y": 502.375,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-routed-ui-action-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 324.1875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 973.421875,
+          "y": 324.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-routed-ui-action-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 324.1875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 973.421875,
+          "y": 324.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-routed-ui-action-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 510.1875
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 285.421875,
+          "y": 510.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-routed-ui-action-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 510.1875
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 285.421875,
+          "y": 510.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-routing-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 276
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 973.421875,
+          "y": 276,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-routing-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 276
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 973.421875,
+          "y": 276,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-routing-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 438
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 285.421875,
+          "y": 438,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-routing-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 438
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 285.421875,
+          "y": 438,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-send-failed-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 341.1875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-send-failed-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 341.1875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-send-failed-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 611.1875
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-send-failed-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 611.1875
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-sending-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 306
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 973.421875,
+          "y": 306,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-sending-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 306
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 973.421875,
+          "y": 306,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-sending-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 468
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 285.421875,
+          "y": 468,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-sending-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 468
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 285.421875,
+          "y": 468,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-sends-when-routed-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 276
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 973.421875,
+          "y": 276,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-sends-when-routed-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 276
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 973.421875,
+          "y": 276,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-sends-when-routed-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 438
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 285.421875,
+          "y": 438,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-sends-when-routed-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 438
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 285.421875,
+          "y": 438,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-sent-again-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 323
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-sent-again-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 323
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-sent-again-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 513
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-sent-again-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 513
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-sent-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 323
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-sent-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 323
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-sent-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 541
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-sent-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 541
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-stop-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 324.1875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 973.421875,
+          "y": 324.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-stop-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 324.1875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 973.421875,
+          "y": 324.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-stop-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 514.1875
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 285.421875,
+          "y": 514.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-stop-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 514.1875
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 285.421875,
+          "y": 514.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-typing-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 324.1875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 973.421875,
+          "y": 324.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-typing-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 324.1875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 973.421875,
+          "y": 324.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-typing-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 486.1875
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 285.421875,
+          "y": 486.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-typing-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 486.1875
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        },
+        "composer-send": {
+          "x": 285.421875,
+          "y": 486.1875,
+          "w": 55.578125,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-composer-ui-action-done-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 341.1875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-ui-action-done-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 341.1875
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-ui-action-done-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 599.375
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-ui-action-done-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 599.375
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-ui-action-partial-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 357.375
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-ui-action-partial-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 357.375
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-ui-action-partial-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 623.375
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-ui-action-partial-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 623.375
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-ui-action-refused-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 357.375
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-ui-action-refused-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 1440,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 532,
+          "y": 5,
+          "w": 380,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 357.375
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-ui-action-refused-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 599.375
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-ui-action-refused-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "frame-header": {
+          "x": 0,
+          "y": 34,
+          "w": 360,
+          "h": 32
+        },
+        "composer-field": {
+          "x": 12,
+          "y": 5,
+          "w": 340,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 599.375
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
     "agent-harbor-fleet-empty-laptop-dark": {
       "viewport": {
         "width": 1440,
@@ -1761,14 +6673,14 @@
         },
         "milestone-row-first": {
           "x": 4,
-          "y": 205,
+          "y": 253,
           "w": 1432,
           "h": 26,
           "index": 0
         },
         "milestone-row-last": {
           "x": 4,
-          "y": 440,
+          "y": 488,
           "w": 1432,
           "h": 26,
           "index": 5
@@ -1819,14 +6731,14 @@
         },
         "milestone-row-first": {
           "x": 4,
-          "y": 205,
+          "y": 253,
           "w": 1432,
           "h": 26,
           "index": 0
         },
         "milestone-row-last": {
           "x": 4,
-          "y": 440,
+          "y": 488,
           "w": 1432,
           "h": 26,
           "index": 5
@@ -1877,14 +6789,14 @@
         },
         "milestone-row-first": {
           "x": 4,
-          "y": 279,
+          "y": 327,
           "w": 352,
           "h": 43,
           "index": 0
         },
         "milestone-row-last": {
           "x": 4,
-          "y": 599,
+          "y": 647,
           "w": 352,
           "h": 43,
           "index": 5
@@ -1935,14 +6847,14 @@
         },
         "milestone-row-first": {
           "x": 4,
-          "y": 279,
+          "y": 327,
           "w": 352,
           "h": 43,
           "index": 0
         },
         "milestone-row-last": {
           "x": 4,
-          "y": 599,
+          "y": 647,
           "w": 352,
           "h": 43,
           "index": 5
@@ -2145,14 +7057,14 @@
         },
         "milestone-row-first": {
           "x": 4,
-          "y": 205,
+          "y": 229,
           "w": 1432,
           "h": 26,
           "index": 0
         },
         "milestone-row-last": {
           "x": 4,
-          "y": 318,
+          "y": 342,
           "w": 1432,
           "h": 26,
           "index": 3
@@ -2203,14 +7115,14 @@
         },
         "milestone-row-first": {
           "x": 4,
-          "y": 205,
+          "y": 229,
           "w": 1432,
           "h": 26,
           "index": 0
         },
         "milestone-row-last": {
           "x": 4,
-          "y": 318,
+          "y": 342,
           "w": 1432,
           "h": 26,
           "index": 3
@@ -2261,14 +7173,14 @@
         },
         "milestone-row-first": {
           "x": 4,
-          "y": 255,
+          "y": 303,
           "w": 352,
           "h": 43,
           "index": 0
         },
         "milestone-row-last": {
           "x": 4,
-          "y": 419,
+          "y": 467,
           "w": 352,
           "h": 43,
           "index": 3
@@ -2319,14 +7231,14 @@
         },
         "milestone-row-first": {
           "x": 4,
-          "y": 255,
+          "y": 303,
           "w": 352,
           "h": 43,
           "index": 0
         },
         "milestone-row-last": {
           "x": 4,
-          "y": 419,
+          "y": 467,
           "w": 352,
           "h": 43,
           "index": 3
@@ -2377,14 +7289,14 @@
         },
         "milestone-row-first": {
           "x": 4,
-          "y": 205,
+          "y": 253,
           "w": 1432,
           "h": 26,
           "index": 0
         },
         "milestone-row-last": {
           "x": 4,
-          "y": 353,
+          "y": 401,
           "w": 1432,
           "h": 26,
           "index": 3
@@ -2435,14 +7347,14 @@
         },
         "milestone-row-first": {
           "x": 4,
-          "y": 205,
+          "y": 253,
           "w": 1432,
           "h": 26,
           "index": 0
         },
         "milestone-row-last": {
           "x": 4,
-          "y": 353,
+          "y": 401,
           "w": 1432,
           "h": 26,
           "index": 3
@@ -2621,14 +7533,14 @@
         },
         "milestone-row-first": {
           "x": 4,
-          "y": 229,
+          "y": 253,
           "w": 1432,
           "h": 26,
           "index": 0
         },
         "milestone-row-last": {
           "x": 4,
-          "y": 377,
+          "y": 401,
           "w": 1432,
           "h": 26,
           "index": 3
@@ -2679,14 +7591,14 @@
         },
         "milestone-row-first": {
           "x": 4,
-          "y": 229,
+          "y": 253,
           "w": 1432,
           "h": 26,
           "index": 0
         },
         "milestone-row-last": {
           "x": 4,
-          "y": 377,
+          "y": 401,
           "w": 1432,
           "h": 26,
           "index": 3
@@ -2737,14 +7649,14 @@
         },
         "milestone-row-first": {
           "x": 4,
-          "y": 279,
+          "y": 303,
           "w": 352,
           "h": 43,
           "index": 0
         },
         "milestone-row-last": {
           "x": 4,
-          "y": 478,
+          "y": 502,
           "w": 352,
           "h": 43,
           "index": 3
@@ -2795,14 +7707,14 @@
         },
         "milestone-row-first": {
           "x": 4,
-          "y": 279,
+          "y": 303,
           "w": 352,
           "h": 43,
           "index": 0
         },
         "milestone-row-last": {
           "x": 4,
-          "y": 478,
+          "y": 502,
           "w": 352,
           "h": 43,
           "index": 3
@@ -3601,14 +8513,14 @@
         },
         "milestone-row-first": {
           "x": 4,
-          "y": 255,
+          "y": 303,
           "w": 352,
           "h": 43,
           "index": 0
         },
         "milestone-row-last": {
           "x": 4,
-          "y": 454,
+          "y": 502,
           "w": 352,
           "h": 43,
           "index": 3
@@ -3659,14 +8571,14 @@
         },
         "milestone-row-first": {
           "x": 4,
-          "y": 255,
+          "y": 303,
           "w": 352,
           "h": 43,
           "index": 0
         },
         "milestone-row-last": {
           "x": 4,
-          "y": 454,
+          "y": 502,
           "w": 352,
           "h": 43,
           "index": 3
@@ -3845,9 +8757,9 @@
           "h": 26
         },
         "controls": {
-          "x": 1008.78125,
+          "x": 1007.4375,
           "y": 6,
-          "w": 423.21875,
+          "w": 424.5625,
           "h": 26
         },
         "inbox-position": {
@@ -3941,9 +8853,9 @@
           "h": 26
         },
         "controls": {
-          "x": 1008.78125,
+          "x": 1007.4375,
           "y": 6,
-          "w": 423.21875,
+          "w": 424.5625,
           "h": 26
         },
         "inbox-position": {
@@ -4172,26 +9084,26 @@
         "active-tab": {
           "x": 0,
           "y": 6,
-          "w": 322.53125,
+          "w": 321.875,
           "h": 26,
           "fill": "#3c3c3c"
         },
         "overflow": {
-          "x": 958.765625,
+          "x": 957.421875,
           "y": 7,
           "w": 28.4375,
           "h": 24
         },
         "add": {
-          "x": 995.203125,
+          "x": 993.859375,
           "y": 6,
           "w": 26,
           "h": 26
         },
         "controls": {
-          "x": 1021.203125,
+          "x": 1019.859375,
           "y": 6,
-          "w": 410.796875,
+          "w": 412.140625,
           "h": 26
         },
         "menu": {
@@ -4221,33 +9133,33 @@
           "h": 18
         },
         "bar-tab-first": {
-          "x": 326.53125,
+          "x": 325.875,
           "y": 6,
           "w": 256,
           "h": 26,
           "index": 0
         },
         "bar-tab-last": {
-          "x": 764.59375,
+          "x": 763.609375,
           "y": 6,
-          "w": 190.171875,
+          "w": 189.8125,
           "h": 26,
           "index": 2
         },
         "bar-active-tab": {
           "x": 0,
           "y": 6,
-          "w": 322.53125,
+          "w": 321.875,
           "h": 26
         },
         "bar-overflow": {
-          "x": 958.765625,
+          "x": 957.421875,
           "y": 7,
           "w": 28.4375,
           "h": 24
         },
         "bar-add": {
-          "x": 995.203125,
+          "x": 993.859375,
           "y": 6,
           "w": 26,
           "h": 26
@@ -4261,18 +9173,18 @@
         "bar-active-tab-label": {
           "x": 24,
           "y": 7,
-          "w": 146.9375,
+          "w": 146.28125,
           "h": 24,
           "cut": true
         },
         "bar-active-tab-progress": {
-          "x": 176.9375,
+          "x": 176.28125,
           "y": 10,
           "w": 19.3125,
           "h": 18
         },
         "bar-active-tab-recordings": {
-          "x": 202.25,
+          "x": 201.59375,
           "y": 7,
           "w": 110.28125,
           "h": 24
@@ -4294,26 +9206,26 @@
         "active-tab": {
           "x": 0,
           "y": 6,
-          "w": 322.53125,
+          "w": 321.875,
           "h": 26,
           "fill": "#b5ae9f"
         },
         "overflow": {
-          "x": 958.765625,
+          "x": 957.421875,
           "y": 7,
           "w": 28.4375,
           "h": 24
         },
         "add": {
-          "x": 995.203125,
+          "x": 993.859375,
           "y": 6,
           "w": 26,
           "h": 26
         },
         "controls": {
-          "x": 1021.203125,
+          "x": 1019.859375,
           "y": 6,
-          "w": 410.796875,
+          "w": 412.140625,
           "h": 26
         },
         "menu": {
@@ -4343,33 +9255,33 @@
           "h": 18
         },
         "bar-tab-first": {
-          "x": 326.53125,
+          "x": 325.875,
           "y": 6,
           "w": 256,
           "h": 26,
           "index": 0
         },
         "bar-tab-last": {
-          "x": 764.59375,
+          "x": 763.609375,
           "y": 6,
-          "w": 190.171875,
+          "w": 189.8125,
           "h": 26,
           "index": 2
         },
         "bar-active-tab": {
           "x": 0,
           "y": 6,
-          "w": 322.53125,
+          "w": 321.875,
           "h": 26
         },
         "bar-overflow": {
-          "x": 958.765625,
+          "x": 957.421875,
           "y": 7,
           "w": 28.4375,
           "h": 24
         },
         "bar-add": {
-          "x": 995.203125,
+          "x": 993.859375,
           "y": 6,
           "w": 26,
           "h": 26
@@ -4383,18 +9295,18 @@
         "bar-active-tab-label": {
           "x": 24,
           "y": 7,
-          "w": 146.9375,
+          "w": 146.28125,
           "h": 24,
           "cut": true
         },
         "bar-active-tab-progress": {
-          "x": 176.9375,
+          "x": 176.28125,
           "y": 10,
           "w": 19.3125,
           "h": 18
         },
         "bar-active-tab-recordings": {
-          "x": 202.25,
+          "x": 201.59375,
           "y": 7,
           "w": 110.28125,
           "h": 24
@@ -4416,26 +9328,26 @@
         "active-tab": {
           "x": 0,
           "y": 6,
-          "w": 322.53125,
+          "w": 321.875,
           "h": 26,
           "fill": "#3c3c3c"
         },
         "overflow": {
-          "x": 958.765625,
+          "x": 957.421875,
           "y": 7,
           "w": 28.4375,
           "h": 24
         },
         "add": {
-          "x": 995.203125,
+          "x": 993.859375,
           "y": 6,
           "w": 26,
           "h": 26
         },
         "controls": {
-          "x": 1021.203125,
+          "x": 1019.859375,
           "y": 6,
-          "w": 410.796875,
+          "w": 412.140625,
           "h": 26
         },
         "menu": {
@@ -4465,33 +9377,33 @@
           "h": 18
         },
         "bar-tab-first": {
-          "x": 326.53125,
+          "x": 325.875,
           "y": 6,
           "w": 256,
           "h": 26,
           "index": 0
         },
         "bar-tab-last": {
-          "x": 764.59375,
+          "x": 763.609375,
           "y": 6,
-          "w": 190.171875,
+          "w": 189.8125,
           "h": 26,
           "index": 2
         },
         "bar-active-tab": {
           "x": 0,
           "y": 6,
-          "w": 322.53125,
+          "w": 321.875,
           "h": 26
         },
         "bar-overflow": {
-          "x": 958.765625,
+          "x": 957.421875,
           "y": 7,
           "w": 28.4375,
           "h": 24
         },
         "bar-add": {
-          "x": 995.203125,
+          "x": 993.859375,
           "y": 6,
           "w": 26,
           "h": 26
@@ -4505,18 +9417,18 @@
         "bar-active-tab-label": {
           "x": 24,
           "y": 7,
-          "w": 146.9375,
+          "w": 146.28125,
           "h": 24,
           "cut": true
         },
         "bar-active-tab-progress": {
-          "x": 176.9375,
+          "x": 176.28125,
           "y": 10,
           "w": 19.3125,
           "h": 18
         },
         "bar-active-tab-recordings": {
-          "x": 202.25,
+          "x": 201.59375,
           "y": 7,
           "w": 110.28125,
           "h": 24
@@ -4538,26 +9450,26 @@
         "active-tab": {
           "x": 0,
           "y": 6,
-          "w": 322.53125,
+          "w": 321.875,
           "h": 26,
           "fill": "#b5ae9f"
         },
         "overflow": {
-          "x": 958.765625,
+          "x": 957.421875,
           "y": 7,
           "w": 28.4375,
           "h": 24
         },
         "add": {
-          "x": 995.203125,
+          "x": 993.859375,
           "y": 6,
           "w": 26,
           "h": 26
         },
         "controls": {
-          "x": 1021.203125,
+          "x": 1019.859375,
           "y": 6,
-          "w": 410.796875,
+          "w": 412.140625,
           "h": 26
         },
         "menu": {
@@ -4587,33 +9499,33 @@
           "h": 18
         },
         "bar-tab-first": {
-          "x": 326.53125,
+          "x": 325.875,
           "y": 6,
           "w": 256,
           "h": 26,
           "index": 0
         },
         "bar-tab-last": {
-          "x": 764.59375,
+          "x": 763.609375,
           "y": 6,
-          "w": 190.171875,
+          "w": 189.8125,
           "h": 26,
           "index": 2
         },
         "bar-active-tab": {
           "x": 0,
           "y": 6,
-          "w": 322.53125,
+          "w": 321.875,
           "h": 26
         },
         "bar-overflow": {
-          "x": 958.765625,
+          "x": 957.421875,
           "y": 7,
           "w": 28.4375,
           "h": 24
         },
         "bar-add": {
-          "x": 995.203125,
+          "x": 993.859375,
           "y": 6,
           "w": 26,
           "h": 26
@@ -4627,18 +9539,18 @@
         "bar-active-tab-label": {
           "x": 24,
           "y": 7,
-          "w": 146.9375,
+          "w": 146.28125,
           "h": 24,
           "cut": true
         },
         "bar-active-tab-progress": {
-          "x": 176.9375,
+          "x": 176.28125,
           "y": 10,
           "w": 19.3125,
           "h": 18
         },
         "bar-active-tab-recordings": {
-          "x": 202.25,
+          "x": 201.59375,
           "y": 7,
           "w": 110.28125,
           "h": 24
@@ -5492,26 +10404,26 @@
         "active-tab": {
           "x": 0,
           "y": 6,
-          "w": 322.53125,
+          "w": 321.875,
           "h": 26,
           "fill": "#3c3c3c"
         },
         "overflow": {
-          "x": 958.765625,
+          "x": 957.421875,
           "y": 7,
           "w": 28.4375,
           "h": 24
         },
         "add": {
-          "x": 995.203125,
+          "x": 993.859375,
           "y": 6,
           "w": 26,
           "h": 26
         },
         "controls": {
-          "x": 1021.203125,
+          "x": 1019.859375,
           "y": 6,
-          "w": 410.796875,
+          "w": 412.140625,
           "h": 26
         },
         "inbox-position": {
@@ -5521,33 +10433,33 @@
           "h": 18
         },
         "bar-tab-first": {
-          "x": 326.53125,
+          "x": 325.875,
           "y": 6,
           "w": 256,
           "h": 26,
           "index": 0
         },
         "bar-tab-last": {
-          "x": 764.59375,
+          "x": 763.609375,
           "y": 6,
-          "w": 190.171875,
+          "w": 189.8125,
           "h": 26,
           "index": 2
         },
         "bar-active-tab": {
           "x": 0,
           "y": 6,
-          "w": 322.53125,
+          "w": 321.875,
           "h": 26
         },
         "bar-overflow": {
-          "x": 958.765625,
+          "x": 957.421875,
           "y": 7,
           "w": 28.4375,
           "h": 24
         },
         "bar-add": {
-          "x": 995.203125,
+          "x": 993.859375,
           "y": 6,
           "w": 26,
           "h": 26
@@ -5561,18 +10473,18 @@
         "bar-active-tab-label": {
           "x": 24,
           "y": 7,
-          "w": 146.9375,
+          "w": 146.28125,
           "h": 24,
           "cut": true
         },
         "bar-active-tab-progress": {
-          "x": 176.9375,
+          "x": 176.28125,
           "y": 10,
           "w": 19.3125,
           "h": 18
         },
         "bar-active-tab-recordings": {
-          "x": 202.25,
+          "x": 201.59375,
           "y": 7,
           "w": 110.28125,
           "h": 24
@@ -5594,26 +10506,26 @@
         "active-tab": {
           "x": 0,
           "y": 6,
-          "w": 322.53125,
+          "w": 321.875,
           "h": 26,
           "fill": "#b5ae9f"
         },
         "overflow": {
-          "x": 958.765625,
+          "x": 957.421875,
           "y": 7,
           "w": 28.4375,
           "h": 24
         },
         "add": {
-          "x": 995.203125,
+          "x": 993.859375,
           "y": 6,
           "w": 26,
           "h": 26
         },
         "controls": {
-          "x": 1021.203125,
+          "x": 1019.859375,
           "y": 6,
-          "w": 410.796875,
+          "w": 412.140625,
           "h": 26
         },
         "inbox-position": {
@@ -5623,33 +10535,33 @@
           "h": 18
         },
         "bar-tab-first": {
-          "x": 326.53125,
+          "x": 325.875,
           "y": 6,
           "w": 256,
           "h": 26,
           "index": 0
         },
         "bar-tab-last": {
-          "x": 764.59375,
+          "x": 763.609375,
           "y": 6,
-          "w": 190.171875,
+          "w": 189.8125,
           "h": 26,
           "index": 2
         },
         "bar-active-tab": {
           "x": 0,
           "y": 6,
-          "w": 322.53125,
+          "w": 321.875,
           "h": 26
         },
         "bar-overflow": {
-          "x": 958.765625,
+          "x": 957.421875,
           "y": 7,
           "w": 28.4375,
           "h": 24
         },
         "bar-add": {
-          "x": 995.203125,
+          "x": 993.859375,
           "y": 6,
           "w": 26,
           "h": 26
@@ -5663,18 +10575,18 @@
         "bar-active-tab-label": {
           "x": 24,
           "y": 7,
-          "w": 146.9375,
+          "w": 146.28125,
           "h": 24,
           "cut": true
         },
         "bar-active-tab-progress": {
-          "x": 176.9375,
+          "x": 176.28125,
           "y": 10,
           "w": 19.3125,
           "h": 18
         },
         "bar-active-tab-recordings": {
-          "x": 202.25,
+          "x": 201.59375,
           "y": 7,
           "w": 110.28125,
           "h": 24
@@ -5872,26 +10784,26 @@
         "active-tab": {
           "x": 0,
           "y": 6,
-          "w": 248.390625,
+          "w": 248.03125,
           "h": 26,
           "fill": "#3c3c3c"
         },
         "overflow": {
-          "x": 958.765625,
+          "x": 957.421875,
           "y": 7,
           "w": 28.4375,
           "h": 24
         },
         "add": {
-          "x": 995.203125,
+          "x": 993.859375,
           "y": 6,
           "w": 26,
           "h": 26
         },
         "controls": {
-          "x": 1021.203125,
+          "x": 1019.859375,
           "y": 6,
-          "w": 410.796875,
+          "w": 412.140625,
           "h": 26
         },
         "inbox-position": {
@@ -5901,33 +10813,33 @@
           "h": 18
         },
         "bar-tab-first": {
-          "x": 252.390625,
+          "x": 252.03125,
           "y": 6,
-          "w": 246.859375,
+          "w": 246.515625,
           "h": 26,
           "index": 0
         },
         "bar-tab-last": {
-          "x": 729.59375,
+          "x": 728.578125,
           "y": 6,
-          "w": 225.171875,
+          "w": 224.84375,
           "h": 26,
           "index": 2
         },
         "bar-active-tab": {
           "x": 0,
           "y": 6,
-          "w": 248.390625,
+          "w": 248.03125,
           "h": 26
         },
         "bar-overflow": {
-          "x": 958.765625,
+          "x": 957.421875,
           "y": 7,
           "w": 28.4375,
           "h": 24
         },
         "bar-add": {
-          "x": 995.203125,
+          "x": 993.859375,
           "y": 6,
           "w": 26,
           "h": 26
@@ -5974,26 +10886,26 @@
         "active-tab": {
           "x": 0,
           "y": 6,
-          "w": 248.390625,
+          "w": 248.03125,
           "h": 26,
           "fill": "#b5ae9f"
         },
         "overflow": {
-          "x": 958.765625,
+          "x": 957.421875,
           "y": 7,
           "w": 28.4375,
           "h": 24
         },
         "add": {
-          "x": 995.203125,
+          "x": 993.859375,
           "y": 6,
           "w": 26,
           "h": 26
         },
         "controls": {
-          "x": 1021.203125,
+          "x": 1019.859375,
           "y": 6,
-          "w": 410.796875,
+          "w": 412.140625,
           "h": 26
         },
         "inbox-position": {
@@ -6003,33 +10915,33 @@
           "h": 18
         },
         "bar-tab-first": {
-          "x": 252.390625,
+          "x": 252.03125,
           "y": 6,
-          "w": 246.859375,
+          "w": 246.515625,
           "h": 26,
           "index": 0
         },
         "bar-tab-last": {
-          "x": 729.59375,
+          "x": 728.578125,
           "y": 6,
-          "w": 225.171875,
+          "w": 224.84375,
           "h": 26,
           "index": 2
         },
         "bar-active-tab": {
           "x": 0,
           "y": 6,
-          "w": 248.390625,
+          "w": 248.03125,
           "h": 26
         },
         "bar-overflow": {
-          "x": 958.765625,
+          "x": 957.421875,
           "y": 7,
           "w": 28.4375,
           "h": 24
         },
         "bar-add": {
-          "x": 995.203125,
+          "x": 993.859375,
           "y": 6,
           "w": 26,
           "h": 26
@@ -6240,26 +11152,26 @@
         "active-tab": {
           "x": 0,
           "y": 6,
-          "w": 322.53125,
+          "w": 321.875,
           "h": 26,
           "fill": "#3c3c3c"
         },
         "overflow": {
-          "x": 958.765625,
+          "x": 957.421875,
           "y": 7,
           "w": 28.4375,
           "h": 24
         },
         "add": {
-          "x": 995.203125,
+          "x": 993.859375,
           "y": 6,
           "w": 26,
           "h": 26
         },
         "controls": {
-          "x": 1021.203125,
+          "x": 1019.859375,
           "y": 6,
-          "w": 410.796875,
+          "w": 412.140625,
           "h": 26
         },
         "inbox-position": {
@@ -6269,33 +11181,33 @@
           "h": 18
         },
         "bar-tab-first": {
-          "x": 326.53125,
+          "x": 325.875,
           "y": 6,
           "w": 256,
           "h": 26,
           "index": 0
         },
         "bar-tab-last": {
-          "x": 764.59375,
+          "x": 763.609375,
           "y": 6,
-          "w": 190.171875,
+          "w": 189.8125,
           "h": 26,
           "index": 2
         },
         "bar-active-tab": {
           "x": 0,
           "y": 6,
-          "w": 322.53125,
+          "w": 321.875,
           "h": 26
         },
         "bar-overflow": {
-          "x": 958.765625,
+          "x": 957.421875,
           "y": 7,
           "w": 28.4375,
           "h": 24
         },
         "bar-add": {
-          "x": 995.203125,
+          "x": 993.859375,
           "y": 6,
           "w": 26,
           "h": 26
@@ -6309,18 +11221,18 @@
         "bar-active-tab-label": {
           "x": 24,
           "y": 7,
-          "w": 146.9375,
+          "w": 146.28125,
           "h": 24,
           "cut": true
         },
         "bar-active-tab-progress": {
-          "x": 176.9375,
+          "x": 176.28125,
           "y": 10,
           "w": 19.3125,
           "h": 18
         },
         "bar-active-tab-recordings": {
-          "x": 202.25,
+          "x": 201.59375,
           "y": 7,
           "w": 110.28125,
           "h": 24
@@ -6342,26 +11254,26 @@
         "active-tab": {
           "x": 0,
           "y": 6,
-          "w": 322.53125,
+          "w": 321.875,
           "h": 26,
           "fill": "#b5ae9f"
         },
         "overflow": {
-          "x": 958.765625,
+          "x": 957.421875,
           "y": 7,
           "w": 28.4375,
           "h": 24
         },
         "add": {
-          "x": 995.203125,
+          "x": 993.859375,
           "y": 6,
           "w": 26,
           "h": 26
         },
         "controls": {
-          "x": 1021.203125,
+          "x": 1019.859375,
           "y": 6,
-          "w": 410.796875,
+          "w": 412.140625,
           "h": 26
         },
         "inbox-position": {
@@ -6371,33 +11283,33 @@
           "h": 18
         },
         "bar-tab-first": {
-          "x": 326.53125,
+          "x": 325.875,
           "y": 6,
           "w": 256,
           "h": 26,
           "index": 0
         },
         "bar-tab-last": {
-          "x": 764.59375,
+          "x": 763.609375,
           "y": 6,
-          "w": 190.171875,
+          "w": 189.8125,
           "h": 26,
           "index": 2
         },
         "bar-active-tab": {
           "x": 0,
           "y": 6,
-          "w": 322.53125,
+          "w": 321.875,
           "h": 26
         },
         "bar-overflow": {
-          "x": 958.765625,
+          "x": 957.421875,
           "y": 7,
           "w": 28.4375,
           "h": 24
         },
         "bar-add": {
-          "x": 995.203125,
+          "x": 993.859375,
           "y": 6,
           "w": 26,
           "h": 26
@@ -6411,18 +11323,18 @@
         "bar-active-tab-label": {
           "x": 24,
           "y": 7,
-          "w": 146.9375,
+          "w": 146.28125,
           "h": 24,
           "cut": true
         },
         "bar-active-tab-progress": {
-          "x": 176.9375,
+          "x": 176.28125,
           "y": 10,
           "w": 19.3125,
           "h": 18
         },
         "bar-active-tab-recordings": {
-          "x": 202.25,
+          "x": 201.59375,
           "y": 7,
           "w": 110.28125,
           "h": 24
@@ -6608,26 +11520,26 @@
         "active-tab": {
           "x": 0,
           "y": 6,
-          "w": 312.3125,
+          "w": 311.671875,
           "h": 26,
           "fill": "#3c3c3c"
         },
         "overflow": {
-          "x": 937.59375,
+          "x": 936.265625,
           "y": 7,
           "w": 42.703125,
           "h": 24
         },
         "add": {
-          "x": 988.296875,
+          "x": 986.96875,
           "y": 6,
           "w": 26,
           "h": 26
         },
         "controls": {
-          "x": 1014.3125,
+          "x": 1012.96875,
           "y": 6,
-          "w": 417.6875,
+          "w": 419.03125,
           "h": 26
         },
         "inbox-position": {
@@ -6637,33 +11549,33 @@
           "h": 18
         },
         "bar-tab-first": {
-          "x": 316.3125,
+          "x": 315.671875,
           "y": 6,
           "w": 256,
           "h": 26,
           "index": 0
         },
         "bar-tab-last": {
-          "x": 749.171875,
+          "x": 748.203125,
           "y": 6,
-          "w": 184.421875,
+          "w": 184.0625,
           "h": 26,
           "index": 2
         },
         "bar-active-tab": {
           "x": 0,
           "y": 6,
-          "w": 312.3125,
+          "w": 311.671875,
           "h": 26
         },
         "bar-overflow": {
-          "x": 937.59375,
+          "x": 936.265625,
           "y": 7,
           "w": 42.703125,
           "h": 24
         },
         "bar-add": {
-          "x": 988.296875,
+          "x": 986.96875,
           "y": 6,
           "w": 26,
           "h": 26
@@ -6677,18 +11589,18 @@
         "bar-active-tab-label": {
           "x": 24,
           "y": 7,
-          "w": 136.71875,
+          "w": 136.078125,
           "h": 24,
           "cut": true
         },
         "bar-active-tab-progress": {
-          "x": 166.71875,
+          "x": 166.078125,
           "y": 10,
           "w": 19.3125,
           "h": 18
         },
         "bar-active-tab-recordings": {
-          "x": 192.03125,
+          "x": 191.390625,
           "y": 7,
           "w": 110.28125,
           "h": 24
@@ -6710,26 +11622,26 @@
         "active-tab": {
           "x": 0,
           "y": 6,
-          "w": 312.3125,
+          "w": 311.671875,
           "h": 26,
           "fill": "#b5ae9f"
         },
         "overflow": {
-          "x": 937.59375,
+          "x": 936.265625,
           "y": 7,
           "w": 42.703125,
           "h": 24
         },
         "add": {
-          "x": 988.296875,
+          "x": 986.96875,
           "y": 6,
           "w": 26,
           "h": 26
         },
         "controls": {
-          "x": 1014.3125,
+          "x": 1012.96875,
           "y": 6,
-          "w": 417.6875,
+          "w": 419.03125,
           "h": 26
         },
         "inbox-position": {
@@ -6739,33 +11651,33 @@
           "h": 18
         },
         "bar-tab-first": {
-          "x": 316.3125,
+          "x": 315.671875,
           "y": 6,
           "w": 256,
           "h": 26,
           "index": 0
         },
         "bar-tab-last": {
-          "x": 749.171875,
+          "x": 748.203125,
           "y": 6,
-          "w": 184.421875,
+          "w": 184.0625,
           "h": 26,
           "index": 2
         },
         "bar-active-tab": {
           "x": 0,
           "y": 6,
-          "w": 312.3125,
+          "w": 311.671875,
           "h": 26
         },
         "bar-overflow": {
-          "x": 937.59375,
+          "x": 936.265625,
           "y": 7,
           "w": 42.703125,
           "h": 24
         },
         "bar-add": {
-          "x": 988.296875,
+          "x": 986.96875,
           "y": 6,
           "w": 26,
           "h": 26
@@ -6779,18 +11691,18 @@
         "bar-active-tab-label": {
           "x": 24,
           "y": 7,
-          "w": 136.71875,
+          "w": 136.078125,
           "h": 24,
           "cut": true
         },
         "bar-active-tab-progress": {
-          "x": 166.71875,
+          "x": 166.078125,
           "y": 10,
           "w": 19.3125,
           "h": 18
         },
         "bar-active-tab-recordings": {
-          "x": 192.03125,
+          "x": 191.390625,
           "y": 7,
           "w": 110.28125,
           "h": 24
@@ -6829,9 +11741,9 @@
           "h": 26
         },
         "controls": {
-          "x": 1014.3125,
+          "x": 1012.96875,
           "y": 6,
-          "w": 417.6875,
+          "w": 419.03125,
           "h": 26
         },
         "menu": {
@@ -6951,9 +11863,9 @@
           "h": 26
         },
         "controls": {
-          "x": 1014.3125,
+          "x": 1012.96875,
           "y": 6,
-          "w": 417.6875,
+          "w": 419.03125,
           "h": 26
         },
         "menu": {
@@ -7260,43 +12172,43 @@
         "active-tab": {
           "x": 0,
           "y": 6,
-          "w": 312.3125,
+          "w": 311.671875,
           "h": 26,
           "fill": "#3c3c3c"
         },
         "overflow": {
-          "x": 937.59375,
+          "x": 936.265625,
           "y": 7,
           "w": 42.703125,
           "h": 24
         },
         "add": {
-          "x": 988.296875,
+          "x": 986.96875,
           "y": 6,
           "w": 26,
           "h": 26
         },
         "controls": {
-          "x": 1014.3125,
+          "x": 1012.96875,
           "y": 6,
-          "w": 417.6875,
+          "w": 419.03125,
           "h": 26
         },
         "menu": {
-          "x": 668.15625,
+          "x": 666.828125,
           "y": 40,
           "w": 312.140625,
           "h": 94
         },
         "menu-item-first": {
-          "x": 673.15625,
+          "x": 671.828125,
           "y": 45,
           "w": 302.140625,
           "h": 28,
           "index": 0
         },
         "menu-item-last": {
-          "x": 673.15625,
+          "x": 671.828125,
           "y": 101,
           "w": 302.140625,
           "h": 28,
@@ -7309,39 +12221,39 @@
           "h": 18
         },
         "bar-tab-first": {
-          "x": 316.3125,
+          "x": 315.671875,
           "y": 6,
           "w": 256,
           "h": 26,
           "index": 0
         },
         "bar-tab-last": {
-          "x": 749.171875,
+          "x": 748.203125,
           "y": 6,
-          "w": 184.421875,
+          "w": 184.0625,
           "h": 26,
           "index": 2
         },
         "bar-active-tab": {
           "x": 0,
           "y": 6,
-          "w": 312.3125,
+          "w": 311.671875,
           "h": 26
         },
         "bar-overflow": {
-          "x": 937.59375,
+          "x": 936.265625,
           "y": 7,
           "w": 42.703125,
           "h": 24
         },
         "bar-add": {
-          "x": 988.296875,
+          "x": 986.96875,
           "y": 6,
           "w": 26,
           "h": 26
         },
         "bar-overflow-menu": {
-          "x": 668.15625,
+          "x": 666.828125,
           "y": 40,
           "w": 312.140625,
           "h": 94
@@ -7355,18 +12267,18 @@
         "bar-active-tab-label": {
           "x": 24,
           "y": 7,
-          "w": 136.71875,
+          "w": 136.078125,
           "h": 24,
           "cut": true
         },
         "bar-active-tab-progress": {
-          "x": 166.71875,
+          "x": 166.078125,
           "y": 10,
           "w": 19.3125,
           "h": 18
         },
         "bar-active-tab-recordings": {
-          "x": 192.03125,
+          "x": 191.390625,
           "y": 7,
           "w": 110.28125,
           "h": 24
@@ -7388,43 +12300,43 @@
         "active-tab": {
           "x": 0,
           "y": 6,
-          "w": 312.3125,
+          "w": 311.671875,
           "h": 26,
           "fill": "#b5ae9f"
         },
         "overflow": {
-          "x": 937.59375,
+          "x": 936.265625,
           "y": 7,
           "w": 42.703125,
           "h": 24
         },
         "add": {
-          "x": 988.296875,
+          "x": 986.96875,
           "y": 6,
           "w": 26,
           "h": 26
         },
         "controls": {
-          "x": 1014.3125,
+          "x": 1012.96875,
           "y": 6,
-          "w": 417.6875,
+          "w": 419.03125,
           "h": 26
         },
         "menu": {
-          "x": 668.15625,
+          "x": 666.828125,
           "y": 40,
           "w": 312.140625,
           "h": 94
         },
         "menu-item-first": {
-          "x": 673.15625,
+          "x": 671.828125,
           "y": 45,
           "w": 302.140625,
           "h": 28,
           "index": 0
         },
         "menu-item-last": {
-          "x": 673.15625,
+          "x": 671.828125,
           "y": 101,
           "w": 302.140625,
           "h": 28,
@@ -7437,39 +12349,39 @@
           "h": 18
         },
         "bar-tab-first": {
-          "x": 316.3125,
+          "x": 315.671875,
           "y": 6,
           "w": 256,
           "h": 26,
           "index": 0
         },
         "bar-tab-last": {
-          "x": 749.171875,
+          "x": 748.203125,
           "y": 6,
-          "w": 184.421875,
+          "w": 184.0625,
           "h": 26,
           "index": 2
         },
         "bar-active-tab": {
           "x": 0,
           "y": 6,
-          "w": 312.3125,
+          "w": 311.671875,
           "h": 26
         },
         "bar-overflow": {
-          "x": 937.59375,
+          "x": 936.265625,
           "y": 7,
           "w": 42.703125,
           "h": 24
         },
         "bar-add": {
-          "x": 988.296875,
+          "x": 986.96875,
           "y": 6,
           "w": 26,
           "h": 26
         },
         "bar-overflow-menu": {
-          "x": 668.15625,
+          "x": 666.828125,
           "y": 40,
           "w": 312.140625,
           "h": 94
@@ -7483,18 +12395,18 @@
         "bar-active-tab-label": {
           "x": 24,
           "y": 7,
-          "w": 136.71875,
+          "w": 136.078125,
           "h": 24,
           "cut": true
         },
         "bar-active-tab-progress": {
-          "x": 166.71875,
+          "x": 166.078125,
           "y": 10,
           "w": 19.3125,
           "h": 18
         },
         "bar-active-tab-recordings": {
-          "x": 192.03125,
+          "x": 191.390625,
           "y": 7,
           "w": 110.28125,
           "h": 24
@@ -8216,44 +13128,44 @@
         "active-tab": {
           "x": 0,
           "y": 6,
-          "w": 322.53125,
+          "w": 321.875,
           "h": 26,
           "fill": "#3c3c3c"
         },
         "overflow": {
-          "x": 958.765625,
+          "x": 957.421875,
           "y": 7,
           "w": 28.4375,
           "h": 24
         },
         "add": {
-          "x": 995.203125,
+          "x": 993.859375,
           "y": 6,
           "w": 26,
           "h": 26
         },
         "controls": {
-          "x": 1021.203125,
+          "x": 1019.859375,
           "y": 6,
-          "w": 410.796875,
+          "w": 412.140625,
           "h": 26
         },
         "popup": {
           "x": 0,
           "y": 38,
           "w": 384,
-          "h": 247
+          "h": 279
         },
         "session-line-first": {
           "x": 13,
-          "y": 199,
+          "y": 231,
           "w": 358,
           "h": 18,
           "index": 0
         },
         "session-line-last": {
           "x": 13,
-          "y": 256,
+          "y": 288,
           "w": 358,
           "h": 18,
           "index": 3
@@ -8277,33 +13189,33 @@
           "h": 18
         },
         "bar-tab-first": {
-          "x": 326.53125,
+          "x": 325.875,
           "y": 6,
           "w": 256,
           "h": 26,
           "index": 0
         },
         "bar-tab-last": {
-          "x": 764.59375,
+          "x": 763.609375,
           "y": 6,
-          "w": 190.171875,
+          "w": 189.8125,
           "h": 26,
           "index": 2
         },
         "bar-active-tab": {
           "x": 0,
           "y": 6,
-          "w": 322.53125,
+          "w": 321.875,
           "h": 26
         },
         "bar-overflow": {
-          "x": 958.765625,
+          "x": 957.421875,
           "y": 7,
           "w": 28.4375,
           "h": 24
         },
         "bar-add": {
-          "x": 995.203125,
+          "x": 993.859375,
           "y": 6,
           "w": 26,
           "h": 26
@@ -8317,18 +13229,18 @@
         "bar-active-tab-label": {
           "x": 24,
           "y": 7,
-          "w": 146.9375,
+          "w": 146.28125,
           "h": 24,
           "cut": true
         },
         "bar-active-tab-progress": {
-          "x": 176.9375,
+          "x": 176.28125,
           "y": 10,
           "w": 19.3125,
           "h": 18
         },
         "bar-active-tab-recordings": {
-          "x": 202.25,
+          "x": 201.59375,
           "y": 7,
           "w": 110.28125,
           "h": 24
@@ -8350,44 +13262,44 @@
         "active-tab": {
           "x": 0,
           "y": 6,
-          "w": 322.53125,
+          "w": 321.875,
           "h": 26,
           "fill": "#b5ae9f"
         },
         "overflow": {
-          "x": 958.765625,
+          "x": 957.421875,
           "y": 7,
           "w": 28.4375,
           "h": 24
         },
         "add": {
-          "x": 995.203125,
+          "x": 993.859375,
           "y": 6,
           "w": 26,
           "h": 26
         },
         "controls": {
-          "x": 1021.203125,
+          "x": 1019.859375,
           "y": 6,
-          "w": 410.796875,
+          "w": 412.140625,
           "h": 26
         },
         "popup": {
           "x": 0,
           "y": 38,
           "w": 384,
-          "h": 247
+          "h": 279
         },
         "session-line-first": {
           "x": 13,
-          "y": 199,
+          "y": 231,
           "w": 358,
           "h": 18,
           "index": 0
         },
         "session-line-last": {
           "x": 13,
-          "y": 256,
+          "y": 288,
           "w": 358,
           "h": 18,
           "index": 3
@@ -8411,33 +13323,33 @@
           "h": 18
         },
         "bar-tab-first": {
-          "x": 326.53125,
+          "x": 325.875,
           "y": 6,
           "w": 256,
           "h": 26,
           "index": 0
         },
         "bar-tab-last": {
-          "x": 764.59375,
+          "x": 763.609375,
           "y": 6,
-          "w": 190.171875,
+          "w": 189.8125,
           "h": 26,
           "index": 2
         },
         "bar-active-tab": {
           "x": 0,
           "y": 6,
-          "w": 322.53125,
+          "w": 321.875,
           "h": 26
         },
         "bar-overflow": {
-          "x": 958.765625,
+          "x": 957.421875,
           "y": 7,
           "w": 28.4375,
           "h": 24
         },
         "bar-add": {
-          "x": 995.203125,
+          "x": 993.859375,
           "y": 6,
           "w": 26,
           "h": 26
@@ -8451,18 +13363,18 @@
         "bar-active-tab-label": {
           "x": 24,
           "y": 7,
-          "w": 146.9375,
+          "w": 146.28125,
           "h": 24,
           "cut": true
         },
         "bar-active-tab-progress": {
-          "x": 176.9375,
+          "x": 176.28125,
           "y": 10,
           "w": 19.3125,
           "h": 18
         },
         "bar-active-tab-recordings": {
-          "x": 202.25,
+          "x": 201.59375,
           "y": 7,
           "w": 110.28125,
           "h": 24
@@ -8484,44 +13396,44 @@
         "active-tab": {
           "x": 0,
           "y": 6,
-          "w": 322.53125,
+          "w": 321.875,
           "h": 26,
           "fill": "#3c3c3c"
         },
         "overflow": {
-          "x": 958.765625,
+          "x": 957.421875,
           "y": 7,
           "w": 28.4375,
           "h": 24
         },
         "add": {
-          "x": 995.203125,
+          "x": 993.859375,
           "y": 6,
           "w": 26,
           "h": 26
         },
         "controls": {
-          "x": 1021.203125,
+          "x": 1019.859375,
           "y": 6,
-          "w": 410.796875,
+          "w": 412.140625,
           "h": 26
         },
         "popup": {
           "x": 0,
           "y": 38,
           "w": 384,
-          "h": 247
+          "h": 279
         },
         "session-line-first": {
           "x": 13,
-          "y": 199,
+          "y": 231,
           "w": 358,
           "h": 18,
           "index": 0
         },
         "session-line-last": {
           "x": 13,
-          "y": 256,
+          "y": 288,
           "w": 358,
           "h": 18,
           "index": 3
@@ -8545,33 +13457,33 @@
           "h": 18
         },
         "bar-tab-first": {
-          "x": 326.53125,
+          "x": 325.875,
           "y": 6,
           "w": 256,
           "h": 26,
           "index": 0
         },
         "bar-tab-last": {
-          "x": 764.59375,
+          "x": 763.609375,
           "y": 6,
-          "w": 190.171875,
+          "w": 189.8125,
           "h": 26,
           "index": 2
         },
         "bar-active-tab": {
           "x": 0,
           "y": 6,
-          "w": 322.53125,
+          "w": 321.875,
           "h": 26
         },
         "bar-overflow": {
-          "x": 958.765625,
+          "x": 957.421875,
           "y": 7,
           "w": 28.4375,
           "h": 24
         },
         "bar-add": {
-          "x": 995.203125,
+          "x": 993.859375,
           "y": 6,
           "w": 26,
           "h": 26
@@ -8585,18 +13497,18 @@
         "bar-active-tab-label": {
           "x": 24,
           "y": 7,
-          "w": 146.9375,
+          "w": 146.28125,
           "h": 24,
           "cut": true
         },
         "bar-active-tab-progress": {
-          "x": 176.9375,
+          "x": 176.28125,
           "y": 10,
           "w": 19.3125,
           "h": 18
         },
         "bar-active-tab-recordings": {
-          "x": 202.25,
+          "x": 201.59375,
           "y": 7,
           "w": 110.28125,
           "h": 24
@@ -8618,44 +13530,44 @@
         "active-tab": {
           "x": 0,
           "y": 6,
-          "w": 322.53125,
+          "w": 321.875,
           "h": 26,
           "fill": "#b5ae9f"
         },
         "overflow": {
-          "x": 958.765625,
+          "x": 957.421875,
           "y": 7,
           "w": 28.4375,
           "h": 24
         },
         "add": {
-          "x": 995.203125,
+          "x": 993.859375,
           "y": 6,
           "w": 26,
           "h": 26
         },
         "controls": {
-          "x": 1021.203125,
+          "x": 1019.859375,
           "y": 6,
-          "w": 410.796875,
+          "w": 412.140625,
           "h": 26
         },
         "popup": {
           "x": 0,
           "y": 38,
           "w": 384,
-          "h": 247
+          "h": 279
         },
         "session-line-first": {
           "x": 13,
-          "y": 199,
+          "y": 231,
           "w": 358,
           "h": 18,
           "index": 0
         },
         "session-line-last": {
           "x": 13,
-          "y": 256,
+          "y": 288,
           "w": 358,
           "h": 18,
           "index": 3
@@ -8679,33 +13591,33 @@
           "h": 18
         },
         "bar-tab-first": {
-          "x": 326.53125,
+          "x": 325.875,
           "y": 6,
           "w": 256,
           "h": 26,
           "index": 0
         },
         "bar-tab-last": {
-          "x": 764.59375,
+          "x": 763.609375,
           "y": 6,
-          "w": 190.171875,
+          "w": 189.8125,
           "h": 26,
           "index": 2
         },
         "bar-active-tab": {
           "x": 0,
           "y": 6,
-          "w": 322.53125,
+          "w": 321.875,
           "h": 26
         },
         "bar-overflow": {
-          "x": 958.765625,
+          "x": 957.421875,
           "y": 7,
           "w": 28.4375,
           "h": 24
         },
         "bar-add": {
-          "x": 995.203125,
+          "x": 993.859375,
           "y": 6,
           "w": 26,
           "h": 26
@@ -8719,18 +13631,18 @@
         "bar-active-tab-label": {
           "x": 24,
           "y": 7,
-          "w": 146.9375,
+          "w": 146.28125,
           "h": 24,
           "cut": true
         },
         "bar-active-tab-progress": {
-          "x": 176.9375,
+          "x": 176.28125,
           "y": 10,
           "w": 19.3125,
           "h": 18
         },
         "bar-active-tab-recordings": {
-          "x": 202.25,
+          "x": 201.59375,
           "y": 7,
           "w": 110.28125,
           "h": 24
@@ -8778,18 +13690,18 @@
           "x": 0,
           "y": 38,
           "w": 288,
-          "h": 247
+          "h": 279
         },
         "session-line-first": {
           "x": 13,
-          "y": 199,
+          "y": 231,
           "w": 262,
           "h": 18,
           "index": 0
         },
         "session-line-last": {
           "x": 13,
-          "y": 256,
+          "y": 288,
           "w": 262,
           "h": 18,
           "index": 3
@@ -8892,18 +13804,18 @@
           "x": 0,
           "y": 38,
           "w": 288,
-          "h": 247
+          "h": 279
         },
         "session-line-first": {
           "x": 13,
-          "y": 199,
+          "y": 231,
           "w": 262,
           "h": 18,
           "index": 0
         },
         "session-line-last": {
           "x": 13,
-          "y": 256,
+          "y": 288,
           "w": 262,
           "h": 18,
           "index": 3
@@ -9006,18 +13918,18 @@
           "x": 0,
           "y": 38,
           "w": 288,
-          "h": 247
+          "h": 279
         },
         "session-line-first": {
           "x": 13,
-          "y": 199,
+          "y": 231,
           "w": 262,
           "h": 18,
           "index": 0
         },
         "session-line-last": {
           "x": 13,
-          "y": 256,
+          "y": 288,
           "w": 262,
           "h": 18,
           "index": 3
@@ -9120,18 +14032,18 @@
           "x": 0,
           "y": 38,
           "w": 288,
-          "h": 247
+          "h": 279
         },
         "session-line-first": {
           "x": 13,
-          "y": 199,
+          "y": 231,
           "w": 262,
           "h": 18,
           "index": 0
         },
         "session-line-last": {
           "x": 13,
-          "y": 256,
+          "y": 288,
           "w": 262,
           "h": 18,
           "index": 3
@@ -9219,9 +14131,9 @@
           "h": 26
         },
         "controls": {
-          "x": 1021.203125,
+          "x": 1019.859375,
           "y": 6,
-          "w": 410.796875,
+          "w": 412.140625,
           "h": 26
         },
         "inbox-position": {
@@ -9303,9 +14215,9 @@
           "h": 26
         },
         "controls": {
-          "x": 1021.203125,
+          "x": 1019.859375,
           "y": 6,
-          "w": 410.796875,
+          "w": 412.140625,
           "h": 26
         },
         "inbox-position": {
@@ -9528,26 +14440,26 @@
         "active-tab": {
           "x": 0,
           "y": 6,
-          "w": 341.484375,
+          "w": 340.796875,
           "h": 26,
           "fill": "#3c3c3c"
         },
         "overflow": {
-          "x": 958.765625,
+          "x": 957.421875,
           "y": 7,
           "w": 28.4375,
           "h": 24
         },
         "add": {
-          "x": 995.203125,
+          "x": 993.859375,
           "y": 6,
           "w": 26,
           "h": 26
         },
         "controls": {
-          "x": 1021.203125,
+          "x": 1019.859375,
           "y": 6,
-          "w": 410.796875,
+          "w": 412.140625,
           "h": 26
         },
         "inbox-position": {
@@ -9557,33 +14469,33 @@
           "h": 18
         },
         "bar-tab-first": {
-          "x": 345.484375,
+          "x": 344.796875,
           "y": 6,
           "w": 256,
           "h": 26,
           "index": 0
         },
         "bar-tab-last": {
-          "x": 774.546875,
+          "x": 773.546875,
           "y": 6,
-          "w": 180.21875,
+          "w": 179.875,
           "h": 26,
           "index": 2
         },
         "bar-active-tab": {
           "x": 0,
           "y": 6,
-          "w": 341.484375,
+          "w": 340.796875,
           "h": 26
         },
         "bar-overflow": {
-          "x": 958.765625,
+          "x": 957.421875,
           "y": 7,
           "w": 28.4375,
           "h": 24
         },
         "bar-add": {
-          "x": 995.203125,
+          "x": 993.859375,
           "y": 6,
           "w": 26,
           "h": 26
@@ -9597,18 +14509,18 @@
         "bar-active-tab-label": {
           "x": 24,
           "y": 7,
-          "w": 121.65625,
+          "w": 120.96875,
           "h": 24,
           "cut": true
         },
         "bar-active-tab-progress": {
-          "x": 151.65625,
+          "x": 150.96875,
           "y": 10,
           "w": 19.3125,
           "h": 18
         },
         "bar-active-tab-recordings": {
-          "x": 176.96875,
+          "x": 176.28125,
           "y": 7,
           "w": 154.515625,
           "h": 24
@@ -9630,26 +14542,26 @@
         "active-tab": {
           "x": 0,
           "y": 6,
-          "w": 341.484375,
+          "w": 340.796875,
           "h": 26,
           "fill": "#b5ae9f"
         },
         "overflow": {
-          "x": 958.765625,
+          "x": 957.421875,
           "y": 7,
           "w": 28.4375,
           "h": 24
         },
         "add": {
-          "x": 995.203125,
+          "x": 993.859375,
           "y": 6,
           "w": 26,
           "h": 26
         },
         "controls": {
-          "x": 1021.203125,
+          "x": 1019.859375,
           "y": 6,
-          "w": 410.796875,
+          "w": 412.140625,
           "h": 26
         },
         "inbox-position": {
@@ -9659,33 +14571,33 @@
           "h": 18
         },
         "bar-tab-first": {
-          "x": 345.484375,
+          "x": 344.796875,
           "y": 6,
           "w": 256,
           "h": 26,
           "index": 0
         },
         "bar-tab-last": {
-          "x": 774.546875,
+          "x": 773.546875,
           "y": 6,
-          "w": 180.21875,
+          "w": 179.875,
           "h": 26,
           "index": 2
         },
         "bar-active-tab": {
           "x": 0,
           "y": 6,
-          "w": 341.484375,
+          "w": 340.796875,
           "h": 26
         },
         "bar-overflow": {
-          "x": 958.765625,
+          "x": 957.421875,
           "y": 7,
           "w": 28.4375,
           "h": 24
         },
         "bar-add": {
-          "x": 995.203125,
+          "x": 993.859375,
           "y": 6,
           "w": 26,
           "h": 26
@@ -9699,18 +14611,18 @@
         "bar-active-tab-label": {
           "x": 24,
           "y": 7,
-          "w": 121.65625,
+          "w": 120.96875,
           "h": 24,
           "cut": true
         },
         "bar-active-tab-progress": {
-          "x": 151.65625,
+          "x": 150.96875,
           "y": 10,
           "w": 19.3125,
           "h": 18
         },
         "bar-active-tab-recordings": {
-          "x": 176.96875,
+          "x": 176.28125,
           "y": 7,
           "w": 154.515625,
           "h": 24

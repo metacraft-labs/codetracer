@@ -1,0 +1,56 @@
+  /ai Start a task: make the regeneration…
+                                             
+                                             
+  Enter sends it · ↑↓ another destination ·
+  to Manager of Shield model hardening
+                                             
+                               More above ↑
+                                             
+  Launch a task · sent to the manager agent
+                                             
+  Repository
+   noir-space-ship
+                                             
+  Branch
+   feat/regen-cap-config
+                                             
+  Agents
+   ✓ Claude   Codex   Grok   Opencode
+   AntiGravity
+                                             
+  Runs on
+   This machine   Executor
+   The server's choice
+                                             
+  Executor
+   linux-x64-4
+                                             
+  Session name
+   named by the server
+                                             
+  Opens in
+   New tab   Split   Beside
+                                             
+  ▾ Schedule  30 6 * * 1-5 · Europe/Sofia
+                                             
+  Cron
+   30 6 * * 1-5
+                                             
+  Time zone
+   Europe/Sofia
+                                             
+  Jitter
+   120 s
+                                             
+  Concurrency
+   Allow overlap   Forbid overlap
+   Replace previous
+                                             
+  Misfire
+   Run once, drop catch-up
+   Run all, catch up
+                                             
+                                             
+                            Enter   Launch
+                                             
+                                             

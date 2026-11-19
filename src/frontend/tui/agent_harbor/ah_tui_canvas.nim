@@ -60,7 +60,8 @@ from std/unicode import runes, Rune, `$`, runeAtPos
 import ../app/views/styled_row
 import isonim/viewmodel
 import nim_agents_isonim_viewmodels/agent_harbor/data_source
-from ../../viewmodel/views/agent_harbor_words import trimBeforeEllipsis, cutPath
+from ../../viewmodel/views/agent_harbor_words import trimBeforeEllipsis,
+  trimAfterEllipsis, cutPath
 import ../../viewmodel/views/agent_harbor_palette
 
 export styled_row, agent_harbor_palette, data_source, viewmodel
@@ -321,6 +322,47 @@ proc elide*(s: string; cells: int): string =
   if cells == 1: return Ellipsis
   let kept = trimCut(cellSlice(s, 0, cells - 1))
   if kept.len == 0: Ellipsis else: kept & Ellipsis
+
+const MiddleCutStartCells* = 8
+  ## The most a middle cut (`elideMiddle`) keeps of a value's start: enough
+  ## to say what the value begins with (`mileston…`), so every other cell
+  ## goes to its end.
+
+proc elideMiddle*(s: string; cells: int): string =
+  ## A one-line input's value in at most `cells` columns: whole when it
+  ## fits, else cut in its middle with "…", keeping its start (at most
+  ## `MiddleCutStartCells`, and a quarter of the cells at narrow widths) and
+  ## as much of its end as fits. A path keeps its final segments whole: when
+  ## its last segment (with the `/` before it) fits beside one cell of the
+  ## start, the start gives way to it (`m…/client.py`). It is never wrapped:
+  ## an input holds one line at every width. Either side of the "…" is
+  ## trimmed by the views' one rule (`trimBeforeEllipsis`,
+  ## `trimAfterEllipsis`).
+  if cells <= 0: return ""
+  let w = widthOf(s)
+  if w <= cells: return s
+  if cells <= 2: return elide(s, cells)
+  let room = cells - 1
+  var startCells = clamp(room div 4, 1, MiddleCutStartCells)
+  let lastSep = s.rfind('/')
+  if lastSep > 0:
+    let lastSegment = widthOf(s[lastSep .. ^1])
+    if lastSegment > room - startCells and lastSegment <= room - 1:
+      startCells = room - lastSegment
+  # A wide glyph straddling the cut is kept whole by `cellSlice` on the side
+  # its first cell is on, so each side is shrunk until it fits its share.
+  var head = cellSlice(s, 0, startCells)
+  var cut = startCells
+  while cut > 0 and widthOf(head) > startCells:
+    dec cut
+    head = cellSlice(s, 0, cut)
+  let endCells = room - widthOf(head)
+  var tail = cellSlice(s, w - endCells, w)
+  var at = w - endCells
+  while at < w and widthOf(tail) > endCells:
+    inc at
+    tail = cellSlice(s, at, w)
+  trimBeforeEllipsis(head) & Ellipsis & trimAfterEllipsis(tail)
 
 proc elidePath*(path: string; cells: int): string =
   ## A file path in at most `cells` columns: whole when it fits, else cut in

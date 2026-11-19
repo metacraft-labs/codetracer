@@ -1,0 +1,56 @@
+  /ai Start a task: make the regeneration…
+                                             
+                                             
+  Complete the form to send · 4 problems ·
+  to Manager of Shield model hardening
+                                             
+  IN VIEW   src/shield.nr:7
+                                             
+   remaining_shield -= damage
+                                             
+   Pass 2 of iterate_asteroids
+                                             
+   Variables: remaining_shield = 9000
+                                             
+   Clamp the shield at zero after a hit
+                                             
+   +
+                                             
+  Cites nothing from this window
+                                             
+                                             
+  THIS SESSION
+  Clamp the shield at zero after a hit
+                                             
+ ▎MANAGER AGENT                      Routed
+ ▎Manager of Shield model hardening
+ ▎It asks for new work outside this session
+                                             
+  UI ACTION
+  CodeTracer
+                                             
+                                             
+  Launch a task · sent to the manager agent
+                                             
+  Repository
+  ▎Choose a repository
+  Choose a repository
+                                             
+  Branch
+   default branch
+                                             
+  Agents
+   Claude   Codex   Grok   Opencode
+   AntiGravity
+  Choose at least one agent
+                                             
+  Runs on
+   This machine   Executor
+   The server's choice
+                                             
+  Executor
+                               More below ↓
+                                             
+     Choose a repository · 3 more   Launch
+                                             
+                                             

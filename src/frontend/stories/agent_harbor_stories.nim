@@ -39,6 +39,15 @@ const playbackFixtures* = [
   ("agent-harbor-fleet", "playback-front-ends")]
   ## Every playback story's surface and fixture.
 
+const surfacesWithoutPlayback* = ["agent-harbor-composer"]
+  ## The surfaces the story hosts draw that have no playback story, each
+  ## with its reason. A playback replays what a server feeds a surface over
+  ## time; the omnibox composer changes only with what the operator types
+  ## and presses, so its stories are moments reached by driving its
+  ## viewmodel (`agent_harbor_composer_stories.nim`), not a scenario. Every
+  ## other surface a host draws must have a playback story
+  ## (`test_ctf_p1c_playback_stories_agree_at_each_moment`).
+
 proc isPlaybackStory*(surface, fixture: string): bool =
   (surface, fixture) in playbackFixtures
 

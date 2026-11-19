@@ -167,7 +167,209 @@ function terminalCheck(assert) {
   return async ({ canvasElement }) => assert(canvasElement);
 }
 
+// --- The omnibox composer (CTF-P2c) --------------------------------------
+// Each composer story is one moment of the composer over the CTF-P2L
+// project (`stories/agent_harbor_composer_stories.nim`). The checks read what
+// the sheet draws: its phase and routing state, the header, each
+// destination row's mark, delivery and actions, the chips and the form.
+
+const composerCheck = (assert) => hostCheck(".ah-composer-sheet", assert);
+const sheetOf = (el) => el.querySelector(".ah-composer-body");
+const headerOf = (el) => el.querySelector(".ah-composer-header")?.textContent ?? "";
+const rowOf = (el, target) => el.querySelector(`.ah-composer-row[data-ah-target="${target}"]`);
+const rowMark = (el, target) => rowOf(el, target)?.querySelector(".ah-composer-row-mark")?.textContent ?? "";
+const rowDelivery = (el, target) => rowOf(el, target)?.querySelector(".ah-composer-row-delivery")?.textContent ?? "";
+// After sending, the state word (the mark's slot) says the delivery's state.
+const selectedTargets = (el) => [...el.querySelectorAll(".ah-composer-row-selected")].map((r) => r.dataset.ahTarget);
+const chipStates = (el) => Object.fromEntries([...el.querySelectorAll(".ah-composer-chip[data-ah-target]")]
+  .map((c) => [c.dataset.ahTarget, c.dataset.ahChip]));
+const sendButton = (el) => el.querySelector(".ah-composer-send-button");
+const destinationsInOrder = (el) =>
+  expect([...el.querySelectorAll(".ah-composer-row")].map((r) => r.dataset.ahTarget))
+    .toEqual(["session", "manager", "ui-action"]);
+
+async function composedTo(el, target, mark = "Routed") {
+  expect(sheetOf(el).dataset.ahPhase).toBe("composing");
+  destinationsInOrder(el);
+  expect(selectedTargets(el)).toEqual([target]);
+  expect(rowMark(el, target)).toBe(mark);
+}
+
+const composerChecks = {
+  "agent-harbor-composer-recent": composerCheck(async (el) => {
+    expect(headerOf(el)).toContain("Type an instruction.");
+    expect(el.querySelectorAll(".ah-composer-recent-row").length).toBe(5);
+    expect(el.querySelector(".ah-composer-row")).toBeNull();
+    expect(el.querySelector(".ah-composer-input").value).toBe("/ai ");
+  }),
+  "agent-harbor-composer-typing": composerCheck(async (el) => {
+    await composedTo(el, "session");
+    expect(el.querySelector(".ah-composer-input").value).toBe("/ai Also test a hit on an empty shield");
+    expect(chipStates(el)).toMatchObject({ file: "cited", replay: "cited", selection: "offered", pane: "offered" });
+    expect(el.querySelector(".ah-composer-cites").textContent).toBe("Cites src/shield.nr:7, Pass 2 of iterate_asteroids");
+    expect(sendButton(el).textContent).toBe("Send");
+    expect(sendButton(el).disabled).toBe(false);
+  }),
+  "agent-harbor-composer-multi-line": composerCheck(async (el) => {
+    expect(el.querySelector(".ah-composer-more-text")?.textContent).toBe("+2 lines");
+    expect(el.querySelector(".ah-composer-instruction")?.textContent).toContain("The status report must still say");
+  }),
+  "agent-harbor-composer-routing": composerCheck(async (el) => {
+    expect(sheetOf(el).dataset.ahRoute).toBe("routing");
+    expect(headerOf(el)).toBe("Routing… · Enter sends it when routed");
+    expect([...el.querySelectorAll(".ah-composer-row-mark")].map((m) => m.textContent))
+      .toEqual(["", "", ""]);
+    expect(selectedTargets(el)).toEqual([]);
+  }),
+  "agent-harbor-composer-sends-when-routed": composerCheck(async (el) => {
+    expect(sheetOf(el).dataset.ahPhase).toBe("sending");
+    expect(headerOf(el)).toBe("Routing… · sends when routed");
+    expect(el.querySelector(".ah-composer-row-delivery")).toBeNull();
+    expect(el.querySelector(".ah-composer-send-hint").textContent).toBe("Sends when routed");
+    expect(sendButton(el).disabled).toBe(true);
+  }),
+  "agent-harbor-composer-manager": composerCheck(async (el) => {
+    await composedTo(el, "manager");
+    expect(el.querySelector(".ah-composer-cites").textContent).toBe("Cites nothing from this window");
+  }),
+  "agent-harbor-composer-ui-action": composerCheck(async (el) => {
+    await composedTo(el, "ui-action");
+    expect(rowOf(el, "ui-action").querySelector(".ah-composer-row-label").textContent)
+      .toContain("Open calculate_damage");
+  }),
+  "agent-harbor-composer-redirected": composerCheck(async (el) => {
+    await composedTo(el, "session", "Chosen by you");
+    expect(rowMark(el, "manager")).toBe("Router's choice");
+    expect(headerOf(el)).toBe("Enter sends it where you chose");
+  }),
+  "agent-harbor-composer-no-session": composerCheck(async (el) => {
+    await composedTo(el, "manager");
+    expect(rowOf(el, "session").classList.contains("ah-composer-row-unavailable")).toBe(true);
+    expect(rowOf(el, "session").textContent).toContain("No agent session in this window");
+    // No session of its own: the reason stands in the label's place.
+    expect(rowOf(el, "session").querySelector(".ah-composer-row-label").textContent)
+      .toBe("No agent session in this window");
+    expect(rowOf(el, "session").querySelector(".ah-composer-row-reason")).toBeNull();
+    expect(el.querySelector(".ah-composer-none")?.textContent).toBe("nothing");
+  }),
+  "agent-harbor-composer-context-edited": composerCheck(async (el) => {
+    expect(chipStates(el)).toMatchObject({ file: "cited", replay: "uncited", pane: "cited" });
+  }),
+  "agent-harbor-composer-add-context": composerCheck(async (el) => {
+    expect([...el.querySelectorAll(".ah-composer-menu-item")].map((i) => i.textContent))
+      .toEqual(["Upload attachment", "Files & folders", "Editor selection", "Recording / trace"]);
+  }),
+  "agent-harbor-composer-sending": composerCheck(async (el) => {
+    expect(sheetOf(el).dataset.ahPhase).toBe("sending");
+    expect(rowMark(el, "session")).toBe("Sending…");
+    expect(rowDelivery(el, "session")).toBe("");
+    expect(sendButton(el).disabled).toBe(true);
+  }),
+  "agent-harbor-composer-sent": composerCheck(async (el) => {
+    expect(sheetOf(el).dataset.ahPhase).toBe("sent");
+    expect(rowMark(el, "session")).toBe("Sent");
+    expect(el.querySelector(".ah-composer-sent-line").textContent).toBe("Sent to this session");
+    expect([...el.querySelectorAll('[data-ah-action="send-again"]')].map((b) => b.dataset.ahTarget))
+      .toEqual(["manager", "ui-action"]);
+  }),
+  "agent-harbor-composer-sent-again": composerCheck(async (el) => {
+    expect(el.querySelector(".ah-composer-sent-line").textContent)
+      .toBe("Sent to this session · redirected to the manager agent");
+    // The bar marks the newest delivery only; each delivered row says Sent.
+    expect(selectedTargets(el)).toEqual(["manager"]);
+    expect(rowMark(el, "session")).toBe("Sent");
+    expect(rowMark(el, "manager")).toBe("Sent");
+  }),
+  "agent-harbor-composer-send-failed": composerCheck(async (el) => {
+    expect(sheetOf(el).dataset.ahPhase).toBe("send-failed");
+    expect(rowMark(el, "manager")).toBe("Failed to send");
+    expect(rowDelivery(el, "manager")).toBe("Agent Harbor answered 503 (the hub is restarting)");
+    expect(rowOf(el, "manager").querySelector('[data-ah-action="retry"]')).toBeTruthy();
+  }),
+  "agent-harbor-composer-route-failed": composerCheck(async (el) => {
+    expect(headerOf(el)).toBe("Could not route: the routing agent did not answer within 20 s");
+    expect(selectedTargets(el)).toEqual(["session"]);
+    expect(rowOf(el, "session").querySelector(".ah-composer-row-reason").textContent)
+      .toBe("Shown because the router did not answer");
+    expect(sendButton(el).disabled).toBe(false);
+  }),
+  "agent-harbor-composer-stop": composerCheck(async (el) => {
+    expect(rowOf(el, "session").querySelector('[data-ah-action="stop"]')?.textContent).toBe("Stop agent");
+  }),
+  "agent-harbor-composer-ui-done": composerCheck(async (el) => {
+    expect(rowDelivery(el, "ui-action")).toBe("Opened calculate_damage (src/shield.nr:22) beside src/shield.nr");
+  }),
+  "agent-harbor-composer-ui-refused": composerCheck(async (el) => {
+    expect(rowDelivery(el, "ui-action")).toMatch(/^Refused: /);
+    expect(rowOf(el, "ui-action").querySelector(".ah-role-warning")).toBeTruthy();
+  }),
+  "agent-harbor-composer-ui-partial": composerCheck(async (el) => {
+    expect(rowDelivery(el, "ui-action")).toMatch(/^Done 1 of 2: /);
+    expect(rowOf(el, "ui-action").querySelector(".ah-role-warning")).toBeTruthy();
+  }),
+  "agent-harbor-composer-launch": composerCheck(async (el) => {
+    await composedTo(el, "manager");
+    expect(el.querySelector(".ah-composer-form").dataset.ahForm).toBe("launch-task");
+    expect(sendButton(el).textContent).toBe("Launch");
+    expect(sendButton(el).disabled).toBe(false);
+  }),
+  "agent-harbor-composer-launch-invalid": composerCheck(async (el) => {
+    expect(sendButton(el).disabled).toBe(true);
+    expect(el.querySelector(".ah-composer-send-hint").textContent).toBe("Choose a repository");
+    expect(el.querySelector(".ah-composer-send-more").textContent).toBe(" · 3 more");
+    expect(headerOf(el)).toBe("Complete the form to send · 4 problems · to Manager of Shield model hardening");
+    const problems = [...el.querySelectorAll(".ah-composer-field-problem-text")].map((p) => p.textContent);
+    expect(problems).toEqual(["Choose a repository", "Choose at least one agent", "Choose an executor"]);
+    // The folded schedule says its own problem on its head line.
+    expect(el.querySelector(".ah-composer-schedule-problem").textContent)
+      .toBe("The hour field allows 0-23; 25 is out of range");
+  }),
+  "agent-harbor-composer-launch-scheduled": composerCheck(async (el) => {
+    expect(el.querySelector(".ah-composer-schedule-open")).toBeTruthy();
+    // Opening the schedule brought it into view in the scrolling body.
+    const body = el.querySelector(".ah-composer-body");
+    // Its end -- the last field, Misfire -- is wholly inside the body's view.
+    const misfire = el.querySelector('[data-ah-field="Misfire"]');
+    await waitUntil(() => misfire.getBoundingClientRect().bottom <=
+                          body.getBoundingClientRect().bottom + 1 &&
+                          misfire.getBoundingClientRect().top >= body.getBoundingClientRect().top,
+                    "the open schedule's end scrolled into view");
+    // The schedule is the form's last part: scrolled to it, nothing is
+    // below, so no "More below" line claims there is.
+    await waitUntil(() => !body.hasAttribute("data-ah-more"), "no More below at the end");
+    expect(el.querySelector('[data-ah-field="Cron"] .ah-composer-field-value').textContent).toBe("30 6 * * 1-5");
+  }),
+  "agent-harbor-composer-launched": composerCheck(async (el) => {
+    expect(rowMark(el, "manager")).toBe("Sent");
+    expect(rowDelivery(el, "manager")).toBe("Started on hub-a · executor linux-x64-4 · session 5c1a3e70");
+  }),
+  "agent-harbor-composer-new-initiative": composerCheck(async (el) => {
+    expect(sendButton(el).textContent).toBe("Start initiative");
+    expect(el.querySelector('[data-ah-field="Plan file"] .ah-composer-field-value').textContent)
+      .toBe("milestones/2026-11-17-asteroid-fields-generated-from-seeds-end.milestones.org");
+  }),
+  "agent-harbor-composer-new-initiative-invalid": composerCheck(async (el) => {
+    expect(sendButton(el).disabled).toBe(true);
+    expect([...el.querySelectorAll(".ah-composer-field-problem-text")].map((p) => p.textContent))
+      .toEqual(["The number of iterations is at least 1", "The plan file is a path inside the workspace"]);
+    expect(el.querySelector('[data-ah-field="Number of iterations"] .ah-composer-field-value').textContent).toBe("0");
+  }),
+  "agent-harbor-composer-gaze": composerCheck(async (el) => {
+    expect(chipStates(el).gaze).toBe("cited");
+    expect(el.querySelector('.ah-composer-chip[data-ah-target="gaze"]').textContent)
+      .toBe("Looked at remaining_shield -= damage · 1.4 s");
+  }),
+  "agent-harbor-composer-gaze-paused": composerCheck(async (el) => {
+    expect(chipStates(el)["gaze-paused"]).toBe("note");
+  }),
+  "agent-harbor-composer-long-names": composerCheck(async (el) => {
+    await composedTo(el, "session");
+    expect(el.querySelectorAll(".ah-chip-cited").length).toBe(4);
+  }),
+};
+
 export const plays = {
+  ...composerChecks,
   "agent-harbor-fleet-snapshot": fleetCheck(async (el) => {
     await waitFor(el, ".ah-fleet-row");
     expect(fleetRows(el).length).toBeGreaterThan(40);
@@ -207,7 +409,13 @@ export const plays = {
     // The class the view sets on an error-level line of a row WITHOUT a
     // failure line (no such row is in the story data) does draw it red: the
     // rule is not overridden by the activity line's own colour rule.
-    const probe = withFailure[0].querySelector(".ah-fleet-activity-line");
+    // Probed on a failed row that has an activity line: a failed session
+    // need not have one (the captured snapshot's first failed row has a
+    // failure line and no recent activity), so the first failed row is not
+    // necessarily one. The story must hold at least one such row.
+    const probeRow = withFailure.find((r) => r.querySelector(".ah-fleet-activity-line"));
+    expect(probeRow, "a failed row with an activity line").toBeTruthy();
+    const probe = probeRow.querySelector(".ah-fleet-activity-line");
     probe.classList.add("ah-fleet-activity-error");
     try {
       expect(getComputedStyle(probe).color).toBe(red);

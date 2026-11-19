@@ -1,0 +1,56 @@
+  /ai Start an initiative: asteroid fields…
+                                             
+                                             
+  Complete the form to send · 2 problems ·
+  to Manager of Shield model hardening
+                                             
+  IN VIEW   src/shield.nr:7
+                                             
+   remaining_shield -= damage
+                                             
+   Pass 2 of iterate_asteroids
+                                             
+   Variables: remaining_shield = 9000
+                                             
+   Clamp the shield at zero after a hit
+                                             
+   +
+                                             
+  Cites nothing from this window
+                                             
+                                             
+  THIS SESSION
+  Clamp the shield at zero after a hit
+                                             
+ ▎MANAGER AGENT                      Routed
+ ▎Manager of Shield model hardening
+ ▎It states a new goal with milestones of
+ ▎its own
+                                             
+  UI ACTION
+  CodeTracer
+                                             
+                                             
+  Start an initiative ·
+  sent to the manager agent
+                                             
+  Goal
+   Asteroid…nerated from seeds, end to end
+                                             
+  Iterations
+   1   auto   N
+                                             
+  Number of iterations
+  ▎0
+  The number of iterations is at least 1
+                                             
+  Plan file
+  ▎../plans/seeded-fields.org
+  The plan file is a path inside
+  the workspace
+                               More below ↓
+                                             
+  The number…  · 1 more   Start initiative
+                                             
+                                             
+                                             

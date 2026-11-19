@@ -1,0 +1,56 @@
+  /ai Why does this go below zero here?
+                                             
+                                             
+  Enter sends it · ↑↓ another destination
+                                             
+  IN VIEW   src/shield.nr:7
+                                             
+   remaining_shield -= damage
+                                             
+   Pass 2 of iterate_asteroids
+                                             
+   Variables: remaining_shield = 9000
+                                             
+   Clamp the shield at zero after a hit
+                                             
+   Looked at remaining_shield -= damage ·
+   1.4 s
+                                             
+   +
+                                             
+  Cites src/shield.nr:7,
+  Pass 2 of iterate_asteroids, Looked at r…
+                                             
+                                             
+ ▎THIS SESSION                       Routed
+ ▎Clamp the shield at zero after a hit
+ ▎It asks about the line this session's
+ ▎change is on
+                                             
+  MANAGER AGENT
+  Manager of Shield model hardening
+                                             
+  UI ACTION
+  CodeTracer
+                                             
+                                             
+                              Enter   Send
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             

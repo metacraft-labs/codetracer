@@ -24,13 +24,15 @@ import ./ah_initiative_tab_bar
 import ./ah_initiative_panels
 import ./ah_fleet_panel
 import ./ah_playback_bar
+import ./ah_composer
+import ../../stories/agent_harbor_composer_stories
 import ../../viewmodel/input/element_press
 import ../../viewmodel/keymap/[base_keymaps, context_keys, editing_keymap,
                                keymap_router,
                                scope_path, user_keymap]
 import ../../../common/key_names
 
-export agent_harbor_stories, ah_theme, ah_playback_bar, user_keymap
+export agent_harbor_stories, ah_theme, ah_playback_bar, user_keymap, ah_composer
 
 const
   GpuiAgentHarborSurfaces* = [
@@ -40,6 +42,7 @@ const
     "agent-harbor-initiative-tabs",
     "agent-harbor-initiatives",
     "agent-harbor-initiative-progress",
+    "agent-harbor-composer",
   ]
     ## Every surface of the Agent Harbor section this module draws.
   FrameTitlePx = 32          ## `.lm_header`
@@ -59,6 +62,7 @@ type
     initiativeTabs*: InitiativeTabStripVM
     initiatives*: InitiativesVM
     progress*: InitiativeProgressVM
+    composer*: OmniboxComposerVM
     playback*: AhPlayback
       ## A playback story's playback (nil for any other story): its source
       ## feeds the viewmodel, and the bar under the story controls it.
@@ -90,6 +94,41 @@ proc playbackPresses*(keymap: UserKeymap; pb: AhPlayback): PlaybackPress =
                                         pane(StoryPlaybackScope)],
                                       ButtonElementKind, operation, mods, "Click")
     discard pb.performPlaybackOperation(outcome.operation)
+
+proc gpuiRouter(keymap: UserKeymap): KeymapRouter =
+  ## The story host's router: the base keymap with a user's rows over it,
+  ## for GPUI's three keys (`edit_arm.GpuiDelivery`: it receives keys, not
+  ## bytes).
+  initKeymapRouter(bkCua, KeyDelivery(frontEnd: feGpui, platform: hostPlatform(),
+                                      keyProtocol: kpNative), user = keymap)
+
+let ComposerScopePath = @[element(ekWindow, "window"), pane(ComposerScope)]
+  ## Where the composer's keys and presses resolve.
+
+proc composerPresses*(keymap: UserKeymap; vm: OmniboxComposerVM): ComposerPress =
+  ## **THE STORY HOST'S ROUTE FOR A PRESS ON THE COMPOSER**
+  ## (Input-Routing-And-Keymaps.md §5.1): resolved in the `composer` scope
+  ## by the window's router — a user's row for the press first, else the
+  ## operation the element carries — and run on the composer's viewmodel on
+  ## the element's target (`runComposerPress`); the view redraws itself from
+  ## the viewmodel.
+  let resolve = routerResolver(gpuiRouter(keymap), SessionFacts())
+  result = proc(operation, target: string) =
+    let outcome = resolveElementPress(resolve, ComposerScopePath, ButtonElementKind,
+                                      operation, {}, "Click")
+    discard vm.runComposerPress(outcome.operation, target)
+
+proc composerKey*(m: AhStoryMount; name: string; keymap = UserKeymap()): string =
+  ## A key (its canonical name) while the composer is shown, ROUTED
+  ## (Input-Routing-And-Keymaps.md §4) in the `composer` scope: `Enter`
+  ## sends, `Down` / `Up` move the destination. Runs the operation it
+  ## resolves to and returns it ("" for none).
+  if m.composer.isNil: return ""
+  var router = gpuiRouter(keymap)
+  let res = router.route(SessionFacts(), ComposerScopePath, nmNormal, name, 0)
+  if res.kind != erOperation or not m.composer.runComposerOperation(res.operation):
+    return ""
+  res.operation
 
 proc drawFrame(r: GpuiRenderer; p: AhPalette; title: string;
                widthPx, heightPx: int): tuple[frame, body: GpuiElement] =
@@ -226,6 +265,10 @@ proc mountAgentHarborStoryGpui*(r: GpuiRenderer; surface, fixture: string;
     of "agent-harbor-initiative-progress":
       m.progress = createProgressStoryVM(fixture, pb)
       r.mountProgressPanel(host, m.progress, p, bodyW)
+    of "agent-harbor-composer":
+      m.composer = createComposerStoryVM(fixture)
+      r.mountComposer(host, m.composer, p, bodyW, heightPx,
+                      composerPresses(keymap, m.composer))
     else:
       raise newException(ValueError, "no GPUI rendering for the Agent Harbor surface " &
                          surface)
@@ -242,6 +285,7 @@ proc mountAgentHarborStoryGpui*(r: GpuiRenderer; surface, fixture: string;
   let initiativeTabs = m.initiativeTabs
   let initiatives = m.initiatives
   let progress = m.progress
+  let composer = m.composer
   let playback = m.playback
   m.dispose = proc() =
     if playback != nil: playback.dispose()
@@ -250,5 +294,6 @@ proc mountAgentHarborStoryGpui*(r: GpuiRenderer; surface, fixture: string;
     if initiativeTabs != nil: initiativeTabs.dispose()
     if initiatives != nil: initiatives.dispose()
     if progress != nil: progress.dispose()
+    if composer != nil: composer.dispose()
     if rootDisposer != nil: rootDisposer()
   m

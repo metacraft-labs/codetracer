@@ -1,0 +1,56 @@
+  /ai
+                                             
+                                             
+  Type an instruction. Enter sends it where
+  it shows; ↑↓ another destination.
+                                             
+                                             
+  RECENT
+                                             
+  Also test a hit on an empty shield
+  Sent to this session
+                                             
+  Explain why regeneration can exceed the…
+  Sent to this session
+                                             
+  Show calculate_damage beside the editor
+  Sent to the UI-action agent
+                                             
+  Which milestone of the shield work shoul…
+  Sent to the manager agent
+                                             
+  Run nargo test after the clamp and recor…
+  Sent to this session
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             

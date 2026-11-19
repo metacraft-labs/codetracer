@@ -157,6 +157,43 @@ const sessionTabsExports = [
 for (const name of sessionTabsExports) {
   agentHarborViews[`agent-harbor-${kebab(name)}`] = `codetracer-agent-harbor--${kebab(name)}`;
 }
+// The omnibox composer (CTF-P2c): one view per `Composer*` story of the Agent
+// Harbor section (`ComposerTyping` -> `agent-harbor-composer-typing`), all in
+// the family `agent-harbor-composer`.
+const composerExports = [
+  "ComposerRecent",
+  "ComposerTyping",
+  "ComposerMultiLine",
+  "ComposerRouting",
+  "ComposerSendsWhenRouted",
+  "ComposerRoutedManager",
+  "ComposerRoutedUiAction",
+  "ComposerRedirected",
+  "ComposerNoSession",
+  "ComposerContextEdited",
+  "ComposerAddContext",
+  "ComposerSending",
+  "ComposerSent",
+  "ComposerSentAgain",
+  "ComposerSendFailed",
+  "ComposerRouteFailed",
+  "ComposerStop",
+  "ComposerUiActionDone",
+  "ComposerUiActionRefused",
+  "ComposerUiActionPartial",
+  "ComposerLaunch",
+  "ComposerLaunchInvalid",
+  "ComposerLaunchScheduled",
+  "ComposerLaunched",
+  "ComposerNewInitiative",
+  "ComposerNewInitiativeInvalid",
+  "ComposerGaze",
+  "ComposerGazePaused",
+  "ComposerLongNames",
+];
+for (const name of composerExports) {
+  agentHarborViews[`agent-harbor-${kebab(name)}`] = `codetracer-agent-harbor--${kebab(name)}`;
+}
 for (const [name, storyId] of Object.entries(agentHarborViews)) {
   views[name] = { storyId, brief: agentHarborBrief, sizes: agentHarborSizes, themes: agentHarborThemes };
 }
@@ -188,6 +225,7 @@ const viewFamilies = {
   // The playback stories (`--moments` captures them at their named moments).
   "agent-harbor-playback": Object.keys(agentHarborViews).filter((v) => v.endsWith("-playback")),
   "agent-harbor-session-tabs": sessionTabsExports.map((name) => `agent-harbor-${kebab(name)}`),
+  "agent-harbor-composer": composerExports.map((name) => `agent-harbor-${kebab(name)}`),
   "agent-harbor-layouts": agentHarborLayoutViews,
 };
 

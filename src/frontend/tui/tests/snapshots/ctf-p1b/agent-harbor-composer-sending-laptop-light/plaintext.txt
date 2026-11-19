@@ -1,0 +1,56 @@
+                                                                   /ai Also test a hit on an empty shield
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                   Sending…
+                                                                                                                                                                                    
+                                                   IN VIEW   src/shield.nr:7   remaining_shield -= damage
+                                                                                                                                                                                    
+                                                    Pass 2 of iterate_asteroids   Variables: remaining_shield = 9000
+                                                                                                                                                                                    
+                                                    Clamp the shield at zero after a hit
+                                                                                                                                                                                    
+                                                   Cites src/shield.nr:7, Pass 2 of iterate_asteroids
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                  ▎THIS SESSION   Clamp the shield at zero after a hit                   Sending…
+                                                                                                                                                                                    
+                                                   MANAGER AGENT  Manager of Shield model hardening
+                                                                                                                                                                                    
+                                                   UI ACTION      CodeTracer
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                 Sending…   Send
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    

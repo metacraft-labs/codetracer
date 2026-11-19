@@ -1,0 +1,56 @@
+                                                                   /ai Start an initiative: asteroid fields gene…
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                   Enter sends it · ↑↓ another destination · to Manager of Shield model hardening
+                                                                                                                                                                                    
+                                                   IN VIEW   src/shield.nr:7   remaining_shield -= damage
+                                                                                                                                                                                    
+                                                    Pass 2 of iterate_asteroids   Variables: remaining_shield = 9000
+                                                                                                                                                                                    
+                                                    Clamp the shield at zero after a hit   +
+                                                                                                                                                                                    
+                                                   Cites nothing from this window
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                   THIS SESSION   Clamp the shield at zero after a hit
+                                                                                                                                                                                    
+                                                  ▎MANAGER AGENT  Manager of Shield model hardening                        Routed
+                                                  ▎               It states a new goal with milestones of its own
+                                                                                                                                                                                    
+                                                   UI ACTION      CodeTracer
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                   Start an initiative · sent to the manager agent
+                                                                                                                                                                                    
+                                                   Goal
+                                                    Asteroid fields generated from seeds, end to end
+                                                                                                                                                                                    
+                                                   Iterations
+                                                    1   auto   N
+                                                                                                                                                                                    
+                                                   Plan file
+                                                    mileston…/2026-11-17-asteroid-fields-generated-from-seeds-end.milestones.org
+                                                                                                                                                                                    
+                                                   Related specs
+                                                    spec/Fixtures.md, spec/Shield-Model.md
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                        Enter   Start initiative
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    

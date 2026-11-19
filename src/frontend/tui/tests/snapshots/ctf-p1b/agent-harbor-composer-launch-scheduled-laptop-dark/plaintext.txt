@@ -1,0 +1,56 @@
+                                                                   /ai Start a task: make the regeneration cap c…
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                   Enter sends it · ↑↓ another destination · to Manager of Shield model hardening
+                                                                                                                                                                                    
+                                                                                                                     More above ↑
+                                                                                                                                                                                    
+                                                   THIS SESSION   Clamp the shield at zero after a hit
+                                                                                                                                                                                    
+                                                  ▎MANAGER AGENT  Manager of Shield model hardening                        Routed
+                                                  ▎               It asks for new work outside this session
+                                                                                                                                                                                    
+                                                   UI ACTION      CodeTracer
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                   Launch a task · sent to the manager agent
+                                                                                                                                                                                    
+                                                   Repository                              Branch
+                                                    noir-space-ship                         feat/regen-cap-config
+                                                                                                                                                                                    
+                                                   Agents
+                                                    ✓ Claude   Codex   Grok   Opencode   AntiGravity
+                                                                                                                                                                                    
+                                                   Runs on
+                                                    This machine   Executor   The server's choice
+                                                                                                                                                                                    
+                                                   Executor                                Session name
+                                                    linux-x64-4                             named by the server
+                                                                                                                                                                                    
+                                                   Opens in
+                                                    New tab   Split   Beside
+                                                                                                                                                                                    
+                                                   ▾ Schedule  30 6 * * 1-5 · Europe/Sofia
+                                                                                                                                                                                    
+                                                   Cron                                    Time zone
+                                                    30 6 * * 1-5                            Europe/Sofia
+                                                                                                                                                                                    
+                                                   Jitter
+                                                    120 s
+                                                                                                                                                                                    
+                                                   Concurrency
+                                                    Allow overlap   Forbid overlap   Replace previous
+                                                                                                                                                                                    
+                                                   Misfire
+                                                    Run once, drop catch-up   Run all, catch up
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                  Enter   Launch
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    

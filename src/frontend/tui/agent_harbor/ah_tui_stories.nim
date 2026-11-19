@@ -32,13 +32,16 @@ import ./ah_tui_initiative_tab_bar
 import ./ah_tui_initiative_panels
 import ./ah_tui_fleet_panel
 import ./ah_tui_playback_bar
+import ./ah_tui_composer
+import ../../stories/agent_harbor_composer_stories
 import nim_everywhere/async_compat
 import ../../viewmodel/input/element_press
 import ../../viewmodel/keymap/[base_keymaps, context_keys, editing_keymap,
                                keymap_router, scope_path, user_keymap]
 import ../../../common/key_names
 
-export agent_harbor_stories, codetracer_stories, emit_storybook_stories, ah_tui_canvas
+export agent_harbor_stories, codetracer_stories, emit_storybook_stories, ah_tui_canvas,
+  ah_tui_composer
 
 const
   TuiAgentHarborSurfaces* = [
@@ -48,6 +51,7 @@ const
     "agent-harbor-initiative-tabs",
     "agent-harbor-initiatives",
     "agent-harbor-initiative-progress",
+    "agent-harbor-composer",
   ]
     ## Every surface of the Agent Harbor section this module draws.
   AgentHarborSectionTitle* = "CodeTracer/Agent Harbor"
@@ -68,6 +72,7 @@ type
     initiativeTabs*: InitiativeTabStripVM
     initiatives*: InitiativesVM
     progress*: InitiativeProgressVM
+    composer*: OmniboxComposerVM
     playback*: AhPlayback
       ## A playback story's playback (nil for any other story).
     drawnAt: int
@@ -136,6 +141,40 @@ proc pressPlayback*(m: AhTuiMount; operation: string): bool {.discardable.} =
   m.draw()
   true
 
+let ComposerScopePath = @[element(ekWindow, "window"), pane(ComposerScope)]
+  ## Where the composer's keys and presses resolve.
+
+proc pressComposer*(m: AhTuiMount; operation, target: string): bool {.discardable.} =
+  ## **A PRESS ON A COMPOSER ELEMENT** (Input-Routing-And-Keymaps.md §5.1),
+  ## from its target (the hit test): resolved by the story host's router in
+  ## the `composer` scope — a user's row for the press first — else the
+  ## operation the element carries, run on the composer's viewmodel on the
+  ## element's target; the screen is drawn again.
+  if m.isNil or m.composer.isNil: return false
+  let outcome = resolveElementPress(routerResolver(m.router, SessionFacts()),
+                                    ComposerScopePath, ButtonElementKind,
+                                    operation, {}, "Click")
+  m.lastOperation = outcome.operation
+  if not m.composer.runComposerPress(outcome.operation, target): return false
+  m.draw()
+  true
+
+proc composerKey*(m: AhTuiMount; token: string): bool =
+  ## A key while the composer is shown, ROUTED (Input-Routing-And-Keymaps.md
+  ## §4): decoded by the terminal's byte decoder and resolved in the
+  ## `composer` scope (`Enter` sends, `Down` / `Up` move the destination). A
+  ## key that resolves to a composer operation runs it, and the screen is
+  ## drawn again.
+  if m.composer.isNil: return false
+  let name = keyName(token)
+  if name.len == 0: return false
+  let res = m.router.route(SessionFacts(), ComposerScopePath, nmNormal, name, 0)
+  m.lastOperation = if res.kind == erOperation: res.operation else: ""
+  if res.kind != erOperation or not m.composer.runComposerOperation(res.operation):
+    return false
+  m.draw()
+  true
+
 proc drawFrame(c: var AhCanvas; title: string): int =
   ## The panel's frame header: the window's ground with the panel's tab at
   ## its start, on the panel's own ground (the active tab runs into its
@@ -175,6 +214,9 @@ proc draw*(m: AhTuiMount) =
   of "agent-harbor-initiative-tabs": c.drawInitiativeTabBar(m.initiativeTabs, top, 0, m.cols)
   of "agent-harbor-initiatives": c.drawInitiativesPanel(m.initiatives, top, 0, m.cols, h)
   of "agent-harbor-initiative-progress": c.drawProgressPanel(m.progress, top, 0, m.cols, h)
+  of "agent-harbor-composer":
+    c.drawComposer(m.composer, top, 0, m.cols, h, (proc(operation, target: string) =
+      discard m.pressComposer(operation, target)))
   else: discard
   if not m.playback.isNil:
     c.drawPlaybackBar(m.playback, m.rows - 1, (proc(operation: string) =
@@ -213,6 +255,7 @@ proc mountAgentHarborStoryTui*(surface, fixture: string; cols, rows: int;
     mountInitiativeTabBar(result.initiativeTabs, cols)
   of "agent-harbor-initiatives": result.initiatives = createInitiativesStoryVM(fixture, pb)
   of "agent-harbor-initiative-progress": result.progress = createProgressStoryVM(fixture, pb)
+  of "agent-harbor-composer": result.composer = createComposerStoryVM(fixture)
   else: discard
   if not pb.isNil: pb.openAtMoment(moment)
   result.draw()
@@ -264,6 +307,7 @@ proc dispose*(m: AhTuiMount) =
   if m.initiativeTabs != nil: m.initiativeTabs.dispose()
   if m.initiatives != nil: m.initiatives.dispose()
   if m.progress != nil: m.progress.dispose()
+  if m.composer != nil: m.composer.dispose()
 
 proc rowsOf*(m: AhTuiMount): seq[StyledRow] =
   ## The screen as styled rows, for `styledRowsTree`.
@@ -288,7 +332,7 @@ proc handleInput*(m: AhTuiMount; token: string): bool =
   ## A press acts on what is under it; motion moves the hover. True when the
   ## screen must be drawn again.
   let (ok, button, row, col, press) = decodeSgrMouse(token)
-  if not ok: return m.playbackKey(token)
+  if not ok: return m.playbackKey(token) or m.composerKey(token)
   if (button and 32) != 0:
     # Motion: SGR adds 32 to the button for a motion report (1003).
     result = m.canvas.pointAt(row, col)

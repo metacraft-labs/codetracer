@@ -80,13 +80,18 @@
     "with a Range, GPUI from the width the view says they take, `data-ah-text-px`).",
     "`same`: cut on both sides or on neither -- a box can be the same width on",
     "both sides within every tolerance and still cut the words on one (a 0.2px",
-    "shortfall elides a title). `never`: cut on neither side."
+    "shortfall elides a title). `never`: cut on neither side.",
+    "",
+    "The omnibox composer (CTF-P2c) adds its own: the field in the caption bar,",
+    "the sheet under it, the sheet's header line and its send button; its",
+    "`surface` is the story's whole window (`.ah-composer-story`), as the GPUI",
+    "view's root is."
   ],
   "schemaVersion": 1,
   "regions": [
     {
       "name": "surface",
-      "web": ".ah-tab-caption, .ah-session-list, .agent-harbor-initiatives, .agent-harbor-progress, .agent-harbor-fleet",
+      "web": ".ah-tab-caption, .ah-session-list, .agent-harbor-initiatives, .agent-harbor-progress, .agent-harbor-fleet, .ah-composer-story",
       "gpui": {
         "data-ah-surface": ""
       }
@@ -500,6 +505,34 @@
       "web": ".ah-initiative-tab-bar .session-tab.ah-tab:not(.ah-tab-notice).active .ah-tab-recordings",
       "gpui": {
         "data-ah-recordings": ""
+      }
+    },
+    {
+      "name": "composer-field",
+      "web": ".ah-composer-input-row",
+      "gpui": {
+        "data-ah-field-row": ""
+      }
+    },
+    {
+      "name": "composer-sheet",
+      "web": ".ah-composer-sheet",
+      "gpui": {
+        "data-ah-sheet": ""
+      }
+    },
+    {
+      "name": "composer-header",
+      "web": ".ah-composer-header",
+      "gpui": {
+        "data-ah-header": ""
+      }
+    },
+    {
+      "name": "composer-send",
+      "web": ".ah-composer-send-button",
+      "gpui": {
+        "data-ah-action": "send"
       }
     }
   ]

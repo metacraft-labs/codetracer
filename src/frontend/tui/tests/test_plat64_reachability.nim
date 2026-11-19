@@ -65,6 +65,12 @@ const
     # hosts mount the timeline.
     "session-activity.copy", "session-activity.jump-to-latest",
     "session-activity.retry", "session-activity.toggle",
+    # The omnibox composer's presses. Its elements carry them
+    # (`agent_harbor_composer_words`) in the story hosts' composer, which
+    # this census does not read (it counts the shell's surfaces); off this
+    # list once the composer replaces the omnibox's agent mode.
+    "composer.add-context", "composer.cite", "composer.recall", "composer.retry",
+    "composer.send-again", "composer.stop",
   ]
 
 proc bound(): HashSet[string] =

@@ -827,9 +827,18 @@ suite "CTF-P1c: the playback stories are declared once, in every host":
     ck stories.len >= MinimumPlaybackStories
     var surfaces: HashSet[string]
     for story in stories: surfaces.incl story.surface
-    # One per surface the hosts draw.
-    ck surfaces.len == GpuiAgentHarborSurfaces.len
-    ck surfaces.len == TuiAgentHarborSurfaces.len
+    # One per surface the hosts draw, except the surfaces declared to have
+    # none (`surfacesWithoutPlayback`, each with its reason): both hosts
+    # draw every playback surface, and every surface they draw is one or
+    # declared.
+    var gpuiSurfaces, tuiSurfaces, without: HashSet[string]
+    for s in GpuiAgentHarborSurfaces: gpuiSurfaces.incl s
+    for s in TuiAgentHarborSurfaces: tuiSurfaces.incl s
+    for s in surfacesWithoutPlayback: without.incl s
+    ck (surfaces * without).len == 0
+    ck without <= gpuiSurfaces and without <= tuiSurfaces
+    ck surfaces + without == gpuiSurfaces
+    ck surfaces + without == tuiSurfaces
     # The terminal story host lists its stories from the same declaration;
     # its listing is read from the binary, not computed here.
     let listing = execCmdEx(appBinaryPath(Stem) & " --list").output.splitLines

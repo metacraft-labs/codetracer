@@ -116,6 +116,9 @@ import viewmodel/views/[isonim_agent_harbor_session_tabs_view,
                         isonim_agent_harbor_initiative_tabs_view,
                         isonim_agent_harbor_playback_view]
 import stories/dom_playback_presses
+import stories/dom_composer_presses
+import stories/agent_harbor_composer_stories
+import viewmodel/views/isonim_agent_harbor_composer_view
 import ../ct_test/contracts as ct_test_contracts
 
 type
@@ -1931,6 +1934,44 @@ proc mountAgentHarborProgress(container: isonim_dom.Element;
     proc(host: isonim_dom.Element; vm: InitiativeProgressVM) =
       mountAgentHarborProgressPanel(host, vm), pb, options)
 
+proc mountAgentHarborComposerStory(container: isonim_dom.Element;
+                                   fixture: string): DisposeProc =
+  ## The omnibox composer as CodeTracer draws it: in the caption bar
+  ## (`#menu > #debug`, where the omnibox lives), its sheet dropping over the
+  ## window under it -- the editor stopped at `src/shield.nr:7`, the window
+  ## the composer's "In view" chips describe
+  ## (`stories/agent_harbor_composer_stories.nim`).
+  var disposers: seq[DisposeProc] = @[]
+  # The story's whole window, the region the layout records name `surface`
+  # (the GPUI view's root spans the window too).
+  let story = createHost(container, "div", "ah-composer-story")
+  isonim_dom.setAttribute(story, cstring"class", cstring"ah-composer-story")
+  let window = createHost(story, "div", "ah-composer-window")
+  isonim_dom.setAttribute(window, cstring"class", cstring"ah-composer-window")
+  let panels = storyStackRow(window)
+  disposers.add mountEditor(storyPanelStack(panels, StoryStopPath, "1 1 0"), "populated")
+  let caption = createHost(story, "div", "menu")
+  isonim_dom.setAttribute(caption, cstring"class", cstring"menu ah-composer-caption")
+  let debug = createHost(caption, "div", "debug")
+  isonim_dom.setAttribute(debug, cstring"class", cstring"ct-header")
+  let host = createHost(debug, "div", "ah-composer-host")
+  isonim_dom.setAttribute(host, cstring"class",
+                          cstring"component-container command-container ah-composer-container")
+  # Its presses and keys are routed (Input-Routing-And-Keymaps.md §5.1):
+  # performed on the composer on the page (`stories/dom_composer_presses`).
+  var shown: OmniboxComposerVM
+  routeComposerPresses(proc(): OmniboxComposerVM = shown)
+  disposers.add mountAgentHarborVM(host,
+    proc(): OmniboxComposerVM =
+      shown = createComposerStoryVM(fixture)
+      shown,
+    proc(h: isonim_dom.Element; vm: OmniboxComposerVM) =
+      mountAgentHarborComposer(h, vm))
+  return proc() =
+    shown = nil
+    for dispose in disposers: dispose()
+    container.innerHTML = ""
+
 proc mountTestResults(container: isonim_dom.Element; fixture: string): DisposeProc =
   ## The Test Results pane over a real `ct test run --events` capture (the
   ## Agent Harbor fixture set's first test run), folded through the pane's
@@ -2716,6 +2757,7 @@ proc mountCodeTracerStory*(container: isonim_dom.Element;
     of "agent-harbor-session-tabs": mountAgentHarborSessionTabs(container, f, o)
     of "agent-harbor-initiative-tabs": mountAgentHarborInitiativeTabs(container, f, o)
     of "agent-harbor-session-list": mountAgentHarborSessionList(container, f, o)
+    of "agent-harbor-composer": mountAgentHarborComposerStory(container, f)
     of "debug-shell": mountDebugShell(container, f)
     of "debug-controls": mountDebugControls(container, f)
     else: mountStructure(container, n, f)

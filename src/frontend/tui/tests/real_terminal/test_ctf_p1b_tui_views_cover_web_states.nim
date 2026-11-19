@@ -94,6 +94,7 @@ import ../../agent_harbor/ah_tui_stories
 import ../../agent_harbor/ah_tui_session_views
 import ../../agent_harbor/ah_tui_initiative_tab_bar
 import ../../agent_harbor/ah_tui_fleet_panel
+import ../../agent_harbor/ah_tui_composer
 import nim_agents/agent_harbor/fleet_records
 import nim_agents_isonim_viewmodels/agent_harbor/[fleet_vm, session_tabs_vm,
   initiative_tabs_vm, initiatives_vm, initiative_progress_vm, fixture_source, data_source]
@@ -691,6 +692,83 @@ proc checkFleet(view: AhNode; vm: FleetSnapshotVM): seq[string] =
                       row.activity[0 ..< shown])
         result.expect("title of " & row.shortId, e.first("title").attr("title"), row.title)
 
+proc checkComposer(view: AhNode; vm: OmniboxComposerVM): seq[string] =
+  ## The composer's drawing against its viewmodel (CTF-P2c): the phase and
+  ## the route, the field, the header, the chips and their states, the
+  ## destinations in their fixed order with the marked row, each state word,
+  ## label and reason, the actions each offers, `Recent`, the form, and the
+  ## send line.
+  result.expect("phase", view.attr("phase"), $vm.phase)
+  result.expect("route", view.attr("route"), $vm.route)
+  result.expect("field", view.values("field"), @[ComposerPrefix & vm.fieldText])
+  result.expect("header", view.values("header"), @[vm.headerText])
+  if vm.isEmptyField:
+    var recent: seq[string]
+    for rec in vm.recent: recent.add rec.text
+    result.expect("recent", view.values("recent-text"), recent)
+    result.expect("destinations", view.values("dest").len, 0)
+    # Nothing typed: no send line (the web draws none).
+    result.expect("send", view.values("send").len, 0)
+    return
+  # A body that holds more than the sheet shows is scrolled (the web's
+  # scrollport): the sections it scrolled past are not drawn, and the sheet
+  # says how many it hid. Only then may a section be missing; what is
+  # drawn is compared.
+  let sheet = view.first("sheet")
+  let scrolled = not sheet.isNil and
+                 (sheet.attr("hidden-above") != "0" or sheet.attr("hidden-below") != "0")
+  let drawnDests = view.values("dest")
+  template section(what: string; drawn, wanted: untyped) =
+    if not (scrolled and drawn.len == 0): result.expect(what, drawn, wanted)
+  var chips, states: seq[string]
+  for ch in vm.chips:
+    chips.add ch.item.id
+    states.add chipState(ch)
+  section("chips", view.values("chip"), chips)
+  section("chip states", view.values("chip-state"), states)
+  let cites = vm.citesShown
+  section("cites", view.values("cites"), if cites.len > 0: @[cites] else: @[])
+  var dests, marked, words, labels: seq[string]
+  for row in vm.rows:
+    dests.add $row.target
+    marked.add $vm.rowMarked(row)
+    words.add stateWord(row)
+    labels.add vm.rowLabel(row)
+  # Scrolled, a row may be missing; the ones drawn keep their order.
+  if scrolled:
+    var kept, keptMarked: seq[string]
+    for i, d in dests:
+      if d in drawnDests:
+        kept.add d
+        keptMarked.add marked[i]
+    dests = kept
+    marked = keptMarked
+  result.expect("destinations", view.values("dest"), dests)
+  result.expect("marked rows", view.values("marked"), marked)
+  for i, row in vm.rows:
+    for e in view.all("dest"):
+      if e.attr("dest") != $row.target: continue
+      result.expect("label of " & $row.target, e.values("label"), @[labels[i]])
+      result.expect("state of " & $row.target, e.values("state"),
+                    if words[i].len > 0: @[words[i]] else: @[])
+      let reason = vm.rowReason(row)
+      result.expect("reason of " & $row.target, e.values("detail"),
+                    if reason.len > 0: @[reason] else: @[])
+      var actions: seq[string]
+      if row.canStop: actions.add "stop"
+      if row.canSendAgain: actions.add "send-again"
+      if row.delivered and row.delivery == dsFailed: actions.add "retry"
+      var drawn: seq[string]
+      for a in e.all("action"): drawn.add a.attr("action")
+      result.expect("actions of " & $row.target, drawn, actions)
+  section("form", view.values("form"), if vm.showsForm: @[$vm.intent] else: @[])
+  if vm.showsSendLine and not vm.isEmptyField:
+    result.expect("send", view.values("send"), @[vm.sendLabel])
+    result.expect("send enabled", view.values("send-enabled"),
+                  @[$(vm.canSend and vm.phase != cpSending)])
+  else:
+    result.expect("send", view.values("send").len, 0)
+
 proc checkStory(m: AhTuiMount): seq[string] =
   let view = m.view
   if view.isNil: return @["no node says which surface was drawn"]
@@ -703,6 +781,7 @@ proc checkStory(m: AhTuiMount): seq[string] =
   of "agent-harbor-initiatives": checkInitiatives(view, m.initiatives)
   of "agent-harbor-initiative-progress": checkProgress(view, m.progress)
   of "agent-harbor-fleet": checkFleet(view, m.fleet)
+  of "agent-harbor-composer": checkComposer(view, m.composer)
   else: @["this suite has no comparison for surface " & m.surface]
 
 # ---------------------------------------------------------------------------

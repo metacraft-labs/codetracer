@@ -134,8 +134,14 @@ const
     ## framed as the Agent Activity panel, and no pane of the layout: the
     ## production `agentActivity` pane keeps its own keys until the timeline
     ## replaces its rendering.
+  ComposerScope* = "composer"
+    ## The scope the omnibox composer's keys and presses are routed in (the
+    ## caption bar's omnibox in agent mode and its sheet,
+    ## `agent_harbor_composer_words`). It is a prototype drawn in story
+    ## hosts and no pane of the layout: the production omnibox keeps its own
+    ## keys until the composer replaces its agent mode.
   NonPaneScopes* = [TopBarScope, BreakpointConditionScope, StoryPlaybackScope,
-                    SessionActivityScope]
+                    SessionActivityScope, ComposerScope]
     ## The scopes a press names in `paneKind` that are not panes.
 
 func element*(kind: ElementKind; id: string; paneKind = ""): ScopeElement =

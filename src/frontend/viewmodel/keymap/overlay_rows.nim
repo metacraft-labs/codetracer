@@ -82,6 +82,13 @@ const
     BaseRow(chords: "Down", operation: "session-activity.focus-next", table: SessionActivityTable),
     BaseRow(chords: "Up", operation: "session-activity.focus-previous", table: SessionActivityTable),
 
+    # --- The omnibox composer: `Enter` sends the instruction where the
+    # sheet's bar marks, `Down` / `Up` move that mark (the omnibox's own
+    # result keys), the same under every base.
+    BaseRow(chords: "Enter", operation: "composer.send", table: ComposerTable),
+    BaseRow(chords: "Down", operation: "composer.next-destination", table: ComposerTable),
+    BaseRow(chords: "Up", operation: "composer.previous-destination", table: ComposerTable),
+
     # --- The Video Player (Visual-Replay.md § Keyboard Shortcuts): its keys
     # while it has the focus, the same under every base, as the desktop's
     # player always had them.

@@ -102,6 +102,9 @@ const
   SessionActivityTable* = PaneTablePrefix & "sessionActivity"
     ## The session activity timeline's keys (`agent_harbor_activity_words`),
     ## while the timeline has the focus.
+  ComposerTable* = PaneTablePrefix & "composer"
+    ## The omnibox composer's keys (`agent_harbor_composer_words`), while
+    ## its field or its sheet has the focus.
   PointerTable* = "pointer"
     ## The rows whose key is a pointer gesture (`pointer_rows`). Never on a
     ## scope path: only `keymap_router.routePointer` consults it.
@@ -627,6 +630,17 @@ const
     op("session-activity.jump-to-latest", SessionActivityTable,
        "Activity: Jump to Latest"),
     op("session-activity.retry", SessionActivityTable, "Activity: Retry"),
+    # The omnibox composer (`agent_harbor_composer_words`): send, move the
+    # destination, and what a press on its chips, rows and Recent does.
+    op("composer.send", ComposerTable, "Composer: Send"),
+    op("composer.next-destination", ComposerTable, "Composer: Next Destination"),
+    op("composer.previous-destination", ComposerTable, "Composer: Previous Destination"),
+    op("composer.cite", ComposerTable, "Composer: Cite or Uncite", oaTarget),
+    op("composer.add-context", ComposerTable, "Composer: Add Context"),
+    op("composer.send-again", ComposerTable, "Composer: Send Here as Well", oaTarget),
+    op("composer.retry", ComposerTable, "Composer: Retry"),
+    op("composer.stop", ComposerTable, "Composer: Stop the Agent"),
+    op("composer.recall", ComposerTable, "Composer: Recall an Instruction", oaTarget),
     op("video-player.toggle-play", VideoPlayerTable, "Video: Play / Pause"),
     op("video-player.rewind", VideoPlayerTable, "Video: Rewind"),
     op("video-player.fast-forward", VideoPlayerTable, "Video: Fast Forward"),
