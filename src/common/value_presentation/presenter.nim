@@ -813,7 +813,11 @@ func joinMembers(v: PValue; ctx: PresentationContext; depth: int;
       parts.add m.label & ":" & rendered
     else:
       parts.add rendered
-  if cap < total:
+  if cap < total or v.elementsTotal > v.members.len:
+    # Also when the ANSWER held elements back (`elementsTotal`: a flow value
+    # or the locals budget carries a collection's first elements only): the
+    # rendering ends in the same `…`, so `[5, 3, …]` never reads as a
+    # complete `[5, 3]`.
     tally.truncated = true
     parts.add Ellipsis
   parts.join(", ")
@@ -827,7 +831,7 @@ func joinEntries(v: PValue; ctx: PresentationContext; depth: int;
     let e = v.entries[i]
     parts.add inlineText(e.key, ctx, depth + 1, presenters, tally) & ": " &
               inlineText(e.val, ctx, depth + 1, presenters, tally)
-  if cap < total:
+  if cap < total or v.elementsTotal > v.entries.len:
     tally.truncated = true
     parts.add Ellipsis
   parts.join(", ")

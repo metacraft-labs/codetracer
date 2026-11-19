@@ -264,6 +264,9 @@ const
   SLIDER_OFFSET = 6 # in px
   FLOW_VALUE_LIMIT = 30
   FLOW_VALUE_MAX_WIDTH = fmt"{FLOW_VALUE_LIMIT}ch"
+  FLOW_VALUE_LOAD_MORE_COUNT = 50
+    ## Elements one "Load more" in a flow value's popup adds
+    ## (`ct/load-flow-value-elements`).
 
 proc calculateMaxWidth*(self: FlowComponent, stepNodeWidth: int) =
   let editor = self.editorUI.monacoEditor
@@ -784,6 +787,16 @@ proc customRedraw(self: ValueComponent) =
 
 proc renderModalValueDom(self: FlowComponent, containerId: cstring): Node =
   self.modalValueComponent[containerId].renderValueDom()
+
+proc refreshTooltip(self: FlowComponent, containerId: cstring) =
+  ## Draw the open popup's value again, after it changed in place (its
+  ## whole value arrived, or a cut collection grew).
+  if self.tooltipId != containerId or self.tippyElement.isNil or
+     not self.modalValueComponent.hasKey(containerId):
+    return
+  let valueDom = self.renderModalValueDom(containerId)
+  for instance in self.tippyElement:
+    instance.setContent(valueDom)
 
 proc openTooltip*(
     self: FlowComponent,
@@ -1560,7 +1573,33 @@ proc createContextMenuItems(self: FlowComponent, name: cstring, beforeValue: Flo
   for entry in flowValueMenu():
     result.add self.flowValueMenuItem(entry, name, beforeValue, stepCount)
 
-proc ensureValueComponent(self: FlowComponent, id: cstring, name: cstring, flowValue: FlowValueText) =
+proc flowValueElementsLoader(self: FlowComponent, name: cstring, stepCount: int,
+                             after: bool): proc(path: seq[int], start: int,
+                                                apply: proc(elements: seq[Value], more: bool)) =
+  ## Continues a flow value's preview (`Omniscience-Flow.md`, "A flow value is
+  ## a preview"): `ct/load-flow-value-elements` answers from the uncut value
+  ## the flow kept, for the flow this component draws, without moving the
+  ## debugger.
+  let flowTicks = if self.flow.isNil: 0 else: self.flow.rrTicks
+  result = proc(path: seq[int], start: int,
+                apply: proc(elements: seq[Value], more: bool)) =
+    let args = js{
+      flowRrTicks: flowTicks, stepCount: stepCount, after: after,
+      expression: name, path: path.toJs, startIndex: start,
+      count: FLOW_VALUE_LOAD_MORE_COUNT}
+    proc load() {.async.} =
+      let body = await data.dapApi.asyncSendCtRequest(CtLoadFlowValueElements, args)
+      if body.isNil or body.elements.isNil:
+        # Refused (the flow was replaced) or failed: keep the button, so
+        # the count stays honest and a press can try again.
+        cwarn fmt"flow: ct/load-flow-value-elements gave no elements for {name} at step {stepCount}"
+        apply(@[], true)
+      else:
+        apply(cast[seq[Value]](body.elements), body.more.to(bool))
+    discard load()
+
+proc ensureValueComponent(self: FlowComponent, id: cstring, name: cstring, flowValue: FlowValueText,
+                          stepCount = -1, after = false) =
   let value = typedValue(flowValue)
   self.modalValueComponent[id] =
     ValueComponent(
@@ -1575,6 +1614,11 @@ proc ensureValueComponent(self: FlowComponent, id: cstring, name: cstring, flowV
       valueWidth: VALUE_COMPONENT_VALUE_WIDTH,
       data: data,
       isTooltipValue: true,
+      heldBackLoader:
+        if stepCount >= 0: self.flowValueElementsLoader(name, stepCount, after)
+        else: nil,
+      customRedraw: proc(component: ValueComponent) =
+        self.refreshTooltip(id),
     )
 
 proc flowEventValue*(self: FlowComponent, event: FlowLayoutEvent, stepCount: int, style: VStyle, i: int): Node =
@@ -1653,7 +1697,7 @@ proc flowSimpleValue*(
       .toLowerAscii()
   let flowValueMode = self.getFlowValueMode(beforeValue, afterValue)
 
-  proc openTypedValuePopup(anchorId: cstring, value: FlowValueText) =
+  proc openTypedValuePopup(anchorId: cstring, value: FlowValueText, after = false) =
     ## Open the full value in a popup drawn by the TYPED value renderer
     ## (`ui/value.nim`'s `renderValueDom`, reached through
     ## `ValueComponent`) rather than by printing a string.
@@ -1661,8 +1705,15 @@ proc flowSimpleValue*(
     ## This is the same renderer the chip's hover tooltip already uses, so
     ## a struct opens as an expandable tree here exactly as it does there.
     if not self.modalValueComponent.hasKey(anchorId):
-      self.ensureValueComponent(anchorId, name, value)
+      self.ensureValueComponent(anchorId, name, value, stepCount, after)
+    elif self.modalValueComponent[anchorId].heldBackLoader.isNil:
+      # The hover tooltip made this component first; the popup can continue
+      # a cut value, so it gets the loader.
+      self.modalValueComponent[anchorId].heldBackLoader =
+        self.flowValueElementsLoader(name, stepCount, after)
     self.openTooltip(anchorId, showNow = true)
+    # The eye opens the whole value: fetch what the preview cut, lazily, now.
+    self.modalValueComponent[anchorId].loadWholeValue()
 
   proc onContextMenu(input: FlowInput, value: FlowValueText) =
     # A SIBLING OF THE EDITOR'S OWN LEAK, and it is inside the editor area: flow
@@ -1716,7 +1767,8 @@ proc flowSimpleValue*(
   let popupAnchorId = cstring(boxes[^1].id)
 
   proc onViewMore(input: FlowInput) =
-    openTypedValuePopup(popupAnchorId, popupValue)
+    openTypedValuePopup(popupAnchorId, popupValue,
+                        after = flowValueMode != BeforeValueMode)
 
   proc onNamePress(input: FlowInput) =
     self.jumpToLocalStep(stepCount)
@@ -3844,8 +3896,9 @@ proc renderFlowLines*(self: FlowComponent) =
           continue
         if step.beforeCount > 0 or step.afterCount > 0 or step.events.len > 0:
           self.addStepValues(step)
-    except IndexDefect:
-      cerror cstring(fmt"flow: renderFlowLines IndexDefect for line {line}")
+    except IndexDefect as e:
+      cerror cstring(fmt"flow: renderFlowLines IndexDefect for line {line}: {e.msg} " &
+        fmt"(loops={self.flow.loops.len}) {e.getStackTrace()}")
       continue
 
 proc reloadFlow*(self:FlowComponent) =

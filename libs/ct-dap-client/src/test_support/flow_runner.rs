@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-use crate::client::{scaled, DapStdioClient};
+use crate::client::{DapStdioClient, scaled};
 use crate::types::flow::{FlowMode, LoadFlowArguments};
 use crate::types::launch::LaunchRequestArguments;
 // Note: Action and StepArg are used by the ct/step protocol (socket-based).
@@ -154,6 +154,10 @@ fn normalize_dap_source_name(name: &str) -> String {
 impl FlowData {
     /// Parse the ct/updated-flow event body into FlowData.
     pub fn from_event_body(body: &Value) -> Result<Self, BoxError> {
+        // Every value whole, whichever way the event came (`ct_flow_wire`).
+        let mut restored = body.clone();
+        ct_flow_wire::restore_flow_update(&mut restored)?;
+        let body = &restored;
         let view_updates = body
             .get("viewUpdates")
             .and_then(|v| v.as_array())

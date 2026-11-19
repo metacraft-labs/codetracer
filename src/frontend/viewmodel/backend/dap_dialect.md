@@ -306,6 +306,13 @@ Measured against the native `replay-server` while capturing
   after the event (`FlowVM.isFlowAcknowledgement`). A client that reads the
   response and stops has an empty flow pane and no error to explain it.
 * The real window is `ct/updated-flow`'s `body.viewUpdates[0]`.
+* Its step values (`steps[].beforeValues`, `.afterValues`) come with their
+  default-valued fields elided, and the body says so: `valueEncoding:
+  "elided-defaults-1"`. Read them through `common/flow_wire.nim`
+  (`restoreElidedFlowValues`; `FlowVM.applyFlowUpdate` does, and so does the
+  desktop's middleware), which puts the defaults back and refuses an encoding
+  it does not know. The table is `libs/ct-flow-wire`'s; a value whose fields
+  are missing is a value read without it, not an empty one.
 * Events **queue**. `ct/load-flow` is sent after a `continue`/breakpoint
   sequence that has already produced `ct/updated-flow` events for earlier
   positions, so a `waitForEvent("ct/updated-flow")` issued without draining

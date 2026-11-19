@@ -91,7 +91,8 @@ func toPValue*(value: Value; depth: int = 32): PValue =
            text: (if value.b: "true" else: "false"))
   of Seq, Set, HashSet, OrderedSet, Array, Varargs, Slice:
     PValue(kind: pvkSequence, typeName: typeName, sourceKind: sourceKind,
-           members: positional(), partial: value.partiallyExpanded)
+           members: positional(), partial: value.partiallyExpanded,
+           elementsTotal: value.elementsTotal)
   of Instance:
     PValue(kind: pvkRecord, typeName: typeName, sourceKind: sourceKind,
            members: labelled(), partial: value.partiallyExpanded)
@@ -105,7 +106,8 @@ func toPValue*(value: Value; depth: int = 32): PValue =
         entries.add PEntry(key: toPValue(item[0], depth - 1),
                            val: toPValue(item[1], depth - 1))
     PValue(kind: pvkMap, typeName: typeName, sourceKind: sourceKind,
-           entries: entries, partial: value.partiallyExpanded)
+           entries: entries, partial: value.partiallyExpanded,
+           elementsTotal: value.elementsTotal)
   of Variant, Union:
     var members: seq[PMember] = @[]
     if not value.activeVariantValue.isNil:

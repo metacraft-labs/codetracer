@@ -414,6 +414,7 @@ applicable:
   - ../keymaps/monaco-unbound-f7-does-nothing.yaml
   - ../keymaps/f7-bound-by-a-row-reaches-the-editor.yaml
   - ../nim-views/rr-nim-recording-opens-as-nim.yaml
+  - ../nim-views/reverse-next-returns-to-the-nim-line.yaml
   - ../layout/event-log-and-scratchpad-tabs.yaml
   - ../point-list/breakpoint-rows-follow-the-gutter.yaml
   - ../point-list/tracepoint-rows-beside-breakpoints.yaml

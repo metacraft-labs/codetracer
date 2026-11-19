@@ -69,6 +69,8 @@ export flow_line_rule.FlowStyledLine, flow_line_rule.FlowLineStyleKind
 # with no imports, exactly so both this layer and `common_types` can hold the
 # same strings; see its header for why the wire form is a name.
 import ../../../common/flow_mode_wire
+# The step values arrive with their default-valued fields elided.
+import ../../../common/flow_wire
 # PLAT-2's value pipeline, for the flow pane's values (`flowValueText`).
 import ../../../common/value_presentation
 import ../../../common/value_presentation/json_adapter
@@ -794,6 +796,13 @@ proc applyFlowUpdate*(vm: FlowVM; response: JsonNode) =
   ## 1 — issue #595. Re-deriving it from `location.rrTicks`, which the backend
   ## sends alongside the window, is what keeps the two in agreement.
   if response.isNil or response.kind != JObject:
+    vm.loadingState.val = lsError
+    return
+  # Every step value whole before anything reads one; an encoding this
+  # reader does not know is an error, not a window of empty values.
+  let unreadable = restoreElidedFlowValues(response)
+  if unreadable.len > 0:
+    echo "FlowVM: ", unreadable
     vm.loadingState.val = lsError
     return
   # A DIFF FLOW IS NOT THE CALL WINDOW. It arrives on the same event, and

@@ -651,6 +651,12 @@ type
     isScratchpadValue*:  bool
     isOperationRunning*: bool
     historyScrollTop*:   int
+    heldBackLoader*:     proc(path: seq[int], start: int,
+                              apply: proc(elements: seq[Value], more: bool))
+      ## Set on a flow value's popup: loads the next elements of a collection
+      ## the flow's preview cut short (`ct/load-flow-value-elements`) and
+      ## hands them to `apply`. `path` is the element indices from the base
+      ## value to the collection.
 
   ScratchpadComponent* = ref object of Component
     i*:             int
@@ -1256,7 +1262,12 @@ type
     lastTraceToggleTime*: int64
     viewZone*:       JsObject
     topLevelEditor*: EditorViewComponent
-    zoneId*:        int
+    zoneId*:        cstring
+      ## The expansion's Monaco view zone (`addZone` answers a string id,
+      ## such as "b2"), or "" while it has none. It was an `int` cast from
+      ## that string, so `zoneId >= 0` compared "b2" with 0, was false, and
+      ## toggling an expansion closed never removed its zone (codetracer-pm
+      ## issue 2026-11-17).
     isExpanded*:    bool # zone expanded
     isExpansion*:   bool # is an expansion editor
     parentLine*:    int

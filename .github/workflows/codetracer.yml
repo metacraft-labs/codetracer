@@ -6020,7 +6020,7 @@ jobs:
             # (ct_gfx_player's build); snapshot-codecs at visual-replay's
             # repro.lock pin, image-diff at codetracer's.
             codetracer-snapshot-codecs=3e503da83b73e805f30096d4baa45c18d138f6d3
-            codetracer-image-diff=d04b56d822c7d4335fbc40f0a1aad387a1b838b5
+            codetracer-image-diff=982e669585a150ede87973db281df63188459328
             reprobuild=e2fe4eb9f5b94abe382f10d39be0957e90a344a9
             runquota=40523b624eb050dc9712ae83ef14dbaf8a1b25c7
 

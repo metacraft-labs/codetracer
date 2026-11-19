@@ -82,6 +82,7 @@ const VALID_DAP_COMMANDS_SEQ*: seq[string] = @[
   "ct/search-calltrace",
   "ct/load-symbols",
   "ct/load-value-elements",
+  "ct/load-flow-value-elements",
   "ct/calltrace-search-res",
   "ct/source-line-jump",
   "ct/source-call-jump",

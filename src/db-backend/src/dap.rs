@@ -482,14 +482,19 @@ impl DapClient {
         }))
     }
 
+    /// The `ct/updated-flow` event. Its step values go out with their
+    /// default-valued fields elided (`ct_flow_wire`): they were most of a
+    /// large flow's bytes.
     pub fn updated_flow_event(&mut self, flow_update: task::FlowUpdate) -> DapResult<DapMessage> {
+        let mut body = serde_json::to_value(flow_update)?;
+        ct_flow_wire::elide_flow_update(&mut body);
         Ok(DapMessage::Event(Event {
             base: ProtocolMessage {
                 seq: self.next_seq(),
                 type_: "event".to_string(),
             },
             event: "ct/updated-flow".to_string(),
-            body: serde_json::to_value(flow_update)?,
+            body,
         }))
     }
 

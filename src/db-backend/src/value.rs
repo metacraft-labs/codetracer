@@ -169,6 +169,11 @@ pub enum ValueRecordWithType {
         typ: TypeRecord,
     },
     Sequence {
+        /// The collection's true length when `elements` holds only its first
+        /// elements: the worker loaded it with an element limit
+        /// (`ReplayQuery::LoadValueLimited`). `None` when `elements` is all.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        len: Option<usize>,
         elements: Vec<ValueRecordWithType>,
         is_slice: bool,
         typ: TypeRecord,
@@ -257,6 +262,7 @@ pub fn to_ct_value(v: &ValueRecordWithType) -> Value {
             res
         }
         ValueRecordWithType::Sequence {
+            len,
             elements,
             typ,
             is_slice,
@@ -269,6 +275,11 @@ pub fn to_ct_value(v: &ValueRecordWithType) -> Value {
             };
             let mut res = Value::new(TypeKind::Seq, ct_typ);
             res.elements = elements.iter().map(to_ct_value).collect();
+            if let Some(len) = len
+                && *len > res.elements.len()
+            {
+                res.elements_total = *len;
+            }
             res
         }
         ValueRecordWithType::Struct { field_values, typ } => {

@@ -38,6 +38,11 @@ type
     activeFields*: seq[langstring]
     gdbValue*: ref GdbValue # should be nil always out of python
     partiallyExpanded*: bool
+    elementsTotal*: int
+      ## A collection's full length when the answer carries only its first
+      ## `elements` (the backend's `elementsTotal`, set by the locals budget and
+      ## by the flow's per-value budget); 0 when nothing was held back.
+      ## A fact about the answer, not the recording (`partiallyExpanded`).
 
   SubPathKind* = enum
     Expression,

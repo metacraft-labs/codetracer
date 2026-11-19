@@ -455,6 +455,7 @@ mod tests {
     fn navigates_through_a_sequence_into_a_struct() {
         let path = parse_watch_expression("ps[1].x").expect("parses");
         let value = ValueRecordWithType::Sequence {
+            len: None,
             elements: vec![point(1, 2), point(30, 40)],
             is_slice: false,
             typ: int_type(),
@@ -481,6 +482,7 @@ mod tests {
     fn an_out_of_range_index_reports_the_recorded_length() {
         let path = parse_watch_expression("xs[5]").expect("parses");
         let value = ValueRecordWithType::Sequence {
+            len: None,
             elements: vec![int(1), int(2)],
             is_slice: false,
             typ: int_type(),

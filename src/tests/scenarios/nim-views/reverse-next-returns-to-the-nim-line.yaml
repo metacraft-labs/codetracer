@@ -1,0 +1,33 @@
+scenario: 1
+name: nim-views/reverse-next-returns-to-the-nim-line
+pack: codetracer
+summary: >-
+  On an rr recording of the Nim sudoku solver, Reverse Next undoes a Next in
+  the Nim source: stopped at line 74 (a breakpoint, then Continue), Next steps
+  over its printBoard call to line 75, and Reverse Next returns to 74. (Not
+  from line 73: the first C line of the loop body's first statement is a
+  hoisted temporary, so a stop there is followed by the loop variable's
+  assignment, line 72; codetracer-pm issue 2026-11-18.)
+
+stage:
+  - use: record-program
+    with: { program: nim_sudoku_solver/main.nim, backend: rr }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 300s }
+  - wait: { until: { at: 'editor[file="main.nim"]/line[number="74"]', present: true }, timeout: 120s }
+  - click: { at: 'editor[file="main.nim"]/line[number="74"]', anchor: glyph }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="main.nim"]', current-line: 74 }, timeout: 120s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="main.nim"]', current-line: 75 }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="reverse-next-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="main.nim"]', current-line: 74 }, timeout: 120s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - expect: { at: status-line, location: { matches: "main.nim:74#" } }

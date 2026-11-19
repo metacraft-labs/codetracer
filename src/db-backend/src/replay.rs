@@ -107,6 +107,27 @@ pub trait ReplaySession: std::fmt::Debug {
         lang: Lang,
     ) -> Result<ValueRecordWithType, Box<dyn Error>>;
 
+    /// `load_value`, loading at most `count_limit` elements of each collection
+    /// (`ValueRecordWithType::Sequence::len` then says how long a cut one
+    /// really is). A replay that cannot limit a load loads it whole.
+    fn load_value_limited(
+        &mut self,
+        expression: &str,
+        depth_limit: Option<usize>,
+        count_limit: Option<usize>,
+        lang: Lang,
+    ) -> Result<ValueRecordWithType, Box<dyn Error>> {
+        let _ = count_limit;
+        self.load_value(expression, depth_limit, lang)
+    }
+
+    /// The current stop's exact identity: a `replay_position` that
+    /// `jump_to_call` returns to from anywhere. `None` when the replay cannot
+    /// name its stops, or cannot return to them.
+    fn load_stop_position(&mut self) -> Option<String> {
+        None
+    }
+
     // assuming currently the replay is stopped in the right `call`(frame) for both trace kinds;
     //   and if rr: possibly near the return value
     // currently depth_limit, lang only used for rr!

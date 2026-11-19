@@ -541,7 +541,15 @@ proc record(
     for line in assessment.diagnostics:
       errorMessage "error: " & line
     quit(1)
-  let sel = recorderSelectorFor(assessment, lang)
+  # `ct record --backend rr` of a compiled `.nim` arrives here as
+  # `--trace-kind rr` (with no `--backend`; `--backend mcr` when MCR was
+  # asked for): `ct record` honoured it (`honouringBackend`) and built the
+  # program natively, so the selector made here must honour it too.  Made
+  # from recognition alone it was `(Nim, native, MCR)` again, and the program
+  # was recorded with `ct-mcr` while the user had asked for rr (codetracer-pm
+  # issue 2026-11-17 "`ct record --backend rr` made an MCR recording").
+  let requestedBackend = if backend.len > 0: backend else: traceKind
+  let sel = recorderSelectorFor(assessment, lang).honouringBackend(requestedBackend)
   let tool = recorderToolFor(sel)
   if lang != LangUnknown and not tool.isDeclared:
     # The native family: nothing in the dispatch table describes it, so a

@@ -2307,6 +2307,11 @@ pub fn handle_request(
             req.load_args::<task::LoadValueElementsArguments>()?,
             sender.clone(),
         )?,
+        "ct/load-flow-value-elements" => handler.load_flow_value_elements(
+            req.clone(),
+            req.load_args::<task::LoadFlowValueElementsArguments>()?,
+            sender.clone(),
+        )?,
         "ct/search-calltrace" => {
             handler.calltrace_search(req.clone(), req.load_args::<CallSearchArg>()?, sender.clone())?
         }
@@ -4105,7 +4110,9 @@ where
 
             // handle all requests here: including `launch` from actually stable thread
             match request.command.as_str() {
-                "ct/load-flow" => {
+                // The flow thread's handler keeps the uncut values behind the
+                // flows it sent, so their continuation is answered there too.
+                "ct/load-flow" | "ct/load-flow-value-elements" => {
                     if let Some(to_flow_sender) = ctx.to_flow_sender.clone()
                         && let Err(e) = to_flow_sender.send(request.clone())
                     {

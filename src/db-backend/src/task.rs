@@ -1140,6 +1140,11 @@ pub struct FlowViewUpdate {
     pub loop_iteration_steps: Vec<Vec<LoopIterationSteps>>,
     pub relevant_step_count: Vec<usize>,
     pub comment_lines: Vec<Position>,
+    /// The uncut values behind this window's previews, for
+    /// `ct/load-flow-value-elements`. Never sent: the handler takes them when
+    /// the update is ready (`value_budget::HeldBackValues`).
+    #[serde(skip)]
+    pub held_back: crate::value_budget::HeldBackValues,
 }
 
 impl FlowViewUpdate {
@@ -1153,6 +1158,7 @@ impl FlowViewUpdate {
             loop_iteration_steps: vec![vec![LoopIterationSteps::default()]],
             relevant_step_count: vec![],
             comment_lines: vec![],
+            held_back: Default::default(),
         }
     }
 
@@ -1567,6 +1573,26 @@ pub struct LoadValueElementsArguments {
     /// The tick the client's locals are about; a request about another stop
     /// is refused rather than answered from the wrong one.
     pub rr_ticks: i64,
+}
+
+/// Arguments of `ct/load-flow-value-elements`: the next slice of a collection
+/// a flow value's preview cut short, out of the uncut value the flow kept.
+#[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LoadFlowValueElementsArguments {
+    /// The flow the value came from: its `FlowUpdate.location.rrTicks`.
+    pub flow_rr_ticks: i64,
+    /// The flow step the value is shown on (`FlowStep.stepCount`).
+    pub step_count: i64,
+    /// The step's after value (`afterValues`) rather than its before value.
+    #[serde(default)]
+    pub after: bool,
+    pub expression: String,
+    #[serde(default)]
+    pub path: Vec<usize>,
+    pub start_index: usize,
+    #[serde(default)]
+    pub count: usize,
 }
 
 /// Response body for `ct/load-value-elements`.

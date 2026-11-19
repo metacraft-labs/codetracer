@@ -946,6 +946,11 @@ const
     # throughout, so this is the only check of that property; registered so it
     # cannot quietly stop running.
     "src/tests/cli/record_nim_debuginfo_e2e_test.nim",
+    # `ct record --backend=rr main.nim` must make an rr recording: `ct`
+    # honoured the backend and `db-backend-record` made the selector again
+    # from recognition alone, so the program was recorded with `ct-mcr`
+    # and nothing said so.  Only the real chain shows it.
+    "src/tests/cli/record_nim_rr_backend_e2e_test.nim",
   ]
 
   CliReviewGateTests* = [

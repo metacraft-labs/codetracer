@@ -1789,7 +1789,10 @@ proc configure(data: Data) =
   for operation in SearchOptionOperations:
     registerSearchToggle(operation)
   toggleMacroExpansionHook = proc(editor: EditorViewComponent) =
-    editor.toggleMacroExpansion()
+    # The line under the pointer is in `pointerEditor`; `editor` (the active
+    # one) only when the pointer has not been over an editor yet.
+    let target = if pointerEditor.isNil: editor else: pointerEditor
+    target.toggleMacroExpansion()
   editorJumpHook = proc(editor: EditorViewComponent; operation: string): bool =
     editor.runEditorJump(operation)
   onKeymapChanged = proc() =

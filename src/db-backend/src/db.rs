@@ -1796,6 +1796,7 @@ impl MaterializedReplaySession {
                 ValueRecord::String { text, type_id }
             }
             ValueRecordWithType::Sequence {
+                len: _,
                 elements,
                 is_slice,
                 typ,
@@ -1899,6 +1900,7 @@ impl MaterializedReplaySession {
                 is_slice,
                 type_id,
             } => ValueRecordWithType::Sequence {
+                len: None,
                 elements: elements.iter().map(|e| self.to_value_record_with_type(e)).collect(),
                 is_slice: *is_slice,
                 typ: self.type_record(*type_id).clone(),

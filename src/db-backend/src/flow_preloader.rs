@@ -17,11 +17,40 @@ use crate::{
         LoopIterationSteps, Position, RRTicks, StepCount, TraceKind,
     },
     value::{Value, ValueRecordWithType, to_ct_value},
+    value_budget,
 };
 
 const STEP_COUNT_LIMIT: usize = 10000;
 const RETURN_VALUE_RR_DEPTH_LIMIT: usize = 7;
 const LOAD_FLOW_VALUE_RR_DEPTH_LIMIT: usize = 2;
+
+/// How many collection elements one flow value carries, over all its levels,
+/// and how many each collection keeps at least.
+///
+/// A flow sends a value for every step whose line mentions it, so a large
+/// array in a loop body went out whole on every pass: the Pascal sudoku's
+/// `boards` (10 x 9 x 9) was about 40 KB a step and 76 MB over the 900 steps
+/// of its initialisation loop, and the window stopped answering while it took
+/// that in. A chip shows 30 characters, so a flow value carries the first
+/// elements of each collection and its full length (`elementsTotal`), the
+/// cut the locals budget makes (`value_budget`), and the renderer ends the
+/// text in `…`; the eye's popup loads the whole value
+/// (`ct/load-flow-value-elements`). Small, because every node carries its
+/// full type: about 400 bytes of JSON each.
+/// `Omniscience-Flow.md`, "A flow value is a preview".
+const FLOW_VALUE_COUNT_BUDGET: i64 = 4;
+const FLOW_VALUE_MIN_COUNT: i64 = 1;
+
+/// A recorded value as the flow sends it: converted and cut to the flow's
+/// per-value budget, with the uncut value beside it when the budget cut
+/// anything (kept in `FlowViewUpdate::held_back` for
+/// `ct/load-flow-value-elements`).
+fn flow_ct_value(record: &ValueRecordWithType) -> (Value, Option<Value>) {
+    let whole = to_ct_value(record);
+    let mut value = whole.clone();
+    let dropped = value_budget::apply_count_budget(&mut [&mut value], FLOW_VALUE_COUNT_BUDGET, FLOW_VALUE_MIN_COUNT);
+    (value, (dropped > 0).then_some(whole))
+}
 
 fn should_seek_materialized_call_body_from_line_only_location(location: &Location) -> bool {
     location.rr_ticks.0 == 0 && location.event == 0 && location.line > 0
@@ -401,6 +430,27 @@ pub struct CallFlowPreloader<'a> {
     /// `n_p0`, a mangled global), tried right after the plain name so a name
     /// looked up again later in the walk costs one probe, not the whole search.
     nim_spellings: HashMap<String, String>,
+    /// The location `move_to_next_step` loaded after its step, handed to the
+    /// top of the walk loop so the walk does not load it a second time. On an
+    /// rr replay each location load is a worker round trip (about 70 ms on the
+    /// Pascal sudoku solver's `main`), and the walk loaded every step's
+    /// location twice. Taken once; `None` makes the walk load it.
+    next_step_location: Option<Location>,
+    /// Whether this walk loads its values cut to the flow's preview and
+    /// leaves the rest in the recording: the replay names its stops exactly
+    /// (`ReplaySession::load_stop_position`), so `ct/load-flow-value-elements`
+    /// can go back to a step and load the value there whole. Otherwise every
+    /// value is loaded whole and the part the preview cuts is kept in memory
+    /// (`FlowViewUpdate::held_back`).
+    ///
+    /// Loading a large value whole at every step was most of a flow's time:
+    /// the Pascal sudoku solver's `main` mentions a 10 x 9 x 9 array on each
+    /// of about 1,900 steps, and showed 4 of its elements.
+    cut_at_the_source: bool,
+    /// The current stop, once a cut value at it asked for its position: the
+    /// step count it was read at, and the stop's location with its
+    /// `replay_position`.
+    stop_position: Option<(i64, Option<Location>)>,
     diff_lines: HashSet<(PathBuf, i64)>,
     diff_call_keys: HashSet<i64>, //  TODO: if we add Eq, Hash it seems we can do CallKey
     mode: FlowMode,
@@ -448,6 +498,9 @@ impl<'a> CallFlowPreloader<'a> {
             last_step_id: StepId(-1),
             last_expr_order: vec![],
             nim_spellings: HashMap::new(),
+            next_step_location: None,
+            cut_at_the_source: false,
+            stop_position: None,
             diff_lines,
             diff_call_keys,
             mode,
@@ -627,7 +680,7 @@ impl<'a> CallFlowPreloader<'a> {
                         specific_info: TypeSpecificInfo::None,
                     },
                 });
-            let return_value = to_ct_value(&return_value_record);
+            let (return_value, return_whole) = flow_ct_value(&return_value_record);
             info!("  return value: {:?}", return_value);
 
             #[allow(clippy::unwrap_used)]
@@ -660,7 +713,21 @@ impl<'a> CallFlowPreloader<'a> {
                 .first_mut()
                 .unwrap()
                 .expr_order
-                .push(return_string);
+                .push(return_string.clone());
+
+            if let Some(whole) = &return_whole {
+                for step_count in [
+                    flow_view_update.steps.first().map(|s| s.step_count.0),
+                    flow_view_update.steps.last().map(|s| s.step_count.0),
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    flow_view_update
+                        .held_back
+                        .keep(step_count, false, &return_string, whole);
+                }
+            }
         }
         flow_view_update
     }
@@ -888,6 +955,7 @@ impl<'a> CallFlowPreloader<'a> {
                 match replay.load_location(&mut self.walk_expr_loader) {
                     Ok(location) => {
                         let new_step_id = StepId(location.rr_ticks.0);
+                        self.next_step_location = Some(location.clone());
                         let progressing = if self.trace_kind == TraceKind::Materialized {
                             new_step_id != from_step_id
                         } else {
@@ -963,7 +1031,9 @@ impl<'a> CallFlowPreloader<'a> {
         //     }
         // }
 
-        info!("flow loop:");
+        self.cut_at_the_source = self.trace_kind == TraceKind::Recreator && replay.load_stop_position().is_some();
+        self.stop_position = None;
+        info!("flow loop: values cut at the source: {}", self.cut_at_the_source);
         loop {
             // let (step_id, progressing) = if first {
             //     first = false;
@@ -1001,7 +1071,10 @@ impl<'a> CallFlowPreloader<'a> {
             // trace-record heuristic (`use_trace_function_boundaries`,
             // `trace_reader.rs`). The window's extent is therefore taken from
             // the preloader's loader instead, below.
-            let new_location = replay.load_location(&mut self.walk_expr_loader)?;
+            let new_location = match self.next_step_location.take() {
+                Some(location) => location,
+                None => replay.load_location(&mut self.walk_expr_loader)?,
+            };
             if step_count == 0 {
                 self.location = new_location.clone();
 
@@ -1191,10 +1264,19 @@ impl<'a> CallFlowPreloader<'a> {
             // e.g. events from some of the next steps on the same line visit
             // one can analyze the step id of the next step, or we can add this info to the object
             let line = new_location.line;
+            // An rr replay's step id is the location's rr ticks, which the
+            // location just loaded already carries; asking the replay again
+            // is one more worker round trip per step (twice, with the one
+            // `process_loops` gets below).
+            let step_id_here = if self.trace_kind == TraceKind::Recreator {
+                StepId(new_location.rr_ticks.0)
+            } else {
+                replay.current_step_id()
+            };
             flow_view_update.steps.push(FlowStep::new(
                 line,
                 step_count,
-                replay.current_step_id(),
+                step_id_here,
                 Iteration(0),
                 LoopId(0),
                 events,
@@ -1210,7 +1292,7 @@ impl<'a> CallFlowPreloader<'a> {
             flow_view_update = self.process_loops(
                 flow_view_update,
                 Position(new_location.line),
-                replay.current_step_id(),
+                step_id_here,
                 path_buf,
                 step_count,
             );
@@ -1276,8 +1358,19 @@ impl<'a> CallFlowPreloader<'a> {
         if let Some(loop_shape) = self.flow_preloader.expr_loader.get_loop_shape(line, path_buf) {
             info!("  loop shape {:?}", loop_shape);
             if loop_shape.first.0 == line.0 && !self.active_loops.contains(&loop_shape.first) {
+                // A loop is named by its POSITION in this update's `loops`,
+                // which is what a step's `loop`, `loop_iteration_steps` and
+                // `branches_taken` are indexed by, here and in the renderer.
+                // The shape's own id numbers the loops of the whole function
+                // as the parser met them. The two agree only while every loop
+                // before this one ran in this window, and the shape ids
+                // restart only at a function node. A Pascal program's main
+                // block is not one, so its loops continued the procedures'
+                // count (10..13 against five loops), and a loop in an untaken
+                // branch shifts every later id.
+                let position = flow_view_update.loops.len() as i64;
                 flow_view_update.loops.push(Loop {
-                    base: LoopId(loop_shape.loop_id.0),
+                    base: LoopId(position),
                     base_iteration: Iteration(0),
                     internal: vec![],
                     first: loop_shape.first,
@@ -1499,6 +1592,71 @@ impl<'a> CallFlowPreloader<'a> {
     /// Load the value `value_name` has at the replay's CURRENT step, the way
     /// the flow shows a variable a line mentions. For Nim it also tries the
     /// compiler's disambiguated spellings (`_pN`, `_N`, mangled globals).
+    /// One name's value for the flow: cut to the preview at the worker when
+    /// the walk cuts at the source (`cut_at_the_source`), whole otherwise.
+    fn load_one_flow_value(
+        &self,
+        replay: &mut dyn ReplaySession,
+        name: &str,
+    ) -> Result<ValueRecordWithType, Box<dyn Error>> {
+        if self.cut_at_the_source {
+            replay.load_value_limited(
+                name,
+                Some(LOAD_FLOW_VALUE_RR_DEPTH_LIMIT),
+                Some(FLOW_VALUE_COUNT_BUDGET as usize),
+                self.lang,
+            )
+        } else {
+            replay.load_value(name, Some(LOAD_FLOW_VALUE_RR_DEPTH_LIMIT), self.lang)
+        }
+    }
+
+    /// Keep what `ct/load-flow-value-elements` needs to serve the rest of
+    /// `preview`, `name`'s value on step `key_step` (`after`: its value after
+    /// that step's line), loaded at step `at_step`'s stop. A walk that cuts at
+    /// the source keeps the stop's position, to load the value there whole on
+    /// demand; otherwise it keeps the uncut value it loaded (`whole`).
+    #[allow(clippy::too_many_arguments)]
+    fn keep_the_rest(
+        &mut self,
+        replay: &mut dyn ReplaySession,
+        held_back: &mut crate::value_budget::HeldBackValues,
+        at_step: i64,
+        key_step: i64,
+        after: bool,
+        name: &str,
+        preview: &Value,
+        whole: Option<&Value>,
+        location: &Location,
+    ) {
+        if self.cut_at_the_source {
+            if !value_budget::is_cut(preview) {
+                return;
+            }
+            let stop = match &self.stop_position {
+                Some((step, stop)) if *step == at_step => stop.clone(),
+                _ => {
+                    let stop = replay.load_stop_position().map(|position| {
+                        let mut stop = location.clone();
+                        stop.replay_position = position;
+                        stop
+                    });
+                    self.stop_position = Some((at_step, stop.clone()));
+                    stop
+                }
+            };
+            // Without a position nothing is kept: what was loaded is the
+            // preview, not the value, and the popup says it cannot load more.
+            if let Some(stop) = stop {
+                held_back.keep_position(key_step, after, name, &stop);
+            }
+            return;
+        }
+        if let Some(whole) = whole {
+            held_back.keep(key_step, after, name, whole);
+        }
+    }
+
     fn load_flow_value(
         &mut self,
         replay: &mut dyn ReplaySession,
@@ -1506,7 +1664,7 @@ impl<'a> CallFlowPreloader<'a> {
         location: &Location,
     ) -> Result<ValueRecordWithType, Box<dyn Error>> {
         // Try loading the value with the original name first
-        let value_result = replay.load_value(value_name, Some(LOAD_FLOW_VALUE_RR_DEPTH_LIMIT), self.lang);
+        let value_result = self.load_one_flow_value(replay, value_name);
 
         // Check if we need to try alternate names (either error or "not found" value)
         let needs_alternate_names = self.lang == Lang::Nim
@@ -1522,7 +1680,7 @@ impl<'a> CallFlowPreloader<'a> {
 
             // The spelling this name was found under earlier in the walk.
             if let Some(spelling) = self.nim_spellings.get(value_name).cloned()
-                && let Ok(value) = replay.load_value(&spelling, Some(LOAD_FLOW_VALUE_RR_DEPTH_LIMIT), self.lang)
+                && let Ok(value) = self.load_one_flow_value(replay, &spelling)
                 && !value.is_not_found()
             {
                 found_value = Some(value);
@@ -1531,7 +1689,7 @@ impl<'a> CallFlowPreloader<'a> {
             // Strategy 1: Try _pN suffixes for parameters (Nim 2.x uses _p0, _p1, etc.)
             for suffix in (0..=5).take_while(|_| found_value.is_none()) {
                 let param_name = format!("{}_p{}", value_name, suffix);
-                if let Ok(value) = replay.load_value(&param_name, Some(LOAD_FLOW_VALUE_RR_DEPTH_LIMIT), self.lang)
+                if let Ok(value) = self.load_one_flow_value(replay, &param_name)
                     && !value.is_not_found()
                 {
                     info!(
@@ -1548,8 +1706,7 @@ impl<'a> CallFlowPreloader<'a> {
             if found_value.is_none() {
                 for suffix in 1..=5 {
                     let suffixed_name = format!("{}_{}", value_name, suffix);
-                    if let Ok(value) =
-                        replay.load_value(&suffixed_name, Some(LOAD_FLOW_VALUE_RR_DEPTH_LIMIT), self.lang)
+                    if let Ok(value) = self.load_one_flow_value(replay, &suffixed_name)
                         && !value.is_not_found()
                     {
                         info!(
@@ -1569,8 +1726,7 @@ impl<'a> CallFlowPreloader<'a> {
                 let path = Path::new(&location.path);
                 if let Some(mut iter) = nim_mangling::MangledNameDualIterator::new(value_name, path, 20) {
                     while let Some(mangled_name) = iter.next_candidate() {
-                        if let Ok(value) =
-                            replay.load_value(mangled_name, Some(LOAD_FLOW_VALUE_RR_DEPTH_LIMIT), self.lang)
+                        if let Ok(value) = self.load_one_flow_value(replay, mangled_name)
                             && !value.is_not_found()
                         {
                             // Copy name only on success (to release borrow before calling iter methods)
@@ -1611,6 +1767,10 @@ impl<'a> CallFlowPreloader<'a> {
     ) -> FlowViewUpdate {
         let mut expr_order: Vec<String> = vec![];
         let mut variable_map: HashMap<String, Value> = HashMap::default();
+        // The uncut values behind the previews in `variable_map`.
+        let mut whole_map: HashMap<String, Value> = HashMap::default();
+        #[allow(clippy::unwrap_used)]
+        let this_step = flow_view_update.steps.last().unwrap().step_count.0;
 
         // for value_record in &db.variables[step_id] {
         //     variable_map.insert(
@@ -1636,13 +1796,27 @@ impl<'a> CallFlowPreloader<'a> {
 
                 if let Ok(value) = final_value {
                     // if variable_map.contains_key(value_name) {
-                    let ct_value = to_ct_value(&value);
+                    let (ct_value, whole) = flow_ct_value(&value);
                     flow_view_update
                         .steps
                         .last_mut()
                         .unwrap()
                         .before_values
                         .insert(value_name.clone(), ct_value.clone());
+                    self.keep_the_rest(
+                        replay,
+                        &mut flow_view_update.held_back,
+                        this_step,
+                        this_step,
+                        false,
+                        value_name,
+                        &ct_value,
+                        whole.as_ref(),
+                        location,
+                    );
+                    if let Some(whole) = whole {
+                        whole_map.insert(value_name.clone(), whole);
+                    }
                     info!("    insert in variables_map {}", value_name);
                     variable_map.insert(value_name.clone(), ct_value);
                 }
@@ -1684,13 +1858,17 @@ impl<'a> CallFlowPreloader<'a> {
                     } else {
                         local.expression.clone()
                     };
-                    let ct_value = to_ct_value(&local.value);
+                    let (ct_value, whole) = flow_ct_value(&local.value);
                     flow_view_update
                         .steps
                         .last_mut()
                         .unwrap()
                         .before_values
                         .insert(value_name.clone(), ct_value.clone());
+                    if let Some(whole) = whole {
+                        flow_view_update.held_back.keep(this_step, false, &value_name, &whole);
+                        whole_map.insert(value_name.clone(), whole);
+                    }
                     variable_map.insert(value_name.clone(), ct_value);
                     expr_order.push(value_name);
                 }
@@ -1719,15 +1897,27 @@ impl<'a> CallFlowPreloader<'a> {
         if self.last_step_id.0 >= 0 && flow_view_update.steps.len() >= 2 {
             let index = flow_view_update.steps.len() - 2;
             let previous_names = self.last_expr_order.clone();
+            let previous_step = flow_view_update.steps[index].step_count.0;
             for variable in &previous_names {
                 let value = match variable_map.get(variable) {
-                    Some(value) => Some(value.clone()),
+                    Some(value) => Some((value.clone(), whole_map.get(variable).cloned())),
                     None => match self.load_flow_value(replay, variable, location) {
-                        Ok(value) if !value.is_not_found() => Some(to_ct_value(&value)),
+                        Ok(value) if !value.is_not_found() => Some(flow_ct_value(&value)),
                         _ => None,
                     },
                 };
-                if let Some(value) = value {
+                if let Some((value, whole)) = value {
+                    self.keep_the_rest(
+                        replay,
+                        &mut flow_view_update.held_back,
+                        this_step,
+                        previous_step,
+                        true,
+                        variable,
+                        &value,
+                        whole.as_ref(),
+                        location,
+                    );
                     flow_view_update.steps[index]
                         .after_values
                         .insert(variable.clone(), value);
@@ -1744,6 +1934,71 @@ impl<'a> CallFlowPreloader<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A 10 x 9 x 9 integer array: the Pascal sudoku's `boards`.
+    fn boards_record() -> ValueRecordWithType {
+        let typ = |kind: TypeKind, name: &str| TypeRecord {
+            kind,
+            lang_type: name.to_string(),
+            specific_info: TypeSpecificInfo::None,
+        };
+        let row = |b: i64, r: i64| ValueRecordWithType::Sequence {
+            len: None,
+            elements: (0..9)
+                .map(|c| ValueRecordWithType::Int {
+                    i: b * 100 + r * 10 + c,
+                    typ: typ(TypeKind::Int, "Integer"),
+                })
+                .collect(),
+            is_slice: false,
+            typ: typ(TypeKind::Array, "TRow"),
+        };
+        let board = |b: i64| ValueRecordWithType::Sequence {
+            len: None,
+            elements: (0..9).map(|r| row(b, r)).collect(),
+            is_slice: false,
+            typ: typ(TypeKind::Array, "TBoard"),
+        };
+        ValueRecordWithType::Sequence {
+            len: None,
+            elements: (0..10).map(board).collect(),
+            is_slice: false,
+            typ: typ(TypeKind::Array, "array[0..9] of TBoard"),
+        }
+    }
+
+    /// A flow sends a value on every step that mentions it, so a large array
+    /// in a loop body must go out as a preview: its first elements, its full
+    /// length, and a bounded payload, not the whole value on every pass.
+    #[test]
+    #[allow(clippy::expect_used)]
+    fn a_large_array_in_the_flow_is_a_bounded_preview() {
+        let record = boards_record();
+        let whole = serde_json::to_string(&to_ct_value(&record)).expect("serialise").len();
+        let (value, kept) = flow_ct_value(&record);
+        let preview = serde_json::to_string(&value).expect("serialise").len();
+        assert_eq!(
+            kept,
+            Some(to_ct_value(&record)),
+            "the uncut value is kept beside the preview"
+        );
+        assert!(whole > 20_000, "the whole value is the large one: {whole} bytes");
+        assert!(
+            preview <= 6_144,
+            "a flow value is capped: {preview} bytes (the whole value is {whole})"
+        );
+        // The first boards, rows and cells, each cut collection saying how
+        // long it really is.
+        assert_eq!((value.elements.len(), value.elements_total), (4, 10));
+        let first_board = &value.elements[0];
+        assert_eq!((first_board.elements.len(), first_board.elements_total), (1, 9));
+        let row = &first_board.elements[0];
+        assert_eq!((row.elements.len(), row.elements_total), (1, 9));
+        assert_eq!(row.elements[0].i, "0", "the elements kept are the first ones");
+        // 900 passes of a loop that mentions it, before and after: the old
+        // flow sent `whole` bytes on each, now at most `preview`.
+        assert!(2 * 900 * preview < 12_000_000, "900 passes stay under 12 MB");
+    }
     use crate::task::{
         Breakpoint, CallLine, CtLoadLocalsArguments, Events, HistoryResultWithRecord, LoadHistoryArg, ProgramEvent,
         VariableWithRecord,

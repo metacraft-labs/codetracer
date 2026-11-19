@@ -109,6 +109,7 @@ impl SyntheticReplaySession {
             (
                 "arr".to_string(),
                 ValueRecordWithType::Sequence {
+                    len: None,
                     elements: vec![
                         int_val(10, &int_t),
                         int_val(20, &int_t),

@@ -71,6 +71,18 @@ pub enum ReplayQuery {
         lang: Lang,
         depth_limit: Option<usize>,
     },
+    /// `LoadValue`, loading at most `count_limit` elements of each collection;
+    /// a sequence cut there carries its true length (`Sequence::len`).
+    LoadValueLimited {
+        expression: String,
+        #[serde(with = "crate::lang::lang_wire")]
+        lang: Lang,
+        depth_limit: Option<usize>,
+        count_limit: Option<usize>,
+    },
+    /// The current stop's exact identity, a `replay_position` `JumpToCall`
+    /// returns to.
+    LoadStopPosition,
     AddBreakpoint {
         path: String,
         line: i64,

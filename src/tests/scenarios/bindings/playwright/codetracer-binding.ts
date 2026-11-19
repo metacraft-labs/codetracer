@@ -232,7 +232,7 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
   "shader-debug": { affordances: [], properties: ["source", "current", "variables", "registers", "step"] },
   "flow-value": { affordances: ["click", "context-click"], properties: ["name", "side", "line", "value", "cut", "clipped", "single-line", "cap", "shown", "eye-shown"] },
   "loop-control": { affordances: ["click"], properties: ["iteration", "total", "slider-width"] },
-  popup: { affordances: ["click"], properties: ["text", "value", "type", "anchored"] },
+  popup: { affordances: ["click"], properties: ["text", "value", "type", "anchored", "cut"] },
   // --- pw7 ---
   "value-actions": { affordances: [], properties: [] },
   "fif-match": { affordances: ["click", "double-click"], properties: ["location", "line", "highlight", "selected"] },
@@ -2081,6 +2081,7 @@ function readSurfacePw3(root: any): void {
       title: "", text: text(tip).length ? [text(tip)] : [],
       value: text(tip.querySelector(".value-expanded-text")), type: text(tip.querySelector(".value-type")),
       anchored,
+      cut: !!tip.querySelector(".value-held-back, .value-held-back-load-more"),
     }));
   }
 
