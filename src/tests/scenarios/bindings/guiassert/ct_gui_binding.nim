@@ -375,41 +375,49 @@ proc inkRuns(f: Frame; y0, y1, x0, x1: int): seq[(int, int)] =
 proc codeLeft(f: Frame; b: EditorBox; rows: seq[EditorRow]; numbersRight: int): int =
   ## Column 0 of the code: the leftmost text any row starts with, a fold
   ## chevron excepted. The chevrons are drawn in a lane of their own left of
-  ## column 0, so a narrow mark with a gap after it, met at the same place on
-  ## two or more rows, is that lane; a lone narrow first letter (`x` of
-  ## `xprint(1)`) is code.
+  ## column 0, so the lane is a narrow mark with a gap after it at the
+  ## leftmost ink of any row, where no plain row starts, and met
+  ##
+  ## * on two or more rows, or
+  ## * on one (a file with one foldable line: `def scale` in `extra.py`)
+  ##   whose text goes on 4 to 12 px to its right, when another row's text
+  ##   is on the code's columns counted from there (at that column, or
+  ##   indented from it).
+  ##
+  ## A narrow first letter at column 0 (`x` of `xprint(1)`) starts where
+  ## plain rows do, or is followed by a letter that touches it or by a
+  ## blank, two columns on; a narrow letter further in (`r` of an indented
+  ## `return`, its `e` a column on) is not the leftmost ink.
   var firsts: seq[seq[(int, int)]]
-  var narrow = initCountTable[int]()
   for r in rows:
-    let runs = inkRuns(f, r.y + r.h div 5, r.y + r.h - r.h div 5, numbersRight + 4, b.right - 4)
-    firsts.add runs
-    if runs.len > 1 and runs[0][1] - runs[0][0] <= 9 and runs[1][0] - runs[0][1] >= 3:
-      narrow.inc runs[0][0]
+    firsts.add inkRuns(f, r.y + r.h div 5, r.y + r.h - r.h div 5, numbersRight + 4, b.right - 4)
+  proc mark(runs: seq[(int, int)]): bool =
+    runs.len > 1 and runs[0][1] - runs[0][0] <= 9 and runs[1][0] - runs[0][1] >= 3
+  var leftmost = high(int)
+  for runs in firsts:
+    if runs.len > 0: leftmost = min(leftmost, runs[0][0])
+  var marks: seq[int]
+  var plainAtLeft = false
+  for i, runs in firsts:
+    if runs.len == 0 or runs[0][0] > leftmost + 1: continue
+    if runs.mark: marks.add i
+    else: plainAtLeft = true
   var lane = -1
-  for x, n in narrow:
-    var near = 0
-    for x2, n2 in narrow:
-      if abs(x2 - x) <= 1: near += n2
-    if near >= 2 and (lane < 0 or x < lane): lane = x
-  if lane < 0:
-    # One chevron alone (a file with one foldable line: `def scale` in
-    # `extra.py`): a narrow mark a little left of where every other row
-    # starts is the lane too. A narrow first letter at column 0 (`x = 1`)
-    # starts where the other rows do.
-    var plain = high(int)
-    for runs in firsts:
-      if runs.len == 0: continue
-      let mark = runs.len > 1 and runs[0][1] - runs[0][0] <= 9 and
-                 runs[1][0] - runs[0][1] >= 3
-      if not mark: plain = min(plain, runs[0][0])
-    if plain < high(int):
-      for x in narrow.keys:
-        if plain - x >= 4 and plain - x <= 14 and (lane < 0 or x < lane): lane = x
+  if not plainAtLeft and marks.len >= 2:
+    lane = leftmost
+  elif not plainAtLeft and marks.len == 1:
+    let i = marks[0]
+    let col0 = firsts[i][1][0]
+    if col0 - firsts[i][0][0] in 4 .. 12:
+      for j, other in firsts:
+        if j == i or other.len == 0 or other[0][0] < col0 - 1: continue
+        let cells = float(other[0][0] - col0) / 9.792
+        if abs(cells - round(cells)) * 9.792 <= 1.5: lane = leftmost
   result = high(int)
   for runs in firsts:
     if runs.len == 0: continue
     var first = runs[0]
-    if lane >= 0 and abs(first[0] - lane) <= 1 and first[1] - first[0] <= 9 and runs.len > 1:
+    if lane >= 0 and abs(first[0] - lane) <= 1 and runs.mark:
       first = runs[1]
     result = min(result, first[0])
   if result == high(int): result = numbersRight + 20
@@ -1365,6 +1373,13 @@ proc overlays(f: Frame; boxes: seq[PaneBox]): seq[Overlay] =
         # (a menu's folder level opening against its right edge is no part
         # of it)
         if x >= o.x0 - 2 and x <= o.x1 - 3 and y >= o.y0 - 2 and y <= o.y1 + 2: inside = true
+        # (nor is a pane's field that a menu drawn over it cuts short — the
+        # event log's Find event under a right-click menu at its foot: the
+        # field's top runs into the menu's side, and the menu's side is all
+        # the side it has)
+        # (one row tall: a submenu opening against a menu's side is taller)
+        if y >= o.y0 and y <= o.y1 + 6 and abs(rx - o.x0) <= 12 and y1 - y < 30:
+          inside = true
       var isBox = false
       for b in boxes:
         if (abs(b.left - x) <= 3 and abs(b.right - x1) <= 3) or
