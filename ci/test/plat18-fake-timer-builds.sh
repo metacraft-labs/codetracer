@@ -36,8 +36,9 @@
 #      1000), which is the MECHANISM threshold: a chain that reached a host
 #      timer scores about 1 and one that did not scores four or five orders of
 #      magnitude more, with nothing in between;
-#   3. the wasm/native wall ratio is printed for each build and compared
-#      against `CT_P18_MAX_SLOWDOWN` (default 3.0). The threshold is the
+#   3. the wasm/native wall ratio is taken over `CT_P18_PAIRS` (default 9)
+#      back-to-back native/wasm pairs per build, and the MEDIAN per-pair
+#      ratio is compared against `CT_P18_MAX_SLOWDOWN` (default 3.0). The threshold is the
 #      "materially slower" in §5 made a number, and it is deliberately loose:
 #      the criterion is about losing a testing PROPERTY, not about a constant
 #      factor, and a tight bound here would be the coin flip §12a describes on
@@ -74,6 +75,7 @@ ITERATIONS="${CT_FAKE_TIMER_ITERATIONS:-300000}"
 MIN_WALL_MS="${CT_P18_MIN_WALL_MS:-50}"
 MIN_RATIO="${CT_P18_MIN_RATIO:-1000}"
 MAX_SLOWDOWN="${CT_P18_MAX_SLOWDOWN:-3.0}"
+PAIRS="${CT_P18_PAIRS:-9}"
 out_dir="${CT_P18_FT_OUT:-${repo_root}/test-logs/plat18-fake-timer}"
 
 failures=0
@@ -94,7 +96,7 @@ rm -rf "${out_dir}"
 mkdir -p "${out_dir}"
 
 echo "=== PLAT-18: the fake-timer signal, DEBUG and RELEASE, --mm:orc ==="
-echo "    probe=${PROBE} iterations=${ITERATIONS}"
+echo "    probe=${PROBE} iterations=${ITERATIONS} pairs=${PAIRS}"
 echo "    host: cpus=$(nproc 2>/dev/null || echo '?') load=$(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null || echo '?')"
 echo
 
@@ -121,7 +123,7 @@ row() { printf '%s\n' "$1" | awk -F'\t' -v k="$2" '$1 == k {print $2}'; }
 # measurement. Hoisting the key makes `shfmt -s` a no-op on this file, which
 # is the only form of the fix that survives the hook.
 # See Verification-Harness-Traps.md §16e.
-declare -A wall_of done_of ratio_of
+declare -A wall_of done_of ratio_of slowdown_of
 
 run_build() {
 	local label="$1"
@@ -155,18 +157,66 @@ run_build() {
 		return
 	fi
 
-	local n_out w_out
-	n_out="$("${out_dir}/ft-native-${label}" "${ITERATIONS}" 2>&1)"
-	w_out="$(node "${out_dir}/ft-wasm-${label}.js" "${ITERATIONS}" 2>&1)"
-	printf '%s\n' "${n_out}" >"${out_dir}/native-${label}.out"
-	printf '%s\n' "${w_out}" >"${out_dir}/wasm-${label}.out"
+	# PAIRS, INTERLEAVED, AND THE VERDICT IS THE MEDIAN OF THE PER-PAIR RATIOS.
+	#
+	# One native run followed by one wasm run is a ratio of two samples of
+	# whatever else the host was doing at the time. Measured 2026-11-19 on the
+	# 24-CPU workstation at load 115-134, ten such pairs of this very build
+	# read release ratios from 0.37 to 8.67 — the slower side was decided by the
+	# scheduler, not by the target, and an unchanged tree failed the 3.0 limit
+	# in four rounds out of ten. Each pair runs its two sides back to back, so
+	# the load they see is close to the same; the median over the pairs then
+	# discards the pairs where it was not. Contracts 0 and 1 read the WORST run
+	# of each side, so a single short or unfinished run still reddens them;
+	# contract 2 reads each side's median simulated/wall ratio, because a load
+	# spike can stretch one run's wall time past the threshold while the chain
+	# never left the runtime (measured 2026-11-19 at load ~130: with the worst
+	# run kept, an unchanged chain failed this contract on debug/native).
+	local n_out w_out pair nw ww pr
+	local -a pair_ratios=() n_ratios=() w_ratios=()
+	local nkey="${label}-native" wkey="${label}-wasm"
+	for ((pair = 1; pair <= PAIRS; pair++)); do
+		n_out="$("${out_dir}/ft-native-${label}" "${ITERATIONS}" 2>&1)"
+		w_out="$(node "${out_dir}/ft-wasm-${label}.js" "${ITERATIONS}" 2>&1)"
+		printf '%s\n' "${n_out}" >"${out_dir}/native-${label}-${pair}.out"
+		printf '%s\n' "${w_out}" >"${out_dir}/wasm-${label}-${pair}.out"
+		nw="$(row "${n_out}" FAKETIMER-WALL-MS)"
+		ww="$(row "${w_out}" FAKETIMER-WALL-MS)"
+		min_into wall_of "${nkey}" "${nw:-0}"
+		min_into wall_of "${wkey}" "${ww:-0}"
+		n_ratios+=("$(row "${n_out}" FAKETIMER-RATIO)")
+		w_ratios+=("$(row "${w_out}" FAKETIMER-RATIO)")
+		min_into done_of "${nkey}" "$(row "${n_out}" FAKETIMER-COMPLETED | awk '{print $1}')"
+		min_into done_of "${wkey}" "$(row "${w_out}" FAKETIMER-COMPLETED | awk '{print $1}')"
+		pr="$(awk -v n="${nw:-0}" -v w="${ww:-0}" 'BEGIN{ if (n + 0 > 0) printf "%.4f", (w + 0) / (n + 0) }')"
+		[ -n "${pr}" ] && pair_ratios+=("${pr}")
+		echo "    ${label} pair ${pair}/${PAIRS}: native=${nw:-?} ms wasm=${ww:-?} ms ratio=${pr:-?}"
+	done
+	ratio_of["${nkey}"]="$(median "${n_ratios[@]}")"
+	ratio_of["${wkey}"]="$(median "${w_ratios[@]}")"
+	if [ "${#pair_ratios[@]}" -eq "${PAIRS}" ]; then
+		slowdown_of["${label}"]="$(median "${pair_ratios[@]}")"
+	fi
+}
 
-	wall_of["${label}-native"]="$(row "${n_out}" FAKETIMER-WALL-MS)"
-	wall_of["${label}-wasm"]="$(row "${w_out}" FAKETIMER-WALL-MS)"
-	ratio_of["${label}-native"]="$(row "${n_out}" FAKETIMER-RATIO)"
-	ratio_of["${label}-wasm"]="$(row "${w_out}" FAKETIMER-RATIO)"
-	done_of["${label}-native"]="$(row "${n_out}" FAKETIMER-COMPLETED | awk '{print $1}')"
-	done_of["${label}-wasm"]="$(row "${w_out}" FAKETIMER-COMPLETED | awk '{print $1}')"
+# The median of the numbers given, or nothing when none is; an empty
+# argument counts as 0, so a run that printed no figure pulls it down.
+median() {
+	[ "$#" -gt 0 ] || return 0
+	printf '%s\n' "$@" | awk '{print ($1 == "" ? 0 : $1)}' | sort -g |
+		awk '{v[NR] = $1} END{ if (NR) printf "%.2f", (NR % 2 ? v[(NR + 1) / 2] : (v[NR / 2] + v[NR / 2 + 1]) / 2) }'
+}
+
+# Keeps the SMALLER of the stored and the offered value under `key`, and
+# treats an empty offer as 0 so a run that printed nothing wins. Contracts 0
+# and 1 are lower bounds, so the worst run is the one to keep.
+min_into() {
+	local -n arr="$1"
+	local key="$2" v="${3:-0}" cur
+	cur="${arr[$key]-}"
+	if [ -z "${cur}" ] || awk -v a="${v}" -v b="${cur}" 'BEGIN{exit !(a+0 < b+0)}'; then
+		arr["${key}"]="${v}"
+	fi
 }
 
 run_build debug
@@ -229,7 +279,7 @@ for label in debug release; do
 	done
 done
 if [ "${work_done}" -eq 1 ]; then
-	ok "all four runs completed ${ITERATIONS} continuations"
+	ok "every run completed ${ITERATIONS} continuations"
 fi
 
 # --- contract 2: the MECHANISM, per run -------------------------------------
@@ -257,20 +307,16 @@ if [ "${work_done}" -eq 0 ] || [ "${resolution_ok}" -eq 0 ]; then
 		"not complete, or contract 0 says the clock cannot resolve it"
 else
 	for label in debug release; do
-		nkey="${label}-native"
-		wkey="${label}-wasm"
-		nw="${wall_of[$nkey]:-0}"
-		ww="${wall_of[$wkey]:-0}"
-		verdict="$(awk -v n="${nw}" -v w="${ww}" -v lim="${MAX_SLOWDOWN}" 'BEGIN{
-			if (n + 0 <= 0) { print "NOWALL 0"; exit }
-			r = (w + 0) / (n + 0);
-			printf "%s %.2f\n", (r <= lim + 0 ? "OK" : "SLOW"), r
+		med="${slowdown_of[$label]:-}"
+		verdict="$(awk -v r="${med}" -v lim="${MAX_SLOWDOWN}" 'BEGIN{
+			if (r == "") { print "NOWALL 0"; exit }
+			printf "%s %.2f\n", (r + 0 <= lim + 0 ? "OK" : "SLOW"), r
 		}')"
 		read -r kind ratio <<<"${verdict}"
 		case "${kind}" in
-		OK) ok "${label}: wasm is ${ratio}x native's wall time (limit ${MAX_SLOWDOWN}x)" ;;
+		OK) ok "${label}: wasm is ${ratio}x native's wall time, median of ${PAIRS} pairs (limit ${MAX_SLOWDOWN}x)" ;;
 		SLOW) fail "${label}: wasm is ${ratio}x native's wall time, above ${MAX_SLOWDOWN}x — §5's rejection criterion" ;;
-		*) fail "${label}: native wall time was ${nw} ms — too short to divide by; raise CT_FAKE_TIMER_ITERATIONS" ;;
+		*) fail "${label}: no pair produced a native wall time to divide by; raise CT_FAKE_TIMER_ITERATIONS" ;;
 		esac
 	done
 fi

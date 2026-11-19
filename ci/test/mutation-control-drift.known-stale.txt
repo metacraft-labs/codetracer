@@ -350,7 +350,6 @@ src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/fro
 src/frontend/gpui/tests/plat21-mutation-control.sha256	src/frontend/tui/tests/test_cross_renderer_panes.nim	f58e0ab79f8baa9e37275ea9ddafaca479a26a0ec8bc5f437c8eb36eea585662	c5ac4c9db971f4e3d82299d96c659827f012fc431e274d75233dd31c148e09b3
 src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/viewmodel/views/isonim_low_level_code_view.nim	efdc4537b69d3f243da39f93f2ac218aab72ec4af8e61bd94990fad61fe178b2	d6b2ab69d75ea8897bfedb675036edb416437674f61e83cf5d805adda5ae712d
 src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/viewmodel/views/isonim_state_view.nim	afe19051c4d4f5f4622cf774a9c8af2a892c5bfb162561b65a6e7d23fa08ef25	2bf5cf331cabc68c9a48c2f6a055ae5e8f473d9992dced21a86f1848e346aa34
-src/frontend/viewmodel/tests/unit/plat18-marshalling-mutation-control.sha256	src/frontend/viewmodel/views/isonim_state_view.nim	afe19051c4d4f5f4622cf774a9c8af2a892c5bfb162561b65a6e7d23fa08ef25	2bf5cf331cabc68c9a48c2f6a055ae5e8f473d9992dced21a86f1848e346aa34
 
 # The Test Results pane leaves a running test's duration empty
 # (test_results_vm.rowDuration, with one added check in the PLAT-53 unit test),
