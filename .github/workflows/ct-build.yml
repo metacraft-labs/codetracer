@@ -112,7 +112,24 @@ jobs:
           # runner's ~/.nimble hid its absence (run 43859070538, 6 cold shards:
           # "cannot open file: results").
           CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
-        run: nix develop .#devShells.x86_64-linux.default --command just build-once
+        # Bounded, with one retry: under repro 0.2.27 build-once stalled for
+        # 157 minutes at `checked=35/42 running=8` until the job limit
+        # cancelled it (run 44577379303; 32 minutes under 0.2.25). The first
+        # attempt runs with the daemon for 50 minutes; on a stall the script
+        # dumps the daemon's sessions and log, the process tree and any
+        # zombies into build-once-diagnostics, then retries with
+        # REPRO_DAEMON=off for 90 (ci/build/bounded-build-once.sh).
+        # 18 minutes of provisioning + 50 + 90 stays inside the 180.
+        run: nix develop .#devShells.x86_64-linux.default --command bash ci/build/bounded-build-once.sh "${RUNNER_TEMP}/build-once-diagnostics" 50 90
+
+      - name: Upload the build-once stall diagnostics
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-once-diagnostics
+          path: ${{ runner.temp }}/build-once-diagnostics
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Build isonim-gpui's windowed shim and the virtual pointer
         id: shim
