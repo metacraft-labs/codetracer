@@ -1301,9 +1301,33 @@ proc readTerminalOutput(ctx: GuiContext; f: Frame; t: var Tree; b: PaneBox) =
   t.add(t.root, node("terminal-output", fl(b.left), fl(b.top), fl(b.right - b.left),
                      fl(b.bottom - b.top), %*{"text": lines, "count": lines.len}))
 
+proc zeroForO(s: string): string =
+  ## A zero the engine read as a letter O: the UI face's 0 is as round as
+  ## its O, and a pane's row has no column grid to tell them apart (the
+  ## Video Player's `Frame 0` read `Frame O`). Digits with an O among them
+  ## (`1O`) are a number; so is a lone O that ends the row or comes before a
+  ## number (`Frame O`, `O / 12`). A lone O between words is a control's
+  ## round icon (the Variables row's `Int O B`), and a word with any other
+  ## letter (`OK`, `On`) keeps its O.
+  var words = s.split(' ')
+  for i, w in words.mpairs:
+    var core = w
+    var tail = ""
+    while core.len > 0 and core[^1] in {',', '.', ':', ';', ')'}:
+      tail = core[^1] & tail
+      core.setLen(core.len - 1)
+    if core.len == 0: continue
+    let digits = core.countIt(it in Digits)
+    let numberNext = i == words.high or words[i + 1].anyIt(it in Digits)
+    if core.allIt(it in Digits or it in {'O', 'o'}) and
+       ((core == "O" and numberNext) or (digits > 0 and digits < core.len)):
+      w = core.multiReplace(("O", "0"), ("o", "0")) & tail
+  words.join(" ")
+
 proc readGenericPane(ctx: GuiContext; f: Frame; t: var Tree; b: PaneBox; title: string) =
   let ground = f.bodyGround(b)
-  let rows = ctx.bodyRows(f, b)
+  var rows = ctx.bodyRows(f, b)
+  for r in rows.mitems: r.text = zeroForO(r.text)
   var lines, tabs: seq[string]
   for r in rows: lines.add r.text
   for tab in b.tabs:
