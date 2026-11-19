@@ -1,0 +1,31 @@
+scenario: 1
+name: nim-views/next-leaves-a-breakpointed-nim-line-mcr
+pack: codetracer
+summary: >-
+  On an MCR recording of the Nim sudoku solver (what `ct record main.nim`
+  makes by default), stopped at line 74 by a breakpoint, Next steps over its
+  printBoard call to line 75. The breakpoint on a Nim line is set on each of
+  its generated C lines, and Next used to stop at the next of them, still
+  line 74 (codetracer-pm issue 2026-11-19 "Next on an MCR recording of a Nim
+  program stops inside the line it started on"). Reverse Next is not here:
+  MCR's stage0 replay answers reverse execution with E0C (codetracer-pm
+  milestones/MCR-Debug-Server.status.org, Linux row); on rr it is
+  nim-views/reverse-next-returns-to-the-nim-line.yaml.
+
+stage:
+  - use: record-program
+    with: { program: nim_sudoku_solver/main.nim, backend: mcr }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 300s }
+  - wait: { until: { at: 'editor[file="main.nim"]/line[number="74"]', present: true }, timeout: 120s }
+  - click: { at: 'editor[file="main.nim"]/line[number="74"]', anchor: glyph }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="main.nim"]', current-line: 74 }, timeout: 120s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="main.nim"]', current-line: 75 }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
