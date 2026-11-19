@@ -45,6 +45,36 @@ proc parseJsonFromJs(o: JsObject): JsonNode =
   parseJson($stringifyJs(o))
 
 proc jsonParseJs(s: cstring): JsObject {.importjs: "JSON.parse(#)".}
+proc jsSame(a, b: JsObject): bool {.importjs: "(# === #)".}
+
+var
+  lastEventBody: JsObject
+  lastEventNode: JsonNode
+  eventBodyConversions* = 0
+    ## How many event bodies were converted to JsonNode (tests read it).
+
+proc eventBodyNode(raw: JsObject): JsonNode =
+  ## The JsonNode of an event body, converted once for all subscribers.
+  ##
+  ## Every `onEvent` subscriber is its own DapApi handler, and each handler
+  ## converted the body itself: four conversions of every event, although
+  ## each subscriber looks at the kind first and most ignore it. A Pascal
+  ## loop's 2.7 MB flow update took about 3 s per conversion, so the four
+  ## held the renderer busy for 12 s, over 30 s on a loaded host -- long
+  ## enough for a test driver's page queries to time out ("backend 'node'
+  ## did not answer within 30000 ms", 2026-11-19). The handlers of one event
+  ## are called in turn with the same body, so the last conversion is kept
+  ## and reused while the body is the same object.
+  ##
+  ## The subscribers share the node. The one that edits it (the flow
+  ## ViewModel restores elided step values in place, `common/flow_wire`) does
+  ## so idempotently, for the only kind it reads.
+  if not lastEventBody.isNil and jsSame(raw, lastEventBody):
+    return lastEventNode
+  result = parseJsonFromJs(raw)
+  inc eventBodyConversions
+  lastEventBody = raw
+  lastEventNode = result
 
 proc toJsObject(j: JsonNode): JsObject =
   ## Convert a stdlib JsonNode to a raw JsObject for DapApi.
@@ -100,7 +130,7 @@ proc newRealBackendService*(
     onBackendEvent proc(kind: string, raw: JsObject) =
       var j = %*{"kind": kind}
       if not raw.isNil:
-        j["data"] = parseJsonFromJs(raw)
+        j["data"] = eventBodyNode(raw)
       handler(j)
 
   let disconnectProc = proc() =
