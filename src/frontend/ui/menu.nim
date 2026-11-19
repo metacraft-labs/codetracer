@@ -453,7 +453,7 @@ when defined(js):
           widths.shortcut))
 
   proc nestedStyleString(self: MenuComponent; value: int; depth: int;
-                         separators: int; width: int): string =
+                         width: int): string =
     # A level not in the DOM yet (a folder opened from the keyboard in the
     # render that also draws its parent) measures 0; the next render
     # places it.
@@ -473,7 +473,11 @@ when defined(js):
       let h = cast[int](jq(cstring"#menu-elements .ct-menu-item").toJs.offsetHeight)
       if h > 0: h else: 28
 
-    fmt"top: {value * itemH + separators * itemH - 2 * itemH}px; left: calc({left}px + {2 * depth}px)"
+    # Each depth-N submenu starts (depth) item-heights below #menu-main's top,
+    # placing its first row one item above the folder that opened it.
+    # `.menu-sub-group-separator` elements are `display: none` and contribute
+    # zero height to the layout, so separator counts must not offset `top`.
+    fmt"top: {(value - depth) * itemH}px; left: calc({left}px + {2 * depth}px)"
 
   proc buildMenuShellModel(self: MenuComponent): MenuShellModel =
     result.rootNodes = @[]
@@ -541,7 +545,7 @@ when defined(js):
       result.nestedMenus.add(MenuNestedRecord(
         id: fmt"menu-nested-elements-{depth + 1}",
         className: fmt"menu-nested-elements menu-top-{sum} {separators}",
-        style: self.nestedStyleString(sum, depth + 1, separators, submenuWidth),
+        style: self.nestedStyleString(sum, depth + 1, submenuWidth),
         nodes: self.menuRecordsForNode(current, self.vm.path[0 .. depth])))
 
   proc handleNodeMouseOver(self: MenuComponent; path: seq[int]) =
