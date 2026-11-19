@@ -86,8 +86,17 @@ export GIT_CONFIG_KEY_1=tag.gpgsign GIT_CONFIG_VALUE_1=false
 lint_step "tools this stage invokes are present" \
 	bash ci/lib/require-tools.sh shellcheck bash just git python3 python3:yaml node awk diff sort comm timeout openssl sha256sum curl pre-commit prek
 
+# In parallel, a few files per shellcheck: with `external-sources=true` every
+# script re-analyses what it sources, so single files take 10-30 s, and one
+# serial invocation over all ~350 was the slowest step of the lane (349 s of
+# a 26-minute run, 44444132651; 194 s serial and 62 s across 24 jobs on a
+# workstation). xargs exits 123 when any invocation fails, so a finding still
+# fails the step.
+shellcheck_in_parallel() {
+	printf '%s\0' "$@" | xargs -0 -P "$(nproc)" -n 4 shellcheck
+}
 lint_step "shellcheck: CI scripts" \
-	shellcheck ci/**/*.sh
+	shellcheck_in_parallel ci/**/*.sh
 
 # THE ONE DEFECT SHELLCHECK DOES NOT HAVE A CODE FOR, and this repository has
 # now paid for it in both directions. `producer | grep -q PAT` under `pipefail`
