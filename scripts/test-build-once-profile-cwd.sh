@@ -2,7 +2,7 @@
 # build-once.sh sources the cached dev-shell profile with THIS repository as
 # the current directory, whatever directory it is invoked from.
 #
-# When tup or nim is not on PATH, build-once.sh sources
+# When node or nim is not on PATH, build-once.sh sources
 # `.direnv/flake-profile-*.rc`, nix-direnv's cached evaluation of the dev
 # shell. That file carries the shell's whole shellHook, which prepares "the
 # current checkout" (`node_modules` link, `.pre-commit-config.yaml`, git hooks)
@@ -12,7 +12,7 @@
 # workspace root and installed this repository's hooks into a sibling.
 #
 # The real build-once.sh runs from a scratch git repository with a PATH that
-# has no tup/nim, against a copy of this repository's layout whose profile
+# has no node/nim, against a copy of this repository's layout whose profile
 # records the directory it was sourced in and then ends the run. Asserted: the
 # profile was sourced in this repository's top level, and the scratch
 # repository is untouched.
@@ -37,7 +37,7 @@ exit 0
 RC
 
 # A PATH with the basic tools build-once.sh needs before the profile, and
-# without tup or nim, so the profile branch is taken.
+# without node or nim, so the profile branch is taken.
 for tool in bash dirname cat uname rm; do
 	ln -s "$(command -v "$tool")" "$WORK/bin/$tool"
 done

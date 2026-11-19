@@ -1,0 +1,45 @@
+scenario: 1
+name: nim-views/generated-c-reverse-next-returns
+pack: codetracer
+summary: >-
+  On an rr recording of the Nim sudoku solver, with the generated C open in
+  the Low Level Code pane (View › View Generated C Source), Next moves the Nim
+  stop and the marked C row to line 72 and Reverse Next brings both back to
+  line 60 (`nimln_(60)`): the backward step of the C view, which
+  stepping-through-views.spec.ts's "step backward in C view" asks for
+  (codetracer-pm issue 2026-11-15 "Reverse Next never completes on an rr
+  recording of a Nim program").
+
+stage:
+  - use: record-program
+    with: { program: nim_sudoku_solver/main.nim, backend: rr }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 300s }
+  - wait: { until: { at: window, front-tabs: { contains: "main.nim" } }, timeout: 120s }
+  - wait: { until: { at: status-line, location: { matches: "main.nim:60#" } }, timeout: 60s }
+  - click: menu-bar
+  - wait: { until: { at: 'menu-bar/menu[label="View"]', present: true }, timeout: 10s }
+  - hover: { at: 'menu-bar/menu[label="View"]', for: 300ms }
+  - wait: { until: { at: 'menu-bar/menu-item[label="View Generated C Source"]', present: true }, timeout: 10s }
+  # Across into View's entries along its own row first, as a user does: a
+  # diagonal path over Build and Reset would open their folders instead.
+  - hover: { at: 'menu-bar/menu-item[label="Filesystem"]', for: 200ms }
+  - wait: settled
+  - click: 'menu-bar/menu-item[label="View Generated C Source"]'
+    # the pane loads the listing after the click; the next wait covers it
+    settle: false
+  - wait: { until: { at: low-level-code, count: { gt: 10 } }, timeout: 120s }
+  - wait: { until: { at: low-level-code, assert: 'active-row-shows("nimln_\\(60\\)")' }, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "main.nim:72#" } }, timeout: 60s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: low-level-code, assert: 'active-row-shows("nimln_\\(72\\)")' }, timeout: 60s }
+  - expect: { at: window, front-tabs: { contains: "main.nim" } }
+  - click: 'toolbar/toolbar-button[label="reverse-next-image"]'
+    settle: false
+  - wait: { until: { at: status-line, location: { matches: "main.nim:60#" } }, timeout: 120s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - wait: { until: { at: low-level-code, assert: 'active-row-shows("nimln_\\(60\\)")' }, timeout: 60s }

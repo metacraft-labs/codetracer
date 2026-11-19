@@ -17173,6 +17173,6498 @@
         }
       }
     },
+    "agent-harbor-session-activity-against-cards-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 715,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 715,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 715,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 715,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 280,
+          "w": 715,
+          "h": 20,
+          "index": 10,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 715,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-against-cards-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 715,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 715,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 715,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 715,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 280,
+          "w": 715,
+          "h": 20,
+          "index": 10,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 715,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-against-cards-panel-dark": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 375,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 375,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 375,
+          "h": 568
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 375,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 280,
+          "w": 375,
+          "h": 20,
+          "index": 10,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 375,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-against-cards-panel-light": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 375,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 375,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 375,
+          "h": 568
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 375,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 280,
+          "w": 375,
+          "h": 20,
+          "index": 10,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 375,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-against-cards-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 175,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 175,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 175,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 175,
+          "h": 60,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 340,
+          "w": 175,
+          "h": 60,
+          "index": 10,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 152,
+          "w": 175,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-against-cards-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 175,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 175,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 175,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 175,
+          "h": 60,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 340,
+          "w": 175,
+          "h": 60,
+          "index": 10,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 152,
+          "w": 175,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-command-trace-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 884,
+          "w": 1432,
+          "h": 16,
+          "index": 49,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 92,
+          "w": 1432,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-expanded": {
+          "x": 4,
+          "y": 92,
+          "w": 1432,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-command-trace-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 884,
+          "w": 1432,
+          "h": 16,
+          "index": 49,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 92,
+          "w": 1432,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-expanded": {
+          "x": 4,
+          "y": 92,
+          "w": 1432,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-command-trace-panel-dark": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 568
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 620,
+          "w": 752,
+          "h": 16,
+          "index": 33,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 92,
+          "w": 752,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-expanded": {
+          "x": 4,
+          "y": 92,
+          "w": 752,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-command-trace-panel-light": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 568
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 620,
+          "w": 752,
+          "h": 16,
+          "index": 33,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 92,
+          "w": 752,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-expanded": {
+          "x": 4,
+          "y": 92,
+          "w": 752,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-command-trace-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 876,
+          "w": 352,
+          "h": 16,
+          "index": 37,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 92,
+          "w": 352,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-expanded": {
+          "x": 4,
+          "y": 92,
+          "w": 352,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-command-trace-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 876,
+          "w": 352,
+          "h": 16,
+          "index": 37,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 92,
+          "w": 352,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-expanded": {
+          "x": 4,
+          "y": 92,
+          "w": 352,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-details-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 528,
+          "w": 1432,
+          "h": 20,
+          "index": 22,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 1432,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-expanded": {
+          "x": 4,
+          "y": 152,
+          "w": 1432,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-details-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 528,
+          "w": 1432,
+          "h": 20,
+          "index": 22,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 1432,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-expanded": {
+          "x": 4,
+          "y": 152,
+          "w": 1432,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-details-panel-dark": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 568
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 528,
+          "w": 752,
+          "h": 20,
+          "index": 22,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 752,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-expanded": {
+          "x": 4,
+          "y": 152,
+          "w": 752,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-details-panel-light": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 568
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 528,
+          "w": 752,
+          "h": 20,
+          "index": 22,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 752,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-expanded": {
+          "x": 4,
+          "y": 152,
+          "w": 752,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-details-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 576,
+          "w": 352,
+          "h": 40,
+          "index": 22,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 352,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-expanded": {
+          "x": 4,
+          "y": 152,
+          "w": 352,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-details-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 576,
+          "w": 352,
+          "h": 40,
+          "index": 22,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 352,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-expanded": {
+          "x": 4,
+          "y": 152,
+          "w": 352,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-empty-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 828
+        }
+      }
+    },
+    "agent-harbor-session-activity-empty-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 828
+        }
+      }
+    },
+    "agent-harbor-session-activity-empty-panel-dark": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 568
+        }
+      }
+    },
+    "agent-harbor-session-activity-empty-panel-light": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 568
+        }
+      }
+    },
+    "agent-harbor-session-activity-empty-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 828
+        }
+      }
+    },
+    "agent-harbor-session-activity-empty-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 828
+        }
+      }
+    },
+    "agent-harbor-session-activity-error-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 828
+        },
+        "error-reason": {
+          "x": 371.25,
+          "y": 476,
+          "w": 697.484375,
+          "h": 16
+        }
+      }
+    },
+    "agent-harbor-session-activity-error-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 828
+        },
+        "error-reason": {
+          "x": 371.25,
+          "y": 476,
+          "w": 697.484375,
+          "h": 16
+        }
+      }
+    },
+    "agent-harbor-session-activity-error-panel-dark": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 568
+        },
+        "error-reason": {
+          "x": 44,
+          "y": 338,
+          "w": 672,
+          "h": 32
+        }
+      }
+    },
+    "agent-harbor-session-activity-error-panel-light": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 568
+        },
+        "error-reason": {
+          "x": 44,
+          "y": 338,
+          "w": 672,
+          "h": 32
+        }
+      }
+    },
+    "agent-harbor-session-activity-error-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 828
+        },
+        "error-reason": {
+          "x": 44,
+          "y": 452,
+          "w": 272,
+          "h": 64
+        }
+      }
+    },
+    "agent-harbor-session-activity-error-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 828
+        },
+        "error-reason": {
+          "x": 44,
+          "y": 452,
+          "w": 272,
+          "h": 64
+        }
+      }
+    },
+    "agent-harbor-session-activity-failed-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 132,
+          "w": 1432,
+          "h": 20,
+          "index": 3,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 92,
+          "w": 1432,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-failed-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 132,
+          "w": 1432,
+          "h": 20,
+          "index": 3,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 92,
+          "w": 1432,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-failed-panel-dark": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 568
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 132,
+          "w": 752,
+          "h": 20,
+          "index": 3,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 92,
+          "w": 752,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-failed-panel-light": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 568
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 132,
+          "w": 752,
+          "h": 20,
+          "index": 3,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 92,
+          "w": 752,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-failed-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 152,
+          "w": 352,
+          "h": 40,
+          "index": 3,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 92,
+          "w": 352,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-failed-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 152,
+          "w": 352,
+          "h": 40,
+          "index": 3,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 92,
+          "w": 352,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-filter-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 96,
+          "w": 1432,
+          "h": 804
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 96,
+          "w": 1432,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 116,
+          "w": 1432,
+          "h": 20,
+          "index": 1,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 96,
+          "w": 1432,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-filter": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-session-activity-filter-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 96,
+          "w": 1432,
+          "h": 804
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 96,
+          "w": 1432,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 116,
+          "w": 1432,
+          "h": 20,
+          "index": 1,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 96,
+          "w": 1432,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-filter": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-session-activity-filter-panel-dark": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 96,
+          "w": 752,
+          "h": 544
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 96,
+          "w": 752,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 116,
+          "w": 752,
+          "h": 20,
+          "index": 1,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 96,
+          "w": 752,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-filter": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-session-activity-filter-panel-light": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 96,
+          "w": 752,
+          "h": 544
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 96,
+          "w": 752,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 116,
+          "w": 752,
+          "h": 20,
+          "index": 1,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 96,
+          "w": 752,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-filter": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-session-activity-filter-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 96,
+          "w": 352,
+          "h": 804
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 96,
+          "w": 352,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 116,
+          "w": 352,
+          "h": 20,
+          "index": 1,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 96,
+          "w": 352,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-filter": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-session-activity-filter-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 96,
+          "w": 352,
+          "h": 804
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 96,
+          "w": 352,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 116,
+          "w": 352,
+          "h": 20,
+          "index": 1,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 96,
+          "w": 352,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-filter": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-session-activity-focused-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 280,
+          "w": 1432,
+          "h": 20,
+          "index": 10,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 1432,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-focus": {
+          "x": 4,
+          "y": 132,
+          "w": 1432,
+          "h": 20,
+          "fill": "#282828"
+        }
+      }
+    },
+    "agent-harbor-session-activity-focused-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 280,
+          "w": 1432,
+          "h": 20,
+          "index": 10,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 1432,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-focus": {
+          "x": 4,
+          "y": 132,
+          "w": 1432,
+          "h": 20,
+          "fill": "#e6e2db"
+        }
+      }
+    },
+    "agent-harbor-session-activity-focused-panel-dark": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 568
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 280,
+          "w": 752,
+          "h": 20,
+          "index": 10,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 752,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-focus": {
+          "x": 4,
+          "y": 132,
+          "w": 752,
+          "h": 20,
+          "fill": "#282828"
+        }
+      }
+    },
+    "agent-harbor-session-activity-focused-panel-light": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 568
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 280,
+          "w": 752,
+          "h": 20,
+          "index": 10,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 752,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-focus": {
+          "x": 4,
+          "y": 132,
+          "w": 752,
+          "h": 20,
+          "fill": "#e6e2db"
+        }
+      }
+    },
+    "agent-harbor-session-activity-focused-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 280,
+          "w": 352,
+          "h": 40,
+          "index": 10,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 352,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-focus": {
+          "x": 4,
+          "y": 132,
+          "w": 352,
+          "h": 20,
+          "fill": "#282828"
+        }
+      }
+    },
+    "agent-harbor-session-activity-focused-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 280,
+          "w": 352,
+          "h": 40,
+          "index": 10,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 352,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-focus": {
+          "x": 4,
+          "y": 132,
+          "w": 352,
+          "h": 20,
+          "fill": "#e6e2db"
+        }
+      }
+    },
+    "agent-harbor-session-activity-group-open-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 340,
+          "w": 1432,
+          "h": 20,
+          "index": 13,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 1432,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-expanded": {
+          "x": 4,
+          "y": 152,
+          "w": 1432,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-group-open-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 340,
+          "w": 1432,
+          "h": 20,
+          "index": 13,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 1432,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-expanded": {
+          "x": 4,
+          "y": 152,
+          "w": 1432,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-group-open-panel-dark": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 568
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 340,
+          "w": 752,
+          "h": 20,
+          "index": 13,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 752,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-expanded": {
+          "x": 4,
+          "y": 152,
+          "w": 752,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-group-open-panel-light": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 568
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 340,
+          "w": 752,
+          "h": 20,
+          "index": 13,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 752,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-expanded": {
+          "x": 4,
+          "y": 152,
+          "w": 752,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-group-open-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 340,
+          "w": 352,
+          "h": 40,
+          "index": 13,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 352,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-expanded": {
+          "x": 4,
+          "y": 152,
+          "w": 352,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-group-open-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 340,
+          "w": 352,
+          "h": 40,
+          "index": 13,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 352,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-expanded": {
+          "x": 4,
+          "y": 152,
+          "w": 352,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-kinds-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 432,
+          "w": 1432,
+          "h": 20,
+          "index": 18,
+          "fill": "#282828"
+        }
+      }
+    },
+    "agent-harbor-session-activity-kinds-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 432,
+          "w": 1432,
+          "h": 20,
+          "index": 18,
+          "fill": "#e6e2db"
+        }
+      }
+    },
+    "agent-harbor-session-activity-kinds-panel-dark": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 568
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 432,
+          "w": 752,
+          "h": 20,
+          "index": 18,
+          "fill": "#282828"
+        }
+      }
+    },
+    "agent-harbor-session-activity-kinds-panel-light": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 568
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 432,
+          "w": 752,
+          "h": 20,
+          "index": 18,
+          "fill": "#e6e2db"
+        }
+      }
+    },
+    "agent-harbor-session-activity-kinds-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 432,
+          "w": 352,
+          "h": 20,
+          "index": 18,
+          "fill": "#282828"
+        }
+      }
+    },
+    "agent-harbor-session-activity-kinds-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 432,
+          "w": 352,
+          "h": 20,
+          "index": 18,
+          "fill": "#e6e2db"
+        }
+      }
+    },
+    "agent-harbor-session-activity-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 280,
+          "w": 1432,
+          "h": 20,
+          "index": 10,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 1432,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 280,
+          "w": 1432,
+          "h": 20,
+          "index": 10,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 1432,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-loading-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 828
+        }
+      }
+    },
+    "agent-harbor-session-activity-loading-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 828
+        }
+      }
+    },
+    "agent-harbor-session-activity-loading-panel-dark": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 568
+        }
+      }
+    },
+    "agent-harbor-session-activity-loading-panel-light": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 568
+        }
+      }
+    },
+    "agent-harbor-session-activity-loading-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 828
+        }
+      }
+    },
+    "agent-harbor-session-activity-loading-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 828
+        }
+      }
+    },
+    "agent-harbor-session-activity-long-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 876,
+          "w": 1432,
+          "h": 20,
+          "index": 39,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 1432,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-long-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 876,
+          "w": 1432,
+          "h": 20,
+          "index": 39,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 1432,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-long-names-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 152,
+          "w": 1432,
+          "h": 20,
+          "index": 4,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 92,
+          "w": 1432,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-long-names-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 152,
+          "w": 1432,
+          "h": 20,
+          "index": 4,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 92,
+          "w": 1432,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-long-names-panel-dark": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 568
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 40,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 172,
+          "w": 752,
+          "h": 40,
+          "index": 4,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 752,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-long-names-panel-light": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 568
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 40,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 172,
+          "w": 752,
+          "h": 40,
+          "index": 4,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 752,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-long-names-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 60,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 192,
+          "w": 352,
+          "h": 80,
+          "index": 4,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 132,
+          "w": 352,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-long-names-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 60,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 192,
+          "w": 352,
+          "h": 80,
+          "index": 4,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 132,
+          "w": 352,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-long-panel-dark": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 568
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 608,
+          "w": 752,
+          "h": 20,
+          "index": 26,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 752,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-long-panel-light": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 568
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 608,
+          "w": 752,
+          "h": 20,
+          "index": 26,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 752,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-long-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 40,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 876,
+          "w": 352,
+          "h": 20,
+          "index": 35,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 132,
+          "w": 352,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-long-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 40,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 876,
+          "w": 352,
+          "h": 20,
+          "index": 35,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 132,
+          "w": 352,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-needs-input-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 112,
+          "w": 1432,
+          "h": 20,
+          "index": 2,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 92,
+          "w": 1432,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-needs-input-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 112,
+          "w": 1432,
+          "h": 20,
+          "index": 2,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 92,
+          "w": 1432,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-needs-input-panel-dark": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 568
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 112,
+          "w": 752,
+          "h": 20,
+          "index": 2,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 92,
+          "w": 752,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-needs-input-panel-light": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 568
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 112,
+          "w": 752,
+          "h": 20,
+          "index": 2,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 92,
+          "w": 752,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-needs-input-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 112,
+          "w": 352,
+          "h": 40,
+          "index": 2,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 92,
+          "w": 352,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-needs-input-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 112,
+          "w": 352,
+          "h": 40,
+          "index": 2,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 92,
+          "w": 352,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-panel-dark": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 568
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 280,
+          "w": 752,
+          "h": 20,
+          "index": 10,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 752,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-panel-light": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 568
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 280,
+          "w": 752,
+          "h": 20,
+          "index": 10,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 752,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-playback-expanded-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 800
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 61.09375,
+          "h": 18,
+          "cut": false
+        }
+      }
+    },
+    "agent-harbor-session-activity-playback-expanded-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 800
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 61.09375,
+          "h": 18,
+          "cut": false
+        }
+      }
+    },
+    "agent-harbor-session-activity-playback-expanded-panel-dark": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 572
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 540
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 617.5,
+          "w": 419.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 617.5,
+          "w": 61.09375,
+          "h": 18,
+          "cut": false
+        }
+      }
+    },
+    "agent-harbor-session-activity-playback-expanded-panel-light": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 572
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 540
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 617.5,
+          "w": 419.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 617.5,
+          "w": 61.09375,
+          "h": 18,
+          "cut": false
+        }
+      }
+    },
+    "agent-harbor-session-activity-playback-expanded-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 800
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 61.09375,
+          "h": 18,
+          "cut": false
+        }
+      }
+    },
+    "agent-harbor-session-activity-playback-expanded-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 800
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 61.09375,
+          "h": 18,
+          "cut": false
+        }
+      }
+    },
+    "agent-harbor-session-activity-playback-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 800
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 61.09375,
+          "h": 18,
+          "cut": false
+        }
+      }
+    },
+    "agent-harbor-session-activity-playback-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 800
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 61.09375,
+          "h": 18,
+          "cut": false
+        }
+      }
+    },
+    "agent-harbor-session-activity-playback-panel-dark": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 572
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 540
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 617.5,
+          "w": 419.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 617.5,
+          "w": 61.09375,
+          "h": 18,
+          "cut": false
+        }
+      }
+    },
+    "agent-harbor-session-activity-playback-panel-light": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 572
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 540
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 617.5,
+          "w": 419.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 617.5,
+          "w": 61.09375,
+          "h": 18,
+          "cut": false
+        }
+      }
+    },
+    "agent-harbor-session-activity-playback-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 800
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 61.09375,
+          "h": 18,
+          "cut": false
+        }
+      }
+    },
+    "agent-harbor-session-activity-playback-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 800
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 61.09375,
+          "h": 18,
+          "cut": false
+        }
+      }
+    },
+    "agent-harbor-session-activity-reading-back-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 804
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 280,
+          "w": 1432,
+          "h": 20,
+          "index": 10,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 1432,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-new": {
+          "x": 644.796875,
+          "y": 876,
+          "w": 150.40625,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-session-activity-reading-back-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 804
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 280,
+          "w": 1432,
+          "h": 20,
+          "index": 10,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 1432,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-new": {
+          "x": 644.796875,
+          "y": 876,
+          "w": 150.40625,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-session-activity-reading-back-panel-dark": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 544
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 280,
+          "w": 752,
+          "h": 20,
+          "index": 10,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 752,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-new": {
+          "x": 304.796875,
+          "y": 616,
+          "w": 150.40625,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-session-activity-reading-back-panel-light": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 544
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 280,
+          "w": 752,
+          "h": 20,
+          "index": 10,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 752,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-new": {
+          "x": 304.796875,
+          "y": 616,
+          "w": 150.40625,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-session-activity-reading-back-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 804
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 280,
+          "w": 352,
+          "h": 40,
+          "index": 10,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 352,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-new": {
+          "x": 104.796875,
+          "y": 876,
+          "w": 150.40625,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-session-activity-reading-back-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 804
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 280,
+          "w": 352,
+          "h": 40,
+          "index": 10,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 352,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-new": {
+          "x": 104.796875,
+          "y": 876,
+          "w": 150.40625,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-session-activity-running-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 152,
+          "w": 1432,
+          "h": 20,
+          "index": 4,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 92,
+          "w": 1432,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-expanded": {
+          "x": 4,
+          "y": 92,
+          "w": 1432,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-running-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 152,
+          "w": 1432,
+          "h": 20,
+          "index": 4,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 92,
+          "w": 1432,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-expanded": {
+          "x": 4,
+          "y": 92,
+          "w": 1432,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-running-panel-dark": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 568
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 152,
+          "w": 752,
+          "h": 20,
+          "index": 4,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 92,
+          "w": 752,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-expanded": {
+          "x": 4,
+          "y": 92,
+          "w": 752,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-running-panel-light": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 568
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 152,
+          "w": 752,
+          "h": 20,
+          "index": 4,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 92,
+          "w": 752,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-expanded": {
+          "x": 4,
+          "y": 92,
+          "w": 752,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-running-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 152,
+          "w": 352,
+          "h": 20,
+          "index": 4,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 92,
+          "w": 352,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-expanded": {
+          "x": 4,
+          "y": 92,
+          "w": 352,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-running-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 152,
+          "w": 352,
+          "h": 20,
+          "index": 4,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 92,
+          "w": 352,
+          "h": 20,
+          "index": 0
+        },
+        "timeline-expanded": {
+          "x": 4,
+          "y": 92,
+          "w": 352,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-short-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 132,
+          "w": 1432,
+          "h": 20,
+          "index": 3,
+          "fill": "#282828"
+        }
+      }
+    },
+    "agent-harbor-session-activity-short-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 132,
+          "w": 1432,
+          "h": 20,
+          "index": 3,
+          "fill": "#e6e2db"
+        }
+      }
+    },
+    "agent-harbor-session-activity-short-panel-dark": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 568
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 132,
+          "w": 752,
+          "h": 20,
+          "index": 3,
+          "fill": "#282828"
+        }
+      }
+    },
+    "agent-harbor-session-activity-short-panel-light": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 568
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 132,
+          "w": 752,
+          "h": 20,
+          "index": 3,
+          "fill": "#e6e2db"
+        }
+      }
+    },
+    "agent-harbor-session-activity-short-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 40,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 152,
+          "w": 352,
+          "h": 40,
+          "index": 3,
+          "fill": "#282828"
+        }
+      }
+    },
+    "agent-harbor-session-activity-short-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 40,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 152,
+          "w": 352,
+          "h": 40,
+          "index": 3,
+          "fill": "#e6e2db"
+        }
+      }
+    },
+    "agent-harbor-session-activity-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 20,
+          "index": 0,
+          "fill": "#282828"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 280,
+          "w": 352,
+          "h": 40,
+          "index": 10,
+          "fill": "#282828"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 352,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "timeline": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 828
+        },
+        "timeline-line-first": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 20,
+          "index": 0,
+          "fill": "#e6e2db"
+        },
+        "timeline-line-last": {
+          "x": 4,
+          "y": 280,
+          "w": 352,
+          "h": 40,
+          "index": 10,
+          "fill": "#e6e2db"
+        },
+        "timeline-group-first": {
+          "x": 4,
+          "y": 112,
+          "w": 352,
+          "h": 20,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-session-activity-unresolvable-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 828
+        }
+      }
+    },
+    "agent-harbor-session-activity-unresolvable-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 1432,
+          "h": 828
+        }
+      }
+    },
+    "agent-harbor-session-activity-unresolvable-panel-dark": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 568
+        }
+      }
+    },
+    "agent-harbor-session-activity-unresolvable-panel-light": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 600
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 752,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 752,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 752,
+          "h": 568
+        }
+      }
+    },
+    "agent-harbor-session-activity-unresolvable-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 828
+        }
+      }
+    },
+    "agent-harbor-session-activity-unresolvable-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 32
+        },
+        "notice": {
+          "x": 4,
+          "y": 72,
+          "w": 352,
+          "h": 828
+        }
+      }
+    },
     "agent-harbor-session-list-docked-laptop-dark": {
       "viewport": {
         "width": 1440,

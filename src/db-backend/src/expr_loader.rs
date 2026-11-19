@@ -47,7 +47,16 @@ pub struct NodeNames {
 ///   `2026-11-04-python-first-stop-load-flow-returns-14-mb-twice-and-stalls-the-vscode-extension-host`).
 ///   Inside a function the fallback showed every local on a line such as
 ///   `pass` or `print("…")`, which mentions none of them.
-const LINE_NAMES_ARE_AUTHORITATIVE: &[Lang] = &[Lang::Solidity, Lang::PythonDb];
+/// - Rust: the fallback reads the frame's locals from the replay worker with
+///   no depth limit, so each name-less line of a loop (`print!(". ")`,
+///   `println!()`, a closing `}`) carried a full copy of every local. In the
+///   flow of `print_board` in the Rust sudoku solver (a 9×9 `board`), 61 such
+///   steps carried 2.1 MB of the 3.4 MB `ct/updated-flow`, and their `LoadLocals`
+///   queries were the slowest the walk made (codetracer-pm issue
+///   `2026-11-15-mcr-rust-sudoku-load-flow-takes-19-to-48-seconds`). The Rust
+///   extractor names the variables a macro's arguments use (`print!("{} ", val)`
+///   names `val`), so an empty list means the line uses none.
+const LINE_NAMES_ARE_AUTHORITATIVE: &[Lang] = &[Lang::Solidity, Lang::PythonDb, Lang::Rust];
 
 #[cfg(feature = "syntax-highlight")]
 static NODE_NAMES: Lazy<HashMap<Lang, NodeNames>> = Lazy::new(|| {
@@ -4374,6 +4383,60 @@ mod flow_fixture_extraction_tests {
         assert_eq!(docstring, Some(vec![]), "a docstring names no variable");
         assert_eq!(call, Some(vec![]), "`print(\"done\")` names no variable");
         assert_eq!(assignment, Some(vec!["total".to_string()]));
+    }
+
+    /// A Rust line that names no variable shows none, rather than the
+    /// recorded frame's locals at full depth (codetracer-pm issue
+    /// `2026-11-15-mcr-rust-sudoku-load-flow-takes-19-to-48-seconds`). The
+    /// function is `print_board` from the Rust sudoku solver the VS Code
+    /// extension's deep test records: its name-less lines are the ones the
+    /// fallback filled with the whole `board`.
+    #[test]
+    fn a_rust_line_without_names_shows_none_rather_than_the_recorded_frame() {
+        let path = std::env::temp_dir().join(format!("ct_rs_nameless_{}.rs", std::process::id()));
+        fs::write(
+            &path,
+            "fn print_board(board: &[[u8; 9]; 9]) {\n\
+             \x20   for row in 0..9 {\n\
+             \x20       for col in 0..9 {\n\
+             \x20           let val = board[row][col];\n\
+             \x20           if val == 0 {\n\
+             \x20               print!(\". \");\n\
+             \x20           } else {\n\
+             \x20               print!(\"{} \", val);\n\
+             \x20           }\n\
+             \x20       }\n\
+             \x20       println!();\n\
+             \x20   }\n\
+             }\n",
+        )
+        .unwrap();
+        let mut loader = ExprLoader::new(CoreTrace::default());
+        loader.load_file(&path).unwrap();
+        let location = Location {
+            path: path.to_string_lossy().to_string(),
+            ..Location::default()
+        };
+        let names = |line: i64| loader.get_expr_list(Position(line), &location);
+        let (element, dot, formatted, newline, closing) = (names(4), names(6), names(8), names(11), names(13));
+        fs::remove_file(&path).unwrap();
+        // The control: the extractor does name what a line uses, macro
+        // arguments included, so an empty list below is a finding, not a
+        // grammar that yields nothing.
+        let Some(element) = element else {
+            panic!("an analysed Rust line has a name list");
+        };
+        for name in ["val", "board", "row", "col"] {
+            assert!(element.contains(&name.to_string()), "line 4 names {name}: {element:?}");
+        }
+        assert_eq!(
+            formatted,
+            Some(vec!["val".to_string()]),
+            "`print!(\"{{}} \", val)` names val"
+        );
+        assert_eq!(dot, Some(vec![]), "`print!(\". \")` names no variable");
+        assert_eq!(newline, Some(vec![]), "`println!()` names no variable");
+        assert_eq!(closing, Some(vec![]), "a closing brace names no variable");
     }
 
     #[test]

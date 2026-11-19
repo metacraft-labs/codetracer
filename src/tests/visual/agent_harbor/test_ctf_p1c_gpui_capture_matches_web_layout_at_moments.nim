@@ -103,7 +103,7 @@ proc momentCaptures(section: CodeTracerStorySection): seq[seq[MomentCapture]] =
     doAssert sid.startsWith(StoryIdPrefix), sid
     let view = ViewPrefix & sid[StoryIdPrefix.len .. ^1]
     let moments = storyMomentNames(story.surface, story.fixture)
-    for (size, w, h) in Sizes:
+    for (size, w, h) in sizesOf(story):
       for theme in Themes:
         var run: seq[MomentCapture]
         for moment in moments:
@@ -116,10 +116,12 @@ proc playbackStoryCount(section: CodeTracerStorySection): int =
   for story in section.stories:
     if isPlaybackFixture(story.fixture): inc result
 
-proc momentCount(section: CodeTracerStorySection): int =
+proc momentCaptureCount(section: CodeTracerStorySection): int =
+  ## Every moment of every playback story, at each of its sizes, in each theme.
   for story in section.stories:
     if isPlaybackFixture(story.fixture):
-      result += storyMomentNames(story.surface, story.fixture).len
+      result += storyMomentNames(story.surface, story.fixture).len *
+                sizesOf(story).len * Themes.len
 
 let section = agentHarborSection()
 let runs = momentCaptures(section)
@@ -153,7 +155,7 @@ suite "CTF-P1c: at each named moment the GPUI captures lay the stories out as th
          " captures within the tolerance; report in ", reportDir / "report.md"
     for f in failing: echo "  FAIL ", f
     for s in stale: echo "  STALE web record entry ", s, " (no playback story at that moment)"
-    check judgements.len == momentCount(section) * Sizes.len * Themes.len
+    check judgements.len == momentCaptureCount(section)
     check failing.len == 0
     check stale.len == 0
 

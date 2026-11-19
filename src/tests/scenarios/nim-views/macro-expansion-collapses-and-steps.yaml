@@ -1,0 +1,61 @@
+scenario: 1
+name: nim-views/macro-expansion-collapses-and-steps
+pack: codetracer
+summary: >-
+  On an rr recording of a Nim program stopped on a macro call (line 17),
+  Toggle Macro Expansion opens the call's expansion inline and toggling again
+  closes it, leaving the stop on line 17. With the expansion open again, Next
+  steps on to line 18 (the template call) and line 19 (the next macro call),
+  and closing the expansion then keeps the stop on line 19.
+
+stage:
+  - use: record-program
+    with: { program: nim_macro_steps/main.nim, backend: rr }
+  # A chord no base layer claims, so the scenario tests the expansion and not
+  # the keymap's precedence.
+  - use: plant-config
+    with: { file: keybindings.json, content: '[ { "key": "ctrl+alt+shift+m", "command": "editor.toggle-macro-expansion" } ]' }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 300s }
+  - wait: { until: { at: 'editor[file="main.nim"]/line[number="17"]', present: true }, timeout: 120s }
+  - click: { at: 'editor[file="main.nim"]/line[number="17"]', anchor: glyph }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="main.nim"]', current-line: 17 }, timeout: 120s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - expect: { at: 'editor[file="main.nim"]/macro-expansion[line="17"]', present: false }
+  - click: { at: 'editor[file="main.nim"]/line[number="17"]', anchor: text-start }
+  - wait: { until: { at: 'editor[file="main.nim"]', focused: true }, timeout: 10s }
+  # toggleMacroExpansion expands the line under the pointer.
+  - hover: { at: 'editor[file="main.nim"]/line[number="17"]', anchor: text-start, for: 500ms }
+  - chord: Ctrl+Alt+Shift+m
+  - wait: { until: { at: 'editor[file="main.nim"]/macro-expansion[line="17"]', present: true }, timeout: 30s }
+  - expect: { at: 'editor[file="main.nim"]/macro-expansion[line="17"]', text: { contains: "addTwice expansion" } }
+  - expect: { at: 'editor[file="main.nim"]/macro-expansion[line="17"]', text: { contains: "counter += 3" } }
+  # toggling again closes the expansion; the stop does not move
+  - hover: { at: 'editor[file="main.nim"]/line[number="17"]', anchor: text-start, for: 500ms }
+  - chord: Ctrl+Alt+Shift+m
+  - wait: { until: { at: 'editor[file="main.nim"]/macro-expansion[line="17"]', present: false }, timeout: 30s }
+  - expect: { at: 'editor[file="main.nim"]', current-line: 17 }
+  # open again: Next steps on with the expansion open (17 -> 18 -> 19), and
+  # closing it keeps the stop where the steps left it
+  - hover: { at: 'editor[file="main.nim"]/line[number="17"]', anchor: text-start, for: 500ms }
+  - chord: Ctrl+Alt+Shift+m
+  - wait: { until: { at: 'editor[file="main.nim"]/macro-expansion[line="17"]', present: true }, timeout: 30s }
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="main.nim"]', current-line: 18 }, timeout: 120s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="main.nim"]', current-line: 19 }, timeout: 120s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - expect: { at: 'editor[file="main.nim"]/macro-expansion[line="17"]', present: true }
+  - hover: { at: 'editor[file="main.nim"]/line[number="17"]', anchor: text-start, for: 500ms }
+  - chord: Ctrl+Alt+Shift+m
+  - wait: { until: { at: 'editor[file="main.nim"]/macro-expansion[line="17"]', present: false }, timeout: 30s }
+  - wait: { until: settled, timeout: 30s }
+  - expect: { at: 'editor[file="main.nim"]', current-line: 19 }
+  - expect: { at: status-line, location: { matches: "main\\.nim:19#" } }

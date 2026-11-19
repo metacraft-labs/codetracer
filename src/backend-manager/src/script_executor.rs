@@ -152,8 +152,8 @@ struct Candidate {
 /// - Cargo build inside a checkout: `<repo>/src/backend-manager/target/<profile>/`
 ///   or `<repo>/src/backend-manager/target/<triple>/<profile>/`, with
 ///   `<repo>/python-api`.
-/// - Tup build inside a checkout: `<repo>/src/build-debug/bin/` or
-///   `<repo>/src/build-release/bin/`, with `<repo>/python-api`.
+/// - Reprobuild build inside a checkout: `<repo>/src/build-debug-repro/bin/`
+///   or `<repo>/src/build-release-repro/bin/`, with `<repo>/python-api`.
 fn layout_candidates(bin: &Path) -> Vec<Candidate> {
     let mut out = Vec::new();
     let name = |p: &Path| p.file_name().and_then(|n| n.to_str()).map(str::to_owned);
@@ -169,10 +169,10 @@ fn layout_candidates(bin: &Path) -> Vec<Candidate> {
             anchor: prefix.to_path_buf(),
             candidate: prefix.join("share/codetracer/python-api"),
         });
-        // <repo>/src/build-{debug,release}/bin
+        // <repo>/src/build-{debug,release}-repro/bin
         if matches!(
             name(prefix).as_deref(),
-            Some("build-debug" | "build-release")
+            Some("build-debug-repro" | "build-release-repro")
         ) && let Some(src) = prefix.parent()
             && name(src).as_deref() == Some("src")
             && let Some(repo) = src.parent()
@@ -1298,7 +1298,7 @@ mod tests {
     fn test_resolve_python_api_empty_explicit_value_is_unset() {
         let root = tempfile::tempdir().expect("tempdir");
         let api = make_api_dir(&root.path().join("repo/python-api"));
-        let exe = make_exe(&root.path().join("repo/src/build-debug/bin/session-manager"));
+        let exe = make_exe(&root.path().join("repo/src/build-debug-repro/bin/session-manager"));
         tighten(root.path());
         let found = resolve_python_api_path(Some(""), Some(&exe), None).expect("ok");
         assert_eq!(found_path(&found), Some(canonical(&api)));
@@ -1313,8 +1313,8 @@ mod tests {
             "repo/src/backend-manager/target/debug/session-manager",
             "repo/src/backend-manager/target/release/session-manager",
             "repo/src/backend-manager/target/x86_64-unknown-linux-gnu/release/session-manager",
-            "repo/src/build-debug/bin/session-manager",
-            "repo/src/build-release/bin/session-manager",
+            "repo/src/build-debug-repro/bin/session-manager",
+            "repo/src/build-release-repro/bin/session-manager",
         ]
         .map(|exe| make_exe(&root.path().join(exe)));
         tighten(root.path());
@@ -1473,7 +1473,7 @@ mod tests {
         let shared = root.path().join("shared");
         make_api_dir(&shared.join("api"));
         let checkout = root.path().join("repo");
-        let exe = make_exe(&checkout.join("src/build-debug/bin/session-manager"));
+        let exe = make_exe(&checkout.join("src/build-debug-repro/bin/session-manager"));
         std::os::unix::fs::symlink(shared.join("api"), checkout.join("python-api"))
             .expect("symlink");
         tighten(root.path());

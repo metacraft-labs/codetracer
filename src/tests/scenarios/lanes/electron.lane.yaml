@@ -147,6 +147,7 @@ applicable:
   - ../replay/portable-macos-recording-replays.yaml
   - ../replay/portable-ios-recording-replays.yaml
   - ../replay/portable-android-recording-replays.yaml
+  - ../replay/portable-windows-recording-replays.yaml
   - ../breakpoints/column-breakpoint-stops-at-its-column.yaml
   - ../breakpoints/glyph-breakpoint-is-line-only.yaml
   - ../breakpoints/column-breakpoint-replaces-the-lines-column.yaml
@@ -406,6 +407,7 @@ applicable:
   - ../nim-views/disassembly-steps-back-by-instruction.yaml
   - ../nim-views/nim-step-moves-by-nim-lines.yaml
   - ../nim-views/toggle-macro-expansion-shows-the-expansion.yaml
+  - ../nim-views/macro-expansion-collapses-and-steps.yaml
   - ../low-level-code/generated-c-of-a-stock-nim-recording.yaml
   - ../low-level-code/generated-c-in-edit-mode.yaml
   - ../shared-editor/debug-mode-shared-editor.yaml
@@ -415,6 +417,7 @@ applicable:
   - ../keymaps/f7-bound-by-a-row-reaches-the-editor.yaml
   - ../nim-views/rr-nim-recording-opens-as-nim.yaml
   - ../nim-views/reverse-next-returns-to-the-nim-line.yaml
+  - ../nim-views/generated-c-reverse-next-returns.yaml
   - ../layout/event-log-and-scratchpad-tabs.yaml
   - ../point-list/breakpoint-rows-follow-the-gutter.yaml
   - ../point-list/tracepoint-rows-beside-breakpoints.yaml

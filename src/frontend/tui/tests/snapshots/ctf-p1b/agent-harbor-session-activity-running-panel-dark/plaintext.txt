@@ -1,0 +1,40 @@
+ Agent Activity  ⚲ ✕
+ running                                                                            Connected
+ › Run the slow integration tests.
+ ▾ Ran 2 shell commands ● Ran pytest -q tests/integration --slow
+   ▸ Ran pytest -q tests/unit
+   ▸ Ran pytest -q tests/integration --slow
+ ▸ Thinking: While the integration tests run, look at the timeout handling.
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               

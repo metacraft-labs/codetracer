@@ -87,7 +87,7 @@ source "$ROOT_DIR/scripts/docs/deep-review-capture-lib.sh"
 # answers "did anyone ever run it", and the sentence underneath asks for
 # something else entirely: that it was run SINCE the sources changed. Any
 # `just build-once` from any branch at any time in the past satisfies the test
-# forever, because nothing deletes `src/build-debug/bin/ct`.
+# forever, because nothing deletes `src/build-debug-repro/bin/ct`.
 #
 # And what happens next is not a report. `ct install` writes a PATH entry and a
 # desktop file, and Phase 2 copies THIS binary to
@@ -99,7 +99,7 @@ source "$ROOT_DIR/scripts/docs/deep-review-capture-lib.sh"
 # Sources come from `git ls-files`, so the ignored build trees are not in the
 # list; the path is absolute so the check no longer depends on the caller's cwd
 # either, which the relative `CT_BIN` above silently did.
-CT_BIN="$ROOT_DIR/src/build-debug/bin/ct"
+CT_BIN="$ROOT_DIR/src/build-debug-repro/bin/ct"
 if [ ! -f "$CT_BIN" ]; then
 	echo "ct binary not found at $CT_BIN"
 	echo "Please run 'just build-once' first."
@@ -214,9 +214,9 @@ echo "  Capabilities: cap_bpf,cap_perfmon,cap_dac_read_search+ep"
 echo
 
 # Create a convenience wrapper in the repo's build dir so developers
-# can just run ./src/build-debug/bin/bpftrace-dev <script>.
+# can just run ./src/build-debug-repro/bin/bpftrace-dev <script>.
 # This path is in .gitignore (matched by **/bin/).
-WRAPPER="src/build-debug/bin/bpftrace-dev"
+WRAPPER="src/build-debug-repro/bin/bpftrace-dev"
 mkdir -p "$(dirname "$WRAPPER")"
 cat >"$WRAPPER" <<'WRAPPER_EOF'
 #!/usr/bin/env bash
@@ -242,7 +242,7 @@ echo
 echo "--- Phase 2c: Passwordless setcap for native BPF backend ---"
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-CT_ABS_PATH="$REPO_ROOT/src/build-debug/bin/ct"
+CT_ABS_PATH="$REPO_ROOT/src/build-debug-repro/bin/ct"
 SETCAP_BIN="$(command -v setcap)"
 
 # The native BPF backend (libbpf-based, replaces bpftrace) requires
@@ -251,8 +251,8 @@ SETCAP_BIN="$(command -v setcap)"
 # root. And since capabilities are stored per-inode, they are lost every time
 # the binary is recompiled.
 #
-# The tup build rule (`!codetracer_bpf` in Tuprules.tup) runs
-# `sudo -n setcap ... %o` after each compilation. For this to work without
+# scripts/build-once.sh runs scripts/post-build-setcap.sh, which runs
+# `sudo -n setcap ...` on the ct binary after each build. For this to work without
 # a password prompt, we need a sudoers rule allowing the developer to run
 # setcap on the specific ct binary path.
 #
@@ -297,7 +297,7 @@ else
 # Repo: $REPO_ROOT
 #
 # Only the exact setcap invocation below is permitted — no wildcards.
-# The tup build rule chains 'sudo -n setcap ...' after each compilation.
+# The build chains 'sudo -n setcap ...' after each compilation.
 Cmnd_Alias CODETRACER_SETCAP = \\
   $SETCAP_BIN cap_bpf\\,cap_perfmon\\,cap_dac_read_search=eip $CT_ABS_PATH
 
@@ -344,7 +344,7 @@ echo "You can now run BPF scripts without sudo:"
 echo "  $WRAPPER your-script.bt"
 echo "  /usr/local/lib/codetracer/bpftrace-dev your-script.bt"
 echo
-echo "Native BPF backend: tup automatically re-applies BPF capabilities"
+echo "Native BPF backend: the build automatically re-applies BPF capabilities"
 echo "to $CT_ABS_PATH after each recompilation (requires the sudoers rule above)."
 echo
 echo "Note: Log out and back in for codetracer-bpf group membership to take effect."

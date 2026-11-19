@@ -1083,10 +1083,10 @@ for (const scenario of definition.scenarios) {
       // and a label with no date is a label nobody can age.
       // THE BUNDLE THAT RAN: a prepared prefix's when the run uses one
       // (`CODETRACER_TEST_PREFIX`, the fixture's `codetracerPrefixOverride`),
-      // `src/build-debug`'s otherwise. Reading `src/build-debug` under a
+      // `src/build-debug-repro`'s otherwise. Reading `src/build-debug-repro` under a
       // prefix recorded a bundle the capture never loaded.
       const uiBundle = path.join(
-        process.env.CODETRACER_TEST_PREFIX || path.join(repoRoot, "src", "build-debug"),
+        process.env.CODETRACER_TEST_PREFIX || path.join(repoRoot, "src", "build-debug-repro"),
         "ui.js",
       );
       const provenance = {
@@ -1370,7 +1370,7 @@ test.describe("PLAT-35 capture: an armed breakpoint and a tracepoint on one line
       `${target}=breakpoint+tracepoint`,
     );
     const uiBundle = path.join(
-      process.env.CODETRACER_TEST_PREFIX || path.join(repoRoot, "src", "build-debug"),
+      process.env.CODETRACER_TEST_PREFIX || path.join(repoRoot, "src", "build-debug-repro"),
       "ui.js",
     );
     const provenance = {

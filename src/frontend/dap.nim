@@ -1,5 +1,5 @@
 import
-  std/[ jsffi, jsconsole, strformat, asyncjs ],
+  std/[ jsffi, jsconsole, strformat, strutils, asyncjs ],
   ../common/ct_event,
   lib/jslib,
   types,
@@ -594,6 +594,19 @@ when not defined(ctInExtension):
       return cstring(&"the debugger refused {named}, without saying why")
     cstring(&"the debugger refused {named}: {outcome.message}")
 
+  proc isSupersededFlowRefusal*(outcome: DapRequestOutcome): bool =
+    ## Whether `outcome` is the engine's answer to a `ct/load-flow` that a
+    ## newer one of the same `flowMode` superseded, before it started or
+    ## while it ran: `success: false`, a `message` that starts with
+    ## `superseded`.
+    ##
+    ## Nothing failed there: the engine skipped the flow of a stop the user
+    ## has already left and is computing the newer one. Painted as a failure,
+    ## every quick step on a slow recording would add a notification.
+    not outcome.succeeded and not outcome.timedOut and
+      outcome.command == cstring"ct/load-flow" and
+      ($outcome.message).startsWith("superseded")
+
   var ctRequestFailedObservers: seq[proc(outcome: DapRequestOutcome)] = @[]
 
   proc onCtRequestFailed*(handler: proc(outcome: DapRequestOutcome)) =
@@ -890,6 +903,9 @@ proc sendCtRequest*(dap: DapApi, kind: CtEventKind, rawValue: JsObject) =
   when not defined(ctInExtension):
     dap.dispatchCtRequest(kind, rawValue, proc(outcome: DapRequestOutcome) =
       if outcome.succeeded:
+        return
+      if isSupersededFlowRefusal(outcome):
+        console.log cstring"ct request superseded: ", outcome.message
         return
       let text = requestFailureText(outcome)
       # LOGGED WHETHER OR NOT ANYBODY IS LISTENING. If no host installed the

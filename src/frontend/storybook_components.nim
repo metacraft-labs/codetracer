@@ -119,6 +119,9 @@ import stories/dom_playback_presses
 import stories/dom_composer_presses
 import stories/agent_harbor_composer_stories
 import viewmodel/views/isonim_agent_harbor_composer_view
+import viewmodel/views/isonim_agent_harbor_session_activity_view
+import viewmodel/agent_harbor_activity_cards
+import stories/dom_activity_presses
 import ../ct_test/contracts as ct_test_contracts
 
 type
@@ -1972,6 +1975,86 @@ proc mountAgentHarborComposerStory(container: isonim_dom.Element;
     for dispose in disposers: dispose()
     container.innerHTML = ""
 
+var shownTimeline: SessionTimelineVM
+  ## The session activity timeline on the page (StoryBook shows one story at
+  ## a time); nil when none is. Its presses and keys act on it.
+
+proc mountTimelineIn(host: isonim_dom.Element; vm: SessionTimelineVM) =
+  ## The timeline's view in `host`, its presses and keys routed to the
+  ## timeline on the page (`stories/dom_activity_presses`).
+  shownTimeline = vm
+  routeActivityPresses(proc(): SessionTimelineVM = shownTimeline)
+  mountAgentHarborSessionActivityPanel(host, vm)
+  routeActivityKeys(toJs(host), proc(): SessionTimelineVM = shownTimeline)
+
+proc heldEvents(source: AgentHarborDataSource; sessionId: string): int =
+  ## How many of `sessionId`'s events `source` holds (-1 when it answers none).
+  var held = -1
+  source.loadSessionEvents(sessionId, proc(answer: DataResult[SessionEventHistory]) =
+    if answer.ok: held = answer.value.rawEvents.len)
+  held
+
+proc mountActivityAgainstCards(container: isonim_dom.Element; fixture: string): DisposeProc =
+  ## The cardless timeline beside today's Agent Activity cards, over one
+  ## session's events (`agent_harbor_activity_cards`): the timeline on the
+  ## left, the cards CodeTracer's own Agent Activity panel draws on the
+  ## right. The row carries what each half got (`data-ah-timeline-*`,
+  ## `data-ah-cards-*`) and where they differ (`data-ah-against-problems`,
+  ## `againstCardsProblems`), which the story's play check reads.
+  mountWithStore(container, proc(store: ReplayDataStore): DisposeProc =
+    let timeline = syntheticTimeline(fixture)
+    let pair = newActivityAgainstCards(store, timeline.sessionId, timeline.events)
+    let source = pair.timelineSource
+    let vm = newSessionTimelineVM(source, timeline.sessionId)
+    vm.load()
+    vm.connection.val = connectionOf(fixture)
+    let row = isonim_dom.createElement(isonim_dom.document, cstring"div")
+    isonim_dom.setAttribute(row, cstring"class", cstring"ah-against-cards")
+    let left = isonim_dom.createElement(isonim_dom.document, cstring"div")
+    isonim_dom.setAttribute(left, cstring"class", cstring"ah-against-half ah-against-timeline")
+    let right = isonim_dom.createElement(isonim_dom.document, cstring"div")
+    isonim_dom.setAttribute(right, cstring"class", cstring"ah-against-half ah-against-card-feed")
+    discard isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(left))
+    discard isonim_dom.appendChild(isonim_dom.Node(row), isonim_dom.Node(right))
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(row))
+    mountTimelineIn(left, vm)
+    let caption = isonim_dom.createElement(isonim_dom.document, cstring"div")
+    isonim_dom.setAttribute(caption, cstring"class", cstring"ah-against-caption")
+    isonim_dom.setAttribute(caption, cstring"data-ah-against-caption", cstring"")
+    discard isonim_dom.appendChild(isonim_dom.Node(caption),
+      isonim_dom.createTextNode(isonim_dom.document, cstring(AgainstCardsCaption)))
+    discard isonim_dom.appendChild(isonim_dom.Node(right), isonim_dom.Node(caption))
+    discard isonim_dom.appendChild(isonim_dom.Node(right), isonim_dom.Node(
+      renderAgentActivityPanel[WebRenderer, isonim_dom.Element](WebRenderer(), pair.cards, 102,
+        "storybook-agent-input-against-cards")))
+    let entry = pair.entry
+    for (k, v) in [("data-ah-timeline-session", vm.sessionId),
+                   ("data-ah-timeline-events", $heldEvents(source, vm.sessionId)),
+                   ("data-ah-cards-session", entry.sessionId),
+                   ("data-ah-cards-events", $entry.events.len),
+                   ("data-ah-against-problems",
+                    pair.againstCardsProblems(vm, source).join("; "))]:
+      isonim_dom.setAttribute(row, cstring(k), cstring(v))
+    return proc() =
+      if shownTimeline == vm: shownTimeline = nil
+      vm.dispose()
+      pair.cards.dispose())
+
+proc mountAgentHarborSessionActivity(container: isonim_dom.Element;
+                                     fixture: string; options = ""): DisposeProc =
+  ## The session activity timeline over the viewmodel
+  ## `createSessionActivityStoryVM` builds for the story's fixture; the
+  ## comparison story draws it beside today's cards.
+  if fixture == "against-cards": return mountActivityAgainstCards(container, fixture)
+  let pb = hostPlayback(SessionActivitySurface, fixture)
+  let dispose = mountAgentHarborVM(container,
+    proc(): SessionTimelineVM = createSessionActivityStoryVM(fixture, pb),
+    proc(host: isonim_dom.Element; vm: SessionTimelineVM) = mountTimelineIn(host, vm),
+    pb, options)
+  return proc() =
+    shownTimeline = nil
+    dispose()
+
 proc mountTestResults(container: isonim_dom.Element; fixture: string): DisposeProc =
   ## The Test Results pane over a real `ct test run --events` capture (the
   ## Agent Harbor fixture set's first test run), folded through the pane's
@@ -2769,6 +2852,7 @@ proc mountCodeTracerStory*(container: isonim_dom.Element;
     of "agent-harbor-session-list": mountAgentHarborSessionList(container, f, o)
     of "agent-harbor-initiatives": mountAgentHarborInitiatives(container, f, o)
     of "agent-harbor-initiative-progress": mountAgentHarborProgress(container, f, o)
+    of "agent-harbor-session-activity": mountAgentHarborSessionActivity(container, f, o)
     of "test-results": mountTestResults(container, f)
     of "build": mountBuild(container, f)
     of "calltrace": mountCalltrace(container, f)

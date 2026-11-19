@@ -292,6 +292,13 @@ pub struct Handler {
     /// and future telemetry can read it too.
     pub origin_summary_chain_builds: std::sync::atomic::AtomicUsize,
 
+    /// The cancellation token of the `ct/load-flow` this handler is serving,
+    /// set by the `flow` task thread for the duration of one request
+    /// (`flow_supersession`). A newer request of the same `flowMode`
+    /// supersedes the flow: its replay stops at once and [`Handler::load_flow`]
+    /// delivers nothing. `None` outside a flow and on the browser path.
+    pub flow_cancel: Option<crate::flow_supersession::FlowCancel>,
+
     /// M21 — optional in-handler [`OriginMetadataDecoder`] used by
     /// materialized traces that ship the M19 metadata namespace.
     /// The browser-replay (Emulator) backend exposes its decoder
@@ -719,6 +726,7 @@ impl Handler {
             sourcemap_cache_dir: None,
             origin_summary_cache: HashMap::new(),
             origin_summary_chain_builds: std::sync::atomic::AtomicUsize::new(0),
+            flow_cancel: None,
             materialized_origin_metadata_decoder: None,
             cached_patterns_fingerprint: None,
             marker_decode_calls: std::sync::atomic::AtomicUsize::new(0),
@@ -1670,9 +1678,12 @@ impl Handler {
             // death ends the flow (reported by `CallFlowPreloader::load_flow`)
             // instead of being papered over by a fresh worker at the start of
             // the recording.
+            // A newer `ct/load-flow` stops this worker in the middle of a
+            // query (`flow_supersession`).
             TraceKind::Recreator => Box::new(
                 RecreatorReplaySession::with_reserved_index("flow", self.ct_rr_args.clone())
-                    .without_respawn_after_worker_death(),
+                    .without_respawn_after_worker_death()
+                    .with_flow_cancel(self.flow_cancel.clone()),
             ),
             TraceKind::Emulator => {
                 return Err(format!(
@@ -1696,6 +1707,7 @@ impl Handler {
         sender: Sender<DapMessage>,
     ) -> Result<(), Box<dyn Error>> {
         let mut flow_replay = self.new_flow_replay(&req.command)?;
+        self.flow_preloader.cancel = self.flow_cancel.clone();
         // TODO: eventually cleanup or manage in a more optimal way flow replays: caching
         // if possible for example
 
@@ -1857,6 +1869,19 @@ impl Handler {
         // refused or timed-out request with an empty body too; a client told
         // "wait for the event" by `{}` would wait for ever on a refusal.
         let raw_event = self.dap_client.updated_flow_event(flow_update)?;
+        // Commit to delivering, or learn that a newer request superseded this
+        // flow while it ran; then its result, partial or not, is dropped and
+        // the request is answered as superseded (`flow_supersession`). After
+        // the seal a newer request no longer supersedes it, so a client never
+        // gets a `ct/updated-flow` for a request answered as superseded.
+        if let Some(cancel) = &self.flow_cancel
+            && let Err(newer_seq) = cancel.seal()
+        {
+            return Err(Box::new(crate::flow_supersession::FlowSuperseded {
+                newer_seq,
+                started: true,
+            }));
+        }
         sender.send(raw_event)?;
         self.respond_dap(req, serde_json::json!({ "event": "ct/updated-flow" }), sender)?;
         Ok(())

@@ -174,12 +174,12 @@
     # reprobuild compiles a solve against ONE reprobuild-packages catalog and
     # refuses a closure that would resolve catalog interfaces from two. The
     # runquota that reprobuild's flake pins as `runquota-src` (6ff97313 at
-    # reprobuild e2fe4eb9, 98ea3e58 at the 0.2.26 release) has a lock on
-    # catalog 15ceea67, while this repo's repro.lock, and reprobuild's own,
-    # are on 29b7bb9b. Following reprobuild therefore put two catalogs in
-    # codetracer's lock closure, and every refresh and platform re-solve of
-    # repro.lock failed. runquota moved to 29b7bb9b itself in 40523b6; no
-    # reprobuild revision pins a runquota that new yet. reprobuild-pm
+    # reprobuild e2fe4eb9 and 33be1e9964, 98ea3e58 at the 0.2.26 release) has
+    # a lock on catalog 15ceea67, while this repo's repro.lock, and
+    # reprobuild's own, are on 56ffd673. Following reprobuild therefore put
+    # two catalogs in codetracer's lock closure, and every refresh and
+    # platform re-solve of repro.lock failed. runquota moved to 56ffd673
+    # itself in aad94ad; no reprobuild revision pins a runquota that new yet. reprobuild-pm
     # issues/2026-11-18-the-runquota-reprobuild-pins-as-runquota-src-carries-catalog-15ceea67-while-reprobuilds-own-lock-pins-29b7bb9b-or-56ffd67.md
     #
     # ## What still holds
@@ -526,7 +526,7 @@
     # 2026-09-30) and have never been promoted to `dev`, whose tip has not
     # moved since 2026-09-29.
     reprobuild-packages = {
-      url = "github:metacraft-labs/reprobuild-packages/29b7bb9bac83ccb2a69e5c626df7fc900a5fbc25";
+      url = "github:metacraft-labs/reprobuild-packages/56ffd673bc0f43ab266de53fd5e2e7f656e37431";
       flake = false;
     };
 
@@ -702,9 +702,9 @@
           _module.args.pkgs = import nixpkgs {
             inherit system;
             config = {
-              # tup is currently considered broken by Nix, but this is not true
-              # TODO: this is already fixed in nixpkgs/unstable, so it may become
-              #       unnecessary after a future `flake update`
+              # Added for tup, which nixpkgs marked broken although it was not.
+              # tup is gone from this repo; whether another package still needs
+              # the permit has not been measured, so it is left in place.
               allowBroken = true;
               # NOTE: `permittedInsecurePackages = [ "electron-24.8.6" ]` used to
               # sit here (and in the `nixpkgs-unstable` import below). It was

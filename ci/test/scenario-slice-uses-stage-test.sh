@@ -64,6 +64,16 @@ else
 	fail "${wf} runs the helper on the runner's bare PATH, which may have no python3"
 fi
 
+# The decision runs whenever the lane does. With the default `success()` it was
+# skipped after an earlier step's failure while the lane (`!cancelled()`) went
+# on without the player (TUI shard 6, run 44384977215).
+player_if="$(awk '/^      - name: /{last_if=""} /^        id: player$/{print last_if} /^        if: /{last_if=$0}' "${wf}")"
+if grep -qF '!cancelled()' <<<"${player_if}"; then
+	ok "${wf} decides on the player whenever the lane runs (!cancelled())"
+else
+	fail "${wf}'s player decision does not run under !cancelled(): '${player_if}'"
+fi
+
 # Without python3 the helper must FAIL, not answer needed=false: from a process
 # substitution the missing interpreter used to read as an empty slice, and TUI
 # shard 6 of run 44269676398 skipped the player its scenario needed.

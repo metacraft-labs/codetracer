@@ -116,10 +116,8 @@ export function requireFreshStorybookStatic(repoRoot) {
   }
   const builtAt = statSync(built).mtimeMs;
 
-  // `main.ts` picks the repro build tree when it exists, exactly as here.
-  const buildDir = existsSync(join(repoRoot, "src/build-debug-repro/frontend"))
-    ? "build-debug-repro"
-    : "build-debug";
+  // `main.ts` uses the same build tree, exactly as here.
+  const buildDir = "build-debug-repro";
 
   const sources = [
     join(storybookDir, ".storybook"),

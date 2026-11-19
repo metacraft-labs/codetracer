@@ -73,6 +73,7 @@ mod data_watch;
 mod event_db;
 mod expr_loader;
 mod flow_preloader;
+mod flow_supersession;
 mod in_memory_trace_reader;
 mod lang;
 mod macro_sourcemap;

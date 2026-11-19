@@ -51,7 +51,7 @@
 # Prerequisites it does not build are refused BY NAME: the isonim-gpui
 # checkout (`ISONIM_GPUI_DIR`, default `../isonim-gpui`), `nix`, `nim`,
 # `tesseract`, and `REPLAY_SERVER_BIN` (default: the one `just build-once`
-# leaves in `src/build-debug/bin`). Run it inside this repo's dev shell.
+# leaves in `src/build-debug-repro/bin`). Run it inside this repo's dev shell.
 #
 # `GPUI_WINDOWED_TARGET_DIR` overrides where the windowed shim is built
 # (default `<isonim-gpui>/rust/target/windowed`, kept apart from
@@ -97,13 +97,12 @@ done
 for tool in nix nim tesseract python3; do
 	command -v "${tool}" >/dev/null 2>&1 || fail "'${tool}' is not on PATH (run inside the dev shell)"
 done
-# The repro output root FIRST, then the tup tree. `src/build-debug` does not
-# exist in a checkout only ever built through `repro`, which is why this used
-# to refuse a replay-server that was in fact built (codetracer-pm
-# `issues/2026-09-29-replay-server-discovery-misses-the-repro-build-output-root.md`).
+# The build's output root FIRST (`CODETRACER_BUILD_DIR`, which the dev shell
+# sets and which may name another checkout's build), then this checkout's own
+# `src/build-debug-repro`.
 _ct_replay_default="${CODETRACER_BUILD_DIR:-${root}/src/build-debug-repro}/bin/replay-server"
 [ -x "${_ct_replay_default}" ] ||
-	_ct_replay_default="${root}/src/build-debug/bin/replay-server"
+	_ct_replay_default="${root}/src/build-debug-repro/bin/replay-server"
 export REPLAY_SERVER_BIN="${REPLAY_SERVER_BIN:-${_ct_replay_default}}"
 [ -x "${REPLAY_SERVER_BIN}" ] || fail "no replay-server at ${REPLAY_SERVER_BIN} (just build-once)"
 
@@ -313,7 +312,14 @@ for w in "${which[@]}"; do
 		# dock document and opens the terminal on `calc`, so it needs
 		# `just build-gpui` (over isonim-gpui's featureless shim) and the
 		# terminal's prerequisites as well as the window's frames.
-		(cd "${ISONIM_GPUI}" && nix develop --command bash -c "cd rust && cargo build") &&
+		# CT_GPUI_FEATURELESS_SHIM_PREBUILT=1: the visual-replay-tools job
+		# built that shim (about 9.5 minutes here otherwise).
+		if [ "${CT_GPUI_FEATURELESS_SHIM_PREBUILT:-0}" = 1 ] &&
+			[ -e "${ISONIM_GPUI}/rust/target/debug/libgpui_nim_shim.so" ]; then
+			echo "=== plat45: isonim-gpui's featureless shim is prebuilt (CT_GPUI_FEATURELESS_SHIM_PREBUILT=1)"
+		else
+			(cd "${ISONIM_GPUI}" && nix develop --command bash -c "cd rust && cargo build")
+		fi &&
 			ISONIM_GPUI_SHIM_DIR="${ISONIM_GPUI}/rust/target/debug" just build-gpui &&
 			just tui-prereqs &&
 			in_compositor_shell "CODETRACER_PLAT45_BIN='${root}/build/bin/codetracer-gpui-window' bash ci/test/plat45-arrangement-window.sh" &&

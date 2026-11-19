@@ -137,7 +137,7 @@ recordings="$tmp_dir/recordings"
 fake_session_manager="$tmp_dir/session-manager"
 mkdir -p \
 	"$fake_bin" \
-	"$fake_root/src/build-debug/bin" \
+	"$fake_root/src/build-debug-repro/bin" \
 	"$fake_root/src/db-backend" \
 	"$fake_root/scripts" \
 	"$fake_root/src/tests/gui/tests/value-origin" \
@@ -194,8 +194,8 @@ if [ "\${FAKE_PROVISION_FAIL:-0}" = "1" ]; then
 fi
 printf '%s\\n' "$fake_session_manager"
 FAKE_PROVISIONER
-printf '#!/usr/bin/env bash\nexit 0\n' >"$fake_root/src/build-debug/bin/ct"
-chmod +x "$fake_root/src/build-debug/bin/ct"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$fake_root/src/build-debug-repro/bin/ct"
+chmod +x "$fake_root/src/build-debug-repro/bin/ct"
 for spec in \
 	cross-tracer-three-recording.spec.ts \
 	event-log-correlation-markers-three-trace.spec.ts; do
@@ -417,9 +417,9 @@ printf '%s\\n' "$recordings"
 FAKE_MATERIALIZER
 chmod +x "$fake_root/scripts/materialize-recording.sh"
 
-mv "$fake_root/src/build-debug/bin/ct" "$fake_root/src/build-debug/bin/ct.off"
+mv "$fake_root/src/build-debug-repro/bin/ct" "$fake_root/src/build-debug-repro/bin/ct.off"
 expect_failure "missing CodeTracer executable" "built CodeTracer executable is missing" run_gate
-mv "$fake_root/src/build-debug/bin/ct.off" "$fake_root/src/build-debug/bin/ct"
+mv "$fake_root/src/build-debug-repro/bin/ct.off" "$fake_root/src/build-debug-repro/bin/ct"
 
 chmod -x "$fixture/regenerate.sh"
 expect_failure "non-executable regenerator" "fixture regenerator is not executable" run_gate

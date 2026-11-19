@@ -11,7 +11,7 @@ cd "$repo"
 
 export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
 
-ct="${CT_BIN:-$repo/src/build-debug/bin/ct}"
+ct="${CT_BIN:-$repo/src/build-debug-repro/bin/ct}"
 work="$(mktemp -d "${TMPDIR:-/tmp}/ct-plat61-capture-XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 

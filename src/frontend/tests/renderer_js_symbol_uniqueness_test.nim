@@ -63,11 +63,11 @@ proc jsTargetsEnablingHcr(reproNim: string): seq[string] =
   ## renderer test bundles).
   ##
   ## It is NOT the only way a JS bundle gets built, which is why the test
-  ## below scans whole files rather than only this one: ``src/Tuprules.tup``
-  ## builds the same outputs on the legacy tup path (still the default of
-  ## ``just build-once`` on Linux), ``justfile`` has two hand-written renderer
-  ## recipes, and ``build_for_extension.sh`` builds ``ui.js`` for the VS Code
-  ## extension.  All four carried the flag; all four must stay clear of it.
+  ## below scans whole files rather than only this one: ``justfile`` has two
+  ## hand-written renderer recipes, and ``build_for_extension.sh`` builds
+  ## ``ui.js`` for the VS Code extension.  (The retired tup build's rules file
+  ## carried the flag too.)  All of them carried the flag; all of them must
+  ## stay clear of it.
   result = @[]
   var current = ""
   for rawLine in reproNim.splitLines:
@@ -84,14 +84,13 @@ proc jsTargetsEnablingHcr(reproNim: string): seq[string] =
 
 const HandWrittenBuildFiles = [
   "justfile",              # `build-ui-js` / `build-ui-js-hmr`
-  "src/Tuprules.tup",      # `!nim_js` / `!nim_node_subwindow`
   "build_for_extension.sh" # `ui.js` for the VS Code extension
 ]
 
 proc handWrittenRecipesEnablingHcr(repoRoot: string): seq[string] =
   ## ``<file>: <line>`` for every non-comment line in the hand-written build
   ## definitions that passes ``--hotCodeReloading``.  Comment lines are skipped
-  ## (all three files use ``#``) so each may keep saying *why* the flag is
+  ## (both files use ``#``) so each may keep saying *why* the flag is
   ## absent.
   result = @[]
   for relPath in HandWrittenBuildFiles:
@@ -256,14 +255,11 @@ suite "Renderer JS bundle — symbol uniqueness":
     check offenders.len == 0
 
   test "no hand-written build recipe passes --hotCodeReloading":
-    ## `repro.nim` is not the only thing that runs `nim js` here.  Three other
+    ## `repro.nim` is not the only thing that runs `nim js` here.  Two other
     ## build definitions compile the very same renderer sources and each one
     ## carried the flag:
     ##
     ## * `justfile` — `build-ui-js` / `build-ui-js-hmr`.
-    ## * `src/Tuprules.tup` — `!nim_js` and `!nim_node_subwindow`; the tup path
-    ##   is still what `just build-once` uses by default on Linux, so a flag
-    ##   left here ships even though `repro.nim` is clean.
     ## * `build_for_extension.sh` — `ui.js` for the VS Code extension.
     ##
     ## Each file must still exist, or the scan would pass by looking at

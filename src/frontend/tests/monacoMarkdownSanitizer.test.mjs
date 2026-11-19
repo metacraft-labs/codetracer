@@ -284,7 +284,7 @@ assert(!scanned.some((rel) => rel.split(path.sep).some(isGeneratedDir)),
 // assertions this file runs does not depend on whether the tree has been
 // built. (`htmlSinks.test.mjs` reconciles its total and would fail outright;
 // keeping both files the same shape avoids planting that trap here later.)
-const builtDirs = ['src/build-debug', 'src/public/dist']
+const builtDirs = ['src/build-debug-repro', 'src/public/dist']
   .filter((rel) => fs.existsSync(path.join(REPO, rel)));
 console.log(`  \x1b[2mbuild output present: ${builtDirs.length > 0 ? builtDirs.join(', ') : '(none)'}; generated dirs skipped: ${skippedGenerated.length}\x1b[0m`);
 assert(builtDirs.length === 0 || skippedGenerated.length > 0,

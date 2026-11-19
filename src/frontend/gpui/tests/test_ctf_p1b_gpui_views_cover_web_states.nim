@@ -39,7 +39,7 @@
 ## Trap 13 / §29 (`Verification-Harness-Traps.md`): every helper that calls
 ## `check` is a template; the procs return the mismatches they found.
 
-import std/[math, os, sets, strutils, unittest]
+import std/[math, os, sequtils, sets, strutils, unittest]
 
 import isonim_gpui/renderer
 from isonim_gpui/bindings import gpui_reset_tree
@@ -50,7 +50,15 @@ import ../agent_harbor/ah_stories
 import ../agent_harbor/ah_session_views
 import ../agent_harbor/ah_fleet_panel
 import ../agent_harbor/ah_composer
+import ../agent_harbor/ah_session_activity
 from ../agent_harbor/ah_theme import textWidth, textPx, CaptionPx, InsetPx, MarkPx
+from ../chrome import contrastRatio
+import nim_agents_isonim_viewmodels/agent_harbor/session_timeline_vm
+from ../../viewmodel/views/agent_harbor_activity_words import runningLineId,
+  runningStripText, showsUnseenChip
+from ../../viewmodel/views/agent_harbor_palette import timelineInk
+import ../../viewmodel/agent_harbor_activity_cards
+import ../../viewmodel/viewmodels/agent_activity_feed
 import nim_agents/agent_harbor/fleet_records
 import nim_agents_isonim_viewmodels/agent_harbor/[fleet_vm, session_tabs_vm,
   initiative_tabs_vm, initiatives_vm, initiative_progress_vm, data_source, fixture_source]
@@ -61,11 +69,12 @@ const
   AgentHarborSectionTitle = "CodeTracer/Agent Harbor"
   Sizes = [("laptop", 1440, 900), ("panel", 760, 640), ("sidebar", 360, 900)]
   Modes = [dmDark, dmLight]
-  MinimumStories = 59
+  MinimumStories = 59 + 21
     ## The section's stories at CTF-P2a's landing (9 fleet, 11 session tabs,
-    ## 10 session list, 12 initiative tabs, 8 initiatives, 9 progress). A
-    ## floor, so a declaration that silently lost its stories cannot pass
-    ## by rendering nothing.
+    ## 10 session list, 12 initiative tabs, 8 initiatives, 9 progress), and
+    ## CTF-P2b's 21 of the session activity timeline. A floor, so a
+    ## declaration that silently lost its stories cannot pass by rendering
+    ## nothing.
 
 var countedAssertions = 0
 template ck(cond: untyped) =
@@ -412,6 +421,129 @@ proc checkFleet(view: GpuiElement; vm: FleetSnapshotVM): seq[string] =
         result.expect("activity of " & row.shortId, e.values("activity"), row.activity[0 ..< shown])
         result.expect("title of " & row.shortId, e.first("title").attr("title"), row.title)
 
+const
+  TextMinContrast = 4.5
+    ## A line's words in the body, label, monospace and ended roles against
+    ## the panel's ground (WCAG 2.2 SC 1.4.3,
+    ## https://www.w3.org/TR/WCAG22/#contrast-minimum).
+  StatusMinContrast = 3.0
+    ## A status role's text (quiet, error, removed, warning, added, running):
+    ## the design system's status colours, whose Light steps reach 3:1 and
+    ## not 4.5:1 on the panel (WCAG 2.2 SC 1.4.11's floor for what tells a
+    ## state apart, https://www.w3.org/TR/WCAG22/#non-text-contrast).
+  TimelineFacts = ["line-kind", "level", "indent", "text", "role", "item-kind", "state",
+                   "expanded", "focused", "count", "failed", "running", "path", "copy"]
+    ## The facts a drawn timeline line carries (`lineFacts`), each compared
+    ## with the viewmodel's line of the same id.
+
+proc factsOf(line: TimelineLine): seq[(string, string)] =
+  ## The viewmodel's line as the facts it should be drawn with, by the rule
+  ## written out here rather than through `lineFacts`, so the check does not
+  ## share the views' function.
+  result = @[("line-kind", $line.kind), ("level", $line.level), ("indent", $line.indent),
+             ("text", line.text), ("role", line.textRole)]
+  if line.itemKind.len > 0: result.add ("item-kind", line.itemKind)
+  if line.state != tisNone: result.add ("state", $line.state)
+  if line.expandable: result.add ("expanded", $line.expanded)
+  if line.focused: result.add ("focused", "true")
+  if line.kind == tlkGroup:
+    result.add ("count", $line.count)
+    result.add ("failed", $line.failed)
+    result.add ("running", $line.running)
+  if line.path.len > 0: result.add ("path", line.path)
+  if line.copyText.len > 0: result.add ("copy", line.copyText)
+
+proc checkTimeline(view: GpuiElement; vm: SessionTimelineVM): seq[string] =
+  ## The timeline's drawn lines against the viewmodel's: a run of its lines
+  ## with no gap (the window the view shows), each with the viewmodel's
+  ## facts; a group holding a running command names it on its line (never
+  ## hidden); the chrome (status, connection badge, filter, the unseen chip,
+  ## the running strip) as the viewmodel says.
+  result.expect("load state", view.attr("state"),
+                (case vm.state.val
+                 of asIdle, asLoading: "loading"
+                 of asError: "error"
+                 of asReady: "ready"))
+  result.expect("status", view.attr("session-status"), vm.statusLabel)
+  result.expect("connection", view.attr("connection"), vm.connection.val)
+  if vm.connection.val.len > 0:
+    result.expect("badge", view.values("badge"), @[vm.connection.val])
+  result.expect("filter", view.values("filter"),
+                if vm.filter.val.len > 0: @[vm.filter.val] else: @[])
+  case vm.state.val
+  of asIdle, asLoading:
+    result.expect("loading notice", view.values("notice"), @["loading"])
+    return
+  of asError:
+    if vm.unresolvable.val.len > 0:
+      result.expect("cannot-be-loaded notice", view.values("notice"), @["unresolvable"])
+    else:
+      commonState(view, vm.state.val, vm.error.val, result)
+    return
+  of asReady: discard
+  if vm.isEmpty:
+    result.expect("empty notice", view.values("notice"), @["empty"])
+    return
+  let lines = vm.lines
+  let drawn = view.all("line")
+  if drawn.len == 0:
+    result.add "no line is drawn of the " & $lines.len & " the viewmodel has"
+    return
+  var start = -1
+  for i, line in lines:
+    if line.id == drawn[0].attr("line"): start = i
+  if start < 0:
+    result.add "the first drawn line " & drawn[0].attr("line") & " is not the viewmodel's"
+    return
+  for k, e in drawn:
+    if start + k >= lines.len:
+      result.add "a line drawn past the viewmodel's last: " & e.attr("line")
+      break
+    let line = lines[start + k]
+    if e.attr("line") != line.id:
+      result.add "drawn line " & $k & " is " & e.attr("line") & ", the viewmodel's is " & line.id
+      continue
+    let wanted = factsOf(line)
+    for fact in TimelineFacts:
+      var want = ""
+      for (k2, v) in wanted:
+        if k2 == fact: want = v
+      if e.attr(fact) != want:
+        result.add line.id & "'s " & fact & ": drawn '" & e.attr(fact) &
+                   "', the viewmodel says '" & want & "'"
+    if line.kind == tlkGroup and line.running > 0:
+      var named = false
+      for part in e.all("part"):
+        if part.attr("part") == "running" and part.drawnText.len > 0: named = true
+      if not named: result.add "the group " & line.id & " holds a running command it does not name"
+  # The chrome.
+  let ids = drawn.mapIt(it.attr("line"))
+  let runningId = runningLineId(lines, vm.runningLine)
+  let strip = runningStripText(vm)
+  let wantStrip = if strip.len > 0 and runningId notin ids: @[strip] else: @[]
+  result.expect("running strip", view.values("running-strip"), wantStrip)
+  result.expect("unseen chip", view.values("unseen"),
+                if showsUnseenChip(vm): @[$vm.unseen.val] else: @[])
+
+proc minContrastOf(role: string): float =
+  if role in ["quiet", "error", "removed", "warning", "added", "running"]: StatusMinContrast
+  else: TextMinContrast
+
+proc timelineInkProblems(view: GpuiElement; p: AhPalette): seq[string] =
+  ## Every drawn part of a line in its role's colour (`timelineInk`, the
+  ## roles `agent_harbor_activity.styl` names), and every text at least
+  ## its role's floor (`minContrastOf`) against the panel's ground in both
+  ## modes.
+  for e in view.all("part"):
+    let role = e.attr("part")
+    if e.attr("ink") != timelineInk(p, role):
+      result.add "a " & role & " part is drawn in " & e.attr("ink") & ", not " &
+                 timelineInk(p, role)
+    elif contrastRatio(e.attr("ink"), p.panel) < minContrastOf(role):
+      result.add "a " & role & " part (" & e.attr("ink") & ") is " &
+                 formatFloat(contrastRatio(e.attr("ink"), p.panel), ffDecimal, 2) &
+                 ":1 on the panel " & p.panel & ", under " & $minContrastOf(role) & ":1"
+
 proc inkProblems(m: AhStoryMount; mode: DesignMode): seq[string] =
   ## The colours the shared rules decide, by surface: the fleet's
   ## (`fleetInkProblems`), and the inbox's Previous / Next in the disabled
@@ -420,6 +552,8 @@ proc inkProblems(m: AhStoryMount; mode: DesignMode): seq[string] =
   case m.surface
   of "agent-harbor-fleet":
     if m.fleet.state.val == asReady: result = fleetInkProblems(m.view, m.fleet, p)
+  of "agent-harbor-session-activity":
+    result = timelineInkProblems(m.view, p)
   of "agent-harbor-initiative-tabs":
     # Previous / Next: the disabled role while nothing waits, the label role
     # while something does (what the browser computes). Each step is drawn
@@ -533,6 +667,17 @@ proc checkStory(m: AhStoryMount): seq[string] =
   of "agent-harbor-initiative-progress": checkProgress(view, m.progress)
   of "agent-harbor-fleet": checkFleet(view, m.fleet)
   of "agent-harbor-composer": checkComposer(view, m.composer)
+  of "agent-harbor-session-activity":
+    if m.cardsFeed.isNil: checkTimeline(view, m.timeline)
+    else:
+      # The comparison story: the timeline half, and the cards half drawn
+      # from the cards' viewmodel over the same events.
+      var problems = checkTimeline(view, m.timeline)
+      let painted = getAttribute(m.cardsFeed, "data-ct-agent")
+      if painted != $m.cards.cards.agentFeed().len:
+        problems.add "the cards half draws " & painted & " rows, the cards' feed has " &
+                     $m.cards.cards.agentFeed().len
+      problems & m.cards.againstCardsProblems(m.timeline, m.cards.timelineSource)
   else: @["this suite has no comparison for surface " & m.surface]
 
 # ---------------------------------------------------------------------------
@@ -642,6 +787,32 @@ suite "CTF-P1b: the comparison can fail":
       if e.attr("selected") == "true": selectedDrawn = e.attr("initiative")
     ck selectedDrawn == first
     m.dispose()
+
+  test "a timeline line opened after drawing is reported until the view redraws":
+    # The session activity timeline: a group opened in the viewmodel with no
+    # redraw is drawn closed, and the check says so; the view's own render
+    # effect then redraws it, and the two agree again.
+    gpui_reset_tree()
+    let host = r.createElement("div")
+    let vm = createSessionActivityStoryVM("populated")
+    drawSessionActivity(r, host, vm, ahPalette(dmDark), 760, 600)
+    ck checkTimeline(host, vm).len == 0
+    var group = ""
+    for line in vm.lines:
+      if line.kind == tlkGroup and group.len == 0: group = line.id
+    ck group.len > 0
+    vm.toggle(group)
+    let stale = checkTimeline(host, vm)
+    ck stale.len > 0
+    ck stale.join(" ").contains(group & "'s expanded")
+    drawSessionActivity(r, host, vm, ahPalette(dmDark), 760, 600)
+    ck checkTimeline(host, vm).len == 0
+    # A group line whose count is drawn other than the viewmodel's is
+    # reported too.
+    for e in host.all("line"):
+      if e.attr("line") == group: r.setAttribute(e, "data-ah-count", "99")
+    ck checkTimeline(host, vm).join(" ").contains(group & "'s count")
+    vm.dispose()
 
   test "a fact that names a word the view does not draw is a mismatch":
     # The text checks compare `data-ah-*` facts with the viewmodel; this holds
@@ -832,4 +1003,4 @@ suite "CTF-P1b: the GPUI views share the viewmodels, not the web views":
 
 suite "CTF-P1b: assertion count":
   test "every assertion ran":
-    check countedAssertions == 67
+    check countedAssertions == 73

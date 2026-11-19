@@ -661,10 +661,8 @@ step_resolve_core() {
 	CORE_BIN="${CODETRACER_CORE_BIN:-${CODETRACER_E2E_CT_PATH:-}}"
 	if [[ -z $CORE_BIN ]]; then
 		for candidate in \
-			"${CODETRACER_BUILD_DIR:-$ROOT_DIR/src/build-debug}/bin/ct" \
-			"$ROOT_DIR/src/build-debug/bin/ct" \
+			"${CODETRACER_BUILD_DIR:-$ROOT_DIR/src/build-debug-repro}/bin/ct" \
 			"$ROOT_DIR/src/build-debug-repro/bin/ct" \
-			"$ROOT_DIR/src/build-release/bin/ct" \
 			"$ROOT_DIR/src/build-release-repro/bin/ct"; do
 			if [[ -x $candidate ]]; then
 				CORE_BIN="$candidate"

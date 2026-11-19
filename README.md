@@ -214,18 +214,17 @@ On macOS, we do not yet have support for Nix, instead we compile by using the no
 
 For Windows local development without Nix, use the scripts under `non-nix-build/windows/`:
 
-1. Inspect pinned versions and source refs (Rust, Node.js, uv, Nim, ct-remote, Cap'n Proto, Tup): `non-nix-build/windows/toolchain-versions.env`
+1. Inspect pinned versions and source refs (Rust, Node.js, uv, Nim, ct-remote, Cap'n Proto): `non-nix-build/windows/toolchain-versions.env`
 1. In Git Bash, source the environment (auto-installs missing tools): `source env.sh`
 1. In PowerShell, dot-source the environment (auto-installs missing tools): `. .\env.ps1`
 
 This workflow bootstraps pinned tools into a shared user cache (`%LOCALAPPDATA%/codetracer/windows-diy` by default) and keeps setup deterministic for Windows contributors.
 When `env.sh` is sourced, it also ensures `libs/tree-sitter-nim/src/parser.c` is generated when missing or stale.
 The parser script prefers local `libs/tree-sitter-nim/node_modules/.bin/tree-sitter` and falls back to an isolated cached `tree-sitter-cli` install when needed, so generation does not require building native addons for the full grammar package.
-`env.sh` also restores caller shell options (it does not leave `set -e` enabled) and auto-installs missing Node deps in `node-packages` by default so `stylus.cmd`/`webpack.cmd` are available for `tup`/`just` (`WINDOWS_DIY_SETUP_NODE_DEPS=0` disables this behavior).
+`env.sh` also restores caller shell options (it does not leave `set -e` enabled) and auto-installs missing Node deps in `node-packages` by default so `stylus.cmd`/`webpack.cmd` are available for the build (`WINDOWS_DIY_SETUP_NODE_DEPS=0` disables this behavior).
 For `ct-remote`, the default is `CT_REMOTE_WINDOWS_SOURCE_MODE=auto`: on Windows x64 it uses local `../codetracer-ci` source publish output when available and otherwise falls back to pinned download, while on Windows arm64 it routes to local source and does not fall back to pinned x64 download. `CT_REMOTE_WINDOWS_SOURCE_RID` defaults by architecture (`win-x64` on x64, `win-arm64` on arm64) and remains overridable. Local-source publish now prefers `CT_REMOTE_WINDOWS_PUBLISH_SCRIPT` (default `<CT_REMOTE_WINDOWS_SOURCE_REPO>/non-nix-build/windows/publish-desktop-client.ps1`) so host-global `dotnet` is not required when that helper is present. Use `CT_REMOTE_WINDOWS_SOURCE_MODE=local|download` and `CT_REMOTE_WINDOWS_SOURCE_REPO=<path>` as needed (`download` is x64-only).
 For Nim, the default is `NIM_WINDOWS_SOURCE_MODE=auto`: try building from pinned Nim/csources source refs with deterministic cache reuse, and fall back to pinned `nim-<version>_x64.zip` when source bootstrap fails. Override with `NIM_WINDOWS_SOURCE_MODE=source|prebuilt`.
 For Cap'n Proto, the default is `CAPNP_WINDOWS_SOURCE_MODE=auto`: use pinned prebuilt ZIP on Windows x64 and source mode on non-x64, with deterministic source-cache reuse. Override with `CAPNP_WINDOWS_SOURCE_MODE=source|prebuilt`.
-For Tup, the default is `TUP_WINDOWS_SOURCE_MODE=auto`: build from pinned source (`https://github.com/zah/tup.git` ref `variants-for-windows`) with deterministic source-cache reuse to preserve Windows variant support. `auto` only falls back to prebuilt when you explicitly provide both `TUP_WINDOWS_PREBUILT_URL` and `TUP_WINDOWS_PREBUILT_SHA256`; otherwise it remains source-only by design. Override with `TUP_WINDOWS_SOURCE_MODE=source|prebuilt`.
 
 ## Running the terminal (TUI) and native (GPUI) front-ends
 
@@ -242,7 +241,7 @@ it with `repro exec . --` (the first run in a fresh checkout takes several minut
 while the environment is built):
 
 ```bash
-repro exec . -- just build-once   # ct and replay-server -> src/build-debug/bin/
+repro exec . -- just build-once   # ct and replay-server -> src/build-debug-repro/bin/
 repro exec . -- just build-tui    # the terminal UI -> build/bin/codetracer-tui
 repro exec . -- just build-gpui   # the native window -> build/bin/codetracer-gpui
 ```
@@ -314,7 +313,7 @@ under `test-logs/tui-fixtures/<name>-<hash>/` (`calc-…`, `wide_state-…`,
 ### Launch
 
 ```bash
-src/build-debug/bin/ct replay --ui=tui /tmp/ct-calc    # terminal UI, via ct
+src/build-debug-repro/bin/ct replay --ui=tui /tmp/ct-calc    # terminal UI, via ct
 build/bin/codetracer-tui /tmp/ct-calc                 # the same, directly
 ```
 
@@ -322,7 +321,7 @@ Running a built binary does not need the development environment. `ct` finds
 `build/bin/codetracer-tui` in the checkout it was built from (`CODETRACER_TUI_BIN`
 overrides it), and the front-end finds the engine the same way: the build's
 published output root (`CT_BUILD_OUT_ROOT`, `CODETRACER_BUILD_DIR`), then
-`src/build-debug-repro/bin/`, then tup's `src/build-debug/bin/`, then cargo's
+`src/build-debug-repro/bin/`, then cargo's
 `src/db-backend/target/{debug,release}/`. Set `REPLAY_SERVER_BIN=<path>` to use a
 different engine build.
 
@@ -330,7 +329,7 @@ The native window needs a graphical session and its runtime libraries, which the
 development environment provides:
 
 ```bash
-repro exec . -- bash -c 'LD_LIBRARY_PATH=$CODETRACER_GPUI_RUNTIME_LIB_PATH src/build-debug/bin/ct replay --ui=gpui /tmp/ct-calc'
+repro exec . -- bash -c 'LD_LIBRARY_PATH=$CODETRACER_GPUI_RUNTIME_LIB_PATH src/build-debug-repro/bin/ct replay --ui=gpui /tmp/ct-calc'
 ```
 
 Without a display, `--report-plan` prints the window's render plan as JSON and

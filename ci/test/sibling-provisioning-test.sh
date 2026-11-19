@@ -660,6 +660,35 @@ else
 		"not in repro.nim: ${undeclared_direct[*]-}"
 fi
 
+# Repositories a workflow clones that the public repro.lock deliberately does
+# not pin, each with the reason. repro.lock and repro.nim are public, so a
+# private repository can be neither declared nor pinned there; a lane that
+# needs one provisions it itself. An entry whose repo the lock DOES pin is a
+# failure (checked below), so this list cannot go stale. A bare entry of one of
+# these names in a workflow's `siblings:` block resolves against the public
+# lock and cannot be cloned until that lane gives it an explicit `=<ref>`; that
+# is an open consequence of declaring only public siblings, not something this
+# list repairs.
+declare -A UNLOCKED_SIBLINGS=(
+	["codetracer-native-recorder"]="private"
+	["codetracer-native-backend"]="private"
+	["codetracer-visual-replay"]="private"
+	["codetracer-launcher"]="private"
+	["codetracer-native-test-programs"]="private"
+	["codetracer-snapshot-codecs"]="private"
+	["codetracer-evm-recorder"]="public, but its tools/source_inputs.nim collides with another recorder's in the provider nimcache, so repro.nim cannot declare it"
+)
+unlocked_now_pinned=()
+for _name in "${!UNLOCKED_SIBLINGS[@]}"; do
+	[[ ",$lock_develop_set," == *",$_name,"* ]] &&
+		unlocked_now_pinned+=("'$_name' is in repro.lock now; remove it from UNLOCKED_SIBLINGS")
+done
+if [ "${#unlocked_now_pinned[@]}" -eq 0 ]; then
+	ok "no sibling listed as deliberately unlocked is pinned by repro.lock (${#UNLOCKED_SIBLINGS[@]})"
+else
+	fail "no sibling listed as deliberately unlocked is pinned by repro.lock" "${unlocked_now_pinned[@]}"
+fi
+
 # 1c. Every sibling a workflow checks out by BARE name is resolved against
 # this lock (`clone-siblings`: a bare or trailing-`=` entry falls back to the
 # lock), so each must be a member. `siblings:` blocks are scanned above;
@@ -684,6 +713,7 @@ done < <(
 )
 unlocked_bare=()
 for bare in "${bare_names[@]}"; do
+	[ -n "${UNLOCKED_SIBLINGS[$bare]:-}" ] && continue
 	[[ ",$lock_develop_set," == *",$bare,"* ]] || unlocked_bare+=("$bare")
 done
 if [ "${#bare_names[@]}" -gt 0 ] && [ "${#unlocked_bare[@]}" -eq 0 ]; then
@@ -902,14 +932,15 @@ while read -r where kind name; do
 	grep -qx -- "$name" <<<"$root_set" && in_root=1
 	grep -qx -- "$name" <<<"$test_set" && in_test=1
 	if [ "$kind" = bare ]; then
-		if [ "$in_root" -eq 0 ]; then
+		if [ "$in_root" -eq 0 ] && [ -z "${UNLOCKED_SIBLINGS[$name]:-}" ]; then
 			if [ "$in_test" -eq 1 ]; then
 				undeclared_clones+=("$where: '$name' is a bare entry, which clone-siblings resolves against repro.lock, but only the test lock declares it; pass it as provision-repro-lock-siblings' test-siblings")
 			else
 				undeclared_clones+=("$where: '$name' (bare) is declared by neither repro.lock nor the test lock")
 			fi
 		fi
-	elif [ "$in_root" -eq 0 ] && [ "$in_test" -eq 0 ] && [ -z "${CLONED_BUT_UNDECLARED[$name]:-}" ]; then
+	elif [ "$in_root" -eq 0 ] && [ "$in_test" -eq 0 ] && [ -z "${CLONED_BUT_UNDECLARED[$name]:-}" ] &&
+		[ -z "${UNLOCKED_SIBLINGS[$name]:-}" ]; then
 		undeclared_clones+=("$where: '$name' ($kind) is declared by neither repro.lock nor the test lock")
 	fi
 done < <(cloned_repos)
@@ -3173,7 +3204,9 @@ echo
 # assertion now expects every solved sibling ("clone all").
 # 49 -> 51 (2026-11-17): every repo a workflow clones is declared by a lock,
 # and every cloned sibling's lock pins repro.lock's package catalog.
-readonly EXPECTED_ASSERTIONS=51
+# 51 -> 52 (2026-11-18): no sibling listed as deliberately unlocked (private, or
+# not declarable) is pinned by the public repro.lock.
+readonly EXPECTED_ASSERTIONS=52
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))

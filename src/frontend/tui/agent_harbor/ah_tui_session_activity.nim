@@ -43,7 +43,7 @@
 ## (`runActivityPress`). Each such element is tagged `operation` and
 ## `target`. With no `press`, a press runs the carried operation itself.
 ##
-## Facts (`AhNode`): `surface`, `state`, `status`, `connection` on the
+## Facts (`AhNode`): `surface`, `state`, `session-status`, `connection` on the
 ## panel; `lineFacts` on every line (`line`, `line-kind`, `level`, `text`,
 ## `role`, `expanded`, `focused`, a group's `count`, `failed`, `running`,
 ## `path`, `copy`); `running-strip`, `unseen` and `filter` on the chrome.
@@ -59,7 +59,7 @@ export session_timeline_vm, agent_harbor_activity_words, ah_tui_canvas
 const
   IndentCells* = 2
     ## Each drill-down level is indented two cells.
-  GlyphCells = 2
+  GlyphCells* = 2
     ## A line's leading glyph (`▸`, `▾`, `›`, `●`) and the cell after it.
   FocusBar* = "\xE2\x96\x8E"     ## ▎
   RunningGlyph* = "\xE2\x97\x8F" ## ●
@@ -114,9 +114,17 @@ proc firstShown(rows: seq[ActivityRow]; vm: SessionTimelineVM; height: int): int
     return i + 1
   let anchor = vm.anchor
   if anchor.len == 0: return 0
+  var at = 0
   for i, r in rows:
-    if r.line.id == anchor: return i
-  0
+    if r.line.id == anchor: at = i
+  # A list cannot scroll past its end (as the browser's cannot): when the
+  # lines from the anchor on leave rows below them, earlier lines fill them.
+  var used = 0
+  for i in at ..< rows.len: used += rows[i].rows
+  while at > 0 and used + rows[at - 1].rows <= height:
+    used += rows[at - 1].rows
+    dec at
+  at
 
 proc drawParts(c: var AhCanvas; node: AhNode; line: TimelineLine;
                row, col, cells: int) =
@@ -215,7 +223,7 @@ proc drawSessionActivity*(c: var AhCanvas; vm: SessionTimelineVM;
   let host = c.node(nil, row, col, width, height,
                     [("surface", "agent-harbor-session-activity"),
                      ("state", stateName(vm.state.val)),
-                     ("status", vm.statusLabel),
+                     ("session-status", vm.statusLabel),
                      ("connection", vm.connection.val)])
   c.area("timeline", row, col, width, height, c.tone.body)
   # The head band: the session's status, and the connection badge.

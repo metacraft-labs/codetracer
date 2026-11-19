@@ -6,7 +6,8 @@
 # would only re-take the record the test compares against.
 # ctf-p1b-web-capture.sh [--no-build] [--moments] — CTF-P1b's WEB arm of the GPUI/web
 # layout comparison: every Agent Harbor story in StoryBook, both themes, at
-# the laptop and sidebar sizes, shot by `tools/visual-review/capture-storybook.mjs
+# the laptop and sidebar sizes (and the session activity timeline's at the
+# panel size too), shot by `tools/visual-review/capture-storybook.mjs
 # --regions` into `build/ctf-p1b/web/` (`CTF_P1B_WEB_OUT` overrides), and the
 # regions the browser laid out merged into the COMMITTED record
 # `src/tests/visual/agent-harbor-web-regions.json`.
@@ -60,13 +61,15 @@ if [ "${moments}" = 1 ]; then
 	OUT="${CTF_P1C_WEB_OUT:-${root}/build/ctf-p1c/web}"
 	RECORD="${root}/src/tests/visual/agent-harbor-web-regions-at-moments.json"
 	views=(--view agent-harbor-playback --moments)
+	panelViews=(--view agent-harbor-session-activity-playback --moments)
 	milestone=CTF-P1c
 	reader=test_ctf_p1c_gpui_capture_matches_web_layout_at_moments.nim
 	what="each Agent Harbor playback story at each named moment of its scenario"
 else
 	OUT="${CTF_P1B_WEB_OUT:-${root}/build/ctf-p1b/web}"
 	RECORD="${root}/src/tests/visual/agent-harbor-web-regions.json"
-	views=(--view agent-harbor-session-tabs --view agent-harbor-fleet --view agent-harbor-composer)
+	views=(--view agent-harbor-session-tabs --view agent-harbor-fleet --view agent-harbor-session-activity --view agent-harbor-composer)
+	panelViews=(--view agent-harbor-session-activity)
 	milestone=CTF-P1b
 	reader=test_ctf_p1b_gpui_capture_matches_web_layout.nim
 	what="each region of each Agent Harbor story"
@@ -95,6 +98,12 @@ for size in laptop sidebar; do
 		--size "${size}" --theme dark --theme light \
 		--out "${OUT}" --regions "${DECL}"
 done
+# The session activity timeline is a panel, so its stories are also taken
+# at the brief's `panel` size (760x640), which the other families are not.
+node tools/visual-review/capture-storybook.mjs --no-build --font-render-hinting none \
+	"${panelViews[@]}" \
+	--size panel --theme dark --theme light \
+	--out "${OUT}" --regions "${DECL}"
 node - "${OUT}" "${RECORD}" "${milestone}" "${reader}" "${what}" <<'EOF'
 // Merge every `<capture id>.regions.json` into the committed record, sorted
 // by id so a re-take that changes nothing changes no byte.

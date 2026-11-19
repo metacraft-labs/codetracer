@@ -7,7 +7,7 @@
 #
 # Host integration test, Linux only: it activates the real reprobuild dev env
 # through `repro exec`, which evaluates the Nix flake, so it needs repro and nix.
-# The expected build dir is the Linux tup default, src/build-debug.
+# The expected build dir is src/build-debug-repro, on every platform.
 # CI runs it in the reprobuild-linux-smoke lane; locally: `just test-repro-dev-env`.
 # Usage: bash scripts/test-repro-dev-env.sh
 set -euo pipefail
@@ -33,19 +33,18 @@ if grep -q '^CODETRACER_PREFIX=' "$scratch/env.out"; then
 fi
 build_dir=$(sed -n 's/^CODETRACER_BUILD_DIR=//p' "$scratch/env.out" | head -1)
 [ -n "$build_dir" ] || fail 'the dev env does not export CODETRACER_BUILD_DIR'
-if [ "$build_dir" != "$repo/src/build-debug" ]; then
-	fail "CODETRACER_BUILD_DIR is $build_dir, not $repo/src/build-debug"
+if [ "$build_dir" != "$repo/src/build-debug-repro" ]; then
+	fail "CODETRACER_BUILD_DIR is $build_dir, not $repo/src/build-debug-repro"
 fi
-# The Nix shell already puts the active bin on PATH, so presence alone proves
-# nothing. What the reprobuild env decides is which build's bin wins: the other
-# reprobuild tree must not sit ahead of the active one.
+# The dev env must put the active build's bin on PATH. The release tree, when a
+# checkout holds one, must not sit ahead of it.
 path=$(sed -n 's/^PATH=//p' "$scratch/env.out" | head -1)
 active_bin="$build_dir/bin"
-other_bin="$repo/src/build-debug-repro/bin"
+other_bin="$repo/src/build-release-repro/bin"
 active_at=$(awk -v RS=: -v want="$active_bin" '$0 == want { print NR; exit }' <<<"$path")
 other_at=$(awk -v RS=: -v want="$other_bin" '$0 == want { print NR; exit }' <<<"$path")
 [ -n "$active_at" ] || fail "PATH does not carry \$CODETRACER_BUILD_DIR/bin ($active_bin)"
 if [ -n "$other_at" ] && [ "$other_at" -lt "$active_at" ]; then
 	fail "PATH puts $other_bin ahead of $active_bin"
 fi
-echo 'PASS: the reprobuild dev env exports CODETRACER_BUILD_DIR=src/build-debug, puts its bin on PATH, and leaves CODETRACER_PREFIX unset'
+echo 'PASS: the reprobuild dev env exports CODETRACER_BUILD_DIR=src/build-debug-repro, puts its bin on PATH, and leaves CODETRACER_PREFIX unset'

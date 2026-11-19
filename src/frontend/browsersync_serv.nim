@@ -135,8 +135,8 @@ options.plugins.push js{
 browsersync.init(options) do (err, instance: js):
   echo "browser sync"
   var watchedFiles = @[
-    # cstring("src/build-debug/*.js"),
-    cstring("src/build-debug/frontend/styles/*.css"),
+    # cstring("src/build-debug-repro/*.js"),
+    cstring("src/build-debug-repro/frontend/styles/*.css"),
     cstring"resources/media/*.*",
     cstring"resources/fonts/*.*"
   ]

@@ -984,7 +984,7 @@ impl MeasurementDriver for DapMeasurementDriver {
         // discovery so cells still measure when `ct` isn't built.
         let dap_binary = ct_cli_binary().or_else(ct_binary).ok_or_else(|| {
             "neither `ct` (preferred) nor `replay-server` is on PATH / discoverable; \
-                 run `just build-once` to produce src/build-debug/bin/ct or build the \
+                 run `just build-once` to produce src/build-debug-repro/bin/ct or build the \
                  db-backend at src/db-backend/target/debug/replay-server"
                 .to_string()
         })?;

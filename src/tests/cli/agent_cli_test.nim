@@ -77,7 +77,7 @@ proc ctBinary(): string =
   if result.len > 0:
     return
   let buildDir = getEnv("CODETRACER_BUILD_DIR",
-    repoRoot() / "src" / "build-debug")
+    repoRoot() / "src" / "build-debug-repro")
   result = buildDir / "bin" / "ct"
 
 proc replayServerBinary(): string =

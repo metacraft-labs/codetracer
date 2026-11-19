@@ -194,6 +194,37 @@ const composerExports = [
 for (const name of composerExports) {
   agentHarborViews[`agent-harbor-${kebab(name)}`] = `codetracer-agent-harbor--${kebab(name)}`;
 }
+// The session activity timeline (CTF-P2b): its static stories, in the family
+// `agent-harbor-session-activity`, and its two playback stories, in
+// `agent-harbor-session-activity-playback` (and, with the other playback
+// stories, in `agent-harbor-playback`). Captured at `panel` as well as at
+// `sidebar` and `laptop`: the timeline is a panel.
+const sessionActivityExports = [
+  "SessionActivity",
+  "SessionActivityShort",
+  "SessionActivityKinds",
+  "SessionActivityGroupOpen",
+  "SessionActivityDetails",
+  "SessionActivityCommandTrace",
+  "SessionActivityRunning",
+  "SessionActivityNeedsInput",
+  "SessionActivityFailed",
+  "SessionActivityLong",
+  "SessionActivityReadingBack",
+  "SessionActivityFocused",
+  "SessionActivityLongNames",
+  "SessionActivityFilter",
+  "SessionActivityAgainstCards",
+  "SessionActivityEmpty",
+  "SessionActivityLoading",
+  "SessionActivityError",
+  "SessionActivityUnresolvable",
+];
+const sessionActivityPlaybackExports = ["SessionActivityPlayback", "SessionActivityPlaybackExpanded"];
+for (const name of [...sessionActivityExports, ...sessionActivityPlaybackExports]) {
+  agentHarborViews[`agent-harbor-${kebab(name)}`] = `codetracer-agent-harbor--${kebab(name)}`;
+}
+const playbackViews = new Set(sessionActivityPlaybackExports.map((name) => `agent-harbor-${kebab(name)}`));
 for (const [name, storyId] of Object.entries(agentHarborViews)) {
   views[name] = { storyId, brief: agentHarborBrief, sizes: agentHarborSizes, themes: agentHarborThemes };
 }
@@ -223,7 +254,10 @@ const viewFamilies = {
   "agent-harbor-fleet": Object.keys(agentHarborViews).filter((v) => v.startsWith("agent-harbor-fleet-")),
   "agent-harbor-ref": Object.keys(agentHarborViews).filter((v) => v.startsWith("agent-harbor-ref-")),
   // The playback stories (`--moments` captures them at their named moments).
-  "agent-harbor-playback": Object.keys(agentHarborViews).filter((v) => v.endsWith("-playback")),
+  "agent-harbor-playback": Object.keys(agentHarborViews).filter((v) => v.endsWith("-playback") || playbackViews.has(v)),
+  // Every story of the timeline, the playback stories at their first frame.
+  "agent-harbor-session-activity": [...sessionActivityExports, ...sessionActivityPlaybackExports].map((name) => `agent-harbor-${kebab(name)}`),
+  "agent-harbor-session-activity-playback": [...playbackViews],
   "agent-harbor-session-tabs": sessionTabsExports.map((name) => `agent-harbor-${kebab(name)}`),
   "agent-harbor-composer": composerExports.map((name) => `agent-harbor-${kebab(name)}`),
   "agent-harbor-layouts": agentHarborLayoutViews,
@@ -531,7 +565,11 @@ async function main() {
           ? `${viewAt}-${sizeName}-${theme}`
           : `${viewAt}-${sizeName}`;
         const screenshotPath = join(outDir, `${captureId}.png`);
-        const story = declared;
+        // A story's declared state is its first frame's. At a named moment a
+        // playback story shows the event the moment names, so it is judged
+        // as showing data there (the session activity timeline's first frame
+        // is its empty notice: the session has not started yet).
+        const story = moment && declared ? { ...declared, state: "data" } : declared;
         if (!story) {
           throw new Error(`${captureId}: story ${view.storyId} is not declared in storybook/stories/generated/stories.json (run just storybook-stories)`);
         }
@@ -652,10 +690,22 @@ async function main() {
             const out = {};
             for (const region of declared) {
               const visible = [];
+              // `within`: only the matches drawn wholly inside the first
+              // visible element of that selector (a scrolling list), so a
+              // row scrolled out of the list's box is not counted as shown,
+              // as the GPUI side draws only the rows the list shows.
+              let box = null;
+              if (region.within) {
+                for (const c of document.querySelectorAll(region.within)) {
+                  const r = c.getBoundingClientRect();
+                  if (r.width > 0 && r.height > 0) { box = r; break; }
+                }
+              }
               for (const element of document.querySelectorAll(region.web)) {
                 const rect = element.getBoundingClientRect();
                 const style = getComputedStyle(element);
                 if (rect.width <= 0 || rect.height <= 0 || style.visibility === "hidden" || style.display === "none") continue;
+                if (region.within && (!box || rect.y < box.y - 0.5 || rect.y + rect.height > box.y + box.height + 0.5)) continue;
                 visible.push({ element, rect });
               }
               let chosen = visible.length > 0 ? 0 : -1;
@@ -704,7 +754,7 @@ async function main() {
               }
             }
             return out;
-          }, regionsDeclaration.regions.map(({ name, web, fill, pick, elision }) => ({ name, web, fill: Boolean(fill), pick, elision })));
+          }, regionsDeclaration.regions.map(({ name, web, fill, pick, elision, within }) => ({ name, web, fill: Boolean(fill), pick, elision, within: within?.web })));
           writeFileSync(
             join(outDir, `${captureId}.regions.json`),
             `${JSON.stringify({ renderer: "web", story: view.storyId, ...(moment ? { moment } : {}), theme, viewport, regions }, null, 2)}\n`,

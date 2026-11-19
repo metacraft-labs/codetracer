@@ -131,7 +131,7 @@ suite "AA-3 recognising the evidence handoff in a session":
   test "the binary may be invoked by path, and may be preceded by a wrapper":
     for command in [
         "/nix/store/abc-codetracer/bin/ct agent evidence review.json",
-        "src/build-debug/bin/ct agent evidence review.json",
+        "src/build-debug-repro/bin/ct agent evidence review.json",
         "env CODETRACER_AGENT_SESSION_ID=s ct agent evidence review.json"]:
       let parsed = parseEvidenceCommand(command)
       check parsed.isSome

@@ -30,12 +30,6 @@ $requiredKeys = @(
   "CAPNP_WIN_X64_SHA256",
   "CAPNP_SOURCE_REPO",
   "CAPNP_SOURCE_REF",
-  "TUP_SOURCE_REPO",
-  "TUP_SOURCE_REF",
-  "TUP_SOURCE_BUILD_COMMAND",
-  "TUP_PREBUILT_VERSION",
-  "TUP_PREBUILT_URL",
-  "TUP_PREBUILT_SHA256",
   "TUP_MSYS2_BASE_VERSION",
   "TUP_MSYS2_BASE_X64_SHA256",
   "TUP_MSYS2_PACKAGES",
@@ -73,12 +67,6 @@ $valuePatterns = @{
   "CAPNP_WIN_X64_SHA256" = '^[A-Fa-f0-9]{64}$'
   "CAPNP_SOURCE_REPO" = '^https?://\S+$'
   "CAPNP_SOURCE_REF" = '^[0-9A-Za-z._/\-]+$'
-  "TUP_SOURCE_REPO" = '^https?://\S+$'
-  "TUP_SOURCE_REF" = '^[0-9A-Za-z._/\-]+$'
-  "TUP_SOURCE_BUILD_COMMAND" = '^.+$'
-  "TUP_PREBUILT_VERSION" = '^[0-9A-Za-z._/\-]+$'
-  "TUP_PREBUILT_URL" = '^https?://\S+$'
-  "TUP_PREBUILT_SHA256" = '^[A-Fa-f0-9]{64}$'
   "TUP_MSYS2_BASE_VERSION" = '^[0-9]{8}$'
   "TUP_MSYS2_BASE_X64_SHA256" = '^[A-Fa-f0-9]{64}$'
   "TUP_MSYS2_PACKAGES" = '^[A-Za-z0-9+_.-]+(?: [A-Za-z0-9+_.-]+)*$'

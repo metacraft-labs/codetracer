@@ -97,8 +97,8 @@ nim \
 # code captures cstring iterator values into async closures (see
 # src/frontend/index/files.nim:541), which Nim 2.2's default lent-cstring
 # iterators refuse with "cannot be captured as it would violate memory
-# safety".  The tup build already passes this flag via
-# src/Tuprules.tup:NIM_COMMON_FLAGS; the AppImage path needs it too.
+# safety".  The product build already passes this flag (`CommonNimDefines`
+# in repro.nim); the AppImage path needs it too.
 
 # index.js
 nim \

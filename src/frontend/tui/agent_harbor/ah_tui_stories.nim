@@ -34,6 +34,14 @@ import ./ah_tui_fleet_panel
 import ./ah_tui_playback_bar
 import ./ah_tui_composer
 import ../../stories/agent_harbor_composer_stories
+import ./ah_tui_session_activity
+import ../app/views/agent_activity_pane
+import ../app/layout/cells
+import ../../viewmodel/agent_harbor_activity_cards
+import ../../viewmodel/viewmodels/agent_activity_feed
+import ../../viewmodel/store/replay_data_store
+import ../../viewmodel/backend/[mock_backend, backend_service]
+import std/base64
 import nim_everywhere/async_compat
 import ../../viewmodel/input/element_press
 import ../../viewmodel/keymap/[base_keymaps, context_keys, editing_keymap,
@@ -52,6 +60,7 @@ const
     "agent-harbor-initiatives",
     "agent-harbor-initiative-progress",
     "agent-harbor-composer",
+    "agent-harbor-session-activity",
   ]
     ## Every surface of the Agent Harbor section this module draws.
   AgentHarborSectionTitle* = "CodeTracer/Agent Harbor"
@@ -59,6 +68,15 @@ const
   TuiSizes* = [("laptop", 180, 56), ("sidebar", 45, 56)]
     ## The brief's laptop 1440×900 and sidebar 360×900, at 8×16 px a cell
     ## (`CellPx`; a row is 16 px).
+  TuiPanelSize* = ("panel", 95, 40)
+    ## The brief's panel 760×640: the session activity timeline is a panel,
+    ## so its stories are also captured at this size (`sizesOf`).
+
+proc sizesOf*(surface: string): seq[(string, int, int)] =
+  ## The named sizes a story of `surface` is captured at: laptop and sidebar,
+  ## and panel for the session activity timeline.
+  result = @TuiSizes
+  if surface == "agent-harbor-session-activity": result.add TuiPanelSize
 
 type
   AhTuiMount* = ref object
@@ -73,6 +91,15 @@ type
     initiatives*: InitiativesVM
     progress*: InitiativeProgressVM
     composer*: OmniboxComposerVM
+    timeline*: SessionTimelineVM
+    cards*: ActivityAgainstCards
+      ## The comparison story's cards (`agent_harbor_activity_cards`); unset
+      ## for any other story.
+    copied*: string
+      ## The last text a timeline's Copy handed the clipboard.
+    output*: string
+      ## Bytes for the terminal that the host writes after a draw (a Copy's
+      ## OSC 52, https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h3-Operating-System-Commands).
     playback*: AhPlayback
       ## A playback story's playback (nil for any other story).
     drawnAt: int
@@ -122,6 +149,8 @@ const
 
 let PlaybackScopePath = @[element(ekWindow, "window"), pane(StoryPlaybackScope)]
   ## Where the playback chrome's keys and presses resolve.
+let ActivityScopePath = @[element(ekWindow, "window"), pane(SessionActivityScope)]
+  ## Where the timeline's keys and presses resolve.
 
 proc draw*(m: AhTuiMount)
 
@@ -175,6 +204,38 @@ proc composerKey*(m: AhTuiMount; token: string): bool =
   m.draw()
   true
 
+proc cardInk(p: AhPalette; style: AgentFeedSpanStyle): string =
+  ## A card's span in the palette's ink for its style, as the GPUI pane
+  ## colours them (`gpui/agent_activity_leaf.colourOf`).
+  case style
+  of fsMuted: p.textCaption
+  of fsError, fsRemoved: p.textError
+  of fsAdded: p.textSuccess
+  of fsCode: p.iconInfo
+  of fsHeading, fsButton: p.textLabel
+  else: p.textBody
+
+proc copyText*(m: AhTuiMount; text: string) =
+  ## The story host's clipboard: the terminal's, through OSC 52
+  ## (`ESC ] 52 ; c ; <base64> BEL`), and the text it got.
+  m.copied = text
+  m.output.add "\e]52;c;" & encode(text) & "\a"
+
+proc pressActivity*(m: AhTuiMount; operation, target: string): bool {.discardable.} =
+  ## **A PRESS ON THE TIMELINE**, from its target (the hit test): resolved
+  ## by the story host's router in the `sessionActivity` scope -- a user's
+  ## row for the press first -- else the operation the element carries, and
+  ## run on the element's target (`runActivityPress`, the host's clipboard
+  ## for a Copy). The screen is drawn again by the caller.
+  if m.isNil or m.timeline.isNil: return false
+  let outcome = resolveElementPress(routerResolver(m.router, SessionFacts()),
+                                    ActivityScopePath,
+                                    ButtonElementKind, operation, {}, "Click")
+  m.lastOperation = outcome.operation
+  let mount = m
+  m.timeline.runActivityPress(outcome.operation, target,
+                              proc(text: string) = mount.copyText(text))
+
 proc drawFrame(c: var AhCanvas; title: string): int =
   ## The panel's frame header: the window's ground with the panel's tab at
   ## its start, on the panel's own ground (the active tab runs into its
@@ -217,6 +278,49 @@ proc draw*(m: AhTuiMount) =
   of "agent-harbor-composer":
     c.drawComposer(m.composer, top, 0, m.cols, h, (proc(operation, target: string) =
       discard m.pressComposer(operation, target)))
+  of "agent-harbor-session-activity":
+    let mount = m
+    let press: ActivityPress = proc(operation, target: string) =
+      discard mount.pressActivity(operation, target)
+    if m.cards.cards.isNil:
+      c.drawSessionActivity(m.timeline, top, 0, m.cols, h, press)
+    else:
+      # The comparison story: the timeline on the left half, today's Agent
+      # Activity cards on the right -- the rows the production pane draws
+      # (`agent_activity_feed`, laid out by `app/views/agent_activity_pane`'s
+      # `layoutAgent`), each span in the palette's ink for its style -- and
+      # a column on the raised ground between them (a step off the window,
+      # the head band and the panel).
+      let half = m.cols div 2
+      c.drawSessionActivity(m.timeline, top, 0, half - 1, h, press)
+      c.area("against-gap", top, half - 1, 1, h, c.tone.filters)
+      c.area("card-feed", top, half, m.cols - half, h, c.tone.body)
+      let cards = m.cards.cards
+      # The caption over the cards half (`AgainstCardsCaption`): today's
+      # cards as that pane draws them, wrapped in the caption's ink.
+      let captionLines = wrapCells(AgainstCardsCaption, m.cols - half - 2)
+      for k, line in captionLines:
+        discard c.put(top + k, half + 1, line, c.p.textCaption)
+      discard c.node(c.root, top, half, m.cols - half, captionLines.len,
+                     [("against-caption", AgainstCardsCaption)])
+      let area = CellArea(col: half + 1, row: top + captionLines.len,
+                          width: m.cols - half - 2, height: h - captionLines.len)
+      let screen = layoutAgent(AgentPaneModel(loaded: true, rows: cards.agentFeed(),
+        prompt: promptPlaceholder(cards), promptIsPlaceholder: true,
+        scroll: initFeedScroll()), area)
+      for k in 0 ..< screen.listRows:
+        let i = screen.top + k
+        if i >= screen.lines.len: break
+        var col = area.col
+        for span in screen.lines[i].spans:
+          let room = area.col + screen.width - col
+          if room <= 0: break
+          col += c.put(screen.listTop + k, col, elide(span.text, room), cardInk(c.p, span.style),
+                       span.style in {fsBold, fsBoldItalic, fsHeading, fsButton})
+      discard c.put(screen.promptRow, area.col,
+                    elide("\xE2\x80\xBA " & promptPlaceholder(cards), area.width), c.p.textCaption)
+      discard c.node(c.root, top, half, m.cols - half, h,
+                     [("card-feed", $min(screen.lines.len, screen.listRows))])
   else: discard
   if not m.playback.isNil:
     c.drawPlaybackBar(m.playback, m.rows - 1, (proc(operation: string) =
@@ -256,6 +360,18 @@ proc mountAgentHarborStoryTui*(surface, fixture: string; cols, rows: int;
   of "agent-harbor-initiatives": result.initiatives = createInitiativesStoryVM(fixture, pb)
   of "agent-harbor-initiative-progress": result.progress = createProgressStoryVM(fixture, pb)
   of "agent-harbor-composer": result.composer = createComposerStoryVM(fixture)
+  of "agent-harbor-session-activity":
+    if fixture == "against-cards":
+      # The cards' store is the story's own, over the mock backend: nothing
+      # is replayed, the cards only read the session's entry.
+      let timeline = syntheticTimeline(fixture)
+      let store = createReplayDataStore(newMockBackendService().toBackendService())
+      result.cards = newActivityAgainstCards(store, timeline.sessionId, timeline.events)
+      result.timeline = newSessionTimelineVM(result.cards.timelineSource, timeline.sessionId)
+      result.timeline.load()
+      result.timeline.connection.val = connectionOf(fixture)
+    else:
+      result.timeline = createSessionActivityStoryVM(fixture, pb)
   else: discard
   if not pb.isNil: pb.openAtMoment(moment)
   result.draw()
@@ -300,7 +416,27 @@ proc playbackKey*(m: AhTuiMount; token: string): bool =
   m.draw()
   true
 
+proc activityKey*(m: AhTuiMount; token: string): bool =
+  ## A key while a timeline story is shown, ROUTED: decoded to its canonical
+  ## name (`key_names.keyName`) and resolved by the story host's router in
+  ## the `sessionActivity` scope (`overlay_rows`' `pane:sessionActivity`:
+  ## Right, Left, Enter, `+`, `-`, Down, Up; a user's rows over them). A key that resolves to one of the timeline's operations
+  ## runs it on the timeline, and the screen is drawn again (true).
+  if m.timeline.isNil: return false
+  let name = keyName(token)
+  if name.len == 0: return false
+  let res = m.router.route(SessionFacts(), ActivityScopePath, nmNormal, name, 0)
+  m.lastOperation = if res.kind == erOperation: res.operation else: ""
+  if res.kind != erOperation or not m.timeline.runActivityOperation(res.operation):
+    return false
+  m.draw()
+  true
+
 proc dispose*(m: AhTuiMount) =
+  if m.timeline != nil: m.timeline.dispose()
+  if m.cards.cards != nil:
+    m.cards.cards.dispose()
+    m.cards.store.dispose()
   if m.playback != nil: m.playback.dispose()
   if m.fleet != nil: m.fleet.dispose()
   if m.sessions != nil: m.sessions.dispose()
@@ -332,7 +468,7 @@ proc handleInput*(m: AhTuiMount; token: string): bool =
   ## A press acts on what is under it; motion moves the hover. True when the
   ## screen must be drawn again.
   let (ok, button, row, col, press) = decodeSgrMouse(token)
-  if not ok: return m.playbackKey(token) or m.composerKey(token)
+  if not ok: return m.playbackKey(token) or m.activityKey(token) or m.composerKey(token)
   if (button and 32) != 0:
     # Motion: SGR adds 32 to the button for a motion report (1003).
     result = m.canvas.pointAt(row, col)

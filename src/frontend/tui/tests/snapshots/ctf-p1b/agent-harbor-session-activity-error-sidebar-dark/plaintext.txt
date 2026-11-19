@@ -1,0 +1,56 @@
+ Agent Activity  ⚲ ✕
+ queued                    Connection error
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+             Could not load this
+             session's activity
+                     GET
+     /api/v1/sessions/5ca1ab1e-0e01-4e00
+      -8000-00000000e001/events/history
+          failed: the server closed
+               the connection
+                    Retry
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             

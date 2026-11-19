@@ -159,7 +159,7 @@ record_fixture() {
 	require_file "$RECORDING_DIR/backend.ct/server.ct" "required CTFS trace payload"
 	require_file "$RECORDING_DIR/session.toml" "recorded three-trace session manifest"
 
-	local ct_bin="$REPO_ROOT/src/build-debug/bin/ct"
+	local ct_bin="$REPO_ROOT/src/build-debug-repro/bin/ct"
 	[ -x "$ct_bin" ] || die "built CodeTracer executable is missing: $ct_bin"
 }
 

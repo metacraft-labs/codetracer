@@ -1526,7 +1526,7 @@ proc findCtBinary*(): string =
   # so 4 parentDir calls reach the repo root.
   let thisFile = currentSourcePath()
   let repoRoot = thisFile.parentDir.parentDir.parentDir.parentDir
-  let candidate = repoRoot / "src" / "build-debug" / "bin" / "ct"
+  let candidate = repoRoot / "src" / "build-debug-repro" / "bin" / "ct"
   if fileExists(candidate):
     return candidate
   raise newException(IOError,

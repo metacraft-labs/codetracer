@@ -1,0 +1,56 @@
+ Agent Activity  ⚲ ✕
+ running                                                                                                                                                                 Connected
+ › Make the upload client retry with jitter.
+ ▸ Thinking: Read the client and its tests before changing anything.
+ ▸ Read 4 files
+ ▸ Searched 2 times
+ ▾ Ran 3 shell commands (1 failed)
+   ▸ Ran pytest -q tests/test_backoff.py
+   ▸ Ran pytest -q exit 1
+   ▸ Ran ruff check src/upload
+ ▸ Use full jitter or equal jitter?
+                                                                                                                                                                                    
+ › Full jitter.
+ ▸ Resumed by operator
+ ▸ Edited 3 files +40 −12
+ ▸ Waiting for input (claude stop hook) ×3
+   Retries now back off with full jitter; 18 tests pass.
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    

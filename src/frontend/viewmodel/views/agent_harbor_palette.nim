@@ -58,6 +58,16 @@ type
       ## icon-subtle (#999180) fell to 1.42:1 on the active tab (#b5ae9f) and
       ## 2.42:1 on the panel; #4e4b45 keeps 3:1 (WCAG 1.4.11, a graphical
       ## object) on every Light surface a mark sits on. Dark keeps its role.
+    timelineAdded*: string
+      ## The session activity timeline's added count (`+40`):
+      ## `by-mode(colors-ui-text-success-primary,
+      ## colors-ui-text-success-primary-hover)`. Light's success text
+      ## (#16a34a) measures 2.55:1 on the panel; its hover step keeps the 3:1
+      ## the timeline holds a status role to (WCAG 1.4.11). Dark keeps its role.
+    timelineWarning*: string
+      ## The timeline's unanswered question: `by-mode(colors-ui-text-warning-primary,
+      ## colors-ui-text-warning-primary-hover)`, Light's warning text (#ea580c)
+      ## being 2.76:1 on the panel.
     endedWord*: string
       ## An ended session's status word (`completed`):
       ## `by-mode(caption, label)`. Light's caption (#7a756a) fell to 2.59:1
@@ -130,6 +140,10 @@ proc ahPalette*(mode: DesignMode): AhPalette =
     iconSubtle: t(dtColorsUiIconPrimarySubtle),
     endedMark: (if mode == dmDark: t(dtColorsUiIconPrimarySubtle)
                 else: t(dtColorsUiIconPrimaryDefaultHover)),
+    timelineAdded: (if mode == dmDark: t(dtColorsUiTextSuccessPrimary)
+                    else: t(dtColorsUiTextSuccessPrimaryHover)),
+    timelineWarning: (if mode == dmDark: t(dtColorsUiTextWarningPrimary)
+                      else: t(dtColorsUiTextWarningPrimaryHover)),
     endedWord: (if mode == dmDark: t(dtColorsUiTextPrimaryCaption)
                 else: t(dtColorsUiTextPrimaryLabel)),
     iconDefault: t(dtColorsUiIconPrimaryDefault),
@@ -228,8 +242,8 @@ proc timelineInk*(p: AhPalette; role: string): string =
   of "label": p.textLabel
   of "quiet": p.textCaption
   of "error", "removed": p.textError
-  of "warning": p.textWarning
+  of "warning": p.timelineWarning
   of "running": p.iconInfo
   of "ended": p.endedWord
-  of "added": p.textSuccess
+  of "added": p.timelineAdded
   else: p.textBody

@@ -368,6 +368,202 @@ const composerChecks = {
   }),
 };
 
+
+// --- The session activity timeline (CTF-P2b) -------------------------------
+//
+// The timeline is cardless: no border, outline, shadow or background around
+// an event. `cardlessProblems` reads every drawn line (`[data-ah-line]`) and
+// every element inside it from the browser's computed styles: each border
+// side 0 (or `none`), no outline, a background that is transparent or the
+// panel's own ground, and no shadow -- except the focused line's one inset
+// bar (`.ah-activity-focused`, `box-shadow: inset`), which is a bar, not a
+// fill.
+const TRANSPARENT = new Set(["rgba(0, 0, 0, 0)", "transparent"]);
+function cardlessProblems(panel) {
+  const ground = getComputedStyle(panel).backgroundColor;
+  const problems = [];
+  for (const line of panel.querySelectorAll("[data-ah-line]")) {
+    const id = line.getAttribute("data-ah-line");
+    for (const e of [line, ...line.querySelectorAll("*")]) {
+      const cs = getComputedStyle(e);
+      for (const side of ["Top", "Right", "Bottom", "Left"]) {
+        if (parseFloat(cs[`border${side}Width`]) > 0 && cs[`border${side}Style`] !== "none") {
+          problems.push(`${id}: a ${side.toLowerCase()} border on ${e.className}`);
+        }
+      }
+      if (cs.outlineStyle !== "none" && parseFloat(cs.outlineWidth) > 0) {
+        problems.push(`${id}: an outline on ${e.className}`);
+      }
+      if (!TRANSPARENT.has(cs.backgroundColor) && cs.backgroundColor !== ground) {
+        problems.push(`${id}: the background ${cs.backgroundColor} on ${e.className}`);
+      }
+      if (cs.boxShadow !== "none") {
+        // The focus bar: one inset shadow on the focused line itself.
+        const bar = e === line && line.classList.contains("ah-activity-focused") &&
+          /inset/.test(cs.boxShadow) && !/\),|px,/.test(cs.boxShadow.replace(/rgba?\([^)]*\)/g, "c"));
+        if (!bar) problems.push(`${id}: the shadow ${cs.boxShadow} on ${e.className}`);
+      }
+    }
+  }
+  return problems;
+}
+
+// The check can fail: a copy of a drawn line given a 1px border is reported,
+// and a copy given the focus bar is not. Both copies are removed at once, so
+// the story is left as it stood.
+function cardlessControl(panel) {
+  const line = panel.querySelector("[data-ah-line]");
+  const host = line.parentElement;
+  const planted = line.cloneNode(true);
+  planted.setAttribute("data-ah-line", "planted-border");
+  planted.classList.remove("ah-activity-focused");
+  planted.style.border = "1px solid red";
+  const focused = line.cloneNode(true);
+  focused.setAttribute("data-ah-line", "planted-focus");
+  focused.classList.add("ah-activity-focused");
+  host.append(planted, focused);
+  try {
+    const found = cardlessProblems(panel);
+    expect(found.some((p) => p.startsWith("planted-border:"))).toBe(true);
+    expect(found.filter((p) => p.startsWith("planted-focus:"))).toEqual([]);
+  } finally {
+    planted.remove();
+    focused.remove();
+  }
+}
+
+const lineState = (panel) => [...panel.querySelectorAll("[data-ah-line]")].map((l) =>
+  [l.getAttribute("data-ah-line"), l.getAttribute("data-ah-expanded") ?? "", l.getAttribute("data-ah-focused") ?? ""].join("|"));
+const lineById = (panel, id) => [...panel.querySelectorAll("[data-ah-line]")].find((l) => l.getAttribute("data-ah-line") === id);
+const toggleOf = (line) => line?.querySelector(":scope > .ah-activity-toggle");
+
+// The timeline's own checks, over any of its stories: the head, then for a
+// drawn timeline the cardless rule (with its control), a running command
+// named on its group line, every Copy routed with its text, and every line
+// tagged as the hosts' tests read it.
+async function activityChecks(canvasElement) {
+  const panel = await waitFor(canvasElement, ".agent-harbor-activity[data-ah-state]");
+  expect(panel.getAttribute("data-ct-pane")).toBe("sessionActivity");
+  expect(panel.querySelector(".ah-activity-status")?.textContent.length).toBeGreaterThan(0);
+  const state = panel.getAttribute("data-ah-state");
+  if (state !== "ready") {
+    if (state === "error") {
+      const retry = panel.querySelector(".ah-activity-retry");
+      if (retry) {
+        expect(retry.getAttribute("data-ct-operation")).toBe("session-activity.retry");
+        retry.click();
+        await waitUntil(() => panel.getAttribute("data-ah-state") === "error" &&
+          panel.querySelector(".ah-activity-retry"), "the error again after Retry");
+      }
+    }
+    return panel;
+  }
+  const lines = panel.querySelectorAll("[data-ah-line]");
+  if (panel.querySelector("[data-ah-notice]")) return panel;
+  expect(lines.length).toBeGreaterThan(0);
+  expect(cardlessProblems(panel)).toEqual([]);
+  cardlessControl(panel);
+  // A running command is never hidden: a group that holds one names it.
+  for (const group of panel.querySelectorAll('[data-ah-line-kind="group"]')) {
+    if (Number(group.getAttribute("data-ah-running")) > 0) {
+      expect(group.querySelector(".ah-activity-role-running")?.textContent.length).toBeGreaterThan(0);
+      expect(group.querySelector(".ah-activity-running-mark")).toBeTruthy();
+    }
+  }
+  // A line that opens carries its press, on itself.
+  for (const line of panel.querySelectorAll('[data-ah-expanded]')) {
+    const t = toggleOf(line);
+    expect(t?.getAttribute("data-ct-operation")).toBe("session-activity.toggle");
+    expect(t?.getAttribute("data-ah-target")).toBe(line.getAttribute("data-ah-line"));
+  }
+  // Copy hands its text to the host's clipboard, through the router.
+  const copy = panel.querySelector(".ah-activity-copy");
+  if (copy) {
+    expect(copy.getAttribute("data-ct-operation")).toBe("session-activity.copy");
+    document.body.removeAttribute("data-ah-copied");
+    copy.click();
+    await waitUntil(() => document.body.getAttribute("data-ah-copied") === copy.getAttribute("data-ah-target"),
+      "the copied text on the host's clipboard");
+  }
+  const chip = panel.querySelector(".ah-activity-unseen");
+  if (chip) {
+    expect(chip.getAttribute("data-ct-operation")).toBe("session-activity.jump-to-latest");
+    expect(chip.textContent).toBe(`${chip.getAttribute("data-ah-unseen")} new · Jump to latest`);
+  }
+  return panel;
+}
+
+// The focused story also drives the timeline as a reader does, then leaves
+// it as it stood: a press on a group opens it, on one of its items opens
+// that, on a command's trace opens the trace (levels 1 to 3), and the same
+// presses close them; then the keys: Down and Up move the focus, Right and
+// Left open and close the focused line, Enter steps in and Left steps out,
+// `+` opens every group and `-` closes everything.
+async function activityReader(panel) {
+  const before = lineState(panel);
+  const focusedId = panel.querySelector('[data-ah-focused="true"]')?.getAttribute("data-ah-line");
+  expect(focusedId).toBeTruthy();
+  const press = async (line, expanded) => {
+    const id = line.getAttribute("data-ah-line");
+    toggleOf(line).click();
+    await waitUntil(() => lineById(panel, id)?.getAttribute("data-ah-expanded") === String(expanded),
+      `${id} ${expanded ? "open" : "closed"}`);
+    return lineById(panel, id);
+  };
+  const group = panel.querySelector('[data-ah-line-kind="group"][data-ah-item-kind="shell"][data-ah-expanded="false"]');
+  expect(group).toBeTruthy();
+  const opened = [await press(group, true)];
+  const childOf = (parent, kind) => {
+    const all = [...panel.querySelectorAll("[data-ah-line]")];
+    const at = all.indexOf(lineById(panel, parent.getAttribute("data-ah-line")));
+    for (const l of all.slice(at + 1)) {
+      if (Number(l.getAttribute("data-ah-indent")) <= Number(parent.getAttribute("data-ah-indent"))) break;
+      if (l.getAttribute("data-ah-expanded") === "false" && (!kind || l.getAttribute("data-ah-line-kind") === kind)) return l;
+    }
+    return null;
+  };
+  const item = childOf(opened[0], "item");
+  expect(item).toBeTruthy();
+  opened.push(await press(item, true));
+  const trace = childOf(opened[1], "trace");
+  if (trace) opened.push(await press(trace, true));
+  for (const line of opened.reverse()) await press(lineById(panel, line.getAttribute("data-ah-line")), false);
+  // The keys, from the group line the presses left focused back to the
+  // story's own focused line.
+  const list = panel.querySelector(".ah-activity-lines");
+  const key = async (k) => {
+    panel.querySelector(".ah-activity-lines").dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true }));
+    await tick();
+  };
+  const focused = () => panel.querySelector('[data-ah-focused="true"]')?.getAttribute("data-ah-line");
+  expect(list).toBeTruthy();
+  const order = [...panel.querySelectorAll("[data-ah-line]")].map((l) => l.getAttribute("data-ah-line"));
+  for (let guard = 0; focused() !== focusedId && guard < order.length; guard++) {
+    await key(order.indexOf(focused()) > order.indexOf(focusedId) ? "ArrowUp" : "ArrowDown");
+  }
+  expect(focused()).toBe(focusedId);
+  await key("ArrowDown");
+  await waitUntil(() => focused() !== focusedId, "Down moves the focus");
+  await key("ArrowUp");
+  await waitUntil(() => focused() === focusedId, "Up moves it back");
+  await key("ArrowRight");
+  await waitUntil(() => lineById(panel, focusedId)?.getAttribute("data-ah-expanded") === "true", "Right opens the focused line");
+  await key("ArrowLeft");
+  await waitUntil(() => lineById(panel, focusedId)?.getAttribute("data-ah-expanded") === "false", "Left closes it");
+  await key("Enter");
+  await waitUntil(() => focused() !== focusedId && lineById(panel, focusedId)?.getAttribute("data-ah-expanded") === "true",
+    "Enter opens it and steps in");
+  await key("ArrowLeft");
+  await waitUntil(() => focused() === focusedId && lineById(panel, focusedId)?.getAttribute("data-ah-expanded") === "false",
+    "Left steps out and closes it");
+  await key("+");
+  await waitUntil(() => [...panel.querySelectorAll('[data-ah-line-kind="group"]')].every((g) => g.getAttribute("data-ah-expanded") === "true"),
+    "+ opens every group");
+  await key("-");
+  await waitUntil(() => panel.querySelectorAll('[data-ah-expanded="true"]').length === 0, "- closes everything");
+  expect(lineState(panel)).toEqual(before);
+}
+
 export const plays = {
   ...composerChecks,
   "agent-harbor-fleet-snapshot": fleetCheck(async (el) => {
@@ -664,6 +860,33 @@ export const plays = {
   // host's playback bar under it, at the first frame, whose controls move
   // the playback and the story with it. The bar lives on the document's
   // body (fixed along the canvas's bottom), not inside the story's root.
+  // The session activity timeline (CTF-P2b): every story of it.
+  "agent-harbor-session-activity": async ({ canvasElement }) => {
+    const panel = await activityChecks(canvasElement);
+    if (panel.querySelector('[data-ah-focused="true"]')) await activityReader(panel);
+  },
+  // The comparison story: both halves show one session's one event list
+  // (`againstCardsProblems`, written on the row by the mount), the
+  // timeline is cardless, and the cards half is today's Agent Activity panel.
+  "agent-harbor-session-activity-against-cards": async ({ canvasElement }) => {
+    const row = await waitFor(canvasElement, ".ah-against-cards");
+    expect(row.getAttribute("data-ah-against-problems")).toBe("");
+    expect(row.getAttribute("data-ah-timeline-session")).toBe(row.getAttribute("data-ah-cards-session"));
+    expect(Number(row.getAttribute("data-ah-timeline-events"))).toBeGreaterThan(0);
+    expect(row.getAttribute("data-ah-timeline-events")).toBe(row.getAttribute("data-ah-cards-events"));
+    await activityChecks(row.querySelector(".ah-against-timeline"));
+    expect(row.querySelector(".ah-against-card-feed .agent-msg-wrapper")).toBeTruthy();
+    // The cards half says the cards are today's pane, which mis-draws these
+    // events, so the mis-rendering is not read as the timeline's.
+    expect(row.querySelector(".ah-against-card-feed > .ah-against-caption")?.textContent)
+      .toMatch(/^Today's Agent Activity cards, including a known mis-rendering/);
+  },
+  // A playback story of the timeline: the playback bar's check, then the
+  // timeline's own.
+  "agent-harbor-session-activity-playback": async (context) => {
+    await plays["agent-harbor-playback"](context);
+    await activityChecks(context.canvasElement);
+  },
   "agent-harbor-playback": async () => {
     const bar = await waitFor(document, ".ah-playback");
     // Each button's accessible name is its word, whichever of its word and

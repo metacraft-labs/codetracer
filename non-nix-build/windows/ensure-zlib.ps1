@@ -14,7 +14,7 @@ $ErrorActionPreference = "Stop"
 #     https://github.com/madler/zlib/releases/download/v<version>/zlib-<version>.tar.gz
 #   SHA256 for 1.3.1 is pinned in toolchain-versions.env as ZLIB_WIN_X64_SHA256.
 #
-# Layout produced (matches `src/Tuprules.tup`'s WINDOWS_ZLIB_DIR pin):
+# Layout produced (matches the WINDOWS_ZLIB_DIR pin in `repro.nim`):
 #   $Root/zlib/<version>/include/zlib.h
 #   $Root/zlib/<version>/include/zconf.h
 #   $Root/zlib/<version>/lib/libz.a
@@ -51,7 +51,17 @@ function Resolve-MinGWMakeExe {
   # ensure-* invocation context.
   $gccVersion = $Toolchain["GCC_VERSION"]
   if (-not [string]::IsNullOrWhiteSpace($gccVersion)) {
-    $gccBin = Join-Path $Root ("gcc/" + $gccVersion + "/bin")
+    # `<root>/gcc/<version>` holds only GCC's `gcc.install.relative-path`
+    # pointer now; the tree stays where WinLibs was extracted (the
+    # relocatability note at the top of `Ensure-Gcc`). Resolve it the way
+    # `env.ps1` does, keeping the old directory as the fallback for an install
+    # made before the pointer existed.
+    $gccVersionRoot = Join-Path $Root ("gcc/" + $gccVersion)
+    $gccDir = Resolve-InstallDirFromRelativePathFile `
+      -InstallRoot $Root `
+      -RelativePathFile (Join-Path $gccVersionRoot "gcc.install.relative-path") `
+      -FallbackDir $gccVersionRoot
+    $gccBin = Join-Path $gccDir "bin"
     $candidate = Join-Path $gccBin "mingw32-make.exe"
     if (Test-Path -LiteralPath $candidate -PathType Leaf) {
       return @{ make = $candidate; binDir = $gccBin }

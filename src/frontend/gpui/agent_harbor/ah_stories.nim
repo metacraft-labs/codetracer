@@ -26,6 +26,12 @@ import ./ah_fleet_panel
 import ./ah_playback_bar
 import ./ah_composer
 import ../../stories/agent_harbor_composer_stories
+import ./ah_session_activity
+import ../agent_activity_leaf
+import ../window_geometry
+import ../../viewmodel/agent_harbor_activity_cards
+import ../../viewmodel/store/replay_data_store
+import ../../viewmodel/backend/[mock_backend, backend_service]
 import ../../viewmodel/input/element_press
 import ../../viewmodel/keymap/[base_keymaps, context_keys, editing_keymap,
                                keymap_router,
@@ -43,6 +49,7 @@ const
     "agent-harbor-initiatives",
     "agent-harbor-initiative-progress",
     "agent-harbor-composer",
+    "agent-harbor-session-activity",
   ]
     ## Every surface of the Agent Harbor section this module draws.
   FrameTitlePx = 32          ## `.lm_header`
@@ -63,6 +70,13 @@ type
     initiatives*: InitiativesVM
     progress*: InitiativeProgressVM
     composer*: OmniboxComposerVM
+    timeline*: SessionTimelineVM
+    cards*: ActivityAgainstCards
+      ## The comparison story's cards (`agent_harbor_activity_cards`): its
+      ## store, the events both halves were fed, and today's Agent Activity
+      ## panel's viewmodel. Unset for any other story.
+    cardsFeed*: GpuiElement
+      ## The comparison story's cards half (nil for any other story).
     playback*: AhPlayback
       ## A playback story's playback (nil for any other story): its source
       ## feeds the viewmodel, and the bar under the story controls it.
@@ -129,6 +143,37 @@ proc composerKey*(m: AhStoryMount; name: string; keymap = UserKeymap()): string 
   if res.kind != erOperation or not m.composer.runComposerOperation(res.operation):
     return ""
   res.operation
+
+let ActivityScopePath* = @[element(ekWindow, "window"), pane(SessionActivityScope)]
+  ## Where the timeline's keys and presses resolve.
+
+proc activityRouter(keymap: UserKeymap): KeymapRouter =
+  # GPUI's three keys (`edit_arm.GpuiDelivery`): it receives keys, not bytes.
+  initKeymapRouter(bkCua, KeyDelivery(frontEnd: feGpui, platform: hostPlatform(),
+                                      keyProtocol: kpNative), user = keymap)
+
+proc activityPresses*(keymap: UserKeymap; vm: SessionTimelineVM;
+                      copy: proc(text: string)): ActivityPress =
+  ## **THE STORY HOST'S ROUTE FOR A PRESS ON THE TIMELINE**: the press is
+  ## resolved in the `sessionActivity` scope by the window's router -- a
+  ## user's row for the press first, else the operation the element carries
+  ## -- and the timeline runs it on the element's target
+  ## (`runActivityPress`); a Copy goes to `copy`, the host's clipboard.
+  let resolve = routerResolver(activityRouter(keymap), SessionFacts())
+  result = proc(operation, target: string) =
+    let outcome = resolveElementPress(resolve, ActivityScopePath, ButtonElementKind,
+                                      operation, {}, "Click")
+    discard vm.runActivityPress(outcome.operation, target, copy)
+
+proc activityKey*(m: AhStoryMount; keymap: UserKeymap; key: string): bool =
+  ## A key while a timeline story is shown, ROUTED: resolved by the window's
+  ## router in the `sessionActivity` scope and run on the timeline
+  ## (`runActivityOperation`). False for a key that resolves to nothing the
+  ## timeline does, or with no timeline.
+  if m.timeline.isNil: return false
+  var router = activityRouter(keymap)
+  let res = router.route(SessionFacts(), ActivityScopePath, nmNormal, key, 0)
+  res.kind == erOperation and m.timeline.runActivityOperation(res.operation)
 
 proc drawFrame(r: GpuiRenderer; p: AhPalette; title: string;
                widthPx, heightPx: int): tuple[frame, body: GpuiElement] =
@@ -269,6 +314,74 @@ proc mountAgentHarborStoryGpui*(r: GpuiRenderer; surface, fixture: string;
       m.composer = createComposerStoryVM(fixture)
       r.mountComposer(host, m.composer, p, bodyW, heightPx,
                       composerPresses(keymap, m.composer))
+    of SessionActivitySurface:
+      # The panel's body: the window less its frame (the header and the 8px
+      # above the body) or less the playback bar.
+      let bodyH = if frameTitle.len > 0: heightPx - FrameTitlePx - 8 else: heightPx
+      # The clipboard is the window's (isonim-gpui `writeClipboard`;
+      # `clipboardText` reads back the last text it got).
+      let copy = proc(text: string) = writeClipboard(text)
+      if fixture == "against-cards":
+        # The timeline beside today's Agent Activity cards over the same
+        # events. The cards' store is a story's own, over the mock backend:
+        # nothing is replayed, the cards only read the session's entry.
+        let timeline = syntheticTimeline(fixture)
+        let store = createReplayDataStore(newMockBackendService().toBackendService())
+        m.cards = newActivityAgainstCards(store, timeline.sessionId, timeline.events)
+        m.timeline = newSessionTimelineVM(m.cards.timelineSource, timeline.sessionId)
+        m.timeline.load()
+        m.timeline.connection.val = connectionOf(fixture)
+        let half = bodyW div 2
+        let row = r.box(pairs = [("width", $bodyW & "px"), ("height", $bodyH & "px")])
+        r.tag(row, "against-cards", "")
+        let left = r.createElement("div")
+        r.setStyle(left, "flex-shrink", "0")
+        r.mountSessionActivity(left, m.timeline, p, half - 1, bodyH,
+                               activityPresses(keymap, m.timeline, copy))
+        r.appendChild(row, left)
+        # The view the story shows is the timeline (the web's surface is its
+        # `.agent-harbor-activity`); the cards half is `cardsFeed`.
+        m.view = left
+        r.appendChild(row, r.box(pairs = [("width", "1px"), ("height", $bodyH & "px"),
+                                         ("background", p.borderPrimary),
+                                         ("flex-shrink", "0")]))
+        # The cards half: a caption saying these are today's cards as that
+        # pane draws them (`AgainstCardsCaption`; 12px on 16px lines,
+        # wrapped, 4px above and below, 8px in, as the web's
+        # `.ah-against-caption`), then the cards below it.
+        let halfW = bodyW - half
+        let captionH = wrappedRows(AgainstCardsCaption, CaptionPx, halfW - 16) *
+                       DetailLinePx + 8
+        let cardsHalf = r.box(column = true, pairs = [("width", $halfW & "px"),
+                                                      ("height", $bodyH & "px"),
+                                                      ("flex-shrink", "0")])
+        let caption = r.box(pairs = [("height", $captionH & "px"), ("flex-shrink", "0"),
+                                     ("padding-left", "8px"), ("padding-right", "8px"),
+                                     ("padding-top", "4px")])
+        r.tag(caption, "against-caption", AgainstCardsCaption)
+        r.appendChild(caption, r.text(AgainstCardsCaption, CaptionPx, p.textCaption,
+                                      shrink = false,
+                                      pairs = [("white-space", "pre-wrap"),
+                                               ("line-height", $DetailLinePx & "px"),
+                                               ("flex-shrink", "1"), ("min-width", "0px")]))
+        r.appendChild(cardsHalf, caption)
+        m.cardsFeed = r.box(column = true, pairs = [("width", $halfW & "px"),
+                                                    ("height", $(bodyH - captionH) & "px"),
+                                                    ("flex-shrink", "0")])
+        r.tag(m.cardsFeed, "card-feed", "")
+        discard r.drawAgentActivity(m.cardsFeed, m.cards.cards.agentFeed(),
+                                    promptPlaceholder(m.cards.cards), true, false,
+                                    GAgentPane(scroll: initFeedScroll()),
+                                    PxRect(x: FrameInsetPx + half,
+                                           y: FrameTitlePx + 8 + captionH,
+                                           w: halfW, h: bodyH - captionH))
+        r.appendChild(cardsHalf, m.cardsFeed)
+        r.appendChild(row, cardsHalf)
+        r.appendChild(host, row)
+      else:
+        m.timeline = createSessionActivityStoryVM(fixture, pb)
+        r.mountSessionActivity(host, m.timeline, p, bodyW, bodyH,
+                               activityPresses(keymap, m.timeline, copy))
     else:
       raise newException(ValueError, "no GPUI rendering for the Agent Harbor surface " &
                          surface)
@@ -286,6 +399,8 @@ proc mountAgentHarborStoryGpui*(r: GpuiRenderer; surface, fixture: string;
   let initiatives = m.initiatives
   let progress = m.progress
   let composer = m.composer
+  let timeline = m.timeline
+  let cards = m.cards
   let playback = m.playback
   m.dispose = proc() =
     if playback != nil: playback.dispose()
@@ -295,5 +410,9 @@ proc mountAgentHarborStoryGpui*(r: GpuiRenderer; surface, fixture: string;
     if initiatives != nil: initiatives.dispose()
     if progress != nil: progress.dispose()
     if composer != nil: composer.dispose()
+    if timeline != nil: timeline.dispose()
+    if cards.cards != nil:
+      cards.cards.dispose()
+      cards.store.dispose()
     if rootDisposer != nil: rootDisposer()
   m

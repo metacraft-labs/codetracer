@@ -11,51 +11,34 @@ set -euo pipefail
 # ## Why this script delegates instead of reimplementing
 #
 # `just build` and `just build-once` used to be two independent transcriptions
-# of the same build, and they drifted (issue #599): `build.sh` had no FUSE
-# preflight, no second tup pass, no `post-build-setcap.sh`, hardcoded the
-# `build-debug` variant where `build-once.sh` honoured `CODETRACER_CONFIG`,
-# and — the actual regression — ran `webpack --watch` BEFORE tup rather than
-# after it.
+# of the same build, and they drifted (issue #599): `build.sh` had no
+# preflight, no `post-build-setcap.sh`, hardcoded one configuration's output
+# tree where `build-once.sh` honoured `CODETRACER_CONFIG`, and ran
+# `webpack --watch` BEFORE the build rather than after it, so the build
+# published `src/public/dist` while webpack was concurrently rewriting it.
 #
-# That last one is the interesting failure. `src/public/Tupfile:38` is
-#
-#     : foreach dist/* |> !tup_preserve |> %f
-#
-# i.e. tup globs webpack's OUTPUT directory. Starting `webpack --watch` first
-# means the glob is evaluated against a directory webpack is concurrently
-# writing into, from inside tup's FUSE sandbox. On a fresh tree `dist/` is
-# empty at parse time and `frontend_bundle.js` never reaches the variant tree;
-# on a warm tree webpack rewrites the bundle mid-pass. Two different,
-# nondeterministic failures from one ordering bug. `build-once.sh` has always
-# had this right: tup, then webpack in the FOREGROUND, then tup again —
-# "webpack may have created some new files that tup will discover".
-#
-# So the rule this script now follows is: `build-once.sh` performs the entire
+# So the rule this script follows is: `build-once.sh` performs the entire
 # build, to completion, before any watcher starts. Everything `build-once.sh`
-# gains — preflights, extra passes, setcap, new configuration — `just build`
-# gains for free, and neither can drift from the other again.
+# gains — preflights, setcap, new configuration — `just build` gains for
+# free, and neither can drift from the other again.
 #
 # ## Background processes started here, and only after the build
 #
-#   * tup monitor -a   — incremental rebuilds on legacy tup hosts. Started
-#                        before the writers below so it does not miss their
-#                        first events.
 #   * webpack --watch  — frontend_bundle.js (third-party bundle)
 #   * livereload       — file-tree watcher + LiveReload-protocol WebSocket
 #                        server on port 35729, watching the resolved output
 #                        tree. `src/frontend/hmr_runtime.nim:70` connects to
 #                        ws://localhost:35729/livereload.
-#   * repro watch      — incremental rebuilds on reprobuild hosts; runs in the
-#                        FOREGROUND as the second `build-once.sh` invocation.
+#   * repro watch      — incremental rebuilds; runs in the FOREGROUND as the
+#                        second `build-once.sh` invocation.
 #
 # Every one of them is registered with `ct_start_watcher` and torn down by the
 # single `cleanup` trap installed below, which is armed BEFORE the first of
-# them exists. The previous version installed its trap after the `tup` calls,
-# so a failing tup under `set -e` orphaned `webpack --watch`; and the
-# reprobuild branch `exec`ed away, discarding the trap entirely. Orphans
-# compound: a leaked livereload holds port 35729 so the next run gets
-# EADDRINUSE, and accumulated webpack instances exhaust the inotify watch
-# budget `tup monitor -a` needs.
+# them exists. An earlier version installed its trap late, so a
+# failing step under `set -e` orphaned `webpack --watch`; and it `exec`ed
+# `repro watch`, discarding the trap entirely. Orphans compound: a leaked
+# livereload holds port 35729 so the next run gets EADDRINUSE, and
+# accumulated webpack instances exhaust the host's inotify watch budget.
 
 # Job control off (the default for non-interactive shells, asserted here
 # because `ct_start_watcher` depends on it): with job control ON, `cmd &`
@@ -65,7 +48,7 @@ set +m
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-# `build-once.sh` and the Tupfiles are written against the repo root as CWD.
+# `build-once.sh` and the recipe is written against the repo root as CWD.
 cd "$REPO_ROOT"
 
 # Diagnostic/test override only. The renderer hardcodes 35729
@@ -127,9 +110,6 @@ cleanup() {
 	fi
 }
 
-# `tup monitor -a` is deliberately NOT torn down: it daemonises itself and is
-# shared state for the checkout (a subsequent `tup upd` expects it), so it
-# outlives any single `just build`, exactly as it did before.
 trap cleanup EXIT
 trap 'cleanup; exit 130' INT
 trap 'cleanup; exit 143' TERM HUP
@@ -180,7 +160,7 @@ fi
 # Phase 1 — the full build, to completion, with no watcher running.
 #
 # CODETRACER_BUILD_ENV_FILE asks build-once.sh to publish the build identity it
-# resolved (host branch, config, tup variant, output root) so the watchers
+# resolved (host, config, output root) so the watchers
 # below target the same tree instead of re-deriving it. See the contract in
 # scripts/build-once.sh.
 # ---------------------------------------------------------------------------
@@ -219,32 +199,10 @@ ct_start_watcher() {
 	ct_watcher_pids+=("$!")
 }
 
-if [ -z "$CT_BUILD_HOST" ]; then
-	# Legacy tup host. `tup monitor -a` daemonises; start it before the
-	# writers below so it does not miss their first events.
-	#
-	# The monitor's autoupdates parse the Tupfiles with THIS environment, so
-	# it needs the roots build-once.sh exported to its own tup runs: the Cargo
-	# target base and the Nim cache root, from the one helper (see
-	# build-once.sh), which refuses a Cargo value here that is not this
-	# checkout's and compiler's. Without them every autoupdate would stop at
-	# the parse. (The contract tests' fixture trees have no helper.)
-	if [ -f "$REPO_ROOT/ci/lib/tup-cargo-target.sh" ]; then
-		if ! ct_tup_cargo_env="$(bash "$REPO_ROOT/ci/lib/tup-cargo-target.sh" --reap --export "$REPO_ROOT")"; then
-			echo "build: no Cargo target base this checkout owns (see above); not starting tup monitor." >&2
-			exit 1
-		fi
-		eval "$ct_tup_cargo_env"
-	fi
-	cd src
-	"${TUP:-tup}" monitor -a
-	cd ..
-fi
-
 # Webpack keeps bundling the third-party JS deps in watch mode. This is
 # unrelated to the Nim renderer's HMR, but frontend_bundle.js is an asset the
 # renderer also loads. It runs only AFTER build-once.sh has finished — see the
-# header: tup globs this process's output directory.
+# header: the build publishes this process's output directory.
 ct_start_watcher node_modules/.bin/webpack --watch --progress
 
 # LiveReload daemon over the resolved output tree. `--wait 200` smooths
@@ -271,16 +229,9 @@ cat <<HMR_BANNER
 ==============================================================
 HMR_BANNER
 
-if [ -n "$CT_BUILD_HOST" ]; then
-	# Reprobuild host: the incremental rebuilder is `repro watch`, which is
-	# build-once.sh invoked a second time with a different reprobuild
-	# subcommand. A plain call, NOT `exec` — `exec` would replace this shell
-	# and discard the cleanup trap, orphaning webpack and livereload.
-	export CODETRACER_REPROBUILD_COMMAND="watch"
-	bash "$SCRIPT_DIR/build-once.sh"
-else
-	# Legacy tup host: `tup monitor -a` already daemonised, so the only
-	# foreground work left is to keep this shell (and therefore the cleanup
-	# trap) alive for as long as the watchers run.
-	wait
-fi
+# The incremental rebuilder is `repro watch`, which is build-once.sh invoked a
+# second time with a different reprobuild subcommand. A plain call, NOT `exec`
+# — `exec` would replace this shell and discard the cleanup trap, orphaning
+# webpack and livereload.
+export CODETRACER_REPROBUILD_COMMAND="watch"
+bash "$SCRIPT_DIR/build-once.sh"

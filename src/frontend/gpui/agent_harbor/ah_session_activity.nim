@@ -25,9 +25,11 @@
 ## out of view; the `N new · Jump to latest` chip at the bottom edge while
 ## the reader does not follow and items arrived.
 ##
-## Following: the view draws from the end while the viewmodel follows, and
-## from the anchor line otherwise (`anchor`), so arriving lines never move
-## what the reader reads. The line heights it lays out by are the drawn
+## Following: the view draws from the end while the viewmodel follows, the
+## last line's foot on the list's foot (as the browser scrolls a list to its
+## end), and from the anchor line otherwise (`anchor`; or earlier, when the
+## lines after it leave the list room), so arriving lines never move what
+## the reader reads. The line heights it lays out by are the drawn
 ## ones: 20px a body line, 16px a caption line, and a prose line's wrapped
 ## lines at the text's measured widths.
 ##
@@ -39,9 +41,10 @@
 ## which resolves it through its router and runs it (`runActivityPress`).
 ## Nothing here decides what a press does. With no `press`, nothing listens.
 ##
-## Facts (`data-ah-*`): `surface`, `state`, `status`, `connection`, and each
+## Facts (`data-ah-*`): `surface`, `state`, `session-status`, `connection`, and each
 ## line's `lineFacts`; `running-strip`, `unseen`, `filter`, `badge`,
-## `copy-action` and `path-shown`.
+## `copy-action` and `path-shown`; on each drawn part of a line, its role
+## (`part`) and the colour it is drawn in (`ink`).
 
 import std/strutils
 import nim_agents_isonim_viewmodels/agent_harbor/session_timeline_vm
@@ -49,6 +52,7 @@ import ../../viewmodel/views/agent_harbor_activity_words
 import ../../viewmodel/input/element_press
 import ../chrome
 import ./ah_theme
+import ../../../common/pointer_shape
 
 export session_timeline_vm, agent_harbor_activity_words, ah_theme
 
@@ -63,11 +67,15 @@ const
   FocusBarPx* = 2             ## the inset bar of the focused line
   RunningGlyph* = "\xE2\x97\x8F"  ## ●
 
+const CaptionLines = {tlkDetail, tlkTrace, tlkTraceLine}
+  ## The lines set as captions (`.ah-activity-detail`, `-trace`,
+  ## `-trace-line`): a detail, a trace's line and its lines.
+
 proc sizeOf(line: TimelineLine): int =
-  if line.kind in {tlkDetail, tlkTraceLine}: CaptionPx else: BodyPx
+  if line.kind in CaptionLines: CaptionPx else: BodyPx
 
 proc lineHeightOf(line: TimelineLine): int =
-  if line.kind in {tlkDetail, tlkTraceLine}: DetailLinePx else: LinePx
+  if line.kind in CaptionLines: DetailLinePx else: LinePx
 
 proc wrappedRows*(text: string; sizePx, availPx: int): int =
   ## How many lines `text` wraps to at `availPx`: word by word at the
@@ -113,9 +121,19 @@ proc firstShown*(lines: openArray[TimelineLine]; vm: SessionTimelineVM;
       dec i
     return i + 1
   let anchor = vm.anchor
+  var at = 0
   for i, line in lines:
-    if line.id == anchor: return i
-  0
+    if line.id == anchor: at = i
+  # A list cannot scroll past its end (as the browser's cannot): when the
+  # lines from the anchor on leave room below them, earlier lines fill it.
+  var used = 0
+  for i in at ..< lines.len: used += heightOf(lines[i], widthPx, i == at)
+  while at > 0:
+    let h = heightOf(lines[at - 1], widthPx, true)
+    if used + h > heightPx: break
+    used += h
+    dec at
+  at
 
 proc tagged(el: GpuiElement; fact: string; into: var seq[GpuiElement]) =
   ## Every element under `el` (itself included) carrying `data-ah-<fact>`.
@@ -138,6 +156,7 @@ proc partEl(r: GpuiRenderer; p: AhPalette; part: LinePart; sizePx: int;
                   bold = part.role == "label", shrink = shrink)
   if part.role.isMono: r.setStyle(result, "font-family", MonoFontFamily)
   r.tag(result, "part", part.role)
+  r.tag(result, "ink", timelineInk(p, part.role))
 
 proc drawLine(r: GpuiRenderer; p: AhPalette; vm: SessionTimelineVM;
               line: TimelineLine; widthPx: int; first: bool;
@@ -177,6 +196,8 @@ proc drawLine(r: GpuiRenderer; p: AhPalette; vm: SessionTimelineVM;
     if line.textRole.isMono or line.kind in {tlkDetail, tlkTraceLine} and
         line.parts.len > 0 and line.parts[0].role.isMono:
       r.setStyle(prose, "font-family", MonoFontFamily)
+    r.tag(prose, "part", line.textRole)
+    r.tag(prose, "ink", ink)
     r.appendChild(body, prose)
   else:
     let first = line.parts[0]
@@ -187,6 +208,8 @@ proc drawLine(r: GpuiRenderer; p: AhPalette; vm: SessionTimelineVM;
       let path = r.pathText(line.path, size, timelineInk(p, first.role),
                             bold = first.role == "label")
       r.tag(path, "path-shown", line.path)
+      r.tag(path, "part", first.role)
+      r.tag(path, "ink", timelineInk(p, first.role))
       r.appendChild(body, path)
     else:
       r.appendChild(body, r.partEl(p, first, size, shrink = true))
@@ -199,14 +222,17 @@ proc drawLine(r: GpuiRenderer; p: AhPalette; vm: SessionTimelineVM;
         r.appendChild(body, r.partEl(p, part, size, shrink = false))
   r.appendChild(result, body)
   if line.copyText.len > 0:
+    # On the line's own pitch, as the web's Copy takes its line's height.
     let action = r.text(CopyLabel, CaptionPx, p.textCaption, shrink = false,
-                        pairs = [("cursor", "pointer"), ("margin-left", $InsetPx & "px")])
+                        pairs = [("cursor", pointerShapeOf(HitTarget(kind: hkControl)).cssName),
+                                 ("margin-left", $InsetPx & "px"),
+                                 ("line-height", $lh & "px")])
     r.tag(action, "copy-action", CopyLabel)
     r.carries(action, ActivityCopyOperation, line.copyText, press)
     r.appendChild(result, action)
   if line.expandable:
     # A press on the line opens or closes it (`session-activity.toggle`).
-    r.setStyle(result, "cursor", "pointer")
+    r.setStyle(result, "cursor", pointerShapeOf(HitTarget(kind: hkExpander)).cssName)
     r.carries(result, ActivityToggleOperation, line.id, press)
 
 proc drawSessionActivity*(r: GpuiRenderer; host: GpuiElement; vm: SessionTimelineVM;
@@ -220,7 +246,7 @@ proc drawSessionActivity*(r: GpuiRenderer; host: GpuiElement; vm: SessionTimelin
                   ("background", p.panel), ("overflow", "hidden")])
   r.tag(host, "surface", "agent-harbor-session-activity")
   r.tag(host, "state", stateName(vm.state.val))
-  r.tag(host, "status", vm.statusLabel)
+  r.tag(host, "session-status", vm.statusLabel)
   r.tag(host, "connection", vm.connection.val)
   # The head: the status, and the connection badge on the right.
   let head = r.box(pairs = [("height", $HeadPx & "px"), ("items", "center"),
@@ -248,6 +274,9 @@ proc drawSessionActivity*(r: GpuiRenderer; host: GpuiElement; vm: SessionTimelin
                              ("padding-left", $InsetPx & "px"), ("gap", "8px"),
                              ("flex-shrink", "0")])
     r.tag(row, "filter", vm.filter.val)
+    # The region declaration names the row by this fact (`filter` alone is
+    # the fleet's filter buttons' too).
+    r.tag(row, "activity-filter", vm.filter.val)
     r.appendChild(row, r.text("Filter: " & vm.filter.val, CaptionPx, p.textLabel))
     r.appendChild(row, r.text(vm.filterCountText, CaptionPx, p.textCaption, shrink = false))
     r.appendChild(host, row)
@@ -294,11 +323,38 @@ proc drawSessionActivity*(r: GpuiRenderer; host: GpuiElement; vm: SessionTimelin
     r.appendChild(s, r.text(RunningGlyph, CaptionPx, timelineInk(p, "running"), shrink = false))
     r.appendChild(s, r.text(strip, CaptionPx, p.textBody))
     r.appendChild(host, s)
+  # While following, the list is laid out as the browser scrolls it to its
+  # end: the last line's foot on the list's foot, and the line above the
+  # first whole one cut by the list's top edge.
+  let listBoxH = listH - (if strip.len > 0 and runningId notin drawnIds: StripPx else: 0)
+  var start = first
+  var topMargin = 0
+  var shifted = false
+  if vm.follow.val:
+    # From the end up, each line with the gap above it (a turn's), until the
+    # lines fill the list; the line that crosses its top is drawn first,
+    # pulled up by what does not fit.
+    var total = 0
+    var i = lines.high
+    while i >= 0:
+      total += heightOf(lines[i], widthPx, i == 0)
+      if total >= listBoxH: break
+      dec i
+    if i >= 0:
+      start = i
+      shifted = true
+      let gap = if lines[i].kind == tlkTurn and i > 0: TurnGapPx else: 0
+      topMargin = gap - (total - listBoxH)
   let list = r.box(column = true, pairs = [("flex-grow", "1"), ("min-height", "0px"),
                                            ("overflow", "hidden")])
   r.tag(list, "lines", $lines.len)
-  for i in first ..< lines.len:
-    r.appendChild(list, r.drawLine(p, vm, lines[i], widthPx, i == first, press))
+  # The region declaration names the list by this fact (`lines` is the
+  # session strip's too).
+  r.tag(list, "activity-lines", $lines.len)
+  for i in start ..< lines.len:
+    let el = r.drawLine(p, vm, lines[i], widthPx, i == start, press)
+    if i == start and shifted: r.setStyle(el, "margin-top", $topMargin & "px")
+    r.appendChild(list, el)
   r.appendChild(host, list)
   if chip:
     let row = r.box(pairs = [("height", $StripPx & "px"), ("justify", "center"),

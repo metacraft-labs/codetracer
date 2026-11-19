@@ -51,7 +51,7 @@
 ##      the window and tab runs, over the real `window_routing` tables.
 ##
 ## Lane: `main-process` — `nim js -d:nodejs -d:ctIndex -d:server`, the
-## defines `server_index.js` is built with (`src/Tupfile`), run under node.
+## defines `server_index.js` is built with (`frontend-server-index-js` in `repro.nim`), run under node.
 ## `-d:server` is what lets `electron_vars` load without Electron; the router
 ## has no `when defined(server)` arm, so the code under test is the code
 ## `index.js` ships.

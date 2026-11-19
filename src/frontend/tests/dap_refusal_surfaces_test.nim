@@ -344,3 +344,34 @@ suite "a refused ct/ request reaches the user as readable text":
                     "setBreakpoints", ""]:
       checkpoint(command)
       check not isMotionCommand(cstring(command))
+
+  test "a superseded ct/load-flow paints nothing; other refusals still do":
+    ## The engine answers a `ct/load-flow` that a newer one of the same mode
+    ## overtook before it started with `success: false` and a message that
+    ## starts with `superseded` (`dap_server.rs::next_task_request`). That
+    ## is not a failure the user can act on: the flow of the stop they are
+    ## at is on its way. Every quick step on a slow recording produces one,
+    ## so painting it would fill the status bar during normal stepping.
+    let Superseded = cstring("superseded: a newer ct/load-flow (request 13) " &
+      "for the same flow mode arrived before this one started")
+    let dap = freshDap()
+    dap.sendCtRequest(CtLoadFlow, JsObject{})
+    dap.resolvePendingDapResponse(
+      refusalFrame(lastSeq(), cstring"ct/load-flow", Superseded))
+    check handedToObservers.len == 0
+    check notificationText(paintStatusBar()) == ""
+
+    # THE FILTER IS NARROW. Any other refusal of a flow is still a failure
+    # the user must read ...
+    let flowDap = freshDap()
+    flowDap.sendCtRequest(CtLoadFlow, JsObject{})
+    flowDap.resolvePendingDapResponse(
+      refusalFrame(lastSeq(), cstring"ct/load-flow", BackendSentence))
+    check notificationText(paintStatusBar()).contains($BackendSentence)
+
+    # ... and the same words on another request are that request's refusal.
+    let otherDap = freshDap()
+    otherDap.sendCtRequest(CtRunTracepoints, JsObject{})
+    otherDap.resolvePendingDapResponse(
+      refusalFrame(lastSeq(), cstring"ct/run-tracepoints", Superseded))
+    check notificationText(paintStatusBar()).contains("superseded")

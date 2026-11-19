@@ -44,7 +44,7 @@ import { READY_ON_ENTRY_SELECTOR } from "../../lib/fixtures";
 // root is three levels up. The earlier `path.dirname(currentDir)` form
 // only walked up one level (after a refactor that moved the GUI tests
 // from `tsc-ui-tests/` to `src/tests/gui/`), which built paths like
-// `.../src/tests/src/build-debug/bin/ct` that resolve to ENOENT.
+// `.../src/tests/src/build-debug-repro/bin/ct` that resolve to ENOENT.
 // ---------------------------------------------------------------------------
 
 const isWindows = process.platform === "win32";
@@ -52,7 +52,7 @@ const isWindows = process.platform === "win32";
 const currentDir = path.resolve();
 const codetracerInstallDir = path.resolve(currentDir, "..", "..", "..");
 const testProgramsPath = path.join(codetracerInstallDir, "test-programs");
-const codetracerPrefix = path.join(codetracerInstallDir, "src", "build-debug");
+const codetracerPrefix = path.join(codetracerInstallDir, "src", "build-debug-repro");
 const ctBinaryName = isWindows ? "ct.exe" : "ct";
 const codetracerPath = process.env.CODETRACER_E2E_CT_PATH ??
   path.join(codetracerPrefix, "bin", ctBinaryName);
@@ -140,7 +140,7 @@ function makeCleanEnv(extra?: Record<string, string>): Record<string, string> {
   delete env.CODETRACER_RECORDING_ID;
   delete env.CODETRACER_CALLER_PID;
   // On Windows the Electron binary is launched directly (its exe is not
-  // inside build-debug/), so the Nim code cannot derive the prefix from
+  // inside build-debug-repro/), so the Nim code cannot derive the prefix from
   // getAppDir() — CODETRACER_PREFIX must be set explicitly.  Elsewhere
   // ct derives it from its own location, so the var is removed.
   if (isWindows && electronExePath) {

@@ -1,5 +1,5 @@
 # The compiler probe of the repro build's Cargo slot (repro.nim,
-# ci/lib/tup-cargo-target.sh --repro-slot). It has no dependencies and does
+# ci/lib/repro-cargo-slot.sh). It has no dependencies and does
 # nothing but report which rustc Cargo resolved when it built it; see build.rs.
 [package]
 name = "ct-repro-cargo-probe"

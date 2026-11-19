@@ -12,7 +12,7 @@
 #      runs setcap with hardcoded capabilities on the hardcoded ct binary.
 #   2. Adds a sudoers rule allowing the developer to run it passwordlessly.
 #
-# The tup build rule calls `sudo -n codetracer-setcap` after compilation.
+# scripts/post-build-setcap.sh calls `sudo -n codetracer-setcap` after the build.
 #
 # Usage in your NixOS configuration (e.g. ~/dotfiles):
 #
@@ -47,7 +47,7 @@ let
   # Default target when no path is given: derived from repoPath when set, for
   # backward-compatible `codetracer-setcap` with no argument. The build graph
   # always passes an explicit path, so repoPath is otherwise unused.
-  defaultTarget = if cfg.repoPath != "" then "${cfg.repoPath}/src/build-debug/bin/ct" else "";
+  defaultTarget = if cfg.repoPath != "" then "${cfg.repoPath}/src/build-debug-repro/bin/ct" else "";
 
   # Helper script that applies BPF capabilities to CodeTracer binaries.
   # Installed on PATH as `codetracer-setcap`. The sudoers rule allows running
@@ -123,7 +123,7 @@ in
       default = "";
       description = ''
         Optional. Absolute path to a CodeTracer checkout, used ONLY to
-        compute the default target (<repoPath>/src/build-debug/bin/ct) when
+        compute the default target (<repoPath>/src/build-debug-repro/bin/ct) when
         `codetracer-setcap` is called with no argument. It no longer restricts
         which binaries can be capped — the helper accepts any checkout's
         binaries that pass the basename + ownership checks. Leave empty if you
@@ -134,7 +134,7 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    # Put codetracer-setcap on PATH so the tup build rule can find it.
+    # Put codetracer-setcap on PATH so scripts/post-build-setcap.sh can find it.
     environment.systemPackages = [ setcapHelper ];
 
     # Scoped sudoers rule: allows ONLY the codetracer-setcap helper. The

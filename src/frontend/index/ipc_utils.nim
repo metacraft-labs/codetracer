@@ -310,8 +310,8 @@ proc searchBatchToJs(batch: FindInFilesBatch): JsObject =
   #   Error: 'r' is of type <lent SearchResultLine> which cannot be captured
   #   as it would violate memory safety
   #
-  # The tup build never sees this: `NIM_COMMON_FLAGS` in `src/Tuprules.tup`
-  # passes `-d:nimNoLentIterators`, which makes `items` yield copies. The
+  # The product build never sees this: its Nim defines (`repro.nim`)
+  # pass `-d:nimNoLentIterators`, which makes `items` yield copies. The
   # Nix derivations (`nix/packages/default.nix`) do not pass it, so only the
   # packaged build (`nix build .#codetracer`) fails, and it fails on the
   # dev shell's Nim as well as on the packaged one. That flag divergence is

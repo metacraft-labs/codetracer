@@ -1,0 +1,40 @@
+ Agent Activity  ⚲ ✕
+ failed                                                                          Disconnected
+ › Upgrade the HTTP library and run the tests.
+ ▸ Ran 3 shell commands (2 failed)
+   error: the HTTP library's new API breaks every upload test; stopping
+   Status: failed The agent stopped: the upgrade breaks the upload tests.
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               

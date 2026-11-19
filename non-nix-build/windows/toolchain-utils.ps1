@@ -473,6 +473,55 @@ function Download-String {
 
 $script:NativeCommandTimeoutSecondsDefault = 1800
 
+function ConvertTo-NativeCommandLine {
+  <#
+    .SYNOPSIS
+      Join arguments into one command line the child splits back exactly.
+
+    .DESCRIPTION
+      Start-Process joins an -ArgumentList array with spaces and quotes
+      nothing, so an argument containing a space reaches the child as several.
+      `bash -lc "set -euo pipefail; pacman -Sy ..."` ran a bare `set` (which
+      prints the variables and exits 0) and never ran pacman, and the MSYS2
+      Tup prerequisites were then reported missing (codetracer run
+      44384977215, win-ci-bare-001). This quotes each argument by the rules
+      CommandLineToArgvW and the MSVC/MinGW runtimes split by: an argument
+      with whitespace or a quote, or an empty one, is wrapped in quotes; a
+      quote inside it is escaped, and the backslashes before a quote or before
+      the closing quote are doubled.
+  #>
+  param([Parameter(Mandatory = $true)][AllowEmptyString()][string[]]$ArgumentList)
+
+  $parts = foreach ($arg in $ArgumentList) {
+    if ($arg.Length -gt 0 -and $arg -notmatch '[\s"]') {
+      $arg
+      continue
+    }
+    $sb = [System.Text.StringBuilder]::new()
+    [void]$sb.Append('"')
+    $backslashes = 0
+    foreach ($ch in $arg.ToCharArray()) {
+      if ($ch -eq '\') {
+        $backslashes++
+        continue
+      }
+      if ($ch -eq '"') {
+        [void]$sb.Append([char]'\', 2 * $backslashes + 1)
+      } elseif ($backslashes -gt 0) {
+        [void]$sb.Append([char]'\', $backslashes)
+      }
+      $backslashes = 0
+      [void]$sb.Append($ch)
+    }
+    if ($backslashes -gt 0) {
+      [void]$sb.Append([char]'\', 2 * $backslashes)
+    }
+    [void]$sb.Append('"')
+    $sb.ToString()
+  }
+  $parts -join ' '
+}
+
 function Invoke-BoundedNativeCommand {
   <#
     .SYNOPSIS
@@ -498,7 +547,7 @@ function Invoke-BoundedNativeCommand {
   #>
   param(
     [Parameter(Mandatory = $true)][string]$FilePath,
-    [Parameter(Mandatory = $true)][string[]]$ArgumentList,
+    [Parameter(Mandatory = $true)][AllowEmptyString()][string[]]$ArgumentList,
     [Parameter(Mandatory = $true)][string]$Activity,
     [int]$TimeoutSeconds = 0
   )
@@ -513,7 +562,7 @@ function Invoke-BoundedNativeCommand {
   $process = $null
   try {
     $process = Start-Process -FilePath $FilePath `
-      -ArgumentList $ArgumentList `
+      -ArgumentList (ConvertTo-NativeCommandLine -ArgumentList $ArgumentList) `
       -NoNewWindow `
       -PassThru `
       -RedirectStandardInput $emptyStdin

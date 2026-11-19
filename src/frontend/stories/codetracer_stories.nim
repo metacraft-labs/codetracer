@@ -82,6 +82,75 @@ func panel(exportName, name, surface: string; fixture = "populated";
            check = ""; description = ""; state = "data"): CodeTracerStory =
   story(exportName, name, "panel", surface, fixture, check, description, state)
 
+func sessionActivityStories(): seq[CodeTracerStory] =
+  ## The session activity timeline (`agent-harbor-session-activity`): one
+  ## session's activity as a cardless timeline, framed as the Agent Activity
+  ## panel, over the invented timelines and the invented `session-run`
+  ## scenario (`stories/agent_harbor_stories.createSessionActivityStoryVM`).
+  ## Every story runs the play check that holds the timeline cardless.
+  const surface = "agent-harbor-session-activity"
+  const check = "agent-harbor-session-activity"
+  func activity(exportName, name, fixture, description: string;
+                state = "data"; check = check): CodeTracerStory =
+    panel(exportName, name, surface, fixture, check, description, state)
+  @[
+    activity("SessionActivity", "Session Activity", "populated",
+             "A session with every group kind, each group closed: reads, searches, " &
+               "shell commands with one failed, edits with their totals, a repeated hook"),
+    activity("SessionActivityShort", "Session Activity: Short", "short",
+             "A few lines and no group"),
+    activity("SessionActivityKinds", "Session Activity: Every Kind", "every-kind",
+             "One line of each kind of event, none grouped"),
+    activity("SessionActivityGroupOpen", "Session Activity: Group Open", "group-open",
+             "The shell commands' group open: its commands one line each"),
+    activity("SessionActivityDetails", "Session Activity: Details", "details",
+             "An edit's diff and a failed command's arguments and output open, each with Copy"),
+    activity("SessionActivityCommandTrace", "Session Activity: Command Trace", "command-trace",
+             "The commands' traces open: a pipeline with a failing stage, a long-running " &
+               "child, a child that outlives its parent, a command with no trace"),
+    activity("SessionActivityRunning", "Session Activity: Running", "running",
+             "A command still running inside a group, named on the group line"),
+    activity("SessionActivityNeedsInput", "Session Activity: Needs Input", "needs-input",
+             "The agent waits on its question"),
+    activity("SessionActivityFailed", "Session Activity: Failed", "failed",
+             "Failed commands in a group, then the failure the agent stopped on: red once"),
+    activity("SessionActivityLong", "Session Activity: Long Session", "long",
+             "About four hundred events over twelve turns, with pauses; the list scrolls"),
+    activity("SessionActivityReadingBack", "Session Activity: Reading Back", "reading-back",
+             "The reader scrolled away while lines arrived: the view holds its place " &
+               "and offers the new lines"),
+    activity("SessionActivityFocused", "Session Activity: Focused Line", "focused",
+             "A group line with the focus"),
+    activity("SessionActivityLongNames", "Session Activity: Long Names", "long-names",
+             "Long messages wrap; long paths are cut in their middle, long commands at their end"),
+    activity("SessionActivityFilter", "Session Activity: Filtered", "filter",
+             "The list filter keeps the lines that name the upload client"),
+    activity("SessionActivityAgainstCards", "Session Activity: Against The Cards",
+             "against-cards",
+             "The same session's events as the cardless timeline and as today's " &
+               "Agent Activity cards, side by side",
+             check = "agent-harbor-session-activity-against-cards"),
+    activity("SessionActivityEmpty", "Session Activity: Empty", "empty",
+             "A session with no events yet", state = "empty"),
+    activity("SessionActivityLoading", "Session Activity: Loading", "loading",
+             "Waiting for the session's events", state = "loading"),
+    activity("SessionActivityError", "Session Activity: Error", "error",
+             "The session's events could not be read", state = "error"),
+    activity("SessionActivityUnresolvable", "Session Activity: Unresolvable Session",
+             "unresolvable",
+             "A session the server does not hold: it says so, never an empty timeline",
+             state = "error"),
+    activity("SessionActivityPlayback", "Session Activity: Playback", "playback-session-run",
+             "One session's work event by event while another session's events interleave; " &
+               "its first frame is before the session's first event",
+             state = "empty", check = "agent-harbor-session-activity-playback"),
+    activity("SessionActivityPlaybackExpanded", "Session Activity: Playback, Group Open",
+             "playback-session-run+expanded",
+             "The same, with the shell group opened when it forms and kept open while " &
+               "lines arrive below it",
+             state = "empty", check = "agent-harbor-session-activity-playback"),
+  ]
+
 func agentHarborSection(): CodeTracerStorySection =
   ## CodeTracer as an Agent Harbor front-end: the prototypes of the panels
   ## that show an Agent Harbor fleet, over the viewmodels of
@@ -436,7 +505,7 @@ func agentHarborSection(): CodeTracerStorySection =
       story("ComposerLongNames", "Composer: Long Names", "view", "agent-harbor-composer", "long-names",
             "agent-harbor-composer-long-names",
             "A long instruction, session and initiative: cut by the one rule, prose wrapped"),
-    ])
+    ] & sessionActivityStories())
 
 func panelsSection(): CodeTracerStorySection =
   CodeTracerStorySection(
@@ -679,6 +748,7 @@ const agentHarborPanelNames = [
   ("agent-harbor-session-list", "Sessions"),
   ("agent-harbor-initiatives", "Initiatives"),
   ("agent-harbor-initiative-progress", "Initiative Progress"),
+  ("agent-harbor-session-activity", "Agent Activity"),
 ]
   ## Each Agent Harbor panel's own name: what its golden-layout tab says in
   ## every story of it, whichever state the story shows.

@@ -388,6 +388,39 @@ try {
   Assert-Equal -Expected 0 -Actual $exit `
     -Message "a successful child still reports exit 0"
 
+  # Every argument reaches the child as exactly one argument. Start-Process
+  # joins an array with spaces and quotes nothing, so `bash -lc "<script>"`
+  # used to run only the script's first word (codetracer run 44384977215: the
+  # MSYS2 pacman install ran a bare `set`). `pwsh -Command "<words>"` hid it,
+  # because pwsh joins its remaining arguments back together.
+  Write-Host "== Invoke-BoundedNativeCommand passes each argument intact"
+  $argProbe = Join-Path ([System.IO.Path]::GetTempPath()) ("ct-argv-" + [Guid]::NewGuid().ToString("N"))
+  $argScript = "$argProbe.ps1"
+  $argOut = "$argProbe.json"
+  Set-Content -LiteralPath $argScript -Value (
+    '$args | ConvertTo-Json -AsArray | Set-Content -LiteralPath $env:CT_ARGV_OUT -Encoding utf8')
+  $sent = @("set -euo pipefail; pacman -Sy --noconfirm a b", "", "plain",
+    'with "quotes" inside', 'C:\dir with space\', 'trailing\', 'a\"b', '  ')
+  [Environment]::SetEnvironmentVariable("CT_ARGV_OUT", $argOut)
+  try {
+    $exit = Invoke-BoundedNativeCommand `
+      -FilePath $pwshPath `
+      -ArgumentList (@("-NoProfile", "-File", $argScript) + $sent) `
+      -Activity "an argv probe" `
+      -TimeoutSeconds 60
+    Assert-Equal -Expected 0 -Actual $exit -Message "the argv probe ran"
+    $got = @(Get-Content -LiteralPath $argOut -Raw | ConvertFrom-Json)
+    Assert-Equal -Expected $sent.Count -Actual $got.Count `
+      -Message "the child received $($sent.Count) arguments, one per argument sent"
+    for ($i = 0; $i -lt $sent.Count; $i++) {
+      Assert-True -Condition ($i -lt $got.Count -and [string]$got[$i] -ceq $sent[$i]) `
+        -Message "argument $i arrives as sent: [$($sent[$i])]"
+    }
+  } finally {
+    [Environment]::SetEnvironmentVariable("CT_ARGV_OUT", $null)
+    Remove-Item -LiteralPath $argScript, $argOut -Force -ErrorAction SilentlyContinue
+  }
+
   # -------------------------------------------------------------------------
   # Part 6 - the bounds are configurable, and reject nonsense loudly.
   # -------------------------------------------------------------------------

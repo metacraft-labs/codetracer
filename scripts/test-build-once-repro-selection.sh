@@ -53,7 +53,7 @@ printf 'darwin lock\n' >"$ct/locks/arm64-macosx.lock"
 for helper in require-siblings build-tailwind; do
 	printf '#!/usr/bin/env bash\nexit 0\n' >"$ct/scripts/$helper.sh"
 done
-for tool in nim tup nix xcrun; do
+for tool in nim node nix xcrun; do
 	printf '#!/usr/bin/env bash\nexit 0\n' >"$work/bin/$tool"
 done
 cat >"$work/bin/repro" <<'TOOL'
@@ -143,7 +143,7 @@ run_driver() {
 	rm -f "$work/ran"
 	(cd "$ct" && env PATH="$path" TEST_RAN="$work/ran" \
 		CODETRACER_REPROBUILD_REPO_PATH="$rb" \
-		RUNQUOTA_SOCKET="$work/unused.sock" CODETRACER_REPROBUILD_LINUX=1 \
+		RUNQUOTA_SOCKET="$work/unused.sock" \
 		CODETRACER_TRACE_FORMAT_NIM_TOOL_PATHS="$work/tool-paths.json" \
 		"$@" bash "$ct/scripts/build-once.sh") >"$work/log" 2>&1 || status=$?
 }
@@ -252,7 +252,7 @@ echo 'PASS: a pin reached through a follows edge is resolved and checked'
 #    PATH is the caller's minus every directory that carries a `repro`, with
 #    this test's stubs except its pinned repro.
 mkdir "$work/norepro"
-for tool in nim tup nix xcrun uname; do
+for tool in nim node nix xcrun uname; do
 	ln -s "$work/bin/$tool" "$work/norepro/$tool"
 done
 norepro_path="$work/norepro"

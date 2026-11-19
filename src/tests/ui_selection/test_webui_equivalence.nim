@@ -106,7 +106,7 @@ proc repoRoot(): string =
 
 let
   root = repoRoot()
-  ctBinary = root / "src" / "build-debug" / "bin" / "ct"
+  ctBinary = root / "src" / "build-debug-repro" / "bin" / "ct"
 
 var
   tracePath = ""

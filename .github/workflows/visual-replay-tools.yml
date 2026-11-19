@@ -23,6 +23,11 @@ jobs:
     timeout-minutes: 150
     name: Build the visual replay tools (once per run)
     steps:
+      - name: Record when the job started
+        # For the cache push at the end, whose budget is what the job's time
+        # limit leaves.
+        run: echo "CT_JOB_STARTED_AT=$(date +%s)" >>"$GITHUB_ENV"
+
       - name: Generate CI token
         id: ci_token
         uses: actions/create-github-app-token@v2
@@ -71,6 +76,17 @@ jobs:
         id: tools
         run: nix develop .#devShells.x86_64-linux.default --command bash ci/test/visual-replay-tools.sh "${RUNNER_TEMP}/visual-replay.env"
 
+      - name: Build isonim-gpui's featureless shim
+        # For GPUI shard 1's plat45, which links `just build-gpui` against it:
+        # built there, it cost the shard about 9.5 minutes of isonim-gpui's dev
+        # shell and cargo (run 44384977215), before its first capture. Only the
+        # shim travels; `just build-gpui` stays in the shard, whose checkout
+        # path the binary is built for.
+        run: |
+          cd ../isonim-gpui
+          nix develop --command bash -c "cd rust && cargo build"
+          ls -la rust/target/debug/libgpui_nim_shim.so
+
       - name: Pack them
         # Paths relative to the workspace's parent, as ct-build packs its
         # products, so a shard restores them beside its own siblings. The
@@ -81,6 +97,7 @@ jobs:
             codetracer-native-backend/target/debug/ct-native-replay
             codetracer-visual-replay/ct_gfx_player
             codetracer-native-recorder/ct_cli/ct_cli
+            isonim-gpui/rust/target/debug/libgpui_nim_shim.so
           )
           [ ! -e codetracer-visual-replay/ct-native-replay ] || files+=(codetracer-visual-replay/ct-native-replay)
           tar -czf "${RUNNER_TEMP}/visual-replay-tools.tar.gz" "${files[@]}"
@@ -93,3 +110,27 @@ jobs:
           path: ${{ runner.temp }}/visual-replay-tools.tar.gz
           retention-days: 2
           compression-level: 0
+
+      - name: Push the dev shells this job realised to the cache
+        # The `.#ci` and default shells this job provisioned, so the shards
+        # substitute them. The only other push of them is at the end of TUI
+        # shard 1, which does not always get there: in run 44384977215 it was
+        # killed during provisioning, and GPUI shard 1 then fetched the sway,
+        # miden-vm, agave and sui sources and built their packages (about 10
+        # minutes) and cargo-build-sbf (11 minutes) itself. This job is no
+        # `needs` of anything, so the push holds no one back. After the upload,
+        # so the shards' tools are not delayed by it. Best effort (a 15-minute
+        # budget capped at what the job's limit leaves, exit 0 on any failure,
+        # continue-on-error), and only dev and agents write the shared cache
+        # (ci/test/push-built-closure-test.sh).
+        if: ${{ !cancelled() && (github.ref_name == 'dev' || github.ref_name == 'agents') }}
+        continue-on-error: true
+        timeout-minutes: 20
+        env:
+          ATTIC_ENDPOINT: ${{ vars.ATTIC_ENDPOINT }}
+          ATTIC_CACHE: ${{ vars.ATTIC_CACHE }}
+          ATTIC_TOKEN: ${{ secrets.ATTIC_TOKEN }}
+          CT_JOB_TIMEOUT_MINUTES: 150
+        # CT_JOB_TIMEOUT_MINUTES is this job's timeout-minutes (held equal by
+        # push-built-closure-test.sh).
+        run: bash ci/deploy/push-built-closure.sh --gcroots "${CT_GCROOT_DIR:-$RUNNER_TEMP/ct-gcroots}" --flake-inputs

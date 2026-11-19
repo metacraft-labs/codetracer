@@ -194,15 +194,38 @@ proc renderNotice[R](r: R; message, kind: string): auto =
     tdiv(class = "empty-overlay ah-activity-notice", `data-ah-notice` = kind):
       text message
 
-proc renderError[R](r: R; vm: SessionTimelineVM): auto =
-  ui(r):
+proc renderError[R, N](r: R; vm: SessionTimelineVM): N =
+  mixin appendChild
+  var message: N
+  result = ui(r):
     tdiv(class = "ah-activity-error", `data-ah-notice` = "error"):
       tdiv(class = "ah-activity-error-title"):
         text ErrorTitle
-      tdiv(class = "ah-activity-error-message", `data-ah-error` = vm.error.val):
-        text vm.error.val
+      tdiv(ref = message, class = "ah-activity-error-message", `data-ah-error` = vm.error.val)
       button(class = "ah-activity-retry", `data-ct-operation` = ActivityRetryOperation):
         text "Retry"
+  # A request's path breaks before each `/` (a `<wbr>`: no character is
+  # added) and the words at their spaces, as GPUI wraps them, never after
+  # the hyphens of an id: each segment's first word is kept whole
+  # (`.ah-activity-error-word`).
+  let parts = vm.error.val.split('/')
+  for i, part in parts:
+    if i > 0:
+      let opportunity = ui(r):
+        wbr()
+      r.appendChild(message, opportunity)
+    let segment = (if i > 0: "/" else: "") & part
+    let space = segment.find(' ')
+    let head = if space < 0: segment else: segment[0 ..< space]
+    let whole = ui(r):
+      span(class = "ah-activity-error-word"):
+        text head
+    r.appendChild(message, whole)
+    if space >= 0:
+      let rest = ui(r):
+        span:
+          text segment[space .. ^1]
+      r.appendChild(message, rest)
 
 when defined(js):
   proc keepPlace(list: isonim_dom.Element; strip: isonim_dom.Element;
@@ -232,6 +255,19 @@ when defined(js):
       }
       place();
       strip_();
+      // On the first drawing the list is not in the page yet, so it has no
+      // layout to scroll or measure: place it again once it is laid out.
+      requestAnimationFrame(function () { place(); strip_(); });
+      // And again once the faces have loaded, which changes the lines'
+      // heights and so where the list's end is.
+      if (document.fonts && document.fonts.ready)
+        document.fonts.ready.then(function () { place(); strip_(); });
+      // And whenever a line's height changes after that (a late wrap): the
+      // list stays where it stands, at its end while following.
+      if (typeof ResizeObserver !== 'undefined') {
+        var ro = new ResizeObserver(function () { place(); strip_(); });
+        for (var i = 0; i < list.children.length; i++) ro.observe(list.children[i]);
+      }
       list.onscroll = function () {
         strip_();
         var b = list.getBoundingClientRect(), top = '';
@@ -263,7 +299,7 @@ proc renderAgentHarborSessionActivity*[R, N](r: R; vm: SessionTimelineVM): N =
                                   of asIdle, asLoading: "loading"
                                   of asError: "error"
                                   of asReady: "ready")),
-                       ("status", vm.statusLabel), ("connection", vm.connection.val)])
+                       ("session-status", vm.statusLabel), ("connection", vm.connection.val)])
     r.appendRendered(body, renderHead[R, N](r, vm))
     if vm.filter.val.len > 0:
       r.appendRendered(body, renderFilterRow(r, vm))
@@ -273,9 +309,16 @@ proc renderAgentHarborSessionActivity*[R, N](r: R; vm: SessionTimelineVM): N =
       return
     of asError:
       if vm.unresolvable.val.len > 0:
-        r.appendRendered(body, renderNotice(r, vm.notice, "unresolvable"))
+        # A session the source does not hold is an error, said in words
+        # (`This session cannot be loaded: <reason>`), never an empty
+        # timeline; centred as the notices are.
+        let n = ui(r):
+          tdiv(class = "ah-activity-unresolvable ah-activity-error-state",
+               `data-ah-notice` = "unresolvable"):
+            text vm.notice
+        r.appendRendered(body, n)
       else:
-        r.appendRendered(body, renderError(r, vm))
+        r.appendRendered(body, renderError[R, N](r, vm))
       return
     of asReady:
       discard
@@ -323,3 +366,12 @@ proc renderAgentHarborSessionActivity*[R, N](r: R; vm: SessionTimelineVM): N =
               if $top != target.readingAt.val: target.readAt($top))
 
   panel
+
+when defined(js):
+  import isonim/web/web_renderer
+
+  proc mountAgentHarborSessionActivityPanel*(container: isonim_dom.Element;
+                                             vm: SessionTimelineVM) =
+    ## The timeline in `container`, for the browser.
+    discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
+      renderAgentHarborSessionActivity[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))

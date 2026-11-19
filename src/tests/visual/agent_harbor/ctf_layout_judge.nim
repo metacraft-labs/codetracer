@@ -48,6 +48,9 @@ const
   Sizes* = [("laptop", 1440, 900), ("sidebar", 360, 900)]
     ## The design brief's laptop and narrow sizes (`capture-storybook.mjs`'s
     ## `laptop` and `sidebar`).
+  PanelSize* = ("panel", 760, 640)
+    ## The brief's `panel` size, at which the session activity timeline's
+    ## stories are also captured (the timeline is a panel; `sizesOf`).
   Themes* = ["dark", "light"]
   FillTolerance* = 1
     ## Per channel, between the GPUI frame's pixel and the colour the browser
@@ -396,6 +399,19 @@ proc drawnCutProblems*(gpuiDoc: JsonNode): seq[string] =
       result.add "GPUI draws the cut text '" & cut.getStr &
                  "' with a space or a separator before its \"…\""
 
+proc cutTopLineProblems*(side: string; regions: RegionSet): seq[string] =
+  ## A list drawn from its first line (the session activity timeline's
+  ## static stories open at the top of their list) cuts no line at its top
+  ## edge: the first line drawn wholly inside it (`timeline-line-first`,
+  ## counted `within` the list) starts on the list's top edge. A line the
+  ## edge cuts in half is not counted, so the first whole one starts lower.
+  if "timeline" notin regions or "timeline-line-first" notin regions: return
+  let list = regions["timeline"]
+  let first = regions["timeline-line-first"]
+  if first.y > list.y + 0.5:
+    result.add side & ": the list's top edge (y " & $list.y & ") cuts a line; its first " &
+               "whole line starts at y " & $first.y
+
 proc judgeCapture*(id: string; dir: string; webCapture: JsonNode;
                   vw, vh: int): CaptureJudgement =
   ## Everything this suite asserts about ONE capture, as a verdict and the
@@ -475,12 +491,18 @@ proc agentHarborSection*(): CodeTracerStorySection =
   for s in codeTracerStorySections():
     if s.title == SectionTitle: return s
 
+proc sizesOf*(story: CodeTracerStory): seq[(string, int, int)] =
+  ## The sizes a story is captured at: laptop and sidebar, and panel for the
+  ## session activity timeline.
+  result = @Sizes
+  if story.surface == "agent-harbor-session-activity": result.add PanelSize
+
 proc expectedCaptures*(section: CodeTracerStorySection): seq[Expected] =
   for story in section.stories:
     let sid = storybookId(section, story)
     doAssert sid.startsWith(StoryIdPrefix), sid
     let view = ViewPrefix & sid[StoryIdPrefix.len .. ^1]
-    for (size, w, h) in Sizes:
+    for (size, w, h) in sizesOf(story):
       for theme in Themes:
         result.add Expected(id: view & "-" & size & "-" & theme, width: w, height: h)
 

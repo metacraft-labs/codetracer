@@ -447,8 +447,8 @@ done <"${sourced_set_file}"
 # ---------------------------------------------------------------------------
 # Five, in two files, and every one of them belongs to the SAME contract: the
 # non-nix build environment, read by eleven scripts in `non-nix-build/` and, in
-# `ROOT_DIR`'s case, by `non-nix-build/windows/ensure-tup.ps1` from the
-# PowerShell side. Renaming them would be a cross-language change with no
+# `ROOT_DIR`'s case, by the `non-nix-build/windows/ensure-*.ps1` bootstraps from
+# the PowerShell side. Renaming them would be a cross-language change with no
 # defect behind it; declaring them costs one line per file and makes it
 # checkable.
 #

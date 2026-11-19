@@ -269,7 +269,6 @@ jobs:
             "non-nix-build/windows/ensure-uv.ps1",
             "non-nix-build/windows/ensure-nim.ps1",
             "non-nix-build/windows/ensure-capnp.ps1",
-            "non-nix-build/windows/ensure-tup.ps1",
             "non-nix-build/windows/ensure-ct-remote.ps1",
             "non-nix-build/windows/ensure-nargo.ps1",
             "non-nix-build/windows/ensure-ttd.ps1",
@@ -1089,7 +1088,7 @@ jobs:
           consumer-directory: wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer
           workspace-directory: wr3-${{ github.run_id }}-${{ github.run_attempt }}
           sibling-strategy: repro-lock
-          repro-version: v0.2.17
+          repro-version: v0.2.26
           gh-token: ${{ steps.ci_token.outputs.token }}
           # THIS LIST HOLDS ONLY WHAT THE LOCK PATH WILL NOT CLONE. `repro develop
           # --all` materialises what repro.lock pins, but it skips a row a recipe
@@ -1336,7 +1335,7 @@ jobs:
           gh-token: ${{ steps.ci_token.outputs.token }}
           env-ps1-path: ./env.ps1
           siblings: |
-            codetracer-native-recorder=bafd73847c9261bc46bfcdd90a20fc4dcee93005
+            codetracer-native-recorder=195fa723db7d20625fb47270c6fd2fb9554d8869
             # codetracer-trace-format{,-nim} BY COMMIT, not `=dev`: the two halves of
             # the FFI pair are `/agents` inputs in flake.nix, and trace-format's `dev`
             # tip (051a298, 2026-09-30) predates the FileTable / PathTableKind API that
@@ -1875,7 +1874,7 @@ jobs:
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=2f01e602e70f69a04675293f3fa0d5bad9f196a1
             codetracer-trace-format-nim=3e50ca3f2bf6316e8f764952a84078cf59b11023
-            codetracer-native-recorder=bafd73847c9261bc46bfcdd90a20fc4dcee93005
+            codetracer-native-recorder=195fa723db7d20625fb47270c6fd2fb9554d8869
 
       # MEASURE THE FETCH ENVIRONMENT BEFORE NIX TOUCHES THE NETWORK, and
       # before the FIRST `nix develop` in this job rather than before the
@@ -2452,12 +2451,11 @@ jobs:
       - name: Clone runquota sibling
         # `just build-once` below compiles `ct`, and src/ct/codetracer.nim ->
         # ../ct_test/ct_test -> src/ct_test/process_exec.nim opens with
-        # `import runquota_process`. On the tup driver this checkout is the only
-        # source of those modules: src/Tuprules.tup's NIM_REPO_PATH_FLAGS names
-        # `$(ROOT)/../runquota/...`, and tup's environment allowlist in that
-        # same file omits RUNQUOTA_SRC, so the dev shell export cannot stand in
-        # for it. Cloned here rather than via the two composite actions above
-        # because neither owns this dependency (issue #641).
+        # `import runquota_process`. The build's Nim search path
+        # (`config.nims`) names `../runquota/...`, so this checkout is where
+        # those modules come from; scripts/require-siblings.sh requires it. Cloned here rather than via
+        # the two composite actions above because neither owns this dependency
+        # (issue #641).
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/runquota
@@ -2660,9 +2658,8 @@ jobs:
         # The `just build-once` step below compiles `ct`, whose import chain
         # (src/ct/codetracer.nim -> ../ct_test/ct_test ->
         # src/ct_test/process_exec.nim) starts with `import runquota_process`.
-        # Under tup the checkout is the only way those modules resolve --
-        # NIM_REPO_PATH_FLAGS points at `$(ROOT)/../runquota/...` and tup's
-        # environment allowlist omits RUNQUOTA_SRC (issue #641).
+        # The checkout is where those modules resolve from --
+        # `config.nims` points at `../runquota/...` (issue #641).
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/runquota
@@ -2728,7 +2725,7 @@ jobs:
         # claim is that it sees something no human and no compiler sees. Its
         # ten arms feed it defects it must report and legal CSS it must
         # not, and include the two instrument checks that stop an empty
-        # stylesheet or an unreadable Tupfile scoring as a pass — which is not
+        # stylesheet or an unreadable entry-point list scoring as a pass — which is not
         # hypothetical, `default_white_theme.styl` compiles to zero bytes.
         #
         # Hermetic and sub-second on synthetic fixtures, so it runs BEFORE the
@@ -2807,7 +2804,7 @@ jobs:
         # and until now nothing else did either. `ci/lib/test-lane-files.sh`
         # recorded why: every JS lane passes `-d:nodejs`, and the renderer does
         # not compile under it — `kdom`'s `createElementNS` is a browser
-        # binding. The only gate was the tup product build, at package time.
+        # binding. The only gate was the product build, at package time.
         #
         # `dev` duly carried a renderer entry point that did not compile.
         # Commit 333ec709 removed `ui_imports`' `electron_lib` re-export after
@@ -3825,11 +3822,17 @@ jobs:
     secrets: inherit
 
   tui-tests:
-    # The job is in tui-tests.yml; it takes ct from ct-build and the
-    # visual replay tools from visual-replay-tools.
-    needs: [ct-build, visual-replay-tools]
-    # ct-build is required; visual-replay-tools only saves time.
+    # The job is in tui-tests.yml; it takes ct from ct-build. The shards that
+    # use the visual replay tools wait for visual-replay-tools' artifact
+    # themselves (ci/wait-for-run-artifact.sh): as a `needs` it held every
+    # shard back until the tools job ended, 43 minutes after ct-build in run
+    # 44384977215.
+    needs: [ct-build]
     if: ${{ !cancelled() && needs.ct-build.result == 'success' }}
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
     uses: ./.github/workflows/tui-tests.yml
     secrets: inherit
 
@@ -3964,11 +3967,17 @@ jobs:
           if-no-files-found: ignore
 
   gpui-window-captures:
-    # The job is in gpui-window-captures.yml; it takes ct from ct-build and the
-    # visual replay tools from visual-replay-tools.
-    needs: [ct-build, visual-replay-tools]
-    # ct-build is required; visual-replay-tools only saves time.
+    # The job is in gpui-window-captures.yml; it takes ct from ct-build. The shards that
+    # use the visual replay tools wait for visual-replay-tools' artifact
+    # themselves (ci/wait-for-run-artifact.sh): as a `needs` it held every
+    # shard back until the tools job ended, 43 minutes after ct-build in run
+    # 44384977215.
+    needs: [ct-build]
     if: ${{ !cancelled() && needs.ct-build.result == 'success' }}
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
     uses: ./.github/workflows/gpui-window-captures.yml
     secrets: inherit
 
@@ -4151,8 +4160,25 @@ jobs:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
+      - name: Clone runquota sibling
+        # The build (`just build-once`) compiles `ct`, and src/ct/codetracer.nim
+        # -> ../ct_test/ct_test -> src/ct_test/process_exec.nim opens with
+        # `import runquota_process`; the Nim search path (`config.nims`) names
+        # `../runquota/...`. scripts/require-siblings.sh requires the checkout
+        # before any compile starts. The step this job used to run
+        # (`ci/build/dev.sh`, the tup build) never ran that preflight, so the
+        # job never needed it; every other job that runs `build-once` clones
+        # it the same way (issue #641).
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/runquota
+          ref: dev
+          path: ${{ github.workspace }}/../runquota
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
       - name: Allow direnv in cloned codetracer-native-recorder
-        # ci/build/dev.sh builds src/db-backend, whose build.rs invokes
+        # the build (`just build-once`) builds src/db-backend, whose build.rs invokes
         # ``direnv exec <recorder-root> bash ct_emulator/build_native_api.sh``
         # to materialise the recorder's generated C before the Rust build. A
         # fresh clone has its .envrc "blocked", so direnv refuses and build.rs
@@ -4184,7 +4210,15 @@ jobs:
       - name: Build
         env:
           CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
-        run: "nix develop .#devShells.x86_64-linux.default --command ./ci/build/dev.sh"
+        run: "nix develop .#devShells.x86_64-linux.default --command just build-once"
+
+      - name: Assert the build produced every product the retired tup build did
+        # products_parity. `ci/build/linux-products-baseline.txt` is
+        # the list of products the last tup build produced, recorded before the
+        # tup rules files were removed; a clean `repro build` has to produce all of it.
+        # The build tree is the one the dev shell names in CODETRACER_BUILD_DIR
+        # (src/build-debug-repro).
+        run: "nix develop .#devShells.x86_64-linux.default --command bash ci/test/products-parity.sh"
 
   nix-build:
     runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
@@ -4656,7 +4690,7 @@ jobs:
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=2f01e602e70f69a04675293f3fa0d5bad9f196a1
             codetracer-trace-format-nim=3e50ca3f2bf6316e8f764952a84078cf59b11023
-            codetracer-native-recorder=bafd73847c9261bc46bfcdd90a20fc4dcee93005
+            codetracer-native-recorder=195fa723db7d20625fb47270c6fd2fb9554d8869
             # Required by scripts/require-siblings.sh, which build-once.sh runs first.
             # BARE: this job only runs on codetracer, so clone-siblings resolves
             # them from this commit's own committed repro.lock, which pins all of them.
@@ -5789,7 +5823,11 @@ jobs:
         shell: bash
         env:
           CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL: "1"
-          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
+          # libs/nim-result LAST: Nim gives the last --path precedence, and
+          # without it `import results` finds libs/nim-stew/stew's legacy copy
+          # (no `unsafeError`, a `func mapErr` nim-fork 2.3.1 refuses), as in
+          # run 44384977215's regression gate. ct-build sets the same three.
+          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
         run: |
           set -euo pipefail
           cd "${{ github.workspace }}"
@@ -5818,7 +5856,11 @@ jobs:
         shell: bash
         env:
           CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL: "1"
-          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
+          # libs/nim-result LAST: Nim gives the last --path precedence, and
+          # without it `import results` finds libs/nim-stew/stew's legacy copy
+          # (no `unsafeError`, a `func mapErr` nim-fork 2.3.1 refuses), as in
+          # run 44384977215's regression gate. ct-build sets the same three.
+          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
         run: |
           set -euo pipefail
           cd "${{ github.workspace }}"
@@ -5979,8 +6021,8 @@ jobs:
         # src/ct_test/process_exec.nim. On Darwin build-once selects the
         # reprobuild driver, which could resolve runquota from its nix flake
         # input alone -- but scripts/require-siblings.sh requires the checkout
-        # on every driver so there is a single workspace-completeness rule (the
-        # tup driver has no other way in; see the notes in that script).
+        # on every driver so there is a single workspace-completeness rule (see
+        # the notes in that script).
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
         with:
           env-flavor: nix
@@ -5999,19 +6041,19 @@ jobs:
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=2f01e602e70f69a04675293f3fa0d5bad9f196a1
             codetracer-trace-format-nim=3e50ca3f2bf6316e8f764952a84078cf59b11023
-            codetracer-native-recorder=bafd73847c9261bc46bfcdd90a20fc4dcee93005
+            codetracer-native-recorder=195fa723db7d20625fb47270c6fd2fb9554d8869
             # codetracer-native-backend and codetracer-visual-replay BY COMMIT as well: both are
             # `/agents` inputs in flake.nix (7ab073a22), so `=dev` cloned a different tree than the
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
             # the lock, as for the trace-format pair above.
             codetracer-visual-replay=92d39d8d249356bd05d8fca5db4d526e1ac4505a
-            codetracer-native-backend=31bf075fbd3bd2c8ccb7dea9ead08685360f6266
+            codetracer-native-backend=2a39bb47dd77184228605aa0e5a00105742f0f93
             # The desktop scenario lane's recorders and recordings: the BEAM
             # recorder at repro.lock's pin, and the example recordings at the
             # pin of the test lock (ci/test/siblings/repro.lock), the commit their
             # scenarios were measured against.
             codetracer-beam-recorder=e8ba8f7b77ac609faca152b7139b19ed4db7cffb
-            codetracer-example-recordings=326079c90879172c334bb421961bf4f23b8be332
+            codetracer-example-recordings=b87d40d6b7b0a4d2e4d8306b16a8f9f778838013
             # The HCR flame scenarios' demo, and reprobuild (repro.lock's pin) for the
             # HCR coordinator driver, the patchable-profile emitter and the in-target
             # agent the patchable Godot links.
@@ -6021,8 +6063,8 @@ jobs:
             # repro.lock pin, image-diff at codetracer's.
             codetracer-snapshot-codecs=3e503da83b73e805f30096d4baa45c18d138f6d3
             codetracer-image-diff=982e669585a150ede87973db281df63188459328
-            reprobuild=e2fe4eb9f5b94abe382f10d39be0957e90a344a9
-            runquota=40523b624eb050dc9712ae83ef14dbaf8a1b25c7
+            reprobuild=33be1e9964f3acdda5df705aefacfddd79b1574f
+            runquota=aad94ad19f8cdb7aadc88e88b830d47caaabed92
 
       - name: Stage codetracer-trace-format into libs/
         # The nix flake build below overrides the codetracer-trace-format input
@@ -6259,7 +6301,7 @@ jobs:
         # ct binary at ``src/build-debug-repro/bin/ct`` — the path
         # ``ci/test/ui-tests-db.sh`` points ``CODETRACER_E2E_CT_PATH`` at. The
         # in-repo ``libs/codetracer-trace-format{,-nim}`` staged above feed the
-        # recipe; no ``--override-input`` is needed for the tup/reprobuild dev
+        # recipe; no ``--override-input`` is needed for the dev
         # build. Replaces the old Homebrew ``./non-nix-build/build.sh``.
         #
         # The `repro daemon stop` is a de-poisoning step, not hygiene. The
@@ -6543,7 +6585,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ github.workspace }}/../codetracer-engine-godot/bin/godot.linuxbsd.template_debug.x86_64.hcrgpu
-          key: hcr-godot-c2b72fd205bcb509cca8513a2627ae18d9809562-reprobuild-e2fe4eb9f5b94abe382f10d39be0957e90a344a9-vulkan-hcrgpu
+          key: hcr-godot-c2b72fd205bcb509cca8513a2627ae18d9809562-reprobuild-33be1e9964f3acdda5df705aefacfddd79b1574f-vulkan-hcrgpu
 
       - name: The HCR flame demo for the desktop scenario lane
         id: hcr-flame
@@ -6800,7 +6842,7 @@ jobs:
         # what the script's stale-checkout check can hold a checkout to.
         env:
           GH_TOKEN: ${{ steps.fresh_token.outputs.token }}
-          RR_BACKEND_REF: 31bf075fbd3bd2c8ccb7dea9ead08685360f6266
+          RR_BACKEND_REF: 2a39bb47dd77184228605aa0e5a00105742f0f93
         run: ./ci/setup-rr-backend.sh
 
       - name: Assert the ct-native-replay build-siblings builds can start
@@ -7124,11 +7166,9 @@ jobs:
         #
         # `runquota` is on the list because this gate runs `just build-once`,
         # which compiles `ct`, which pulls in src/ct_test/process_exec.nim ->
-        # `import runquota_process`. Under the tup driver this CHECKOUT is the
-        # only way those modules resolve: NIM_REPO_PATH_FLAGS points at
-        # `$(ROOT)/../runquota/...`, and tup's environment allowlist in
-        # src/Tuprules.tup does not carry RUNQUOTA_SRC, so the dev shell's
-        # export of it never reaches `nim`. Its absence is what made this job
+        # `import runquota_process`. This CHECKOUT is
+        # where those modules resolve from: `config.nims` points at
+        # `../runquota/...`. Its absence is what made this job
         # die on `cannot open file: runquota_process` (issue #641), fifteen
         # minutes into the Nim compile rather than here.
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
@@ -7153,7 +7193,7 @@ jobs:
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=2f01e602e70f69a04675293f3fa0d5bad9f196a1
             codetracer-trace-format-nim=3e50ca3f2bf6316e8f764952a84078cf59b11023
-            io-mon=5f7a7ec976c9adf091e092aff4f548946be387d2
+            io-mon=5839ebac3fcc51d2532205e0c1aceccca40261ce
             nim-shm-queue=0d6049997d77421b6e4748f819657cf6042e9508
             nim-shm-gset=0b2896adc65d0d62c0ee84af1356c909da2975d0
             nim-stackable-hooks=07319306758cf608e664fe9e64ab7e0bed5ca186
@@ -7162,10 +7202,10 @@ jobs:
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
             # the lock, as for the trace-format pair above.
             codetracer-visual-replay=92d39d8d249356bd05d8fca5db4d526e1ac4505a
-            codetracer-native-backend=31bf075fbd3bd2c8ccb7dea9ead08685360f6266
-            codetracer-native-recorder=bafd73847c9261bc46bfcdd90a20fc4dcee93005
+            codetracer-native-backend=2a39bb47dd77184228605aa0e5a00105742f0f93
+            codetracer-native-recorder=195fa723db7d20625fb47270c6fd2fb9554d8869
             codetracer-native-test-programs=dev
-            runquota=40523b624eb050dc9712ae83ef14dbaf8a1b25c7
+            runquota=aad94ad19f8cdb7aadc88e88b830d47caaabed92
             isonim-tui
             test-certificates-tools
             nim-pty
@@ -7195,7 +7235,11 @@ jobs:
           CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
           CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL: "1"
           CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
-          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
+          # libs/nim-result LAST: Nim gives the last --path precedence, and
+          # without it `import results` finds libs/nim-stew/stew's legacy copy
+          # (no `unsafeError`, a `func mapErr` nim-fork 2.3.1 refuses), as in
+          # run 44384977215's regression gate. ct-build sets the same three.
+          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
           CODETRACER_VISUAL_REPLAY_REPO_PATH: ${{ github.workspace }}/../codetracer-visual-replay
           CODETRACER_VISUAL_REPLAY_GITHUB_TOKEN: ${{ steps.ci_token.outputs.token }}
           PLAYWRIGHT_GLOBAL_TIMEOUT: "10800000"
@@ -7499,18 +7543,18 @@ jobs:
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=2f01e602e70f69a04675293f3fa0d5bad9f196a1
             codetracer-trace-format-nim=3e50ca3f2bf6316e8f764952a84078cf59b11023
-            io-mon=5f7a7ec976c9adf091e092aff4f548946be387d2
+            io-mon=5839ebac3fcc51d2532205e0c1aceccca40261ce
             nim-shm-queue=0d6049997d77421b6e4748f819657cf6042e9508
             nim-shm-gset=0b2896adc65d0d62c0ee84af1356c909da2975d0
             nim-stackable-hooks=07319306758cf608e664fe9e64ab7e0bed5ca186
-            codetracer-native-recorder=bafd73847c9261bc46bfcdd90a20fc4dcee93005
+            codetracer-native-recorder=195fa723db7d20625fb47270c6fd2fb9554d8869
             codetracer-js-recorder=6f699e3112484c6c73f7cf8d654e1f3106e76162
             codetracer-ruby-recorder=dev
             # codetracer-native-backend and codetracer-visual-replay BY COMMIT as well: both are
             # `/agents` inputs in flake.nix (7ab073a22), so `=dev` cloned a different tree than the
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
             # the lock, as for the trace-format pair above.
-            codetracer-native-backend=31bf075fbd3bd2c8ccb7dea9ead08685360f6266
+            codetracer-native-backend=2a39bb47dd77184228605aa0e5a00105742f0f93
             codetracer-visual-replay=92d39d8d249356bd05d8fca5db4d526e1ac4505a
 
       - name: Allow direnv in the cloned recorder siblings
@@ -7532,7 +7576,11 @@ jobs:
         # recording assertions into checks of nothing.
         env:
           CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL: "1"
-          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew
+          # libs/nim-result LAST: Nim gives the last --path precedence, and
+          # without it `import results` finds libs/nim-stew/stew's legacy copy
+          # (no `unsafeError`, a `func mapErr` nim-fork 2.3.1 refuses), as in
+          # run 44384977215's regression gate. ct-build sets the same three.
+          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
           # codetracer-native-recorder depends on the PRIVATE metacraft-labs/lldb-sys.rs.
           # Cargo's default libgit2 transport does not read gitconfig, so it never
           # presents the org-scoped extraHeader that `Setup dev env` installs job-wide
@@ -8757,16 +8805,15 @@ jobs:
         # the state of the dev-shell lanes.
         run: bash tools/visual-review/deepreview-harness-test.sh
 
-      - name: Assert no web bundle is assembled inside a tup variant directory
+      - name: Assert no web bundle is assembled inside a build output directory
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         # `just test-web-bundle` defaulted its output to `src/build-debug/web`,
-        # inside tup's variant directory, and the ViewModel job runs it before
-        # `build-once`: tup then refuses the variant ("Variant directory must
-        # only contain a tup.config file. Found extra files: web"), so the
-        # build step could not pass once the smoke had. Both web-bundle
-        # scripts now default to ci/lib/web-bundle-dir.sh's `build/web`; this
-        # fails when that default, or a literal one in any script, lies inside
-        # a directory holding a tracked `tup.config`. Pure bash and git.
+        # inside a build output tree, and the ViewModel job runs it before
+        # `build-once`; the build that owned that tree refused the extra
+        # directory, so the build step could not pass once the smoke had. Both
+        # web-bundle scripts now default to ci/lib/web-bundle-dir.sh's
+        # `build/web`; this fails when that default, or a literal one in any
+        # script, lies inside a `src/build-*` directory. Pure bash and git.
         run: bash ci/test/web-bundle-default-dir-test.sh
 
   ci-verdict:

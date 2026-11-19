@@ -727,7 +727,7 @@ proc uiHandoffMetric(bench: Bench) =
   ## quickly would produce a very good number.
   let root = repoRoot()
   let tuiBinary = root / "build" / "bin" / "codetracer-tui"
-  let ctBinary = root / "src" / "build-debug" / "bin" / "ct"
+  let ctBinary = root / "src" / "build-debug-repro" / "bin" / "ct"
   if not fileExists(tuiBinary):
     raise newException(IOError,
       "missing " & tuiBinary & " — run `just build-tui`")

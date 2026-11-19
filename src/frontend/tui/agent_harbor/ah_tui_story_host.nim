@@ -38,8 +38,9 @@
 ## story at every named moment of its scenario, size and theme
 ## (`agent-harbor-<story>-at-<moment>-<size>-<theme>`, CTF-P1c's moment
 ## captures; the moments are read from the scenario, in time order). The
-## sizes the captures use are `ah_tui_stories.TuiSizes`: laptop 180×56 and sidebar
-## 45×56, the brief's 1440×900 and 360×900 at 8×16 px a cell. Colours are
+## sizes the captures use are `ah_tui_stories.sizesOf`: laptop 180×56 and sidebar
+## 45×56, the brief's 1440×900 and 360×900 at 8×16 px a cell, and for the
+## session activity timeline also panel 95×40 (760×640). Colours are
 ## 24-bit (the views' design-system roles), so the terminal should be
 ## truecolor. Like every snapshot app it ends after
 ## `TestAppDeadlineSeconds` or on `q`.
@@ -96,7 +97,7 @@ when isMainModule:
           if not isPlaybackStory(story.surface, story.fixture): continue
           moments = storyMomentNames(story.surface, story.fixture)
         for moment in moments:
-          for (size, _, _) in TuiSizes:
+          for (size, _, _) in sizesOf(story.surface):
             for theme in ["dark", "light"]:
               echo captureIdOf(storybookId(section, story), size, theme, moment)
       return 0
@@ -128,7 +129,13 @@ when isMainModule:
         mount = mountStory(story, cols, rows, mode, moment = a.moment)
       styledRowsTree(r, mount.rowsOf)
     let input = proc(token: string): bool =
-      not mount.isNil and mount.handleInput(token)
+      if mount.isNil: return false
+      result = mount.handleInput(token)
+      # What the story wrote for the terminal itself (a Copy's OSC 52).
+      if mount.output.len > 0:
+        stdout.write(mount.output)
+        stdout.flushFile()
+        mount.output = ""
     let idle = proc(): bool = not mount.isNil and mount.idle()
     let prologue = proc(cols, rows: int): string = MouseOn
     result = snapshotAppMain(build, a.rest, input, prologue = prologue, idle = idle)
