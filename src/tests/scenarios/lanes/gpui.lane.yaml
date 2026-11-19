@@ -73,4 +73,5 @@ applicable:
   - ../gpui/test-results-run-the-tests.yaml
   - ../gpui/verification-run-lists-findings.yaml
   - ../gpui/welcome-from-the-plus.yaml
+  - ../gpui/origin-chain-from-the-menu.yaml
 unsupported: []
