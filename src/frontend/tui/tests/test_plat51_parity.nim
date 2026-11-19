@@ -58,10 +58,11 @@ import ./fixtures/fixture_provider
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 159
+const ExpectedAssertions = 160
   ## +1 on 2026-11-09: the View menu gained `Constraints` (`b2ae01483`), and
   ## the "no View entry is a Timeline" sweep asserts once per entry.
   ## +2: an unbound Alt+<char> is the character alone (the caret case).
+  ## +1: the View menu gained `VCS` (issue #907), adding one more sweep assertion.
 
 var countedAssertions = 0
 

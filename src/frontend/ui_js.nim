@@ -6681,6 +6681,7 @@ var actions*: array[ClientAction, ClientActionHandler] = [
     dbg.formattedSourceView = t.on
     dbg.setActiveSourceView(cstring(t.viewPath))
     data.viewsApi.infoMessage(cstring(t.notice)),
+  aVcs: proc(actionData: JsObject) = data.openLayoutTab(Content.VCS),
 ]
 
 data.actions = actions

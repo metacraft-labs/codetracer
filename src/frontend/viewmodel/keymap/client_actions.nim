@@ -145,6 +145,7 @@ const
     ("layout.focus-pane(shell)", "aShell"),
     ("layout.focus-pane(verification)", "aVerification"),
     ("layout.focus-pane(constraints)", "aConstraints"),
+    ("layout.focus-pane(vcs)", "aVcs"),
     ("preferences.options", "aOptions"),
     ("preferences.toggle-shared-editor", "aToggleSharedEditor"),
     ("preferences.keymap-cua", "aKeymapCua"),

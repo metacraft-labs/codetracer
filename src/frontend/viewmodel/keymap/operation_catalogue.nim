@@ -63,7 +63,7 @@ const
                     "file-tree", "problems", "build-output", "terminal",
                     "points", "search", "flow", "scratchpad", "shell",
                     "agent-activity", "verification", "step-list",
-                    "local-call-trace", "constraints"]
+                    "local-call-trace", "constraints", "vcs"]
     ## The pane names `layout.focus-pane(…)` takes, in the specification's
     ## spelling (CUA-Keymap.md §3.7, CodeTracer-TUI.md §4.2).
 
