@@ -11145,13 +11145,20 @@ proc showValueHistory(r: GpuiRenderer; path: string) =
                $vm.valueHistory.val.getOrDefault(path).len & " value(s)")
   redrawPaneOf(r, paneState)
 
+proc stateKeyRowsOf(vm: StateVM): seq[StateKeyRow]
+proc revealStateRow(at: int)
+
 proc showValueOrigin(r: GpuiRenderer; path: string) =
   ## K28 / K41: "Show value origin" and the row's origin badge — the chain
   ## OPENS IN THE PANE under the row (PLAT-51; the desktop's in-row chain),
   ## nearest cause first; a second toggle closes it. PLAT-70 Part E: the
   ## hops are rows (`state_pane_keys.originHopRows`), each with the tick
   ## `Enter` on it seeks to; a chain that closes takes the keyboard cursor
-  ## off its hops.
+  ## off its hops. A chain that opens is scrolled into the pane's box: under
+  ## the last row in view (`value` at module scope) it opened below the box,
+  ## where nothing showed that it had. Its last hop is brought in, then its
+  ## variable's row, which stays in view when the chain is taller than the
+  ## box.
   let vm = gSession.session.stateVM
   if vm.isNil:
     return
@@ -11169,6 +11176,12 @@ proc showValueOrigin(r: GpuiRenderer; path: string) =
   vm.originHops.val = hops
   traceGesture("origin " & path & " " & $hops.getOrDefault(path).len &
                " hop(s)")
+  let shown = hops.getOrDefault(path)
+  if shown.len > 0:
+    let rows = stateKeyRowsOf(vm)
+    for at in [rows.cursorIndex(StateCursor(path: path, hop: shown.len - 1)),
+               rows.cursorIndex(variableCursor(path))]:
+      if at >= 0: revealStateRow(at)
   redrawPaneOf(r, paneState)
 
 # ---------------------------------------------------------------------------

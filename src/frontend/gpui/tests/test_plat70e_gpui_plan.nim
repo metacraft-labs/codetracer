@@ -36,7 +36,7 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 16
+  ExpectedAssertions = 17
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   W = 1600
   H = 1000
@@ -178,7 +178,15 @@ suite "PLAT-70 Part E: value origin from the keyboard in the GPUI window":
     ck mg.contains("context menu") and mg.contains("Show value origin")
     let (toggled, _) = windowPlan(ops & ",key:menu,ctx:Show value origin")
     ck toggled.hops.len >= 1
-    discard menu
+    # `value` is the last row the box shows: the chain opens below it and is
+    # scrolled in (the box's scroll, `top,left`, moves down).
+    proc scrollTop(plan: JsonNode): int =
+      let box = plan.nodesWith("data-ct-state-scroll")
+      if box.len != 1: return -1
+      try: parseInt(box[0].attr("data-ct-state-scroll").split(',')[0])
+      except ValueError: -1
+    checkpoint("scroll before " & $menu.scrollTop & ", after " & $toggled.scrollTop)
+    ck menu.scrollTop >= 0 and toggled.scrollTop > menu.scrollTop
 
   test "o walks to the origin and Shift+O walks back":
     let ops = ToExpressions
