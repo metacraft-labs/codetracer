@@ -696,12 +696,10 @@ with pkgs;
     # copies it when the checkout's grammar.js is the one it was generated
     # from, rather than running `tree-sitter generate` (about 6 minutes at a
     # 7.6 GB peak on a fresh CI runner), and generates as before otherwise.
-    # The package is named only when the flake was evaluated WITH the
-    # submodule: interpolating it makes it a build input of the shell, and
-    # without libs/tree-sitter-nim it has no grammar to build from (run
-    # 44379188088's macOS legs). Empty means "generate", as before the cache.
+    # The package fetches its grammar at the submodule's gitlink, so it is
+    # the same whether or not the flake was evaluated with submodules.
     if [ -n "$ROOT_PATH" ] && [ -f "$ROOT_PATH/libs/tree-sitter-nim/grammar.js" ]; then
-      CT_TREE_SITTER_NIM_PARSER="${pkgs.lib.optionalString (builtins.pathExists ../../libs/tree-sitter-nim/grammar.js) "${ourPkgs.tree-sitter-nim-parser}"}" \
+      CT_TREE_SITTER_NIM_PARSER="${ourPkgs.tree-sitter-nim-parser}" \
         ROOT_DIR="$ROOT_PATH" bash "$ROOT_PATH/non-nix-build/ensure_tree_sitter_nim_parser.sh"
     fi
 

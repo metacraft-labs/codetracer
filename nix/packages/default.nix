@@ -874,26 +874,32 @@
         # what `tree-sitter generate` writes for the pinned grammar.
         tree-sitter-nim-parser = pkgs.stdenvNoCC.mkDerivation {
           name = "tree-sitter-nim-parser";
-          # Without the submodule (a flake evaluated without ?submodules=1,
-          # as the macOS jobs do) the root does not exist and toSource throws
-          # at EVALUATION, which takes down every dev shell whose hook names
-          # this package. An empty source defers the failure to a build that
-          # nothing in such a shell performs; the hook only copies the parser
-          # when the checkout has grammar.js.
-          src =
-            if builtins.pathExists ../../libs/tree-sitter-nim/grammar.js then
-              pkgs.lib.fileset.toSource {
-                root = ../../libs/tree-sitter-nim;
-                fileset = pkgs.lib.fileset.unions (
-                  map (f: pkgs.lib.fileset.maybeMissing (../../libs/tree-sitter-nim + "/${f}")) [
-                    "grammar.js"
-                    "tree-sitter.json"
-                    "package.json"
-                  ]
-                );
-              }
-            else
-              pkgs.emptyDirectory;
+          # The grammar is FETCHED at the submodule's gitlink, not read from
+          # libs/tree-sitter-nim: a flake evaluated without ?submodules=1 --
+          # every CI job's plain `nix develop` -- has no submodule contents, so
+          # a submodule-sourced package either failed evaluation or (gated on
+          # pathExists) dropped out of the shell, and run 44384977215's shards
+          # all ran `tree-sitter generate` at 7.6 GB again. Fetched, the
+          # package is the same with or without submodules, and the shells'
+          # cache push carries it. ci/test/tree-sitter-nim-parser-test.sh holds
+          # `rev` equal to the gitlink; if they ever differ, the shell's gate
+          # sees another grammar.js hash and generates, never copies a stale
+          # parser.
+          src = pkgs.fetchFromGitHub {
+            owner = "metacraft-labs";
+            repo = "tree-sitter-nim";
+            rev = "89d44d5fd3acb2d4d904b0c716654afa0898f00d";
+            hash = "sha256-xbT3SoMKQJX3LL2ORxlhI1C9CVWz+S2Zh2pKbrS2y+c=";
+          };
+          # Only the generation's inputs, so nothing else in the grammar
+          # repository reaches the derivation's build.
+          postUnpack = ''
+            mkdir grammar-inputs
+            for f in grammar.js tree-sitter.json package.json; do
+              if [ -e "$sourceRoot/$f" ]; then cp "$sourceRoot/$f" grammar-inputs/; fi
+            done
+            sourceRoot=grammar-inputs
+          '';
           nativeBuildInputs = [
             pkgs.tree-sitter
             pkgs.nodejs_20
@@ -902,7 +908,7 @@
           buildPhase = ''
             runHook preBuild
             test -f grammar.js || {
-              echo "no libs/tree-sitter-nim/grammar.js: evaluate the flake with ?submodules=1" >&2
+              echo "the fetched tree-sitter-nim has no grammar.js" >&2
               exit 1
             }
             tree-sitter generate
