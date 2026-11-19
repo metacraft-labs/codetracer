@@ -1025,7 +1025,10 @@ proc normLabel(s: string): string =
   ## A strip tab's caption as the pack names the pane: the window draws the
   ## desktop's caption (`CALLTRACE`, `EVENT LOG`), which is the pane's own
   ## name (`Call Trace`, `Event Log`) by the product's caption rule
-  ## (`pane_names.desktopTabTitle`), read back here.
+  ## (`pane_names.desktopTabTitle`), read back here. An editor tab's caption
+  ## names a file, never a pane, and is answered as drawn: read as a cut
+  ## caption, `request-session/demo_server.py` began `REQUESTS`.
+  if s.split(' ')[0].isSourceName: return s
   let drawn = s.toUpperAscii.splitWhitespace.join(" ")
   for k in PaneKind:
     if desktopTabTitle(k) == drawn or desktopTabTitle(k).replace(" ", "") == drawn.replace(" ", ""):
