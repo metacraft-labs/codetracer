@@ -332,6 +332,11 @@ lint_step "workflow files stay under GitHub's size limit" \
 lint_step "scenario lane shards cover their lane exactly" \
 	bash ci/test/scenario-lane-shard-test.sh
 
+# The scenario runner and backends are built only from the sibling revisions
+# the test lock pins: an off-pin DemoVideoScript killed rr's replays at random.
+lint_step "scenario programs are built only from pinned siblings" \
+	bash ci/test/scenarios-sibling-pin-test.sh
+
 # The TUI job runs the Nim test lanes in shards (NIM_TEST_LANE_SHARD); the
 # shards must cover each lane exactly, or a suite silently stops running.
 lint_step "Nim test lane shards cover their lane exactly" \

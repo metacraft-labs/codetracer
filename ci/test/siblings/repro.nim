@@ -17,7 +17,8 @@
 ##     `repro develop` in this directory, so CI clones these siblings at the
 ##     revisions this lock pins;
 ##   * `ci/test/scenarios.sh` builds the runner and backends from the checkouts
-##     next to codetracer, and warns when one is at another revision;
+##     next to codetracer, and refuses one at another revision (unless
+##     CT_SCENARIOS_ALLOW_OFF_PIN=1);
 ##   * `ci/test/sibling-provisioning-test.sh` checks this lock against both.
 ##
 ## To move a pin: check the sibling out at the new revision next to codetracer

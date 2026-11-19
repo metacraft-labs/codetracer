@@ -14,8 +14,9 @@
 # (README.md there). The general-purpose runner and backends are siblings of
 # this checkout, at the revisions the TEST lock pins: ci/test/siblings/repro.lock,
 # a project of its own nested here (its repro.nim says why it is separate from
-# the product's repro.lock). CI clones them from it; `build` warns when a
-# checkout here is at another revision.
+# the product's repro.lock). CI clones them from it. `build` refuses a sibling
+# checkout at another revision, and `run` and `lane` rebuild a program built
+# from one (CT_SCENARIOS_ALLOW_OFF_PIN=1: build against it anyway, on purpose).
 #
 #   ../DemoVideoScript               the format, the linter and the one runner
 #   ../DemoVideoScript-TermAssert    the terminal backend (over ../TermAssert)
@@ -53,20 +54,123 @@ require() {
 	fi
 }
 
-# warn_off_pin <name> <dir>: say so when ../<name> is a checkout at another
-# revision than the test lock pins. A warning, not a failure: trying the pack
-# against a sibling's work in progress is a normal thing to do locally.
+# A sibling a program is built from must be the revision the test lock pins.
+# A sibling checkout three commits behind its pin built a `dvs` whose orphan
+# reaper killed rr's replay processes (DemoVideoScript 028ea4f, "leave a
+# traced orphan to its tracer"), and every rr scenario that seeks lost its
+# replay at random -- while the only sign was a warning in the build log. So
+# a build refuses an off-pin sibling, and a program records the revisions it
+# was built from (${bin}/.siblings-<part>), which `run` and `lane` check
+# before using it. CT_SCENARIOS_ALLOW_OFF_PIN=1 builds against a sibling's
+# work in progress on purpose, and says so.
 test_lock="${root}/ci/test/siblings/repro.lock"
-warn_off_pin() {
-	local name="$1" dir="$2" pinned head
+off_pin_allowed() { [ "${CT_SCENARIOS_ALLOW_OFF_PIN:-}" = 1 ]; }
+
+# pin_of <name>: the revision the test lock pins <name> at; empty when it
+# pins none.
+pin_of() {
 	[ -f "${test_lock}" ] || return 0
-	pinned="$(grep -o "name = \"${name}\", coord_kind = \"vcs\", url = \"[^\"]*\", revision = \"[0-9a-f]*\"" "${test_lock}" |
-		sed 's/.*revision = "//; s/"$//' | head -n 1)"
+	grep -o "name = \"$1\", coord_kind = \"vcs\", url = \"[^\"]*\", revision = \"[0-9a-f]*\"" "${test_lock}" |
+		sed 's/.*revision = "//; s/"$//' | head -n 1 || true
+}
+
+# head_of <dir>: the commit checked out at <dir>; "unknown" when it is not a
+# git checkout.
+head_of() { git -C "$1" rev-parse HEAD 2>/dev/null || echo unknown; }
+
+# require_on_pin <name> <dir>: refuse a sibling checkout off its pin.
+require_on_pin() {
+	local name="$1" dir="$2" pinned head
+	pinned="$(pin_of "${name}")"
 	[ -n "${pinned}" ] || return 0
-	head="$(git -C "${dir}" rev-parse HEAD 2>/dev/null)" || return 0
-	if [ "${head}" != "${pinned}" ]; then
-		echo "scenarios: warning: ${dir} is at ${head:0:11}, the test lock pins ${name} at ${pinned:0:11}" >&2
+	head="$(head_of "${dir}")"
+	[ "${head}" != "${pinned}" ] || return 0
+	if off_pin_allowed; then
+		echo "scenarios: warning: building against ${dir} at ${head:0:11}; the test lock pins ${name} at ${pinned:0:11} (CT_SCENARIOS_ALLOW_OFF_PIN=1)" >&2
+		return 0
 	fi
+	echo "scenarios: ${dir} is at ${head:0:11}, but the test lock (ci/test/siblings/repro.lock) pins ${name} at ${pinned:0:11}" >&2
+	echo "  check it out at the pin (git -C ${dir} checkout --detach ${pinned}), or set CT_SCENARIOS_ALLOW_OFF_PIN=1 to build against it on purpose" >&2
+	exit 3
+}
+
+# The siblings each part is built from: "<name> <dir>" pairs.
+siblings_of() {
+	case "$1" in
+	dvs) echo "DemoVideoScript $(dirname "${dvs_src}")" ;;
+	terminal)
+		echo "DemoVideoScript $(dirname "${dvs_src}")"
+		echo "DemoVideoScript-TermAssert $(dirname "${dta_src}")"
+		echo "TermAssert $(dirname "${ta_src}")"
+		echo "TermAssertClient ${ws}/TermAssertClient"
+		echo "nim-libvterm ${ws}/nim-libvterm"
+		echo "nim-pty ${ws}/nim-pty"
+		;;
+	gpui)
+		echo "DemoVideoScript $(dirname "${dvs_src}")"
+		echo "DemoVideoScript-GuiAssert $(dirname "${dga_src}")"
+		echo "GuiAssert $(dirname "${ga_src}")"
+		;;
+	playwright) echo "DemoVideoScript-Playwright ${dpw_root}" ;;
+	esac
+}
+
+# check_siblings <part>: refuse to build <part> from an off-pin sibling.
+check_siblings() {
+	local name dir
+	while read -r name dir; do
+		[ -n "${name}" ] && require_on_pin "${name}" "${dir}"
+	done < <(siblings_of "$1")
+}
+
+# stamp_siblings <part>: record the revisions <part> was just built from.
+stamp_siblings() {
+	local name dir
+	mkdir -p "${bin}"
+	while read -r name dir; do
+		[ -n "${name}" ] && echo "${name} $(head_of "${dir}")"
+	done < <(siblings_of "$1") >"${bin}/.siblings-$1"
+}
+
+# output_of <part>: what building <part> makes.
+output_of() {
+	case "$1" in
+	dvs) echo "${bin}/dvs" ;;
+	terminal) echo "${bin}/dvs-termassert-codetracer" ;;
+	gpui) echo "${bin}/dvs-guiassert-codetracer" ;;
+	playwright) echo "${build_dir}/scenario-arm/src/main.ts" ;;
+	esac
+}
+
+# built_on_pin <part>: <part> was built, from the revisions the test lock pins
+# now (or off them, when that is allowed).
+built_on_pin() {
+	local stamp="${bin}/.siblings-$1" name rev pinned
+	[ -e "$(output_of "$1")" ] && [ -f "${stamp}" ] || return 1
+	while read -r name rev; do
+		pinned="$(pin_of "${name}")"
+		if [ -n "${pinned}" ] && [ "${rev}" != "${pinned}" ] && ! off_pin_allowed; then
+			echo "scenarios: ${1} was built from ${name} ${rev:0:11}, the test lock pins ${pinned:0:11}: rebuilding it" >&2
+			return 1
+		fi
+	done <"${stamp}"
+}
+
+# parts_of <flavour>: the parts a flavour's runs use.
+parts_of() {
+	case "$1" in
+	terminal) echo "terminal" ;;
+	gpui) echo "gpui" ;;
+	electron) echo "dvs playwright" ;;
+	esac
+}
+
+# ensure_built <flavour>: every part the flavour uses, built on its pins.
+ensure_built() {
+	local part
+	for part in $(parts_of "$1"); do
+		built_on_pin "${part}" || "$0" build "${part}"
+	done
 }
 
 # Optimised, with assertions and runtime checks kept on by name (a tool's or
@@ -79,9 +183,11 @@ nim_common=(--hints:off --warnings:off --threads:on -d:release --assertions:on -
 
 build_dvs() {
 	require "DemoVideoScript" "${dvs_src}/dvs.nim"
+	check_siblings dvs
 	mkdir -p "${bin}"
 	nim c --hints:off --path:"${dvs_src}" -d:release \
 		--nimcache:"${nimcache}/scenario-dvs" -o:"${bin}/dvs" "${dvs_src}/dvs.nim"
+	stamp_siblings dvs
 }
 
 build_stage() {
@@ -91,14 +197,17 @@ build_stage() {
 
 build_terminal() {
 	require "DemoVideoScript-TermAssert" "${dta_src}/demo_video_script_termassert.nim"
+	check_siblings terminal
 	nim c "${nim_common[@]}" --path:"${ta_src}" --path:../TermAssertClient/src \
 		--path:../nim-libvterm/src --path:../nim-pty/src --path:"${dvs_src}" --path:"${dta_src}" \
 		--nimcache:"${nimcache}/scenario-termassert" \
 		-o:"${bin}/dvs-termassert-codetracer" "${S}/bindings/termassert/dvs_termassert_codetracer.nim"
+	stamp_siblings terminal
 }
 
 build_gpui() {
 	require "DemoVideoScript-GuiAssert" "${dga_src}/demo_video_script_guiassert.nim"
+	check_siblings gpui
 	nim c "${nim_common[@]}" --path:"${ga_src}" --path:"${dvs_src}" --path:"${dga_src}" \
 		--nimcache:"${nimcache}/scenario-guiassert" \
 		-o:"${bin}/dvs-guiassert-codetracer" "${S}/bindings/guiassert/dvs_guiassert_codetracer.nim"
@@ -106,10 +215,12 @@ build_gpui() {
 	nim c "${nim_common[@]}" --path:"${ga_src}" --path:"${dvs_src}" --path:"${dga_src}" \
 		--nimcache:"${nimcache}/scenario-guiassert-surface" \
 		-o:"${bin}/ct-gui-surface" "${S}/bindings/guiassert/ct_gui_surface.nim"
+	stamp_siblings gpui
 }
 
 build_playwright() {
 	require "DemoVideoScript-Playwright" "${dpw_root}/src/main.ts"
+	check_siblings playwright
 	# Playwright is the repository's own (node_modules, from the dev shell):
 	# the binding imports it from there, and the arm is staged beside a link
 	# to the same copy, so both drive one Playwright.
@@ -120,6 +231,7 @@ build_playwright() {
 	rm -rf "${build_dir}/scenario-arm/src"
 	cp -r "${dpw_root}/src" "${build_dir}/scenario-arm/src"
 	printf '{ "type": "module", "private": true }\n' >"${build_dir}/scenario-arm/package.json"
+	stamp_siblings playwright
 }
 
 backend_of() {
@@ -148,13 +260,10 @@ build)
 	shift
 	parts=("$@")
 	[ "${#parts[@]}" -gt 0 ] || parts=(dvs stage terminal gpui playwright)
-	for sibling in DemoVideoScript DemoVideoScript-TermAssert TermAssert DemoVideoScript-GuiAssert GuiAssert DemoVideoScript-Playwright; do
-		if [ -d "${ws}/${sibling}" ]; then warn_off_pin "${sibling}" "${ws}/${sibling}"; fi
-	done
 	for p in "${parts[@]}"; do "build_${p}"; done
 	;;
 lint)
-	[ -x "${bin}/dvs" ] || build_dvs
+	built_on_pin dvs || build_dvs
 	# Every scenario, against the pack. Warnings (L4 ordinals, L6 timing)
 	# are allowed; an error fails. The pack itself is linted first.
 	mapfile -t files < <(find "${S}" -name '*.yaml' -not -path '*/pack/*' -not -path '*/lanes/*' \
@@ -217,6 +326,7 @@ lane)
 	flavour="${2:?usage: scenarios.sh lane <terminal|gpui|electron>}"
 	runner="$(runner_of "${flavour}")"
 	[ -x "${runner}" ] || "$0" build
+	ensure_built "${flavour}"
 	# The desktop binding's own tests first: a reader that cannot read the
 	# product's large panes in bounded time fails here, by name, rather than as
 	# scenarios timing out.
@@ -250,6 +360,7 @@ run)
 	terminal) settle=(--settle-timeout 15000) ;;
 	electron) settle=(--settle-timeout 15000) ;;
 	esac
+	ensure_built "${flavour}"
 	"$(runner_of "${flavour}")" run "${scenario}" --pack "${S}/pack/codetracer.pack.yaml" \
 		--backend "$(backend_of "${flavour}")" --build "${build_dir}" "${settle[@]}" "$@"
 	;;
