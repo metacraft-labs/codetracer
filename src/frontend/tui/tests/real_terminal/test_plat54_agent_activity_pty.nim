@@ -92,6 +92,26 @@ proc waitScreen(sess: var TuiTestSession; needle: string;
   raise newException(AssertionFailedError,
     "'" & needle & "' never appeared; screen:\n" & result.join("\n"))
 
+proc waitScreenAll(sess: var TuiTestSession; needles: openArray[string];
+                   timeoutMs = 60000): seq[string] =
+  ## A screen on which every one of `needles` is drawn — the STATE a case
+  ## asserts, rather than the first of its lines to arrive. A pane is painted
+  ## over several writes, and a loaded host reads a frame half drawn.
+  let deadline = getMonoTime() + initDuration(milliseconds = timeoutMs)
+  while getMonoTime() < deadline:
+    result = sess.screen()
+    let text = result.join("\n")
+    var all = true
+    for needle in needles:
+      if not text.contains(needle):
+        all = false
+        break
+    if all:
+      return
+    sleep(50)
+  raise newException(AssertionFailedError,
+    "not all of " & $(@needles) & " appeared; screen:\n" & result.join("\n"))
+
 proc find(s: seq[string]; needle: string): (int, int) =
   for r, line in s:
     let at = line.find(needle)
@@ -158,7 +178,10 @@ suite "PLAT-54 on a real terminal: Agent Activity":
     let (vr, vc) = tabs.find(" VCS ")
     ck vr >= 0
     sess.press(vr, vc + 2)
-    s = sess.waitScreen("Iteration one")
+    # The review's title, its files' header and a file, in one frame: the
+    # pane's state, waited for as a whole. Waiting for the title alone read
+    # a frame whose file list had not been drawn yet (CI run 44384977215).
+    s = sess.waitScreenAll(["Iteration one", "CHANGED FILES", "main.rs"])
     ck s.join("\n").contains("CHANGED FILES")
     ck s.join("\n").contains("main.rs")
 

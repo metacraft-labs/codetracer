@@ -537,3 +537,6 @@ src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/fronten
 src/frontend/tui/tests/plat70b-table-mutation-control.sha256	src/frontend/gpui/app/leaves.nim	d478d57a3af30afc7a7572076336d3dec9fa84e1ea56a60c39d8871f599be9ab	4d6f23582e69908a7dfc350d3ae6e3223887410703a23389aebe5396c6020c49
 src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	src/frontend/gpui/app/leaves.nim	d478d57a3af30afc7a7572076336d3dec9fa84e1ea56a60c39d8871f599be9ab	4d6f23582e69908a7dfc350d3ae6e3223887410703a23389aebe5396c6020c49
 src/frontend/tui/tests/plat70g-multiclick-mutation-control.sha256	src/frontend/gpui/app/leaves.nim	d478d57a3af30afc7a7572076336d3dec9fa84e1ea56a60c39d8871f599be9ab	4d6f23582e69908a7dfc350d3ae6e3223887410703a23389aebe5396c6020c49
+# The Agent Activity pty suite waits for the review's title, file header and file together (CI run
+# 44384977215), which moved test_plat54_agent_activity_pty.nim. Re-grade the arms whose needles sit in it.
+src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/tui/tests/real_terminal/test_plat54_agent_activity_pty.nim	86d4833a80f3169ac2a5327e6c67e56049e9ca65d3e428bd2af0aff177d26faf	2e52983f0f1d1f6b08e7211cccac4afeb2156674a37598b295bd0c1a2fd13f47

@@ -15,14 +15,17 @@ steps:
   - expect: { at: 'call-trace/call[#5]', name: apply_op }
   - expect: { at: 'call-trace/call[#6]', name: add }
   - click: { at: 'call-trace/call[#5]', anchor: expander }
-  # Waited for by the row that goes away and comes back (`add`'s arguments,
-  # `right=3)`, which no other row shows whole), then read by position: a
+  # Waited for by the row that goes away and comes back (`add`'s whole
+  # argument list, `(left=2, right=3)`). Not `right=3)` alone:
+  # `sub #17(left=20, right=3)` and `mul #22(left=3, right=3)` stay on
+  # screen while the call is collapsed, so a wait for its absence never held
+  # (CI run 44384977215). Then read by position: a
   # wait on `call[#6]` keeps the instance it first located, and once the
   # call is collapsed that instance is the next `add` down the trace, which
   # never reads `evaluate`.
-  - wait: { until: { at: 'pane[title="Call Trace"]', assert: 'lacks-row("right=3)")' }, timeout: 30s }
+  - wait: { until: { at: 'pane[title="Call Trace"]', assert: 'lacks-row("(left=2, right=3)")' }, timeout: 30s }
   - expect: { at: 'call-trace/call[#6]', name: evaluate }
   - click: { at: 'call-trace/call[#5]', anchor: expander }
-  - wait: { until: { at: 'pane[title="Call Trace"]', assert: 'has-row("right=3)")' }, timeout: 30s }
+  - wait: { until: { at: 'pane[title="Call Trace"]', assert: 'has-row("(left=2, right=3)")' }, timeout: 30s }
   - expect: { at: 'call-trace/call[#6]', name: add }
   - expect: { at: 'call-trace/call[#6]', arguments: { contains: "(left=2, right=3)" } }
