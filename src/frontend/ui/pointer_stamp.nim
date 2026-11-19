@@ -23,7 +23,7 @@ type
   JsEv {.importc: "Event".} = ref object
 
 const
-  PointerBindings: array[268, PointerBinding] = [
+  PointerBindings: array[281, PointerBinding] = [
     (cstring".ct-origin-inline-chain-hop", hkRow, false),
     (cstring".ct-origin-inline-chain-terminator", hkNone, false),
     (cstring".ct-origin-hop", hkRow, false),
@@ -39,6 +39,22 @@ const
     (cstring".agent-test-run-header", hkControl, false),
     (cstring".agent-test-row-header", hkControl, false),
     (cstring".agent-user-copy-button", hkControl, false),
+    # The Agent Harbor inbox, session-activity and changes views (their
+    # stylesheets said `cursor: pointer`; the stepper's disabled state said
+    # `default`).
+    (cstring".ah-step", hkControl, false),
+    (cstring".ah-step:disabled", hkControl, true),
+    (cstring".ah-auto-switch", hkControl, false),
+    (cstring".ah-inbox-row", hkRow, false),
+    (cstring".ah-choice", hkControl, false),
+    (cstring".ah-activity-line.ah-activity-expandable", hkExpander, false),
+    (cstring".ah-activity-copy", hkControl, false),
+    (cstring".ah-activity-unseen", hkControl, false),
+    (cstring".ah-changes-tab", hkTab, false),
+    (cstring".ah-spec-card-head", hkExpander, false),
+    (cstring".ah-side", hkControl, false),
+    (cstring".ah-file-link", hkControl, false),
+    (cstring".ah-file-step", hkControl, false),
     # The Agent Activity playback bar's buttons (their stylesheet said
     # `cursor: pointer` itself, which PA-1 leaves to pointer.styl alone).
     (cstring".ah-playback-button", hkControl, false),

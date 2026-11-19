@@ -49,6 +49,7 @@ import ../../viewmodel/views/agent_harbor_activity_words
 import ../../viewmodel/input/element_press
 import ../chrome
 import ./ah_theme
+import ../../../common/pointer_shape
 
 export session_timeline_vm, agent_harbor_activity_words, ah_theme
 
@@ -200,13 +201,14 @@ proc drawLine(r: GpuiRenderer; p: AhPalette; vm: SessionTimelineVM;
   r.appendChild(result, body)
   if line.copyText.len > 0:
     let action = r.text(CopyLabel, CaptionPx, p.textCaption, shrink = false,
-                        pairs = [("cursor", "pointer"), ("margin-left", $InsetPx & "px")])
+                        pairs = [("cursor", pointerShapeOf(HitTarget(kind: hkControl)).cssName),
+                                 ("margin-left", $InsetPx & "px")])
     r.tag(action, "copy-action", CopyLabel)
     r.carries(action, ActivityCopyOperation, line.copyText, press)
     r.appendChild(result, action)
   if line.expandable:
     # A press on the line opens or closes it (`session-activity.toggle`).
-    r.setStyle(result, "cursor", "pointer")
+    r.setStyle(result, "cursor", pointerShapeOf(HitTarget(kind: hkExpander)).cssName)
     r.carries(result, ActivityToggleOperation, line.id, press)
 
 proc drawSessionActivity*(r: GpuiRenderer; host: GpuiElement; vm: SessionTimelineVM;
