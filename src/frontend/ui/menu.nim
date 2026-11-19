@@ -473,11 +473,13 @@ when defined(js):
       let h = cast[int](jq(cstring"#menu-elements .ct-menu-item").toJs.offsetHeight)
       if h > 0: h else: 28
 
-    # Each depth-N submenu starts (depth) item-heights below #menu-main's top,
-    # placing its first row one item above the folder that opened it.
+    # `value` is the accumulated visible-index sum across all ancestor levels,
+    # so `value * itemH` places the submenu's first row at exactly the same y as
+    # the folder that opened it.  No depth adjustment: the `-depth` term in the
+    # previous formula was overcorrecting by one item-height per nesting level.
     # `.menu-sub-group-separator` elements are `display: none` and contribute
     # zero height to the layout, so separator counts must not offset `top`.
-    fmt"top: {(value - depth) * itemH}px; left: calc({left}px + {2 * depth}px)"
+    fmt"top: {value * itemH}px; left: calc({left}px + {2 * depth}px)"
 
   proc buildMenuShellModel(self: MenuComponent): MenuShellModel =
     result.rootNodes = @[]
