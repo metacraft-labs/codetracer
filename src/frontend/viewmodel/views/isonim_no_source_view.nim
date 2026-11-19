@@ -170,7 +170,7 @@ proc renderNoSourcePanel*[R, N](r: R; vm: NoSourceVM): N =
           tdiv(class = "unknown-location-buttons"):
             p:
               text "You can still use all of the actions or you can go back"
-            button(class = "jump-back-button",
+            button(class = "ct-button-md-secondary jump-back-button",
                    onclick = proc() = vm.jumpBack()):
               text "Jump back"
       r.appendChild(contentNode, buttonBorder)

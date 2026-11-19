@@ -56,8 +56,10 @@ AGENT_BUTTON_TEXT = 0.75rem
   padding: 0.5em 0.5em
   position: relative
 
+  // D-43: the prompt box is a text field, so in light it takes the field token
+  // `surface/input/default` like every other field; dark keeps canvas.
   .agent-input-wrapper
-    background: colors-ui-surface-base-canvas
+    background: by-mode(colors-ui-surface-base-canvas, colors-ui-surface-input-default)
     border-radius: AGENT_TOOLBAR_CONTROL_RADIUS
     display: flex
     flex-direction: column
@@ -322,11 +324,10 @@ AGENT_BUTTON_TEXT = 0.75rem
     flex: 0 0 auto !important
     margin-left: auto !important
 
+  // Send is a primary button, so its arrow is a mask in
+  // `icon/on-action/primary` (D-45), not the picture with white baked in.
   .agent-start-button
-    background-image: COMMAND_PALETTE_START_MSG_IMG
-    background-repeat: no-repeat
-    background-size: 1em
-    background-position: center
+    button-icon(COMMAND_PALETTE_START_MSG_IMG, 1em)
     border-radius: 50% !important
 
   .agent-stop-button
@@ -831,7 +832,9 @@ AGENT_BUTTON_TEXT = 0.75rem
 
 .user-wrapper
   background: colors-ui-surface-primary-default !important
-  border-radius: border-border-radius-2xs !important
+  // The token is a bare number (4); without a unit the browser dropped the
+  // declaration and the bubble had square corners.  As session_tabs.styl does.
+  border-radius: unit(border-border-radius-2xs / 16, 'rem') !important
   padding-top: 0.5em !important
   padding-bottom: 0.5em !important
 
@@ -1161,7 +1164,8 @@ AGENT_BUTTON_TEXT = 0.75rem
     height: 100%
 
 .agent-interaction
-  background: colors-ui-surface-base-canvas
+  // D-43: the whole prompt tray reads as one field in light (Nikolay, 2026-11-19).
+  background: by-mode(colors-ui-surface-base-canvas, colors-ui-surface-input-default)
   border-radius: AGENT_TOOLBAR_CONTROL_RADIUS
   padding: 0.5em
   flex: 0 0 auto

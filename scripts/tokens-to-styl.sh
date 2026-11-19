@@ -152,6 +152,10 @@ def stylus_scalar(value):
         if is_hex_color(value):
             return value
         if is_css_dimension(value):
+            # A zero size needs no unit, and the stylesheets ban px
+            # (ci/test/ui-design-decisions.py), so write `0px` as `0`.
+            if re.fullmatch(r"-?0+(?:\.0+)?[a-z%]+", value):
+                return "0"
             return value
         return quote_string(value)
     return None
@@ -265,7 +269,7 @@ def render_file(title, flat_map, known_vars):
 # without it still work. Add a new collection folder here (or make it optional)
 # and it flows through with no other change.
 REQUIRED_LAYERS = ["brand", "alias", "mapped"]
-OPTIONAL_LAYERS = ["space"]
+OPTIONAL_LAYERS = ["space", "typography"]  # typography: built from Figma text styles
 
 layers = list(REQUIRED_LAYERS)
 for name in OPTIONAL_LAYERS:

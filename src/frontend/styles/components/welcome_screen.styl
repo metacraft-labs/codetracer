@@ -845,10 +845,6 @@ welcome-heading-type()
             animation-name: loading
             animation-duration: 3s
 
-          &.failed
-            background-image: ct-images-notification-error
-          &.success
-            background-image: ct-images-notification-success
 
         .new-record-result-info
           text-align: center
@@ -917,17 +913,22 @@ welcome-heading-type()
   #progress-bar
     position: relative
 
+  // D-42: #919191 files; the light theme repaints them in `icon/primary/subtle`.
   #trace-upload-button
     background-image: WELCOME_SCREEN_UPLOAD_BUTTON
+    light-icon(WELCOME_SCREEN_UPLOAD_BUTTON, 1em 1em, colors-ui-icon-primary-subtle)
 
   #trace-copy-button
     background-image: WELCOME_SCREEN_COPY_BUTTON
+    light-icon(WELCOME_SCREEN_COPY_BUTTON, 1em 1em, colors-ui-icon-primary-subtle)
 
   #trace-delete-button
     background-image: WELCOME_SCREEN_DELETE_BUTTON
+    light-icon(WELCOME_SCREEN_DELETE_BUTTON, 1em 1em, colors-ui-icon-primary-subtle)
 
   #trace-info-button
     background-image: WELCOME_SCREEN_INFO_BUTTON
+    light-icon(WELCOME_SCREEN_INFO_BUTTON, 1em 1em, colors-ui-icon-primary-subtle)
 
   #trace-info-button-active
     background-image: WELCOME_SCREEN_INFO_ACTIVE_BUTTON

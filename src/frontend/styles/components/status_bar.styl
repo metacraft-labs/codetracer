@@ -247,7 +247,8 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
 
     &:hover
       color: colors-ui-text-primary-body
-      background-color: rgba(255, 255, 255, 0.1)
+      // D-40: the list hover in the light theme; white at 10% vanished there.
+      background-color: by-mode(rgba(255, 255, 255, 0.1), colors-ui-surface-primary-secondary-hover)
 
     &.active
       color: colors-ui-text-success-primary
@@ -272,7 +273,7 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
       white-space: nowrap
 
       &:hover
-        background-color: rgba(255, 255, 255, 0.1)
+        background-color: by-mode(rgba(255, 255, 255, 0.1), colors-ui-surface-primary-secondary-hover)
 
       &.active
         color: colors-ui-text-success-primary
@@ -601,7 +602,8 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     // NOTE the guard reads the COMPILED theme, so it only sees an edit to this
     // file after `just build-once`.
     bottom: 0
-    background-color: colors-ui-surface-primary-default
+    // D-46: the status bar is part of the frame, `surface/base/canvas` in light.
+    background-color: by-mode(colors-ui-surface-primary-default, colors-ui-surface-base-canvas)
     // THE BAR DECLARES A TEXT COLOUR, because it declares a background.
     //
     // Reported from noirstudio.dev as *"the colors in the status bar are
@@ -728,7 +730,7 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     // `UNREACHABLE_SELECTORS` rather than repainted.
     .status-button-clicked
       background-color: colors-ui-surface-primary-secondary-hover
-      color: colors-ui-border-primary
+      color: by-mode(colors-ui-border-primary, colors-ui-text-primary-label-subtle)
       float: left
       width: max-content
       margin-left: 1.25rem
@@ -1143,6 +1145,9 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
 
     #bug-report-title
       margin-left: 10% !important
+      // The shared panel field (D-41) fills its row; match the description box.
+      width: 80%
+      max-width: 80%
 
     textarea
       color: colors-ui-text-primary-body
@@ -1182,6 +1187,7 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
   background-repeat: no-repeat
   background-position: center
   background-image: url("../../public/resources/menu/copy_file_path_dark.svg")
+  light-icon(url("../../public/resources/menu/copy_file_path_dark.svg"), auto) // D-42
   cursor: pointer
 
   &:hover
@@ -1329,11 +1335,13 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
 
   &::before
     content: ""
-    width: 0.9375rem
-    height: 0.875rem
+    // D-38: icons-lg=copy.  The variable it used existed only in the dark
+    // theme, so in the light theme the mask was dropped and nothing showed.
+    width: 1rem
+    height: 1rem
     background-color: currentColor
-    -webkit-mask-image: ct-images-copy-path
-    mask-image: ct-images-copy-path
+    -webkit-mask-image: ICON_COPY
+    mask-image: ICON_COPY
     -webkit-mask-repeat: no-repeat
     mask-repeat: no-repeat
     -webkit-mask-position: center

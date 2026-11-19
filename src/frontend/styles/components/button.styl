@@ -60,7 +60,8 @@ LIST_HOVER_BG = colors-ui-surface-primary-secondary-hover
 // chosen row's fill (Nikolay, 2026-11-02; docs/UI-Design-Decisions.md, D-30).
 // It only shows on the dark surfaces dropdowns normally have (#161616, #1b1b1b):
 // a dropdown painted #242424 or lighter stays on LIST_HOVER_BG.
-DROPDOWN_HOVER_BG = colors-ui-surface-primary-default-hover
+// Light: pure white, `colors/base/white` (Nikolay, 2026-11-18, D-30).
+DROPDOWN_HOVER_BG = by-mode(colors-ui-surface-primary-default-hover, colors-base-white)
 
 // Button transition — ONE timing for every button's state change (hover, and
 // the welcome forms' Record / Download turning primary): the colours ease over
@@ -94,13 +95,66 @@ BUTTON_TRANSITION = background-color BUTTON_TRANSITION_TIMING, color BUTTON_TRAN
 // its own: the mask covers the whole box.
 ICON_CHEVRON_DOWN = url('../../public/resources/shared/build_chevron_down.svg')
 ICON_OPEN_DIFF = url('../../public/resources/shared/vc-open-diff.svg')
+// D-38: these replace the `ct-images-*` pictures that only the dark theme
+// defined, so the light theme drew nothing.  Names are the Figma variants.
+ICON_STOP = url('../../public/resources/shared/build_stop.svg') // icons-lg=stop
+ICON_REC_AND_REPLAY = url('../../public/resources/shared/run_test_img.svg') // nav-icons=rec-and-replay
+ICON_COPY = url('../../public/resources/shared/copy.svg') // icons-lg=copy
+ICON_CLOSE_SM = url('../../public/resources/shared/close_sm.svg') // icons-lg=close-sm
+ICON_CHEVRON_LEFT = url('../../public/resources/shared/chevron_left.svg') // icons-lg=chevron-left
+ICON_CHEVRON_RIGHT = url('../../public/resources/shared/chevron_right.svg') // icons-lg=chevron-right
+ICON_TAB_MENU = url('../../public/resources/shared/tab_menu.svg') // icons-lg=tab-menu
+ICON_FOLDER = url('../../public/resources/shared/folder.svg') // icons-lg=folder
+ICON_FILE = url('../../public/resources/shared/file.svg') // type=content-file
+// alert-icons, size=lg (20px).  Painted in the status icon tokens, which the
+// light theme re-maps, so one file serves both themes.
+ICON_ALERT_INFO = url('../../public/resources/notifications/alert_info_lg.svg')
+ICON_ALERT_WARNING = url('../../public/resources/notifications/alert_warning_lg.svg')
+ICON_ALERT_ERROR = url('../../public/resources/notifications/alert_error_lg.svg')
+ICON_ALERT_SUCCESS = url('../../public/resources/notifications/alert_success_lg.svg')
 
+// The same, for a button that also holds a tooltip or text: the icon is a
+// `::before`, and the old background picture is switched off.  `h` defaults to
+// `w`; give it for artwork that is not square.
+button-icon(img, w = 1rem, h = null)
+  background-image: none !important
+
+  &::before
+    content: ""
+    mask-icon(img, w)
+    if h
+      height: h
+
+// D-42: for the light theme only.  A picture with a near-white colour baked in
+// (the dark theme's file, which the light theme also points at) is redrawn as a
+// mask on a layer over the element, in an icon token, so it shows on a light
+// surface.  The dark theme's output is unchanged.  A layer, not the element
+// itself, because these buttons also hold a tooltip, an outline or a fill.
+// `size` is what the picture was drawn at: `auto` for its own size.
+light-icon(img, size = contain, color = colors-ui-icon-primary-default)
+  if COLOR_MODE is defined and COLOR_MODE == "Light"
+    position: relative
+    background-image: none !important
+
+    &::before
+      content: ""
+      position: absolute
+      inset: 0
+      pointer-events: none
+      background-color: color
+      -webkit-mask: img center / size no-repeat
+      mask: img center / size no-repeat
+
+// The icon is painted in the text colour unless its button names an icon
+// colour in `--ct-icon-color`.  A primary button does (D-45, below): its icons
+// take `icon/on-action/primary`.  Everywhere else nothing sets it, so every
+// other icon looks exactly as it did.
 mask-icon(img, size = 1rem)
   display: inline-block
   flex: 0 0 auto
   width: size
   height: size
-  background: currentColor
+  background: var(--ct-icon-color, currentColor)
   -webkit-mask-image: img
   mask-image: img
   -webkit-mask-repeat: no-repeat
@@ -237,14 +291,28 @@ button
 [class*="-button-"][class*="-primary"]
   background-color: colors-ui-surface-action-primary
   color: colors-ui-text-on-action-primary
+  // D-45: an icon on the action fill is `icon/on-action/primary`, light in both
+  // modes, the same value as the label (Nikolay, 2026-11-19).  The general icon
+  // tokens can't be used here: `icon/primary/default` is dark in Light, so the
+  // marks came out near-black on the indigo, and `icon/primary/on-color` is
+  // dark in Dark.  `mask-icon()` reads this variable.
+  --ct-icon-color: colors-ui-icon-on-action-primary
 
+  // The label keeps the on-action ink on hover.  Without it the generic
+  // `button:hover` text colour (above) won, which in light is the dark body
+  // ink: "Done" turned near-black on brand/700.  Dark keeps the colour that
+  // rule always gave it (text/primary/body).
   &:hover:not(:disabled)
     background-color: colors-ui-surface-action-primary-hover !important
+    color: by-mode(colors-ui-text-primary-body, colors-ui-text-on-action-primary-hover)
 
   // The fill stays (D-20), so the grey disabled text would all but vanish on it
   // (#727272 on #6366F1 is 1.1:1).  Its own text colour, dimmed, stays readable.
+  // Light keeps more of it (0.7, 3.4:1 on brand/600), so it still reads (D-44).
   &:disabled
-    color: rgba(colors-ui-text-on-action-primary, 0.5) !important
+    color: rgba(colors-ui-text-on-action-primary, by-mode(0.5, 0.7)) !important
+    // The icon dims with the label (D-20): back to the label's colour.
+    --ct-icon-color: currentColor
 
 // Secondary and tertiary are one look now: the button look (top of this file).
 // Tertiary was a second, flatter fill with no border; it is kept as a class
@@ -371,17 +439,14 @@ button
   path, line, polyline, polygon, circle, rect, ellipse
     vector-effect: non-scaling-stroke
 
-#reset-operation-loading-image
-  background-image: ct-images-reset-operation-loading
-
+// D-38: every icon below is a Design System icon painted in the button's
+// text colour (`button-icon`), not a picture named by a `ct-images-*`
+// variable that only the dark theme defined.  The rules for
+// `reset-operation-loading`, `jump-before`, `jump-after` and
+// `run-tests-loading` were removed: no screen renders those ids.
 #stop-image
-  background-image: ct-images-stop
-
-#jump-before-image
-  background-image: ct-images-jump-before
-
-#jump-after-image
-  background-image: ct-images-jump-after
+  // 1em tall, like the twelve marks beside it on the strip (.ct-control-mark).
+  button-icon(ICON_STOP, 1em)
 
 // `run-tests-image` is the ONE id the two topbar surfaces share, and the
 // page-object contract says so out loud (`EDIT_TOOLBAR_IDS.runTests` in
@@ -401,17 +466,14 @@ button
 // also gets the sizing rules above.
 #run-tests-image[class*="ct-button-image-"]
 #jump-to-live-debug
-  background-image: ct-images-run-tests
-
-#run-tests-loading-image
-  background-image: ct-images-run-tests-loading
+  // The artwork is 21x16; 1em tall like the strip's other marks.
+  button-icon(ICON_REC_AND_REPLAY, 1.3125em, 1em)
 
 #copy-path-image
-  background-image: ct-images-copy-path
+  button-icon(ICON_COPY)
 
 #category-image
-  background-image: ct-images-layout-tab
-  background-size: 1em auto !important
+  button-icon(ICON_TAB_MENU)
 
   // The button look (top of this file), like every other button — it used to
   // copy the search field it sits beside (Nikolay, 2026-10-20: the Event Log's
@@ -425,12 +487,11 @@ button
     border-color: colors-ui-border-action !important
 
 #close-element
-  background-image: ct-images-close-button
-  background-size: 0.5em 0.5em !important
+  // The same × as the strip tabs and the tab list (D-01).
+  button-icon(ICON_CLOSE_SM)
 
 #backward-loop
-  background-image: ct-images-omni-backward
-  background-size: 0.5em !important
+  button-icon(ICON_CHEVRON_LEFT)
   z-index: 10
   height: 1.3em !important
   width: 1.3em !important
@@ -438,24 +499,24 @@ button
   max-height: 1.3em !important
 
 #forward-loop
-  background-image: ct-images-omni-forward
-  background-size: 0.5em !important
+  button-icon(ICON_CHEVRON_RIGHT)
   z-index: 10
   height: 1.3em !important
   width: 1.3em !important
   max-width: 1.3em !important
   max-height: 1.3em !important
 
-// These two paint their icon as a background image, which `color` cannot reach
-// and `opacity` cannot dim without fading the fill too (D-20).  A half-strength
-// layer of the button's own fill over the image dims only the icon.
-LOOP_ICON_DIM = linear-gradient(rgba(colors-ui-surface-primary-default, 0.5), rgba(colors-ui-surface-primary-default, 0.5))
+// The counterexample's loop iteration arrows: "‹ ›" typed as text in an
+// unstyled button until D-41.
+.ct-counterexample-iteration-backward
+  button-icon(ICON_CHEVRON_LEFT)
 
-#backward-loop:disabled
-  background-image: LOOP_ICON_DIM, ct-images-omni-backward
+.ct-counterexample-iteration-forward
+  button-icon(ICON_CHEVRON_RIGHT)
 
-#forward-loop:disabled
-  background-image: LOOP_ICON_DIM, ct-images-omni-forward
+// Disabled: the shared `:disabled` rule turns the text colour to
+// `text/primary/disabled`, and the masked icon follows it (D-20).  The
+// half-strength fill layer these two used to dim a picture is no longer needed.
 
 // The trace editor's run and options buttons draw the design system's ui-icons
 // (icons-lg) as the Build panel's buttons do (`.build-ctrl-btn`,
@@ -543,14 +604,14 @@ LOOP_ICON_DIM = linear-gradient(rgba(colors-ui-surface-primary-default, 0.5), rg
 .ct-button-no-border
   border: none !important
 
-// The design system's Tooltip (Figma: ❖ Tooltip), Size=sm.  In the light theme the
-// text is the body colour: Figma's `text/on-color/body` is #d2ccc1 there, unreadable
-// on this #f8f6f2.
+// The design system's Tooltip (Figma: ❖ Tooltip), Size=sm.  In the light theme it
+// is an inverse chip: `surface/on-color/secondary` is dark there (stone 900) and
+// `text/on-color/body` is its light ink (stone 100, 10.7:1).
 TOOLTIP_BORDER_WIDTH = by-mode(0.0625rem, 0)
 
 tooltip-look()
   background-color: by-mode(colors-ui-surface-base-raised, colors-ui-surface-on-color-secondary)
-  color: colors-ui-text-primary-body
+  color: by-mode(colors-ui-text-primary-body, colors-ui-text-on-color-body)
   padding: by-mode(0.375rem 0.75rem, 0.25rem 0.5rem)
   border-radius: 0.25rem
   // Drawn inside, as Figma's border is, so it adds nothing to the size.

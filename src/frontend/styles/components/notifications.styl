@@ -31,27 +31,33 @@
     width: 100%
     gap: 0.625rem
 
+  // D-38: the Design System's `alert-icons` (size=lg, 20px), painted through a
+  // mask in the status icon token, which the light theme re-maps.  They were
+  // pictures named by variables that only the dark theme defined, so in the
+  // light theme every notification had no icon.
   .notification-icon
-    width: 1.125rem
-    min-width: 1.125rem
-    height: 1.125rem
-    min-height: 1.125rem
-    background-repeat: no-repeat
-    background-size: 1.125rem
-    background-position: center
+    mask-icon(ICON_ALERT_INFO, 1.25rem)
+    min-width: 1.25rem
+    min-height: 1.25rem
     margin-top: 0.125rem
 
     &.info
-      background-image: ct-images-notification-info
+      color: colors-ui-icon-information-primary
 
     &.warning
-      background-image: ct-images-notification-warning
+      color: colors-ui-icon-warning-primary
+      -webkit-mask-image: ICON_ALERT_WARNING
+      mask-image: ICON_ALERT_WARNING
 
     &.error
-      background-image: ct-images-notification-error
+      color: colors-ui-icon-error-primary
+      -webkit-mask-image: ICON_ALERT_ERROR
+      mask-image: ICON_ALERT_ERROR
 
     &.success
-      background-image: ct-images-notification-success
+      color: colors-ui-icon-success-primary
+      -webkit-mask-image: ICON_ALERT_SUCCESS
+      mask-image: ICON_ALERT_SUCCESS
 
   .notification-message
     flex: 1
@@ -74,10 +80,11 @@
     cursor: pointer
     user-select: none
     opacity: 0.72
-    background-image: ct-images-close-button
-    background-repeat: no-repeat
-    background-position: center
-    background-size: 0.875rem
+    // D-38: the Design System × (icons-lg=close-sm), the same as the strip
+    // tabs' and the tab list's (D-01), in the text colour.
+    background-color: currentColor
+    -webkit-mask: ICON_CLOSE_SM center / 1rem no-repeat
+    mask: ICON_CLOSE_SM center / 1rem no-repeat
     border-radius: 0.25rem
 
     &:hover

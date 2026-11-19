@@ -586,6 +586,7 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   background-image: url("../../public/resources/shared/vcs-copy-details.svg")
   background-repeat: no-repeat
   background-size: contain
+  light-icon(url("../../public/resources/shared/vcs-copy-details.svg")) // D-42
   background-position: center
   opacity: 0.6
   transition: background-image 0s, opacity 150ms ease
@@ -595,6 +596,7 @@ VCS_BRANCH_PICKER_INSET = 0.25em
 
   &.copied
     background-image: url("../../public/resources/shared/vcs-copy-success.svg")
+    light-icon(url("../../public/resources/shared/vcs-copy-success.svg"), contain, colors-ui-icon-success-primary) // D-42
     opacity: 1
     cursor: default
 
@@ -765,13 +767,13 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   color: by-mode(#4ec9b0, colors-ui-text-success-primary)
 
 .vcs-status-deleted
-  color: #f44747
+  color: by-mode(#f44747, colors-ui-text-error-primary)
 
 .vcs-status-modified
   color: by-mode(#e5c07b, colors-ui-text-warning-primary)
 
 .vcs-status-other
-  color: #888
+  color: by-mode(#888, colors-ui-text-primary-caption-subtle)
 
 .vcs-status-untracked
   color: by-mode(#4ec9b0, colors-ui-text-success-primary)
@@ -805,7 +807,7 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   color: by-mode(#4ec9b0, colors-ui-text-success-primary)
 
 .vcs-stat-deleted
-  color: #f44747
+  color: by-mode(#f44747, colors-ui-text-error-primary)
 
 // ---------------------------------------------------------------------------
 // Refresh button
@@ -913,6 +915,7 @@ VCS_BRANCH_PICKER_INSET = 0.25em
   background-image: url("../../public/resources/shared/vc-open-diff.svg")
   background-repeat: no-repeat
   background-size: contain
+  light-icon(url("../../public/resources/shared/vc-open-diff.svg")) // D-42
   background-position: center
 
   .custom-tooltip

@@ -33,11 +33,16 @@
   --ct-toggle-thumb-gap: 0.125em
 
   // --- color tokens ---
-  --ct-toggle-track: rgba(255, 255, 255, 0.12)
-  --ct-toggle-track-hover: rgba(255, 255, 255, 0.2)
+  // D-40: in the light theme the off track is `surface/primary/tertiary`
+  // (hover `tertiary-hover`), one step darker than the panel, and the thumb is
+  // `surface/on-color/default`, near-white.  White at 12% was invisible on a
+  // light panel; `surface/base/raised` became the lightest surface (D-44), so
+  // a near-white thumb on it vanished too.  Dark is unchanged.
+  --ct-toggle-track: by-mode(rgba(255, 255, 255, 0.12), colors-ui-surface-primary-tertiary)
+  --ct-toggle-track-hover: by-mode(rgba(255, 255, 255, 0.2), colors-ui-surface-primary-tertiary-hover)
   --ct-toggle-track-on: colors-ui-surface-action-primary
   --ct-toggle-track-on-hover: colors-ui-surface-action-primary-hover
-  --ct-toggle-thumb-color: #ffffff
+  --ct-toggle-thumb-color: by-mode(#ffffff, colors-ui-surface-on-color-default)
 
   position: relative
   display: inline-flex
