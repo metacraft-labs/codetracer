@@ -76,6 +76,17 @@ jobs:
         id: tools
         run: nix develop .#devShells.x86_64-linux.default --command bash ci/test/visual-replay-tools.sh "${RUNNER_TEMP}/visual-replay.env"
 
+      - name: Build isonim-gpui's featureless shim
+        # For GPUI shard 1's plat45, which links `just build-gpui` against it:
+        # built there, it cost the shard about 9.5 minutes of isonim-gpui's dev
+        # shell and cargo (run 44384977215), before its first capture. Only the
+        # shim travels; `just build-gpui` stays in the shard, whose checkout
+        # path the binary is built for.
+        run: |
+          cd ../isonim-gpui
+          nix develop --command bash -c "cd rust && cargo build"
+          ls -la rust/target/debug/libgpui_nim_shim.so
+
       - name: Pack them
         # Paths relative to the workspace's parent, as ct-build packs its
         # products, so a shard restores them beside its own siblings. The
@@ -86,6 +97,7 @@ jobs:
             codetracer-native-backend/target/debug/ct-native-replay
             codetracer-visual-replay/ct_gfx_player
             codetracer-native-recorder/ct_cli/ct_cli
+            isonim-gpui/rust/target/debug/libgpui_nim_shim.so
           )
           [ ! -e codetracer-visual-replay/ct-native-replay ] || files+=(codetracer-visual-replay/ct-native-replay)
           tar -czf "${RUNNER_TEMP}/visual-replay-tools.tar.gz" "${files[@]}"

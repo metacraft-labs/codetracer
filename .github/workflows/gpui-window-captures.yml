@@ -270,6 +270,10 @@ jobs:
         run: |
           bash ci/unpack-ct-build-products.sh "${RUNNER_TEMP}/visual-replay-tools" visual-replay-tools.tar.gz
           echo "CT_VISUAL_REPLAY_TOOLS_PREBUILT=1" >>"$GITHUB_ENV"
+          # plat45's featureless shim, when the tools job packed it.
+          if [ -e ../isonim-gpui/rust/target/debug/libgpui_nim_shim.so ]; then
+            echo "CT_GPUI_FEATURELESS_SHIM_PREBUILT=1" >>"$GITHUB_ENV"
+          fi
 
       - name: Build the windowed GPUI front-end the scenario lane opens
         # Linked here, against the restored shim, because the front-end pins

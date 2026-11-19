@@ -312,7 +312,14 @@ for w in "${which[@]}"; do
 		# dock document and opens the terminal on `calc`, so it needs
 		# `just build-gpui` (over isonim-gpui's featureless shim) and the
 		# terminal's prerequisites as well as the window's frames.
-		(cd "${ISONIM_GPUI}" && nix develop --command bash -c "cd rust && cargo build") &&
+		# CT_GPUI_FEATURELESS_SHIM_PREBUILT=1: the visual-replay-tools job
+		# built that shim (about 9.5 minutes here otherwise).
+		if [ "${CT_GPUI_FEATURELESS_SHIM_PREBUILT:-0}" = 1 ] &&
+			[ -e "${ISONIM_GPUI}/rust/target/debug/libgpui_nim_shim.so" ]; then
+			echo "=== plat45: isonim-gpui's featureless shim is prebuilt (CT_GPUI_FEATURELESS_SHIM_PREBUILT=1)"
+		else
+			(cd "${ISONIM_GPUI}" && nix develop --command bash -c "cd rust && cargo build")
+		fi &&
 			ISONIM_GPUI_SHIM_DIR="${ISONIM_GPUI}/rust/target/debug" just build-gpui &&
 			just tui-prereqs &&
 			in_compositor_shell "CODETRACER_PLAT45_BIN='${root}/build/bin/codetracer-gpui-window' bash ci/test/plat45-arrangement-window.sh" &&
