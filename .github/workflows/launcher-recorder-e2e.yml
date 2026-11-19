@@ -665,6 +665,25 @@ jobs:
         with:
           env-flavor: nix
           gh-token: ${{ steps.ci_token.outputs.token }}
+          # THE NIX CREDENTIAL MUST OUTLIVE THE HOUR, BECAUSE THIS JOB DOES.
+          # With the App's id and key, setup-dev-env starts its job credential
+          # broker, which re-mints the Nix GitHub credential before it expires
+          # and rewrites the job's credential files in place, so every later
+          # `nix` and `repro exec` reads a live token on its next fetch.
+          # Without them the broker step is skipped and nix keeps presenting
+          # `gh-token` after it expires.  Ruby-recorder PR #146, job
+          # 131497234823: token minted 22:29:44; at 00:03:05 the shared
+          # preparation's `repro exec` evaluated tools/ruby-sdk/default.nix,
+          # whose `builtins.fetchTree` of the PUBLIC nixpkgs tarball got
+          # `HTTP error 401 "Bad credentials"`.  The prefetch step below
+          # cannot cover that: it fetches flake inputs, not what a non-flake
+          # expression fetches during a later evaluation.  The broker mints
+          # its own `contents: read` tokens through its own channel, so this
+          # job still has exactly one mint step.  The id takes the same
+          # secret-or-variable spelling as the `ci_token` mint above, and both
+          # arrive through the callers' `secrets: inherit`.
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID || vars.CI_TOKEN_PROVIDER_APP_ID }}
+          app-private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           attic-token: ${{ secrets.ATTIC_TOKEN }}

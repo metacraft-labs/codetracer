@@ -98,6 +98,10 @@
 #      job.  The day one stops, this fails and the change is deliberate.  A call
 #      site that forces `sibling-strategy: repro-lock` must also name every
 #      sibling source `repro.nim` imports by relative path.
+#   9d. The reusable workflow's `setup-dev-env` step passes `app-id` and
+#      `app-private-key`, so the job credential broker re-mints the Nix
+#      GitHub credential for a job that outlives the token's hour.  A copy
+#      missing either input is rejected.
 #  10. THE CHECKER'S OWN MUTATION TEST: fourteen mutations of real files, each of
 #      which must be REJECTED, plus a positive control on the unmutated copies
 #      so a checker that always fails cannot pass this section.
@@ -2024,6 +2028,64 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 9d. THE NIX CREDENTIAL IS RE-MINTED FOR THE WHOLE JOB.
+#
+# This job outlives the hour an App installation token lasts.  setup-dev-env
+# starts its job credential broker, which re-mints the Nix GitHub credential,
+# only when it is passed both `app-id` and `app-private-key` (its broker step
+# is `if: inputs.app-id != '' && inputs.app-private-key != '' && ...`).
+# Without them ruby-recorder PR #146's job 131497234823 got `401 Bad
+# credentials` from a `builtins.fetchTree` 93 minutes after its mint.  The
+# values must name the same App as the `ci_token` mint, in the same spelling.
+# A copy of the step with either input removed must be REJECTED.
+# ---------------------------------------------------------------------------
+echo
+echo "setup-dev-env starts the job credential broker"
+
+readonly BROKER_STEP="Setup dev env + clone the remaining siblings"
+# shellcheck disable=SC2016 # Match GitHub expressions as literal workflow data.
+readonly BROKER_APP_ID='          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID || vars.CI_TOKEN_PROVIDER_APP_ID }}'
+# shellcheck disable=SC2016 # Match GitHub expressions as literal workflow data.
+readonly BROKER_APP_KEY='          app-private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}'
+
+# broker_violations FILE -> one line per missing broker input; empty when the
+# setup-dev-env step passes both.  The step must exist and call setup-dev-env,
+# so a renamed step cannot pass vacuously.
+broker_violations() {
+	local block
+	block="$(step_block "$BROKER_STEP" "$1")"
+	if ! grep -qE '^        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@' <<<"$block"; then
+		echo "no step '$BROKER_STEP' calling setup-dev-env"
+		return
+	fi
+	grep -qxF "$BROKER_APP_ID" <<<"$block" || echo "missing: ${BROKER_APP_ID#"${BROKER_APP_ID%%[! ]*}"}"
+	grep -qxF "$BROKER_APP_KEY" <<<"$block" || echo "missing: ${BROKER_APP_KEY#"${BROKER_APP_KEY%%[! ]*}"}"
+}
+
+broker_out="$(broker_violations "$REUSABLE")"
+if [ -z "$broker_out" ]; then
+	ok "the setup-dev-env step passes app-id and app-private-key from the ci_token App"
+else
+	mapfile -t broker_lines <<<"$broker_out"
+	fail "the setup-dev-env step passes app-id and app-private-key from the ci_token App" "${broker_lines[@]}"
+fi
+
+BRK="$TMP/broker"
+mkdir -p "$BRK"
+broker_bad=()
+for key in app-id app-private-key; do
+	strip_cr "$REUSABLE" | grep -vE "^          ${key}: " >"$BRK/no-${key}.yml"
+	if ! grep -qF "missing: ${key}:" <<<"$(broker_violations "$BRK/no-${key}.yml")"; then
+		broker_bad+=("a step without '${key}' was accepted")
+	fi
+done
+if [ "${#broker_bad[@]}" -eq 0 ]; then
+	ok "a setup-dev-env step missing either broker input is rejected, by name"
+else
+	fail "a setup-dev-env step missing either broker input is rejected, by name" "${broker_bad[@]}"
+fi
+
+# ---------------------------------------------------------------------------
 # 10. THE CHECKER'S OWN MUTATION TEST.
 #
 # Everything above reports a defect by NOT finding something, which is the
@@ -2337,7 +2399,7 @@ fi
 # reporting success on fewer checks than it claims.
 # ---------------------------------------------------------------------------
 echo
-readonly EXPECTED_ASSERTIONS=48
+readonly EXPECTED_ASSERTIONS=50
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))
