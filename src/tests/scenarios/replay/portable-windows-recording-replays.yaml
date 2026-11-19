@@ -4,7 +4,11 @@ pack: codetracer
 summary: >-
   A portable MCR recording made on Windows x86-64 (codetracer-example-recordings),
   opened through `ct host` in a browser on another platform, replays: the
-  status bar shows a location in the recorded program's source.
+  status bar shows a location in the recorded program's source,
+  `ct_fixture_prog.c` (the name its PDB gives it). The replay starts from the
+  recording's START boundary, at the program's entry point (codetracer-pm
+  MCR-Portable-Trace-Format.md M14h), so it reaches `main` well within the
+  budget.
 
 stage:
   - use: portable-recording
@@ -13,4 +17,4 @@ stage:
     with: { deployment: web }
 
 steps:
-  - wait: { until: { at: status-line, location: { contains: "source.c:" } }, timeout: 300s }
+  - wait: { until: { at: status-line, location: { contains: "ct_fixture_prog.c:" } }, timeout: 300s }
