@@ -406,6 +406,7 @@ applicable:
   - ../nim-views/disassembly-steps-back-by-instruction.yaml
   - ../nim-views/nim-step-moves-by-nim-lines.yaml
   - ../nim-views/toggle-macro-expansion-shows-the-expansion.yaml
+  - ../nim-views/macro-expansion-collapses-and-steps.yaml
   - ../low-level-code/generated-c-of-a-stock-nim-recording.yaml
   - ../low-level-code/generated-c-in-edit-mode.yaml
   - ../shared-editor/debug-mode-shared-editor.yaml
