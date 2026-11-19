@@ -262,11 +262,21 @@ proc clearViewZones*(self: EditorViewComponent) =
 # through `key_router.toggleMacroExpansionHook`, installed by `ui_js`. It used
 # to be the Monaco `commands` table's `ALT+KeyE`, which ran it instead of
 # focusing the Event Log whenever the caret was in the editor.
+var pointerEditor*: EditorViewComponent = nil
+  ## The editor view the pointer last moved over (its `onMouseMove`). The
+  ## expansion toggle acts on the line under the pointer, so it belongs to
+  ## this editor, not to the one with the keyboard or the active one: opening
+  ## an expansion makes ITS editor the active one, and the toggle sent there
+  ## found no expansion and left the open one open (codetracer-pm issue
+  ## 2026-11-17).
+
 proc toggleMacroExpansion*(self: EditorViewComponent) =
   if self.lastMouseMoveLine != -1:
     if self.expanded.hasKey(self.lastMouseMoveLine):
       self.expanded[self.lastMouseMoveLine].isExpanded = not self.expanded[self.lastMouseMoveLine].isExpanded
       self.data.redraw()
+      if not expansionsChangedHook.isNil:
+        expansionsChangedHook(self)
     else:
       expand(self.path, self.lastMouseMoveLine)
 
@@ -3614,6 +3624,7 @@ proc initMonacoForEditor(self: EditorViewComponent, host: JsObject) =
       else:
         (cast[int](event.target.element.parentElement.offsetTop) div 20) + tabInfo.location.expansionFirstLine
     self.lastMouseMoveLine = line
+    pointerEditor = self
     # Gesture 7a: the faint dot on the hovered line of the glyph column.
     let hint = if cast[int](event.target.toJs["type"]) == MouseTargetGutterGlyphMargin and
                   not position.isNil: line
@@ -4164,9 +4175,10 @@ proc renderExpandedEditorDirect(self: EditorViewComponent) =
 
   self.editorAfterRedraw()
 
-expansionOpenedHook = proc(parent: EditorViewComponent) =
-  # `editor_service.openExpanded` records an expansion on its parent; this
-  # mounts and draws it now rather than at the next move.
+expansionsChangedHook = proc(parent: EditorViewComponent) =
+  # An expansion opened (`editor_service.openExpanded`) or toggled
+  # (`toggleMacroExpansion`) is only recorded on its parent; this adds or
+  # removes its view zone now rather than at the next move.
   parent.editorAfterRedraw()
 
 proc ensureExpanded*(self: EditorViewComponent, expanded: EditorViewComponent, line: int) =
@@ -4186,7 +4198,7 @@ proc ensureExpanded*(self: EditorViewComponent, expanded: EditorViewComponent, l
     }
 
     self.monacoEditor.changeViewZones do (view: js):
-      expanded.zoneId = cast[int](view.addZone(expanded.viewZone))
+      expanded.zoneId = view.addZone(expanded.viewZone).to(cstring)
 
     domwindow.toJs.parent = expanded.viewZone.domNode.parentNode
     expanded.isExpanded = true
@@ -4194,17 +4206,17 @@ proc ensureExpanded*(self: EditorViewComponent, expanded: EditorViewComponent, l
     return
   else:
     if not expanded.isExpanded:
-      if expanded.zoneId >= 0:
+      if not expanded.zoneId.isNil and expanded.zoneId.len > 0:
         self.monacoEditor.changeViewZones do (view: js):
           try:
             view.removeZone(expanded.zoneId)
-            expanded.zoneId = -1
+            expanded.zoneId = cstring""
           except:
             cerror "editor: non expanded: " & getCurrentExceptionMsg()
     else:
-      if expanded.zoneId == -1:
+      if expanded.zoneId.isNil or expanded.zoneId.len == 0:
         self.monacoEditor.changeViewZones do (view: js):
-          expanded.zoneId = cast[int](view.addZone(expanded.viewZone))
+          expanded.zoneId = view.addZone(expanded.viewZone).to(cstring)
 
     discard
 

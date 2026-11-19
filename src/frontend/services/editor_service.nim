@@ -104,11 +104,13 @@ data.services.editor.onOpenedTab = proc(self: EditorService, response: OpenedTab
   self.data.openTab(response.path, ViewSource) # , response.lang)
 
 
-var expansionOpenedHook*: proc(parent: EditorViewComponent) = nil
+var expansionsChangedHook*: proc(parent: EditorViewComponent) = nil
   ## Installed by `ui/editor`: draws the parent editor's expansions
-  ## (`editorAfterRedraw` mounts each one's view zone). `openExpanded` only
-  ## records the expansion on its parent, and a `redraw` does not reach the
-  ## Monaco zones, so the expansion stayed undrawn until the replay next moved.
+  ## (`editorAfterRedraw` adds or removes each one's view zone). Opening an
+  ## expansion (`openExpanded`) or toggling one (`toggleMacroExpansion`) only
+  ## records it on its parent, and a `redraw` does not reach the Monaco zones:
+  ## an opened expansion stayed undrawn, and a closed one stayed open, until
+  ## the replay next moved.
 
 proc openExpanded*(self: EditorService, location: types.Location) {.async.} =
   # isExpanded true
@@ -154,8 +156,8 @@ proc openExpanded*(self: EditorService, location: types.Location) {.async.} =
   editorComponent.tabInfo = tabInfo
   self.active = name
   self.data.redraw()
-  if not expansionOpenedHook.isNil:
-    expansionOpenedHook(parentEditor)
+  if not expansionsChangedHook.isNil:
+    expansionsChangedHook(parentEditor)
 
 # TODO init
 

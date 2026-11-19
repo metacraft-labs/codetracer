@@ -1256,7 +1256,12 @@ type
     lastTraceToggleTime*: int64
     viewZone*:       JsObject
     topLevelEditor*: EditorViewComponent
-    zoneId*:        int
+    zoneId*:        cstring
+      ## The expansion's Monaco view zone (`addZone` answers a string id,
+      ## such as "b2"), or "" while it has none. It was an `int` cast from
+      ## that string, so `zoneId >= 0` compared "b2" with 0, was false, and
+      ## toggling an expansion closed never removed its zone (codetracer-pm
+      ## issue 2026-11-17).
     isExpanded*:    bool # zone expanded
     isExpansion*:   bool # is an expansion editor
     parentLine*:    int
