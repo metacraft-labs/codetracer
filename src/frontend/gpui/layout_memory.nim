@@ -12,6 +12,13 @@
 ##   * this window — `<state root>/gpui-layout.json`, BESIDE the terminal's
 ##     (one state root, `viewmodel/host/native_state`), and never the same file.
 ##
+## Each of the two native products keeps ONE FILE PER PRODUCT MODE
+## (Mode-Transitions.md §4b, *"a file per mode"*): the Debug arrangement in
+## `gpui-layout.json` and the Edit arrangement — `ct edit --ui=gpui`, and a
+## folder tab's — in `gpui-layout-edit.json`. A mode's file is read only by
+## that mode and written only from that mode's arrangement, so an Edit
+## arrangement survives a restart and never replaces the Debug one.
+##
 ## None reads another's: a layout arranged in the terminal does not change the
 ## GPUI window's next start, and vice versa.
 ##
@@ -36,11 +43,16 @@ import std/[json, os, strutils]
 
 import headless_app/layout_model
 import ../viewmodel/host/native_state
+import ../viewmodel/viewmodels/product_mode
+
+export product_mode.ProductMode
 
 const
   GpuiLayoutFileName* = "gpui-layout.json"
-    ## The GPUI product's document, directly under the native state root —
-    ## beside the terminal's `tui-layout.json` and never the same name.
+    ## The GPUI product's DEBUG document, directly under the native state
+    ## root — beside the terminal's `tui-layout.json` and never the same name.
+  GpuiEditLayoutFileName* = "gpui-layout-edit.json"
+    ## The GPUI product's EDIT document, beside the Debug one.
 
 type
   GpuiRestoreStatus* = enum
@@ -60,63 +72,72 @@ type
     message*: string
       ## Never empty for `grsUnreadable`; the KIND first, the path last.
 
-proc gpuiLayoutDocumentPath*(): string =
-  nativeStateRoot() / GpuiLayoutFileName
+proc gpuiLayoutFileName*(mode: ProductMode): string =
+  case mode
+  of pmDebug: GpuiLayoutFileName
+  of pmEdit: GpuiEditLayoutFileName
 
-proc sharedDefaultValue*(): Layout =
-  ## The shared default at depth 0 — this front-end has no minimum-size
-  ## contract in pixels, so it never folds (PLAT-45 deliverable 6).
-  initLayout(sharedDefaultLayout().tree, sharedDefaultLayout().docked)
+proc gpuiLayoutDocumentPath*(mode = pmDebug): string =
+  nativeStateRoot() / gpuiLayoutFileName(mode)
 
-proc unreadable(path, kind, why: string): GpuiLayoutRestore =
+proc sharedDefaultValue*(mode = pmDebug): Layout =
+  ## The mode's shared default at depth 0 — this front-end has no
+  ## minimum-size contract in pixels, so it never folds (PLAT-45
+  ## deliverable 6).
+  case mode
+  of pmDebug: initLayout(sharedDefaultLayout().tree, sharedDefaultLayout().docked)
+  of pmEdit: initLayout(sharedEditLayout().tree, sharedEditLayout().docked)
+
+proc unreadable(mode: ProductMode; path, kind, why: string): GpuiLayoutRestore =
   GpuiLayoutRestore(
-    status: grsUnreadable, layout: sharedDefaultValue(), path: path,
+    status: grsUnreadable, layout: sharedDefaultValue(mode), path: path,
     kind: kind,
     message: "saved layout ignored (" & kind & "): " & why &
       " — this window is on the shared default and the file was left " &
       "alone: " & path)
 
-proc restoreGpuiLayout*(): GpuiLayoutRestore =
-  ## Read the GPUI product's remembered arrangement.
-  let path = gpuiLayoutDocumentPath()
+proc restoreGpuiLayout*(mode = pmDebug): GpuiLayoutRestore =
+  ## Read the GPUI product's remembered arrangement for `mode`.
+  let path = gpuiLayoutDocumentPath(mode)
   if not fileExists(path):
     return GpuiLayoutRestore(status: grsNoDocument,
-                             layout: sharedDefaultValue(), path: path)
+                             layout: sharedDefaultValue(mode), path: path)
   var text = ""
   try:
     text = readFile(path)
   except CatchableError as e:
-    return unreadable(path, "UnreadableFile", e.msg.splitLines()[0])
+    return unreadable(mode, path, "UnreadableFile", e.msg.splitLines()[0])
   if text.strip().len == 0:
-    return unreadable(path, "EmptyDocument", "the file is empty")
+    return unreadable(mode, path, "EmptyDocument", "the file is empty")
   var doc: JsonNode = nil
   try:
     doc = parseJson(text)
   except CatchableError as e:
-    return unreadable(path, "NotJson", e.msg.splitLines()[0])
+    return unreadable(mode, path, "NotJson", e.msg.splitLines()[0])
   try:
     let layout = restoreLayoutDocument(doc)
     let problems = validate(layout, {})
     if problems.len > 0:
-      return unreadable(path, $problems[0].kind,
+      return unreadable(mode, path, $problems[0].kind,
                         "the arrangement does not validate")
     GpuiLayoutRestore(status: grsRestored, layout: layout, path: path)
   except LayoutDecodeError as e:
-    unreadable(path, $e.kind, e.msg.splitLines()[0])
+    unreadable(mode, path, $e.kind, e.msg.splitLines()[0])
 
-proc saveGpuiLayout*(layout: Layout): string =
-  ## Write the arrangement through. "" on success, else a one-line message.
-  writeStaged(gpuiLayoutDocumentPath(), pretty(saveLayout(layout)) & "\n")
+proc saveGpuiLayout*(layout: Layout; mode = pmDebug): string =
+  ## Write `mode`'s arrangement through. "" on success, else a one-line
+  ## message.
+  writeStaged(gpuiLayoutDocumentPath(mode), pretty(saveLayout(layout)) & "\n")
 
-proc saveGpuiLayoutDocument*(doc: JsonNode): string =
+proc saveGpuiLayoutDocument*(doc: JsonNode; mode = pmDebug): string =
   ## `saveGpuiLayout` for a caller already holding the versioned document
   ## (`GpuiShell.saveWindowLayout`'s answer).
-  writeStaged(gpuiLayoutDocumentPath(), pretty(doc) & "\n")
+  writeStaged(gpuiLayoutDocumentPath(mode), pretty(doc) & "\n")
 
-proc resetGpuiLayout*(): string =
-  ## Delete THIS product's file and nothing else. "" on success (including
-  ## when there was nothing to delete), else a one-line message.
-  let path = gpuiLayoutDocumentPath()
+proc resetGpuiLayout*(mode = pmDebug): string =
+  ## Delete THIS product's file for `mode` and nothing else. "" on success
+  ## (including when there was nothing to delete), else a one-line message.
+  let path = gpuiLayoutDocumentPath(mode)
   try:
     if fileExists(path):
       removeFile(path)

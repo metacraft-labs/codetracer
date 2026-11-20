@@ -577,16 +577,37 @@ type
       ## arrived and the canonical name they resolved to.
     width*: int
     height*: int
-    layoutDocument*: string
-      ## PLAT-6's persistence: where THIS session's rearranged layout is saved.
+    layoutDocuments*: array[ProductMode, string]
+      ## PLAT-6's persistence, KEYED BY THE MODE (Mode-Transitions.md §4b's
+      ## store tier): where THIS session saves and restores each mode's
+      ## arrangement. `layoutDocument` below is the session's own mode's.
       ##
-      ## **`""` WHENEVER PERSISTENCE IS OFF, which is every session without
-      ## `--layout-binding` and every host that never named a document.** The
-      ## path is held here rather than recomputed at exit because the two ends
-      ## of a save must be the same file: a session that restored from one path
-      ## and wrote to another would silently keep two arrangements for one
-      ## recording. `host/layout_store.nim` is what fills it, and it is the only
-      ## thing in this front-end that touches a file for this purpose.
+      ## **`""` WHENEVER PERSISTENCE IS OFF FOR THAT MODE**: every session
+      ## without a binding, every host that never named a document, and a mode
+      ## this session has not entered yet (a replay's Edit document is bound on
+      ## the first switch into Edit mode, `modeDocumentWanted`). The paths are
+      ## held here rather than recomputed at exit because the two ends of a save
+      ## must be the same file. `host/layout_store.nim` is what fills them, and
+      ## it is the only thing in this front-end that touches a file for this
+      ## purpose.
+    layoutHome*: ProductMode
+      ## The mode the session bound its own document in
+      ## (`bindLayoutDocument`): Debug for a replay, Edit for `ct edit`. The
+      ## single-document accessors (`layoutDocument`,
+      ## `layoutDocumentQuarantined`, `layoutPersistPlanOf(rt)`) answer for it.
+    modeDocumentWanted*: proc(rt: TuiRuntime; mode: ProductMode): string {.closure.}
+      ## The HOST's tier-2 read (Mode-Transitions.md §4.1 obligation 1:
+      ## register, then the mode's store, then its default), called on the
+      ## first switch into a mode whose register cell is empty and whose
+      ## document is not bound yet. `host/layout_store.stageLayoutForMode` is
+      ## what it runs in a shipped binary; nil in a host that does not
+      ## persist, where the mode's default is entered. A hook for the same
+      ## reason `layoutCommitted` is one: `app/` may not open a file. It
+      ## answers the message to show for a document it could not read (§4c:
+      ## a real loss is announced), "" otherwise.
+    stagedLayoutNotice: string
+      ## That message, carried from the switch to the switch's own notice so
+      ## the "switched to" line does not overwrite it.
     eraseByte*: char
       ## PLAT-68. The byte this terminal sends for Backspace (termios
       ## `VERASE`, read by the host's driver); the other of `0x7f` / `0x08` is
@@ -678,8 +699,9 @@ type
       ## What a docked pane's label press did to the layout, when its
       ## operation (`layout.toggle-docked-pane`) ran: `routeLayoutMouse`
       ## reports it as the gesture's own action.
-    layoutDocumentQuarantined*: bool
-      ## Whether this session started from a document it could NOT read.
+    layoutQuarantined*: array[ProductMode, bool]
+      ## Per mode: whether this session read that mode's document and could
+      ## NOT read it.
       ##
       ## Carried across the whole session for one reason, and it is the
       ## expensive case the schema chain exists for: a document written by a
@@ -992,6 +1014,19 @@ proc enableLayoutBinding*(rt: TuiRuntime): LayoutBinding =
 # rest of the runtime's state.
 # ---------------------------------------------------------------------------
 
+proc layoutDocument*(rt: TuiRuntime): string =
+  ## The document of the session's own mode (`layoutHome`).
+  rt.layoutDocuments[rt.layoutHome]
+
+proc layoutDocumentQuarantined*(rt: TuiRuntime): bool =
+  ## Whether the session's own mode's document could not be read.
+  rt.layoutQuarantined[rt.layoutHome]
+
+proc layoutPersistenceEnabled*(rt: TuiRuntime; mode: ProductMode): bool =
+  ## Whether this session saves `mode`'s arrangement: a binding, and a
+  ## document bound for that mode.
+  rt.layoutBindingEnabled() and rt.layoutDocuments[mode].len > 0
+
 proc layoutPersistenceEnabled*(rt: TuiRuntime): bool =
   ## Whether this session saves and restores its arrangement.
   ##
@@ -1000,16 +1035,28 @@ proc layoutPersistenceEnabled*(rt: TuiRuntime): bool =
   ## persistence exactly as it gates the gestures. A host that enabled the
   ## binding and named no document gets the behaviour PLAT-6 shipped — a
   ## rearrangeable session that forgets.
-  rt.layoutBindingEnabled() and rt.layoutDocument.len > 0
+  rt.layoutPersistenceEnabled(rt.layoutHome)
+
+proc currentLayoutMode(rt: TuiRuntime): ProductMode =
+  ## The mode whose arrangement is on screen: the binding's, or the mode
+  ## register's when no binding is enabled.
+  if rt.layoutBindingEnabled(): rt.app.layoutBinding.product
+  else: rt.app.modes.product
+
+proc bindLayoutDocument*(rt: TuiRuntime; mode: ProductMode; path: string) =
+  ## Name the file `mode`'s arrangement is saved to and restored from.
+  rt.layoutDocuments[mode] = path
+  rt.layoutQuarantined[mode] = false
 
 proc bindLayoutDocument*(rt: TuiRuntime; path: string) =
-  ## Name the file this session's arrangement is saved to and restored from.
+  ## Name the file this session's arrangement is saved to and restored from,
+  ## for the mode the session is in now, which becomes its `layoutHome`.
   ##
   ## Naming it does not read it: `host/layout_store.nim` does that and hands
   ## the bytes to `adoptLayoutDocument` below, which is the split
   ## `host/capabilities` -> `app/theme/capabilities` already uses.
-  rt.layoutDocument = path
-  rt.layoutDocumentQuarantined = false
+  rt.layoutHome = rt.currentLayoutMode()
+  rt.bindLayoutDocument(rt.layoutHome, path)
 
 proc adoptLayoutDocument*(rt: TuiRuntime; path, text: string):
     LayoutRestoreReport =
@@ -1029,7 +1076,8 @@ proc adoptLayoutDocument*(rt: TuiRuntime; path, text: string):
   ##     focused;
   ##   * **an unreadable document is remembered**, so exiting leaves it alone.
   result = rt.app.layoutBinding.adoptLayoutDocument(path, text)
-  rt.layoutDocumentQuarantined = result.status == lrsUnreadable
+  rt.layoutQuarantined[rt.app.layoutBinding.product] =
+    result.status == lrsUnreadable
   if result.status != lrsRestored:
     return
   rt.rebuildFocus()
@@ -1043,38 +1091,69 @@ proc markLayoutDocumentUnreadable*(rt: TuiRuntime) =
   ## caller, because only it can meet that failure, and the consequence is the
   ## same one `adoptLayoutDocument` sets: the document is left alone on the way
   ## out.
-  rt.layoutDocumentQuarantined = true
+  rt.layoutQuarantined[rt.layoutHome] = true
 
-proc layoutPersistPlanOf*(rt: TuiRuntime): LayoutPersistPlan =
-  ## What exiting should do with this session's document.
+proc markLayoutDocumentUnreadable*(rt: TuiRuntime; mode: ProductMode) =
+  ## The same record for a mode's document read by `stageLayoutDocument`'s
+  ## host, which meets the same open failure.
+  rt.layoutQuarantined[mode] = true
+
+proc stageLayoutDocument*(rt: TuiRuntime; mode: ProductMode;
+                          path, text: string): LayoutRestoreReport =
+  ## Adopt `mode`'s saved document into the MODE REGISTER, for a mode that is
+  ## not on screen, so the next switch into it enters the user's arrangement
+  ## rather than the mode's default (§4.1 obligation 1, the store tier). The
+  ## document is decoded by a scratch binding of that mode, through the same
+  ## `adoptLayoutDocument` the session's own document goes through, so the
+  ## two stores' documents have one reader and one set of failure reports.
   ##
-  ## `lpiQuarantine` for a session with persistence switched off as well as for
-  ## one that started from an unreadable document, and that is deliberate
-  ## rather than a coincidence of spelling: **quarantine is the intent that
-  ## touches nothing**, which is exactly the answer "the flag is off" needs. A
-  ## host that called this without checking would still write no file.
+  ## A readable document fills the cell as a user's arrangement (a restore
+  ## is a user modification); an unreadable one leaves the cell empty, so
+  ## the mode's default is entered, and quarantines the file so no exit
+  ## writes over it.
+  let profile = selectProfile(rt.width, rt.height)
+  let scratch = newLayoutBinding(layoutValueForMode(mode, profile), profile,
+                                 product = mode)
+  result = scratch.adoptLayoutDocument(path, text)
+  rt.layoutQuarantined[mode] = result.status == lrsUnreadable
+  if result.status == lrsRestored:
+    rt.app.modes.bound[mode] = BoundCell(stored: true,
+                                         layout: scratch.layout.clone(),
+                                         userModified: true,
+                                         profile: scratch.profile)
+
+proc layoutPersistPlanOf*(rt: TuiRuntime; mode: ProductMode):
+    LayoutPersistPlan =
+  ## What exiting should do with `mode`'s document.
   ##
-  ## **THE DOCUMENT IS THE DEBUG ARRANGEMENT**, in whichever mode the session
-  ## exits. The terminal keeps ONE document and it is not keyed by mode
-  ## (Mode-Transitions.md §4.6, "the terminal's `ct edit` arrangement lives in
-  ## the register only"), and the replay loop restores it into Debug mode. So
-  ## while the binding holds Edit mode's arrangement the plan is made from the
-  ## Debug arrangement the mode register holds (`shell.switchBound`): a user
-  ## who rearranged Debug mode and quit from Edit mode keeps that arrangement,
-  ## one who never touched Debug mode gets the untouched answer (remove), and
-  ## Edit's arrangement is never written. A register with no Debug cell —
-  ## unreachable, since a bound runtime with a document starts in Debug mode —
-  ## answers the intent that touches nothing.
-  if not rt.layoutPersistenceEnabled():
+  ## `lpiQuarantine` for a mode with persistence switched off as well as for
+  ## one whose document could not be read, and that is deliberate rather than
+  ## a coincidence of spelling: **quarantine is the intent that touches
+  ## nothing**, which is exactly the answer "the flag is off" needs. A host
+  ## that called this without checking would still write no file.
+  ##
+  ## **EACH DOCUMENT HOLDS ITS OWN MODE'S ARRANGEMENT**, in whichever mode
+  ## the session exits (Mode-Transitions.md §4b, a store keyed by the mode).
+  ## The arrangement is the binding's while it holds that mode, and the mode
+  ## register's cell otherwise (`shell.switchBound`): a user who rearranged
+  ## Debug mode and quit from Edit mode keeps that arrangement, and one who
+  ## never touched Debug mode gets the untouched answer (remove). A register
+  ## with no cell for the mode — the mode was neither entered nor restored in
+  ## this session — answers the intent that touches nothing, so a file this
+  ## session never read is never written.
+  if not rt.layoutPersistenceEnabled(mode):
     return LayoutPersistPlan(intent: lpiQuarantine, text: "")
   let b = rt.app.layoutBinding
-  if b.product == pmDebug:
-    return layoutPersistPlan(b, rt.layoutDocumentQuarantined)
-  let debug = rt.app.modes.bound[pmDebug]
-  if not debug.stored:
+  if b.product == mode:
+    return layoutPersistPlan(b, rt.layoutQuarantined[mode])
+  let cell = rt.app.modes.bound[mode]
+  if not cell.stored:
     return LayoutPersistPlan(intent: lpiQuarantine, text: "")
-  layoutPersistPlan(debug.layout, debug.userModified,
-                    rt.layoutDocumentQuarantined)
+  layoutPersistPlan(cell.layout, cell.userModified, rt.layoutQuarantined[mode])
+
+proc layoutPersistPlanOf*(rt: TuiRuntime): LayoutPersistPlan =
+  ## The plan for the session's own mode's document (`layoutHome`).
+  rt.layoutPersistPlanOf(rt.layoutHome)
 
 proc debugArrangementOf*(rt: TuiRuntime): Layout =
   ## The DEBUG arrangement of a bound runtime, in whichever mode is on screen:
@@ -1106,26 +1185,24 @@ proc afterLayoutCommit(rt: TuiRuntime) =
   ##     remembered arrangement is current after every change rather than only
   ##     after a clean exit.
   ##
-  ## **BOTH ARE DEBUG MODE'S, AND ONLY DEBUG MODE'S COMMITS REACH THEM.** The
-  ## slot's `Layout` is the session's REPLAY arrangement (`HeadlessApp` has no
-  ## edit slot) and the document is the Debug arrangement
-  ## (`layoutPersistPlanOf`). A commit made while the binding holds Edit
-  ## mode's arrangement — a VCS tab clicked in a replay toggled into Edit mode
-  ## — is that arrangement's alone: it is kept in the binding, and in the mode
-  ## register across a switch, and written onto neither. Writing it to the
-  ## slot would put Edit's panes into the session's replay arrangement, and
-  ## writing it through would overwrite the user's remembered Debug
-  ## arrangement with an Edit one. The commit is still COUNTED: the host's
+  ## **THE SLOT IS DEBUG MODE'S ONLY; THE WRITE-THROUGH IS EACH MODE'S
+  ## OWN.** The slot's `Layout` is the session's REPLAY arrangement
+  ## (`HeadlessApp` has no edit slot), so a commit made while the binding
+  ## holds Edit mode's arrangement — a VCS tab clicked in a replay toggled
+  ## into Edit mode — is never written onto it: that would put Edit's panes
+  ## into the session's replay arrangement. It IS written through, to Edit
+  ## mode's own document (`layoutPersistPlanOf(rt, mode)`), since each mode
+  ## has a store of its own and Debug's document never receives an Edit
+  ## arrangement. The commit is COUNTED in either mode: the host's
   ## `layoutCommits` watch re-measures the source pane after any arrangement
-  ## change, in either mode.
+  ## change.
   if not rt.layoutBindingEnabled():
     return
   inc rt.layoutCommits
-  if rt.app.layoutBinding.product != pmDebug:
-    return
-  let slot = rt.app.shell.activeSlot()
-  if not slot.isNil:
-    slot.layout = rt.app.layoutBinding.layout.clone()
+  if rt.app.layoutBinding.product == pmDebug:
+    let slot = rt.app.shell.activeSlot()
+    if not slot.isNil:
+      slot.layout = rt.app.layoutBinding.layout.clone()
   if not rt.layoutCommitted.isNil:
     rt.layoutCommitted(rt)
 
@@ -1160,6 +1237,13 @@ proc toggleBoundArrangement(rt: TuiRuntime; profile: LayoutProfile): bool =
   let target = toggled(rt.app.modes.product)
   let leaving = BoundCell(stored: true, layout: b.layout.clone(),
                           userModified: b.userModified, profile: b.profile)
+  # §4.1 obligation 1's second tier: a mode with no cell in this session's
+  # register is read from its store before it is entered, once.
+  if not rt.app.modes.bound[target].stored and
+      rt.layoutPersistenceEnabled() and
+      rt.layoutDocuments[target].len == 0 and
+      not rt.modeDocumentWanted.isNil and target != rt.app.modes.product:
+    rt.stagedLayoutNotice = rt.modeDocumentWanted(rt, target)
   let (changed, entering) = rt.app.modes.switchBound(leaving, target)
   if not changed:
     return false
@@ -6917,6 +7001,11 @@ proc applyLocalAction(rt: TuiRuntime; action: KeyAction;
         rt.app.traceName.len > 0)
       if notice.len > 0:
         message = notice
+    # A remembered arrangement that could not be read is a real loss and is
+    # announced first: the status row truncates the tail (§4c).
+    if rt.stagedLayoutNotice.len > 0:
+      message = rt.stagedLayoutNotice & "; " & message
+      rt.stagedLayoutNotice = ""
     rt.note(message)
     outcome.detail = message
     rt.rebuildFocus()

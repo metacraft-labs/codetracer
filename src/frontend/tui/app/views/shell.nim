@@ -573,11 +573,10 @@ proc switchTo*(reg: var ModeRegister; leaving: LayoutNode;
   ##     all."* There is no path through this procedure that writes `product`
   ##     without also settling `layouts[product]`.
   ##
-  ## §4b's SECOND tier — the device-level store — is NOT implemented here, and
-  ## that is stated rather than implied: `app/layout/persistence.nim` +
-  ## `host/layout_store.nim` persist ONE arrangement per recording and are not
-  ## keyed by mode, so an Edit arrangement made in one session is a default
-  ## again in the next. See PLAT-16's status note.
+  ## §4b's SECOND tier — the device-level store — is not this unbound
+  ## register's: a bound runtime reads a mode's store before its first entry
+  ## (`runtime.modeDocumentWanted`, one document per mode under
+  ## `host/layout_store.nim`) and enters it through `switchBound`.
   if target == reg.product:
     return false
   reg.layouts[reg.product] = leaving

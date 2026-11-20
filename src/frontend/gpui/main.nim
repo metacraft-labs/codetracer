@@ -1413,8 +1413,14 @@ var
   gWindow = WindowId(0)
   gRemember = false
     ## Write a committed rearrangement through to this product's remembered
-    ## layout: a Debug window whose remembered file was readable. Edit mode
-    ## opens its shared default and remembers nothing (PLAT-45).
+    ## DEBUG layout: a Debug window whose remembered file was readable.
+  gRememberEdit = false
+    ## The same for the EDIT arrangement (`gpui-layout-edit.json`,
+    ## Mode-Transitions.md §4b: one store per mode): an Edit window, or a
+    ## folder tab, whose remembered Edit file was readable.
+  gEditWindowShell: GpuiShell = nil
+    ## `ct edit --ui=gpui`'s shell (`runEdit`), whose arrangement is Edit
+    ## mode's.
   gRoot: GpuiElement = nil
   gContainer: GpuiElement = nil
   gTop: GpuiElement = nil
@@ -2561,10 +2567,17 @@ proc applyGestureCommand(r: GpuiRenderer; cmd: LayoutCommand) =
     traceGesture("refused " & $cmd & ": " & $applied.problem.kind)
     return
   traceGesture("applied " & $cmd)
-  # PLAT-51: a folder tab's Edit arrangement is never this product's
-  # remembered (Debug) layout.
-  if gRemember and (gMainShell.isNil or gShell == gMainShell):
-    let failed = saveGpuiLayoutDocument(gShell.saveWindowLayout(gWindow))
+  # Each mode's arrangement is written to that mode's own file: an Edit
+  # window's and a folder tab's (PLAT-51) to the Edit file, a replay
+  # window's to the Debug file — never one into the other's.
+  let editArrangement = gShell == gEditWindowShell or
+    (not gEditShell.isNil and gShell == gEditShell)
+  let remember =
+    if editArrangement: gRememberEdit
+    else: gRemember and (gMainShell.isNil or gShell == gMainShell)
+  if remember:
+    let failed = saveGpuiLayoutDocument(gShell.saveWindowLayout(gWindow),
+                                        if editArrangement: pmEdit else: pmDebug)
     if failed.len > 0:
       stderr.writeLine("codetracer-gpui: the layout could not be saved: " &
                        failed)
@@ -6790,8 +6803,13 @@ proc showFolderTab(r: GpuiRenderer; index: int): string =
     gMainShell = gShell
   if gEditShell.isNil:
     gEditShell = newGpuiShell(gMainShell.viewport)
-    discard gEditShell.openWindow(WindowId(0),
-                                  initLayout(sharedEditLayout().tree, sharedEditLayout().docked))
+    # The remembered Edit arrangement, or Edit mode's shared default; an
+    # unreadable file is reported and left alone, as the Debug one is.
+    let remembered = restoreGpuiLayout(pmEdit)
+    gRememberEdit = remembered.status != grsUnreadable
+    if remembered.status == grsUnreadable:
+      stderr.writeLine("codetracer-gpui: " & remembered.message)
+    discard gEditShell.openWindow(WindowId(0), remembered.layout)
   gWelcomeTabs.active = index
   gShell = gEditShell
   gWindow = WindowId(0)
@@ -15969,19 +15987,56 @@ proc runEdit(cmd: GpuiCommand): int =
   defer: stopConstraintsHost()
   var shell = newGpuiShell(DockViewport(width: cmd.width, height: cmd.height,
                                         dockExtent: DefaultGpuiViewport.dockExtent))
+  # EDIT MODE OPENS WHAT IT REMEMBERS (`gpui-layout-edit.json`), or the
+  # shared Edit default — the arrangement the desktop's edit mode and the
+  # terminal's show — at depth 0 (this front-end has no pixel minimums, so it
+  # never folds). Its own file, never the Debug one (Mode-Transitions.md §4b).
+  # An unreadable file is reported by kind and left alone; `--reset-layout`
+  # deletes it.
+  var editLayout = sharedDefaultValue(pmEdit)
+  var editQuarantined = false
+  if cmd.resetLayout:
+    let failed = resetGpuiLayout(pmEdit)
+    if failed.len > 0:
+      stderr.writeLine("codetracer-gpui: the remembered layout could not be " &
+                       "removed: " & failed)
+  else:
+    let remembered = restoreGpuiLayout(pmEdit)
+    editLayout = remembered.layout
+    if remembered.status == grsUnreadable:
+      editQuarantined = true
+      stderr.writeLine("codetracer-gpui: " & remembered.message)
+  # `--layout-ops`, the window's scripted gesture, as a replay window takes
+  # it: applied, then written through to the Edit file unless that file
+  # could not be read.
+  if cmd.layoutOps.len > 0:
+    for op in cmd.layoutOps:
+      let applied = apply(editLayout, op)
+      case applied.kind
+      of loRefused:
+        stderr.writeLine("codetracer-gpui: --layout-ops: " & $op &
+                         " was refused: " & $applied.problem.kind)
+        return 1
+      of loNoOp: discard
+      of loApplied: editLayout = applied.layout
+    if editQuarantined:
+      stderr.writeLine("codetracer-gpui: the rearranged layout was not " &
+                       "saved: the remembered file could not be read and " &
+                       "was left alone")
+    else:
+      let failed = saveGpuiLayout(editLayout, pmEdit)
+      if failed.len > 0:
+        stderr.writeLine("codetracer-gpui: the layout could not be saved: " &
+                         failed)
   let surface = editSurfaceFor(cmd,
-    editorRowsFor(initLayout(sharedEditLayout().tree, sharedEditLayout().docked), shell.viewport, cmd))
+    editorRowsFor(editLayout, shell.viewport, cmd))
   # `openWindow` and not `openWindowForSession`: there is no session. That is a
   # real product state rather than a test affordance — `shell.openWindow`'s own
   # header says so — and it is exactly the state edit mode is in, because edit
   # mode's subject is the working tree and a `HeadlessSessionSlot` is a replay
   # session.
   let windowId = WindowId(0)
-  # PLAT-45: EDIT MODE OPENS THE SHARED EDIT DEFAULT — the arrangement the
-  # desktop's edit mode and the terminal's show — at depth 0 (this front-end
-  # has no pixel minimums, so it never folds). Not remembered: this product's
-  # remembered file holds its Debug arrangement, as the terminal's does.
-  let opened = shell.openWindow(windowId, initLayout(sharedEditLayout().tree, sharedEditLayout().docked))
+  let opened = shell.openWindow(windowId, editLayout)
   if opened.kind == wsRefused:
     stderr.writeLine("codetracer-gpui: could not open a window: " &
                      $opened.problem.kind)
@@ -16031,15 +16086,17 @@ proc runEdit(cmd: GpuiCommand): int =
   # `PLAT35-F3`: the editor pane's inner width, from the geometry this
   # window is about to be laid out at.
   gEditorSurface = surface
-  gEditorViewportPx = editorBodyWidthFor(
-    initLayout(sharedEditLayout().tree, sharedEditLayout().docked), shell.viewport, cmd)
+  gEditorViewportPx = editorBodyWidthFor(editLayout, shell.viewport, cmd)
   let drawn = renderLeaves(r, leafSet, surface, gEditorViewportPx)
   editPane = findEditorPane(drawn.root)
-  # PLAT-47 part B: the window's gestures act on this shell; edit mode opens
-  # its shared default and remembers nothing (PLAT-45).
+  # PLAT-47 part B: the window's gestures act on this shell, and a
+  # rearrangement is written through to the Edit file — never over one this
+  # window could not read.
   gShell = shell
   gWindow = windowId
   gRemember = false
+  gEditWindowShell = shell
+  gRememberEdit = not editQuarantined
   gLeafSet = leafSet
   # PLAT-68: the shared router, under the session's base and the user's
   # `keybindings.json` (read, never written: the one-time import of older

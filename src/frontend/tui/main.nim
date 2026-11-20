@@ -246,6 +246,18 @@ proc wireTopBar(rt: TuiRuntime) =
       rt.app.notification = NerdSuggestion
   rt.saveIcons = proc(mode: IconsMode): string = saveIconsPreference(mode)
 
+proc wireLayoutWriteThrough(rt: TuiRuntime) =
+  ## PLAT-45: every committed layout change is written through to the
+  ## terminal's document for the mode it was made in, so a crash loses
+  ## nothing. Both loops install it: the replay loop and `ct edit`.
+  rt.layoutCommitted = proc(rt: TuiRuntime) =
+    # WRITE-THROUGH. A failure is the user's to know about, on the status
+    # line, and is not fatal: the arrangement is still on screen and the exit
+    # save tries again.
+    let saved = persistLayoutForSession(rt)
+    if saved.outcome == lpoFailed:
+      rt.app.notification = saved.message
+
 proc wireLayoutPreferences(rt: TuiRuntime;
                            flags: array[LayoutSetting, string]) =
   ## PLAT-51 deliverables 9 and 11, PLAT-70 Part H: the remembered layout
@@ -781,8 +793,9 @@ proc interactive(command: TuiCommand): int =
   # recording. PLAT-45 deliverable 8 flips both: every session starts on the
   # shared default (or on the arrangement the user last left the TERMINAL in),
   # the `:` layout verbs and the mouse can rearrange it, and every committed
-  # change is written through to ONE document for the terminal product under
-  # the user's state directory (`host/layout_store.layoutDocumentPath`). The
+  # change is written through to the terminal product's document for the
+  # mode it was made in, under the user's state directory
+  # (`host/layout_store.layoutDocumentPath`). The
   # desktop and the GPUI window keep files of their own and never read this
   # one. `--layout-binding` is still accepted, and asks for what is now the
   # default. What made PLAT-6 keep this an opt-in — the session slot holding a
@@ -794,13 +807,13 @@ proc interactive(command: TuiCommand): int =
   discard rt.enableLayoutBinding()
   wireLayoutPreferences(rt, command.layoutFlags)
   wireColumnWidths(rt)
-  rt.layoutCommitted = proc(rt: TuiRuntime) =
-    # WRITE-THROUGH, so a crash loses nothing. A failure is the user's to
-    # know about, on the status line, and is not fatal: the arrangement is
-    # still on screen and the exit save below tries again.
-    let saved = persistLayoutForSession(rt)
-    if saved.outcome == lpoFailed:
-      rt.app.notification = saved.message
+  wireLayoutWriteThrough(rt)
+  # Mode-Transitions.md §4b: the OTHER mode's remembered arrangement is read
+  # on the first switch into it (`Ctrl+F5` into Edit mode), from that mode's
+  # own document, and an unreadable one is reported as this one is.
+  rt.modeDocumentWanted = proc(rt: TuiRuntime; mode: ProductMode): string =
+    let staged = stageLayoutForMode(rt, mode)
+    if staged.status == lrsUnreadable: staged.message else: ""
   let layoutRestore = restoreLayoutForSession(rt)
   if layoutRestore.message.len > 0:
     app.notification = layoutRestore.message
@@ -1875,23 +1888,24 @@ proc editInteractive(command: TuiCommand): int =
   # default (`tui_app.enableLayoutBinding`, `profile.layoutValueForMode`), not
   # from Debug's.
   #
-  # NO LAYOUT DOCUMENT IS BOUND, deliberately, and that is the half of the
-  # replay loop's wiring left out: no `restoreLayoutForSession`, no
-  # `rt.layoutCommitted` write-through, no exit save. The terminal's remembered
-  # arrangement (`host/layout_store.layoutDocumentPath`) is ONE document, and
-  # it is not keyed by mode — Mode-Transitions.md §4b's second tier is not
-  # implemented (see `views/shell.switchTo`). It holds the replay loop's Debug
-  # arrangement, so restoring it here would paint Debug's panes into an editor
-  # and saving here would overwrite the user's Debug arrangement with Edit's.
-  # With no document bound, `layoutPersistenceEnabled` is false and
-  # `layoutPersistPlanOf` answers the intent that touches nothing, so an Edit
-  # arrangement lasts for the session — which is what the mode register
-  # already promises for Edit mode (§4b tier 1) — and no file is read or
-  # written.
+  # EDIT MODE'S OWN DOCUMENT IS BOUND, as the replay loop binds Debug's
+  # (Mode-Transitions.md §4b: the store is keyed by the mode). The terminal
+  # keeps one document per mode (`host/layout_store.layoutDocumentPath`):
+  # this loop restores `tui-layout-edit.json`, writes every committed change
+  # through to it, and saves it on the way out, and it never reads or writes
+  # the replay loop's Debug document — so an Edit arrangement survives a
+  # restart and the Debug one is never replaced by it. The rules are the
+  # replay loop's: an unreadable document is reported and left alone, and a
+  # session that ends on Edit mode's default removes a stale one.
   discard rt.enableLayoutBinding()
   var noFlags: array[LayoutSetting, string]
   wireLayoutPreferences(rt, noFlags)
   wireColumnWidths(rt)
+  wireLayoutWriteThrough(rt)
+  block:
+    let restored = restoreLayoutForSession(rt)
+    if restored.message.len > 0:
+      app.notification = restored.message
   # PLAT-29: the Edit pane's parse runs on this worker, never on the render
   # path; stopped when the loop that owns it returns.
   let highlights = startHighlights(rt, driver)
@@ -2053,6 +2067,13 @@ proc editInteractive(command: TuiCommand): int =
         let barsMoved = rt.tickScrollbars(nowMs()).repaint
         if outcome.repaint or vcsFollowed or barsMoved:
           paint(driver, rt)
+  # THE EDIT ARRANGEMENT IS SAVED ON THE WAY OUT, on the replay loop's terms:
+  # written if it is the user's, removed if it is the default's, left alone if
+  # the session could not read it.
+  let saved = persistLayoutForSession(rt)
+  if saved.outcome == lpoFailed:
+    driver.stop()
+    stderr.writeLine(TuiProgramName & ": " & saved.message)
   ExitOk
 
 proc run(args: seq[string]): int =

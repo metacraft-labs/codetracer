@@ -932,8 +932,8 @@ MUTATIONS = [
     ),
     Mutation(
         "M40", STORE,
-        "  layoutStateRoot() / LayoutDocumentFileName",
-        "  layoutStateRoot() / \"tui-layouts\" / LayoutDocumentFileName",
+        "  layoutStateRoot() / layoutDocumentFileName(mode)",
+        "  layoutStateRoot() / \"tui-layouts\" / layoutDocumentFileName(mode)",
         P_KEY,
         "PLAT-45 re-pointed this arm when the per-recording key it guarded was "
         "deleted: the document leaves the state root for PLAT-6's old "
@@ -1028,7 +1028,7 @@ MUTATIONS = [
     Mutation(
         "M45", RUNTIME,
         "  ## out.\n"
-        "  rt.layoutDocumentQuarantined = true",
+        "  rt.layoutQuarantined[rt.layoutHome] = true",
         "  ## out.\n"
         "  discard rt",
         P_EACCES,
@@ -1112,8 +1112,10 @@ MUTATIONS = [
     ),
     Mutation(
         "M51", RUNTIME,
-        "  rt.layoutDocumentQuarantined = result.status == lrsUnreadable",
-        "  rt.layoutDocumentQuarantined = false",
+        "  rt.layoutQuarantined[rt.app.layoutBinding.product] =\n"
+        "    result.status == lrsUnreadable",
+        "  rt.layoutQuarantined[rt.app.layoutBinding.product] =\n"
+        "    false",
         X_PRECMOD,
         "M45's twin on the OTHER path into the quarantine. `M45` covers the "
         "flag `host/layout_store.nim` sets by hand; this is the flag "
@@ -1125,7 +1127,7 @@ MUTATIONS = [
     ),
     Mutation(
         "M52", RUNTIME,
-        "  if not rt.layoutPersistenceEnabled():\n"
+        "  if not rt.layoutPersistenceEnabled(mode):\n"
         '    return LayoutPersistPlan(intent: lpiQuarantine, text: "")',
         "  if false:\n"
         '    return LayoutPersistPlan(intent: lpiQuarantine, text: "")',
@@ -1138,7 +1140,7 @@ MUTATIONS = [
     ),
     Mutation(
         "M55", STORE,
-        "      outcome: (if rt.layoutPersistenceEnabled(): lpoQuarantined\n"
+        "      outcome: (if rt.layoutPersistenceEnabled(mode): lpoQuarantined\n"
         "                else: lpoDisabled),",
         "      outcome: lpoQuarantined,",
         X_OFF,
@@ -1381,8 +1383,8 @@ DECLARED_SURVIVORS = [
     ),
     Mutation(
         "S13", STORE,
-        "  layoutStateRoot() / LayoutDocumentFileName",
-        "  joinPath(layoutStateRoot(), LayoutDocumentFileName)",
+        "  layoutStateRoot() / layoutDocumentFileName(mode)",
+        "  joinPath(layoutStateRoot(), layoutDocumentFileName(mode))",
         "",
         "`/` spelled as the `joinPath` it is. IT MUST SURVIVE, and it is THE "
         "CONTROL FOR M40, which rewrites the same expression (re-pointed with "
@@ -1438,10 +1440,10 @@ DECLARED_SURVIVORS = [
     Mutation(
         "S18", RUNTIME,
         "  ## out.\n"
-        "  rt.layoutDocumentQuarantined = true",
+        "  rt.layoutQuarantined[rt.layoutHome] = true",
         "  ## out.\n"
         "  let unreadable = true\n"
-        "  rt.layoutDocumentQuarantined = unreadable",
+        "  rt.layoutQuarantined[rt.layoutHome] = unreadable",
         "",
         "The quarantine named before it is assigned — the same field, the same "
         "value, the same one-statement body. IT MUST SURVIVE, and it is THE "
@@ -1504,8 +1506,8 @@ DECLARED_SURVIVORS = [
     ),
     Mutation(
         "S22", RUNTIME,
-        "  if not rt.layoutPersistenceEnabled():",
-        "  if not layoutPersistenceEnabled(rt):",
+        "  if not rt.layoutPersistenceEnabled(mode):",
+        "  if not layoutPersistenceEnabled(rt, mode):",
         "",
         "The persistence guard spelled as a plain call. IT MUST SURVIVE, and "
         "it is THE CONTROL FOR M52, which removes that guard.",
@@ -1513,9 +1515,9 @@ DECLARED_SURVIVORS = [
     ),
     Mutation(
         "S23", STORE,
-        "      outcome: (if rt.layoutPersistenceEnabled(): lpoQuarantined\n"
+        "      outcome: (if rt.layoutPersistenceEnabled(mode): lpoQuarantined\n"
         "                else: lpoDisabled),",
-        "      outcome: (if not rt.layoutPersistenceEnabled(): lpoDisabled\n"
+        "      outcome: (if not rt.layoutPersistenceEnabled(mode): lpoDisabled\n"
         "                else: lpoQuarantined),",
         "",
         "The same two-armed choice with the condition negated and the arms "
@@ -1525,8 +1527,10 @@ DECLARED_SURVIVORS = [
     ),
     Mutation(
         "S24", RUNTIME,
-        "  rt.layoutDocumentQuarantined = result.status == lrsUnreadable",
-        "  rt.layoutDocumentQuarantined = (result.status == lrsUnreadable)",
+        "  rt.layoutQuarantined[rt.app.layoutBinding.product] =\n"
+        "    result.status == lrsUnreadable",
+        "  rt.layoutQuarantined[rt.app.layoutBinding.product] =\n"
+        "    (result.status == lrsUnreadable)",
         "",
         "The quarantine predicate parenthesised — the same comparison, the "
         "same assignment. IT MUST SURVIVE, and it is THE CONTROL FOR M51, "
