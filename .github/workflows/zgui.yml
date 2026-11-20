@@ -67,6 +67,15 @@ jobs:
         with:
           env-flavor: nix
           gh-token: ${{ steps.ci_token.outputs.token }}
+          # The same cache settings as `Install Nix` above. This action
+          # installs and configures Nix again, and without them the
+          # configuration it writes names no Attic cache: on an ephemeral
+          # runner, whose store starts empty, the dev shell the next step
+          # realises is then built from source, which ran past the job's
+          # whole budget.
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
 
       - name: Provision dependency siblings from repro.lock
         uses: ./.github/actions/provision-repro-lock-siblings
@@ -179,6 +188,15 @@ jobs:
         with:
           env-flavor: nix
           gh-token: ${{ steps.ci_token.outputs.token }}
+          # The same cache settings as `Install Nix` above. This action
+          # installs and configures Nix again, and without them the
+          # configuration it writes names no Attic cache: on an ephemeral
+          # runner, whose store starts empty, the dev shell the next step
+          # realises is then built from source, which ran past the job's
+          # whole budget.
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
 
       - name: Provision dependency siblings from repro.lock
         uses: ./.github/actions/provision-repro-lock-siblings
