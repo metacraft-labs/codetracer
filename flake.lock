@@ -7454,11 +7454,11 @@
     "isonim-gpui": {
       "flake": false,
       "locked": {
-        "lastModified": 1795102021,
-        "narHash": "sha256-z3576INMEZGH3zfKkypOJLqJafzXIEz7d57Nl+mMDPM=",
+        "lastModified": 1795178240,
+        "narHash": "sha256-fjHw2Z/YB7Y7Y8QybjWRwBbQiJpIzKQ+LOvCoXc/vx0=",
         "owner": "metacraft-labs",
         "repo": "isonim-gpui",
-        "rev": "301c8c9cecbf797fc92b8b46c0501ff7a9f36112",
+        "rev": "936f27dce1fa099d1b59138f7b01a5b0324490eb",
         "type": "github"
       },
       "original": {
