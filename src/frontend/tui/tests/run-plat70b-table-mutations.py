@@ -61,6 +61,7 @@ GLYPHS = "src/frontend/tui/app/views/glyph_table.nim"
 TUI_EVENTS = "src/frontend/tui/app/views/event_log.nim"
 TUI_CALLS = "src/frontend/tui/app/views/call_trace.nim"
 TUI_SHELL = "src/frontend/tui/app/views/shell.nim"
+TUI_TOOLTIP = "src/frontend/tui/app/views/tooltip.nim"
 RUNTIME = "src/frontend/tui/app/runtime.nim"
 GPUI_MAIN = "src/frontend/gpui/main.nim"
 GPUI_LEAVES = "src/frontend/gpui/app/leaves.nim"
@@ -74,8 +75,8 @@ PLAN = "src/frontend/gpui/tests/test_plat70b_gpui_plan.nim"
 SPEC = "src/tests/gui/tests/layout/plat70b-table-overflow.spec.ts"
 
 SUBJECTS = [MODEL, EVENT_VM, SURFACES, CUA, EMACS, NAVIGATION, GLYPHS,
-            TUI_EVENTS, TUI_CALLS, TUI_SHELL, RUNTIME, GPUI_MAIN, GPUI_LEAVES,
-            DOM]
+            TUI_EVENTS, TUI_CALLS, TUI_SHELL, TUI_TOOLTIP, RUNTIME, GPUI_MAIN,
+            GPUI_LEAVES, DOM]
 SUITES = [VMU, TBL, PTY, PLAN, SPEC]
 
 PTY_MAIN = "*::HO-8, hover, the `…` press and the detail, list.copy"
@@ -166,8 +167,8 @@ ARMS = [
              "    let fitted = fitCell(full, stop - textAt + 2, measureOf(g))")],
      [(TBL, None)],
      "HO-8: the Call Trace's row is fitted at a width other than its own"),
-    ("T5", [(TUI_SHELL, "  let row = if below + h <= height - 1: below else: max(0, t.row - h)",
-             "  let row = below")],
+    ("T5", [(TUI_TOOLTIP, "    let row = if below + h <= height - 1: below else: max(0, t.row - h)",
+             "    let row = below")],
      [(TBL, None)],
      "§5.3: the tooltip runs off the screen's foot"),
     ("T6", [(RUNTIME, "  discard rt.openDetail(hit.pane, hit.cut.key, hit.cut.column)\n  outcome.repaint = true\n  true",
@@ -223,7 +224,7 @@ ARMS = [
 DECLARED_SURVIVORS = {"N1"}
 
 IN_BINARY = {MODEL, EVENT_VM, SURFACES, CUA, EMACS, NAVIGATION, GLYPHS,
-             TUI_EVENTS, TUI_CALLS, TUI_SHELL, RUNTIME}
+             TUI_EVENTS, TUI_CALLS, TUI_SHELL, TUI_TOOLTIP, RUNTIME}
   # Subjects compiled into `codetracer-tui`.
 IN_GPUI = {MODEL, EVENT_VM, SURFACES, CUA, EMACS, NAVIGATION, GPUI_MAIN,
            GPUI_LEAVES}

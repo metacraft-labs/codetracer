@@ -95,7 +95,9 @@ import ../replay_ops
 # RE-COUNTED 2026-09-23: 535 → 555, by the second route above — PLAT-44 added
 # two non-test files under `src/frontend/gpui/app/` (`edit_arm.nim`,
 # `gpui_keys.nim`), 2 x 10 assertions in the registry scan.
-const ExpectedAssertions = 975
+const ExpectedAssertions = 984
+  ## 2026-11-20 (the hover label moved into a module of its own): 975 -> 984.
+  ## One more scanned source file, `hover_label.nim`, at 1 + 8 = 9 per file.
   ## 2026-11-19 (the Agent Harbor omnibox composer): 966 -> 975. One more
   ## scanned source file, `agent_harbor/ah_composer.nim`, at 1 + 8 = 9 per
   ## file.

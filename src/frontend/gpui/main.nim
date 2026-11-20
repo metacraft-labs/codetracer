@@ -104,6 +104,7 @@ import ./window_gestures
 import ./welcome_leaf
 import headless_app/welcome_tabs
 import ./window_top_bar
+import ./hover_label                     # the hover label: a control's tooltip, a menu item's reason
 import ./window_chrome                   # PLAT-69: the top bar as the title bar
 import ../../common/window_policy        # PLAT-69: how the window opens
 from ../../common/ct_home import ctConfigDir
@@ -4952,9 +4953,6 @@ proc cancelWindowGesture(): bool =
 # key, hover label and pin / unpin
 # ---------------------------------------------------------------------------
 
-const
-  HoverLabelPx = 24
-
 var
   gMenu: MenuVM = nil
     ## THE SHARED MENU VIEWMODEL — the tree the desktop's menu is built from
@@ -5502,24 +5500,6 @@ proc drawFooter(r: GpuiRenderer) =
       text(r, c, cert)
       gTopEls.add c
 
-proc wrapWords(text: string; maxChars: int): seq[string] =
-  ## `text` broken at spaces into lines of at most `maxChars` characters, the
-  ## way a desktop tooltip wraps at its maximum width. A word longer than
-  ## `maxChars` keeps a line of its own, uncut (cutting could split a UTF-8
-  ## sequence). Joining the lines with one space gives back the words.
-  var line = ""
-  for word in text.splitWhitespace:
-    if line.len == 0:
-      line = word
-    elif line.len + 1 + word.len <= maxChars:
-      line.add ' '
-      line.add word
-    else:
-      result.add line
-      line = word
-  if line.len > 0:
-    result.add line
-
 proc menuRefusalLabel(): tuple[text: string, lines: seq[string], at: PxRect] =
   ## EMT-D14: the open menu's highlighted item, when it is disabled — its
   ## reason, and where the hover label shows it: beside the item's row, to
@@ -5530,9 +5510,6 @@ proc menuRefusalLabel(): tuple[text: string, lines: seq[string], at: PxRect] =
   ## puts it over the popover, wrapped to the window. `lines` has one entry
   ## per drawn line. `("", @[], _)` when the highlighted item is enabled, a
   ## folder, or not drawn.
-  const MinSidePx = 20 * TabCharPx + 2 * TabPadPx
-    ## The narrowest side a wrapped reason is put on: about three words a
-    ## line. Narrower than that, it reads better over the popover.
   if gMenu.isNil or not gMenu.isOpen:
     return
   let it = gMenu.highlightedItem()
@@ -5549,36 +5526,11 @@ proc menuRefusalLabel(): tuple[text: string, lines: seq[string], at: PxRect] =
     for row in p.rows:
       if row.item < 0 or lv.items[row.item].index != gMenu.highlight:
         continue
-      let winW = pendingViewportWidth
-      let oneLine = textPx(text) + 2 * TabPadPx
-      let rightX = p.rect.x + p.rect.w + 4
-      let rightRoom = winW - rightX
-      let leftRoom = p.rect.x - 4
-      # The side: the right where the one line fits, else the left, else
-      # wrapped on the roomier of the two; over the popover only when both
-      # are too narrow even for that.
-      type Side = enum sRight, sLeft, sOver
-      let (side, room) =
-        if oneLine <= rightRoom: (sRight, rightRoom)
-        elif oneLine <= leftRoom: (sLeft, leftRoom)
-        elif rightRoom >= MinSidePx and rightRoom >= leftRoom:
-          (sRight, rightRoom)
-        elif leftRoom >= MinSidePx: (sLeft, leftRoom)
-        else: (sOver, winW)
-      let lines = wrapWords(text, max(1, (room - 2 * TabPadPx) div TabCharPx))
-      var widest = 0
-      for l in lines:
-        widest = max(widest, textPx(l))
-      let w = min(widest + 2 * TabPadPx, max(1, winW))
-      let wanted = case side
-        of sRight: rightX
-        of sLeft: leftRoom - w # flush against the popover's left edge
-        of sOver: 0
-      let x = max(0, min(wanted, winW - w))
-      let h = lines.len * HoverLabelPx
-      let y = max(0, min(row.rect.y + (row.rect.h - HoverLabelPx) div 2,
-                         pendingViewportHeight - h))
-      return (text, lines, PxRect(x: x, y: y, w: w, h: h))
+      # Beside the popover, never over it while a side holds it
+      # (`hoverLabelBeside`).
+      let place = hoverLabelBeside(text, p.rect, row.rect,
+                                   pendingViewportWidth, pendingViewportHeight)
+      return (text, place.lines, place.at)
 
 proc drawPopovers(r: GpuiRenderer) =
   ## The right-click menu and an event's content, over the window.
@@ -5654,14 +5606,15 @@ proc drawCellTooltip(r: GpuiRenderer) =
     var widest = 0
     for l in gCellTooltip:
       widest = max(widest, l.runeLen)
+    # Under the cell, above it where the window has no room below — the
+    # hover label's rule, flush against the cell.
     let a = gCellHoverAnchor
-    let w = min(pendingViewportWidth, pxOfText(widest) + 2 * TabPadPx)
-    let h = gCellTooltip.len * HoverLabelPx
-    let below = a.y + a.h
-    let y = if below + h <= pendingViewportHeight: below else: max(0, a.y - h)
-    let x = max(0, min(a.x, pendingViewportWidth - w))
-    let tb = absBox(r, PxRect(x: x, y: y, w: w, h: h),
-                    chromeOf(crWindowBackground))
+    let at = placeBelowOrAbove(
+      PxRect(x: a.x, y: a.y, h: a.h),
+      min(pendingViewportWidth, pxOfText(widest) + 2 * TabPadPx),
+      gCellTooltip.len * HoverLabelPx, 0,
+      pendingViewportWidth, pendingViewportHeight)
+    let tb = absBox(r, at, chromeOf(crWindowBackground))
     r.setAttribute(tb, CellTooltipAttribute, gCellHover.key & "|" &
                                              gCellHover.column)
     r.setStyle(tb, "display", "flex")
@@ -6038,12 +5991,13 @@ proc drawTopBar(r: GpuiRenderer) =
     for (k, v) in tabStyle(true): r.setStyle(ub, k, v)
     r.appendChild(ub, r.createTextNode("Unpin"))
     gTopEls.add ub
-  # THE HOVER LABEL: a disabled menu item's reason, a control's tooltip and
-  # key, or an auto-hide label's pane, beside the pointer's target.
+  # THE HOVER LABEL (`hover_label.nim`): a disabled menu item's reason, a
+  # control's tooltip and key, or a session tab's tooltip, beside the
+  # pointer's target.
   var hoverText = ""
   var hoverAt = PxRect()
   var hoverLines: seq[string] = @[]
-    ## Set only by a wrapped reason: one entry per line drawn.
+    ## Set only by a wrapped label: one entry per line drawn.
   let refusal = menuRefusalLabel()
   if refusal.text.len > 0:
     # EMT-D14: the highlighted menu item is disabled, by the keyboard or the
@@ -6055,62 +6009,31 @@ proc drawTopBar(r: GpuiRenderer) =
     hoverText = controlTooltip(gHoverControl,
                                gMenu.shortcutFor(
                                  TransportControls[gHoverControl].clientAction))
-    hoverAt = PxRect(x: sg.rect.x, y: sg.rect.y + sg.rect.h + 2,
-                     w: textPx(hoverText) + 2 * TabPadPx, h: HoverLabelPx)
+    hoverAt = hoverLabelBelow(sg.rect, hoverText, 2)
   elif gHoverTab >= 0 and gHoverTab < tabs.len:
     # PLAT-49 part B: a session tab's tooltip — its title, and with an agent
     # in the session its task, state and progress (`SessionTabView.tooltip`).
     let sg = gTopLayout.segOf(gtTab, gHoverTab)
     hoverText = tabs[gHoverTab].tooltip
-    hoverAt = PxRect(x: sg.rect.x, y: sg.rect.y + sg.rect.h + 6,
-                     w: textPx(hoverText) + 2 * TabPadPx, h: HoverLabelPx)
+    hoverAt = hoverLabelBelow(sg.rect, hoverText, 6)
   elif gHoverTabAdd:
     let sg = gTopLayout.segOf(gtTabAdd)
     hoverText = NewSessionTabTitle
-    hoverAt = PxRect(x: sg.rect.x, y: sg.rect.y + sg.rect.h + 6,
-                     w: textPx(hoverText) + 2 * TabPadPx, h: HoverLabelPx)
+    hoverAt = hoverLabelBelow(sg.rect, hoverText, 6)
   elif gHoverTests.title.len > 0:
     # Test-Results-Pane.md §9.6: a Test Results control's title — the
     # desktop's tooltip — beneath the control, wrapped at a tooltip's width
     # and kept inside the window.
     hoverText = gHoverTests.title
-    const TooltipChars = 60
-    hoverLines = wrapWords(hoverText, TooltipChars)
-    var widest = 0
-    for l in hoverLines:
-      widest = max(widest, textPx(l))
-    let w = min(pendingViewportWidth, widest + 2 * TabPadPx)
-    let h = max(1, hoverLines.len) * HoverLabelPx
-    let a = gHoverTests.at
-    let below = a.y + a.h + 2
-    hoverAt = PxRect(x: max(0, min(a.x, pendingViewportWidth - w)),
-                     y: (if below + h <= pendingViewportHeight: below
-                         else: max(0, a.y - h - 2)),
-                     w: w, h: h)
+    hoverLines = hoverLabelLines(hoverText, HoverLabelWrapChars)
+    hoverAt = hoverLabelUnder(gHoverTests.at, hoverLines, 2,
+                              pendingViewportWidth, pendingViewportHeight)
   # (An auto-hide label's hover shows its PANE — the preview, PLAT-49 part B
   # — not a hint label: the desktop's strip tab has none.)
   if hoverText.len > 0:
-    let hb = absBox(r, hoverAt, chromeOf(crWindowBackground))
-    r.setAttribute(hb, "data-ct-hover-label", hoverText)
+    let hb = drawHoverLabel(r, hoverAt, hoverText, hoverLines)
     if gHoverTests.title.len > 0 and hoverText == gHoverTests.title:
       r.setAttribute(hb, "data-ct-tests-hover", "true")
-    r.setStyle(hb, "padding-left", $TabPadPx & "px")
-    r.setStyle(hb, "white-space", "nowrap")
-    for (k, v) in paneOutlineStyle(true): r.setStyle(hb, k, v)
-    if hoverLines.len > 1:
-      # A wrapped reason: one row per line, stacked.
-      r.setStyle(hb, "flex-direction", "column")
-      r.setStyle(hb, "items", "start")
-      for l in hoverLines:
-        let lb = r.createElement("div")
-        r.setAttribute(lb, "data-ct-hover-label-line", l)
-        r.setStyle(lb, "height", $HoverLabelPx & "px")
-        r.setStyle(lb, "items", "center")
-        r.setStyle(lb, "white-space", "nowrap")
-        r.appendChild(lb, r.createTextNode(l))
-        r.appendChild(hb, lb)
-    else:
-      r.appendChild(hb, r.createTextNode(hoverText))
     gTopEls.add hb
   # PLAT-70 Part B (Horizontal-Overflow.md §5.3): A TRUNCATED CELL'S FULL
   # TEXT, after the pointer rested on it 500 ms — under the cell (above it
