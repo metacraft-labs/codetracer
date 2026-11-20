@@ -2,7 +2,7 @@
 # gpui-window-captures.sh — RE-TAKE the GPUI window's measurements on a real
 # compositor and assert them, end to end, from nothing but a checkout.
 #
-#   bash ci/test/gpui-window-captures.sh [plat45] [plat47] [plat48] [plat68] [plat69] [plat59] [plat70a] [plat70b] [m71] [vcsoffloop]
+#   bash ci/test/gpui-window-captures.sh [plat45] [plat47] [plat48] [plat68] [plat69] [plat59] [plat70a] [plat70b] [m71] [vcsoffloop] [flowfirst]
 #   just gpui-window-captures                 # all nine
 #   bash ci/test/gpui-window-captures.sh --shim-only    # step 1 only: the
 #                                             # windowed shim and the virtual
@@ -84,11 +84,11 @@ case "${1:-}" in
 	;;
 esac
 which=("$@")
-[ "${#which[@]}" -gt 0 ] || which=(plat45 plat47 plat48 plat59 plat68 plat69 plat70a plat70b m71 vcsoffloop)
+[ "${#which[@]}" -gt 0 ] || which=(plat45 plat47 plat48 plat59 plat68 plat69 plat70a plat70b m71 vcsoffloop flowfirst)
 for w in "${which[@]}"; do
 	case "${w}" in
-	plat45 | plat47 | plat48 | plat59 | plat68 | plat69 | plat70a | plat70b | m71 | vcsoffloop) ;;
-	*) fail "unknown capture '${w}' (plat45, plat47, plat48, plat59, plat68, plat69, plat70a, plat70b, m71, vcsoffloop)" ;;
+	plat45 | plat47 | plat48 | plat59 | plat68 | plat69 | plat70a | plat70b | m71 | vcsoffloop | flowfirst) ;;
+	*) fail "unknown capture '${w}' (plat45, plat47, plat48, plat59, plat68, plat69, plat70a, plat70b, m71, vcsoffloop, flowfirst)" ;;
 	esac
 done
 
@@ -264,6 +264,15 @@ for w in "${which[@]}"; do
 		in_compositor_shell "CODETRACER_VCSOFF_ISONIM_GPUI='${ISONIM_GPUI}' bash ci/test/gpui-vcs-off-loop-window.sh" &&
 			bash ci/test/gpui-vcs-off-loop-window.sh --record &&
 			suite gpui-shell src/frontend/gpui/tests/test_gpui_vcs_off_loop_window.nim ||
+			failed+=("${w}")
+		;;
+	flowfirst)
+		# The window maps before the first stop's flow answers: the flow's
+		# answer held by a proxy in front of the replay-server; the record is
+		# sway's tree while it is held and the window's own trace order.
+		in_compositor_shell "CODETRACER_FLOWFIRST_ISONIM_GPUI='${ISONIM_GPUI}' bash ci/test/gpui-flow-first-window.sh" &&
+			bash ci/test/gpui-flow-first-window.sh --record &&
+			suite gpui-shell src/frontend/gpui/tests/test_gpui_flow_first_window.nim ||
 			failed+=("${w}")
 		;;
 	plat59)

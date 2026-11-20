@@ -81,6 +81,7 @@ when defined(js):
 
 import ./design_fonts
 from sdk/breakpoints import columnBreakpointAt
+from sdk/stop_loader import StopPane, spFlow, setPaneOpen   # the first stop's flow, after the window
 import viewmodels/editor_gutter_lanes
 import std/[cpuinfo, json, math, options, os, sequtils, sets, strutils, tables,
             times, exitprocs]
@@ -8039,6 +8040,17 @@ proc applyHoverReply(r: GpuiRenderer; reply: AutoHideReply) =
 
 proc hoverTick() {.cdecl.}
 proc vcsTick() {.cdecl.}
+proc flowAfterWindowTick() {.cdecl.}
+  ## Forward-declared; defined with the replay window's refresh.
+
+var gFlowAfterWindow = false
+  ## The first stop's flow is still to be asked for: an interactive window
+  ## opens on the stop's code, values and call trace, and asks for the flow
+  ## once it has drawn (`runOpen`, `flowAfterWindowTick`).
+
+const FlowAfterWindowPollMs = 50
+  ## How often the deferred flow looks for the window's first frame.
+
 proc vcsPollTick() {.cdecl.}
   ## Forward-declared; defined with the VCS pane's refresh.
 proc recordTick() {.cdecl.}
@@ -8106,6 +8118,14 @@ proc armHoverTick() =
   # (which now delivers certificate answers alongside that activity's work).
   # PLAT-57: a Find in Files search streaming is pumped on the same tick,
   # every `SearchPollMs`, while it runs.
+  # The first stop's flow, once the window has drawn (`runOpen`): before
+  # anything else, so the editor's flow overlay is the first thing filled in.
+  if due < 0 and gFlowAfterWindow:
+    let want = (due: -11'i64, vcs: false)
+    if gArmedTick != want:
+      gArmedTick = want
+      gpui_set_tick(uint32(FlowAfterWindowPollMs), flowAfterWindowTick)
+    return
   if due < 0 and nativeFindInFiles.running:
     let want = (due: -4'i64, vcs: false)
     if gArmedTick != want:
@@ -10798,6 +10818,31 @@ proc afterMove(r: GpuiRenderer) =
   gViewedFile = ""
   refreshReplayWindow(r)
 
+proc flowAfterWindowTick() {.cdecl.} =
+  ## The first stop's flow, asked for once the window has drawn its first
+  ## frame (`runOpen` left it out), then the window drawn again with it: the
+  ## editor's flow overlay and the flow pane fill in. A native flow can take
+  ## minutes on a loaded host, and the window showed nothing while it opened
+  ## on it; its read is on the window's clock, which the engine's progress
+  ## keeps running (ui-selection.md §8b).
+  if gpui_frame_count() == 0'u64:
+    return   # not drawn yet: this tick looks again
+  gFlowAfterWindow = false
+  if not gSession.isNil:
+    # The rows the editor draws with a flow state: none before the flow, the
+    # lines the stop's call ran after it (`gpui-flow-first-window.sh`).
+    proc flowRows(): int =
+      for row in gEditorSurface.rows:
+        if row.flow != efsUnknown: inc result
+    traceGesture("flow requested after the first frame; flow rows " &
+                 $flowRows())
+    gSession.sdk.stops.setPaneOpen(spFlow, true)
+    var r: GpuiRenderer
+    refreshReplayWindow(r)
+    traceGesture("flow applied; flow rows " & $flowRows())
+  gArmedTick = (due: -2'i64, vcs: false)
+  armHoverTick()
+
 proc openContextMenuAt(r: GpuiRenderer; menu: ContextMenuModel; x, y: int) =
   # a shown cell tooltip goes with it: the menu is what the press asked for
   if gCellHover.dismiss():
@@ -13334,6 +13379,12 @@ proc routeWindowKey(r: GpuiRenderer; key: string; mods: seq[string]) =
   ## One GPUI keystroke through the shared router: decoded to its canonical
   ## name (`canonicalKeyOfGpui`, GPUI's one decoder), resolved for THIS
   ## window's scope path and facts, and run (§6.1 step 5).
+  # A capture's sentinel (`CODETRACER_GPUI_PROBE_SENTINEL`) ends the loop
+  # whatever the key does here, as it does in an Edit window (`editKey`), so a
+  # replay window's capture can tell "the typist finished" from the backstop.
+  let sentinel = probeSentinel.len > 0 and key == probeSentinel
+  defer:
+    if sentinel: gpui_quit()
   let name = canonicalKeyOfGpui(key, mods)
   if name.len == 0:
     return
@@ -16291,6 +16342,17 @@ proc runOpen(cmd: GpuiCommand): int =
   # PLAT-52 / Q3: the Terminal Output pane asks for the lines it shows as it
   # is drawn (`drawTerminalPane`), as the terminal's does.
   session.openTerminalOutput()
+  # THE WINDOW OPENS BEFORE THE FIRST STOP'S FLOW. The flow walks the call
+  # the debugger stopped in, and a native one (rr, a step at a time) took
+  # more than a minute on a loaded host, with no window on screen meanwhile.
+  # An interactive window loads the stop's other panes now and asks for the
+  # flow once it has drawn (`flowAfterWindowTick`). A run that reports what
+  # it drew (`--plan-out`) or replays operations first keeps the flow in its
+  # first frame, as before.
+  if opensWindow(cmd) and cmd.planOut.len == 0 and cmd.replayOps.len == 0:
+    session.sdk.stops.setPaneOpen(spFlow, false)
+    gFlowAfterWindow = true
+    traceGesture("flow deferred until the first frame")
   discard session.loadStopPanes()
   # The current call is selected once the call trace holds the section its
   # pane shows (`reportListViewports`, with the first frame's geometry).
