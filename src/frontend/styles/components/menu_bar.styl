@@ -191,7 +191,7 @@ CAPTION_BAR_PADDING_BOTTOM = unquote("var(--caption-bar-padding-bottom)")
   -webkit-app-region: no-drag
   z-index: 50
   align-items: flex-end
-  gap: 0.25em
+  gap: 0
 
   // The three marks are stencils painted in the theme's icon colour
   // (`icon/primary/default`), as `.value-history-button` and the origin badge
@@ -220,10 +220,11 @@ CAPTION_BAR_PADDING_BOTTOM = unquote("var(--caption-bar-padding-bottom)")
       -webkit-mask-image: url('../../public/resources/window/minimize_window_dark.svg')
       mask-image: url('../../public/resources/window/minimize_window_dark.svg')
       opacity: 1
-      // Align the minimize line to the bottom of the circle, matching the
-      // bottom edge of the maximize icon (which sits centred at 50%).
-      -webkit-mask-position: center bottom
-      mask-position: center bottom
+      // Align the minimize line's centre to the bottom edge of the maximize
+      // icon (which sits centred at 50%, so its bottom is at 1.0em within the
+      // 1.5em circle).  With a 0.5em icon, 75% puts its centre at 1.0em.
+      -webkit-mask-position: center 75%
+      mask-position: center 75%
 
     // The restore button shows the maximize mark, so the button looks the
     // same whichever state the window is in.
