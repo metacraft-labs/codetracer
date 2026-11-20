@@ -1,0 +1,12 @@
+{
+  "M1": "r.sup.waitUntil(\"stale dropped\", proc (): bool =",
+  "M10": "r.sup.faults.allIt(it.plugin == \"acme-tools.flame\")",
+  "M2": "r.sup.waitUntil(\"hang fault\", proc (): bool =",
+  "M3": "errs.anyIt(it.code == pecNativeWithoutProcess and",
+  "M4": "not r.press(\"k\").found",
+  "M5": "not r.sup.resolveLayerKey(\"j\", \"\").found",
+  "M6": "errs.anyIt(it.code == pecReservedKey and it.plugin == \"acme-tools.flame\")",
+  "M7": "r.sup.observeEscape()",
+  "M8": "r.sup.slot(\"acme-tools.flame\").latched",
+  "M9": "r.sup.slot(\"acme-tools.flame\").layers.len == 0"
+}
