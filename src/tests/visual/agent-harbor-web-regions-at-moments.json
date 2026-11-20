@@ -2409,6 +2409,2802 @@
         }
       }
     },
+    "agent-harbor-inbox-playback-at-answered-laptop-dark": {
+      "moment": "answered",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 33
+        },
+        "rows": {
+          "x": 4,
+          "y": 108,
+          "w": 416,
+          "h": 764
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 56.234375,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 73,
+          "w": 1432,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 108,
+          "w": 415,
+          "h": 72,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 252,
+          "w": 415,
+          "h": 74,
+          "index": 2
+        },
+        "item-page": {
+          "x": 420,
+          "y": 108,
+          "w": 1016,
+          "h": 132
+        },
+        "item-head": {
+          "x": 428,
+          "y": 116,
+          "w": 1000,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-inbox-playback-at-answered-laptop-light": {
+      "moment": "answered",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 33
+        },
+        "rows": {
+          "x": 4,
+          "y": 108,
+          "w": 416,
+          "h": 764
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 56.234375,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 73,
+          "w": 1432,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 108,
+          "w": 415,
+          "h": 72,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 252,
+          "w": 415,
+          "h": 74,
+          "index": 2
+        },
+        "item-page": {
+          "x": 420,
+          "y": 108,
+          "w": 1016,
+          "h": 132
+        },
+        "item-head": {
+          "x": 428,
+          "y": 116,
+          "w": 1000,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-inbox-playback-at-answered-sidebar-dark": {
+      "moment": "answered",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 59
+        },
+        "rows": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 218
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 56.234375,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 99,
+          "w": 352,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 72,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 278,
+          "w": 352,
+          "h": 74,
+          "index": 2
+        },
+        "item-page": {
+          "x": 4,
+          "y": 352,
+          "w": 352,
+          "h": 156
+        },
+        "item-head": {
+          "x": 12,
+          "y": 360,
+          "w": 336,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-inbox-playback-at-answered-sidebar-light": {
+      "moment": "answered",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 59
+        },
+        "rows": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 218
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 56.234375,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 99,
+          "w": 352,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 72,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 278,
+          "w": 352,
+          "h": 74,
+          "index": 2
+        },
+        "item-page": {
+          "x": 4,
+          "y": 352,
+          "w": 352,
+          "h": 156
+        },
+        "item-head": {
+          "x": 12,
+          "y": 360,
+          "w": 336,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-inbox-playback-at-arrives-while-reading-laptop-dark": {
+      "moment": "arrives-while-reading",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 33
+        },
+        "rows": {
+          "x": 4,
+          "y": 108,
+          "w": 416,
+          "h": 764
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 123.125,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 73,
+          "w": 1432,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 108,
+          "w": 415,
+          "h": 74,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 182,
+          "w": 415,
+          "h": 72,
+          "index": 1
+        },
+        "item-page": {
+          "x": 420,
+          "y": 108,
+          "w": 1016,
+          "h": 204
+        },
+        "item-head": {
+          "x": 428,
+          "y": 116,
+          "w": 1000,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-inbox-playback-at-arrives-while-reading-laptop-light": {
+      "moment": "arrives-while-reading",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 33
+        },
+        "rows": {
+          "x": 4,
+          "y": 108,
+          "w": 416,
+          "h": 764
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 123.125,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 73,
+          "w": 1432,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 108,
+          "w": 415,
+          "h": 74,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 182,
+          "w": 415,
+          "h": 72,
+          "index": 1
+        },
+        "item-page": {
+          "x": 420,
+          "y": 108,
+          "w": 1016,
+          "h": 204
+        },
+        "item-head": {
+          "x": 428,
+          "y": 116,
+          "w": 1000,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-inbox-playback-at-arrives-while-reading-sidebar-dark": {
+      "moment": "arrives-while-reading",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 59
+        },
+        "rows": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 146
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 123.125,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 99,
+          "w": 352,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 74,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 208,
+          "w": 352,
+          "h": 72,
+          "index": 1
+        },
+        "item-page": {
+          "x": 4,
+          "y": 280,
+          "w": 352,
+          "h": 228
+        },
+        "item-head": {
+          "x": 12,
+          "y": 288,
+          "w": 336,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-inbox-playback-at-arrives-while-reading-sidebar-light": {
+      "moment": "arrives-while-reading",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 59
+        },
+        "rows": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 146
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 123.125,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 99,
+          "w": 352,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 74,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 208,
+          "w": 352,
+          "h": 72,
+          "index": 1
+        },
+        "item-page": {
+          "x": 4,
+          "y": 280,
+          "w": 352,
+          "h": 228
+        },
+        "item-head": {
+          "x": 12,
+          "y": 288,
+          "w": 336,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-inbox-playback-at-auto-switch-laptop-dark": {
+      "moment": "auto-switch",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 33
+        },
+        "rows": {
+          "x": 4,
+          "y": 108,
+          "w": 416,
+          "h": 764
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 70.921875,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 73,
+          "w": 1432,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 108,
+          "w": 415,
+          "h": 72,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 180,
+          "w": 415,
+          "h": 74,
+          "index": 1
+        },
+        "inbox-current-row": {
+          "x": 4,
+          "y": 108,
+          "w": 415,
+          "h": 72,
+          "fill": "#333333"
+        },
+        "item-page": {
+          "x": 420,
+          "y": 134,
+          "w": 1016,
+          "h": 204
+        },
+        "item-head": {
+          "x": 428,
+          "y": 142,
+          "w": 1000,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-inbox-playback-at-auto-switch-laptop-light": {
+      "moment": "auto-switch",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 33
+        },
+        "rows": {
+          "x": 4,
+          "y": 108,
+          "w": 416,
+          "h": 764
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 70.921875,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 73,
+          "w": 1432,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 108,
+          "w": 415,
+          "h": 72,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 180,
+          "w": 415,
+          "h": 74,
+          "index": 1
+        },
+        "inbox-current-row": {
+          "x": 4,
+          "y": 108,
+          "w": 415,
+          "h": 72,
+          "fill": "#c8c2b5"
+        },
+        "item-page": {
+          "x": 420,
+          "y": 134,
+          "w": 1016,
+          "h": 204
+        },
+        "item-head": {
+          "x": 428,
+          "y": 142,
+          "w": 1000,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-inbox-playback-at-auto-switch-sidebar-dark": {
+      "moment": "auto-switch",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 59
+        },
+        "rows": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 146
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 70.921875,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 99,
+          "w": 352,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 72,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 206,
+          "w": 352,
+          "h": 74,
+          "index": 1
+        },
+        "inbox-current-row": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 72,
+          "fill": "#333333"
+        },
+        "item-page": {
+          "x": 4,
+          "y": 306,
+          "w": 352,
+          "h": 228
+        },
+        "item-head": {
+          "x": 12,
+          "y": 314,
+          "w": 336,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-inbox-playback-at-auto-switch-sidebar-light": {
+      "moment": "auto-switch",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 59
+        },
+        "rows": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 146
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 70.921875,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 99,
+          "w": 352,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 72,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 206,
+          "w": 352,
+          "h": 74,
+          "index": 1
+        },
+        "inbox-current-row": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 72,
+          "fill": "#c8c2b5"
+        },
+        "item-page": {
+          "x": 4,
+          "y": 306,
+          "w": 352,
+          "h": 228
+        },
+        "item-head": {
+          "x": 12,
+          "y": 314,
+          "w": 336,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-inbox-playback-at-boost-ends-laptop-dark": {
+      "moment": "boost-ends",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 33
+        },
+        "rows": {
+          "x": 4,
+          "y": 108,
+          "w": 416,
+          "h": 764
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 68.078125,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 73,
+          "w": 1432,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 108,
+          "w": 415,
+          "h": 72,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 324,
+          "w": 415,
+          "h": 74,
+          "index": 3
+        },
+        "inbox-current-row": {
+          "x": 4,
+          "y": 108,
+          "w": 415,
+          "h": 72,
+          "fill": "#333333"
+        },
+        "item-page": {
+          "x": 420,
+          "y": 134,
+          "w": 1016,
+          "h": 108
+        },
+        "item-head": {
+          "x": 428,
+          "y": 142,
+          "w": 1000,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-inbox-playback-at-boost-ends-laptop-light": {
+      "moment": "boost-ends",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 33
+        },
+        "rows": {
+          "x": 4,
+          "y": 108,
+          "w": 416,
+          "h": 764
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 68.078125,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 73,
+          "w": 1432,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 108,
+          "w": 415,
+          "h": 72,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 324,
+          "w": 415,
+          "h": 74,
+          "index": 3
+        },
+        "inbox-current-row": {
+          "x": 4,
+          "y": 108,
+          "w": 415,
+          "h": 72,
+          "fill": "#c8c2b5"
+        },
+        "item-page": {
+          "x": 420,
+          "y": 134,
+          "w": 1016,
+          "h": 108
+        },
+        "item-head": {
+          "x": 428,
+          "y": 142,
+          "w": 1000,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-inbox-playback-at-boost-ends-sidebar-dark": {
+      "moment": "boost-ends",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 59
+        },
+        "rows": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 306
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 68.078125,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 99,
+          "w": 352,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 88,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 366,
+          "w": 352,
+          "h": 74,
+          "index": 3
+        },
+        "inbox-current-row": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 88,
+          "fill": "#333333"
+        },
+        "item-page": {
+          "x": 4,
+          "y": 482,
+          "w": 352,
+          "h": 132
+        },
+        "item-head": {
+          "x": 12,
+          "y": 490,
+          "w": 336,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-inbox-playback-at-boost-ends-sidebar-light": {
+      "moment": "boost-ends",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 59
+        },
+        "rows": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 306
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 68.078125,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 99,
+          "w": 352,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 88,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 366,
+          "w": 352,
+          "h": 74,
+          "index": 3
+        },
+        "inbox-current-row": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 88,
+          "fill": "#c8c2b5"
+        },
+        "item-page": {
+          "x": 4,
+          "y": 482,
+          "w": 352,
+          "h": 132
+        },
+        "item-head": {
+          "x": 12,
+          "y": 490,
+          "w": 336,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-inbox-playback-at-first-wait-laptop-dark": {
+      "moment": "first-wait",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 33
+        },
+        "rows": {
+          "x": 4,
+          "y": 108,
+          "w": 416,
+          "h": 764
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 54.0625,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 73,
+          "w": 1432,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 108,
+          "w": 415,
+          "h": 72,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 180,
+          "w": 415,
+          "h": 74,
+          "index": 1
+        }
+      }
+    },
+    "agent-harbor-inbox-playback-at-first-wait-laptop-light": {
+      "moment": "first-wait",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 33
+        },
+        "rows": {
+          "x": 4,
+          "y": 108,
+          "w": 416,
+          "h": 764
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 54.0625,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 73,
+          "w": 1432,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 108,
+          "w": 415,
+          "h": 72,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 180,
+          "w": 415,
+          "h": 74,
+          "index": 1
+        }
+      }
+    },
+    "agent-harbor-inbox-playback-at-first-wait-sidebar-dark": {
+      "moment": "first-wait",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 59
+        },
+        "rows": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 146
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 54.0625,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 99,
+          "w": 352,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 72,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 206,
+          "w": 352,
+          "h": 74,
+          "index": 1
+        }
+      }
+    },
+    "agent-harbor-inbox-playback-at-first-wait-sidebar-light": {
+      "moment": "first-wait",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 59
+        },
+        "rows": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 146
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 54.0625,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 99,
+          "w": 352,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 72,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 206,
+          "w": 352,
+          "h": 74,
+          "index": 1
+        }
+      }
+    },
+    "agent-harbor-inbox-playback-at-four-waiting-laptop-dark": {
+      "moment": "four-waiting",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 33
+        },
+        "rows": {
+          "x": 4,
+          "y": 108,
+          "w": 416,
+          "h": 764
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 72.21875,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 73,
+          "w": 1432,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 108,
+          "w": 415,
+          "h": 72,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 324,
+          "w": 415,
+          "h": 74,
+          "index": 3
+        }
+      }
+    },
+    "agent-harbor-inbox-playback-at-four-waiting-laptop-light": {
+      "moment": "four-waiting",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 33
+        },
+        "rows": {
+          "x": 4,
+          "y": 108,
+          "w": 416,
+          "h": 764
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 72.21875,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 73,
+          "w": 1432,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 108,
+          "w": 415,
+          "h": 72,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 324,
+          "w": 415,
+          "h": 74,
+          "index": 3
+        }
+      }
+    },
+    "agent-harbor-inbox-playback-at-four-waiting-sidebar-dark": {
+      "moment": "four-waiting",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 59
+        },
+        "rows": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 326
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 72.21875,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 99,
+          "w": 352,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 88,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 386,
+          "w": 352,
+          "h": 74,
+          "index": 3
+        }
+      }
+    },
+    "agent-harbor-inbox-playback-at-four-waiting-sidebar-light": {
+      "moment": "four-waiting",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 59
+        },
+        "rows": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 326
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 72.21875,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 99,
+          "w": 352,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 88,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 386,
+          "w": 352,
+          "h": 74,
+          "index": 3
+        }
+      }
+    },
+    "agent-harbor-inbox-playback-at-next-laptop-dark": {
+      "moment": "next",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 33
+        },
+        "rows": {
+          "x": 4,
+          "y": 108,
+          "w": 416,
+          "h": 764
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 26.75,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 73,
+          "w": 1432,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 108,
+          "w": 415,
+          "h": 72,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 324,
+          "w": 415,
+          "h": 74,
+          "index": 3
+        },
+        "inbox-current-row": {
+          "x": 4,
+          "y": 108,
+          "w": 415,
+          "h": 72,
+          "fill": "#333333"
+        },
+        "item-page": {
+          "x": 420,
+          "y": 134,
+          "w": 1016,
+          "h": 108
+        },
+        "item-head": {
+          "x": 428,
+          "y": 142,
+          "w": 1000,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-inbox-playback-at-next-laptop-light": {
+      "moment": "next",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 33
+        },
+        "rows": {
+          "x": 4,
+          "y": 108,
+          "w": 416,
+          "h": 764
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 26.75,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 73,
+          "w": 1432,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 108,
+          "w": 415,
+          "h": 72,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 324,
+          "w": 415,
+          "h": 74,
+          "index": 3
+        },
+        "inbox-current-row": {
+          "x": 4,
+          "y": 108,
+          "w": 415,
+          "h": 72,
+          "fill": "#c8c2b5"
+        },
+        "item-page": {
+          "x": 420,
+          "y": 134,
+          "w": 1016,
+          "h": 108
+        },
+        "item-head": {
+          "x": 428,
+          "y": 142,
+          "w": 1000,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-inbox-playback-at-next-sidebar-dark": {
+      "moment": "next",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 59
+        },
+        "rows": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 326
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 26.75,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 99,
+          "w": 352,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 88,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 386,
+          "w": 352,
+          "h": 74,
+          "index": 3
+        },
+        "inbox-current-row": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 88,
+          "fill": "#333333"
+        },
+        "item-page": {
+          "x": 4,
+          "y": 502,
+          "w": 352,
+          "h": 132
+        },
+        "item-head": {
+          "x": 12,
+          "y": 510,
+          "w": 336,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-inbox-playback-at-next-sidebar-light": {
+      "moment": "next",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 59
+        },
+        "rows": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 326
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 26.75,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 99,
+          "w": 352,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 88,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 386,
+          "w": 352,
+          "h": 74,
+          "index": 3
+        },
+        "inbox-current-row": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 88,
+          "fill": "#c8c2b5"
+        },
+        "item-page": {
+          "x": 4,
+          "y": 502,
+          "w": 352,
+          "h": 132
+        },
+        "item-head": {
+          "x": 12,
+          "y": 510,
+          "w": 336,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-inbox-playback-at-prev-laptop-dark": {
+      "moment": "prev",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 33
+        },
+        "rows": {
+          "x": 4,
+          "y": 108,
+          "w": 416,
+          "h": 764
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 25.359375,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 73,
+          "w": 1432,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 108,
+          "w": 415,
+          "h": 72,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 180,
+          "w": 415,
+          "h": 74,
+          "index": 1
+        },
+        "item-page": {
+          "x": 420,
+          "y": 108,
+          "w": 1016,
+          "h": 244
+        },
+        "item-head": {
+          "x": 428,
+          "y": 116,
+          "w": 1000,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-inbox-playback-at-prev-laptop-light": {
+      "moment": "prev",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 33
+        },
+        "rows": {
+          "x": 4,
+          "y": 108,
+          "w": 416,
+          "h": 764
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 25.359375,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 73,
+          "w": 1432,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 108,
+          "w": 415,
+          "h": 72,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 180,
+          "w": 415,
+          "h": 74,
+          "index": 1
+        },
+        "item-page": {
+          "x": 420,
+          "y": 108,
+          "w": 1016,
+          "h": 244
+        },
+        "item-head": {
+          "x": 428,
+          "y": 116,
+          "w": 1000,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-inbox-playback-at-prev-sidebar-dark": {
+      "moment": "prev",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 59
+        },
+        "rows": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 146
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 25.359375,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 99,
+          "w": 352,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 72,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 206,
+          "w": 352,
+          "h": 74,
+          "index": 1
+        },
+        "item-page": {
+          "x": 4,
+          "y": 280,
+          "w": 352,
+          "h": 268
+        },
+        "item-head": {
+          "x": 12,
+          "y": 288,
+          "w": 336,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-inbox-playback-at-prev-sidebar-light": {
+      "moment": "prev",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 59
+        },
+        "rows": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 146
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 25.359375,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 99,
+          "w": 352,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 134,
+          "w": 352,
+          "h": 72,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 206,
+          "w": 352,
+          "h": 74,
+          "index": 1
+        },
+        "item-page": {
+          "x": 4,
+          "y": 280,
+          "w": 352,
+          "h": 268
+        },
+        "item-head": {
+          "x": 12,
+          "y": 288,
+          "w": 336,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-inbox-playback-at-resolved-elsewhere-laptop-dark": {
+      "moment": "resolved-elsewhere",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 33
+        },
+        "rows": {
+          "x": 4,
+          "y": 108,
+          "w": 416,
+          "h": 764
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 113.5,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 73,
+          "w": 1432,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 108,
+          "w": 415,
+          "h": 74,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 108,
+          "w": 415,
+          "h": 74,
+          "index": 0
+        },
+        "item-page": {
+          "x": 420,
+          "y": 108,
+          "w": 1016,
+          "h": 204
+        },
+        "item-head": {
+          "x": 428,
+          "y": 116,
+          "w": 1000,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-inbox-playback-at-resolved-elsewhere-laptop-light": {
+      "moment": "resolved-elsewhere",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 33
+        },
+        "rows": {
+          "x": 4,
+          "y": 108,
+          "w": 416,
+          "h": 764
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 113.5,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 73,
+          "w": 1432,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 108,
+          "w": 415,
+          "h": 74,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 108,
+          "w": 415,
+          "h": 74,
+          "index": 0
+        },
+        "item-page": {
+          "x": 420,
+          "y": 108,
+          "w": 1016,
+          "h": 204
+        },
+        "item-head": {
+          "x": 428,
+          "y": 116,
+          "w": 1000,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-inbox-playback-at-resolved-elsewhere-sidebar-dark": {
+      "moment": "resolved-elsewhere",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 33
+        },
+        "rows": {
+          "x": 4,
+          "y": 108,
+          "w": 352,
+          "h": 74
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 113.5,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 73,
+          "w": 352,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 108,
+          "w": 352,
+          "h": 74,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 108,
+          "w": 352,
+          "h": 74,
+          "index": 0
+        },
+        "item-page": {
+          "x": 4,
+          "y": 182,
+          "w": 352,
+          "h": 228
+        },
+        "item-head": {
+          "x": 12,
+          "y": 190,
+          "w": 336,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-inbox-playback-at-resolved-elsewhere-sidebar-light": {
+      "moment": "resolved-elsewhere",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 832
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 33
+        },
+        "rows": {
+          "x": 4,
+          "y": 108,
+          "w": 352,
+          "h": 74
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 113.5,
+          "h": 18,
+          "cut": false
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 73,
+          "w": 352,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 108,
+          "w": 352,
+          "h": 74,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 108,
+          "w": 352,
+          "h": 74,
+          "index": 0
+        },
+        "item-page": {
+          "x": 4,
+          "y": 182,
+          "w": 352,
+          "h": 228
+        },
+        "item-head": {
+          "x": 12,
+          "y": 190,
+          "w": 336,
+          "h": 24
+        }
+      }
+    },
     "agent-harbor-initiative-progress-playback-at-milestone-blocked-laptop-dark": {
       "moment": "milestone-blocked",
       "viewport": {

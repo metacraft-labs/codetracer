@@ -51,6 +51,7 @@ import ../agent_harbor/ah_session_views
 import ../agent_harbor/ah_fleet_panel
 import ../agent_harbor/ah_composer
 import ../agent_harbor/ah_session_activity
+import ./ctf_p3_gpui_cover
 from ../agent_harbor/ah_theme import textWidth, textPx, CaptionPx, InsetPx, MarkPx
 from ../chrome import contrastRatio
 import nim_agents_isonim_viewmodels/agent_harbor/session_timeline_vm
@@ -75,6 +76,11 @@ const
     ## CTF-P2b's 21 of the session activity timeline. A floor, so a
     ## declaration that silently lost its stories cannot pass by rendering
     ## nothing.
+  MinimumChangesInboxStories = 59
+    ## The Changes panel's and the Inbox's stories at CTF-P3's landing (23
+    ## Changes, 12 Inbox, 24 item pages), counted apart: a floor on the
+    ## whole section would let these be lost while other stories were
+    ## added.
 
 var countedAssertions = 0
 template ck(cond: untyped) =
@@ -554,6 +560,8 @@ proc inkProblems(m: AhStoryMount; mode: DesignMode): seq[string] =
     if m.fleet.state.val == asReady: result = fleetInkProblems(m.view, m.fleet, p)
   of "agent-harbor-session-activity":
     result = timelineInkProblems(m.view, p)
+  of "agent-harbor-inbox":
+    result = inboxInkProblems(m.view, p)
   of "agent-harbor-initiative-tabs":
     # Previous / Next: the disabled role while nothing waits, the label role
     # while something does (what the browser computes). Each step is drawn
@@ -678,6 +686,15 @@ proc checkStory(m: AhStoryMount): seq[string] =
         problems.add "the cards half draws " & painted & " rows, the cards' feed has " &
                      $m.cards.cards.agentFeed().len
       problems & m.cards.againstCardsProblems(m.timeline, m.cards.timelineSource)
+  of "agent-harbor-changes":
+    checkChanges(view, m.changesInbox.changes, parseInt(view.attr("width-px")),
+                 changesStoryContext(m.fixture))
+  of "agent-harbor-inbox":
+    checkInbox(view, m.changesInbox.inbox, parseInt(view.attr("width-px")),
+               inboxStoryContext(m.fixture, StoryHostRequests()))
+  of "agent-harbor-inbox-item":
+    checkItemPage(view, m.changesInbox.inboxItem,
+                  inboxItemStoryContext(m.fixture, StoryHostRequests()))
   else: @["this suite has no comparison for surface " & m.surface]
 
 # ---------------------------------------------------------------------------
@@ -701,7 +718,8 @@ proc renderStory(story: CodeTracerStory; w, h: int; mode: DesignMode;
     let m = r.mountAgentHarborStoryGpui(story.surface, story.fixture, w, h, mode,
                                         frameTitle)
     result.mount = m
-    result.problems = checkStory(m) & drawnTextProblems(m.root) & inkProblems(m, mode)
+    result.problems = checkStory(m) & drawnTextProblems(m.root) & inkProblems(m, mode) &
+                      p3DrawnTextProblems(m.root)
     if not r.verifyRenderPlan(m.root):
       result.problems.add "the shadow tree builds no valid render plan"
     if frameTitle.len > 0 and m.root.first("frame-title").attr("frame-title") != frameTitle:
@@ -714,6 +732,10 @@ suite "CTF-P1b: the stories come from their one declaration":
   test "the Agent Harbor section is declared and holds the P2a stories":
     ck section.title == AgentHarborSectionTitle
     ck section.stories.len >= MinimumStories
+    var changesInbox = 0
+    for story in section.stories:
+      if story.surface in ChangesInboxSurfaces: inc changesInbox
+    ck changesInbox >= MinimumChangesInboxStories
     ck validateStorySections(@[section]).len == 0
     var ids: HashSet[string]
     for story in section.stories: ids.incl storybookId(section, story)
@@ -1003,4 +1025,4 @@ suite "CTF-P1b: the GPUI views share the viewmodels, not the web views":
 
 suite "CTF-P1b: assertion count":
   test "every assertion ran":
-    check countedAssertions == 73
+    check countedAssertions == 74

@@ -52,6 +52,13 @@
   ],
   "nearCopy": [
     {
+      "file": "codetracer/ci/test/siblings/repro.lock",
+      "sources": [
+        "diffs/*#repro.lock"
+      ],
+      "reason": "A reprobuild lock file (the CI sibling set's) whose header and sibling pins have the same layout in every repository; a captured branch diff of another public repository changes that repository's lock."
+    },
+    {
       "file": "codetracer/config.nims",
       "sources": [
         "diffs/*#config.nims"

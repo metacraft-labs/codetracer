@@ -194,6 +194,73 @@ const composerExports = [
 for (const name of composerExports) {
   agentHarborViews[`agent-harbor-${kebab(name)}`] = `codetracer-agent-harbor--${kebab(name)}`;
 }
+// The Changes panel and the Inbox (CTF-P3): one view per story, each captured
+// at its first frame (`InboxPlayback` at its moments with `--moments`); the
+// families `agent-harbor-changes` and `agent-harbor-inbox` below select them.
+const changesInboxExports = [
+  "Changes",
+  "ChangesSpecChanges",
+  "ChangesSpecChangesStaged",
+  "ChangesSpecChangesRequestOpen",
+  "ChangesSpecChangesRevertConfirm",
+  "ChangesSpecChangesReverting",
+  "ChangesSpecChangesRevertFailed",
+  "ChangesSpecChangesMalformed",
+  "ChangesTests",
+  "ChangesTestsAllPassing",
+  "ChangesTestsAllPending",
+  "ChangesImplementation",
+  "ChangesCode",
+  "ChangesCodeFileOpen",
+  "ChangesCodeFiltered",
+  "ChangesCodeLong",
+  "ChangesNoPlan",
+  "ChangesOpensOnTests",
+  "ChangesMilestone",
+  "ChangesRunning",
+  "ChangesEmpty",
+  "ChangesLoading",
+  "ChangesError",
+  "Inbox",
+  "InboxLong",
+  "InboxFleet",
+  "InboxPrevNext",
+  "InboxPrevNextFirst",
+  "InboxPrevNextEnd",
+  "InboxManagerHeld",
+  "InboxEmpty",
+  "InboxEmptied",
+  "InboxLoading",
+  "InboxError",
+  "InboxQuestion",
+  "InboxQuestionSingle",
+  "InboxQuestionMulti",
+  "InboxQuestionConfirmation",
+  "InboxQuestionNoOptions",
+  "InboxIdlePrompt",
+  "InboxPermissionGate",
+  "InboxSudo",
+  "InboxNetwork",
+  "InboxLogin",
+  "InboxLoginCarryError",
+  "InboxLoginCancelling",
+  "InboxLoginCompleted",
+  "InboxLoginFailed",
+  "InboxLoginEmpty",
+  "InboxFeedback",
+  "InboxFeedbackOptions",
+  "InboxFeedbackInvalid",
+  "InboxFeedbackOptionsInvalid",
+  "InboxFeedbackExpired",
+  "InboxDraft",
+  "InboxUnfamiliar",
+  "InboxAnswered",
+  "InboxAnswerFailed",
+  "InboxPlayback",
+];
+for (const name of changesInboxExports) {
+  agentHarborViews[`agent-harbor-${kebab(name)}`] = `codetracer-agent-harbor--${kebab(name)}`;
+}
 // The session activity timeline (CTF-P2b): its static stories, in the family
 // `agent-harbor-session-activity`, and its two playback stories, in
 // `agent-harbor-session-activity-playback` (and, with the other playback
@@ -260,6 +327,10 @@ const viewFamilies = {
   "agent-harbor-session-activity-playback": [...playbackViews],
   "agent-harbor-session-tabs": sessionTabsExports.map((name) => `agent-harbor-${kebab(name)}`),
   "agent-harbor-composer": composerExports.map((name) => `agent-harbor-${kebab(name)}`),
+  // CTF-P3: the Changes panel's stories, and the Inbox's (the panel and an
+  // item's page; `--moments` with `agent-harbor-playback` for its playback).
+  "agent-harbor-changes": changesInboxExports.filter((name) => name.startsWith("Changes")).map((name) => `agent-harbor-${kebab(name)}`),
+  "agent-harbor-inbox": changesInboxExports.filter((name) => name.startsWith("Inbox")).map((name) => `agent-harbor-${kebab(name)}`),
   "agent-harbor-layouts": agentHarborLayoutViews,
 };
 

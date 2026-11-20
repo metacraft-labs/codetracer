@@ -564,6 +564,150 @@ async function activityReader(panel) {
   expect(lineState(panel)).toEqual(before);
 }
 
+// --- The Changes panel and the Inbox (CTF-P3) ------------------------------
+//
+// Their rows are cardless, as the timeline's lines are: an inbox row, a spec
+// card, an item's page and the row layout inside each draw no border,
+// outline or shadow, and no background but the panel's own ground. Two
+// exceptions, each a mark of state rather than a box: the item on screen
+// (`.ah-inbox-row-current`) is a selection, the raised fill with one inset
+// bar in the action colour, and an open card (`.ah-card-open`) has the one
+// inset bar and no fill. The parts that are not rows -- the state dot, the
+// chips, buttons and fields -- are drawn with their own grounds and are not
+// read. `rowProblems` reads the browser's computed styles.
+const P3_ROWS = ".ah-inbox-row, .ah-spec-card, .ah-item-page";
+const P3_ROW_PARTS = [
+  ":scope > .ah-inbox-row-main",
+  ":scope > .ah-inbox-row-main > .ah-inbox-row-line",
+  ":scope > .ah-spec-card-head",
+  ":scope > .ah-spec-card-body",
+  ":scope > .ah-item-head",
+].join(", ");
+// One inset shadow and nothing else: `<colour> <x> <y> <blur> <spread>
+// inset`, as the browser computes it. The colours' own commas are taken out
+// first, so any comma left separates a second shadow, before or after the
+// inset one.
+const oneInsetBar = (shadow) => {
+  const layers = shadow.replace(/rgba?\([^)]*\)/g, "c");
+  return !layers.includes(",") && /\binset\b/.test(layers);
+};
+function rowProblems(panel) {
+  const ground = getComputedStyle(panel).backgroundColor;
+  const problems = [];
+  for (const row of panel.querySelectorAll(P3_ROWS)) {
+    const id = row.getAttribute("data-ah-item") || row.getAttribute("data-ah-card") || row.className;
+    const selected = row.classList.contains("ah-inbox-row-current");
+    const open = row.classList.contains("ah-card-open");
+    for (const e of [row, ...row.querySelectorAll(P3_ROW_PARTS)]) {
+      const cs = getComputedStyle(e);
+      for (const side of ["Top", "Right", "Bottom", "Left"]) {
+        if (parseFloat(cs[`border${side}Width`]) > 0 && cs[`border${side}Style`] !== "none") {
+          problems.push(`${id}: a ${side.toLowerCase()} border on ${e.className}`);
+        }
+      }
+      if (cs.outlineStyle !== "none" && parseFloat(cs.outlineWidth) > 0) {
+        problems.push(`${id}: an outline on ${e.className}`);
+      }
+      const filled = !TRANSPARENT.has(cs.backgroundColor) && cs.backgroundColor !== ground;
+      if (filled && !(e === row && selected)) {
+        problems.push(`${id}: the background ${cs.backgroundColor} on ${e.className}`);
+      }
+      if (cs.boxShadow !== "none" && !(e === row && (selected || open) && oneInsetBar(cs.boxShadow))) {
+        problems.push(`${id}: the shadow ${cs.boxShadow} on ${e.className}`);
+      }
+    }
+  }
+  return problems;
+}
+
+// The check can fail: each of four copies of a drawn row, given one box --
+// a 1px border, an outline, a drop shadow, a fill of its own -- is reported
+// for it, and so is a fifth whose inset bar has a second shadow beside it;
+// a copy given the selection (an inbox row) or opened (a card) is not. The
+// boxes are planted on the row's first row-layout part when it has one, so
+// the parts are read too. Every copy is removed at once, so the story is
+// left as it stood.
+const PLANTED_BOXES = [
+  ["border", { border: "1px solid red" }, /border on/],
+  ["outline", { outline: "1px solid red" }, /an outline on/],
+  ["shadow", { boxShadow: "0 1px 2px red" }, /the shadow/],
+  ["fill", { backgroundColor: "rgb(255, 0, 0)" }, /the background/],
+  ["two-shadows", { boxShadow: "inset 3px 0 0 red, 0 1px 2px red" }, /the shadow/],
+];
+function rowControl(panel, row) {
+  const asMark = row.classList.contains("ah-inbox-row") ? "ah-inbox-row-current"
+    : row.classList.contains("ah-spec-card") ? "ah-card-open" : null;
+  const copies = [];
+  const plant = (id) => {
+    const copy = row.cloneNode(true);
+    copy.classList.remove("ah-inbox-row-current", "ah-card-open");
+    copy.setAttribute("data-ah-item", id);
+    copy.setAttribute("data-ah-card", id);
+    copies.push(copy);
+    return copy;
+  };
+  for (const [kind, style] of PLANTED_BOXES) {
+    const copy = plant(`planted-${kind}`);
+    const target = kind === "two-shadows" ? copy : (copy.querySelector(P3_ROW_PARTS) ?? copy);
+    Object.assign(target.style, style);
+  }
+  if (asMark) plant("planted-mark").classList.add(asMark);
+  row.parentElement.append(...copies);
+  try {
+    const found = rowProblems(panel);
+    const missed = PLANTED_BOXES.filter(([kind, , says]) =>
+      !found.some((p) => p.startsWith(`planted-${kind}:`) && says.test(p))).map(([kind]) => kind);
+    expect(missed).toEqual([]);
+    expect(found.filter((p) => p.startsWith("planted-mark:"))).toEqual([]);
+  } finally {
+    for (const c of copies) c.remove();
+  }
+}
+
+// A Changes or Inbox story: its panel drawn in its declared state, its rows
+// cardless (with the control, wherever a row is drawn), and, where `rows`
+// says the story is for its rows, at least one drawn. Returns the panel.
+async function changesInboxChecks(canvasElement, selector, { rows = false } = {}) {
+  const panel = await waitFor(canvasElement, selector);
+  await tick();
+  const drawn = panel.querySelectorAll(P3_ROWS);
+  if (rows) expect(drawn.length).toBeGreaterThan(0);
+  expect(rowProblems(panel)).toEqual([]);
+  const row = panel.querySelector(".ah-inbox-row, .ah-spec-card") ?? drawn[0];
+  if (row) rowControl(panel, row);
+  return panel;
+}
+
+// The inbox's Previous / Next group: its position is the viewmodel's
+// (`3 of 5` mid-walk), and each step is enabled or disabled as the story
+// says. The position names the row on screen: the one selected row is the
+// row at that place in the drawn order, there are as many rows as the
+// position counts, and the explanation strip over the item's page opens
+// with the same position. So a step that landed on another item, or a
+// group that shows a position the rows do not, fails here even though the
+// check presses nothing.
+function stepperIs(panel, position, { prev, next }) {
+  const stepper = panel.querySelector(".ah-inbox-stepper");
+  expect(stepper?.getAttribute("data-ah-position")).toBe(position);
+  expect(stepper.querySelector(".ah-step-position")?.textContent).toBe(position);
+  expect(stepper.querySelector(".ah-step-prev").disabled).toBe(!prev);
+  expect(stepper.querySelector(".ah-step-next").disabled).toBe(!next);
+  const [at, of] = position.split(" of ").map(Number);
+  const rows = [...panel.querySelectorAll(".ah-inbox-row")];
+  expect(rows.length).toBe(of);
+  const current = rows.filter((r) => r.classList.contains("ah-inbox-row-current"));
+  expect(current.length).toBe(1);
+  expect(rows.indexOf(current[0]) + 1).toBe(at);
+  expect(current[0].getAttribute("data-ah-position")).toBe(String(at));
+  expect(panel.querySelector(".ah-item-page")).toBeTruthy();
+  expect(panel.querySelector(".ah-inbox-strip")?.getAttribute("data-ah-strip") ?? "")
+    .toMatch(new RegExp(`^${position} \u00b7 `));
+}
+
+const changesPanel = ".agent-harbor-changes";
+const inboxPanel = ".agent-harbor-inbox";
+const inboxItemPanel = ".agent-harbor-inbox-item";
+
 export const plays = {
   ...composerChecks,
   "agent-harbor-fleet-snapshot": fleetCheck(async (el) => {
@@ -880,6 +1024,60 @@ export const plays = {
     // events, so the mis-rendering is not read as the timeline's.
     expect(row.querySelector(".ah-against-card-feed > .ah-against-caption")?.textContent)
       .toMatch(/^Today's Agent Activity cards, including a known mis-rendering/);
+  },
+  // The Changes panel (CTF-P3): every story's rows cardless; a story of its
+  // spec cards draws at least one.
+  "agent-harbor-changes": async ({ canvasElement }) => {
+    await changesInboxChecks(canvasElement, changesPanel);
+  },
+  "agent-harbor-changes-cards": async ({ canvasElement }) => {
+    const panel = await changesInboxChecks(canvasElement, changesPanel, { rows: true });
+    expect(panel.querySelectorAll(".ah-spec-card").length).toBeGreaterThan(0);
+  },
+  // The Inbox panel: every story's rows and page cardless; a story of its
+  // rows draws at least one, the item on screen as the one selected row.
+  "agent-harbor-inbox": async ({ canvasElement }) => {
+    await changesInboxChecks(canvasElement, inboxPanel);
+  },
+  "agent-harbor-inbox-rows": async ({ canvasElement }) => {
+    const panel = await changesInboxChecks(canvasElement, inboxPanel, { rows: true });
+    expect(panel.querySelectorAll(".ah-inbox-row").length).toBeGreaterThan(0);
+    expect(panel.querySelectorAll(".ah-inbox-row-current").length).toBeLessThanOrEqual(1);
+  },
+  // Mid-walk (`prev-next`): `3 of 5` with both steps enabled, the row on
+  // screen selected; the first step of a walk (`1 of 5`) cannot go back;
+  // the last of the order (`5 of 5`), reached by going back from the top
+  // to the only item visited, cannot go back either and still goes on while
+  // items wait.
+  "agent-harbor-inbox-prev-next": async ({ canvasElement }) => {
+    const panel = await changesInboxChecks(canvasElement, inboxPanel, { rows: true });
+    stepperIs(panel, "3 of 5", { prev: true, next: true });
+  },
+  "agent-harbor-inbox-prev-next-first": async ({ canvasElement }) => {
+    const panel = await changesInboxChecks(canvasElement, inboxPanel, { rows: true });
+    stepperIs(panel, "1 of 5", { prev: false, next: true });
+  },
+  "agent-harbor-inbox-prev-next-end": async ({ canvasElement }) => {
+    const panel = await changesInboxChecks(canvasElement, inboxPanel, { rows: true });
+    stepperIs(panel, "5 of 5", { prev: false, next: true });
+  },
+  // An empty inbox: the notice, no row, both steps disabled.
+  "agent-harbor-inbox-empty": async ({ canvasElement }) => {
+    const panel = await changesInboxChecks(canvasElement, inboxPanel);
+    expect(panel.querySelectorAll(".ah-inbox-row").length).toBe(0);
+    const stepper = panel.querySelector(".ah-inbox-stepper");
+    expect(stepper.querySelector(".ah-step-prev").disabled).toBe(true);
+    expect(stepper.querySelector(".ah-step-next").disabled).toBe(true);
+  },
+  // An item's page on its own (`agent-harbor-inbox-item`): cardless.
+  "agent-harbor-inbox-item": async ({ canvasElement }) => {
+    const panel = await changesInboxChecks(canvasElement, inboxItemPanel);
+    expect(panel.querySelectorAll(".ah-item-page, .ah-item-head").length).toBeGreaterThan(0);
+  },
+  // The inbox's playback: the playback bar's check, then the inbox's own.
+  "agent-harbor-inbox-playback": async (context) => {
+    await plays["agent-harbor-playback"](context);
+    await plays["agent-harbor-inbox-rows"](context);
   },
   // A playback story of the timeline: the playback bar's check, then the
   // timeline's own.
