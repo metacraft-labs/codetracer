@@ -186,3 +186,18 @@ LOCK_FENIX=dd2c80d0b88463ccc0402c86e9e72dbb354ac091
 # `codetracer-trace-format` c8e57b1, so `nargo trace` still writes `meta.dat`
 # version 7.
 LOCK_NOIR=a5e92b847ec95a7f20eadee36745b55d7c8f9659
+
+# ## Private siblings a CI lane clones by revision
+#
+# repro.lock and repro.nim are public, so a private repository can be neither
+# declared nor pinned there (bbf7dbed4a6; ci/test/sibling-provisioning-test.sh
+# UNLOCKED_SIBLINGS). A lane that needs one names it with an explicit
+# revision. Where flake.lock pins the repo (native-backend, native-recorder,
+# visual-replay) the lane takes flake.lock's revision; these two have no
+# flake input, so their revision lives here.
+#
+# The revisions codetracer's repro.lock last pinned before bbf7dbed4a6 dropped
+# them (3b0524226ed), with which run 44384977215's TUI and visual-replay-tools
+# jobs built.
+PRIVATE_SIBLING_CODETRACER_LAUNCHER=7aafc5efe2bde5d8c81bc849116c4df589a8ef6b
+PRIVATE_SIBLING_CODETRACER_SNAPSHOT_CODECS=3e503da83b73e805f30096d4baa45c18d138f6d3

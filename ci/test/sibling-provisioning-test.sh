@@ -666,9 +666,8 @@ fi
 # needs one provisions it itself. An entry whose repo the lock DOES pin is a
 # failure (checked below), so this list cannot go stale. A bare entry of one of
 # these names in a workflow's `siblings:` block resolves against the public
-# lock and cannot be cloned until that lane gives it an explicit `=<ref>`; that
-# is an open consequence of declaring only public siblings, not something this
-# list repairs.
+# lock and cannot be cloned, so it is a failure (checked with the bare names
+# below): the lane must give it an explicit `=<ref>`.
 declare -A UNLOCKED_SIBLINGS=(
 	["codetracer-native-recorder"]="private"
 	["codetracer-native-backend"]="private"
@@ -712,10 +711,31 @@ done < <(
 	done | LC_ALL=C sort -u
 )
 unlocked_bare=()
+private_bare=()
 for bare in "${bare_names[@]}"; do
-	[ -n "${UNLOCKED_SIBLINGS[$bare]:-}" ] && continue
+	if [ -n "${UNLOCKED_SIBLINGS[$bare]:-}" ]; then
+		private_bare+=("$bare")
+		continue
+	fi
 	[[ ",$lock_develop_set," == *",$bare,"* ]] || unlocked_bare+=("$bare")
 done
+# A bare entry of a name the public lock deliberately does not pin cannot be
+# cloned: clone-siblings resolves it against this lock and finds nothing. That
+# was "an open consequence" until bbf7dbed4a6 dropped the private siblings from
+# the lock with three bare entries still in the workflows (codetracer-launcher
+# in tui-tests.yml, codetracer-visual-replay in mcr-dap-flow.yml,
+# codetracer-native-recorder in launcher-recorder-e2e.yml), and run
+# 44612896066's TUI shards all failed on "pins no revision for these
+# sibling(s): codetracer-launcher". Each such entry must carry `=<rev>`.
+if [ "${#private_bare[@]}" -eq 0 ]; then
+	ok "no workflow names a sibling the public lock cannot pin bare (${#UNLOCKED_SIBLINGS[@]} such siblings)"
+else
+	fail "no workflow names a sibling the public lock cannot pin bare" \
+		"these are in UNLOCKED_SIBLINGS, so repro.lock never pins them and a" \
+		"bare entry clones nothing; give each an explicit '<name>=<rev>'" \
+		"(flake.lock's revision, or ci/toolchain.pin's PRIVATE_SIBLING_* one):" \
+		"${private_bare[*]}"
+fi
 if [ "${#bare_names[@]}" -gt 0 ] && [ "${#unlocked_bare[@]}" -eq 0 ]; then
 	ok "every sibling the workflows check out by bare name is in repro.lock (${#bare_names[@]})"
 else
@@ -3206,7 +3226,8 @@ echo
 # and every cloned sibling's lock pins repro.lock's package catalog.
 # 51 -> 52 (2026-11-18): no sibling listed as deliberately unlocked (private, or
 # not declarable) is pinned by the public repro.lock.
-readonly EXPECTED_ASSERTIONS=52
+# 52 -> 53 (2026-11-20): no workflow names such a sibling bare (run 44612896066).
+readonly EXPECTED_ASSERTIONS=53
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))

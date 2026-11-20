@@ -72,6 +72,61 @@ jobs:
           # its runner and backend from these (ci/test/scenarios.sh).
           test-siblings: DemoVideoScript,DemoVideoScript-GuiAssert,GuiAssert
 
+      - name: Read the private siblings' pins
+        # The four repos the tools build from are private, so the public
+        # repro.lock cannot pin them and provisioning does not clone them
+        # (bbf7dbed4a6). native-backend, native-recorder and visual-replay take
+        # flake.lock's revisions; snapshot-codecs, which visual-replay's
+        # config.nims puts on the Nim path, has no flake input and takes
+        # ci/toolchain.pin's.
+        id: private_pins
+        run: |
+          set -euo pipefail
+          flake_rev() { jq -er --arg r "$1" '[.nodes[] | .locked? | select(.owner? == "metacraft-labs" and .repo? == $r) | .rev] | unique | if length == 1 then .[0] else error("\($r): \(length) revisions in flake.lock") end' flake.lock; }
+          {
+            echo "native_backend=$(flake_rev codetracer-native-backend)"
+            echo "native_recorder=$(flake_rev codetracer-native-recorder)"
+            echo "visual_replay=$(flake_rev codetracer-visual-replay)"
+            echo "snapshot_codecs=$(sed -n 's/^PRIVATE_SIBLING_CODETRACER_SNAPSHOT_CODECS=\([0-9a-f]\{40\}\)$/\1/p' ci/toolchain.pin)"
+          } | tee -a "$GITHUB_OUTPUT"
+          grep -q '^snapshot_codecs=[0-9a-f]\{40\}$' "$GITHUB_OUTPUT"
+
+      - name: Clone codetracer-native-backend
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-native-backend
+          ref: ${{ steps.private_pins.outputs.native_backend }}
+          path: ${{ github.workspace }}/../codetracer-native-backend
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'true'
+
+      - name: Clone codetracer-native-recorder
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-native-recorder
+          ref: ${{ steps.private_pins.outputs.native_recorder }}
+          path: ${{ github.workspace }}/../codetracer-native-recorder
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Clone codetracer-visual-replay
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-visual-replay
+          ref: ${{ steps.private_pins.outputs.visual_replay }}
+          path: ${{ github.workspace }}/../codetracer-visual-replay
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Clone codetracer-snapshot-codecs
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-snapshot-codecs
+          ref: ${{ steps.private_pins.outputs.snapshot_codecs }}
+          path: ${{ github.workspace }}/../codetracer-snapshot-codecs
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
       - name: Build ct-native-replay, ct_gfx_player and ct-mcr
         id: tools
         run: nix develop .#devShells.x86_64-linux.default --command bash ci/test/visual-replay-tools.sh "${RUNNER_TEMP}/visual-replay.env"

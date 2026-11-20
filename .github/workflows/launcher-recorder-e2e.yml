@@ -699,7 +699,8 @@ jobs:
             nim-agents
             codetracer-trace-format
             codetracer-trace-format-nim
-            codetracer-native-recorder
+            # Private, so the public repro.lock cannot pin it: flake.lock's revision.
+            codetracer-native-recorder=195fa723db7d20625fb47270c6fd2fb9554d8869
             # The io-mon family. `ct` itself imports io_mon/depfile from
             # src/ct_test/incremental/io_mon_capture.nim, so WITHOUT these the
             # core build dies with `cannot open file: io_mon/depfile`, no
