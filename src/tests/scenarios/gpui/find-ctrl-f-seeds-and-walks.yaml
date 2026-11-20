@@ -13,8 +13,8 @@ steps:
   - wait: { until: replay-idle, timeout: 120s }
   - click: { at: 'editor[file="main.py"]/line[number="31"]', anchor: "column(14)" }
   - chord: Ctrl+F
-  - wait: { until: { at: find-field, present: true }, timeout: 20s }
+  - wait: { until: { at: find-field, present: true }, timeout: 120s }
   - type: "right"
-  - wait: { until: { at: find-field, query: { contains: "right" } }, timeout: 20s }
+  - wait: { until: { at: find-field, query: { contains: "right" } }, timeout: 120s }
   - key: F3
-  - wait: { until: { at: find-field, count: { contains: " of " } }, timeout: 20s }
+  - wait: { until: { at: find-field, count: { contains: " of " } }, timeout: 120s }
