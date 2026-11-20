@@ -49,7 +49,15 @@ type
 
     # -- Mutable state --
     selectedPoint*: Signal[Option[int]]
+      ## The selected row's INDEX in `points`, for a painter that draws rows by
+      ## position. Local: a peer's list may hold the same points in another
+      ## order, so an index is not something two front-ends can agree on.
     editingPoint*: Signal[Option[int]]
+    selectedPointId*: Signal[string]
+      ## THE SELECTION AS A PEER SEES IT: the selected row's stable `id`
+      ## (`PointListEntry.id`), or "" for none. This is the field a shared
+      ## session publishes; `selectPointById` is how an incoming selection
+      ## lands, and it lands on the same POINT whatever position it holds here.
 
     points*: Signal[seq[PointListEntry]]
       ## Alias of `store.pointList.rows` — the store's own signal, not a copy
@@ -67,11 +75,42 @@ type
 # ---------------------------------------------------------------------------
 
 proc selectPoint*(vm: PointListVM; index: Option[int]) =
-  ## Set the selected point index. Pass `none(int)` to clear.
-  if vm.actionSink.forwards("pointList", "selectPoint",
+  ## Set the selected point index. Pass `none(int)` to clear. The stable id of
+  ## the row at that index is selected with it, and that id — not the index —
+  ## is what a mirror forwards, so the primary selects the same point even
+  ## when its list is in a different order.
+  let rows = vm.points.val
+  let id =
+    if index.isSome and index.get >= 0 and index.get < rows.len:
+      rows[index.get].id
+    else: ""
+  if id.len > 0 and vm.actionSink.forwards("pointList", "selectPointById",
+      %*{"id": id}):
+    return
+  if id.len == 0 and vm.actionSink.forwards("pointList", "selectPoint",
       %*{"index": sinkArg(index)}):
     return
   vm.selectedPoint.val = index
+  vm.selectedPointId.val = id
+
+proc selectPointById*(vm: PointListVM; id: string) =
+  ## Select the row whose stable id is `id`, wherever it is in the list; ""
+  ## (or an id no row carries) clears the selection.
+  if vm.actionSink.forwards("pointList", "selectPointById", %*{"id": id}):
+    return
+  var index = none(int)
+  for i, r in vm.points.val:
+    if id.len > 0 and r.id == id:
+      index = some(i)
+      break
+  vm.selectedPoint.val = index
+  vm.selectedPointId.val = if index.isSome: id else: ""
+
+proc indexOfPoint*(vm: PointListVM; id: string): int =
+  ## Where the point with stable id `id` is in the list now, or -1.
+  for i, r in vm.points.val:
+    if r.id == id: return i
+  -1
 
 proc startEditing*(vm: PointListVM; index: int) =
   ## Begin editing the point at `index`. Also selects that point.
@@ -126,6 +165,7 @@ proc createPointListVM*(store: ReplayDataStore): PointListVM =
       store: store,
       selectedPoint: createSignal(none(int)),
       editingPoint: createSignal(none(int)),
+      selectedPointId: createSignal(""),
       points:
         if store.isNil: createSignal(newSeq[PointListEntry]())
         else: store.pointList.rows,

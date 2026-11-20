@@ -419,6 +419,7 @@ proc applyAction*(session: SessionViewModel; msg: JsonNode): bool =
     if v.isNil: return false
     case action
     of "selectPoint": v.selectPoint(a.arg("index", none(int)))
+    of "selectPointById": v.selectPointById(a.arg("id", ""))
     of "startEditing": v.startEditing(a.arg("index", 0))
     of "stopEditing": v.stopEditing()
     else: return false
