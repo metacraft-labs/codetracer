@@ -1643,7 +1643,9 @@ proc loadInProgramVisualiser*(s: HeadlessDebugSession;
     if args.len == 0: continue
     let arg = json_adapter.toPValue(args[0]{"value"})
     let ret = json_adapter.toPValue(call{"returnValue"})
-    if arg.isNil or ret.isNil: continue
+    # A call whose return the engine did not answer (`None`) is not an
+    # answer: rendering it would put `nil` where the program said something.
+    if arg.isNil or ret.isNil or ret.kind in {pvkNil, pvkNotExpanded}: continue
     let text =
       if ret.kind in {pvkString, pvkCString}: ret.text
       else: presentText(ret, ExecutableInputBudget)

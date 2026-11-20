@@ -3801,7 +3801,19 @@ impl Handler {
                 total += 1;
                 if arg.limit == 0 || calls.len() < arg.limit {
                     // expanded children count not relevant here
-                    calls.push(self.reader.to_call(db_call, &mut self.expr_loader));
+                    //
+                    // The SEEKABLE call stream is the record the calltrace
+                    // pane reads (`Calltrace::new`), and it carries the
+                    // call's return value. The materialized table
+                    // `calls_iter` walks does not on a CTFS trace (its
+                    // `return_value` is `None` for every call), so a search
+                    // answered from it reported every function as returning
+                    // nothing while the pane showed `=> "…"` for the same call.
+                    let record = self.reader.seekable_call(db_call.key);
+                    calls.push(
+                        self.reader
+                            .to_call(record.as_ref().unwrap_or(db_call), &mut self.expr_loader),
+                    );
                 }
             }
         }
