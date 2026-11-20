@@ -537,3 +537,12 @@ src/frontend/tui/tests/plat61-shell-mutation-control.sha256	src/frontend/tui/mai
 src/frontend/tui/tests/plat62-constraints-mutation-control.sha256	src/frontend/tui/main.nim	542daaeb00fff6a74ddba731c5b78aa7dfcf05a49d36235dac67aa6941d99c17	0587c5ead2bb77a565486d7265fa962a76b7f97b7f1004cd1786611098d78834
 src/frontend/tui/tests/plat65-nim-tracing-mutation-control.sha256	src/frontend/tui/main.nim	542daaeb00fff6a74ddba731c5b78aa7dfcf05a49d36235dac67aa6941d99c17	0587c5ead2bb77a565486d7265fa962a76b7f97b7f1004cd1786611098d78834
 src/frontend/tui/tests/plat72-screen-reader-mutation-control.sha256	src/frontend/tui/main.nim	542daaeb00fff6a74ddba731c5b78aa7dfcf05a49d36235dac67aa6941d99c17	0587c5ead2bb77a565486d7265fa962a76b7f97b7f1004cd1786611098d78834
+
+# 2026-11-20, the parity gate names its backstop and both columns name their
+# memory manager: ci/lib/run-nim-test-lane.sh's native arm and the parity gate's
+# native build pass --mm:orc, and vm-unit-wasm-lane-test.sh asserts both. Every
+# harness that digests those bytes owes a re-grade.
+src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	ci/lib/run-nim-test-lane.sh	d1a2a215a9f74c50d465925aaa14ad2fbc674db88c4dfa5e4a2e24ea222ef97e	5f53ca8e65d9013d2fdf8ada18ecbdb2dd17cf7c1d59776ec471bc684c552f43
+src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/run-nim-test-lane.sh	d1a2a215a9f74c50d465925aaa14ad2fbc674db88c4dfa5e4a2e24ea222ef97e	5f53ca8e65d9013d2fdf8ada18ecbdb2dd17cf7c1d59776ec471bc684c552f43
+src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/test/vm-unit-wasm-parity.sh	cc903e83e819a7bf7c0236f21e3be33faa10e476151795eed22bc0d5f95424dc	dd059a1a694f1aa1c6fa6fa9fbea16c9cc1edd57a82867a075c5e27a892cd2dd
+src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/test/vm-unit-wasm-lane-test.sh	25e02f5edd71b89864b5f771a585bff1f1c6f26e8053d728c5722d1dda5442ee	9c28c6234fae228dd052c5d1cd7d37a941aedd5e684b4a53dbf5b72cf16c851b
