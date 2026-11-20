@@ -302,6 +302,7 @@ import viewmodel/session_vm
 import ui/session_viewmodels
 import ui/panel_host   # the panes it mounts render their tab's ViewModels
 import ui/pointer_stamp
+import ui/project_visualisers   # the checkout's per-type visualisers
 from viewmodel/keymap/editing_keymap import BaseKeymap, bkCua, bkEmacs, bkVim,
   bkKakoune
 from ui/pane_host_lookup import tabOfPaneHost
@@ -3426,6 +3427,11 @@ proc onTraceLoaded(
   if data.trace.lang in {LangC, LangCpp, LangRust, LangGo}:
     data.startOptions.loading = false
   CURRENT_LANG = data.trace.lang
+  # THE CHECKOUT'S PER-TYPE VISUALISERS, read now and installed on the door
+  # every desktop value surface renders through (Project-Definitions §5).
+  for note in installProjectVisualisers(
+      if data.trace.workdir.isNil: "" else: $data.trace.workdir):
+    clog cstring("project definitions: " & note)
 
   if not data.services.eventLog.isNil:
     data.services.eventLog.restart()

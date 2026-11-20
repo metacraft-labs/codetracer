@@ -1130,6 +1130,11 @@ test_lane_files() {
 		echo src/frontend/tests/debug_toolbar_follows_active_tab_test.nim
 		echo src/frontend/tests/agent_editor_selection_dom_test.nim
 		echo src/frontend/tests/origin_chain_wiring_test.nim
+		# `value_provenance_dom_test.nim` holds the desktop to READING a
+		# checkout's `.codetracer/visualisers.toml` when a trace opens and to
+		# naming the visualiser that drew a value in the value span's `title`
+		# — read back out of the DOM, with the built-in title as its control.
+		echo src/frontend/tests/value_provenance_dom_test.nim
 		# `origin_side_panel_confidence_test.nim` holds the origin side panel
 		# to printing each hop's confidence, and the low-confidence label
 		# below 0.7 (Value-Origin-Tracking.md §3.2.2 "Side panel").
