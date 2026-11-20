@@ -468,13 +468,9 @@ proc onSaveUntitled*(sender: js, response: jsobject(name=cstring, raw=cstring, s
   ## user did not choose and cannot find; the `saveAs: true` the renderer has
   ## always sent on this message said what should happen and nothing read it.
   ##
-  ## The reply still carries the BUFFER's name rather than the chosen path,
-  ## because `ui_js.onSavedFile` looks the tab up by it and a reply naming the
-  ## destination would clear nothing. The consequence is that the tab keeps its
-  ## `#untitled{N}` title and a second save asks again; renaming the tab to its
-  ## destination is a renderer-side change this did not make. Documented in
-  ## `GUI/Welcome-And-Sessions/Welcome-Screen.md` §"New file, and what it
-  ## creates" rather than left to be rediscovered.
+  ## The reply sends `CODETRACER::saved-as` with both the original placeholder
+  ## name and the chosen destination so `ui_js.onSavedAs` can rename the tab,
+  ## clear the `untitled` flag, and update the Monaco language mode (issue #836).
   try:
     var destination = response.name
     if isUntitledBufferName($response.name):
@@ -495,8 +491,12 @@ proc onSaveUntitled*(sender: js, response: jsobject(name=cstring, raw=cstring, s
     suppressSelfWrite(destination)
     discard await writeFileAsync(fsAsync, destination, response.raw)
     suppressSelfWrite(destination)
-    mainWindow.webContents.send "CODETRACER::saved-file",
-      answerFor(response.toJs, js{name: response.name})
+    # Send `saved-as` so the renderer can rename the tab from the untitled
+    # placeholder to the chosen path, update the language mode, and clear the
+    # untitled flag.  Sending only `saved-file` with the original placeholder
+    # name left the tab stuck as `#untitled{N}` after the first save (issue #836).
+    mainWindow.webContents.send "CODETRACER::saved-as",
+      answerFor(response.toJs, js{name: response.name, path: destination})
   except:
     errorPrint "save-untitled error: ", getCurrentExceptionMsg()
     mainWindow.webContents.send "CODETRACER::save-file-error",

@@ -4393,19 +4393,59 @@ proc onCtInstallStatus(sender: js, status: (cstring, cstring)) =
   else:
     data.viewsApi.errorMessage($(status[1]))
 
-proc onSavedAs(sender: js, files: JsAssoc[cstring, cstring]) =
-  # discard
-  # TODO
-  for untitledName, newPath in files:
+proc setMonacoModelLanguage(model: JsObject, language: cstring)
+  {.importjs: "monaco.editor.setModelLanguage(#, #)".}
+
+proc onSavedAs(sender: js, response: jsobject(name=cstring, path=cstring)) =
+  ## The renderer side of `index/files.onSaveUntitled`'s success path.
+  ##
+  ## `response.name` is the untitled placeholder (`#untitled{N}`);
+  ## `response.path` is the destination the user chose.  Move both the
+  ## `TabInfo` (in `services.editor.open`) and the `EditorViewComponent` (in
+  ## `ui.editors`) from the old key to the new one, clear the `untitled` flag,
+  ## update the GoldenLayout tab title, and tell Monaco the new language so
+  ## syntax highlighting matches the chosen file extension (issue #836).
+  let untitledName = response.name
+  let newPath = response.path
+  if data.services.editor.open.hasKey(untitledName):
     data.services.editor.open[newPath] = data.services.editor.open[untitledName]
     data.services.editor.open[newPath].untitled = false
     data.services.editor.open[newPath].changed = false
     data.services.editor.open[newPath].name = newPath
-    # data.services.editor.open[newPath].fileInfo.path = newPath
+    data.services.editor.open[newPath].path = newPath
+    data.services.editor.open[newPath].lang = fromPath(newPath)
     discard jsDelete(data.services.editor.open[untitledName])
-    data.ui.editors[newPath] = data.ui.editors[untitledName]
-    discard jsDelete(data.ui.editors[untitledName])
-    data.ui.editors[newPath].path = newPath
+  try:
+    if data.ui.editors.hasKey(untitledName):
+      data.ui.editors[newPath] = data.ui.editors[untitledName]
+      discard jsDelete(data.ui.editors[untitledName])
+      let editor = data.ui.editors[newPath]
+      editor.path = newPath
+      editor.name = newPath
+      editor.lang = fromPath(newPath)
+      # Register the new path in the Find-in-Files index.
+      if not data.services.search.paths.hasKey(newPath):
+        data.services.search.pathsPrepared.add(fuzzysort.prepare(newPath))
+        data.services.search.paths[newPath] = true
+      # Update the GoldenLayout tab label (the same steps onSavedFile takes).
+      var tokens = rsplit($newPath, {'/'}, maxsplit=1)
+      var label = $newPath
+      if tokens.len >= 2:
+        label = tokens[1]
+      if not editor.contentItem.isNil:
+        editor.contentItem.setTitle(cstring(label))
+        editor.contentItem.config.componentState.label = newPath
+        editor.contentItem.config.componentState.fullPath = newPath
+      # Re-colour the Monaco model for the new file extension.
+      let langId = cstring(toCLang(fromPath(newPath)))
+      if not editor.monacoEditor.isNil:
+        let model = editor.monacoEditor.toJs.getModel()
+        if not model.isNil:
+          setMonacoModelLanguage(model, langId)
+  except:
+    cerror "saved-as: could not update editor tab for " &
+      $newPath & ": " & getCurrentExceptionMsg()
+  checkPendingReRecord(data)
 
 proc onSavedFile(sender: js, response: jsobject(name=cstring)) =
   if data.services.editor.open.hasKey(response.name):
