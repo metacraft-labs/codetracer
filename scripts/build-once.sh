@@ -497,86 +497,36 @@ PY
 		fi
 	fi
 
-	runquotad_pid=""
-	if [ -z "${RUNQUOTA_SOCKET:-}" ]; then
-		runquotad_bin="${RUNQUOTAD_BIN:-}"
-		if [ -z "$runquotad_bin" ]; then
-			# Windows ships `runquotad.exe`; macOS / Linux ship a bare
-			# `runquotad`. Search both filenames.
-			runquotad_candidates=(
-				"../runquota/build/bin/runquotad.exe"
-				"../../runquota/build/bin/runquotad.exe"
-				"../runquota/build/bin/runquotad"
-				"../../runquota/build/bin/runquotad"
-			)
-			for candidate in "${runquotad_candidates[@]}"; do
-				if [ -x "$candidate" ]; then
-					runquotad_bin="$(cd "$(dirname "$candidate")" && pwd)/$(basename "$candidate")"
-					break
-				fi
-			done
-		fi
-		if [ -z "$runquotad_bin" ]; then
-			runquotad_bin="$(command -v runquotad || true)"
-		fi
-		if [ -z "$runquotad_bin" ]; then
-			echo "Error: runquotad is required for Reprobuild builds with RunQuota." >&2
-			echo "Build ../runquota or set RUNQUOTAD_BIN/RUNQUOTA_SOCKET." >&2
-			exit 127
-		fi
-
-		mkdir -p .repro/runquota
-		# THE SOCKET GOES IN A DIRECTORY OF ITS OWN, never straight into
-		# $TMPDIR. The socket's parent directory is the rendezvous point,
-		# and runquotad verifies it on every start -- and its client on
-		# every connect -- before it will bind: owned by this user, and
-		# never group- or world-writable. A shared /tmp is root-owned 1777
-		# and fails both halves, so a socket placed directly in it is
-		# refused with "refusing a path owned by uid 0 with mode 1777" and
-		# the daemon exits before it ever listens.
-		#
-		# That refusal is correct rather than something to work around: a
-		# rendezvous point any local user can write is a rendezvous point
-		# any local user can replace, and this daemon hands out the
-		# machine's whole build budget. The per-PID directory below does
-		# not exist yet, so runquotad CREATES it with the mode it requires
-		# (0700 here, 0750 on a host with a `runquota` group) -- it only
-		# refuses directories it found already there. The published stats
-		# table lands beside the socket for the same reason, so this also
-		# keeps it out of a shared /tmp where concurrent builds would
-		# collide on one file.
-		runquota_dir="${TMPDIR:-/tmp}/codetracer-reprobuild-$$"
-		runquota_socket="$runquota_dir/runquota.sock"
-		runquota_log=".repro/runquota/runquotad.log"
-		rm -rf "$runquota_dir"
-		"$runquotad_bin" \
-			--socket "$runquota_socket" \
-			--cpu-milli "${CODETRACER_RUNQUOTA_CPU_MILLI:-8000}" \
-			--memory-bytes "${CODETRACER_RUNQUOTA_MEMORY_BYTES:-17179869184}" \
-			--pool console=1 \
-			>"$runquota_log" 2>&1 &
-		runquotad_pid="$!"
-		trap 'if [ -n "$runquotad_pid" ]; then kill "$runquotad_pid" 2>/dev/null || true; wait "$runquotad_pid" 2>/dev/null || true; fi; rm -rf "$runquota_dir"' EXIT
-		for _ in {1..300}; do
-			if grep -q "runquotad listening" "$runquota_log" 2>/dev/null; then
-				export RUNQUOTA_SOCKET="$runquota_socket"
-				break
-			fi
-			if ! kill -0 "$runquotad_pid" 2>/dev/null; then
-				echo "Error: runquotad exited before becoming ready. See $runquota_log" >&2
-				# Print it too. A build that dies here is usually a build on
-				# a machine nobody can log into afterwards, and a log the
-				# reader has to go and find is a log they never read.
-				sed 's/^/  runquotad: /' "$runquota_log" >&2 2>/dev/null || true
-				exit 1
-			fi
-			sleep 0.05
-		done
-		if [ -z "${RUNQUOTA_SOCKET:-}" ]; then
-			echo "Error: runquotad did not become ready. See $runquota_log" >&2
-			sed 's/^/  runquotad: /' "$runquota_log" >&2 2>/dev/null || true
-			exit 1
-		fi
+	# THE BUILD'S RESOURCE BUDGET IS THE HOST'S, NOT THIS SCRIPT'S.
+	#
+	# This script used to start a private `runquotad` on a private socket with
+	# a budget of its own (8 CPUs, 16 GiB), and stop it at exit. That made the
+	# budget a property of one invocation: two concurrent builds, or a build
+	# beside a test run, each admitted against a whole budget of their own and
+	# together overran the machine while each believed itself within it. A
+	# resource coordinator is only useful with a view of the whole host.
+	#
+	# So the script starts nothing and owns nothing. `repro` finds the daemon
+	# itself, in this order (the RunQuota endpoint discovery):
+	#   1. RUNQUOTA_SOCKET, when set: an explicit endpoint, which wins. CI and
+	#      the tests point it at a daemon they run.
+	#   2. The host's service, when one is provisioned.
+	#   3. Otherwise the invoking user's shared per-user daemon, which `repro`
+	#      starts on first use, every later invocation of that user adopts, and
+	#      which exits by itself after an idle period.
+	# When none of these is possible (no `runquotad` installed), `repro` runs
+	# the build without admission and says so in its own diagnostics; this
+	# script does not paper over that by inventing a budget.
+	#
+	# The budget therefore belongs to the host's configuration: change it with
+	# `runquota config set machine.cpu_milli N` (and `machine.memory_bytes`),
+	# not with environment variables of this script. The former
+	# CODETRACER_RUNQUOTA_CPU_MILLI / CODETRACER_RUNQUOTA_MEMORY_BYTES /
+	# RUNQUOTAD_BIN knobs configured the private daemon and no longer exist.
+	if [ -n "${RUNQUOTA_SOCKET:-}" ]; then
+		echo "build-once: runquota: using the endpoint in RUNQUOTA_SOCKET ($RUNQUOTA_SOCKET)" >&2
+	else
+		echo "build-once: runquota: no RUNQUOTA_SOCKET; repro adopts the host's daemon, or starts the shared per-user one" >&2
 	fi
 
 	# macOS-only: pick up the system SDK path so cargo's cc-rs and the
