@@ -108,6 +108,48 @@ proc projectTrustLedgerPath*(root = ""): string =
   if sibling.len == 0: return ""
   sibling.parentDir / projectTrustFileName
 
+when defined(linux):
+  type
+    StatxTimestampCt {.importc: "struct statx_timestamp",
+                       header: "<sys/stat.h>", bycopy.} = object
+      tv_sec: int64
+      tv_nsec: uint32
+    StatxCt {.importc: "struct statx", header: "<sys/stat.h>",
+              bycopy.} = object
+      stx_mask: uint32
+      stx_btime: StatxTimestampCt
+  let
+    AtFdCwdCt {.importc: "AT_FDCWD", header: "<fcntl.h>".}: cint
+    StatxBtimeCt {.importc: "STATX_BTIME", header: "<sys/stat.h>".}: cuint
+  proc statxCt(dirfd: cint; path: cstring; flags: cint; mask: cuint;
+               buf: var StatxCt): cint {.importc: "statx",
+                                         header: "<sys/stat.h>".}
+
+proc birthMarker*(root: string): string =
+  ## THE HOST-SIDE MARKER AGAINST INODE REUSE: the directory's birth time, as
+  ## the filesystem recorded it when the directory was created, or "" when the
+  ## filesystem does not report one.
+  ##
+  ## PLAT-13's residue 1 named the gap: a checkout deleted and a different
+  ## repository created in its place may land on the same `(device, inode)`
+  ## and inherit the grant. The birth time closes it where it is available,
+  ## because it is a fact nothing a repository carries can set — `git clone`
+  ## creates the directory, the kernel stamps its birth, and `utimensat(2)`
+  ## can move the access and modification times but has no argument for the
+  ## birth time. A rename keeps it (the inode is the same inode), and `cp -r`
+  ## does not (a new directory is born), which is exactly the identity §2.3
+  ## asks for. Folded into the identity rather than kept beside it, so the one
+  ## comparison `admit` already makes is the comparison that sees the reuse.
+  when defined(linux):
+    var buf: StatxCt
+    if statxCt(AtFdCwdCt, root.cstring, 0, StatxBtimeCt, buf) != 0:
+      return ""
+    if (buf.stx_mask and uint32(StatxBtimeCt)) == 0:
+      return ""
+    $buf.stx_btime.tv_sec & "." & $buf.stx_btime.tv_nsec
+  else:
+    ""
+
 proc checkoutIdentity*(root: string): RepositoryIdentity =
   ## The identity of ONE checkout, or "" when there is not one to identify.
   ##
@@ -141,7 +183,15 @@ proc checkoutIdentity*(root: string): RepositoryIdentity =
   try:
     let info = getFileInfo(root, followSymlink = true)
     if info.kind != pcDir: return ""
-    result = "fs1:" & $info.id.device & ":" & $info.id.file
+    # `fs2` carries the birth marker; `fs1` is the identity of a checkout on
+    # a filesystem that reports no birth time, where residue 1 still stands
+    # and the content digest is what keeps an inherited grant harmless.
+    let born = birthMarker(root)
+    result =
+      if born.len > 0:
+        "fs2:" & $info.id.device & ":" & $info.id.file & ":" & born
+      else:
+        "fs1:" & $info.id.device & ":" & $info.id.file
   except CatchableError, Defect:
     return ""
 
@@ -312,3 +362,99 @@ proc revokeExecutableTier*(userRoot, checkoutRoot: string;
   let failure = updateProjectTrust(userRoot, proc(l: var ProjectTrustLedger) =
     outcome = l.revoke(identity, kind, at, annotation))
   recordReport(checkoutRoot, outcome, failure)
+
+# ---------------------------------------------------------------------------
+# Keeping the ledger from growing without bound
+# ---------------------------------------------------------------------------
+
+func devInoOf(identity: RepositoryIdentity): string =
+  ## `<device>:<inode>` of an `fs1`/`fs2` identity, or "" for any other shape.
+  let parts = identity.split(':')
+  if parts.len >= 3 and parts[0] in ["fs1", "fs2"]:
+    parts[1] & ":" & parts[2]
+  else:
+    ""
+
+type
+  TrustUpkeep* = object
+    ## What `keepProjectTrust` did to the ledger.
+    forgotten*: seq[RepositoryIdentity]
+      ## Checkouts whose every entry was dropped, and why each one could never
+      ## be admitted again is in `describeUpkeep`.
+    reannotated*: int
+      ## Entries whose path note was brought up to date.
+    failure*: string
+      ## "" on success, or why the ledger could not be rewritten.
+
+proc keepProjectTrust*(userRoot: string;
+                       seen: openArray[(RepositoryIdentity, string)]):
+    TrustUpkeep =
+  ## PRUNE THE LEDGER, AND KEEP ITS PATH NOTES TRUE. PLAT-13's residue 5:
+  ## `forget` existed and nothing called it, so a machine that granted many
+  ## checkouts grew the file without bound.
+  ##
+  ## WHAT IS FORGOTTEN IS ONLY WHAT CAN NEVER BE ADMITTED AGAIN, and that is
+  ## decided by asking the filesystem about the path each entry was recorded
+  ## at: when that path now holds a directory with the SAME `(device, inode)`
+  ## and a DIFFERENT identity, the inode was reused (the birth marker moved) or
+  ## the entry predates the marker (`fs1` on a filesystem that now reports
+  ## one). Either way no directory anywhere carries the old identity any more.
+  ##
+  ## A CHECKOUT THAT WAS MOVED IS NOT FORGOTTEN. Its recorded path may now be
+  ## empty, or hold another repository, and the grant must survive the move
+  ## (§2.3: "moving a checkout does not silently re-grant" is the other half
+  ## of keeping it). So a path that is gone, or that holds a different inode,
+  ## proves nothing and is left alone — and `seen`, the checkouts this session
+  ## is looking at, re-annotates a moved checkout's entries with the path it
+  ## is at now, so the next upkeep asks about the right directory.
+  ##
+  ## THE FILE IS WRITTEN ONLY WHEN SOMETHING CHANGED, under the ledger's lock,
+  ## through the same read-modify-write a grant and a revocation use.
+  let path = projectTrustLedgerPath(userRoot)
+  if path.len == 0 or not fileExists(path):
+    return
+  let parse = loadProjectTrustFrom(path)
+  var dead: seq[RepositoryIdentity] = @[]
+  for identity in parse.ledger.identities:
+    var notePath = ""
+    for e in parse.ledger.entries:
+      if e.identity == identity and e.note.len > 0 and e.note.isAbsolute:
+        notePath = e.note
+    if notePath.len == 0: continue
+    let now = checkoutIdentity(notePath)
+    if now.len > 0 and now != identity and devInoOf(now).len > 0 and
+       devInoOf(now) == devInoOf(identity):
+      dead.add identity
+  var renotes = 0
+  for (identity, at) in seen:
+    let note = pathAnnotation(at)
+    for e in parse.ledger.entries:
+      if e.identity == identity and e.note != note: inc renotes
+  if dead.len == 0 and renotes == 0:
+    return
+  var forgotten: seq[RepositoryIdentity] = @[]
+  var reannotated = 0
+  let seenNow = @seen   # an openArray cannot be captured by the closure
+  result.failure = updateProjectTrustAt(path, proc(l: var ProjectTrustLedger) =
+    for identity in dead:
+      if l.forget(identity) > 0: forgotten.add identity
+    for (identity, at) in seenNow:
+      let note = pathAnnotation(at)
+      for e in l.entries.mitems:
+        if e.identity == identity and e.note != note:
+          e.note = note
+          inc reannotated)
+  result.forgotten = forgotten
+  result.reannotated = reannotated
+
+func describeUpkeep*(u: TrustUpkeep): string =
+  ## One line for a status line or a report, or "" when nothing happened.
+  var parts: seq[string] = @[]
+  if u.forgotten.len > 0:
+    parts.add "forgot " & $u.forgotten.len & " trust decision(s) about " &
+      "checkouts that no longer exist (" & u.forgotten.join(", ") & ")"
+  if u.reannotated > 0:
+    parts.add "updated the path of " & $u.reannotated & " trust entr(ies)"
+  if u.failure.len > 0:
+    parts.add u.failure
+  parts.join("; ")

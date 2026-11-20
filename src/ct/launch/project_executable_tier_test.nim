@@ -345,7 +345,11 @@ suite "PLAT-13: the grant is recorded by IDENTITY, not by path":
     ckEq checkoutIdentity(w.root.parentDir / "no-such-checkout"), ""
     ckEq checkoutIdentity(""), ""
     ckEq checkoutIdentity(w.root / definitionPath("", dfkVisualiserCode)), ""
-    ck checkoutIdentity(w.root).startsWith("fs1:")
+    # `fs2:` carries the directory's birth time (the host-side marker against
+    # inode reuse, `project_trust_store.birthMarker`) where the filesystem
+    # reports one; `fs1:` is the identity where it does not.
+    ck checkoutIdentity(w.root).startsWith(
+      if birthMarker(w.root).len > 0: "fs2:" else: "fs1:")
     # A path reached through a symlink is the SAME checkout, because the
     # identity is the directory and not the name.
     when defined(posix):
