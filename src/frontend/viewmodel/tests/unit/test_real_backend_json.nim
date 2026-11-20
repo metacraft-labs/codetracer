@@ -24,8 +24,17 @@ import backend/[backend_service, real_backend]
 proc jsonParse(s: cstring): JsObject {.importjs: "JSON.parse(#)".}
 proc jsonStringify(o: JsObject): cstring {.importjs: "JSON.stringify(#)".}
 proc repeated(times: int; o: JsObject): JsObject {.importjs: "({ steps: Array(#).fill(#) })".}
+proc edgeCases(): JsObject {.importjs: """
+  ({ int: 7, float: 1.5, negZero: -0, past53: 9007199254740992, expo: 1e21,
+     nan: NaN, inf: -Infinity, gone: undefined, fn: function () {},
+     list: [undefined, function () {}, NaN, 2, "x", null, true, [], {}],
+     when: new Date(0), text: "flow \u00fc \u2028 \u{1F600}", nil: null,
+     nested: { a: [{ b: { c: [1, 2.25, "3"] } }] } })""".}
 
 const flowUpdate = staticRead("../../../../../libs/ct-flow-wire/tests/fixtures/flow-update.full.json")
+const elidedFlowUpdate = staticRead("../../../../../libs/ct-flow-wire/tests/fixtures/flow-update.elided.json")
+
+proc roundTrip(o: JsObject): JsonNode = parseJson($jsonStringify(o))
 
 type Handlers = ref object
   list: seq[proc(kind: string, raw: JsObject)]
@@ -90,3 +99,35 @@ suite "RealBackendService event bodies":
     echo "  ", size, " bytes to four subscribers: ", ms, " ms"
     check count == 4
     check eventBodyConversions - before == 1
+
+suite "jsonFromJs":
+  test "a flow update converts to what the string round trip gives":
+    for text in [flowUpdate, elidedFlowUpdate]:
+      let o = jsonParse(cstring(text))
+      check jsonFromJs(o) == roundTrip(o)
+      check $jsonFromJs(o) == $roundTrip(o)
+
+  test "JSON.stringify's own cases convert as the round trip does":
+    let o = edgeCases()
+    let walked = jsonFromJs(o)
+    let expected = roundTrip(o)
+    check walked == expected
+    check $walked == $expected
+    check not walked.hasKey("gone")
+    check walked["list"].len == 9
+    check walked["float"].kind == JFloat
+    check walked["int"].kind == JInt
+    check walked["when"].kind == JString
+
+  test "a large flow update converts faster than the round trip":
+    # About 7.5 MB of JSON: the elided flow update's steps, 450 times over.
+    let o = repeated(450, jsonParse(cstring(elidedFlowUpdate)))
+    var start = getMonoTime()
+    let walked = jsonFromJs(o)
+    let walkMs = (getMonoTime() - start).inMilliseconds
+    start = getMonoTime()
+    let expected = roundTrip(o)
+    let roundTripMs = (getMonoTime() - start).inMilliseconds
+    echo "  ", jsonStringify(o).len, " bytes: walk ", walkMs, " ms, round trip ", roundTripMs, " ms"
+    check walked == expected
+    check walkMs < roundTripMs
