@@ -1,4 +1,4 @@
-                                                                   /ai Start a task: make the regeneration cap c…
+                                                   /ai Start a task: make the regeneration cap configurable per ship
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                    Complete the form to send · 4 problems · to Manager of Shield model hardening
@@ -27,7 +27,7 @@
                                                    Choose a repository
                                                                                                                                                                                     
                                                    Agents
-                                                    Claude   Codex   Grok   Opencode   AntiGravity
+                                                    Claude   Codex   Grok   Opencode   Antigravity
                                                    Choose at least one agent
                                                                                                                                                                                     
                                                    Runs on

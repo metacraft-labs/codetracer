@@ -89,6 +89,14 @@ const
     BaseRow(chords: "Down", operation: "composer.next-destination", table: ComposerTable),
     BaseRow(chords: "Up", operation: "composer.previous-destination", table: ComposerTable),
 
+    # --- The omnibox's result commands: `Enter` opens the selected row,
+    # `Down` / `Up` move the selection, `Tab` inserts a completion (the
+    # launcher's sigil rule), the same under every base.
+    BaseRow(chords: "Enter", operation: "results.open", table: ResultsTable),
+    BaseRow(chords: "Down", operation: "results.next", table: ResultsTable),
+    BaseRow(chords: "Up", operation: "results.previous", table: ResultsTable),
+    BaseRow(chords: "Tab", operation: "results.insert", table: ResultsTable),
+
     # --- The Video Player (Visual-Replay.md § Keyboard Shortcuts): its keys
     # while it has the focus, the same under every base, as the desktop's
     # player always had them.

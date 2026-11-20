@@ -653,6 +653,38 @@ proc checkComposer(view: GpuiElement; vm: OmniboxComposerVM): seq[string] =
   else:
     result.expect("send", view.values("send").len, 0)
 
+proc checkResults(view: GpuiElement; vm: ResultCommandsVM): seq[string] =
+  ## The result commands' drawn tree against their viewmodel (CTF-P2c step
+  ## 2): the query's kind, the field, the header, the line in place of the
+  ## rows, every group in order with its state word, its rows in order with
+  ## the one selected, and `+N more`. A body that holds more than the window
+  ## leaves it ends early (the sheet says how many blocks it hid): what is
+  ## drawn is then a prefix of the viewmodel's.
+  result.expect("kind", view.attr("kind"), $vm.kind)
+  result.expect("field", view.values("field"), @[vm.input])
+  result.expect("header", view.values("header"), @[vm.headerText])
+  let n = vm.notice
+  result.expect("notice", view.values("notice-line"), if n.text.len > 0: @[n.text] else: @[])
+  let sheet = view.first("sheet")
+  let scrolled = not sheet.isNil and sheet.attr("hidden-below") != "0"
+  var groups, states, rows, selected, more: seq[string]
+  for g in vm.groups:
+    groups.add g.group.id
+    states.add stateWord(g.group)
+    for i, r in g.rows:
+      rows.add r.title
+      selected.add $vm.isSelected(g, i)
+    let m = moreLabel(g)
+    if m.len > 0: more.add m
+  template prefix(what: string; drawn, wanted: seq[string]) =
+    if scrolled and drawn.len <= wanted.len: result.expect(what, drawn, wanted[0 ..< drawn.len])
+    else: result.expect(what, drawn, wanted)
+  prefix("groups", view.values("group"), groups)
+  prefix("group states", view.values("state"), states)
+  prefix("rows", view.values("row"), rows)
+  prefix("selected rows", view.values("selected"), selected)
+  prefix("more", view.values("more"), more)
+
 proc checkStory(m: AhStoryMount): seq[string] =
   ## The drawn tree against the viewmodel the story built; empty when they
   ## agree.
@@ -667,6 +699,7 @@ proc checkStory(m: AhStoryMount): seq[string] =
   of "agent-harbor-initiative-progress": checkProgress(view, m.progress)
   of "agent-harbor-fleet": checkFleet(view, m.fleet)
   of "agent-harbor-composer": checkComposer(view, m.composer)
+  of "agent-harbor-results": checkResults(view, m.results)
   of "agent-harbor-session-activity":
     if m.cardsFeed.isNil: checkTimeline(view, m.timeline)
     else:

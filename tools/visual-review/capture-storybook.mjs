@@ -194,6 +194,32 @@ const composerExports = [
 for (const name of composerExports) {
   agentHarborViews[`agent-harbor-${kebab(name)}`] = `codetracer-agent-harbor--${kebab(name)}`;
 }
+// The omnibox's result commands and search (CTF-P2c step 2): one view per
+// story (`SearchPartial` -> `agent-harbor-search-partial`), all in the family
+// `agent-harbor-results`, the instruction's sigil completions among them.
+const resultsExports = [
+  "SearchPartial",
+  "SearchFinal",
+  "SearchProviderFailed",
+  "SearchProviderEmpty",
+  "SearchNoResults",
+  "SearchLong",
+  "SearchGroupOpen",
+  "SearchSuperseded",
+  "AhCommands",
+  "AhSearch",
+  "AhUnknown",
+  "AhUnreachable",
+  "AhExtensionCommand",
+  "ResultRichRows",
+  "ResultTextFallback",
+  "ResultOpenedOutside",
+  "ComposerAtCompletion",
+  "ComposerSlashCompletion",
+];
+for (const name of resultsExports) {
+  agentHarborViews[`agent-harbor-${kebab(name)}`] = `codetracer-agent-harbor--${kebab(name)}`;
+}
 // The session activity timeline (CTF-P2b): its static stories, in the family
 // `agent-harbor-session-activity`, and its two playback stories, in
 // `agent-harbor-session-activity-playback` (and, with the other playback
@@ -260,6 +286,7 @@ const viewFamilies = {
   "agent-harbor-session-activity-playback": [...playbackViews],
   "agent-harbor-session-tabs": sessionTabsExports.map((name) => `agent-harbor-${kebab(name)}`),
   "agent-harbor-composer": composerExports.map((name) => `agent-harbor-${kebab(name)}`),
+  "agent-harbor-results": resultsExports.map((name) => `agent-harbor-${kebab(name)}`),
   "agent-harbor-layouts": agentHarborLayoutViews,
 };
 

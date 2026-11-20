@@ -1,4 +1,4 @@
-  /ai Start a task: make the regeneration…
+  /ai Star…ration cap configurable per ship
                                              
                                              
   Enter sends it · ↑↓ another destination ·
@@ -16,7 +16,7 @@
                                              
   Agents
    ✓ Claude   Codex   Grok   Opencode
-   AntiGravity
+   Antigravity
                                              
   Runs on
    This machine   Executor

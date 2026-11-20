@@ -51,12 +51,38 @@ AH_COMPOSER_PAD = 0.75rem
     max-width: unquote("calc(100vw - 1rem)")
     flex-basis: auto
 
-  .ah-composer-container
-    position: relative
-    width: 100%
-    height: 100%
-    display: flex
-    align-items: center
+// The omnibox's host in the caption bar, in the composer's story and in a
+// whole window (CTF-P2L's L12): the composer centred in its height.
+#menu .ah-composer-container
+  position: relative
+  width: 100%
+  height: 100%
+  padding: 0
+  background: transparent
+  display: flex
+  align-items: center
+
+// While the sheet is open the field takes the sheet's edges (P2c study D36):
+// `min(40rem, window − 1rem)`, the sheet's own width, so
+// a long instruction has the sheet's room and its end, where the caret is,
+// stays in view (the view scrolls the field to its end). The field is drawn
+// OVER its neighbours in the caption bar, centred on the omnibox's place:
+// the omnibox's host keeps its caption width (menu_bar.styl), so the session
+// tabs and the toolbar beside it keep their places under the open sheet
+// instead of being squeezed out of the bar (CTF-P2L's L12 at laptop).
+#menu #debug:has(.ah-composer-sheet)
+  overflow: visible
+  // Above the session tab strip (z-index 21, session_tabs.styl), whose
+  // tabs the widened field covers; below the tab strip's own menus and the
+  // initiative popup (120, 130), which never open with it.
+  position: relative
+  z-index: 24
+
+.ah-composer .ah-composer-input-row
+  width: unquote("min(40rem, calc(100vw - 1rem))")
+  left: 50%
+  transform: translateX(-50%)
+  z-index: 3
 
 .ah-composer
   position: relative
@@ -547,16 +573,20 @@ AH_COMPOSER_PAD = 0.75rem
 .ah-composer-send-blocked .ah-composer-send-hint
   color: colors-ui-text-error-primary
 
-// The primary button. On Light's pale action ground the on-action white is
-// about 2:1, so Light takes the body text there, as a selected row does
-// (agent_harbor.styl, `.ah-fleet-row-selected`).
+// The primary button: CodeTracer's own primary button in both themes (P2c
+// study D39), the shared rule's fill and text
+// (`[class*="-button-"][class*="-primary"]`, button.styl): the design
+// system's `surface/action/primary` with `text/on-action-primary`, and no
+// border of another colour. Light's pair is the design system's own pale
+// one (`brand/300` under `grey/50`); a stronger Light primary is a design
+// system change, left to a human.
 .ah-composer-send-button
   height: CONTROL_HEIGHT_SM
   padding: 0 0.75rem
-  border: 0.0625rem solid colors-ui-border-action
+  border: 0.0625rem solid colors-ui-surface-action-primary
   border-radius: ah-rem(border-border-radius-control)
   background: colors-ui-surface-action-primary
-  color: by-mode(colors-ui-text-on-action-primary, colors-ui-text-primary-body)
+  color: colors-ui-text-on-action-primary
   font-family: inherit
   font-size: ah-rem(type-ui-size-label-md)
 

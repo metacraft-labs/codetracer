@@ -1,4 +1,4 @@
-                                                                   /ai
+                                                   /ai
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                    Type an instruction. Enter sends it where it shows; ↑↓ another destination.

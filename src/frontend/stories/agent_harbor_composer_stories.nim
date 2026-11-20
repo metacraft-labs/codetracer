@@ -124,7 +124,7 @@ var actions: ScriptedActionSource
 proc newStoryComposer(router: InstructionRouter; targets: seq[RouteTarget];
                       context = windowContext()): OmniboxComposerVM =
   result = newOmniboxComposerVM(router, actions, targets, context, ComposerPlanDate)
-  result.agentChoices = @["Claude", "Codex", "Grok", "Opencode", "AntiGravity"]
+  result.agentChoices = @["Claude", "Codex", "Grok", "Opencode", "Antigravity"]
   result.executorChoices = @["linux-x64-4", "mac-arm64-2", "ws-ada"]
   result.open()
 

@@ -1,4 +1,4 @@
-                                                                   /ai Show calculate_damage beside the editor
+                                                   /ai Show calculate_damage beside the editor
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                    Enter sends it · ↑↓ another destination

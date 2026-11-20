@@ -34,6 +34,8 @@ import ./ah_tui_fleet_panel
 import ./ah_tui_playback_bar
 import ./ah_tui_composer
 import ../../stories/agent_harbor_composer_stories
+import ./ah_tui_results
+import ../../stories/agent_harbor_results_stories
 import ./ah_tui_session_activity
 import ../app/views/agent_activity_pane
 import ../app/layout/cells
@@ -49,7 +51,7 @@ import ../../viewmodel/keymap/[base_keymaps, context_keys, editing_keymap,
 import ../../../common/key_names
 
 export agent_harbor_stories, codetracer_stories, emit_storybook_stories, ah_tui_canvas,
-  ah_tui_composer
+  ah_tui_composer, ah_tui_results
 
 const
   TuiAgentHarborSurfaces* = [
@@ -60,6 +62,7 @@ const
     "agent-harbor-initiatives",
     "agent-harbor-initiative-progress",
     "agent-harbor-composer",
+    "agent-harbor-results",
     "agent-harbor-session-activity",
   ]
     ## Every surface of the Agent Harbor section this module draws.
@@ -91,6 +94,7 @@ type
     initiatives*: InitiativesVM
     progress*: InitiativeProgressVM
     composer*: OmniboxComposerVM
+    results*: ResultCommandsVM
     timeline*: SessionTimelineVM
     cards*: ActivityAgainstCards
       ## The comparison story's cards (`agent_harbor_activity_cards`); unset
@@ -204,6 +208,37 @@ proc composerKey*(m: AhTuiMount; token: string): bool =
   m.draw()
   true
 
+let ResultsScopePath = @[element(ekWindow, "window"), pane(ResultsScope)]
+  ## Where the results' keys and presses resolve.
+
+proc pressResults*(m: AhTuiMount; operation, target: string): bool {.discardable.} =
+  ## **A PRESS ON A RESULTS ELEMENT** (Input-Routing-And-Keymaps.md §5.1):
+  ## resolved by the story host's router in the `results` scope -- a user's
+  ## row for the press first -- else the operation the element carries, run
+  ## on the results' viewmodel on the element's target; drawn again.
+  if m.isNil or m.results.isNil: return false
+  let outcome = resolveElementPress(routerResolver(m.router, SessionFacts()),
+                                    ResultsScopePath, ButtonElementKind,
+                                    operation, {}, "Click")
+  m.lastOperation = outcome.operation
+  if not m.results.runResultsPress(outcome.operation, target): return false
+  m.draw()
+  true
+
+proc resultsKey*(m: AhTuiMount; token: string): bool =
+  ## A key while the results are shown, ROUTED in the `results` scope
+  ## (`Enter` opens, `Down` / `Up` move, `Tab` inserts); drawn again when it
+  ## ran a results operation.
+  if m.results.isNil: return false
+  let name = keyName(token)
+  if name.len == 0: return false
+  let res = m.router.route(SessionFacts(), ResultsScopePath, nmNormal, name, 0)
+  m.lastOperation = if res.kind == erOperation: res.operation else: ""
+  if res.kind != erOperation or not m.results.runResultsOperation(res.operation):
+    return false
+  m.draw()
+  true
+
 proc cardInk(p: AhPalette; style: AgentFeedSpanStyle): string =
   ## A card's span in the palette's ink for its style, as the GPUI pane
   ## colours them (`gpui/agent_activity_leaf.colourOf`).
@@ -278,6 +313,9 @@ proc draw*(m: AhTuiMount) =
   of "agent-harbor-composer":
     c.drawComposer(m.composer, top, 0, m.cols, h, (proc(operation, target: string) =
       discard m.pressComposer(operation, target)))
+  of "agent-harbor-results":
+    c.drawResults(m.results, top, 0, m.cols, h, (proc(operation, target: string) =
+      discard m.pressResults(operation, target)))
   of "agent-harbor-session-activity":
     let mount = m
     let press: ActivityPress = proc(operation, target: string) =
@@ -360,6 +398,11 @@ proc mountAgentHarborStoryTui*(surface, fixture: string; cols, rows: int;
   of "agent-harbor-initiatives": result.initiatives = createInitiativesStoryVM(fixture, pb)
   of "agent-harbor-initiative-progress": result.progress = createProgressStoryVM(fixture, pb)
   of "agent-harbor-composer": result.composer = createComposerStoryVM(fixture)
+  of "agent-harbor-results":
+    result.results = createResultsStoryVM(fixture)
+    # A terminal cannot render HTML: every rich row is drawn as its text
+    # form, and the header says so (OMNI-AREQ4, P2c study D45).
+    result.results.setHtmlEnabled(false)
   of "agent-harbor-session-activity":
     if fixture == "against-cards":
       # The cards' store is the story's own, over the mock backend: nothing
@@ -444,6 +487,7 @@ proc dispose*(m: AhTuiMount) =
   if m.initiatives != nil: m.initiatives.dispose()
   if m.progress != nil: m.progress.dispose()
   if m.composer != nil: m.composer.dispose()
+  if m.results != nil: m.results.dispose()
 
 proc rowsOf*(m: AhTuiMount): seq[StyledRow] =
   ## The screen as styled rows, for `styledRowsTree`.
@@ -468,7 +512,8 @@ proc handleInput*(m: AhTuiMount; token: string): bool =
   ## A press acts on what is under it; motion moves the hover. True when the
   ## screen must be drawn again.
   let (ok, button, row, col, press) = decodeSgrMouse(token)
-  if not ok: return m.playbackKey(token) or m.activityKey(token) or m.composerKey(token)
+  if not ok: return m.playbackKey(token) or m.activityKey(token) or m.composerKey(token) or
+                    m.resultsKey(token)
   if (button and 32) != 0:
     # Motion: SGR adds 32 to the button for a motion report (1003).
     result = m.canvas.pointAt(row, col)

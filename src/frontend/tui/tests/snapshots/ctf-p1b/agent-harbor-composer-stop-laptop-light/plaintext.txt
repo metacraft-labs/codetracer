@@ -1,4 +1,4 @@
-                                                                   /ai Also test a hit on an empty shield
+                                                   /ai Also test a hit on an empty shield
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                    Enter sends it · ↑↓ another destination

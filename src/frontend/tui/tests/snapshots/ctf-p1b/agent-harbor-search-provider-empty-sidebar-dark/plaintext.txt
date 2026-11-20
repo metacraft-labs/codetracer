@@ -1,0 +1,56 @@
+  /s field
+                                             
+                                             
+   18 results from 4 providers
+   Enter opens
+                                             
+                                             
+   FILES                                 2
+  ▎fixtures/positive_field.toml
+   fixtures/negative_field.toml
+                                             
+   SYMBOLS                      no results
+                                             
+   PROGRAM TEXT                         10
+   // We are about to pass trough an
+   asteroid field, changing the course is
+   very expensive at this speed
+                             src/main.nr:4
+                                             
+   fn main(initial_shield: Field,
+   shield_regen_percentage: Field,
+   asteroid_masses_positive: pub [Field;
+   8], asteroid_masses_negative: pub
+   [Field; 8]) -> pub bool {
+                            src/main.nr:12
+                                             
+   pub fn iterate_asteroids(
+   initial_shield: Field,
+   shield_regen_percentage: Field,
+   masses: [Field; 8]) -> bool {
+                           src/shield.nr:1
+                                             
+   fn calculate_damage(initial_shield:
+   Field, remaining_shield: Field, mass:
+   Field) -> Field {
+                          src/shield.nr:22
+                                             
+   fn calculate_shield_regeneration(
+   initial_shield:Field,
+   remaining_shield:Field,
+   shield_regen_percentage: Field) ->
+   Field{
+                          src/shield.nr:37
+                                             
+   regen as Field
+                          src/shield.nr:43
+                                             
+   fn calculate_remaining_shield_pct(
+   initial_shield: Field,
+   remaining_shield: Field) -> Field {
+                          src/shield.nr:45
+                              More below ↓
+                                             
+                                             
+                                             
+                                             

@@ -1,4 +1,4 @@
-                                                                   /ai Also test a hit on an empty shield when t…
+                                                   /ai Also…n cap is configured per ship and the asteroid field comes from a seed
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                    Enter sends it · ↑↓ another destination
@@ -9,8 +9,8 @@
                                                                                                                                                                                     
                                                     Clamp the shield at zero after a hit   +
                                                                                                                                                                                     
-                                                   Cites src/shield.nr:7, remaining_shield -= damage, Pass 2 of iterate_asteroids,
-                                                   Variables: remaining_shield = 9000
+                                                   Cites src/shield.nr:7, remaining_shield -= damage,
+                                                   Pass 2 of iterate_asteroids, Variables: remaining_shield = 9000
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                   ▎THIS SESSION   Clamp the shield at zero after a hit, and keep           Routed

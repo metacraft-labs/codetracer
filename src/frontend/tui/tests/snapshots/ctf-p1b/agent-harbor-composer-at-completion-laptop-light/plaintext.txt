@@ -1,0 +1,56 @@
+                                         /ai Run drained_field_fails again with @
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                          Completing @ · Tab inserts it
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                          AGENTS                                                                                         5
+                                         ▎@Claude
+                                          @Codex
+                                          @Grok
+                                          @Opencode
+                                          @Antigravity
+                                                                                                                                                                                    
+                                          REPOSITORIES                                                                                   1
+                                          @noir-space-ship
+                                                                                                                                                                                    
+                                          FILES                                                                                          7
+                                          @src/main.nr
+                                          @src/shield.nr
+                                          @src/tests.nr
+                                          @Nargo.toml
+                                          @Prover.toml
+                                          @fixtures/positive_field.toml
+                                          @fixtures/negative_field.toml
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    

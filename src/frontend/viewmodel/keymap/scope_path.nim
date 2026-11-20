@@ -140,8 +140,13 @@ const
     ## `agent_harbor_composer_words`). It is a prototype drawn in story
     ## hosts and no pane of the layout: the production omnibox keeps its own
     ## keys until the composer replaces its agent mode.
+  ResultsScope* = "results"
+    ## The scope the omnibox's result commands' keys and presses are routed
+    ## in (`/s`, `/ah…` and an instruction's sigil completions, and their
+    ## sheet, `agent_harbor_results_words`). A prototype drawn in story hosts
+    ## and no pane of the layout, as the composer.
   NonPaneScopes* = [TopBarScope, BreakpointConditionScope, StoryPlaybackScope,
-                    SessionActivityScope, ComposerScope]
+                    SessionActivityScope, ComposerScope, ResultsScope]
     ## The scopes a press names in `paneKind` that are not panes.
 
 func element*(kind: ElementKind; id: string; paneKind = ""): ScopeElement =

@@ -278,6 +278,21 @@ proc scheduleSummary*(vm: OmniboxComposerVM): tuple[text: string; problem: bool]
   elif s.enabled: (s.cron & ComposerDot & s.timezone, false)
   else: (ScheduleOnce, false)
 
+proc sentBlock*(vm: OmniboxComposerVM): tuple[text, line: string] =
+  ## What the sheet shows of a sent instruction, above the destinations:
+  ## the instruction as sent, and where it went. The line is left out while
+  ## every delivery failed (P2c study D37): the header and
+  ## the failed row already say `Failed to send`, the row with its reason.
+  ## ("", "") before anything was sent.
+  let d = vm.draft
+  if not (vm.phase in {cpSent, cpSendFailed} or
+          vm.phase == cpSending and d.deliveries.len > 1) or d.deliveries.len == 0:
+    return ("", "")
+  var delivered = false
+  for x in d.deliveries:
+    if x.state != dsFailed: delivered = true
+  (d.sentText, if delivered: vm.sentLine else: "")
+
 proc sendAgainLabel*(row: DestinationRow): string =
   "Send to " & destinationPhrase(row.target)
 

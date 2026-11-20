@@ -1,11 +1,10 @@
-  /ai Which milestone of the shield work s…
+  /ai Whic…d take the damage overflow next?
                                              
                                              
   Failed to send
                                              
   Which milestone of the shield work should
   take the damage overflow next?
-  Failed to send to the manager agent
                                              
   IN VIEW   src/shield.nr:7
                                              
@@ -36,6 +35,7 @@
   CodeTracer
                                              
    Send to the UI-action agent
+                                             
                                              
                                              
                                              

@@ -1,4 +1,4 @@
-  /ai Also test a hit on an empty shield w…
+  /ai Also…asteroid field comes from a seed
                                              
                                              
   Enter sends it · ↑↓ another destination

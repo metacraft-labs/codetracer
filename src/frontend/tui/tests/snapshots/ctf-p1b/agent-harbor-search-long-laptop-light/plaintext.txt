@@ -1,0 +1,56 @@
+                                         /s remaining
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                          26 results from 4 providers · Enter opens
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                          FILES                                                                                 no results
+                                                                                                                                                                                    
+                                          SYMBOLS                                                                                        5
+                                         ▎remaining_shield  variable                                                       src/shield.nr:2
+                                          calculate_remaining_shield_pct  function                                        src/shield.nr:45
+                                          remaining_shield_as_u32  variable                                               src/shield.nr:60
+                                          remaining_shield_pct  variable                                                  src/shield.nr:61
+                                          remaining_shield_pct_as_u32  variable                                           src/shield.nr:62
+                                                                                                                                                                                    
+                                          PROGRAM TEXT                                                                                  20
+                                          let mut remaining_shield = initial_shield;                                       src/shield.nr:2
+                                          let damage = calculate_damage(initial_shield, remaining_shield, mass);           src/shield.nr:6
+                                          remaining_shield -= damage;                                                      src/shield.nr:7
+                                          if (remaining_shield as u32 > 0){                                               src/shield.nr:10
+                                                                                                                                                                                    
+                                          regeneration = calculate_shield_regeneration(initial_shield ,remaining_shield,  src/shield.nr:11
+                                          shield_regen_percentage);
+                                                                                                                                                                                    
+                                          remaining_shield += regeneration;                                               src/shield.nr:12
+                                          status_report(i,initial_shield, remaining_shield, damage, regeneration);        src/shield.nr:14
+                                          let result = remaining_shield as u32 > 0;                                       src/shield.nr:18
+                                          +12 more
+                                                                                                                                                                                    
+                                          AGENT HARBOR SESSIONS                                                                          1
+                                          Clamp the shield at zero after a hit  Shield model hardening · Claude · running
+                                          “Clamped the damage to remaining_shield at src/shield.nr:34; re-running shield_never_negative.”
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    

@@ -67,6 +67,9 @@ const
     # list once the composer replaces the omnibox's agent mode.
     "composer.add-context", "composer.cite", "composer.recall", "composer.retry",
     "composer.send-again", "composer.stop",
+    # The omnibox result commands' presses (`agent_harbor_results_words`):
+    # `+N more` and the way back, in the story hosts' results, as above.
+    "results.all", "results.more",
   ]
 
 proc bound(): HashSet[string] =

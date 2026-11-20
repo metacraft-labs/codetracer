@@ -100,6 +100,18 @@ when defined(js):
       requestAnimationFrame(step);
     })(#)""".}
   proc inputValueOf(node: isonim_dom.Node): cstring {.importjs: "(#.value || '')".}
+  proc keepFieldEndInView(field: isonim_dom.Node) {.importjs: """
+    (function (f) {
+      // The field's end, where the caret is, stays in view (P2c D36): the
+      // input scrolled to its end, never cut (D32). Again on the next
+      // frames, as the field reaches the sheet's width only once laid out.
+      var n = 0;
+      var go = function () {
+        f.scrollLeft = f.scrollWidth;
+        if (++n < 30) requestAnimationFrame(go);
+      };
+      go();
+    })(#)""".}
 
 import ./agent_harbor_composer_words
 
@@ -360,6 +372,7 @@ proc renderAgentHarborComposer*[R, N](r: R; vm: OmniboxComposerVM): N =
     when defined(js):
       when N is isonim_dom.Element:
         setInputValue(isonim_dom.Node(field), cstring(ComposerPrefix & fieldText))
+        keepFieldEndInView(isonim_dom.Node(field))
     r.setAttribute(field, "value", ComposerPrefix & fieldText)
     r.clearChildren(more)
     let moreText = vm.moreLines
@@ -386,18 +399,18 @@ proc renderAgentHarborComposer*[R, N](r: R; vm: OmniboxComposerVM): N =
     let whole = vm.instructionBlock
     if whole.len > 0 and vm.phase == cpComposing:
       r.appendRendered(sheet, textNode(r, "ah-composer-instruction", whole))
-    if vm.phase in {cpSent, cpSendFailed} or
-        vm.phase == cpSending and vm.draft.deliveries.len > 1:
-      let sent = vm.sentLine
+    # What was sent, and where it went (no line while every delivery
+    # failed: the header and the row say it, D37).
+    let (sentText, sent) = vm.sentBlock
+    if sentText.len > 0:
+      var sentNode: N
+      let sentHost = ui(r):
+        tdiv(ref = sentNode, class = "ah-composer-sent"):
+          span(class = "ah-composer-sent-text"):
+            text sentText
       if sent.len > 0:
-        let sentText = vm.draft.sentText
-        let sentNode = ui(r):
-          tdiv(class = "ah-composer-sent"):
-            span(class = "ah-composer-sent-text"):
-              text sentText
-            span(class = "ah-composer-sent-line"):
-              text sent
-        r.appendRendered(sheet, sentNode)
+        r.appendRendered(sentNode, textSpan(r, "ah-composer-sent-line", sent))
+      r.appendRendered(sheet, sentHost)
     if vm.isEmptyField:
       # Nothing typed: what was sent lately.
       let recent = vm.recent

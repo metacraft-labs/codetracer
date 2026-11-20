@@ -1,4 +1,4 @@
-  /ai Start a task: make the regeneration…
+  /ai Star…ration cap configurable per ship
                                              
                                              
   Complete the form to send · 4 problems ·
@@ -41,7 +41,7 @@
                                              
   Agents
    Claude   Codex   Grok   Opencode
-   AntiGravity
+   Antigravity
   Choose at least one agent
                                              
   Runs on

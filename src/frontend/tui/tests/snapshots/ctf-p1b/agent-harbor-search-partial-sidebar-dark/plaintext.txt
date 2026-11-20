@@ -1,0 +1,56 @@
+  /s shield
+                                             
+                                             
+   Searching… 3 of 4 providers answered
+                                             
+                                             
+   FILES                                 1
+  ▎src/shield.nr
+                                             
+   SYMBOLS                              13
+   initial_shield
+   parameter                src/main.nr:12
+                                             
+   shield_regen_percentage
+   parameter                src/main.nr:12
+                                             
+   initial_shield
+   parameter               src/shield.nr:1
+                                             
+   shield_regen_percentage
+   parameter               src/shield.nr:1
+                                             
+   remaining_shield
+   variable                src/shield.nr:2
+                                             
+   shield_pct
+   variable               src/shield.nr:26
+                                             
+   calculate_shield_regeneration
+   function               src/shield.nr:37
+                                             
+   calculate_remaining_shield_pct
+   function               src/shield.nr:45
+                                             
+   +5 more
+                                             
+   PROGRAM TEXT                 searching…
+                                             
+   AGENT HARBOR SESSIONS                 4
+   Clamp the shield at zero after a hit
+   Shield model hardening
+   Claude · running
+                                             
+   Add a test for an asteroid field that…
+   Shield model hardening
+   Codex · completed
+                                             
+   Cap shield regeneration at the initial…
+   Shield model hardening
+   Claude · running
+                                             
+   Print the shield percentage after ever…
+   Shield model hardening
+   Opencode · completed
+                                             
+                                             

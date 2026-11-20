@@ -105,6 +105,9 @@ const
   ComposerTable* = PaneTablePrefix & "composer"
     ## The omnibox composer's keys (`agent_harbor_composer_words`), while
     ## its field or its sheet has the focus.
+  ResultsTable* = PaneTablePrefix & "results"
+    ## The omnibox's result commands' keys (`agent_harbor_results_words`),
+    ## while their field or their sheet has the focus.
   PointerTable* = "pointer"
     ## The rows whose key is a pointer gesture (`pointer_rows`). Never on a
     ## scope path: only `keymap_router.routePointer` consults it.
@@ -641,6 +644,14 @@ const
     op("composer.retry", ComposerTable, "Composer: Retry"),
     op("composer.stop", ComposerTable, "Composer: Stop the Agent"),
     op("composer.recall", ComposerTable, "Composer: Recall an Instruction", oaTarget),
+    # The omnibox's result commands (`agent_harbor_results_words`): open,
+    # move, insert, and what a press on `+N more` and the way back does.
+    op("results.open", ResultsTable, "Results: Open", oaTarget),
+    op("results.next", ResultsTable, "Results: Next Row"),
+    op("results.previous", ResultsTable, "Results: Previous Row"),
+    op("results.insert", ResultsTable, "Results: Insert the Completion"),
+    op("results.more", ResultsTable, "Results: Show the Whole Group", oaTarget),
+    op("results.all", ResultsTable, "Results: Show Every Group"),
     op("video-player.toggle-play", VideoPlayerTable, "Video: Play / Pause"),
     op("video-player.rewind", VideoPlayerTable, "Video: Rewind"),
     op("video-player.fast-forward", VideoPlayerTable, "Video: Fast Forward"),

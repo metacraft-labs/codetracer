@@ -285,6 +285,11 @@ const composerChecks = {
     expect(rowMark(el, "manager")).toBe("Failed to send");
     expect(rowDelivery(el, "manager")).toBe("Agent Harbor answered 503 (the hub is restarting)");
     expect(rowOf(el, "manager").querySelector('[data-ah-action="retry"]')).toBeTruthy();
+    // Said by the header and the row only (P2c D37): the instruction as
+    // sent, and no line naming where it went.
+    expect(headerOf(el)).toBe("Failed to send");
+    expect(el.querySelector(".ah-composer-sent-text")?.textContent).toContain("Which milestone");
+    expect(el.querySelector(".ah-composer-sent-line")).toBeNull();
   }),
   "agent-harbor-composer-route-failed": composerCheck(async (el) => {
     expect(headerOf(el)).toBe("Could not route: the routing agent did not answer within 20 s");
@@ -564,8 +569,175 @@ async function activityReader(panel) {
   expect(lineState(panel)).toEqual(before);
 }
 
+// --- The omnibox's result commands (CTF-P2c step 2) ---------------------
+// Each story is one moment of `/s`, `/ah…` or an instruction's sigil
+// completion over the CTF-P2L project
+// (`stories/agent_harbor_results_stories.nim`). The checks read what the
+// sheet draws: the field, the header, each group's id, state and rows, the
+// line in place of the rows, a row's tag, its box and what opening it said.
+
+const resultsCheck = (assert) => hostCheck(".ah-results-sheet", assert);
+const resultsHeader = (el) => el.querySelector(".ah-results .ah-composer-header")?.textContent ?? "";
+const resultsField = (el) => el.querySelector(".ah-results .ah-composer-input")?.value ?? "";
+const groupsOf = (el) => [...el.querySelectorAll(".ah-results-group")].map((g) => ({
+  id: g.dataset.ahGroup, state: g.dataset.ahState,
+  word: g.querySelector(".ah-results-state")?.textContent ?? "",
+  rows: [...g.querySelectorAll(".ah-results-row")].map((r) => r.querySelector(".ah-results-title").dataset.ahTitle),
+  more: g.querySelector(".ah-results-more")?.textContent ?? "",
+}));
+const groupById = (el, id) => groupsOf(el).find((g) => g.id === id);
+const resultsNotice = (el) => el.querySelector(".ah-results-notice-text")?.textContent ?? "";
+const searchGroups = ["files", "symbols", "program-text", "agent-harbor-search"];
+
+const resultsChecks = {
+  "agent-harbor-results-search-partial": resultsCheck(async (el) => {
+    expect(resultsField(el)).toBe("/s shield");
+    expect(groupsOf(el).map((g) => g.id)).toEqual(searchGroups);
+    expect(groupById(el, "program-text").word).toBe("searching…");
+    expect(groupById(el, "program-text").rows).toEqual([]);
+    expect(groupById(el, "files").rows).toEqual(["src/shield.nr"]);
+    expect(resultsHeader(el)).toBe("Searching… 3 of 4 providers answered");
+  }),
+  "agent-harbor-results-search-final": resultsCheck(async (el) => {
+    expect(groupsOf(el).map((g) => g.state)).toEqual(["answered", "answered", "answered", "answered"]);
+    expect(groupById(el, "program-text").word).toBe("42");
+    expect(groupById(el, "program-text").rows.length).toBe(8);
+    expect(groupById(el, "program-text").more).toBe("+34 more");
+    expect(resultsHeader(el)).toBe("60 results from 4 providers · Enter opens");
+    // The query's match is drawn in bold, in the title's own role.
+    expect(el.querySelector(".ah-results-row .ah-results-match")?.textContent.toLowerCase()).toBe("shield");
+    expect(el.querySelectorAll(".ah-results-row-selected").length).toBe(1);
+  }),
+  "agent-harbor-results-search-failed": resultsCheck(async (el) => {
+    const harbor = groupById(el, "agent-harbor-search");
+    expect(harbor.state).toBe("failed");
+    expect(harbor.word).toBe("failed: Agent Harbor is not reachable");
+    expect(el.querySelector('.ah-results-group[data-ah-group="agent-harbor-search"] .ah-results-state-error')).toBeTruthy();
+    // Named in the header too, in the error role, whatever the body scrolled past.
+    expect(resultsHeader(el)).toBe("3 results from 3 of 4 providers · Agent Harbor sessions failed · Enter opens");
+    expect(el.querySelector(".ah-results .ah-composer-header.ah-role-error")).toBeTruthy();
+    expect(groupById(el, "symbols").rows).toEqual(["calculate_damage"]);
+  }),
+  "agent-harbor-results-search-no-symbols": resultsCheck(async (el) => {
+    expect(groupById(el, "symbols").word).toBe("no results");
+    expect(groupById(el, "files").rows).toEqual(["fixtures/positive_field.toml", "fixtures/negative_field.toml"]);
+    expect(groupById(el, "agent-harbor-search").rows.length).toBe(6);
+    // A session matched by what it last said quotes it, so the match shows.
+    const quoted = [...el.querySelectorAll('.ah-results-group[data-ah-group="agent-harbor-search"] .ah-results-second')]
+      .map((q) => q.textContent);
+    expect(quoted.length).toBeGreaterThan(0);
+    for (const q of quoted) expect(q.toLowerCase()).toContain("field");
+  }),
+  "agent-harbor-results-search-none": resultsCheck(async (el) => {
+    expect(resultsNotice(el)).toBe("Nothing matches “warp drive”");
+    expect(el.querySelector(".ah-results-group")).toBeNull();
+    expect(resultsHeader(el)).toBe("Searched 4 providers");
+  }),
+  "agent-harbor-results-search-long": resultsCheck(async (el) => {
+    expect(groupById(el, "program-text").rows.length).toBe(8);
+    expect(groupById(el, "program-text").more).toBe("+12 more");
+    expect(el.querySelector('.ah-results-more[data-ah-target="program-text"]')?.dataset.ctOperation).toBe("results.more");
+  }),
+  "agent-harbor-results-search-group": resultsCheck(async (el) => {
+    expect(groupsOf(el).map((g) => g.id)).toEqual(["program-text"]);
+    expect(groupById(el, "program-text").rows.length).toBe(20);
+    expect(groupById(el, "program-text").more).toBe("");
+    expect(el.querySelector(".ah-results-back")?.textContent).toBe("← All providers");
+    expect(resultsHeader(el)).toBe("Program text · 20 results · Enter opens");
+    expect(el.querySelector(".ah-results-row-selected .ah-results-title").dataset.ahTitle).toBe("remaining_shield -= damage;");
+  }),
+  "agent-harbor-results-search-superseded": resultsCheck(async (el) => {
+    expect(resultsField(el)).toBe("/s shield_pct");
+    expect(groupById(el, "program-text").word).toBe("searching…");
+    // No row of the older `/s shield` stands under the newer query.
+    expect(groupById(el, "files").word).toBe("no results");
+    for (const g of groupsOf(el)) for (const t of g.rows) expect(t.toLowerCase()).toContain("shield_pct");
+  }),
+  "agent-harbor-results-ah-commands": resultsCheck(async (el) => {
+    const cmds = groupById(el, "agent-harbor-commands");
+    expect(cmds.rows).toEqual(["/ah-search", "/ah-search-chats", "/ah-specs"]);
+    const tags = [...el.querySelectorAll(".ah-results-row .ah-results-tag")].map((t) => t.textContent);
+    expect(tags).toEqual(["Agent Harbor", "Agent Harbor", "Spec index"]);
+    expect([...el.querySelectorAll(".ah-results-row .ah-results-detail")].map((d) => d.textContent))
+      .toEqual(["/ahs", "/ahsc", "/ahsp"]);
+  }),
+  "agent-harbor-results-ah-search": resultsCheck(async (el) => {
+    expect(resultsHeader(el)).toBe("/ahs is /ah-search · Search sessions · Agent Harbor");
+    expect(groupById(el, "search").rows[0]).toBe("Clamp the shield at zero after a hit");
+  }),
+  "agent-harbor-results-ah-unknown": resultsCheck(async (el) => {
+    expect(resultsNotice(el)).toBe("No Agent Harbor command named /ah-sessions");
+    expect(el.querySelector(".ah-results-notice-hint")?.textContent).toBe("/ah lists them");
+    // The command's name is never split by a line break.
+    expect(el.querySelector(".ah-results-term")?.textContent).toBe("/ah-sessions");
+    expect(el.querySelector(".ah-results-group")).toBeNull();
+  }),
+  "agent-harbor-results-ah-unreachable": resultsCheck(async (el) => {
+    expect(resultsNotice(el)).toBe("Agent Harbor is not reachable: GET /api/v1/input-commands failed: connection refused");
+    expect(el.querySelector(".ah-results-notice.ah-role-error")).toBeTruthy();
+    expect(el.querySelector(".ah-results-group")).toBeNull();
+  }),
+  "agent-harbor-results-ah-extension": resultsCheck(async (el) => {
+    expect(resultsHeader(el)).toBe("/ahsp is /ah-specs · Search specs · Spec index");
+    const tags = [...el.querySelectorAll(".ah-results-row .ah-results-tag")].map((t) => t.textContent);
+    expect(tags).toEqual(["Spec index", "Spec index"]);
+  }),
+  "agent-harbor-results-rich-rows": resultsCheck(async (el) => {
+    const frames = [...el.querySelectorAll("iframe.ah-results-box")];
+    expect(frames.length).toBe(3);
+    // Never same-origin; scripts only for the trusted (built-in) source.
+    // The roles reach the frames once they are in the page.
+    await waitUntil(() => frames.every((f) => (f.getAttribute("srcdoc") ?? "").includes("--ct-body:#")),
+                    "the boxes filled with the page's roles");
+    expect(frames.map((f) => f.getAttribute("sandbox"))).toEqual(["allow-scripts", "allow-scripts", ""]);
+    for (const f of frames) expect(f.getAttribute("srcdoc")).toContain("default-src 'none'");
+    // An untrusted box is given its HTML without its script.
+    expect(frames[2].getAttribute("srcdoc")).not.toContain("getElementById('live')");
+    // The tall box is held to the height its source asks (at most 12rem)
+    // and scrolls inside.
+    await waitUntil(() => Math.round(frames[1].getBoundingClientRect().height) === 120, "the tall box held to its height");
+    expect(el.querySelector(".ah-results-note")?.textContent).toBe("Scripts are not run for this source");
+    expect([...el.querySelectorAll(".ah-results-tag-html")].length).toBe(3);
+    // A drawn box holds the row's words: no quoted line repeats them.
+    for (const box of el.querySelectorAll(".ah-results-boxwrap")) {
+      expect(box.closest(".ah-results-row").querySelector(".ah-results-second")).toBeNull();
+    }
+  }),
+  "agent-harbor-results-text-fallback": resultsCheck(async (el) => {
+    expect(el.querySelector("iframe.ah-results-box")).toBeNull();
+    // The phrase is joined by no-break spaces: a narrow sheet wraps the
+    // header between its parts.
+    expect(resultsHeader(el)).toBe("4 results from 5 providers · Enter opens · Rich\u00a0results\u00a0shown\u00a0as\u00a0text");
+    expect(groupById(el, "agent-harbor-search").rows.length).toBe(3);
+    // Each rich row shows its text form instead of its box: its last
+    // words, quoted under its title.
+    const quoted = [...el.querySelectorAll('.ah-results-group[data-ah-group="agent-harbor-search"] .ah-results-second')]
+      .map((n) => n.textContent);
+    expect(quoted.length).toBe(3);
+    for (const q of quoted) expect(q.startsWith("\u201c")).toBe(true);
+    // The design note's too (a contributed provider's rich row).
+    const notes = [...el.querySelectorAll('.ah-results-group:not([data-ah-group="agent-harbor-search"]) .ah-results-second')];
+    expect(notes.map((n) => n.textContent.startsWith("\u201cThe damage is clamped"))).toEqual([true]);
+  }),
+  "agent-harbor-results-opened-outside": resultsCheck(async (el) => {
+    expect(resultsHeader(el)).toBe("Opened outside CodeTracer: https://specs.noir-space-ship.example/shield-clamp");
+    expect(el.querySelector(".ah-results-opened-outside")?.textContent).toBe("Opened outside CodeTracer");
+  }),
+  "agent-harbor-results-at-completion": resultsCheck(async (el) => {
+    expect(resultsField(el)).toBe("/ai Run drained_field_fails again with @");
+    expect(groupsOf(el).map((g) => g.id)).toEqual(["agents", "repositories", "files"]);
+    expect(groupById(el, "agents").rows).toEqual(["@Claude", "@Codex", "@Grok", "@Opencode", "@Antigravity"]);
+    expect(resultsHeader(el)).toBe("Completing @ · Tab inserts it");
+  }),
+  "agent-harbor-results-slash-completion": resultsCheck(async (el) => {
+    expect(groupsOf(el).map((g) => g.id)).toEqual(["workflows", "capabilities"]);
+    expect(groupById(el, "capabilities").rows).toEqual(["/research", "/think", "/stream"]);
+  }),
+};
+
 export const plays = {
   ...composerChecks,
+  ...resultsChecks,
   "agent-harbor-fleet-snapshot": fleetCheck(async (el) => {
     await waitFor(el, ".ah-fleet-row");
     expect(fleetRows(el).length).toBeGreaterThan(40);

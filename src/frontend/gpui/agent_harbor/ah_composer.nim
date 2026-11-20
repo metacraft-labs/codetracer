@@ -50,7 +50,6 @@ export omnibox_composer_vm, agent_harbor_composer_words, ah_theme
 
 const
   CaptionBarPx* = 34      ## `--caption-bar-height` (2.125rem)
-  FieldPx* = 380          ## the caption omnibox's width
   FieldHeightPx* = 28     ## COMMAND_INPUT_HEIGHT
   TriggerGapPx* = 6       ## DROPDOWN_TRIGGER_GAP
   SheetRadiusPx* = 6      ## DROPDOWN_RADIUS
@@ -105,6 +104,18 @@ proc acts(r: GpuiRenderer; el: GpuiElement; action, target: string;
   if press != nil:
     r.addEventListener(el, "mousedown", proc(ev: GpuiEvent) =  # ir1-gate: hit test
       press(operation, target))
+
+proc endThatFits*(text: string; sizePx, availPx: int): string =
+  ## The longest end of `text` that the face sets within `availPx`: what an
+  ## input scrolled to its end shows (no "…": the start is scrolled out of
+  ## view, not cut).
+  if textWidth(text, sizePx) <= float(availPx): return text
+  var start = 0
+  while start < text.len:
+    inc start
+    while start < text.len and (ord(text[start]) and 0xC0) == 0x80: inc start
+    if textWidth(text[start .. ^1], sizePx) <= float(availPx): return text[start .. ^1]
+  ""
 
 proc linesOf(text: string; sizePx, availPx: int): int =
   if text.len == 0: 0 else: wrappedRows(text, sizePx, max(1, availPx))
@@ -519,20 +530,21 @@ proc bodyBlocks(r: GpuiRenderer; p: AhPalette; vm: OmniboxComposerVM;
     let t = r.wrapText(whole, BodyPx, BodyLinePx, p.textBody)
     r.tag(t, "instruction", whole)
     result.add r.spaced(t, 4 + BodyLinePx * linesOf(whole, BodyPx, w) + 8, top = 4, bottom = 8)
-  if vm.phase in {cpSent, cpSendFailed} or
-      vm.phase == cpSending and vm.draft.deliveries.len > 1:
-    let sent = vm.sentLine
+  # What was sent, and where it went (no line while every delivery failed:
+  # the header and the row say it, D37).
+  let (sentText, sent) = vm.sentBlock
+  if sentText.len > 0:
+    let col = r.box(column = true, pairs = [("gap", "2px")])
+    let t = r.wrapText(sentText, BodyPx, BodyLinePx, p.textBody)
+    r.tag(t, "sent-text", sentText)
+    r.appendChild(col, t)
+    var h = BodyLinePx * linesOf(sentText, BodyPx, w)
     if sent.len > 0:
-      let sentText = vm.draft.sentText
-      let col = r.box(column = true, pairs = [("gap", "2px")])
-      let t = r.wrapText(sentText, BodyPx, BodyLinePx, p.textBody)
-      r.tag(t, "sent-text", sentText)
-      r.appendChild(col, t)
       let l = r.wrapText(sent, CaptionPx, 16, p.textCaption)
       r.tag(l, "sent-line", sent)
       r.appendChild(col, l)
-      result.add r.spaced(col, BodyLinePx * linesOf(sentText, BodyPx, w) + 2 +
-                                16 * linesOf(sent, CaptionPx, w) + 8, bottom = 8)
+      h += 2 + 16 * linesOf(sent, CaptionPx, w)
+    result.add r.spaced(col, h + 8, bottom = 8)
   if vm.isEmptyField:
     result.add r.recentBlocks(p, vm, lay)
     return
@@ -583,9 +595,10 @@ proc sendLine(r: GpuiRenderer; p: AhPalette; vm: OmniboxComposerVM;
                          ("flex-shrink", "0"), ("rounded", $ControlRadiusPx & "px"),
                          ("border-width", "1px")])
   if canSend:
-    r.styles(b, [("border-color", p.borderAction), ("background", p.action)])
-    r.appendChild(b, r.text(label, CaptionPx,
-                            if p.mode == dmDark: p.onAction else: p.textBody, shrink = false))
+    # CodeTracer's own primary button in both themes (P2c study D39): the
+    # action fill with the on-action text, no border of another colour.
+    r.styles(b, [("border-color", p.action), ("background", p.action)])
+    r.appendChild(b, r.text(label, CaptionPx, p.onAction, shrink = false))
   else:
     r.setStyle(b, "border-color", p.borderSecondary)
     r.appendChild(b, r.text(label, CaptionPx, p.textDisabled, shrink = false))
@@ -609,16 +622,21 @@ proc drawComposer*(r: GpuiRenderer; host: GpuiElement; vm: OmniboxComposerVM;
   let caption = r.box(pairs = [("height", $CaptionBarPx & "px"), ("flex-shrink", "0"),
                                ("items", "center"), ("justify", "center"),
                                ("background", p.ground)])
-  let fieldW = min(FieldPx, widthPx - 16)
+  # While the sheet is open the field has the sheet's edges (P2c study D36):
+  # `sheetWidthFor`, centred, the sheet's own.
+  let fieldW = vm.sheetWidthFor(widthPx)
   let field = r.box(pairs = [("width", $fieldW & "px"), ("height", $FieldHeightPx & "px"),
                              ("items", "center"), ("padding-left", "12px"),
                              ("padding-right", "12px"), ("gap", "8px"),
                              ("rounded", $ControlRadiusPx & "px"), ("border-width", "1px"),
                              ("border-color", p.borderPrimary), ("background", p.panel)])
   let fieldText = ComposerPrefix & vm.fieldText
-  # Never cut by an ellipsis (P2c D32): the field shows what fits, as an
-  # input scrolled to its start does.
-  let ft = r.text(fieldText, BodyPx, p.textBody, shrink = false,
+  # Never cut by an ellipsis (P2c D32), and its end, where the caret is, in
+  # view (D36): the field shows the longest end of the text that fits, as
+  # an input scrolled to its end does.
+  let more0 = vm.moreLines
+  let room = fieldW - 24 - (if more0.len > 0: textPx(more0, CaptionPx) + 8 else: 0)
+  let ft = r.text(endThatFits(fieldText, BodyPx, room), BodyPx, p.textBody, shrink = false,
                   pairs = [("flex-grow", "1"), ("flex-shrink", "1"), ("min-width", "0px"),
                            ("overflow", "hidden")])
   r.tag(ft, "field", fieldText)

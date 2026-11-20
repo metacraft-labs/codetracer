@@ -160,7 +160,8 @@ func agentHarborSection(): CodeTracerStorySection =
   ## INV-D-02 (sessions as tabs, in the strip, the sidebar and docked);
   ## INV-D-04, INV-P2-26 (initiatives); INV-D-05, INV-P2-44 (initiative
   ## progress); INV-C-20 to INV-C-24, INV-C-40, INV-P2-30 to INV-P2-34,
-  ## INV-P2-42, INV-P2-61 (the omnibox composer, CTF-P2c).
+  ## INV-P2-42, INV-P2-61 (the omnibox composer, CTF-P2c); INV-C-25 to
+  ## INV-C-31, INV-P2-38 (its result commands and search).
   CodeTracerStorySection(
     title: "CodeTracer/Agent Harbor",
     group: "Agent Harbor",
@@ -505,6 +506,63 @@ func agentHarborSection(): CodeTracerStorySection =
       story("ComposerLongNames", "Composer: Long Names", "view", "agent-harbor-composer", "long-names",
             "agent-harbor-composer-long-names",
             "A long instruction, session and initiative: cut by the one rule, prose wrapped"),
+      # The omnibox's result commands and search (CTF-P2c step 2; inventory
+      # INV-C-25 to INV-C-31, INV-P2-38): `/s`, `/ah`, rich rows and the
+      # instruction's sigil completions, over the same window.
+      story("SearchPartial", "Search: Partly Answered", "view", "agent-harbor-results", "search-partial",
+            "agent-harbor-results-search-partial",
+            "`/s shield`: files, symbols and Agent Harbor's sessions answered, the program text still searching"),
+      story("SearchFinal", "Search: Every Provider Answered", "view", "agent-harbor-results", "search-final",
+            "agent-harbor-results-search-final",
+            "`/s shield`: every group with its count, the long one ending in `+N more`"),
+      story("SearchProviderFailed", "Search: One Provider Failing", "view", "agent-harbor-results", "search-failed",
+            "agent-harbor-results-search-failed",
+            "Agent Harbor's sessions failed: Agent Harbor is not reachable; the others answered"),
+      story("SearchProviderEmpty", "Search: One Provider Empty", "view", "agent-harbor-results", "search-no-symbols",
+            "agent-harbor-results-search-no-symbols",
+            "`/s field`: no symbol matches; the files, the program text and the sessions do"),
+      story("SearchNoResults", "Search: Nothing Matches", "view", "agent-harbor-results", "search-none",
+            "agent-harbor-results-search-none",
+            "`/s warp drive`: one line in place of the groups"),
+      story("SearchLong", "Search: A Long Group", "view", "agent-harbor-results", "search-long",
+            "agent-harbor-results-search-long",
+            "`/s remaining`: the program text's first eight rows and `+N more`"),
+      story("SearchGroupOpen", "Search: One Group Alone", "view", "agent-harbor-results", "search-group",
+            "agent-harbor-results-search-group",
+            "The program text shown alone with every row, under the way back"),
+      story("SearchSuperseded", "Search: Superseded", "view", "agent-harbor-results", "search-superseded",
+            "agent-harbor-results-search-superseded",
+            "`/s shield_pct` after `/s shield`: only the newer query's rows; the slow provider searching"),
+      story("AhCommands", "Agent Harbor Commands", "view", "agent-harbor-results", "ah-commands",
+            "agent-harbor-results-ah-commands",
+            "`/ah`: every command with its alias, description and source, an extension's among them"),
+      story("AhSearch", "Agent Harbor Command By Alias", "view", "agent-harbor-results", "ah-search",
+            "agent-harbor-results-ah-search",
+            "`/ahs shield` is `/ah-search`: Agent Harbor's session search and its rows"),
+      story("AhUnknown", "Agent Harbor Command Unknown", "view", "agent-harbor-results", "ah-unknown",
+            "agent-harbor-results-ah-unknown",
+            "`/ah-sessions`: no command has that name"),
+      story("AhUnreachable", "Agent Harbor Not Reachable", "view", "agent-harbor-results", "ah-unreachable",
+            "agent-harbor-results-ah-unreachable",
+            "`/ah` while Agent Harbor's discovery fails: the error in place of the rows"),
+      story("AhExtensionCommand", "Agent Harbor Extension Command", "view", "agent-harbor-results", "ah-extension",
+            "agent-harbor-results-ah-extension",
+            "`/ahsp shield`: the Spec index extension's command and its rows, tagged with the extension"),
+      story("ResultRichRows", "Results: Rich Rows", "view", "agent-harbor-results", "rich-rows",
+            "agent-harbor-results-rich-rows",
+            "`/s clamp`: a session's summary box, a tall box that scrolls, an untrusted box whose script is not run"),
+      story("ResultTextFallback", "Results: Text Fallback", "view", "agent-harbor-results", "text-fallback",
+            "agent-harbor-results-text-fallback",
+            "The same rows with HTML off: each row's text form"),
+      story("ResultOpenedOutside", "Results: Opened Outside CodeTracer", "view", "agent-harbor-results", "opened-outside",
+            "agent-harbor-results-opened-outside",
+            "A row whose URL CodeTracer cannot open, passed on to the system"),
+      story("ComposerAtCompletion", "Composer: @ Completion", "view", "agent-harbor-results", "at-completion",
+            "agent-harbor-results-at-completion",
+            "An instruction ending in `@`: agents, repositories and files to insert"),
+      story("ComposerSlashCompletion", "Composer: / Completion", "view", "agent-harbor-results", "slash-completion",
+            "agent-harbor-results-slash-completion",
+            "An instruction ending in `/`: workflows and chat capabilities to insert"),
     ] & sessionActivityStories())
 
 func panelsSection(): CodeTracerStorySection =

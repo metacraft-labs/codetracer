@@ -1,0 +1,301 @@
+// The omnibox's result commands and search
+// (isonim_agent_harbor_results_view.nim, CTF-P2c step 2). A file of its own,
+// as agent_harbor_composer.styl is.
+//
+// The results are the composer's sheet holding rows instead of
+// destinations (P2c study D40): the root carries the composer's classes, so
+// the field, the sheet, its header and its scrolling body are the composer's
+// rules; this file adds the groups and their rows. A row is the omnibox's
+// result row: no line between rows, a hover ground, and the selected row on
+// the palette's chosen ground (`surface/primary/tertiary`,
+// `.ct-menu-item--chosen`, which the omnibox's own selected result takes).
+// Every colour is a design-system role; type sizes are the design system's
+// type roles (`ah-rem`, agent_harbor.styl). The pointer's shape over a row is
+// the one shared rule's (`pointer.styl`, from each row's routed operation),
+// never this file's.
+
+AH_RESULTS_PAD = 0.75rem
+
+// The roles a rich row's box draws in (D45): the view reads these from the
+// results' element and hands them into the sandboxed frame as `--ct-*`, so
+// the box's own markup names roles, never colours.
+.ah-results
+  --ah-box-body: colors-ui-text-primary-body
+  --ah-box-caption: colors-ui-text-primary-caption
+  --ah-box-label: colors-ui-text-primary-label
+  --ah-box-border: colors-ui-border-secondary
+  --ah-box-ground: colors-ui-surface-primary-default
+  --ah-box-raised: colors-ui-surface-base-raised
+  --ah-box-success: colors-ui-text-success-primary
+  --ah-box-warning: by-mode(colors-ui-text-warning-primary, colors-ui-text-warning-primary-hover)
+  --ah-box-error: colors-ui-text-error-primary
+  --ah-box-action: colors-ui-border-action
+  // The type roles: the face, the body and caption sizes, the line.
+  --ah-box-font: unquote('"SpaceGrotesk", sans-serif')
+  --ah-box-size: ah-rem(type-ui-size-body-md)
+  --ah-box-caption-size: ah-rem(type-ui-size-caption-md)
+  --ah-box-line: 1.4
+
+// The body ends on its last row: the composer's sticky "More below" line
+// sits on the scrollport's own bottom edge, with nothing showing under it
+// (a bottom padding would let the next row show between them).
+
+// A group shown alone: the way back, a quiet pressable line.
+.ah-results-back
+  padding: 0.25rem AH_RESULTS_PAD 0.375rem
+  font-size: ah-rem(type-ui-size-caption-md)
+  color: colors-ui-text-primary-caption
+
+  &:hover
+    color: colors-ui-text-primary-body
+
+// The line in place of the rows.
+.ah-results-notice
+  display: flex
+  flex-wrap: wrap
+  align-items: baseline
+  column-gap: 0.75rem
+  padding: 0.5rem AH_RESULTS_PAD 0.75rem
+  color: colors-ui-text-primary-body
+
+  &.ah-role-error .ah-results-notice-text
+    color: colors-ui-text-error-primary
+
+// A term a line break must not split.
+.ah-results-term
+  white-space: nowrap
+
+.ah-results-notice-hint
+  font-size: ah-rem(type-ui-size-caption-md)
+  color: colors-ui-text-primary-caption
+
+// A provider's group: its title and its state on one line, then its rows. A
+// hairline between groups, as the composer sets its destinations off.
+.ah-results-group
+  padding-top: 0.25rem
+
+  & + .ah-results-group
+    margin-top: 0.25rem
+    border-top: 0.0625rem solid colors-ui-border-secondary
+    padding-top: 0.5rem
+
+.ah-results-group-head
+  display: flex
+  flex-wrap: wrap
+  align-items: baseline
+  justify-content: space-between
+  column-gap: 0.75rem
+  min-width: 0
+  padding: 0 AH_RESULTS_PAD 0.25rem
+
+.ah-results-group-title
+  flex: 0 1 auto
+  min-width: 0
+  overflow: hidden
+  white-space: nowrap
+
+// The state, one slot at the head's right: quiet while searching or with
+// nothing, the count in the caption role, a failure in the error role.
+.ah-results-state
+  flex: 0 1 auto
+  min-width: 0
+  overflow: hidden
+  white-space: nowrap
+  font-size: ah-rem(type-ui-size-caption-md)
+  color: colors-ui-text-primary-caption
+
+  // A failure's reason wraps rather than being cut (CTF-P1b's rule for a
+  // load failure): on a line of its own under the title when it does not
+  // fit beside it.
+  &.ah-results-state-error
+    color: colors-ui-text-error-primary
+    white-space: normal
+    overflow-wrap: anywhere
+
+.ah-results-row
+  display: flex
+  flex-direction: column
+  margin: 0 0.0625rem
+  padding: 0.3125rem AH_RESULTS_PAD
+  min-width: 0
+
+  &:hover
+    background: by-mode(colors-ui-surface-primary-secondary-hover, colors-ui-surface-primary-secondary)
+
+  // The palette's chosen ground. On Light's tertiary step the caption role
+  // is about 2:1, so a selected row's quieter words take the label role
+  // there (5.4:1).
+  &.ah-results-row-selected
+    background: colors-ui-surface-primary-tertiary
+
+    .ah-results-detail,
+    .ah-results-location,
+    .ah-results-tag,
+    .ah-results-second
+      color: by-mode(colors-ui-text-primary-caption, colors-ui-text-primary-label)
+
+  // A selected row with a box: the chosen ground under its line only, the
+  // box on the sheet's own ground under them, so the selection stays a
+  // small mark rather than a block around the box (P2c D41, D45).
+  &.ah-results-row-selected.ah-results-row-rich
+    background: transparent
+    padding-top: 0
+
+    > .ah-results-row-line
+      margin: 0 (- AH_RESULTS_PAD)
+      padding: 0.3125rem AH_RESULTS_PAD
+      background: colors-ui-surface-primary-tertiary
+
+// The row's line: its title, what it is, then where it is and its tag at
+// the right. Each part a one-line text cut by the views' rule (ah_cut_text).
+.ah-results-row-line
+  display: flex
+  align-items: baseline
+  gap: 0.5rem
+  min-width: 0
+
+// The title gives way first: what a row is (a session's state) and where
+// it is stay whole where they can.
+.ah-results-title
+  flex: 0 6 auto
+  min-width: 3rem
+  overflow: hidden
+  white-space: nowrap
+  color: colors-ui-text-primary-body
+
+// The query's match: bold, in the title's own role (one colour, the cut
+// rule's).
+.ah-results-match
+  font-weight: 600
+
+// A line of the program's text is set in the code face, as the editor and
+// the Changes panel set code, and wraps at every width (inside a name where
+// it must) rather than being cut, so the match that put it in the list is
+// always in view.
+.ah-results-title.ah-results-title-code
+  flex: 1 1 auto
+  white-space: normal
+  overflow-wrap: anywhere
+  font-family: "SpaceMono", monospace
+  // A wider gap before where it is, so a wrapped line never reads on into
+  // the path.
+  margin-right: 0.5rem
+
+// What a row is keeps its words (a session's state, `needs input`): only
+// the title gives way, down to its least; past that, what it is is cut too.
+.ah-results-detail
+  flex: 0 0 auto
+  max-width: 60%
+  min-width: 0
+  overflow: hidden
+  white-space: nowrap
+  font-size: ah-rem(type-ui-size-caption-md)
+  color: colors-ui-text-primary-caption
+
+.ah-results-location
+  flex: 0 0 auto
+  max-width: 45%
+  min-width: 0
+  margin-left: auto
+  overflow: hidden
+  white-space: nowrap
+  font-size: ah-rem(type-ui-size-caption-md)
+  font-variant-numeric: tabular-nums
+  color: colors-ui-text-primary-caption
+
+// A quiet tag: where a command or a contributed row comes from; `HTML` on a
+// rich row drawn as HTML.
+.ah-results-tag
+  flex: 0 0 auto
+  white-space: nowrap
+  font-size: ah-rem(type-ui-size-caption-md)
+  color: colors-ui-text-primary-caption
+
+  .ah-results-location + &,
+  .ah-results-detail + &,
+  .ah-results-title + &
+    margin-left: auto
+
+  & + .ah-results-tag
+    margin-left: 0
+
+.ah-results-second
+  margin-top: 0.125rem
+  font-size: ah-rem(type-ui-size-caption-md)
+  color: colors-ui-text-primary-caption
+  overflow-wrap: anywhere
+
+// A rich row's box (D45): a sandboxed frame under the row's line, as tall
+// as the source asks, at most 12rem, then it scrolls inside; the box's
+// border holds the frame and, under it, the quiet line that says it
+// scrolls.
+.ah-results-boxwrap
+  margin-top: 0.375rem
+  border: 0.0625rem solid colors-ui-border-secondary
+  border-radius: ah-rem(border-border-radius-control)
+  background: colors-ui-surface-primary-default
+  overflow: hidden
+
+.ah-results-box
+  display: block
+  width: 100%
+  max-height: 12rem
+  box-sizing: border-box
+  border: 0
+  background: colors-ui-surface-primary-default
+
+// Shown while a trusted box's content is taller than its cap and the whole
+// box is in the sheet's view.
+.ah-results-boxmore
+  display: none
+  padding: 0.125rem 0.5rem
+  border-top: 0.0625rem solid colors-ui-border-secondary
+  text-align: right
+  font-size: ah-rem(type-ui-size-caption-md)
+  color: colors-ui-text-primary-caption
+
+.ah-results-boxwrap[data-ah-box-more]:not([data-ah-box-clipped]) .ah-results-boxmore
+  display: block
+
+.ah-results-note
+  margin-top: 0.25rem
+  font-size: ah-rem(type-ui-size-caption-md)
+  font-style: italic
+  color: colors-ui-text-primary-caption
+
+// `+N more`: a quiet pressable line at the group's end.
+.ah-results-more
+  margin: 0 0.0625rem
+  padding: 0.25rem AH_RESULTS_PAD
+  font-size: ah-rem(type-ui-size-caption-md)
+  color: colors-ui-text-primary-label
+
+  &:hover
+    background: colors-ui-surface-primary-secondary-hover
+    color: colors-ui-text-primary-body
+
+// A narrow window: where a row is goes under its title, so the title keeps
+// the line.
+@media (max-width: 30rem)
+  .ah-results-row-line
+    flex-wrap: wrap
+    row-gap: 0.125rem
+
+  // The title takes its line; what the row is and where it is follow on the
+  // next together, what at the left and where at the right (where alone
+  // starts at the left).
+  .ah-results-title
+    flex: 1 0 100%
+    max-width: 100%
+
+  .ah-results-detail
+    max-width: 100%
+    flex-shrink: 1
+
+  // Where is always at the right, as on the wider sizes, so the paths line
+  // up down the sheet; a tag after it stays beside it.
+  .ah-results-location
+    margin-left: auto
+
+  .ah-results-location + .ah-results-tag
+    margin-left: 0.5rem

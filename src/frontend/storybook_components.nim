@@ -119,6 +119,9 @@ import stories/dom_playback_presses
 import stories/dom_composer_presses
 import stories/agent_harbor_composer_stories
 import viewmodel/views/isonim_agent_harbor_composer_view
+import stories/dom_results_presses
+import stories/agent_harbor_results_stories
+import viewmodel/views/isonim_agent_harbor_results_view
 import viewmodel/views/isonim_agent_harbor_session_activity_view
 import viewmodel/agent_harbor_activity_cards
 import stories/dom_activity_presses
@@ -1975,6 +1978,42 @@ proc mountAgentHarborComposerStory(container: isonim_dom.Element;
     for dispose in disposers: dispose()
     container.innerHTML = ""
 
+proc mountAgentHarborResultsStory(container: isonim_dom.Element;
+                                  fixture: string): DisposeProc =
+  ## The omnibox's result commands as CodeTracer draws them: in the caption
+  ## bar where the composer is, their sheet over the same window -- the
+  ## editor stopped at `src/shield.nr:7`, whose program the SYMBOLS and
+  ## PROGRAM TEXT rows are read from
+  ## (`stories/agent_harbor_results_stories.nim`).
+  var disposers: seq[DisposeProc] = @[]
+  let story = createHost(container, "div", "ah-composer-story")
+  isonim_dom.setAttribute(story, cstring"class", cstring"ah-composer-story ah-results-story")
+  let window = createHost(story, "div", "ah-composer-window")
+  isonim_dom.setAttribute(window, cstring"class", cstring"ah-composer-window")
+  let panels = storyStackRow(window)
+  disposers.add mountEditor(storyPanelStack(panels, StoryStopPath, "1 1 0"), "populated")
+  let caption = createHost(story, "div", "menu")
+  isonim_dom.setAttribute(caption, cstring"class", cstring"menu ah-composer-caption")
+  let debug = createHost(caption, "div", "debug")
+  isonim_dom.setAttribute(debug, cstring"class", cstring"ct-header")
+  let host = createHost(debug, "div", "ah-results-host")
+  isonim_dom.setAttribute(host, cstring"class",
+                          cstring"component-container command-container ah-composer-container")
+  # Its presses and keys are routed (Input-Routing-And-Keymaps.md §5.1):
+  # performed on the results on the page (`stories/dom_results_presses`).
+  var shown: ResultCommandsVM
+  routeResultsPresses(proc(): ResultCommandsVM = shown)
+  disposers.add mountAgentHarborVM(host,
+    proc(): ResultCommandsVM =
+      shown = createResultsStoryVM(fixture)
+      shown,
+    proc(h: isonim_dom.Element; vm: ResultCommandsVM) =
+      mountAgentHarborResults(h, vm))
+  return proc() =
+    shown = nil
+    for dispose in disposers: dispose()
+    container.innerHTML = ""
+
 var shownTimeline: SessionTimelineVM
   ## The session activity timeline on the page (StoryBook shows one story at
   ## a time); nil when none is. Its presses and keys act on it.
@@ -2459,27 +2498,6 @@ proc mountCaptionTabs(window: StoryWindow; container: isonim_dom.Element;
     if disposeVm != nil: disposeVm()
     if rootDisposer != nil: rootDisposer()
 
-proc applyLayoutPalette(vm: CommandPaletteVM; moment: string) =
-  ## The omnibox of a moment: closed, or (`omnibox-routing`) open on an
-  ## instruction typed for an agent, with where it can go listed under it:
-  ## the session in view, Agent Harbor's manager agent, or a CodeTracer UI
-  ## action, the first selected. The existing palette stands in for the
-  ## routing composer until it is built (its rows are `cprkAgent` and
-  ## `cprkProjectAction` results).
-  if moment != "omnibox-routing": return
-  vm.open()
-  vm.setMode(cpmAgent)
-  vm.setQuery("/ai also test a hit on an empty shield")
-  vm.setResults([
-    CommandPaletteResultEntry(kind: cprkAgent,
-      value: "To this session: Clamp the shield at zero"),
-    CommandPaletteResultEntry(kind: cprkAgent,
-      value: "To the Shield model hardening manager"),
-    CommandPaletteResultEntry(kind: cprkProjectAction,
-      value: "UI action: show calculate_damage beside"),
-  ])
-  vm.setSelected(0)
-
 proc mountStoryWindow(container: isonim_dom.Element; moment: string;
                       tabs: CaptionTabs; disposers: var seq[DisposeProc];
                       prepare: proc(vm: InitiativeTabStripVM) = nil): StoryWindow =
@@ -2500,10 +2518,28 @@ proc mountStoryWindow(container: isonim_dom.Element; moment: string;
       toolbarVm)
     renderDebugChromeInto(r,
       isonim_dom.getElementById(isonim_dom.document, cstring(DebugShellId)), paletteId)
+    let paletteHost = isonim_dom.getElementById(isonim_dom.document,
+      cstring(commandPaletteHostId(paletteId)))
+    if moment == "omnibox-routing":
+      # L12: the omnibox open as the composer (P2c study D50),
+      # the composer of `ComposerTyping`: the instruction routed to the
+      # session in view, citing the file and the replay position. It stood
+      # in for it with the palette's agent rows until the composer was built.
+      isonim_dom.setAttribute(paletteHost, cstring"class",
+        cstring(DebugCommandPaletteHostClass & " ah-composer-container"))
+      var composerRoot: proc()
+      var composerVm: OmniboxComposerVM
+      createRoot proc(dispose: proc()) =
+        composerRoot = dispose
+        composerVm = createComposerStoryVM("typing")
+        mountAgentHarborComposer(paletteHost, composerVm)
+      return proc() =
+        if composerVm != nil: composerVm.dispose()
+        if composerRoot != nil: composerRoot()
+        toolbarVm.dispose()
+    # Every other moment: the omnibox closed.
     let paletteVm = createCommandPaletteVM(store)
-    paletteVm.applyLayoutPalette(moment)
-    mountIsoNimCommandPalettePanel(isonim_dom.getElementById(isonim_dom.document,
-      cstring(commandPaletteHostId(paletteId))), paletteVm)
+    mountIsoNimCommandPalettePanel(paletteHost, paletteVm)
     return proc() =
       paletteVm.dispose()
       toolbarVm.dispose())
@@ -2841,6 +2877,7 @@ proc mountCodeTracerStory*(container: isonim_dom.Element;
     of "agent-harbor-initiative-tabs": mountAgentHarborInitiativeTabs(container, f, o)
     of "agent-harbor-session-list": mountAgentHarborSessionList(container, f, o)
     of "agent-harbor-composer": mountAgentHarborComposerStory(container, f)
+    of "agent-harbor-results": mountAgentHarborResultsStory(container, f)
     of "debug-shell": mountDebugShell(container, f)
     of "debug-controls": mountDebugControls(container, f)
     else: mountStructure(container, n, f)

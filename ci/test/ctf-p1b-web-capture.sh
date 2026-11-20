@@ -68,7 +68,7 @@ if [ "${moments}" = 1 ]; then
 else
 	OUT="${CTF_P1B_WEB_OUT:-${root}/build/ctf-p1b/web}"
 	RECORD="${root}/src/tests/visual/agent-harbor-web-regions.json"
-	views=(--view agent-harbor-session-tabs --view agent-harbor-fleet --view agent-harbor-session-activity --view agent-harbor-composer)
+	views=(--view agent-harbor-session-tabs --view agent-harbor-fleet --view agent-harbor-session-activity --view agent-harbor-composer --view agent-harbor-results)
 	panelViews=(--view agent-harbor-session-activity)
 	milestone=CTF-P1b
 	reader=test_ctf_p1b_gpui_capture_matches_web_layout.nim

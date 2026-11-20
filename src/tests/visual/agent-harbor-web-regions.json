@@ -9,6 +9,646 @@
   ],
   "schemaVersion": 1,
   "captures": {
+    "agent-harbor-ah-commands-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 263
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-ah-commands-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 263
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-ah-commands-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 410
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-ah-commands-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 410
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-ah-extension-command-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 150
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-ah-extension-command-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 150
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-ah-extension-command-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 200
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-ah-extension-command-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 200
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-ah-search-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 220
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-ah-search-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 220
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-ah-search-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 320
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-ah-search-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 320
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-ah-unknown-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 93
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-ah-unknown-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 93
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-ah-unknown-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 140
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-ah-unknown-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 140
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-ah-unreachable-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 92
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-ah-unreachable-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 92
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-ah-unreachable-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 140
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-ah-unreachable-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 140
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
     "agent-harbor-composer-add-context-laptop-dark": {
       "viewport": {
         "width": 1440,
@@ -21,16 +661,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -65,16 +699,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -109,16 +737,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -153,16 +775,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -185,6 +801,134 @@
         }
       }
     },
+    "agent-harbor-composer-at-completion-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 604
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-at-completion-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 604
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-at-completion-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 604
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-at-completion-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 604
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
     "agent-harbor-composer-context-edited-laptop-dark": {
       "viewport": {
         "width": 1440,
@@ -197,16 +941,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -241,16 +979,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -285,16 +1017,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -329,16 +1055,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -373,16 +1093,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -417,16 +1131,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -461,16 +1169,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -505,16 +1207,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -549,16 +1245,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -593,16 +1283,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -637,16 +1321,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -681,16 +1359,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -725,16 +1397,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -769,16 +1435,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -813,16 +1473,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -857,16 +1511,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -901,16 +1549,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -945,16 +1587,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -989,16 +1625,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -1033,16 +1663,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -1077,16 +1701,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -1121,16 +1739,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -1165,16 +1777,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -1209,16 +1815,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -1253,16 +1853,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -1291,16 +1885,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -1329,16 +1917,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -1367,16 +1949,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -1405,16 +1981,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -1449,16 +2019,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -1493,16 +2057,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -1537,16 +2095,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -1581,16 +2133,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -1625,16 +2171,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -1669,16 +2209,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -1713,16 +2247,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -1757,16 +2285,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -1801,16 +2323,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -1845,16 +2361,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -1889,16 +2399,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -1933,16 +2437,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -1977,16 +2475,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -2021,16 +2513,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -2065,16 +2551,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -2109,16 +2589,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -2153,16 +2627,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -2197,16 +2665,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -2241,16 +2703,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -2285,16 +2741,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -2323,16 +2773,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -2361,16 +2805,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -2399,16 +2837,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -2437,16 +2869,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -2481,16 +2907,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -2525,16 +2945,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -2569,16 +2983,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -2613,16 +3021,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -2657,16 +3059,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -2701,16 +3097,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -2745,16 +3135,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -2789,16 +3173,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -2833,16 +3211,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -2877,16 +3249,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -2921,16 +3287,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -2965,16 +3325,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -3009,16 +3363,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -3053,16 +3401,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -3097,16 +3439,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -3141,16 +3477,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -3185,16 +3515,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -3229,16 +3553,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -3273,16 +3591,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -3317,23 +3629,17 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
           "x": 402,
           "y": 33,
           "w": 640,
-          "h": 341.1875
+          "h": 315.1875
         },
         "composer-header": {
           "x": 403,
@@ -3355,23 +3661,17 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
           "x": 402,
           "y": 33,
           "w": 640,
-          "h": 341.1875
+          "h": 315.1875
         },
         "composer-header": {
           "x": 403,
@@ -3393,23 +3693,17 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
           "x": 10,
           "y": 33,
           "w": 344,
-          "h": 611.1875
+          "h": 585.1875
         },
         "composer-header": {
           "x": 11,
@@ -3431,23 +3725,17 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
           "x": 10,
           "y": 33,
           "w": 344,
-          "h": 611.1875
+          "h": 585.1875
         },
         "composer-header": {
           "x": 11,
@@ -3469,16 +3757,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -3513,16 +3795,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -3557,16 +3833,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -3601,16 +3871,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -3645,16 +3909,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -3689,16 +3947,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -3733,16 +3985,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -3777,16 +4023,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -3821,16 +4061,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -3859,16 +4093,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -3897,16 +4125,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -3935,16 +4157,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -3973,16 +4189,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -4011,16 +4221,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -4049,16 +4253,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -4087,16 +4285,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -4104,6 +4296,134 @@
           "y": 33,
           "w": 344,
           "h": 541
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-slash-completion-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 325
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-slash-completion-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 325
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-slash-completion-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 325
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-composer-slash-completion-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 325
         },
         "composer-header": {
           "x": 11,
@@ -4125,16 +4445,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -4169,16 +4483,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -4213,16 +4521,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -4257,16 +4559,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -4301,16 +4597,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -4345,16 +4635,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -4389,16 +4673,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -4433,16 +4711,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -4477,16 +4749,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -4515,16 +4781,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -4553,16 +4813,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -4591,16 +4845,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -4629,16 +4877,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -4667,16 +4909,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -4705,16 +4941,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -4743,16 +4973,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -4781,16 +5005,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -4819,16 +5037,10 @@
           "w": 1440,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 1440,
-          "h": 32
-        },
         "composer-field": {
-          "x": 532,
+          "x": 402,
           "y": 5,
-          "w": 380,
+          "w": 640,
           "h": 28
         },
         "composer-sheet": {
@@ -4857,16 +5069,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -4895,16 +5101,10 @@
           "w": 360,
           "h": 900
         },
-        "frame-header": {
-          "x": 0,
-          "y": 34,
-          "w": 360,
-          "h": 32
-        },
         "composer-field": {
-          "x": 12,
+          "x": 10,
           "y": 5,
-          "w": 340,
+          "w": 344,
           "h": 28
         },
         "composer-sheet": {
@@ -17170,6 +17370,1414 @@
           "y": 165,
           "w": 144,
           "h": 14
+        }
+      }
+    },
+    "agent-harbor-result-opened-outside-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 141
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-result-opened-outside-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 141
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-result-opened-outside-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 190
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 54
+        }
+      }
+    },
+    "agent-harbor-result-opened-outside-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 190
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 54
+        }
+      }
+    },
+    "agent-harbor-result-rich-rows-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 781
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-result-rich-rows-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 781
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-result-rich-rows-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 850
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-result-rich-rows-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 850
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-result-text-fallback-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 512
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-result-text-fallback-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 512
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-result-text-fallback-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 732
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 54
+        }
+      }
+    },
+    "agent-harbor-result-text-fallback-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 732
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 54
+        }
+      }
+    },
+    "agent-harbor-search-final-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 850
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-search-final-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 850
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-search-final-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 850
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-search-final-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 850
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-search-group-open-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 850
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-search-group-open-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 850
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-search-group-open-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 850
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-search-group-open-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 850
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-search-long-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 820
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-search-long-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 820
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-search-long-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 850
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-search-long-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 850
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-search-no-results-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 92
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-search-no-results-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 92
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-search-no-results-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 92
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-search-no-results-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 92
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-search-partial-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 689
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-search-partial-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 689
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-search-partial-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 850
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-search-partial-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 850
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-search-provider-empty-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 850
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-search-provider-empty-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 850
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-search-provider-empty-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 850
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-search-provider-empty-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 850
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-search-provider-failed-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 354
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-search-provider-failed-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 354
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-search-provider-failed-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 527
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 54
+        }
+      }
+    },
+    "agent-harbor-search-provider-failed-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 527
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 54
+        }
+      }
+    },
+    "agent-harbor-search-superseded-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 343
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-search-superseded-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 402,
+          "y": 5,
+          "w": 640,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 402,
+          "y": 33,
+          "w": 640,
+          "h": 343
+        },
+        "composer-header": {
+          "x": 403,
+          "y": 42,
+          "w": 638,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-search-superseded-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 443
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
+        }
+      }
+    },
+    "agent-harbor-search-superseded-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "composer-field": {
+          "x": 10,
+          "y": 5,
+          "w": 344,
+          "h": 28
+        },
+        "composer-sheet": {
+          "x": 10,
+          "y": 33,
+          "w": 344,
+          "h": 443
+        },
+        "composer-header": {
+          "x": 11,
+          "y": 42,
+          "w": 342,
+          "h": 30
         }
       }
     },

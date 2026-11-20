@@ -95,7 +95,9 @@
     "The omnibox composer (CTF-P2c) adds its own: the field in the caption bar,",
     "the sheet under it, the sheet's header line and its send button; its",
     "`surface` is the story's whole window (`.ah-composer-story`), as the GPUI",
-    "view's root is."
+    "view's root is. The web story drops the sheet over an editor window",
+    "(`.ah-composer-window`), whose own tab header is not the composer's: the",
+    "composer has no frame, so `frame-header` never matches inside that window."
   ],
   "schemaVersion": 1,
   "regions": [
@@ -108,7 +110,7 @@
     },
     {
       "name": "frame-header",
-      "web": ".lm_header",
+      "web": ".lm_header:not(.ah-composer-window .lm_header)",
       "gpui": {
         "data-ah-frame-header": ""
       }

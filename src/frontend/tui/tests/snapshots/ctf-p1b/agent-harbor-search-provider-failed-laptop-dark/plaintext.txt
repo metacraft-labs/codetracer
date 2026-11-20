@@ -1,0 +1,56 @@
+                                         /s calculate_damage
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                          3 results from 3 of 4 providers · Agent Harbor sessions failed · Enter opens
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                          FILES                                                                                 no results
+                                                                                                                                                                                    
+                                          SYMBOLS                                                                                        1
+                                         ▎calculate_damage  function                                                      src/shield.nr:22
+                                                                                                                                                                                    
+                                          PROGRAM TEXT                                                                                   2
+                                          let damage = calculate_damage(initial_shield, remaining_shield, mass);           src/shield.nr:6
+                                                                                                                                                                                    
+                                          fn calculate_damage(initial_shield: Field, remaining_shield: Field, mass:       src/shield.nr:22
+                                          Field) -> Field {
+                                                                                                                                                                                    
+                                          AGENT HARBOR SESSIONS                                      failed: Agent Harbor is not reachable
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    

@@ -1,0 +1,56 @@
+  /s shield_pct
+                                             
+                                             
+   Searching… 3 of 4 providers answered
+                                             
+                                             
+   FILES                        no results
+                                             
+   SYMBOLS                               4
+  ▎shield_pct
+  ▎variable               src/shield.nr:26
+                                             
+   calculate_remaining_shield_pct
+   function               src/shield.nr:45
+                                             
+   remaining_shield_pct
+   variable               src/shield.nr:61
+                                             
+   remaining_shield_pct_as_u32
+   variable               src/shield.nr:62
+                                             
+   PROGRAM TEXT                 searching…
+                                             
+   AGENT HARBOR SESSIONS        no results
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             

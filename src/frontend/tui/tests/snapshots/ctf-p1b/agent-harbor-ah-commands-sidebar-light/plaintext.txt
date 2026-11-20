@@ -1,0 +1,56 @@
+  /ah
+                                             
+                                             
+   Agent Harbor commands
+   Enter chooses one
+                                             
+                                             
+   AGENT HARBOR COMMANDS                 3
+  ▎/ah-search
+  ▎/ahs                       Agent Harbor
+  ▎Sessions whose prompt, messages or
+  ▎files match the text
+                                             
+   /ah-search-chats
+   /ahsc                      Agent Harbor
+   Web chats whose history matches the
+   text, with key:value filters
+                                             
+   /ah-specs
+   /ahsp                        Spec index
+   Sections of the project's
+   specifications that mention the text
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             

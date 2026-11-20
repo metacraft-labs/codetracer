@@ -1,0 +1,56 @@
+  /s clamp
+                                             
+                                             
+   4 results from 5 providers
+   Enter opens
+   Rich results shown as text
+                                             
+                                             
+   FILES                        no results
+                                             
+   SYMBOLS                      no results
+                                             
+   PROGRAM TEXT                 no results
+                                             
+   AGENT HARBOR SESSIONS                 3
+  ▎Clamp the shield at zero after a hit
+  ▎Shield model hardening
+  ▎Claude · running
+  ▎“Clamped the damage to remaining_shield
+  ▎at src/shield.nr:34;
+  ▎re-running shield_never_negative.”
+                                             
+   Add a test for an asteroid field that…
+   Shield model hardening
+   Codex · completed
+   “drained_field_fails is in src/tests.nr
+   and fails before the clamp, as
+   it should.”
+                                             
+   Write the 0.4 changelog
+   Release 0.4 · Opencode · needs input
+   “The 0.4 changelog lists the clamp, the
+   regeneration cap and the fixture
+   loader; over to you for the wording.”
+                                             
+   DESIGN NOTES                          1
+   Why the clamp is in calculate_damage
+   design note                Design notes
+   “The damage is clamped where it is
+   computed, so every caller sees a damage
+   the shield can absorb.”
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             

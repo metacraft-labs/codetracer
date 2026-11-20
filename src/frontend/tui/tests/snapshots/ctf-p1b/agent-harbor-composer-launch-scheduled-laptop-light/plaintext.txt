@@ -1,4 +1,4 @@
-                                                                   /ai Start a task: make the regeneration cap c…
+                                                   /ai Start a task: make the regeneration cap configurable per ship
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                    Enter sends it · ↑↓ another destination · to Manager of Shield model hardening
@@ -19,7 +19,7 @@
                                                     noir-space-ship                         feat/regen-cap-config
                                                                                                                                                                                     
                                                    Agents
-                                                    ✓ Claude   Codex   Grok   Opencode   AntiGravity
+                                                    ✓ Claude   Codex   Grok   Opencode   Antigravity
                                                                                                                                                                                     
                                                    Runs on
                                                     This machine   Executor   The server's choice

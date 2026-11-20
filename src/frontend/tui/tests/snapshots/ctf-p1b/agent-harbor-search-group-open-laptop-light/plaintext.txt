@@ -1,0 +1,56 @@
+                                         /s remaining
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                          Program text · 20 results · Enter opens
+                                                                                                                                                                                    
+                                          ← All providers
+                                                                                                                                                                                    
+                                          PROGRAM TEXT                                                                                  20
+                                          let mut remaining_shield = initial_shield;                                       src/shield.nr:2
+                                          let damage = calculate_damage(initial_shield, remaining_shield, mass);           src/shield.nr:6
+                                         ▎remaining_shield -= damage;                                                      src/shield.nr:7
+                                          if (remaining_shield as u32 > 0){                                               src/shield.nr:10
+                                                                                                                                                                                    
+                                          regeneration = calculate_shield_regeneration(initial_shield ,remaining_shield,  src/shield.nr:11
+                                          shield_regen_percentage);
+                                                                                                                                                                                    
+                                          remaining_shield += regeneration;                                               src/shield.nr:12
+                                          status_report(i,initial_shield, remaining_shield, damage, regeneration);        src/shield.nr:14
+                                          let result = remaining_shield as u32 > 0;                                       src/shield.nr:18
+                                                                                                                                                                                    
+                                          fn calculate_damage(initial_shield: Field, remaining_shield: Field, mass:       src/shield.nr:22
+                                          Field) -> Field {
+                                                                                                                                                                                    
+                                          let shield_pct = calculate_remaining_shield_pct(initial_shield,                 src/shield.nr:26
+                                          remaining_shield);
+                                                                                                                                                                                    
+                                          fn calculate_shield_regeneration(initial_shield:Field, remaining_shield:Field,  src/shield.nr:37
+                                          shield_regen_percentage: Field) -> Field{
+                                                                                                                                                                                    
+                                          if((remaining_shield + regen) as u32 > initial_shield as u32){                  src/shield.nr:40
+                                          regen = initial_shield - remaining_shield;                                      src/shield.nr:41
+                                                                                                                                                                                    
+                                          fn calculate_remaining_shield_pct(initial_shield: Field, remaining_shield:      src/shield.nr:45
+                                          Field) -> Field {
+                                                                                                                                                                                    
+                                          let result = (remaining_shield * 100) as u32 / initial_shield as u32;           src/shield.nr:46
+                                                                                                                                                                                    
+                                          fn status_report(iteration: u32 ,initial_shield: Field, remaining_shield:       src/shield.nr:50
+                                          Field, damage: Field, regenerated_shield: Field){
+                                                                                                                                                                                    
+                                          let remaining_shield_as_u32 = remaining_shield as u32;                          src/shield.nr:60
+                                                                                                                                                                                    
+                                          let remaining_shield_pct = calculate_remaining_shield_pct(initial_shield,       src/shield.nr:61
+                                          remaining_shield);
+                                                                                                                                                                                    
+                                          let remaining_shield_pct_as_u32 = remaining_shield_pct as u32;                  src/shield.nr:62
+                                                                                                                                                                                    
+                                          println(f"Shield status {remaining_shield_pct_as_u32}%                          src/shield.nr:63
+                                          {remaining_shield_as_u32}");
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    

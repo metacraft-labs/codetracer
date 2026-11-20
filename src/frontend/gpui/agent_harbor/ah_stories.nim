@@ -26,6 +26,8 @@ import ./ah_fleet_panel
 import ./ah_playback_bar
 import ./ah_composer
 import ../../stories/agent_harbor_composer_stories
+import ./ah_results
+import ../../stories/agent_harbor_results_stories
 import ./ah_session_activity
 import ../agent_activity_leaf
 import ../window_geometry
@@ -38,7 +40,8 @@ import ../../viewmodel/keymap/[base_keymaps, context_keys, editing_keymap,
                                scope_path, user_keymap]
 import ../../../common/key_names
 
-export agent_harbor_stories, ah_theme, ah_playback_bar, user_keymap, ah_composer
+export agent_harbor_stories, ah_theme, ah_playback_bar, user_keymap, ah_composer,
+  ah_results
 
 const
   GpuiAgentHarborSurfaces* = [
@@ -49,6 +52,7 @@ const
     "agent-harbor-initiatives",
     "agent-harbor-initiative-progress",
     "agent-harbor-composer",
+    "agent-harbor-results",
     "agent-harbor-session-activity",
   ]
     ## Every surface of the Agent Harbor section this module draws.
@@ -70,6 +74,7 @@ type
     initiatives*: InitiativesVM
     progress*: InitiativeProgressVM
     composer*: OmniboxComposerVM
+    results*: ResultCommandsVM
     timeline*: SessionTimelineVM
     cards*: ActivityAgainstCards
       ## The comparison story's cards (`agent_harbor_activity_cards`): its
@@ -141,6 +146,32 @@ proc composerKey*(m: AhStoryMount; name: string; keymap = UserKeymap()): string 
   var router = gpuiRouter(keymap)
   let res = router.route(SessionFacts(), ComposerScopePath, nmNormal, name, 0)
   if res.kind != erOperation or not m.composer.runComposerOperation(res.operation):
+    return ""
+  res.operation
+
+let ResultsScopePath = @[element(ekWindow, "window"), pane(ResultsScope)]
+  ## Where the results' keys and presses resolve.
+
+proc resultsPresses*(keymap: UserKeymap; vm: ResultCommandsVM): ResultsPress =
+  ## **THE STORY HOST'S ROUTE FOR A PRESS ON THE RESULTS**
+  ## (Input-Routing-And-Keymaps.md §5.1): resolved in the `results` scope by
+  ## the window's router -- a user's row for the press first, else the
+  ## operation the element carries -- and run on the results' viewmodel on
+  ## the element's target (`runResultsPress`).
+  let resolve = routerResolver(gpuiRouter(keymap), SessionFacts())
+  result = proc(operation, target: string) =
+    let outcome = resolveElementPress(resolve, ResultsScopePath, ButtonElementKind,
+                                      operation, {}, "Click")
+    discard vm.runResultsPress(outcome.operation, target)
+
+proc resultsKey*(m: AhStoryMount; name: string; keymap = UserKeymap()): string =
+  ## A key (its canonical name) while the results are shown, ROUTED in the
+  ## `results` scope: `Enter` opens, `Down` / `Up` move, `Tab` inserts.
+  ## Runs the operation it resolves to and returns it ("" for none).
+  if m.results.isNil: return ""
+  var router = gpuiRouter(keymap)
+  let res = router.route(SessionFacts(), ResultsScopePath, nmNormal, name, 0)
+  if res.kind != erOperation or not m.results.runResultsOperation(res.operation):
     return ""
   res.operation
 
@@ -314,6 +345,13 @@ proc mountAgentHarborStoryGpui*(r: GpuiRenderer; surface, fixture: string;
       m.composer = createComposerStoryVM(fixture)
       r.mountComposer(host, m.composer, p, bodyW, heightPx,
                       composerPresses(keymap, m.composer))
+    of "agent-harbor-results":
+      m.results = createResultsStoryVM(fixture)
+      # GPUI cannot render HTML: every rich row is drawn as its text form,
+      # and the header says so (OMNI-AREQ4, P2c study D45).
+      m.results.setHtmlEnabled(false)
+      r.mountResults(host, m.results, p, bodyW, heightPx,
+                     resultsPresses(keymap, m.results))
     of SessionActivitySurface:
       # The panel's body: the window less its frame (the header and the 8px
       # above the body) or less the playback bar.
@@ -399,6 +437,7 @@ proc mountAgentHarborStoryGpui*(r: GpuiRenderer; surface, fixture: string;
   let initiatives = m.initiatives
   let progress = m.progress
   let composer = m.composer
+  let results = m.results
   let timeline = m.timeline
   let cards = m.cards
   let playback = m.playback
@@ -410,6 +449,7 @@ proc mountAgentHarborStoryGpui*(r: GpuiRenderer; surface, fixture: string;
     if initiatives != nil: initiatives.dispose()
     if progress != nil: progress.dispose()
     if composer != nil: composer.dispose()
+    if results != nil: results.dispose()
     if timeline != nil: timeline.dispose()
     if cards.cards != nil:
       cards.cards.dispose()

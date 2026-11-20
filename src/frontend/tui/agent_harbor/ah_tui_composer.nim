@@ -74,9 +74,6 @@ const
   TitleCells* = 13
     ## A destination's title column at laptop width: the longest title,
     ## `MANAGER AGENT` (the web's 7.25rem column holds it in a smaller type).
-  FieldCells* = 48
-    ## The omnibox field in the caption bar (the web's caption omnibox,
-    ## about 380 px).
   SheetTop* = 2
     ## The sheet's first row: one row under the caption bar (the web's
     ## trigger gap).
@@ -105,24 +102,24 @@ type
     spacer: bool     ## a blank row, nothing to scroll to
     draw: proc(c: var AhCanvas; row: int) {.closure.}
 
-  Inks = object
+  Inks* = object
     ## The grounds and inks the sheet draws with, chosen once against the
     ## sheet's ground (`inksFor`).
-    window: string    ## the window under the caption bar, which the sheet covers
-    sheet: string     ## the sheet: the dropped surface's ground
-    band: string      ## the header and context, and the send line
-    quiet: string     ## a chip in view, not cited
-    removed: string   ## a chip the operator switched off
-    cited: string     ## a cited chip, a chosen option: the action surface
-    citedText: string ## the words on it
-    control: string   ## a button's and a choice's own ground
-    chosen: string    ## a chosen option
-    field: string     ## a form field's value (the app's input field)
-    menu: string      ## the add-context menu, on the band
-    caption: string   ## a caption on the sheet
-    bandCaption: string ## a caption on the band
-    bandError: string ## the error role on the band
-    controlText: string ## a quiet text on a control's ground
+    window*: string    ## the window under the caption bar, which the sheet covers
+    sheet*: string     ## the sheet: the dropped surface's ground
+    band*: string      ## the header and context, and the send line
+    quiet*: string     ## a chip in view, not cited
+    removed*: string   ## a chip the operator switched off
+    cited*: string     ## a cited chip, a chosen option: the action surface
+    citedText*: string ## the words on it
+    control*: string   ## a button's and a choice's own ground
+    chosen*: string    ## a chosen option
+    field*: string     ## a form field's value (the app's input field)
+    menu*: string      ## the add-context menu, on the band
+    caption*: string   ## a caption on the sheet
+    bandCaption*: string ## a caption on the band
+    bandError*: string ## the error role on the band
+    controlText*: string ## a quiet text on a control's ground
 
   Layout = object
     ## The sheet's inner columns, its inks, and where a press goes.
@@ -149,19 +146,19 @@ proc pressable(c: var AhCanvas; n: AhNode; press: ComposerPress; operation, targ
   n.tag("target", target)
   c.target(n.row, n.col, max(1, n.width), max(1, n.height), pressOf(press, operation, target))
 
-proc warningInk(p: AhPalette): string =
+proc warningInk*(p: AhPalette): string =
   ## Light's warning text role is a pale step meant for larger type; its
   ## hover step is the readable one (the web's `ah-role-warning`).
   if p.mode == dmDark: p.textWarning
   else: tokenHexOf(dtColorsUiTextWarningPrimaryHover, p.mode)
 
-proc readable(p: AhPalette; ground: string): string =
+proc readable*(p: AhPalette; ground: string): string =
   ## The caption role on `ground`, or the label role where the caption is
   ## too faint there.
   if contrastOf(p.textCaption, ground) >= CaptionMinContrast: p.textCaption
   else: p.textLabel
 
-proc firstOff(ground: string; candidates: openArray[string];
+proc firstOff*(ground: string; candidates: openArray[string];
               avoid: openArray[string] = []): string =
   ## The first candidate at least `ControlGroundMinContrast` off `ground`
   ## and not one of `avoid`; the last candidate when none is.
@@ -171,7 +168,7 @@ proc firstOff(ground: string; candidates: openArray[string];
       return cand
   candidates[^1]
 
-proc inksFor(c: AhCanvas): Inks =
+proc inksFor*(c: AhCanvas): Inks =
   ## The sheet's grounds, from the design system's surface roles.
   ##
   ## The sheet is three areas, where the web draws two hairlines: a band
@@ -316,7 +313,9 @@ proc listLines(s: string; cells: int): seq[string] =
   var all: seq[string]
   for part in s.split(", "):
     let piece = if line.len == 0: part else: ", " & part
-    if line.len > 0 and widthOf(line & piece) > cells:
+    # A line that breaks here ends in the comma, so the comma's cell counts:
+    # the line holds `cells` with it, never one cell into the sheet's inset.
+    if line.len > 0 and widthOf(line & piece & ",") > cells:
       all.add line & ","
       line = part
     else:
@@ -858,16 +857,16 @@ proc bodyBlocks(vm: OmniboxComposerVM; host: AhNode; lay: Layout;
     result.add Block(rows: paraRows(whole, width), draw: proc(c: var AhCanvas; row: int) =
       discard c.drawPara(host, row, left, width, whole, c.p.textBody, "instruction"))
     result.add blank()
-  if vm.phase in {cpSent, cpSendFailed} or
-      vm.phase == cpSending and vm.draft.deliveries.len > 1:
-    let sent = vm.sentLine
-    if sent.len > 0:
-      let sentText = vm.draft.sentText
-      result.add Block(rows: paraRows(sentText, width) + paraRows(sent, width),
-        draw: proc(c: var AhCanvas; row: int) =
-          let r = c.drawPara(host, row, left, width, sentText, c.p.textBody, "sent-text")
+  # What was sent, and where it went (no line while every delivery failed:
+  # the header and the row say it, D37).
+  let (sentText, sent) = vm.sentBlock
+  if sentText.len > 0:
+    result.add Block(rows: paraRows(sentText, width) + (if sent.len > 0: paraRows(sent, width) else: 0),
+      draw: proc(c: var AhCanvas; row: int) =
+        let r = c.drawPara(host, row, left, width, sentText, c.p.textBody, "sent-text")
+        if sent.len > 0:
           discard c.drawPara(host, row + r, left, width, sent, lay.ink.bandCaption, "sent-line"))
-      result.add blank()
+    result.add blank()
   if vm.isEmptyField:
     for b in result.mitems:
       b.band = true
@@ -938,11 +937,10 @@ proc drawSendLine(c: var AhCanvas; ink: Inks; press: ComposerPress; vm: OmniboxC
   if moreW > 0:
     discard c.text(send, row, bcol - GapCells - moreW, moreW, more, quiet,
                    fact = "send-more")
-  # The primary button: the action ground; Light takes the body text on it
-  # (the web's `by-mode(on-action, body)`); disabled, the disabled role on
-  # the controls' ground.
-  let (fg, bg) = if canSend:
-                   ((if c.p.mode == dmDark: c.p.onAction else: c.p.textBody), c.p.action)
+  # The primary button: CodeTracer's own primary button in both themes (P2c
+  # study D39): the action ground with the on-action text, the web's shared
+  # rule; disabled, the disabled role on the controls' ground.
+  let (fg, bg) = if canSend: (c.p.onAction, c.p.action)
                  else: (c.p.textDisabled, ink.quiet)
   discard c.put(row, bcol, button, fg, bg = bg)
   let b = c.node(send, row, bcol, bw, 1, [("action", "send"), ("button", label)])
@@ -962,11 +960,9 @@ proc drawComposer*(c: var AhCanvas; vm: OmniboxComposerVM; row, col, width, heig
   let field = ComposerPrefix & vm.fieldText
   let more = vm.moreLines
   let moreW = if more.len > 0: widthOf(more) + GapCells else: 0
-  # The caption omnibox's width, centred: what does not fit is cut. With
-  # `+N lines` beside it, the field takes the room its first line and the
-  # count need, so the first line still shows whole where the window has it.
-  let fieldW = if more.len == 0: min(width - 2, FieldCells)
-               else: min(width - 2, max(FieldCells, widthOf(field) + 2 + moreW))
+  # While the sheet is open the field has the sheet's edges (P2c study D36):
+  # `sheetWidthFor` cells, centred, the sheet's own.
+  let fieldW = min(width, max(10, vm.sheetWidthFor(width * CellPx) div CellPx))
   let fieldCol = col + (width - fieldW) div 2
   # The field is an area of its own: a ground off both the caption bar's
   # and the window's under it.
@@ -976,11 +972,13 @@ proc drawComposer*(c: var AhCanvas; vm: OmniboxComposerVM; row, col, width, heig
       fieldGround = cand
       break
   c.area("field", row, fieldCol, fieldW, 1, fieldGround)
-  # What does not fit is cut by the views' one rule: the web's input
-  # scrolls instead (P2c D32), a drawn line cannot, and a cut with no "…"
-  # would read as the whole instruction.
+  # What does not fit is cut in its middle by the one-line input rule (D35,
+  # D36): the start (`/ai ` and a few cells) and as much of the end, where
+  # the caret is, as fits. The web's input scrolls to its end instead (D32);
+  # a drawn line cannot scroll, and a cut with no "…" would read as the
+  # whole instruction.
   let fieldRoom = max(1, fieldW - 2 - moreW)
-  let fieldShown = elide(field, fieldRoom)
+  let fieldShown = elideMiddle(field, fieldRoom)
   discard c.put(row, fieldCol + 1, fieldShown, c.p.textBody)
   discard c.node(host, row, fieldCol, fieldW, 1, [("field", field)])
   if more.len > 0:

@@ -95,6 +95,7 @@ import ../../agent_harbor/ah_tui_session_views
 import ../../agent_harbor/ah_tui_initiative_tab_bar
 import ../../agent_harbor/ah_tui_fleet_panel
 import ../../agent_harbor/ah_tui_composer
+import ../../agent_harbor/ah_tui_results
 import ../../agent_harbor/ah_tui_session_activity
 import ../../../viewmodel/agent_harbor_activity_cards
 import nim_agents/agent_harbor/fleet_records
@@ -150,15 +151,16 @@ proc elidedMatch*(drawn, value: string): bool =
     return value.startsWith(kept) and widthOf(drawn) < widthOf(value)
   false
 
+proc drawnLines(m: AhTuiMount; n: AhNode): seq[string] =
+  ## The rows of a wrapped text, each line's ends trimmed.
+  for r in n.row ..< min(m.rows, n.row + n.height):
+    result.add m.canvas.grid.cellsText(r, n.col, n.width).strip
+
 proc drawnText(m: AhTuiMount; n: AhNode): string =
   ## The text a node's cells hold: its one row, or the rows of a wrapped
-  ## text (each line's ends trimmed) joined by a space, as the words were.
-  let g = m.canvas.grid
-  if n.height <= 1: return g.cellsText(n.row, n.col, n.width)
-  var lines: seq[string]
-  for r in n.row ..< min(m.rows, n.row + n.height):
-    lines.add g.cellsText(r, n.col, n.width).strip
-  lines.join(" ")
+  ## text joined by a space, as the words were.
+  if n.height <= 1: return m.canvas.grid.cellsText(n.row, n.col, n.width)
+  m.drawnLines(n).join(" ")
 
 proc sameWords(drawn, value: string): bool =
   ## A wrapped text against its value: the same words, a word cut across
@@ -177,8 +179,11 @@ proc drawnTextProblems(m: AhTuiMount): seq[string] =
           result.add "a " & fact & " says '" & n.attr(fact) & "' but draws no cell"
         continue
       let drawn = m.drawnText(n)
+      # A text of parts joined by ` · ` (a row's "what it is") breaks only
+      # between them and drops the separator at the break (P2c D51).
       if not (elidedMatch(drawn, n.attr(fact)) or
-              n.height > 1 and sameWords(drawn, n.attr(fact))):
+              n.height > 1 and (sameWords(drawn, n.attr(fact)) or
+                                m.drawnLines(n).join(" \xC2\xB7 ") == n.attr(fact))):
         result.add "a " & fact & " says '" & n.attr(fact) & "' but draws '" & drawn & "'"
 
 const NeverCutFacts = [
@@ -772,6 +777,41 @@ proc checkComposer(view: AhNode; vm: OmniboxComposerVM): seq[string] =
   else:
     result.expect("send", view.values("send").len, 0)
 
+proc checkResults(view: AhNode; vm: ResultCommandsVM): seq[string] =
+  ## The result commands' drawing against their viewmodel (CTF-P2c step 2):
+  ## the query's kind, the field, the header, the line in place of the
+  ## rows, every group in order with its state word, its rows in order with
+  ## the one selected, and `+N more`. A body that holds more than the
+  ## screen leaves it ends early (the sheet says how many lines it hid): the
+  ## groups and rows drawn are then a prefix of the viewmodel's.
+  result.expect("kind", view.attr("kind"), $vm.kind)
+  result.expect("field", view.values("field"), @[vm.input])
+  result.expect("header", view.values("header"), @[vm.headerText])
+  let n = vm.notice
+  result.expect("notice", view.values("notice-line"), if n.text.len > 0: @[n.text] else: @[])
+  result.expect("back", view.values("back").len, if vm.alone.val.len > 0: 1 else: 0)
+  let sheet = view.first("sheet")
+  let scrolled = not sheet.isNil and sheet.attr("hidden-below") != "0"
+  var groups, states, rows, selected, more: seq[string]
+  for g in vm.groups:
+    groups.add g.group.id
+    states.add stateWord(g.group)
+    for i, r in g.rows:
+      rows.add r.title
+      selected.add $vm.isSelected(g, i)
+    let m = moreLabel(g)
+    if m.len > 0: more.add m
+  template prefix(what: string; drawn, wanted: seq[string]) =
+    if scrolled and drawn.len <= wanted.len: result.expect(what, drawn, wanted[0 ..< drawn.len])
+    else: result.expect(what, drawn, wanted)
+  prefix("groups", view.values("group"), groups)
+  prefix("group states", view.values("state"), states)
+  prefix("rows", view.values("row"), rows)
+  prefix("selected rows", view.values("selected"), selected)
+  prefix("more", view.values("more"), more)
+  if not scrolled:
+    result.expect("more below", view.values("more-below").len, 0)
+
 const TimelineFacts = ["line-kind", "level", "indent", "text", "role", "item-kind", "state",
                        "expanded", "focused", "count", "failed", "running", "path", "copy"]
   ## The facts a drawn timeline line carries (`lineFacts`), each compared
@@ -870,6 +910,7 @@ proc checkStory(m: AhTuiMount): seq[string] =
   of "agent-harbor-initiative-progress": checkProgress(view, m.progress)
   of "agent-harbor-fleet": checkFleet(view, m.fleet)
   of "agent-harbor-composer": checkComposer(view, m.composer)
+  of "agent-harbor-results": checkResults(view, m.results)
   of "agent-harbor-session-activity":
     var problems = checkTimeline(view, m.timeline)
     if not m.cards.cards.isNil:

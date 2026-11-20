@@ -1,0 +1,56 @@
+                                         /s field
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                          18 results from 4 providers · Enter opens
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                          FILES                                                                                          2
+                                         ▎fixtures/positive_field.toml
+                                          fixtures/negative_field.toml
+                                                                                                                                                                                    
+                                          SYMBOLS                                                                               no results
+                                                                                                                                                                                    
+                                          PROGRAM TEXT                                                                                  10
+                                          // We are about to pass trough an asteroid field, changing the course is very      src/main.nr:4
+                                          expensive at this speed
+                                                                                                                                                                                    
+                                          fn main(initial_shield: Field, shield_regen_percentage: Field,                    src/main.nr:12
+                                          asteroid_masses_positive: pub [Field; 8], asteroid_masses_negative: pub [Field;
+                                          8]) -> pub bool {
+                                                                                                                                                                                    
+                                          pub fn iterate_asteroids(initial_shield: Field, shield_regen_percentage: Field,  src/shield.nr:1
+                                          masses: [Field; 8]) -> bool {
+                                                                                                                                                                                    
+                                          fn calculate_damage(initial_shield: Field, remaining_shield: Field, mass:       src/shield.nr:22
+                                          Field) -> Field {
+                                                                                                                                                                                    
+                                          fn calculate_shield_regeneration(initial_shield:Field, remaining_shield:Field,  src/shield.nr:37
+                                          shield_regen_percentage: Field) -> Field{
+                                                                                                                                                                                    
+                                          regen as Field                                                                  src/shield.nr:43
+                                                                                                                                                                                    
+                                          fn calculate_remaining_shield_pct(initial_shield: Field, remaining_shield:      src/shield.nr:45
+                                          Field) -> Field {
+                                                                                                                                                                                    
+                                          result as Field                                                                 src/shield.nr:47
+                                          +2 more
+                                                                                                                                                                                    
+                                          AGENT HARBOR SESSIONS                                                                          6
+                                          Add a test for an asteroid field that drains the sh…  Shield model hardening · Codex · completed
+                                                                                                                                                                                    
+                                          Make calculate_damage safe for masses above u32  Shield model hardening · Grok · needs input
+                                          “Cast the masses to u64 before multiplying, or keep Field arithmetic and range-check
+                                          the product?”
+                                                                                                                                                                                    
+                                          Print the shield percentage after every hit  Shield model hardening · Opencode · completed
+                                          “status_report prints "Shield status 90% 9000" after every hit; both fields' output checked.”
+                                                                                                                                                                                    
+                                          Load the asteroid fields from fixtures/*.toml  Asteroid fields as fixtures · Claude · running
+                                          Generate the negative asteroid field from a seed  Asteroid fields as fixtures · Codex · queued
+                                          Fix the negative-field test that tim…  Tests on the arm64 and macOS runners · Grok · needs input
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
