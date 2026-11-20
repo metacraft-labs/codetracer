@@ -73,6 +73,7 @@ BINDING = "src/frontend/tui/app/frame_viewer_binding.nim"
 RUNTIME = "src/frontend/tui/app/runtime.nim"
 HOST = "src/frontend/tui/host/tui_session.nim"
 FRAME_IMAGE = "src/frontend/tui/host/frame_image.nim"
+MAIN = "src/frontend/tui/main.nim"
 GPUI_LEAF = "src/frontend/gpui/visual_replay_leaf.nim"
 GPUI_MAIN = "src/frontend/gpui/main.nim"
 VOCAB = "src/frontend/view_vocabulary/pane_views.nim"
@@ -90,7 +91,7 @@ REFUSAL = "src/frontend/tui/tests/test_container_version_refusal.nim"
 SPEC = "src/tests/gui/tests/frame-viewer/plat59-visual-replay-capture.spec.ts"
 
 SUBJECTS = [PANES, PLAYER, FRAME, HISTORY, CLIENT, PRODUCER, OPEN, CHANNEL, TUI_PANE,
-            TUI_PANES, BINDING, RUNTIME, HOST, FRAME_IMAGE, GPUI_LEAF,
+            TUI_PANES, BINDING, RUNTIME, HOST, FRAME_IMAGE, MAIN, GPUI_LEAF,
             GPUI_MAIN, VOCAB, FACTORY, OVERLAY]
 SUITES = [VMU, TBL, PTY, PLAN, SPEC, REFUSAL]
 
@@ -231,13 +232,38 @@ ARMS = [
              "  false")],
      [(TBL, TBL_DRAW)],
      "the Video Player draws no draw-call scrubber"),
-    ("T3", [(TUI_PANE, "    model.capability.protocol in {ImageProtocol.ipKitty, ImageProtocol.ipITerm2}",
+    ("T3", [(TUI_PANE, "    model.capability.protocol in {ImageProtocol.ipKitty, ImageProtocol.ipITerm2,\n"
+                       "                                  ImageProtocol.ipSixel}",
              "    false")],
      [(TBL, TBL_TIER0)],
      "a tier-0 terminal reserves no cells for the frame"),
-    ("T4", [(FRAME_IMAGE, "    body.add kittyPlaceFrame(rect)", "    discard")],
+    ("T4", [(FRAME_IMAGE, "  body.add cursorTo(rect)", "  discard")],
+     [(TBL, TBL_TIER0), (PTY, None)],
+     "the frame is transmitted wherever the cursor happens to be, not over "
+     "the reserved cells"),
+    ("T12", [(FRAME_IMAGE, "    FramePlacementId, rect.width, rect.height, alreadyUploaded = uploaded,",
+              "    FramePlacementId, rect.width, rect.height, alreadyUploaded = true,")],
+     [(TBL, TBL_TIER0), (PTY, None)],
+     "a new frame is only ever re-placed: its pixels never reach the terminal"),
+    ("T13", [(FRAME_IMAGE, "  if demoteForPayload(cap, emission.emittedBytes).tier != itProtocol:",
+              "  if false:")],
      [(TBL, TBL_TIER0)],
-     "the Kitty frame is transmitted and never placed"),
+     "over SSH a frame larger than the link budget is sent anyway"),
+    ("T16", [(FRAME_IMAGE, "      emitSixelImage(model.raster, rect.width, rect.height, cw, ch,",
+              "      emitSixelImage(model.raster, rect.width, rect.height, ch, cw,")],
+     [(TBL, TBL_TIER0), (PTY, None)],
+     "a Sixel frame is sized with the cell's width and height swapped"),
+    ("T17", [(FRAME_IMAGE, "    elif not state.placed.isEmptyArea:\n      state.repaintNeeded = true",
+              "    elif false:\n      state.repaintNeeded = true")],
+     [(TBL, TBL_TIER0)],
+     "a Sixel or iTerm2 frame taken down leaves its pixels on the terminal"),
+    ("T15", [(MAIN, "        if graphics.probe.noteProbeReplies(ev.token):\n"
+                    "          graphics.fenced = true",
+              "        if false:\n"
+              "          graphics.fenced = true")],
+     [(PTY, None)],
+     "the graphics probe's replies are swallowed unread: a Kitty terminal "
+     "never reaches tier 0"),
     ("T5", [(RUNTIME, "  discard rt.actOnVisual(VisualAct(kind: vaPickPixel, x: x, y: y), outcome)",
              "  discard")],
      [(TBL, TBL_PICK)],
@@ -311,7 +337,8 @@ ARMS = [
 DECLARED_SURVIVORS = {"Z1"}
 
 IN_BINARY = {PANES, PLAYER, FRAME, HISTORY, CLIENT, PRODUCER, TUI_PANE,
-             TUI_PANES, BINDING, RUNTIME, HOST, FRAME_IMAGE, VOCAB, OVERLAY}
+             TUI_PANES, BINDING, RUNTIME, HOST, FRAME_IMAGE, MAIN, VOCAB,
+             OVERLAY}
 IN_GPUI = {PANES, PLAYER, FRAME, HISTORY, CLIENT, PRODUCER, GPUI_LEAF,
            GPUI_MAIN, VOCAB, OVERLAY}
 IN_DESKTOP = {FACTORY}

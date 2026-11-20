@@ -232,7 +232,11 @@ maxv = (1 << depth) - 1
 def px(x, y):
     # The formula, in 8-bit terms: r, g, b, a.
     return ((x * 37 + y * 11) % 256, (x * 5 + y * 53) % 256, (x * y * 7) % 256, (255 - x * 9) % 256)
-def scale(v): return v * maxv // 255
+def scale(v):
+    # 16-bit samples get a low byte that differs from the high one, so a
+    # decoder that kept the wrong byte is caught (v * 257 would repeat it).
+    if depth == 16: return v * 256 + (37 * v + 11) % 256
+    return v * maxv // 255
 palette = []
 def pal_index(p):
     key = (p[0] >> 6, p[1] >> 6)  # 16 entries, folded to the depth's range
@@ -313,7 +317,8 @@ func expected(ctype, depth, x, y: int): array[4, int] =
   let a = (255 - x * 9 + 256 * 4) mod 256
   let maxv = (1 shl depth) - 1
   proc back(v: int): int =
-    let s = v * maxv div 255
+    let s = if depth == 16: v * 256 + (37 * v + 11) mod 256
+            else: v * maxv div 255
     if depth == 16: s shr 8
     elif depth == 8: s
     else: s * 255 div maxv
