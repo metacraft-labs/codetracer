@@ -466,6 +466,25 @@ type
     clockMs*: int64
       ## The latest time the runtime was told (a token, a tick).
 
+  ProjectDefinitionsService* = ref object
+    ## What only the host can do about the open checkout's project
+    ## definitions (Project-Definitions.md): it read them off the disk when
+    ## the session opened, it holds the trust ledger, and it is the one half
+    ## that may read an executable definition's bytes — to digest them for a
+    ## review, never to run them. `:project` reaches each closure; every one
+    ## answers the text the user is shown.
+    report*: proc(): string {.closure.}
+      ## `:project` — what loaded, what is in force, what did not run.
+    review*: proc(): tuple[ok: bool, text: string] {.closure.}
+      ## `:project review` — the trust disclosure for the code the project
+      ## ships that has not been granted.
+    grant*: proc(): string {.closure.}
+      ## `:project grant` — grant exactly what the last review showed.
+    revoke*: proc(): string {.closure.}
+      ## `:project revoke` — withdraw this checkout's grants.
+    reload*: proc(): string {.closure.}
+      ## `:project reload` — read the definitions again now.
+
   TerminalService* = ref object
     ## PLAT-71 (Terminal-Adaptation §5, §10): what only the host can do
     ## about the terminal — it holds the start-up negotiation.
@@ -631,6 +650,9 @@ type
       ## PLAT-51: the HOST's write of a layout preference (`:set
       ## focus-highlight off`, `:set scrollbar-thickness thin`), "" on
       ## success, else why not. Nil in a host that keeps no state.
+    projectDefinitions*: ProjectDefinitionsService
+      ## The HOST's half of `:project` (see the type). Nil until a session
+      ## opened a checkout.
     terminalService*: TerminalService
       ## PLAT-71: the HOST's half of the terminal settings and the report —
       ## re-resolving the capability profile when `:set` changes one (rank 1
@@ -1694,6 +1716,9 @@ proc runBuildLine*(rt: TuiRuntime; line: string): string =
   ## A `:build` line (§3.12) through the shared grammar. What to say.
   runBuildVerb(rt.buildTaskHost, rt.buildTaskConfig, parseBuildVerb(line))
 
+proc showContent(rt: TuiRuntime; title, text: string; diff = false;
+                 outcome: var RuntimeOutcome)
+
 proc runCommandLine(rt: TuiRuntime; line: string; outcome: var RuntimeOutcome;
                     unknownFallsThrough = false): bool =
   ## One command line, through CTUI-10's interpreter and the verbs beside it —
@@ -1729,6 +1754,36 @@ proc runCommandLine(rt: TuiRuntime; line: string; outcome: var RuntimeOutcome;
         rt.note(sl.message)
       else:
         rt.note(rt.applyLayoutSetting(sl.setting, sl.value))
+      outcome.detail = rt.app.notification
+      return
+
+  # `:project` — the open checkout's project definitions, and the trust
+  # decision about the code it ships (`ProjectDefinitionsService`).
+  block:
+    var text = line.strip()
+    if text.startsWith(":"):
+      text = text[1 .. ^1].strip()
+    let words = text.splitWhitespace()
+    if words.len > 0 and words[0] == "project":
+      outcome.repaint = true
+      let svc = rt.projectDefinitions
+      let sub = if words.len > 1: words[1] else: ""
+      if svc.isNil:
+        rt.note("no recording is open, so no project definitions were read")
+      else:
+        case sub
+        of "":
+          rt.showContent("PROJECT DEFINITIONS", svc.report(), false, outcome)
+        of "review":
+          let (ok, body) = svc.review()
+          if ok: rt.showContent("TRUST THIS PROJECT'S CODE?", body, false,
+                                outcome)
+          else: rt.note(body)
+        of "grant": rt.note(svc.grant())
+        of "revoke": rt.note(svc.revoke())
+        of "reload": rt.note(svc.reload())
+        else:
+          rt.note(":project takes nothing, review, grant, revoke or reload")
       outcome.detail = rt.app.notification
       return
 

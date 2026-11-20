@@ -83,6 +83,19 @@ suite "a session reads its checkout's definitions":
     check d.pending.len == 0
     check describeCheckout(d).contains("declares no project definitions")
 
+  test "the launcher's own user root is not a project's .codetracer/":
+    # `$HOME/.codetracer` holds the launcher's registry and the trust ledgers;
+    # a session opened from the home directory must not read it as a project.
+    let w = newWorld("home")
+    let home = w.root.parentDir / "home"
+    createDir(home / ".codetracer")
+    writeFile(home / ".codetracer/visualisers.toml", Visualisers)
+    putEnv(userRootEnvVar, home / ".codetracer")
+    let d = readCheckoutDefinitions(home)
+    check not d.present
+    check d.visualisers.len == 0
+    putEnv(userRootEnvVar, w.userRoot)
+
   test "collections are resolved against the checkout's own files, per point":
     let w = newWorld("points")
     w.write("src/router.nim", Router)

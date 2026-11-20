@@ -376,6 +376,23 @@ proc withSourceWindow*(model: SourcePaneModel; vm: SourceVM): SourcePaneModel =
 # of: both compile, both run, and only one of them is right
 # (Verification-Harness-Traps §14).
 
+proc pointListPaneModelOf*(rows: openArray[PointListEntry]): PointListPaneModel =
+  ## The Points pane over the store's rows themselves: every point the gutter
+  ## marks (`sourcePointsOf`'s rows, in the same order and the same words), and
+  ## every point of a project's collection whether or not it could be located
+  ## — Project-Definitions §4's "a point whose location no longer resolves is
+  ## reported, not dropped", which a pane built from the gutter's points alone
+  ## could not honour.
+  var paneRows: seq[PointListPaneRow] = @[]
+  for r in rows:
+    if r.kind notin [PointKindBreakpoint, PointKindTracepoint]: continue
+    if r.line < 1 and r.collection.len == 0: continue
+    paneRows.add PointListPaneRow(kind: r.kind, path: r.path,
+      line: max(0, r.line), enabled: r.enabled,
+      column: (if r.kind == PointKindBreakpoint: r.column else: 0),
+      collection: r.collection, resolution: r.resolution, id: r.id)
+  initPointListPaneModel(paneRows, loaded = true)
+
 proc pointListPaneModelFor*(points: openArray[SourcePoint]): PointListPaneModel =
   ## PLAT-40. The Points pane's rows: the SAME points the gutter marks, so the
   ## pane and the gutter cannot disagree about which lines carry one.

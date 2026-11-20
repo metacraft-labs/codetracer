@@ -1563,10 +1563,13 @@ proc interactive(command: TuiCommand): int =
         session.applyOutcome(rt, bars)
       let barsChanged = bars.repaint
       let keysChanged = rt.pollKeybindings(keybindings)
+      # The checkout's project definitions, when the author saved one.
+      let definitionsChanged = session.pumpDefinitions(rt, nowMs())
       if drainHighlights(rt, highlights, files) or built or vcsChanged or
          hoverChanged or frameOwed or recorded or keysChanged or searched or
          barsChanged or testsChanged or agentChanged or problemsChanged or
-         requestsChanged or verified or constraintsChanged or shellChanged or visualChanged:
+         requestsChanged or verified or constraintsChanged or shellChanged or visualChanged or
+         definitionsChanged:
         paint(driver, rt)
         frameOwed = false
     of dekResize:

@@ -109,6 +109,18 @@ proc userDefinitionsRoot*(): string =
   let r = launcherUserRoot()
   if r.len == 0: "" else: r / UserDefinitionsSubdir
 
+proc isLauncherUserRoot(dir: string): bool =
+  ## `$HOME/.codetracer` is the LAUNCHER's user root (its registry, its
+  ## components, the trust ledgers) — PLAT-11's residue 1 names the collision
+  ## — so a session opened from the home directory must not read it as a
+  ## project's definitions.
+  let user = launcherUserRoot()
+  if user.len == 0: return false
+  try:
+    expandFilename(dir) == expandFilename(user)
+  except CatchableError, Defect:
+    false
+
 proc packageScopesFor*(root: string; sourcePaths: openArray[string]):
     seq[string] =
   ## Every directory strictly between `root` and a recorded source file that
@@ -124,7 +136,8 @@ proc packageScopesFor*(root: string; sourcePaths: openArray[string]):
     if not file.startsWith(base & "/"): continue
     var rel = file[base.len + 1 .. ^1].parentDir
     while rel.len > 0 and rel != "." and rel != "/":
-      if rel notin result and dirExists(base / rel / ProjectDefinitionDir):
+      if rel notin result and dirExists(base / rel / ProjectDefinitionDir) and
+         not isLauncherUserRoot(base / rel / ProjectDefinitionDir):
         result.add rel
       let up = rel.parentDir
       if up == rel: break
@@ -191,7 +204,8 @@ proc readCheckoutDefinitions*(root: string;
   if root.len == 0 or not dirExists(root):
     return
   result.scopes = packageScopesFor(root, sourcePaths)
-  result.present = dirExists(root / ProjectDefinitionDir) or
+  result.present = (dirExists(root / ProjectDefinitionDir) and
+                    not isLauncherUserRoot(root / ProjectDefinitionDir)) or
                    result.scopes.len > 0
   let users = if userRoot.len > 0: userRoot else: userDefinitionsRoot()
   result.stamp = definitionsStamp(root, result.scopes)
