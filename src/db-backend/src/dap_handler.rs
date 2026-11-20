@@ -1750,15 +1750,28 @@ impl Handler {
             // walk on a replay can take tens of seconds; a front-end that
             // reads silence as a stalled engine (GPUI gives up after 30 s
             // without a message) is told how it is going meanwhile.
+            //
+            // A step can itself take longer than the front-end's patience on a
+            // starved host (one rr step past 30 s at load 130), so a heartbeat
+            // repeats the last count on a timer as well (`FlowHeartbeat`).
             let progress_sender = sender.clone();
+            let heartbeat = FlowHeartbeat::start(
+                sender.clone(),
+                FLOW_HEARTBEAT_INTERVAL,
+                FLOW_HEARTBEAT_CEILING,
+                flow_replay.cpu_watch(),
+            );
+            let walked = heartbeat.steps_walked();
             self.flow_preloader
                 .report_progress(FLOW_PROGRESS_INTERVAL, move |progress| {
+                    walked.store(progress.steps_walked, std::sync::atomic::Ordering::Relaxed);
                     let _ = progress_sender.send(flow_progress_event(progress));
                 });
             let flow_update = self
                 .flow_preloader
                 .load(location, arg.flow_mode, self.trace_kind, &mut *flow_replay);
             self.flow_preloader.stop_reporting_progress();
+            drop(heartbeat);
             flow_update
             // let step_id = StepId(arg.location.rr_ticks.0);
             // let call_key = self.db.steps[step_id].call_key;
@@ -3710,7 +3723,13 @@ impl Handler {
 
     /// `expression`'s value, whole, at the exact stop a flow kept for it.
     fn load_flow_value_at_stop(&mut self, stop: &Location, expression: &str) -> Result<Value, Box<dyn Error>> {
-        let landed = self.replay.jump_to_call(stop).map_err(|e| {
+        // The popup waits on this one jump. On a host at load 109 it took
+        // over the 10 s a side replay's query is given, and the popup stayed
+        // cut (Pascal sudoku, 2026-11-20); a working worker is waited for.
+        self.replay.set_waits_on_busy_motions(true);
+        let jumped = self.replay.jump_to_call(stop);
+        self.replay.set_waits_on_busy_motions(false);
+        let landed = jumped.map_err(|e| {
             format!(
                 "ct/load-flow-value-elements: the replay could not return to the step's stop at {}:{}: {e}",
                 stop.path, stop.line
@@ -8587,6 +8606,112 @@ fn forked_process_executable(
 
 /// How often a flow walk reports its progress (`ct/flow-progress`).
 const FLOW_PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// How often a flow walk's heartbeat looks at its worker (`FlowHeartbeat`).
+const FLOW_HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// How long a flow walk's heartbeat beats at most: past it, a walk still
+/// running is left to the front-end's own patience (`FlowHeartbeat`).
+const FLOW_HEARTBEAT_CEILING: std::time::Duration = std::time::Duration::from_secs(600);
+
+/// Sends `ct/flow-progress` on a timer while a flow walk runs and its replay
+/// worker is working, with the step count the walk last reported.
+///
+/// The walk reports as its steps complete (`FlowPreloader::report_progress`),
+/// so a step that takes long sends nothing while it runs. On a host at load
+/// 130 one rr step outlasted the 30 s GPUI gives an engine that sends nothing,
+/// and the window gave up on a flow that was still being walked (the native
+/// draft `low-level-code-native-steps-by-instruction`, 2026-11-20).
+///
+/// A beat is a claim that the engine is working, so it is sent only when it
+/// is true: each `every`, the heartbeat looks at the worker's process tree
+/// (`WorkerCpuWatch`: the worker, its rr, the processes rr traces) and beats
+/// only if it used CPU since the last look. A worker that hangs -- alive and
+/// asleep -- gets no beats, and the front-end's clock runs out on it as it
+/// should. A walk without a worker gets none either (its own reports are all
+/// there is), and none is sent after `ceiling`. The heartbeat runs on its own
+/// thread until it is dropped.
+pub struct FlowHeartbeat {
+    steps_walked: std::sync::Arc<std::sync::atomic::AtomicI64>,
+    stop: Option<std::sync::mpsc::Sender<()>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl FlowHeartbeat {
+    /// Look at the worker every `every`, and send `ct/flow-progress` on
+    /// `sender` when it worked, for at most `ceiling`.
+    pub fn start(
+        sender: Sender<DapMessage>,
+        every: std::time::Duration,
+        ceiling: std::time::Duration,
+        watch: Option<crate::recreator_session::WorkerCpuWatch>,
+    ) -> FlowHeartbeat {
+        let steps_walked = std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0));
+        let (stop, stopped) = std::sync::mpsc::channel::<()>();
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let thread = watch.and_then(|mut watch| {
+                let walked = steps_walked.clone();
+                let started_ms = crate::wall_clock::monotonic_ms();
+                let ceiling_ms = u64::try_from(ceiling.as_millis()).unwrap_or(u64::MAX);
+                // The first look has nothing to compare with.
+                let _ = watch.advanced();
+                std::thread::Builder::new()
+                    .name("flow-heartbeat".to_string())
+                    .spawn(move || {
+                        while let Err(std::sync::mpsc::RecvTimeoutError::Timeout) = stopped.recv_timeout(every) {
+                            let elapsed_ms = crate::wall_clock::monotonic_ms().saturating_sub(started_ms);
+                            if elapsed_ms > ceiling_ms {
+                                break;
+                            }
+                            if !watch.advanced() {
+                                continue;
+                            }
+                            let progress = crate::flow_preloader::FlowProgress {
+                                steps_walked: walked.load(std::sync::atomic::Ordering::Relaxed),
+                                elapsed_ms,
+                            };
+                            if sender.send(flow_progress_event(progress)).is_err() {
+                                break;
+                            }
+                        }
+                    })
+                    .ok()
+            });
+            FlowHeartbeat {
+                steps_walked,
+                stop: Some(stop),
+                thread,
+            }
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            // No threads here; the walk's own reports are all there is.
+            let _ = (sender, every, ceiling, watch, stopped);
+            FlowHeartbeat {
+                steps_walked,
+                stop: Some(stop),
+            }
+        }
+    }
+
+    /// Where the walk records how many steps it has visited.
+    pub fn steps_walked(&self) -> std::sync::Arc<std::sync::atomic::AtomicI64> {
+        self.steps_walked.clone()
+    }
+}
+
+impl Drop for FlowHeartbeat {
+    fn drop(&mut self) {
+        // Dropping the sender ends the thread's wait at once.
+        self.stop.take();
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
 
 /// The `ct/flow-progress` event: a flow walk is under way and has visited
 /// `stepsWalked` steps in `elapsedMs`. Its `seq` is set by the sending thread.

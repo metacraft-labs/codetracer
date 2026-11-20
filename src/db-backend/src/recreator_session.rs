@@ -326,6 +326,12 @@ fn is_read_timeout(e: &std::io::Error) -> bool {
 /// 2026-11-15).
 fn waits_on_a_busy_worker(worker_name: &str, raw_json: &str) -> bool {
     const SIDE_REPLAYS: &[&str] = &["flow", "tracepoint"];
+    !SIDE_REPLAYS.contains(&worker_name) && is_motion(raw_json)
+}
+
+/// Whether a serialized replay query moves the replay (see
+/// [`waits_on_a_busy_worker`]).
+fn is_motion(raw_json: &str) -> bool {
     const MOTIONS: &[&str] = &[
         "RunToEntry",
         "Step",
@@ -341,7 +347,7 @@ fn waits_on_a_busy_worker(worker_name: &str, raw_json: &str) -> bool {
         "SaveReplayPosition",
         "RestoreReplayPosition",
     ];
-    !SIDE_REPLAYS.contains(&worker_name) && MOTIONS.contains(&replay_query_kind(raw_json).as_str())
+    MOTIONS.contains(&replay_query_kind(raw_json).as_str())
 }
 
 struct WorkerProgress {
@@ -587,6 +593,14 @@ pub struct ReplayWorker {
     /// the flow is superseded the worker is stopped at once, even with a
     /// query in flight, and is not started again.
     cancel: Option<FlowCancel>,
+    /// The pid of the worker process while it runs, 0 when there is none:
+    /// shared, so another thread can watch the worker without the session
+    /// (see [`WorkerCpuWatch`]).
+    live_pid: std::sync::Arc<std::sync::atomic::AtomicU32>,
+    /// A motion of this worker's replay is waited for while the worker is
+    /// busy, even on a side replay (see
+    /// [`ReplaySession::set_waits_on_busy_motions`]).
+    waits_on_busy_motions: bool,
 }
 
 #[derive(Default, Debug, Clone)]
@@ -655,6 +669,8 @@ impl ReplayWorker {
             recording_id: recording_id.to_string(),
             process: None,
             stream: None,
+            live_pid: Default::default(),
+            waits_on_busy_motions: false,
             last_death: None,
             cancel: None,
         }
@@ -806,6 +822,7 @@ impl ReplayWorker {
         let worker_pid = ct_worker.id();
         eprintln!("[rr-worker] spawned worker pid={}", worker_pid);
         self.process = Some(ct_worker);
+        self.live_pid.store(worker_pid, std::sync::atomic::Ordering::Relaxed);
         if let Err(err) = self.setup_worker_sockets() {
             let worker_stderr = std::fs::read_to_string(&log_path)
                 .ok()
@@ -816,6 +833,7 @@ impl ReplayWorker {
                 let _ = child.wait();
             }
             self.process = None;
+            self.live_pid.store(0, std::sync::atomic::Ordering::Relaxed);
             self.stream = None;
             self.active = false;
             // #689: the worker's stderr is not just a diagnostic blob — when
@@ -1147,7 +1165,8 @@ impl ReplayWorker {
         // continue took more than 10 s, the worker was stopped, and the next
         // query (a value-origin walk) found no worker. Every other query keeps
         // the plain timeout (`waits_on_a_busy_worker`).
-        let waits_on_busy = waits_on_a_busy_worker(&self.name, &raw_json);
+        let waits_on_busy =
+            waits_on_a_busy_worker(&self.name, &raw_json) || (self.waits_on_busy_motions && is_motion(&raw_json));
         // Its first look is taken once the answer is late (the first read
         // slice passes), so a query answered at once never pays for it.
         let mut progress = WorkerProgress::deferred(worker_pid);
@@ -1339,6 +1358,7 @@ impl ReplayWorker {
         self.stream = None;
         self.active = false;
         let pid = self.process.as_ref().map(Child::id);
+        self.live_pid.store(0, std::sync::atomic::Ordering::Relaxed);
         let process_end = match self.process.take() {
             Some(mut child) => reap_worker(&mut child, WORKER_EXIT_GRACE),
             None => "the session holds no process handle for it".to_string(),
@@ -1364,7 +1384,66 @@ impl ReplayWorker {
             let _ = child.wait();
         }
         self.process = None;
+        self.live_pid.store(0, std::sync::atomic::Ordering::Relaxed);
         self.active = false;
+    }
+
+    /// Wait for a motion of this worker's replay while the worker is busy,
+    /// even on a side replay (see [`ReplaySession::set_waits_on_busy_motions`]).
+    pub fn set_waits_on_busy_motions(&mut self, on: bool) {
+        self.waits_on_busy_motions = on;
+    }
+
+    /// A watch on this worker's CPU time, usable from another thread.
+    pub fn cpu_watch(&self) -> WorkerCpuWatch {
+        WorkerCpuWatch {
+            pid: self.live_pid.clone(),
+            watched_pid: 0,
+            last: None,
+        }
+    }
+}
+
+/// Whether a replay worker is working: its process tree (the worker, the rr
+/// it started, the processes rr traces) used CPU since the last look.
+///
+/// A flow walk's heartbeat (`dap_handler::FlowHeartbeat`) beats only while
+/// this holds, so a worker that hangs -- alive and asleep -- still leaves the
+/// front-end in silence, and it gives up within its own budget.
+#[derive(Debug)]
+pub struct WorkerCpuWatch {
+    pid: std::sync::Arc<std::sync::atomic::AtomicU32>,
+    watched_pid: u32,
+    last: Option<std::collections::HashMap<u32, u64>>,
+}
+
+impl WorkerCpuWatch {
+    /// A watch on `pid` and its process tree, for a worker started elsewhere.
+    pub fn of_pid(pid: u32) -> WorkerCpuWatch {
+        WorkerCpuWatch {
+            pid: std::sync::Arc::new(std::sync::atomic::AtomicU32::new(pid)),
+            watched_pid: 0,
+            last: None,
+        }
+    }
+
+    /// Whether the worker's processes used CPU since the last call. The first
+    /// look at a worker (and the first after it was replaced) answers false:
+    /// it has nothing to compare with.
+    pub fn advanced(&mut self) -> bool {
+        let pid = self.pid.load(std::sync::atomic::Ordering::Relaxed);
+        if pid == 0 {
+            self.last = None;
+            return false;
+        }
+        let Some(now) = worker_tree_cpu_ticks(pid) else {
+            self.last = None;
+            return false;
+        };
+        let advanced = self.watched_pid == pid && self.last.as_ref().is_some_and(|before| used_cpu_since(before, &now));
+        self.watched_pid = pid;
+        self.last = Some(now);
+        advanced
     }
 }
 
@@ -1673,6 +1752,14 @@ fn default_materialization_cache_ctfs_path(path: &Path) -> Option<PathBuf> {
 }
 
 impl ReplaySession for RecreatorReplaySession {
+    fn cpu_watch(&self) -> Option<WorkerCpuWatch> {
+        Some(self.stable.cpu_watch())
+    }
+
+    fn set_waits_on_busy_motions(&mut self, on: bool) {
+        self.stable.set_waits_on_busy_motions(on);
+    }
+
     fn supports_instruction_stepping(&mut self) -> bool {
         if let Some(supported) = self.instruction_stepping {
             return supported;
@@ -2796,6 +2883,8 @@ while True:
                 recording_id: "test-recording".to_string(),
                 process: None,
                 stream: Some(client),
+                live_pid: Default::default(),
+                waits_on_busy_motions: false,
                 last_death: None,
                 cancel: None,
             },
@@ -2875,6 +2964,8 @@ while True:
                 recording_id: "test-recording".to_string(),
                 process: None,
                 stream: Some(client),
+                live_pid: Default::default(),
+                waits_on_busy_motions: false,
                 last_death: None,
                 cancel: None,
             },

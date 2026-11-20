@@ -48,7 +48,12 @@ fn write_busy_worker(dir: &Path) -> PathBuf {
 /// answer the first query three seconds late (three read timeouts) and every
 /// later one at once, and send `first` then a `LoadLocation`. Returns both
 /// answers, or the errors that ended them.
-fn two_queries(dir: &Path, role: &str, first: ReplayQuery) -> (Result<String, String>, Result<String, String>) {
+fn two_queries(
+    dir: &Path,
+    role: &str,
+    first: ReplayQuery,
+    waits_on_busy_motions: bool,
+) -> (Result<String, String>, Result<String, String>) {
     let stub = write_busy_worker(dir);
     let trace_folder = dir.join("trace");
     std::fs::create_dir_all(&trace_folder).expect("create trace folder");
@@ -80,6 +85,7 @@ fn two_queries(dir: &Path, role: &str, first: ReplayQuery) -> (Result<String, St
 
     let mut worker = ReplayWorker::new(role, 0, &stub, &trace_folder);
     worker.start().expect("the session connects to the worker socket");
+    worker.set_waits_on_busy_motions(waits_on_busy_motions);
     let first = worker.dispatch_replay_query(first).map_err(|e| e.to_string());
     let second = worker
         .dispatch_replay_query(ReplayQuery::LoadLocation)
@@ -106,7 +112,12 @@ fn a_motion_of_the_users_replay_is_waited_for_and_nothing_else_is() {
     // A run to entry on the main replay: waited for, and the connection is
     // still paired afterwards.
     let temp = tempfile::tempdir().expect("create temp dir");
-    let (first, second) = two_queries(temp.path(), &format!("busy-motion-{pid}"), ReplayQuery::RunToEntry);
+    let (first, second) = two_queries(
+        temp.path(),
+        &format!("busy-motion-{pid}"),
+        ReplayQuery::RunToEntry,
+        false,
+    );
     assert_eq!(
         first.as_deref(),
         Ok("\"answer to query 0\""),
@@ -120,7 +131,12 @@ fn a_motion_of_the_users_replay_is_waited_for_and_nothing_else_is() {
 
     // A read on the main replay: the timeout ends it.
     let temp = tempfile::tempdir().expect("create temp dir");
-    let (first, _) = two_queries(temp.path(), &format!("busy-read-{pid}"), ReplayQuery::LoadLocation);
+    let (first, _) = two_queries(
+        temp.path(),
+        &format!("busy-read-{pid}"),
+        ReplayQuery::LoadLocation,
+        false,
+    );
     assert!(
         first.as_ref().is_err_and(|e| e.contains("timed out")),
         "a read must end at the read timeout however busy the worker is, got {first:?}"
@@ -135,9 +151,29 @@ fn a_motion_of_the_users_replay_is_waited_for_and_nothing_else_is() {
             action: db_backend::task::Action::Next,
             forward: true,
         },
+        false,
     );
     assert!(
         first.as_ref().is_err_and(|e| e.contains("timed out")),
         "a query of the flow replay must end at the read timeout however busy its worker is, got {first:?}"
     );
+
+    // The same motion on the flow replay, when one request waits on it (the
+    // flow value popup returning to a step's stop): waited for.
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let (first, second) = two_queries(
+        temp.path(),
+        "flow",
+        ReplayQuery::Step {
+            action: db_backend::task::Action::Next,
+            forward: true,
+        },
+        true,
+    );
+    assert_eq!(
+        first.as_deref(),
+        Ok("\"answer to query 0\""),
+        "a flow replay's motion that a request waits on must be waited for while its worker works"
+    );
+    assert_eq!(second.as_deref(), Ok("\"answer to query 1\""));
 }

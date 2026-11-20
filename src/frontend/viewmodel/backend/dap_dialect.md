@@ -324,7 +324,11 @@ The working sequence is therefore: drain, request, then wait for the event.
 
 While the walk runs, the engine sends **`ct/flow-progress`** at most every two
 seconds, `{"stepsWalked": <steps visited>, "elapsedMs": <since the walk
-began>}` (`Handler::load_flow`, `FlowPreloader::report_progress`). It is
+began>}` (`Handler::load_flow`, `FlowPreloader::report_progress`). While
+no step completes it repeats the last count every five seconds, but only
+while the replay worker's processes use CPU (`FlowHeartbeat`): one rr step can
+outlast 30 s on a starved host, and a worker that hangs must still leave the
+client in silence. It is
 advisory: it says the engine is working, not that a window is coming, and a
 client with no kind for it ignores it (the desktop and the VS Code bridge
 catch the unmapped event). It exists for a client that reads silence as a

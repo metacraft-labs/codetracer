@@ -13,6 +13,20 @@ use crate::value::ValueRecordWithType;
 pub trait ReplaySession: std::fmt::Debug {
     fn load_location(&mut self, expr_loader: &mut ExprLoader) -> Result<Location, Box<dyn Error>>;
 
+    /// A watch on the CPU time of the worker process this session drives, for
+    /// a session that drives one (see `recreator_session::WorkerCpuWatch`).
+    fn cpu_watch(&self) -> Option<crate::recreator_session::WorkerCpuWatch> {
+        None
+    }
+
+    /// Wait for a motion of this replay while its worker is busy, past the
+    /// query timeout, even when the replay is a side one. A side replay's
+    /// queries give up at the timeout by default: a flow walk is better off
+    /// with a fresh worker than with one that stopped answering. A motion one
+    /// user request waits on (the flow value popup returning to a step's stop)
+    /// is not, on a loaded host. A no-op for a session without a worker.
+    fn set_waits_on_busy_motions(&mut self, _on: bool) {}
+
     /// Returns the C-level location from the last `load_location` call, if available.
     ///
     /// For sourcemapped languages (e.g. Nim compiled to C), this returns the
