@@ -410,6 +410,13 @@ with pkgs;
     # produces in some configurations.
     glibc_multi
 
+    # The zgui front-end's shim (`just build-zgui` builds isonim-zgui's
+    # `zgui-nim-shim` from the sibling checkout, with this shell's compiler
+    # and C library): zgui's Wayland platform links libxkbcommon and
+    # libwayland-client, found through pkg-config.
+    libxkbcommon
+    wayland
+
     # Headless display stack for Playwright / WDIO / Xephyr-based
     # multi-window e2e tests.
     xvfb-run

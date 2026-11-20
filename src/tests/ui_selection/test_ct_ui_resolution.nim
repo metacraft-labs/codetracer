@@ -102,7 +102,7 @@ const
     ## same geometry CTUI-11's and CTUI-12's real-terminal suites use, so a
     ## frame that differs between them differs for a reason other than size.
 
-  AcceptedSetText = "electron, gui, gpui, tui, webui"
+  AcceptedSetText = "electron, gui, gpui, tui, webui, zgui"
     ## §4's accepted set as the refusal must name it. `gpui` joined it with
     ## PLAT-20 (cbb953f75, 2026-09-15); this suite kept the four-value text
     ## until 2026-09-25, so every refusal case here was red from that commit. Spelled here rather than

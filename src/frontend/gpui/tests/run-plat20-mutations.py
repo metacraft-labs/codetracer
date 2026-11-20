@@ -251,8 +251,8 @@ ARMS = [
         "different questions, and only `classify` asks the second."),
 
     Arm("G8", UISEL,
-        '  AcceptedUiValues*: array[5, string] = ["electron", "gui", "gpui", "tui",\n                                         "webui"]',
-        '  AcceptedUiValues*: array[4, string] = ["electron", "gui", "tui",\n                                         "webui"]',
+        '  AcceptedUiValues*: array[6, string] = ["electron", "gui", "gpui", "tui",\n                                         "webui", "zgui"]',
+        '  AcceptedUiValues*: array[5, string] = ["electron", "gui", "tui",\n                                         "webui", "zgui"]',
         SUITE_UISEL,
         "`gpui` is ACCEPTED, and reaches its own component — PLAT-20",
         "  UiEnvVar* = \"CODETRACER_UI\"",

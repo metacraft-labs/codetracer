@@ -5714,6 +5714,61 @@ test-gpui-shell:
   exec > >(tee test-logs/test-gpui-shell.log) 2>&1
   bash ci/lib/run-nim-test-lane.sh gpui-shell
 
+# The zgui front-end (`codetracer-zgui`, src/frontend/zgui/): a proof of
+# concept of the debugger on zgui's retained document, through isonim-zgui.
+#
+# The shim is built here, from the sibling `isonim-zgui` checkout, with this
+# shell's Rust and C library, so the binary and the shim it loads agree on the
+# C library (a shim built in isonim-zgui's own flake links a newer glibc than
+# this shell's and cannot be loaded into a binary built here). On Linux the
+# libraries zgui loads at run time (Vulkan, Wayland, X11, fonts) are put on
+# the shim's run path from the shell's GPUI runtime set. The binary records
+# the shim's absolute path, so it runs from anywhere.
+build-zgui:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p build/bin
+  zgui_rust="$(cd .. && pwd)/isonim-zgui/rust"
+  if [ ! -f "${zgui_rust}/Cargo.toml" ]; then
+    echo "isonim-zgui is not checked out beside this repository" >&2
+    echo "  (expected ${zgui_rust}); it is in the codetracer project's workspace." >&2
+    exit 1
+  fi
+  if [ -n "${CODETRACER_GPUI_RUNTIME_LIB_PATH:-}" ]; then
+    export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-Wl,-rpath,${CODETRACER_GPUI_RUNTIME_LIB_PATH}"
+  fi
+  (cd "${zgui_rust}" && cargo build --release --locked)
+  shim="${zgui_rust}/target/release/libzgui_nim_shim.so"
+  [ -e "${shim}" ] || shim="${zgui_rust}/target/release/libzgui_nim_shim.dylib"
+  nim c --hints:off --mm:orc -d:release --path:src/frontend/viewmodel \
+    -d:zguiShimPath="${shim}" \
+    --nimcache:build/nimcache/codetracer-zgui \
+    -o:build/bin/codetracer-zgui \
+    src/frontend/zgui/main.nim
+  echo "built build/bin/codetracer-zgui ($(wc -c <build/bin/codetracer-zgui) bytes) against ${shim}"
+
+# The zgui front-end's suites (the `zgui` lane), headless on zgui's own
+# platform: the binding against the web binding with no recording, and the
+# built `codetracer-zgui` on the `calc` recording. On Linux zgui draws with
+# Mesa's software Vulkan driver, taken from the shell's GPUI runtime set.
+test-zgui: build-zgui
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-zgui.log) 2>&1
+  shim_dir="$(cd .. && pwd)/isonim-zgui/rust/target/release"
+  export LD_LIBRARY_PATH="${shim_dir}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+  export DYLD_LIBRARY_PATH="${shim_dir}${DYLD_LIBRARY_PATH:+:${DYLD_LIBRARY_PATH}}"
+  if [ -n "${CODETRACER_GPUI_RUNTIME_LIB_PATH:-}" ] && [ -z "${VK_ICD_FILENAMES:-}" ]; then
+    IFS=: read -r -a dirs <<<"${CODETRACER_GPUI_RUNTIME_LIB_PATH}"
+    for d in "${dirs[@]}"; do
+      icd="${d%/lib}/share/vulkan/icd.d/lvp_icd.$(uname -m).json"
+      if [ -f "${icd}" ]; then export VK_ICD_FILENAMES="${icd}"; break; fi
+    done
+    export ZGUI_BACKENDS=vulkan
+  fi
+  bash ci/lib/run-nim-test-lane.sh zgui
+
 # The GPUI suites that open an rr recording of a native program
 # (`ci/lib/test-lane-files.sh`'s `gpui-native` lane — every suite under
 # `src/frontend/gpui/tests/` importing `fixtures/native_recording`, PLAT-60's

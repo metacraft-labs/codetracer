@@ -82,7 +82,7 @@ const
                 "fileTree", "buildOutput", "vcs", "agentActivity",
                 "terminalOutput", "testResults", "constraints", "problems",
                 "requests", "lowLevelCode", "verification", "videoPlayer",
-                "pixelHistory", "shaderDebug"]
+                "pixelHistory", "shaderDebug", "macroExpansion"]
     ## `headless_app/layout_model.PaneKind`'s names, in its order — the
     ## values `paneKind` holds and a `when` may compare against. Spelled
     ## here so this package stays free of the layout model's imports;
