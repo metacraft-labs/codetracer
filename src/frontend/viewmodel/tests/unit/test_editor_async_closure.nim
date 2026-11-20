@@ -84,7 +84,7 @@ template counted(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 58
+const ExpectedAssertions = 67
   ## **+8 ON 2026-09-23: ROUTES 8 AND 9** — the symlinked root and the
   ## subdirectory module the gate's root set used to miss (four assertions
   ## each).
@@ -159,6 +159,14 @@ type Route = enum
     ## ROUTE 9 — a module in a SUBDIRECTORY of the editor directory, imported
     ## by no root. Measured green by the same pass: `-maxdepth 1` never saw
     ## it and nothing walked to it.
+  rtAdmittedLibrary
+    ## OQ-F5 (the user, 2026-11-20): the ADMITTED library, `regex`, imported
+    ## by a root — resolved as a reviewed leaf and not walked. The control for
+    ## the next route.
+  rtUnadmittedLibrary
+    ## OQ-F5's other side: a vendored library that is NOT admitted
+    ## (`jsony`, checked out beside nim-regex under `libs/`) does not resolve
+    ## in the closure, so importing it is a finding.
 
 const RouteCount = ord(high(Route)) - ord(low(Route)) + 1
 
@@ -212,6 +220,10 @@ proc coreBody(route: Route): string =
     # gate for a reason that has nothing to do with the rule being tested,
     # which is the misdirected verdict route 3 already cost this file once.
     result.add "import ../lib/helper\nimport ../keymap/editing_keymap\n"
+  of rtAdmittedLibrary:
+    result.add "import ../lib/helper\nimport regex\n"
+  of rtUnadmittedLibrary:
+    result.add "import ../lib/helper\nimport jsony\n"
   result.add "\nproc value*(): int = 41 + 1\n"
 
 proc helperBody(route: Route): string =
@@ -448,6 +460,26 @@ suite "PLAT-29 — the seven routes past a text scan":
     counted not run.output.contains("VIOLATION editor-core-names-no-async-primitive")
     counted run.output.contains("1 failing")
 
+  test "OQ-F5 — THE ADMITTED LIBRARY RESOLVES, AS A LEAF AT ITS REVIEWED REVISION":
+    let run = withTree(rtAdmittedLibrary)
+    checkpoint(run.output.strip())
+    counted run.code == 0
+    counted not run.output.contains("VIOLATION")
+    # A LEAF: the walk did not descend into nim-regex, whose debug-only
+    # `dotgraph` module imports `std/os` — the closure is the control's two.
+    counted run.output.contains("2 in the closure")
+    counted run.output.contains("OK  admitted-libraries-at-reviewed-revision: " &
+                                $EditorCoreAdmittedLibraries.len)
+    counted isEditorCoreAdmittedLibrary("regex")
+
+  test "OQ-F5 — A LIBRARY THAT IS NOT ADMITTED MUST REDDEN IT":
+    let run = withTree(rtUnadmittedLibrary)
+    checkpoint(run.output.strip())
+    counted run.code != 0
+    counted run.output.contains("VIOLATION closure-is-readable")
+    counted run.output.contains("core.nim: jsony")
+    counted not isEditorCoreAdmittedLibrary("jsony")
+
   test "THE CONTROL — the same tree with nothing planted is GREEN":
     # §7b. Without this, every case above is satisfied by a gate that refuses
     # every tree, by a temp directory that was never created and by a typo in
@@ -462,7 +494,7 @@ suite "PLAT-29 — the seven routes past a text scan":
     # modules rather than about zero.
     counted run.output.contains("1 root module(s)")
     counted run.output.contains("2 in the closure")
-    counted RouteCount == 11
+    counted RouteCount == 13
 
 # ===========================================================================
 suite "PLAT-29 — the tally":

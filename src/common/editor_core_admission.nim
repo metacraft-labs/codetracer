@@ -55,7 +55,7 @@
 ##
 ## | reader | what it does with this table |
 ## |---|---|
-## | `ci/test/editor-import-closure.sh` | parses the names out of it and refuses a closure module importing a `std/` module that is not here |
+## | `ci/test/editor-import-closure.sh` | parses the names out of it and refuses a closure module importing a `std/` module that is not here, or a library that is not admitted |
 ## | `src/frontend/viewmodel/tests/unit/test_editor_async_closure.nim` | drives that gate against the real tree AND against seven synthetic trees, one per route past a text scan, and asserts the gate reddens on each |
 ##
 ## Nothing hardcodes the list in either place. The gate looks the table up by
@@ -85,6 +85,24 @@ const
     ("std/strutils", "string manipulation. Its only re-exports are `toLower` and `toUpper`"),
     ("std/tables", "hash tables over in-memory values"),
     ("std/unicode", "rune-level string handling, including the generated range tables. The grapheme segmenter the whole coordinate model rests on is built on it"),
+  ]
+
+  EditorCoreAdmittedLibraries*: array[1, tuple[primitive, replacement: string]] = [
+    ## THE ONE THIRD-PARTY LIBRARY ADMITTED, by the user's decision of
+    ## 2026-11-20 (Find-And-Incremental-Search.md OQ-F5: *"regex in the
+    ## core"*). Left: the module name the editor imports. Right: why it
+    ## satisfies the membership rule.
+    ##
+    ## A library is admitted as a REVIEWED LEAF: the gate resolves the import
+    ## to the vendored checkout and does not walk it, because its sources
+    ## carry a debug-only module (`regex/dotgraph.nim`, `std/os`, compiled
+    ## only under `-d:regexDotDir`) that a textual walk cannot tell from the
+    ## engine. What stands in for the walk is the review, pinned: the gate
+    ## refuses the row unless the submodule sits at the revision reviewed
+    ## (`ADMITTED_LIBRARIES` in `ci/test/editor-import-closure.sh`), so a
+    ## bump is a new review. A library not in this table does not resolve in
+    ## the closure at all, and an unresolvable import is a violation.
+    ("regex", "nim-regex 0.27.0 (`libs/nim-regex`): a pure-Nim Thompson-NFA engine over strings in memory, compiled to C and to JS; matching never backtracks and never waits; it opens no file, spawns nothing and reads no clock outside `dotgraph`'s debug dump"),
   ]
 
   EditorCoreDeniedNames*: array[18, tuple[primitive, replacement: string]] = [
@@ -128,6 +146,8 @@ const
   ]
 
   EditorCoreAllowedStdlibModulesConst* = "EditorCoreAllowedStdlibModules"
+
+  EditorCoreAdmittedLibrariesConst* = "EditorCoreAdmittedLibraries"
     ## The name `ci/test/editor-import-closure.sh` looks the table up by, read
     ## from here rather than spelled in the gate — the same drift guard PLAT-8
     ## puts on its own three tables.
@@ -140,6 +160,12 @@ const
     ## subject list, and a hardcoded subject list cannot see a new file in the
     ## directory it claims to cover."* A list of module names here would have
     ## been exactly that list.
+
+func isEditorCoreAdmittedLibrary*(name: string): bool =
+  for entry in EditorCoreAdmittedLibraries:
+    if entry.primitive == name:
+      return true
+  false
 
 func isEditorCoreAllowedStdlibModule*(spec: string): bool =
   ## True when SPEC is a `std/` module the editor model's closure may import.

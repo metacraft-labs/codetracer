@@ -1524,6 +1524,13 @@ proc refreshFindWidget(ed: SharedEditor) =
   let wb = ed.findWidget.querySelector(cstring".ct-find-word")
   if not isNilOrUndef(cb): cb.setAttr("aria-pressed", cstring($caseOn))
   if not isNilOrUndef(wb): wb.setAttr("aria-pressed", cstring($wordOn))
+  # Find-And-Incremental-Search OQ-F5: the regular-expression and Find in
+  # Selection toggles of the shared session.
+  let rb = ed.findWidget.querySelector(cstring".ct-find-regex")
+  let sb = ed.findWidget.querySelector(cstring".ct-find-in-selection")
+  if not isNilOrUndef(rb):
+    rb.setAttr("aria-pressed", cstring($ed.doc.state.search.options.regex))
+  if not isNilOrUndef(sb): sb.setAttr("aria-pressed", cstring($ed.find.hasScope))
   let rp = ed.findWidget.querySelector(cstring".ct-replace-part")
   if not isNilOrUndef(rp):
     rp.setStyle("display", cstring(if ed.replaceShown: "flex" else: "none"))
@@ -1621,10 +1628,14 @@ proc findCommand*(ed: SharedEditor; op: string): bool =
       ed.afterFindMove(walked.reveal)
   of "find.close", "find.accept": ed.closeFindWidget(restore = false)
   of "find.cancel": ed.closeFindWidget(restore = true)
-  of "find.toggle-case", "find.toggle-whole-word":
+  of "find.toggle-case", "find.toggle-whole-word", "find.toggle-regex",
+     "find.toggle-in-selection":
     if not ed.find.open: return false
     discard ed.runCoreStep("find", proc(d: var EditingDocument): EditingOutcome =
-      r = (if op == "find.toggle-case": ed.find.toggleCase(d)
+      r = (case op
+           of "find.toggle-case": ed.find.toggleCase(d)
+           of "find.toggle-regex": ed.find.toggleRegex(d)
+           of "find.toggle-in-selection": ed.find.toggleInSelection(d)
            else: ed.find.toggleWholeWord(d))
       eoMoved)
     ed.afterFindMove(r)
@@ -1643,7 +1654,8 @@ proc findCommand*(ed: SharedEditor; op: string): bool =
 
 proc buildFindWidget(ed: SharedEditor) =
   ## Monaco's find widget's place and parts (top right, the field, the count,
-  ## Match Case, Whole Word, previous / next, close; the replace row under
+  ## Match Case, Whole Word, Use Regular Expression, Find in Selection,
+  ## previous / next, close; the replace row under
   ## it), driven by the shared find session.
   let w = createEl("div")
   w.setClass("find-widget ct-find-widget")
@@ -1661,6 +1673,8 @@ proc buildFindWidget(ed: SharedEditor) =
 <span class="matchesCount ct-find-count" aria-live="polite"></span>
 <button class="ct-find-case" title="Match Case" aria-pressed="false">Aa</button>
 <button class="ct-find-word" title="Match Whole Word" aria-pressed="false">ab</button>
+<button class="ct-find-regex" title="Use Regular Expression" aria-pressed="false">.*</button>
+<button class="ct-find-in-selection" title="Find in Selection" aria-pressed="false">&#x2261;</button>
 <button class="ct-find-prev" title="Previous Match">&#x2191;</button>
 <button class="ct-find-next" title="Next Match">&#x2193;</button>
 <button class="ct-find-close" title="Close">&#x00D7;</button></div>
@@ -1699,6 +1713,8 @@ proc buildFindWidget(ed: SharedEditor) =
   ed.replaceInput.addListener("keydown", keys)
   for (sel, op) in [(".ct-find-case", "find.toggle-case"),
                     (".ct-find-word", "find.toggle-whole-word"),
+                    (".ct-find-regex", "find.toggle-regex"),
+                    (".ct-find-in-selection", "find.toggle-in-selection"),
                     (".ct-find-prev", "find.previous"),
                     (".ct-find-next", "find.next"),
                     (".ct-find-close", "find.close"),

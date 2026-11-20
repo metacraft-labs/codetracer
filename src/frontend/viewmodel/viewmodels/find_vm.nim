@@ -12,7 +12,10 @@
 ## Emacs's `C-w` (`yankWord`) and `M-s .` (`openSymbolAtCaret`), the closed
 ## walk (`F3` / `n` after the session closed) and CUA's `Ctrl+F3`
 ## (`nextSelectionMatch`, the one named operation of §4.2, because a macro
-## row has no `if`).
+## row has no `if`). OQ-F5 (the user, 2026-11-20): the regular-expression
+## toggle (`toggleRegex`, `Alt+R`) and Find in Selection (`toggleInSelection`,
+## `Alt+L`), as VS Code's find widget has them — the scope is the
+## session's, dropped when it closes, as VS Code drops its `searchScope`.
 ##
 ## Refuses to own:
 ##
@@ -103,6 +106,11 @@ type
       ## recomputed on every change (CTUI-10's rule: never narrowed).
     capped*: bool
       ## `matches` stopped at `MatchesLimit`; the count reads `19999+`.
+    scope*: seq[MatchSpan]
+      ## Find in Selection (`toggleInSelection`): the ranges the search is
+      ## confined to, empty when it is off. Taken from the selection when
+      ## toggled on, mapped through edits made while the session is open.
+    scopeVersion: DocumentVersion
     current*: MatchSpan
       ## The current match; `a = -1` for none.
     wrapped*: bool
@@ -134,6 +142,8 @@ type
 
 const
   NoMatchesText* = "no matches"
+  NoSelectionScopeText* = "find in selection: select the text to search first"
+    ## `toggleInSelection` with nothing selected (VS Code stays off silently).
   NoPreviousPatternText* = "no previous search pattern"
     ## Vim's `E35`.
   WrappedForwardText* = "search hit BOTTOM, continuing at TOP"
@@ -164,9 +174,24 @@ func hasUpper(s: string): bool =
 # The match set
 # ---------------------------------------------------------------------------
 
+proc mapScope(f: var FindVM; d: EditingDocument) =
+  ## The scope follows edits made while the session is open (§3.5's rule for
+  ## the origin, applied to the scope).
+  if f.scope.len == 0 or d.version == f.scopeVersion: return
+  if d.timeline.knows(f.scopeVersion):
+    var xs: seq[SelectionRange] = @[]
+    for r in f.scope: xs.add spanRange(r.a, r.b)
+    let mapped = mapSelection(editorSelection(xs, 0),
+                              d.timeline.delta(f.scopeVersion))
+    f.scope = @[]
+    for r in mapped.ranges:
+      if not r.isEmpty: f.scope.add MatchSpan(a: r.rangeFrom, b: r.rangeTo)
+  f.scopeVersion = d.version
+
 proc recompute(f: var FindVM; d: EditingDocument) =
+  f.mapScope(d)
   let st = d.state.search
-  f.matches = matchesOf(d.state.doc, st.pattern, st.options)
+  f.matches = matchesOf(d.state.doc, st.pattern, st.options, scope = f.scope)
   f.capped = f.matches.len >= MatchesLimit
   f.windowCache = ("", @[])
 
@@ -209,7 +234,7 @@ proc pickFromOrigin(f: var FindVM; d: var EditingDocument): FindReveal =
   if st.pattern.len > 0:
     let w = nextMatchOf(d.state.doc, st.pattern, st.options,
                         f.origin.searchFrom,
-                        forward = f.direction == sdForward)
+                        forward = f.direction == sdForward, scope = f.scope)
     if w.found:
       f.current = w.span
       f.wrapped = w.wrapped
@@ -244,16 +269,19 @@ func selectionText*(d: EditingDocument): string =
   if m.isEmpty: "" else: d.state.doc[m.rangeFrom ..< min(m.rangeTo, d.state.doc.len)]
 
 proc seedOf(d: EditingDocument; seed: FindSeed): string =
-  ## §4.1, in its order.
+  ## §4.1, in its order. A seed taken from the text is escaped when the
+  ## regular-expression toggle is on, as VS Code escapes it.
+  let options = d.state.search.options
   case seed
   of fsNone: ""
   of fsSelectionOrWord:
     let t = selectionText(d)
     if t.len > 0:
-      if '\n' notin t: return t
+      if '\n' notin t: return literalPattern(t, options)
       return d.state.search.pattern
     let w = wordAtCaret(d)
-    if w.a >= 0: d.state.doc[w.a ..< w.b] else: d.state.search.pattern
+    if w.a >= 0: literalPattern(d.state.doc[w.a ..< w.b], options)
+    else: d.state.search.pattern
 
 proc openFind*(f: var FindVM; d: var EditingDocument; model: BaseKeymap;
            owner: string; backward: bool; seed: FindSeed;
@@ -263,6 +291,7 @@ proc openFind*(f: var FindVM; d: var EditingDocument; model: BaseKeymap;
   ## highlighted and the match at or after the caret made current. **Opening
   ## does not move the caret.**
   let caseSensitive = d.state.search.options.caseSensitive
+  let regex = d.state.search.options.regex
   f = FindVM(open: true, owner: owner, modal: isModal(model),
              direction: (if backward: sdBackward else: sdForward),
              caseRule: caseRuleFor(model), select: selectFor(model))
@@ -285,7 +314,9 @@ proc openFind*(f: var FindVM; d: var EditingDocument; model: BaseKeymap;
                     of fcrInsensitive: false
                     of fcrSensitive: true
                     of fcrSmart: caseSensitive),
-    wholeWord: false)
+    wholeWord: false,
+    # The toggle outlives the session, as VS Code's `isRegex` does.
+    regex: regex)
   f.applyCase(d)
   f.recompute(d)
   if text.len > 0:
@@ -306,7 +337,7 @@ proc openSymbolAtCaret*(f: var FindVM; d: var EditingDocument;
     return f.openFind(d, model, owner, backward = false, fsNone, top, leftCol)
   discard f.openFind(d, model, owner, backward = false, fsNone, top, leftCol)
   f.origin.searchFrom = w.b
-  f.field = d.state.doc[w.a ..< w.b]
+  f.field = literalPattern(d.state.doc[w.a ..< w.b], d.state.search.options)
   f.cursor = f.field.len
   f.fieldSelected = false
   d.state.search.pattern = f.field
@@ -392,6 +423,45 @@ proc toggleWholeWord*(f: var FindVM; d: var EditingDocument): FindReveal =
   f.recompute(d)
   f.pickFromOrigin(d)
 
+proc toggleRegex*(f: var FindVM; d: var EditingDocument): FindReveal =
+  ## `find.toggle-regex` (`Alt+R`, Emacs `M-r`): the field's text read as a
+  ## regular expression, or literally again; the search run from the
+  ## origin. A pattern that does not compile matches nowhere and the count
+  ## says why (`patternError`).
+  d.state.search.options.regex = not d.state.search.options.regex
+  f.recompute(d)
+  f.pickFromOrigin(d)
+
+func scopeOfSelection*(d: EditingDocument): seq[MatchSpan] =
+  ## The scope Find in Selection takes (VS Code's `toggleSearchScope`): every
+  ## non-empty range of the selection, a range ending at the start of a later
+  ## line ended at the previous line's end instead.
+  result = @[]
+  let doc = d.state.doc
+  for r in d.state.selection.ranges:
+    var a = r.rangeFrom
+    var b = min(r.rangeTo, doc.len)
+    if b > a and doc[b - 1] == '\n':
+      dec b
+    if b > a: result.add MatchSpan(a: a, b: b)
+
+proc toggleInSelection*(f: var FindVM; d: var EditingDocument): FindReveal =
+  ## `find.toggle-in-selection` (`Alt+L`): on, the search is confined to the
+  ## selection's ranges (`scopeOfSelection`), the first match in them made
+  ## current; off, the whole document again. With nothing selected it stays
+  ## off, as VS Code's does (`hasScope` reads whether it took).
+  if f.scope.len > 0:
+    f.scope = @[]
+  else:
+    f.scope = scopeOfSelection(d)
+    f.scopeVersion = d.version
+    if f.scope.len > 0:
+      f.origin.searchFrom = f.scope[0].a
+  f.recompute(d)
+  f.pickFromOrigin(d)
+
+func hasScope*(f: FindVM): bool = f.scope.len > 0
+
 # ---------------------------------------------------------------------------
 # Walking (§3.4)
 # ---------------------------------------------------------------------------
@@ -411,7 +481,8 @@ proc step*(f: var FindVM; d: var EditingDocument; next: bool): FindReveal =
   let start =
     if f.hasCurrent: (if forward: f.current.a + 1 else: f.current.a)
     else: f.origin.searchFrom
-  let w = nextMatchOf(d.state.doc, st.pattern, st.options, start, forward)
+  let w = nextMatchOf(d.state.doc, st.pattern, st.options, start, forward,
+                      scope = f.scope)
   f.wrapped = w.wrapped
   if not w.found:
     f.current = noSpan()
@@ -431,7 +502,8 @@ proc walkClosed*(d: var EditingDocument; model: BaseKeymap;
     let w = wordAtCaret(d)
     if model != bkCua or w.a < 0:
       return (FindReveal(), false, NoPreviousPatternText)
-    d.state.search.pattern = d.state.doc[w.a ..< w.b]
+    d.state.search.pattern = literalPattern(d.state.doc[w.a ..< w.b],
+                                            d.state.search.options)
     d.state.search.options.wholeWord = false
   let st = d.state.search
   let forward = if isModal(model): (st.direction == sdForward) == next
@@ -516,7 +588,8 @@ proc yankWord*(f: var FindVM; d: var EditingDocument): FindReveal =
   if stop <= start: return revealOf(d, f.current)
   # The origin stays where the session opened, so the grown query's first
   # match at or after it is the match it grew from.
-  f.setQuery(d, f.field & doc[start ..< stop])
+  f.setQuery(d, f.field & literalPattern(doc[start ..< stop],
+                                         d.state.search.options))
 
 # ---------------------------------------------------------------------------
 # Leaving (§3.5)
@@ -568,8 +641,11 @@ proc cancel*(f: var FindVM; d: var EditingDocument):
 # ---------------------------------------------------------------------------
 
 func countText*(f: FindVM; d: EditingDocument): string =
-  ## §3.3 step 5: `3 of 17`, `19999+` past the cap, `no matches`.
+  ## §3.3 step 5: `3 of 17`, `19999+` past the cap, `no matches` — or why a
+  ## regular expression matches nowhere (`patternError`).
   if d.state.search.pattern.len == 0: return ""
+  let refused = patternError(d.state.search.pattern, d.state.search.options)
+  if refused.len > 0: return refused
   if f.matches.len == 0: return NoMatchesText
   let total = if f.capped: $MatchesLimit & "+" else: $f.matches.len
   let i = f.currentIndex
@@ -581,12 +657,25 @@ func wrapText*(f: FindVM): string =
   elif f.direction == sdForward: WrappedForwardText
   else: WrappedBackwardText
 
+func togglesText*(f: FindVM; d: EditingDocument): string =
+  ## The OQ-F5 toggles that are on, as VS Code's widget marks them: `.*` for
+  ## a regular expression, `in selection` for Find in Selection — bracketed,
+  ## "" when neither is on.
+  var on: seq[string] = @[]
+  if d.state.search.options.regex: on.add ".*"
+  if f.hasScope: on.add "in selection"
+  if on.len == 0: "" else: "[" & on.join(" ") & "]"
+
 func statusText*(f: FindVM; d: EditingDocument): string =
-  ## The terminal's status-line form of the field: the count and the wrap.
+  ## The terminal's status-line form of the field: the count, the wrap and
+  ## the OQ-F5 toggles that are on.
   result = f.countText(d)
   let w = f.wrapText
   if w.len > 0:
     result.add (if result.len > 0: "  " else: "") & w
+  let t = f.togglesText(d)
+  if t.len > 0:
+    result.add (if result.len > 0: "  " else: "") & t
 
 func closedHighlightActive*(d: EditingDocument): bool =
   ## With no session open, the highlights stay while the selection is ON a
@@ -627,7 +716,8 @@ proc marksInWindow*(f: var FindVM; d: EditingDocument;
   if not f.open and not closedHighlightActive(d): return @[]
   let lastLine = firstLine + rows - 1
   let key = $d.version & "|" & st.pattern & "|" & $st.options.caseSensitive &
-            $st.options.wholeWord & "|" & $firstLine & "|" & $rows & "|" &
+            $st.options.wholeWord & $st.options.regex & "|" & $f.scope & "|" &
+            $firstLine & "|" & $rows & "|" &
             $f.open & "|" & $f.current.a & "|" &
             $d.state.selection.mainRange.rangeFrom
   if f.windowCache.key == key:
@@ -644,8 +734,18 @@ proc marksInWindow*(f: var FindVM; d: EditingDocument;
     for m in f.matches:
       if m.b > winA and m.a < winB: spans.add m
   else:
-    for m in matchesOf(doc[winA ..< winB], st.pattern, st.options):
-      spans.add MatchSpan(a: m.a + winA, b: m.b + winA)
+    # The window's own text, as one scope range: the regular expression's
+    # line-by-line search sees the same lines it would over the document.
+    var winScope = @[MatchSpan(a: winA, b: winB)]
+    if f.open and f.scope.len > 0:
+      winScope = @[]
+      for r in f.scope:
+        let a = max(r.a, winA)
+        let b = min(r.b, winB)
+        if b > a: winScope.add MatchSpan(a: a, b: b)
+    if winScope.len > 0:
+      for m in matchesOf(doc, st.pattern, st.options, scope = winScope):
+        spans.add m
   var current = f.current
   if not f.open:
     let m = d.state.selection.mainRange

@@ -135,9 +135,9 @@ type
   SearchState* = object
     ## What `search-next` / `search-prev` consult and what `search-forward` /
     ## `search-backward` / `search-selection` / `search-clear` write. A literal
-    ## pattern, not a regular expression: §5.1 forbids an operation that waits,
-    ## and nothing here needs a regex engine to make the four operations
-    ## executable and total.
+    ## pattern unless `options.regex` says it is a regular expression
+    ## (Find-And-Incremental-Search.md OQ-F5); either way the match is
+    ## computed in memory by `find_match`, which waits on nothing (§5.1).
     ##
     ## PLAT-70 Part C (Find-And-Incremental-Search.md §2 principle 2): THE
     ## ONE PATTERN STORE. The find session's query is this `pattern` while
@@ -147,7 +147,8 @@ type
     pattern*: string
     direction*: SearchDirection
     options*: MatchOptions
-      ## Case and whole word (`find_match.MatchOptions`). `initEditorState`
+      ## Case, whole word and regular expression (`find_match.MatchOptions`).
+      ## `initEditorState`
       ## opens case-sensitive (Vim's `noignorecase`, Kakoune's regex);
       ## `editing_core.initEditingDocument` sets each base's default (§3.1:
       ## CUA case-insensitive, as VS Code; Emacs case-folding, as

@@ -2824,6 +2824,11 @@ proc drawFindWidget(r: GpuiRenderer; pane: GpuiElement; d: EditingDocument) =
                  (if d.state.search.options.caseSensitive: "on" else: "off"))
   r.setAttribute(w, "data-ct-find-word",
                  (if d.state.search.options.wholeWord: "on" else: "off"))
+  # OQ-F5: the regular-expression and Find in Selection toggles.
+  r.setAttribute(w, "data-ct-find-regex",
+                 (if d.state.search.options.regex: "on" else: "off"))
+  r.setAttribute(w, "data-ct-find-in-selection",
+                 (if gFind.hasScope: "on" else: "off"))
   r.setStyle(w, "position", "absolute")
   r.setStyle(w, "left", $max(0, gEditorViewportPx - WidgetPx) & "px")
   r.setStyle(w, "top", $EditorTopPadPx & "px")
@@ -2854,8 +2859,12 @@ proc drawFindWidget(r: GpuiRenderer; pane: GpuiElement; d: EditingDocument) =
   r.appendChild(count, r.createTextNode(if text.len > 0: text
                                         else: NoMatchesText))
   r.appendChild(w, count)
+  # VS Code's four toggles, in its order: Match Case, Match Whole Word, Use
+  # Regular Expression, Find in Selection.
   for (label, on) in [("Aa", d.state.search.options.caseSensitive),
-                      ("ab", d.state.search.options.wholeWord)]:
+                      ("ab", d.state.search.options.wholeWord),
+                      (".*", d.state.search.options.regex),
+                      ("\u2261", gFind.hasScope)]:
     let t = r.createElement("div")
     r.setAttribute(t, "data-ct-find-toggle", label)
     r.setStyle(t, "padding-left", "4px")
@@ -12694,12 +12703,40 @@ proc findTrace(d: EditingDocument) =
   traceGesture("find open=" & $gFind.open & " field=" & gFind.field &
                " count=" & gFind.countText(d) & " wrapped=" & $gFind.wrapped &
                " selection=" & $m.rangeFrom & "-" & $m.rangeTo &
-               " pattern=" & d.state.search.pattern)
+               " pattern=" & d.state.search.pattern &
+               " regex=" & $d.state.search.options.regex &
+               " scope=" & $gFind.scope.len)
+
+proc findDocPath(): string =
+  ## The document the in-document find searches: the folder window's open
+  ## file (its edit arm, OQ-F7), else the replay editor's file — "" when
+  ## there is none.
+  if not openArm.isNil: "edit:" & openArm.path
+  else: editorPath()
+
+proc findDocReady(path: string): bool =
+  if path.len == 0: return false
+  if not openArm.isNil: return path == "edit:" & openArm.path
+  debugDocumentFor(path, gEditorSurface.executionLine)
+
+proc findDoc(path: string): ptr EditingDocument =
+  ## `path`'s document, for the duration of one operation.
+  if not openArm.isNil: addr openArm.doc
+  else: addr gDebugDocs[path]
 
 proc findRevealed(r: GpuiRenderer; path: string; reveal: FindReveal) =
   ## §3.3 step 3: the current match revealed — vertically centred when it
   ## was off-screen — and the editor drawn with the highlights and the
   ## widget; the horizontal view follows the caret on the draw (§4.5).
+  if not openArm.isNil:
+    # OQ-F7: the folder window's editor, drawn from its arm.
+    if reveal.line > 0:
+      openArm.viewportTop = revealTop(openArm.viewportTop,
+                                      max(1, openArm.viewportRows),
+                                      reveal.line)
+    redrawEditor()
+    findTrace(openArm.doc)
+    return
   if reveal.line > 0:
     let rows = max(1, editorRowsOf(gGeom))
     let top = editorTopLine()
@@ -12711,19 +12748,20 @@ proc findRevealed(r: GpuiRenderer; path: string; reveal: FindReveal) =
 
 proc findTyped(r: GpuiRenderer; text: string) =
   ## Characters typed into the widget's field (§3.3).
-  let path = editorPath()
-  if not gDebugDocs.hasKey(path): return
-  findRevealed(r, path, gFind.typeText(gDebugDocs[path], text))
+  let path = findDocPath()
+  if not findDocReady(path): return
+  findRevealed(r, path, gFind.typeText(findDoc(path)[], text))
 
 proc findFieldOperation(r: GpuiRenderer; operation: string) =
   ## The field's own editing operations (`input.*`), and its `Enter` /
   ## `Escape` where a base resolves them as the field's.
-  let path = editorPath()
-  if not gDebugDocs.hasKey(path): return
+  let path = findDocPath()
+  if not findDocReady(path): return
+  template d: untyped = findDoc(path)[]
   var reveal = FindReveal()
   case operation
-  of "input.delete-backward": reveal = gFind.deleteBackward(gDebugDocs[path])
-  of "input.delete-forward": reveal = gFind.deleteForward(gDebugDocs[path])
+  of "input.delete-backward": reveal = gFind.deleteBackward(d)
+  of "input.delete-forward": reveal = gFind.deleteForward(d)
   of "input.move-left": gFind.moveFieldCursor(-1)
   of "input.move-right": gFind.moveFieldCursor(1)
   of "input.move-start": gFind.fieldHome()
@@ -12731,41 +12769,44 @@ proc findFieldOperation(r: GpuiRenderer; operation: string) =
   of "input.paste":
     let pasted = clipboardText().splitLines()
     if pasted.len > 0 and pasted[0].len > 0:
-      reveal = gFind.typeText(gDebugDocs[path], pasted[0])
+      reveal = gFind.typeText(d, pasted[0])
   of "input.commit":
-    reveal = gFind.accept(gDebugDocs[path])
+    reveal = gFind.accept(d)
     gFindBrowsing = isModal(gRouter.base)
   of "input.cancel":
     if gRouter.base == bkCua:
-      reveal = gFind.accept(gDebugDocs[path])
+      reveal = gFind.accept(d)
     else:
-      discard gFind.cancel(gDebugDocs[path])
+      discard gFind.cancel(d)
       gFindBrowsing = false
   else:
     traceGesture("`" & operation & "` is not available in the find field")
   findRevealed(r, path, reveal)
 
 proc runFindOperation(r: GpuiRenderer; operation: string; nowMs: int64) =
-  ## The find session's operations, onto the shared session.
-  let path = editorPath()
-  if not debugDocumentFor(path, gEditorSurface.executionLine):
+  ## The find session's operations, onto the shared session — over the
+  ## replay editor's document, or the folder window's (OQ-F7).
+  let path = findDocPath()
+  if not findDocReady(path):
     traceGesture("find: there is no document in the editor to search")
     return
-  template d: untyped = gDebugDocs[path]
+  template d: untyped = findDoc(path)[]
+  let owner = if openArm.isNil: "editor:" & path else: "editor:" & openArm.path
+  let top = if openArm.isNil: editorTopLine() else: openArm.viewportTop
   var reveal = FindReveal()
   case operation
   of "find.open", "find.open-backward":
     # §4.1: CUA seeds from the selection or the word at the caret; the
     # other bases' prompts open empty.
     gFindBrowsing = false
-    reveal = gFind.openFind(d, gRouter.base, "editor:" & path,
+    reveal = gFind.openFind(d, gRouter.base, owner,
                             operation == "find.open-backward",
                             (if gRouter.base == bkCua: fsSelectionOrWord
                              else: fsNone),
-                            editorTopLine(), gEditorView.leftCol)
+                            top, gEditorView.leftCol)
   of "find.open-symbol-at-caret":
-    reveal = gFind.openSymbolAtCaret(d, gRouter.base, "editor:" & path,
-                                     editorTopLine(), gEditorView.leftCol)
+    reveal = gFind.openSymbolAtCaret(d, gRouter.base, owner, top,
+                                     gEditorView.leftCol)
   of "find.next", "find.previous":
     if gFind.open:
       reveal = gFind.step(d, operation == "find.next")
@@ -12780,15 +12821,27 @@ proc runFindOperation(r: GpuiRenderer; operation: string; nowMs: int64) =
   of "find.cancel":
     gFindBrowsing = false
     if gFind.open:
-      let (top, leftCol) = gFind.cancel(d)
-      scrollEditorTo(r, top)
-      followEditorView()
-      discard gEditorView.scrollBy(leftCol - gEditorView.leftCol)
-      gEditorFollow = d.caretFollowOf
+      let (originTop, originLeft) = gFind.cancel(d)
+      if openArm.isNil:
+        scrollEditorTo(r, originTop)
+        followEditorView()
+        discard gEditorView.scrollBy(originLeft - gEditorView.leftCol)
+        gEditorFollow = d.caretFollowOf
+      else:
+        openArm.viewportTop = originTop
+        discard gEditorView.scrollBy(originLeft - gEditorView.leftCol)
   of "find.toggle-case":
     if gFind.open: reveal = gFind.toggleCase(d)
   of "find.toggle-whole-word":
     if gFind.open: reveal = gFind.toggleWholeWord(d)
+  of "find.toggle-regex":
+    if gFind.open: reveal = gFind.toggleRegex(d)
+  of "find.toggle-in-selection":
+    if gFind.open:
+      let scopedBefore = gFind.hasScope
+      reveal = gFind.toggleInSelection(d)
+      if not scopedBefore and not gFind.hasScope:
+        traceGesture("find: " & NoSelectionScopeText)
   of "find.yank-word":
     if gFind.open: reveal = gFind.yankWord(d)
   of "find.next-selection-match", "find.previous-selection-match":
@@ -13444,6 +13497,7 @@ proc buildWindowOperationTables(r: GpuiRenderer) =
   window.onEach(["find.open", "find.open-backward", "find.open-symbol-at-caret",
                  "find.next", "find.previous", "find.close", "find.accept",
                  "find.cancel", "find.toggle-case", "find.toggle-whole-word",
+                 "find.toggle-regex", "find.toggle-in-selection",
                  "find.yank-word", "find.next-selection-match",
                  "find.previous-selection-match"],
                 act(runFindOperation(r, c.name, c.nowMs)))

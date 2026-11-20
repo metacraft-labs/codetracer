@@ -2029,7 +2029,9 @@ proc cSearchSelection(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
   let t = selectedText(st)
   if t.len == 0: return refused(st, rrNoMatch)
   var after = st
-  after.search.pattern = t
+  # Verbatim under a regular expression too: escaped, so the toggle the
+  # find session left on (`find.toggle-regex`) still finds the selection.
+  after.search.pattern = literalPattern(t, st.search.options)
   after.search.options.wholeWord = false
   settle(st, after)
 
@@ -2044,7 +2046,7 @@ proc cSearchSelectionWholeWord(env: OpEnv; st: EditorState;
   let t = selectedText(st)
   if t.len == 0: return refused(st, rrNoMatch)
   var after = st
-  after.search.pattern = t
+  after.search.pattern = literalPattern(t, st.search.options)
   after.search.options.wholeWord = isWholeWordText(t)
   settle(st, after)
 
