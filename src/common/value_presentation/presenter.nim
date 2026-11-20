@@ -163,6 +163,31 @@ type
       ## (§5.4's "ties broken by declaration order"). Computed by the bridge
       ## from the declaration's scope depth and match specificity, because
       ## those are provenance and provenance does not cross the boundary.
+    computed*: seq[ComputedSummary]
+      ## A visualiser whose answers were COMPUTED by the host before this
+      ## rendering began: a project's executable visualiser
+      ## (`.codetracer/visualisers.wasm`), run in its sandbox over each value a
+      ## surface is about to show.
+      ##
+      ## THE PIPELINE STILL RUNS NO CODE. The host ran the module; what crosses
+      ## into the presenter is a table of `(input, text)` pairs, compared by
+      ## equality, exactly as `summary` is a template and `mediaFrom` a label.
+      ## A presentation therefore stays a function of its arguments: the same
+      ## value and the same table render the same bytes on every surface.
+      ##
+      ## `computedDeclared` says this visualiser is one of these. It then claims
+      ## a value only when the table holds a NON-EMPTY answer for that value's
+      ## `executableInputOf` — so a value the host did not precompute, or one
+      ## the module declined (an empty answer), falls through to the next rule
+      ## and finally to the built-in table rather than rendering blank.
+    computedDeclared*: bool
+
+  ComputedSummary* = object
+    ## One answer an executable visualiser gave the host.
+    input*: string
+      ## The bytes the host handed the module: `executableInputOf(value)`.
+    text*: string
+      ## What it returned. Rendered verbatim as the value's summary line.
 
   PresenterSet* = object
     ## The ordered rules resolution considers. A parameter, so PLAT-12 extends
@@ -265,6 +290,32 @@ func visualiserRanks(a, b: Visualiser): bool =
   let (ta, tb) = (effectiveTier(a), effectiveTier(b))
   ta < tb or (ta == tb and a.rank > b.rank)
 
+const
+  ExecutableInputBudget* = Budget(
+    name: "executable-input",
+    lines: 1, cells: 0, depth: 4, members: 32,
+    expandable: false, annotated: false, media: {mcOctetStream})
+    ## The rendering a host hands an executable visualiser as its input, and
+    ## the key its answer is looked up by. ONE budget, named here, so the host
+    ## that runs the module and the presenter that reads the answer cannot
+    ## compute two different keys for one value.
+
+func executableInputOf*(v: PValue): string
+  ## The bytes an executable visualiser is handed for `v`: its built-in
+  ## one-line rendering at `ExecutableInputBudget`, with NO visualiser applied
+  ## (a module's input cannot depend on another rule, or on itself). Defined
+  ## below `present`, which it calls.
+
+func computedAnswer*(vis: Visualiser; v: PValue): string =
+  ## The host's precomputed answer for `v`, or "" when there is none.
+  ## Equality over a table the host bounded; nothing is run here.
+  if not vis.computedDeclared or v.isNil or vis.computed.len == 0:
+    return ""
+  let key = executableInputOf(v)
+  for c in vis.computed:
+    if c.input == key: return c.text
+  ""
+
 func winningVisualiser*(v: PValue; presenters: PresenterSet;
                         language: string): int =
   ## The index of the visualiser that claims `v`, or -1.
@@ -293,8 +344,14 @@ func winningVisualiser*(v: PValue; presenters: PresenterSet;
   if v.isNil:
     return
   for i, vis in presenters.visualisers:
-    if not typeMatches(vis.matchKind, vis.typeMatch, vis.language,
-                       v.typeName, language):
+    if vis.computedDeclared:
+      # An executable visualiser claims exactly the values the host has an
+      # answer for. No type predicate: the module decided, and an empty answer
+      # is its way of declining.
+      if computedAnswer(vis, v).len == 0:
+        continue
+    elif not typeMatches(vis.matchKind, vis.typeMatch, vis.language,
+                         v.typeName, language):
       continue
     if result < 0 or visualiserRanks(vis, presenters.visualisers[result]):
       result = i
@@ -725,6 +782,9 @@ func visualiserScanCost(v: PValue; presenters: PresenterSet): int =
   let nameLen = v.typeName.len
   for vis in presenters.visualisers:
     result += 1 + min(vis.typeMatch.len, nameLen)
+    # A computed visualiser's scan is a lookup over the host's table: one
+    # unit per entry it may compare.
+    if vis.computedDeclared: result += vis.computed.len
 
 func chargedWinner(v: PValue; presenters: PresenterSet; language: string;
                    tally: var RenderTally): int =
@@ -1201,6 +1261,10 @@ func visualisedText(vis: Visualiser; v: PValue; ctx: PresentationContext;
   ##   3. A SUMMARY TEMPLATE, or, when the rule declared none, the built-in
   ##      rendering with the rule's hidden fields removed. A rule that only
   ##      hides is the common case and must not have to restate the rendering.
+  if vis.computedDeclared:
+    # The answer a project's executable visualiser gave the host for this
+    # value. `winningVisualiser` chose this rule only because it is non-empty.
+    return computedAnswer(vis, v)
   if vis.mediaType.len > 0:
     let field = chargedMemberNamed(tally, v, vis.mediaFrom)
     if surfaceDrawsMedia(ctx, vis, field):
@@ -1544,6 +1608,9 @@ func present*(v: PValue; budget: Budget; lang = plUnknown;
   present(v, PresentationContext(lang: lang, languageName: languageName,
                                  budget: budget, measure: measure),
           presenters)
+
+func executableInputOf*(v: PValue): string =
+  present(v, ExecutableInputBudget).root.text
 
 func presentText*(v: PValue; budget: Budget; lang = plUnknown;
                   measure: PresentationMeasure = nil): string =

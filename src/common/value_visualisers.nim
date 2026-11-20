@@ -315,6 +315,79 @@ func presentersFor*(loaded: LoadedProjectDefinitions;
   ## inherits as "a visualiser is pure").
   withVisualisers(visualisersFor(loaded), base)
 
+const
+  MaxComputedSummaries* = 256
+    ## How many precomputed answers one executable visualiser may carry into a
+    ## presenter set. The host computes one per value a surface is about to
+    ## show; a pane shows far fewer, and the bound is what keeps the lookup in
+    ## `presenter.computedAnswer` a scan over a number this repository chose.
+
+func executableVisualiser*(file: string;
+                           computed: openArray[ComputedSummary]): Visualiser =
+  ## A project's EXECUTABLE visualiser (`.codetracer/visualisers.wasm`), as the
+  ## presenter sees one: the answers the host computed in the sandbox, keyed by
+  ## the input it handed the module.
+  ##
+  ## THE TIER IS THE PROJECT'S AND THE RANK IS THE LOWEST IN IT. A declarative
+  ## rule names a type; the module claims whatever it answers for. §5.4's
+  ## "more specific first" therefore puts every declared rule that matches a
+  ## value ahead of the module, which still beats a plugin and the built-ins.
+  ##
+  ## Answers past `MaxComputedSummaries`, answers longer than
+  ## `MaxSummaryBytes`, and empty answers (the module declined) do not cross.
+  var kept: seq[ComputedSummary] = @[]
+  for c in computed:
+    if kept.len >= MaxComputedSummaries: break
+    if c.text.len == 0 or c.text.len > MaxSummaryBytes: continue
+    kept.add c
+  Visualiser(
+    id: "project:" & file & "#ct_visualise",
+    tier: ptProjectDefinition,
+    tierDeclared: true,
+    computed: kept,
+    computedDeclared: true,
+    rank: 0)
+
+const
+  InProgramVisualiserFunction* = "codetracer_visualise"
+    ## §5.1 mechanism 1's AGREED NAME: a function in the recorded program, of
+    ## one argument, that answers how its argument should read. The program's
+    ## author writes it in their own language; CodeTracer never calls it.
+
+func inProgramVisualiser*(function: string;
+                          answers: openArray[ComputedSummary]): Visualiser =
+  ## §5.1 mechanism 1, from a RECORDING: what the program's own visualiser
+  ## function answered, every time the recorded program called it, keyed by
+  ## the argument it was called with.
+  ##
+  ## "Because a recording is omniscient … calling it is replay rather than live
+  ## evaluation." The host reads each recorded call's argument and return
+  ## value out of the trace (`HeadlessDebugSession.loadInProgramVisualiser`)
+  ## and this turns them into the same lookup table an executable visualiser
+  ## produces: a value on screen whose rendering equals an argument the
+  ## program rendered reads the way the program said. Nothing is executed —
+  ## not the program, not the function, not anything of the project's.
+  ##
+  ## THE TOP TIER, DECLARED. §5.4 puts the program's own function above every
+  ## declaration, "because it is the author's stated intent about their own
+  ## type" — and `tierDeclared` is set with it, because `ptInProgram` is also
+  ## the enum's zero value (see `presenter.Visualiser.tierDeclared`).
+  var kept: seq[ComputedSummary] = @[]
+  for c in answers:
+    if kept.len >= MaxComputedSummaries: break
+    if c.text.len == 0 or c.text.len > MaxSummaryBytes: continue
+    var seen = false
+    for k in kept:
+      if k.input == c.input: seen = true
+    if not seen: kept.add c
+  Visualiser(
+    id: "program:" & function,
+    tier: ptInProgram,
+    tierDeclared: true,
+    computed: kept,
+    computedDeclared: true,
+    rank: 0)
+
 func describeVisualisers*(presenters: PresenterSet): string =
   ## What a `--verbose` run, a log or a diagnostics pane prints about the tier
   ## that is active: how many rules, and each one's id, match and effect.
@@ -336,6 +409,10 @@ func describeVisualisers*(presenters: PresenterSet): string =
       effect.add "media " & vis.mediaType & " from '" & vis.mediaFrom & "'"
     if vis.presentDeclared:
       effect.add "presents as " & presentationSpelling(vis.present)
+    if vis.computedDeclared:
+      lines.add "  " & vis.id & ": code, run in the sandbox; " &
+        $vis.computed.len & " answer(s) for the values on screen"
+      continue
     lines.add "  " & vis.id & ": " & $vis.matchKind & " '" & vis.typeMatch &
       "'" & (if vis.language.len > 0: " in " & vis.language else: "") &
       " (rank " & $vis.rank & ") — " &

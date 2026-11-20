@@ -37,11 +37,13 @@
 ## `src/frontend/tui/tests/test_value_presentation_corpus.nim`, which is in the
 ## `tui` lane because it needs a trace and a server this lane does not build.
 
-import std/[json, unittest]
+import std/[json, strutils, unittest]
 
 import types
 import lang
 import value_presentation/json_adapter
+import project_definitions
+import value_visualisers
 
 var countedAssertions = 0
 
@@ -49,7 +51,7 @@ template ck(condition: untyped) =
   inc countedAssertions
   check condition
 
-const ExpectedAssertions = 483
+const ExpectedAssertions = 892
 
 # ---------------------------------------------------------------------------
 # One value, two ways
@@ -234,6 +236,78 @@ suite "PLAT-2: one value, two front-ends, the same bytes":
       ck p.root.text.len > 0
       inc mapped
     ck mapped == 34
+
+const DeclaredVisualisers = """
+schema = "codetracer.visualisers.v1"
+
+[[visualiser]]
+match = "Point"
+summary = "({x}, {y})"
+
+[[visualiser]]
+match = "list"
+hide = ["0"]
+
+[[visualiser]]
+match = "str"
+summary = "a message"
+"""
+
+suite "a declared visualiser renders the same bytes on every front-end":
+
+  # PLAT-12's bound 7: the pairs above prove the two ADAPTERS agree with NO
+  # visualisers. Here the same rules — read from a real definition through
+  # the loader the session uses — are applied on both routes: the desktop's
+  # door (`presentValue` over a `Value`, as `ui/presented_value` calls it) and
+  # the terminal's and GPUI's (`present` over the `ct/load-locals` JSON, with
+  # the presenter set `presentersFor` builds). Every byte, class and
+  # attribution must agree, at every surface budget, for every pair.
+  test "every pair renders identically through a declared tier":
+    let loaded = loadProjectDefinitions([DefinitionFile(
+      kind: dfkVisualisers, origin: doProject, scope: "",
+      path: ".codetracer/visualisers.toml", text: DeclaredVisualisers)])
+    ck loaded.problems.len == 0
+    let visualisers = visualisersFor(loaded)
+    ck visualisers.len == 3
+    let presenters = presentersFor(loaded)
+    var compared = 0
+    var claimed = 0
+    for pair in pairsToCheck():
+      for budget in SurfaceBudgets:
+        let desktop = presentValue(pair.native, budget, LangUnknown, visualisers)
+        let terminal = present(json_adapter.toPValue(pair.wire), budget,
+                               presenters = presenters)
+        checkpoint(pair.name & " @ " & budget.name & ": desktop='" &
+                   desktop.root.text & "' terminal='" & terminal.root.text & "'")
+        ck desktop.root.text == terminal.root.text
+        ck desktop.root.class == terminal.root.class
+        ck desktop.attribution.presenter == terminal.attribution.presenter
+        if desktop.attribution.presenter.startsWith("project:"):
+          inc claimed
+        inc compared
+    ck compared == 15 * SurfaceBudgets.len
+    # THE CONTROL: the rules really applied, on both routes — the record, the
+    # sequence and the string are claimed at every budget. A tier that matched
+    # nothing would make this suite the one above it again.
+    ck claimed >= 3 * SurfaceBudgets.len
+
+  test "an executable visualiser's answers render identically too":
+    # The host runs a project's code and hands the presenter a table; both
+    # routes look the same value up by the same key (`executableInputOf`), so
+    # they must find the same answer.
+    var computed: seq[ComputedSummary] = @[]
+    for pair in pairsToCheck():
+      computed.add ComputedSummary(input: executableInputOf(toPValue(pair.native)),
+                                   text: "computed " & pair.name)
+    let vis = @[executableVisualiser(".codetracer/visualisers.wasm", computed)]
+    for pair in pairsToCheck():
+      let desktop = presentValue(pair.native, StatePanelBudget, LangUnknown, vis)
+      let terminal = present(json_adapter.toPValue(pair.wire), StatePanelBudget,
+                             presenters = withVisualisers(vis))
+      ck desktop.root.text == terminal.root.text
+      ck desktop.root.text == "computed " & pair.name
+      ck terminal.attribution.presenter ==
+         "project:.codetracer/visualisers.wasm#ct_visualise"
 
 suite "PLAT-2: the language is an argument here too":
 
