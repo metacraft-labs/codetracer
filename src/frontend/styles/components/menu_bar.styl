@@ -191,7 +191,7 @@ CAPTION_BAR_PADDING_BOTTOM = unquote("var(--caption-bar-padding-bottom)")
   -webkit-app-region: no-drag
   z-index: 50
   align-items: flex-end
-  gap: 0.1875em
+  gap: 0.25em
 
   // The three marks are stencils painted in the theme's icon colour
   // (`icon/primary/default`), as `.value-history-button` and the origin badge
@@ -203,27 +203,27 @@ CAPTION_BAR_PADDING_BOTTOM = unquote("var(--caption-bar-padding-bottom)")
   // nothing.  Drawn at the artwork's own size (10x2, 14x11, 10x10 units), as
   // the dark theme always drew them.
   .menu-button-svg
-    width: 1.0em
-    height: 1.0em
+    width: 1.5em
+    height: 1.5em
     border-radius: 50%
     background-color: colors-ui-icon-primary-default
     -webkit-mask-position: center
     mask-position: center
     -webkit-mask-repeat: no-repeat
     mask-repeat: no-repeat
-    // `contain` scales the icon proportionally to fit within the circle at any
-    // zoom level.  Without it the mask renders at the SVG's intrinsic pixel
-    // size (10×2, 14×11, 10×10), which is smaller than the button at default
-    // zoom but larger when zoomed out, clipping the icon.
-    -webkit-mask-size: contain
-    mask-size: contain
+    // Fixed 0.5em icon within the 1.5em circle: the mark is small relative to
+    // the button, giving breathing room inside each circle.
+    -webkit-mask-size: 0.5em
+    mask-size: 0.5em
 
     &.minimize
       -webkit-mask-image: url('../../public/resources/window/minimize_window_dark.svg')
       mask-image: url('../../public/resources/window/minimize_window_dark.svg')
       opacity: 1
-      -webkit-mask-position: center 65%
-      mask-position: center 65%
+      // Align the minimize line to the bottom of the circle, matching the
+      // bottom edge of the maximize icon (which sits centred at 50%).
+      -webkit-mask-position: center bottom
+      mask-position: center bottom
 
     // The restore button shows the maximize mark, so the button looks the
     // same whichever state the window is in.
