@@ -1,0 +1,238 @@
+name: zgui front-end
+
+# The `zgui` lane (`just test-zgui`): codetracer-zgui and its vocabulary
+# binding, headless on zgui's own platform, on Linux (Mesa's software Vulkan
+# driver) and on macOS (Metal). The lane builds isonim-zgui's shim from the
+# sibling checkout with the dev shell's toolchain, builds codetracer-zgui
+# against it, and runs the binding suite and the binary on the `calc`
+# recording through a real replay-server.
+#
+# The Linux job records `calc` with `ct` (`just build-once` of its target) and
+# hands the recording to the macOS job, which replays it with a replay-server
+# built for macOS. `build-once` does not run on macOS while
+# locks/arm64-macosx.lock trails repro.lock (codetracer-pm issues 2026-11-04
+# and 2026-11-08): it refuses the drift, and with the drift allowed it
+# refuses the lock's cargo pin.
+#
+# isonim-zgui is not in repro.lock (nothing in this repository's dependency
+# graph reaches it but the zgui front-end), so its revision is pinned here.
+
+on:
+  push:
+    branches: [agents, 'zgui-ci-*']
+    paths:
+      - 'src/frontend/zgui/**'
+      - 'src/frontend/view_vocabulary/**'
+      - '.github/workflows/zgui.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ISONIM_ZGUI_REV: a432efd1eb79787996ed96e5724c6e37f076fafa
+
+jobs:
+  linux:
+    name: zgui lane (x86_64-linux)
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 150
+    steps:
+      - name: Mint installation token for cross-repo sibling access
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Setup db-backend siblings
+        uses: ./.github/actions/setup-db-backend-siblings
+        with:
+          env-flavor: nix
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Provision dependency siblings from repro.lock
+        uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      - name: Mint a token for the clone below
+        id: late_token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      - name: Clone isonim-zgui
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/isonim-zgui
+          ref: agents
+          path: ${{ github.workspace }}/../isonim-zgui
+          gh-token: ${{ steps.late_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Check out the pinned isonim-zgui revision
+        run: |
+          set -euo pipefail
+          git -C "${GITHUB_WORKSPACE}/../isonim-zgui" fetch --quiet origin "${ISONIM_ZGUI_REV}" || true
+          git -C "${GITHUB_WORKSPACE}/../isonim-zgui" checkout --quiet --detach "${ISONIM_ZGUI_REV}"
+          git -C "${GITHUB_WORKSPACE}/../isonim-zgui" log --oneline -1
+
+      - name: Build ct (the calc fixture is recorded with ct)
+        env:
+          CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
+        # Only the targets this lane needs: the whole build also captures the
+        # book's screenshots, which needs the native recorder's ct_cli. `ct`
+        # reads its default config and layout from the built tree, and
+        # build-once refuses a `ct` without them, so they are built first (each
+        # of those builds is refused for lacking the other, and that is fine).
+        run: |
+          nix develop . --command bash -c '
+            for t in config-default-layout-json config-default-config-yaml; do
+              CODETRACER_REPROBUILD_TARGET=".#$t" just build-once || true
+            done
+            CODETRACER_REPROBUILD_TARGET=".#ct-binary" just build-once'
+
+      - name: Build replay-server
+        env:
+          CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
+          CODETRACER_REPROBUILD_TARGET: ".#replay-server"
+        run: nix develop . --command just build-once
+
+      - name: The zgui lane
+        env:
+          CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
+          # The runner's own nimcache: a shared /tmp/ct-nim-cache can belong to
+          # another runner account on the same host.
+          CT_NIM_CACHE_ROOT: ${{ runner.temp }}/ct-nim-cache
+        run: nix develop . --command just test-zgui
+
+      - name: Hand the calc recording to the macOS job
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zgui-calc-recording
+          path: test-logs/tui-fixtures/calc-2f0db4f45192/
+          include-hidden-files: true
+          retention-days: 7
+
+      - name: Upload the lane's log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zgui-lane-x86_64-linux
+          path: test-logs/test-zgui.log
+          retention-days: 30
+
+  macos:
+    name: zgui lane (aarch64-darwin)
+    needs: linux
+    runs-on: aarch64-darwin
+    timeout-minutes: 150
+    steps:
+      - name: Mint installation token for cross-repo sibling access
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Setup db-backend siblings
+        uses: ./.github/actions/setup-db-backend-siblings
+        with:
+          env-flavor: nix
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Provision dependency siblings from repro.lock
+        uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      - name: Mint a token for the clone below
+        id: late_token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      - name: Clone isonim-zgui
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/isonim-zgui
+          ref: agents
+          path: ${{ github.workspace }}/../isonim-zgui
+          gh-token: ${{ steps.late_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Check out the pinned isonim-zgui revision
+        run: |
+          set -euo pipefail
+          git -C "${GITHUB_WORKSPACE}/../isonim-zgui" fetch --quiet origin "${ISONIM_ZGUI_REV}" || true
+          git -C "${GITHUB_WORKSPACE}/../isonim-zgui" checkout --quiet --detach "${ISONIM_ZGUI_REV}"
+          git -C "${GITHUB_WORKSPACE}/../isonim-zgui" log --oneline -1
+
+      - name: The calc recording, from the Linux job
+        uses: actions/download-artifact@v4
+        with:
+          name: zgui-calc-recording
+          path: test-logs/tui-fixtures/calc-2f0db4f45192
+
+      - name: Build replay-server
+        env:
+          CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
+        run: nix develop . --command bash -c 'cd src/db-backend && cargo build --bin replay-server'
+
+      - name: The zgui lane
+        env:
+          CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
+          # The runner's own nimcache: a shared /tmp/ct-nim-cache can belong to
+          # another runner account on the same host.
+          CT_NIM_CACHE_ROOT: ${{ runner.temp }}/ct-nim-cache
+        run: nix develop . --command just test-zgui
+
+      - name: Upload the lane's log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zgui-lane-aarch64-darwin
+          path: test-logs/test-zgui.log
+          retention-days: 30

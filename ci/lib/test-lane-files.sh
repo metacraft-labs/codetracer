@@ -315,6 +315,7 @@ tui-real-terminal
 tui-real-emulators
 gpui-shell
 gpui-native
+zgui
 agent-harbor-gpui-captures
 ui-selection
 ct-host-admission
@@ -367,6 +368,7 @@ test_lane_description() {
 	gpui-shell) echo "PLAT-20 GPUI shell: the dock projection against gpui-kit's own fixtures, and the shell/leaf split through the real isonim-gpui shim" ;;
 	gpui-native) echo "GPUI suites over an rr recording of a native program (need rr, ct-native-replay, codetracer-native-test-programs and build/bin/codetracer-gpui; run by the rr CI job)" ;;
 	agent-harbor-gpui-captures) echo "CTF-P1b and CTF-P1c: the GPUI window captures of the Agent Harbor stories, and of the playback stories at each named moment, against the committed web layout records (just ctf-p1b-gpui-captures takes both sets of captures on headless sway first)" ;;
+	zgui) echo "The zgui front-end (codetracer-zgui) headless on zgui's own platform: the vocabulary binding against the web binding, and the built binary on the calc recording (just test-zgui builds the binary and the isonim-zgui shim, and puts the shim on the library path)" ;;
 	ui-selection) echo 'PLAT-1 --ui front-end selection, end to end: the real launcher, the real ct, the real TUI and a real ct host server' ;;
 	ct-host-admission) echo 'ct host admission, session isolation and lifetime, end to end: the real ct host refuses a client without its session secret or from a foreign origin, gives every client its own replay and session, and leaves no process behind when it is signalled or killed; and it refuses a trace container it cannot read with one error line naming the reason' ;;
 	ct-host-manifest) echo 'ct host --manifest slice selection, end to end: the real ct host opens the mcr_slices slice the replay start (or CODETRACER_START_SLICE_KEY) names, refuses one it does not list' ;;
@@ -798,6 +800,11 @@ test_lane_extra_flags() {
 		# `gpui-native` is `gpui-shell`'s rr-recording half (see that lane)
 		# and compiles the same kind of suite, so it takes these flags.
 		echo "--path:src/frontend/viewmodel --path:../GuiAssert/src"
+		;;
+	zgui)
+		# The zgui suites import the ViewModels by their bare module names, as
+		# `codetracer-zgui` does (`just build-zgui` passes the same path).
+		echo "--path:src/frontend/viewmodel"
 		;;
 
 	tui | tui-native | tui-real-terminal)
@@ -2390,6 +2397,10 @@ test_lane_files() {
 		# holds every job that runs such a suite to those prerequisites.
 		_tlf_glob src/frontend/gpui/tests 'test_*.nim' |
 			_tlf_keep_matching_file "${_TLF_NATIVE_RECORDING_IMPORT_RE}"
+		;;
+
+	zgui)
+		_tlf_glob src/frontend/zgui/tests 'test_*.nim'
 		;;
 
 	agent-harbor-gpui-captures)
