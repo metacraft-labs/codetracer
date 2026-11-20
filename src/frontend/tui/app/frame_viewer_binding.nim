@@ -306,7 +306,7 @@ proc openMagnifierAt*(model: FrameViewerModel; col, row: int;
     raise newException(MagnifierError,
       "there is no decoded frame to magnify: " & remedyFor(fdgNoDecoder))
   let fit = fitToCells(model.sourceWidth, model.sourceHeight,
-                       DefaultCellAspect, viewCols, viewRows)
+                       model.capability.cellAspectOf, viewCols, viewRows)
   result = model
   result.magnified = true
   result.magnifier = openMagnifier(model.sourceWidth, model.sourceHeight, fit,

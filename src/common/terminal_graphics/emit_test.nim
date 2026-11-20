@@ -42,7 +42,7 @@ template ckEq(a, b: untyped) =
   inc countedAssertions
   check a == b
 
-const ExpectedAssertions = 72
+const ExpectedAssertions = 89
   ## Written from a run. See the final case.
 
 const
@@ -154,7 +154,9 @@ suite "PLAT-14: the tier-0 escape sequences, byte for byte":
   test "an iTerm2 inline image is the documented OSC, written out":
     ckEq iterm2Inline(Abc),
          "\x1b]1337;File=inline=1;size=3:" & AbcBase64 & "\x07"
-    ckEq kittyDelete(7), "\x1b_Ga=d,i=7\x1b\\"
+    # `d=i`: without it Kitty deletes EVERY placement on the screen.
+    ckEq kittyDelete(7), "\x1b_Ga=d,d=i,i=7\x1b\\"
+    ckEq kittyDelete(7, quiet = true), "\x1b_Ga=d,d=i,i=7,q=2\x1b\\"
 
   test "tmux passthrough doubles every ESC, and only ESC":
     let inner = kittyPlace(7, 1)
@@ -169,6 +171,71 @@ suite "PLAT-14: the tier-0 escape sequences, byte for byte":
     # brackets, which is the falsifying twin: a wrapper that doubled
     # indiscriminately would fail here.
     ckEq tmuxPassthrough("hello"), "\x1bPtmux;hello\x1b\\"
+
+suite "a frame over a pane's reserved cells, byte for byte":
+
+  test "Kitty names the placement, holds the cursor and stays quiet":
+    let first = emitProtocolImage(ipKitty, Abc, imageId = 4900,
+                                  placementId = 1, cols = 8, rows = 4,
+                                  alreadyUploaded = false,
+                                  placement = ppReservedCells)
+    ckEq first.bytes,
+         "\x1b_Ga=T,f=100,i=4900,p=1,c=8,r=4,C=1,m=0,q=2;" & AbcBase64 &
+         "\x1b\\"
+    ck not first.placementReused
+    # The same image re-placed: no payload, the same keys.
+    let again = emitProtocolImage(ipKitty, Abc, imageId = 4900,
+                                  placementId = 1, cols = 6, rows = 3,
+                                  alreadyUploaded = true,
+                                  placement = ppReservedCells)
+    ckEq again.bytes, "\x1b_Ga=p,i=4900,p=1,c=6,r=3,C=1,q=2\x1b\\"
+    ck again.placementReused
+    # THE TWIN: at the cursor, none of the three keys is written.
+    let atCursor = emitProtocolImage(ipKitty, Abc, imageId = 4900,
+                                     placementId = 1, cols = 8, rows = 4,
+                                     alreadyUploaded = false)
+    ck not atCursor.bytes.contains("C=1")
+    ck not atCursor.bytes.contains("q=2")
+    ck not atCursor.bytes.contains("p=1")
+
+  test "every chunk of a quiet transmission is quiet":
+    var payload = newSeq[byte](KittyChunkBytes)
+    for i in 0 ..< payload.len: payload[i] = byte(i mod 251)
+    let bytes = kittyTransmit(payload, 4900, 8, 4, placementId = 1,
+                              holdCursor = true, quiet = true)
+    let chunks = bytes.count(ApcPrefix)
+    ck chunks > 1
+    ckEq bytes.count("q=2"), chunks
+    ckEq bytes.count("C=1"), 1
+
+  test "iTerm2 is sized to the reserved cells":
+    let sized = emitProtocolImage(ipITerm2, Abc, imageId = 4900,
+                                  placementId = 1, cols = 8, rows = 4,
+                                  alreadyUploaded = false,
+                                  placement = ppReservedCells)
+    ckEq sized.bytes,
+         "\x1b]1337;File=inline=1;size=3;width=8;height=4;" &
+         "preserveAspectRatio=0:" & AbcBase64 & "\x07"
+    ckEq iterm2Inline(Abc, 8, 4), sized.bytes
+
+  test "under tmux each escape is wrapped on its own, and nothing else is":
+    let body = "\x1b[3;5H" & kittyPlace(9, 1) & "\x1b8" & iterm2Inline(Abc)
+    let wrapped = tmuxPassthroughEach(body)
+    ckEq wrapped, "\x1b[3;5H" & tmuxPassthrough(kittyPlace(9, 1)) & "\x1b8" &
+                  tmuxPassthrough(iterm2Inline(Abc))
+    # A chunked transmission is one passthrough per chunk.
+    var payload = newSeq[byte](KittyChunkBytes)
+    let chunked = kittyTransmit(payload, 9)
+    ckEq tmuxPassthroughEach(chunked).count(TmuxPassthroughOpen),
+         chunked.count(ApcPrefix)
+    ckEq tmuxPassthroughEach("plain"), "plain"
+    # …and `emitProtocolImage` wraps a reserved-cells emission that way.
+    let framed = emitProtocolImage(ipKitty, payload, 9, 1, 8, 4,
+                                   alreadyUploaded = false, wrapForTmux = true,
+                                   placement = ppReservedCells)
+    ckEq framed.bytes.count(TmuxPassthroughOpen),
+         kittyTransmit(payload, 9, 8, 4, placementId = 1, holdCursor = true,
+                       quiet = true).count(ApcPrefix)
 
 suite "PLAT-14: the cell-tier bytes":
 

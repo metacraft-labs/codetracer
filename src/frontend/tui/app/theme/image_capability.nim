@@ -97,14 +97,14 @@
 import std/strutils
 
 import ../../../../common/terminal_graphics/tiers
-import ../../../../common/terminal_graphics/emit
+import ../../../../common/terminal_graphics/[aspect, emit]
 import ./capabilities
 
 # The image axis is an EXTENSION of the colour/border/mouse axes and takes
 # `TerminalCapabilities` as an input, so every consumer of one needs the other.
 # Re-exported for `host/capabilities.nim`'s reason: a caller that had to import
 # both would be importing two halves of one decision.
-export capabilities
+export capabilities, aspect
 
 type
   Multiplexer* = enum
@@ -238,6 +238,10 @@ type
       ## The most EMITTED BYTES (`emit.EmittedImage.emittedBytes`, and no other
       ## quantity — see that module's header) one tier-0 image may cost here.
       ## `0` means unbounded, which is a local session.
+    cellAspect*: CellAspect
+      ## §2.4: the terminal's cell, as `CSI 16 t` reported it
+      ## (`casReported`), or `DefaultCellAspect`. Every fit of a picture into
+      ## cells corrects against `cellAspectOf` of this value.
 
 const
   KittyTerms* = ["xterm-kitty"]
@@ -411,7 +415,8 @@ func resolveImageCapability*(env: TerminalEnv; ienv: ImageEnv;
                              caps: TerminalCapabilities;
                              flags: CapabilityFlags;
                              probe = GraphicsProbe();
-                             hint = ihPhoto): ImageCapability =
+                             hint = ihPhoto;
+                             cellAspect = DefaultCellAspect): ImageCapability =
   ## THE whole image decision, as one pure function.
   ##
   ## The default `probe` is the zero value — "nothing was measured" — because a
@@ -541,7 +546,18 @@ func resolveImageCapability*(env: TerminalEnv; ienv: ImageEnv;
     advertised: advertised, refusal: refusal, overriddenRefusal: overridden,
     multiplexer: mux, overSsh: ssh, repertoire: repertoire,
     wrapForMultiplexer: tier == itProtocol and mux == muxTmux,
-    linkBudget: (if ssh: MaxLinkImageBytes else: 0))
+    linkBudget: (if ssh: MaxLinkImageBytes else: 0),
+    cellAspect: cellAspect)
+
+func cellAspectOf*(cap: ImageCapability): CellAspect =
+  ## The cell the picture is fitted to: the reported one, or §2.4's
+  ## configured default when nothing was reported. A capability built
+  ## without one — the zero `CellAspect` — answers the default too, so no
+  ## fit ever divides by a zero cell.
+  if cap.cellAspect.widthPx <= 0 or cap.cellAspect.heightPx <= 0:
+    DefaultCellAspect
+  else:
+    cap.cellAspect
 
 func withinLinkBudget*(cap: ImageCapability; emittedBytes: int): bool =
   ## Whether an emission of `emittedBytes` bytes is allowed on this link.

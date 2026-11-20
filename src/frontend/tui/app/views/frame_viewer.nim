@@ -755,7 +755,8 @@ proc paintFrameViewer*(g: var StyledGrid; area: CellArea;
     # blank at the fit's extent (the aspect corrected, never enlarged past the
     # rectangle); the host places the picture there after the frame.
     let fit = fitToCells(model.sourceWidth, model.sourceHeight,
-                         DefaultCellAspect, area.width, pictureHeight)
+                         model.capability.cellAspectOf, area.width,
+                         pictureHeight)
     let cols = max(1, min(fit.cols, area.width))
     let rows = max(1, min(fit.rows, pictureHeight))
     for r in 0 ..< rows:
@@ -772,16 +773,14 @@ proc paintFrameViewer*(g: var StyledGrid; area: CellArea;
       if model.magnified:
         renderMagnifier(model.raster, model.magnifier, model.capability.tier)
       else:
-        # THE ASPECT IS `DefaultCellAspect`, NAMED AT THE CALL SITE. Nothing in
-        # this build sends `CSI 16 t` (PLAT-14 bound 9), so `casReported` has
-        # no producer and every shipped rendering corrects against 1:2 — and
-        # this is the call site that would change on the day one appears.
-        # The frame is DITHERED (error diffusion, `cell_render`'s header); the
-        # magnifier above is not, because it must show each pixel's own colour.
+        # THE ASPECT IS THE TERMINAL'S CELL (`CSI 16 t`, PLAT-14 bound 9's
+        # producer), or §2.4's 1:2 default where it did not say. The frame is
+        # DITHERED (error diffusion, `cell_render`'s header); the magnifier
+        # above is not, because it must show each pixel's own colour.
         renderCells(model.raster, tier,
                     fitToCells(model.sourceWidth, model.sourceHeight,
-                               DefaultCellAspect, area.width, pictureHeight),
-                               dither = dmDiffusion)
+                               model.capability.cellAspectOf, area.width,
+                               pictureHeight), dither = dmDiffusion)
     result.candidatesEvaluated = grid.candidatesEvaluated
     result.pictureCols = min(grid.cols, area.width)
     result.pictureTop = atRow
@@ -923,6 +922,6 @@ proc emitFrameViewerPicture*(model: FrameViewerModel;
     else:
       renderCells(model.raster, tier,
                   fitToCells(model.sourceWidth, model.sourceHeight,
-                             DefaultCellAspect, width, pictureHeight),
-                  dither = dmDiffusion)
+                             model.capability.cellAspectOf, width,
+                             pictureHeight), dither = dmDiffusion)
   emitCellImage(grid, writing)

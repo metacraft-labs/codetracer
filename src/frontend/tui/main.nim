@@ -319,32 +319,62 @@ var gFrameImage: FrameImageState
   ## per process).
 
 type GraphicsProbeState = object
-  ## PLAT-48: the kitty graphics query sent after the first frame, so the
-  ## `icons` default can be `graphics` on a terminal that draws pictures —
-  ## measured, never assumed from `$TERM`. Sent AFTER frame 0 rather than in
-  ## the start-up round, so the cold-start gate pays nothing for it.
-  open: bool
+  ## THE GRAPHICS PROBE (`host/image_probe`), sent LAZILY: once, after the
+  ## frame that first needs its answer — the controls' pictures (PLAT-48)
+  ## while the icons mode may still be `graphics`, or a recording's Video
+  ## Player frame — and never in the start-up round, so the cold-start gate
+  ## pays nothing for it. Its bytes are `graphicsProbeQuery`'s, through tmux's
+  ## passthrough when the pane has it on (`readTmuxPassthrough`, spawned only
+  ## here); its replies arrive as framed tokens and are read by
+  ## `noteProbeReplies`, the parser `probeGraphics` uses; and after
+  ## `DefaultProbeTimeoutMs` with no fence the path counts as unanswered.
+  ## A reply that arrives after that still counts: the capability is
+  ## re-resolved with it, so a slow terminal ends up at the tier it measured.
+  asked: bool
+  waiting: bool
+    ## Asked and not yet fenced, within the timeout.
+  fenced: bool
+    ## The DA1 fence came back.
   deadlineMs: int64
+  probe: GraphicsProbe
+  ienv: ImageEnv
 
-const GraphicsProbeWaitMs = 500'i64
+proc graphicsWanted(rt: TuiRuntime; hasVisual: bool): bool =
+  ## Whether anything on screen needs to know if the terminal draws pictures:
+  ## the controls' pictures (unless the user chose a mode that is not
+  ## `graphics`, or the screen-reader mode, which reads text), or the Video
+  ## Player's frame.
+  hasVisual or
+    (not rt.caps.screenReader and
+     (not rt.app.iconsChosen or rt.app.icons == imGraphics))
 
-proc startGraphicsProbe(driver: TerminalDriver; rt: TuiRuntime):
-    GraphicsProbeState =
-  ## Ask, unless a multiplexer is in the path (tmux or screen would need a
-  ## passthrough this probe does not negotiate; `image_capability` refuses
-  ## tier 0 there too) or the user already chose a mode that is not
-  ## `graphics`.
-  let env = readImageEnv()
-  if env.tmux.len > 0 or env.sty.len > 0:
+proc askGraphics(state: var GraphicsProbeState; driver: TerminalDriver;
+                 askCellSize: bool) =
+  ## Send the probe, once. Not under `screen` (it never passes graphics, and
+  ## the resolver refuses tier 0 there) nor under a tmux whose
+  ## `allow-passthrough` is not on (the query would not reach the terminal).
+  if state.asked:
     return
-  if rt.app.iconsChosen and rt.app.icons != imGraphics:
+  state.asked = true
+  state.ienv = readImageEnv()
+  if state.ienv.sty.len > 0:
     return
+  let wrap = state.ienv.tmux.len > 0
+  if wrap:
+    state.ienv.passthrough = readTmuxPassthrough()
+    if state.ienv.passthrough != ptOn:
+      return
+  # The cell's size rides with the probe when the start-up round did not ask
+  # it (`--no-mouse`): the picture's aspect is corrected against it.
+  let before = if askCellSize: CellSizeQuery else: ""
   driver.expectReplies(true)
-  writeAll(driver.outFd, ProbeQuery & ProbeFence)
-  GraphicsProbeState(open: true, deadlineMs: nowMs() + GraphicsProbeWaitMs)
+  writeAll(driver.outFd, graphicsProbeQuery(wrap, before))
+  state.probe = GraphicsProbe(attempted: true)
+  state.waiting = true
+  state.deadlineMs = nowMs() + DefaultProbeTimeoutMs
 
-proc isGraphicsProbeReply(token: string): bool =
-  token.startsWith("\x1b_Gi=" & $ProbeImageId & ";")
+proc imageEnvOf(state: GraphicsProbeState): ImageEnv =
+  if state.asked: state.ienv else: readImageEnv()
 
 proc startHighlights(rt: TuiRuntime; driver: TerminalDriver): HighlightWorker =
   ## PLAT-29. The Edit pane's parse moves onto a worker thread: the runtime
@@ -421,6 +451,15 @@ proc paint(driver: TerminalDriver; rt: TuiRuntime) =
     if rt.app.frameViewer.transmitsProtocol: rt.videoPlayerScreen().screen.protocolRect
     else: CellArea()
   epilogue.add frameImageBytes(gFrameImage, frameRect, rt.app.frameViewer)
+  if gFrameImage.refusedBytes > 0:
+    # §3: on a constrained link this frame costs more emitted bytes than the
+    # budget allows. Nothing was sent; the capability is demoted (the same
+    # `demoteForPayload` that refused it) and the frame is painted as cells.
+    rt.imageCapability = demoteForPayload(rt.imageCapability,
+                                          gFrameImage.refusedBytes)
+    rt.app.frameViewer.capability = rt.imageCapability
+    paint(driver, rt)
+    return
   let (prompting, row, col) = rt.promptCursor()
   if prompting:
     epilogue.add "\x1b[" & $(row + 1) & ";" & $(col + 1) & "H" &
@@ -937,7 +976,9 @@ proc interactive(command: TuiCommand): int =
     # PLAT-59: the image decision the Video Player draws at, and the
     # recording's graphics — its player and the Visual Replay panes.
     rt.imageCapability = resolveImageCapability(readTerminalEnv(),
-      readImageEnv(), rt.caps, command.flags)
+      readImageEnv(), rt.caps, command.flags,
+      cellAspect = initCellAspect(negotiation.probe.cellWidthPx,
+                                  negotiation.probe.cellHeightPx))
     session.attachVisualReplay(rt, folder, highlights.wakeWriteFd)
     session.syncVisualLayout(rt)
   except DapStalledError as e:
@@ -1478,7 +1519,25 @@ proc interactive(command: TuiCommand): int =
   # ViewModels exist.
   rt.refreshMenuForKeymap()
   paint(driver, rt)
-  var graphicsProbe = startGraphicsProbe(driver, rt)
+  var graphics = GraphicsProbeState()
+  proc imageCapabilityNow(): ImageCapability =
+    ## THE image decision, from everything measured so far: the environment,
+    ## the probe (when it was sent) and the cell's size (`CSI 16 t`, from the
+    ## start-up round or the probe).
+    resolveImageCapability(readTerminalEnv(), graphics.imageEnvOf(),
+      rt.caps, command.flags, graphics.probe,
+      cellAspect = initCellAspect(negotiation.probe.cellWidthPx,
+                                  negotiation.probe.cellHeightPx))
+  proc adoptImageCapability() =
+    ## Re-resolve and, when the answer moved, repaint the Video Player.
+    let next = imageCapabilityNow()
+    if next != rt.imageCapability:
+      rt.imageCapability = next
+      if session.refreshVisualIfShown(rt):
+        paint(driver, rt)
+  if graphicsWanted(rt, not session.visualPanes.isNil):
+    graphics.askGraphics(driver, command.flags.noMouse)
+  adoptImageCapability()
 
   var running = true
   var frameOwed = false
@@ -1516,17 +1575,19 @@ proc interactive(command: TuiCommand): int =
       # is gone, and the only correct thing left is to give the tty back.
       running = false
     of dekIdle:
-      if graphicsProbe.open and nowMs() > graphicsProbe.deadlineMs:
-        # No answer: the terminal draws no pictures. The default stays.
-        graphicsProbe.open = false
-        # PLAT-59: and the Video Player draws its frame as cells.
-        rt.imageCapability = resolveImageCapability(readTerminalEnv(),
-          readImageEnv(), rt.caps, command.flags,
-          GraphicsProbe(attempted: true, answered: true, kitty: false))
-        if session.refreshVisualIfShown(rt):
-          paint(driver, rt)
+      if graphics.waiting and nowMs() > graphics.deadlineMs:
+        # No fence within the timeout: the path counts as unanswered and the
+        # Video Player draws its frame as cells. A late reply still counts.
+        graphics.waiting = false
+        adoptImageCapability()
+      if not graphics.asked and
+         graphicsWanted(rt, not session.visualPanes.isNil):
+        # The first need arrived after start-up (a recording with graphics
+        # opened later, or the icons mode set back to `graphics`).
+        graphics.askGraphics(driver, command.flags.noMouse)
+        adoptImageCapability()
       discard rt.clipboardReadDue(driver)
-      if not graphicsProbe.open and not rt.clipboardRead.open:
+      if not graphics.waiting and not rt.clipboardRead.open:
         negotiation.closeReplyWindow(driver)
       # THE BUILD IS ADVANCED FROM THE SAME LOOP THAT READS THE KEYBOARD, on
       # exactly `editInteractive`'s rule and for §5's reason. A replay session
@@ -1613,29 +1674,34 @@ proc interactive(command: TuiCommand): int =
     of dekToken:
       if rt.takeClipboardReply(driver, ev.token):
         continue
-      # PLAT-48: THE ANSWER TO THE GRAPHICS QUERY. `OK` means the terminal
-      # draws pictures: the controls default to the desktop's marks, unless
-      # the user chose otherwise. Never a key, never journalled.
-      if isGraphicsProbeReply(ev.token):
-        graphicsProbe.open = false
-        # PLAT-59: the path MEASURED: the Video Player's frame goes at tier 0
-        # only where the Kitty query came back.
-        rt.imageCapability = resolveImageCapability(readTerminalEnv(),
-          readImageEnv(), rt.caps, command.flags,
-          GraphicsProbe(attempted: true, answered: true,
-                        kitty: ev.token.contains(";OK")))
-        session.refreshVisual(rt)
-        if ev.token.contains(";OK"):
+      # THE ANSWERS TO THE GRAPHICS PROBE: the Kitty reply (by the probe's
+      # own image id) whenever it comes, and the DA1 fence behind it — the
+      # first one after the start-up round's own fence. `OK` means the
+      # terminal draws pictures: the controls default to the desktop's
+      # marks, unless the user chose otherwise, and the Video Player's frame
+      # goes at tier 0 where the path allows it. Never a key, never
+      # journalled.
+      if graphics.asked and (isProbeReplyToken(ev.token) or
+          (isFenceToken(ev.token) and not graphics.fenced and
+           negotiation.probe.answered)):
+        if graphics.probe.noteProbeReplies(ev.token):
+          graphics.fenced = true
+        graphics.waiting = graphics.waiting and not graphics.fenced and
+                           not graphics.probe.kitty
+        if graphics.probe.kitty and not rt.app.graphicsDrawn:
           rt.app.graphicsDrawn = true
           if not rt.app.iconsChosen:
             rt.app.icons = imGraphics
           paint(driver, rt)
+        adoptImageCapability()
         continue
       # PLAT-46: A TERMINAL'S LATE ANSWER TO THE START-UP ROUND IS NOT A KEY.
       # It re-decides the capabilities and repaints; it is never journalled.
       let (wasReply, changed) = negotiation.takeReply(driver, ev.token)
       if wasReply:
         adoptMouseMetrics(driver, negotiation)
+        # A late `CSI 16 t`: the picture's aspect follows the cell.
+        adoptImageCapability()
         if changed:
           rt.adoptCaps(negotiation.caps)
           let (write, text) = noteSlot.lateNote(

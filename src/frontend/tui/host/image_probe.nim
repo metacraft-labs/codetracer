@@ -143,6 +143,47 @@ proc writeAll(fd: cint; data: string): bool =
     written += int(n)
   true
 
+func graphicsProbeQuery*(wrapForTmux = false; before = ""): string =
+  ## The bytes one probe writes: the Kitty graphics query (through tmux's
+  ## passthrough when the path needs it), then `before` — any further query
+  ## whose answer should arrive ahead of the fence, e.g. `CSI 16 t` — then
+  ## the DA1 fence. ONE spelling, written by `probeGraphics` and by the
+  ## terminal front-end's lazy probe alike.
+  (if wrapForTmux: tmuxPassthrough(ProbeQuery) else: ProbeQuery) & before &
+    ProbeFence
+
+func isProbeReplyToken*(token: string): bool =
+  ## A Kitty graphics reply to THIS probe's query (`ESC _ G i=31 ; … ESC \`).
+  ## Recognised by the probe's own image id, so it is never confused with a
+  ## reply to some other image.
+  token.startsWith("\x1b_Gi=" & $ProbeImageId & ";")
+
+func isFenceToken*(token: string): bool =
+  ## A primary device attributes report: `CSI ? <params> c`.
+  token.startsWith("\x1b[?") and token.endsWith("c")
+
+proc noteProbeReplies*(probe: var GraphicsProbe; buf: string): bool =
+  ## Read what came back — a whole buffer, or one framed token — into
+  ## `probe`. Answers whether the DA1 FENCE is in it, after which nothing more
+  ## belongs to this probe.
+  ##
+  ## A Kitty `OK` sets `kitty` and is itself proof the path round-trips, so it
+  ## sets `answered` too; the fence sets `answered` and reads DA1's attribute
+  ## list for Sixel (`4`). "The fence decided" and "the graphics reply
+  ## decided" stay two facts.
+  if buf.contains(ProbeOkReply):
+    probe.kitty = true
+    probe.answered = true
+  let da1 = buf.find("\x1b[?")
+  if da1 >= 0 and buf.find('c', da1) > da1:
+    probe.answered = true
+    let attrs = buf[da1 + 3 ..< buf.find('c', da1)]
+    for part in attrs.split(';'):
+      if part == "4":
+        probe.sixel = true
+    return true
+  false
+
 proc probeGraphics*(writeFd: cint = STDOUT_FILENO;
                     readFd: cint = STDIN_FILENO;
                     timeoutMs = DefaultProbeTimeoutMs;
@@ -158,11 +199,15 @@ proc probeGraphics*(writeFd: cint = STDOUT_FILENO;
   ## caller that cannot guarantee raw mode should not call this: the zero
   ## `GraphicsProbe` is the honest answer for "not measured", and it resolves
   ## to the same cell tier.
+  ##
+  ## A BLOCKING READ OF `readFd`, so it is for a caller that owns the
+  ## descriptor outright (a test child, a one-shot diagnostic). The terminal
+  ## front-end's event loop reads its tty through the driver's framer, and a
+  ## second reader beside it would take the user's keys; it sends the same
+  ## `graphicsProbeQuery` and hands each framed reply to the same
+  ## `noteProbeReplies` instead (`main.nim`'s lazy probe).
   result = GraphicsProbe(attempted: true)
-  var query = ProbeQuery
-  if wrapForTmux:
-    query = tmuxPassthrough(query)
-  if not writeAll(writeFd, query & ProbeFence):
+  if not writeAll(writeFd, graphicsProbeQuery(wrapForTmux)):
     # The descriptor refused the write. Nothing was measured and nothing is
     # claimed: `answered` stays false, which resolves to a cell tier.
     return
@@ -180,21 +225,8 @@ proc probeGraphics*(writeFd: cint = STDOUT_FILENO;
     if n <= 0:
       break
     buf.add chunk[0 ..< n]
-    if buf.contains(ProbeOkReply):
-      result.kitty = true
-    # The DA1 answer is `CSI ? <params> c`. Its terminating `c` is the fence.
-    let da1 = buf.find("\x1b[?")
-    if da1 >= 0 and buf.find('c', da1) > da1:
-      result.answered = true
-      let attrs = buf[da1 + 3 ..< buf.find('c', da1)]
-      for part in attrs.split(';'):
-        if part == "4":
-          result.sixel = true
+    if result.noteProbeReplies(buf):
       break
-  if buf.contains(ProbeOkReply):
-    # A Kitty reply is itself proof the path round-trips, whether or not the
-    # DA1 fence was recognised. Stated as a separate arm rather than folded
-    # into the loop so that "the fence decided" and "the graphics reply
-    # decided" are two facts and not one.
-    result.kitty = true
-    result.answered = true
+  # A Kitty reply that arrived after the fence in the same read is still the
+  # path round-tripping: read the whole buffer once more.
+  discard result.noteProbeReplies(buf)

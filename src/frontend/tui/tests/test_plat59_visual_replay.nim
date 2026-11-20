@@ -67,7 +67,7 @@ import ./fixtures/visual_fixture
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 120
+const ExpectedAssertions = 125
 
 var countedAssertions = 0
 
@@ -425,15 +425,37 @@ suite "PLAT-59: the Visual Replay panes on the terminal":
       ck screen.protocolRect.width > 0 and screen.protocolRect.height > 0
       ck screen.pictureTop == screen.protocolRect.row
       var state = FrameImageState()
-      let bytes = frameImageBytes(state, screen.protocolRect, kitty)
-      ck "a=t,f=32,s=256,v=256,i=" & $FrameImageId in bytes
-      ck "a=p,i=" & $FrameImageId & ",p=1,c=" & $screen.protocolRect.width &
-         ",r=" & $screen.protocolRect.height in bytes
+      let rect = screen.protocolRect
+      let bytes = frameImageBytes(state, rect, kitty)
+      # The frame as a PNG, transmitted and placed in one command over the
+      # reserved cells (`emit.emitProtocolImage` at `ppReservedCells`).
+      ck "\x1b_Ga=T,f=100,i=" & $FrameImageId & ",p=1,c=" & $rect.width &
+         ",r=" & $rect.height & ",C=1," in bytes
+      ck bytes.startsWith("\x1b7\x1b[" & $(rect.row + 1) & ";" &
+                          $(rect.col + 1) & "H")
       # Nothing changed: nothing is sent again.
-      ck frameImageBytes(state, screen.protocolRect, kitty) == ""
+      ck frameImageBytes(state, rect, kitty) == ""
+      # The same frame over a moved rectangle is RE-PLACED, not re-uploaded.
+      var moved = rect
+      moved.row += 1
+      let replaced = frameImageBytes(state, moved, kitty)
+      ck "a=p,i=" & $FrameImageId & ",p=1,c=" & $rect.width & ",r=" &
+         $rect.height & ",C=1,q=2" in replaced
+      ck "f=100" notin replaced
       # The rectangle gone: the placement is taken down.
       ck "a=d,d=i,i=" & $FrameImageId in
         frameImageBytes(state, CellArea(), kitty)
+      # §3: a link budget the frame's EMISSION exceeds sends nothing and says
+      # how much it would have cost; the demotion is a cell tier.
+      var ssh = kitty
+      ssh.capability.overSsh = true
+      ssh.capability.linkBudget = 64
+      ssh.capability.tierFrom = csEnvironment   # a pin is never demoted
+      var fresh = FrameImageState()
+      ck frameImageBytes(fresh, rect, ssh) == ""
+      ck fresh.refusedBytes > 64
+      ck demoteForPayload(ssh.capability, fresh.refusedBytes).tier ==
+         itHalfBlock
       rt.app.frameViewer = saved
 
     test "the vocabulary's Video Player view says the shared words":

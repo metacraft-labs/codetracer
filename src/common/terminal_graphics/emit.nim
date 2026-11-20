@@ -80,6 +80,23 @@ type
 
   EmitError* = object of CatchableError
 
+  ProtocolPlacement* = enum
+    ## WHERE a tier-0 image goes, which decides the keys around the payload.
+    ppAtCursor
+      ## At the cursor, as the protocol's defaults have it: Kitty answers
+      ## `OK`, moves the cursor past the image and names no placement; iTerm2
+      ## sizes the image itself. The shape `nim_termctl` emits, kept
+      ## byte-identical to it (see the header).
+    ppReservedCells
+      ## Over a rectangle of cells a PANE reserved and keeps repainting
+      ## around — the Video Player's frame (`host/frame_image.nim`). Kitty
+      ## names the placement (`p=`) so a re-placement replaces it, keeps the
+      ## cursor where it was (`C=1`, so an image on the last rows cannot
+      ## scroll the screen) and stays quiet (`q=2`, so no `OK` reaches the
+      ## keymap); iTerm2 is sized to the cells (`width=` / `height=`,
+      ## `preserveAspectRatio=0`); and under tmux each escape is wrapped on its
+      ## own (`tmuxPassthroughEach`).
+
 const
   MaxLinkImageBytes* = 262_144
     ## The most EMITTED BYTES one tier-0 image may cost on a link this build
@@ -127,16 +144,44 @@ func tmuxPassthrough*(payload: string): string =
       inner.add ch
   TmuxPassthroughOpen & inner & StringTerminator
 
+func tmuxPassthroughEach*(body: string): string =
+  ## `tmuxPassthrough` applied to EACH graphics escape in `body` — every Kitty
+  ## APC (`ESC _ G … ESC \`) and iTerm2 OSC 1337 (`ESC ] 1337 ; … BEL`) — with
+  ## everything between them (cursor moves, saves and restores) left outside.
+  ##
+  ## One passthrough per escape rather than one around the lot: a chunked
+  ## transmission is many APCs, and a cursor move inside a passthrough would
+  ## move the OUTER terminal's cursor rather than the pane's.
+  var i = 0
+  while i < body.len:
+    let apc = body.find(ApcPrefix, i)
+    let osc = body.find("\x1b]1337;", i)
+    var start = -1
+    if apc >= 0 and (osc < 0 or apc < osc): start = apc
+    elif osc >= 0: start = osc
+    if start < 0:
+      result.add body[i .. ^1]
+      break
+    result.add body[i ..< start]
+    let stop =
+      if start == apc: body.find(StringTerminator, start) + StringTerminator.len
+      else: body.find('\x07', start) + 1
+    result.add tmuxPassthrough(body[start ..< stop])
+    i = stop
+
 func kittyControl(keys: seq[string]): string =
   keys.join(",")
 
 func kittyTransmit*(payload: openArray[byte]; imageId: uint32;
-                    cols = 0; rows = 0): string =
+                    cols = 0; rows = 0; placementId = 0'u32;
+                    holdCursor = false; quiet = false): string =
   ## `a=T` — transmit AND display, chunked at `KittyChunkBytes` of base64.
   ##
-  ## With `cols == 0` and `rows == 0` the cell-extent keys are omitted and the
+  ## With `cols == 0` and `rows == 0` and none of the placement keys the
   ## result is byte-identical to `nim_termctl.emitKittyChunked`; see this
-  ## module's header for the assertion that keeps it so.
+  ## module's header for the assertion that keeps it so. `placementId`,
+  ## `holdCursor` (`C=1`) and `quiet` (`q=2`, on every chunk) are
+  ## `ppReservedCells`' keys.
   if payload.len == 0:
     raise newException(EmitError, "kitty transmit: empty payload")
   let b64 = base64.encode(payload)
@@ -151,11 +196,14 @@ func kittyTransmit*(payload: openArray[byte]; imageId: uint32;
       ctrl.add "a=T"
       ctrl.add "f=100"
       if imageId != 0: ctrl.add "i=" & $imageId
+      if placementId != 0: ctrl.add "p=" & $placementId
       if cols > 0: ctrl.add "c=" & $cols
       if rows > 0: ctrl.add "r=" & $rows
+      if holdCursor: ctrl.add "C=1"
       ctrl.add "m=" & $more
     else:
       ctrl.add "m=" & $more
+    if quiet: ctrl.add "q=2"
     buf.add ApcPrefix
     buf.add kittyControl(ctrl)
     buf.add ";"
@@ -165,7 +213,8 @@ func kittyTransmit*(payload: openArray[byte]; imageId: uint32;
   buf
 
 func kittyPlace*(imageId: uint32; placementId: uint32;
-                 cols = 0; rows = 0): string =
+                 cols = 0; rows = 0; holdCursor = false;
+                 quiet = false): string =
   ## `a=p` — display an image the terminal ALREADY HOLDS, by id.
   ##
   ## §3: *"a scrub must not re-transmit an unchanged image. Kitty's image
@@ -181,14 +230,26 @@ func kittyPlace*(imageId: uint32; placementId: uint32;
   var ctrl: seq[string] = @["a=p", "i=" & $imageId, "p=" & $placementId]
   if cols > 0: ctrl.add "c=" & $cols
   if rows > 0: ctrl.add "r=" & $rows
+  if holdCursor: ctrl.add "C=1"
+  if quiet: ctrl.add "q=2"
   ApcPrefix & kittyControl(ctrl) & StringTerminator
 
-func kittyDelete*(imageId: uint32): string =
-  ApcPrefix & "a=d,i=" & $imageId & StringTerminator
+func kittyDelete*(imageId: uint32; quiet = false): string =
+  ## Take down every placement of image `imageId`, keeping its data, so a
+  ## later `a=p` can show it again without a re-upload.
+  ##
+  ## `d=i` IS REQUIRED. Without a `d` key Kitty's delete defaults to `d=a` —
+  ## every placement on the screen — and ignores `i=`, so the bare
+  ## `a=d,i=<id>` this function used to write would also have taken down the
+  ## controls' pictures (`host/control_icons.nim`).
+  ApcPrefix & "a=d,d=i,i=" & $imageId & (if quiet: ",q=2" else: "") &
+    StringTerminator
 
-func iterm2Inline*(payload: openArray[byte]): string =
+func iterm2Inline*(payload: openArray[byte]; cols = 0; rows = 0): string =
   ## iTerm2's `OSC 1337 ; File=inline=1`. Byte-identical to
-  ## `nim_termctl.emitITerm2Inline`; same assertion, same reason.
+  ## `nim_termctl.emitITerm2Inline` with no extent; same assertion, same
+  ## reason. With `cols` and `rows` the image is sized to that many cells and
+  ## stretched to fill them (`preserveAspectRatio=0`) — `ppReservedCells`.
   ##
   ## THERE IS NO PLACEMENT ID IN THIS PROTOCOL. iTerm2 inline images are a
   ## stream of bytes at the cursor with no addressable registry, so every draw
@@ -197,8 +258,10 @@ func iterm2Inline*(payload: openArray[byte]): string =
   ## than of this code, it is why §3's bandwidth rule bites harder on iTerm2
   ## than on Kitty, and `emit_test.nim` asserts it rather than leaving a reader
   ## to infer it from the absence of a branch.
-  "\x1b]1337;File=inline=1;size=" & $payload.len & ":" &
-    base64.encode(payload) & "\x07"
+  var keys = "File=inline=1;size=" & $payload.len
+  if cols > 0 and rows > 0:
+    keys.add ";width=" & $cols & ";height=" & $rows & ";preserveAspectRatio=0"
+  "\x1b]1337;" & keys & ":" & base64.encode(payload) & "\x07"
 
 func sgrColour(c: Rgb; foreground: bool; writing: ColourWriting): string =
   case writing
@@ -283,24 +346,33 @@ func emitCellImage*(grid: CellGrid; writing: ColourWriting;
 func emitProtocolImage*(protocol: ImageProtocol; payload: openArray[byte];
                         imageId: uint32; placementId: uint32;
                         cols, rows: int; alreadyUploaded: bool;
-                        wrapForTmux = false): EmittedImage =
+                        wrapForTmux = false;
+                        placement = ppAtCursor): EmittedImage =
   ## §2.1's tier 0, and §3's placement rule.
   ##
+  ## `payload` is the ENCODED image (a PNG: Kitty's `f=100`, iTerm2's
+  ## `File=inline`) — both protocols decode in the terminal.
   ## `alreadyUploaded` is the caller's record that THIS terminal already holds
   ## THIS image under `imageId` — the scrub case. On Kitty it produces a
   ## placement escape and no payload at all; on iTerm2 it cannot, and the
   ## re-transmission is reported rather than hidden (see `iterm2Inline`).
+  ## `placement` says where the image goes (`ProtocolPlacement`).
+  let reserved = placement == ppReservedCells
   var body = ""
   var reused = false
   case protocol
   of ipKitty:
     if alreadyUploaded:
-      body = kittyPlace(imageId, placementId, cols, rows)
+      body = kittyPlace(imageId, placementId, cols, rows,
+                        holdCursor = reserved, quiet = reserved)
       reused = true
     else:
-      body = kittyTransmit(payload, imageId, cols, rows)
+      body = kittyTransmit(payload, imageId, cols, rows,
+                           placementId = (if reserved: placementId else: 0),
+                           holdCursor = reserved, quiet = reserved)
   of ipITerm2:
-    body = iterm2Inline(payload)
+    body = if reserved: iterm2Inline(payload, cols, rows)
+           else: iterm2Inline(payload)
   of ipSixel:
     raise newException(EmitError,
       "sixel emission needs a quantiser and a dither this build does not " &
@@ -310,7 +382,7 @@ func emitProtocolImage*(protocol: ImageProtocol; payload: openArray[byte];
     raise newException(EmitError,
       "emitProtocolImage called with ipNone; a cell tier is emitCellImage")
   if wrapForTmux:
-    body = tmuxPassthrough(body)
+    body = if reserved: tmuxPassthroughEach(body) else: tmuxPassthrough(body)
   EmittedImage(bytes: body, tier: itProtocol, protocol: protocol,
                placementReused: reused, imageId: imageId,
                wrappedForMultiplexer: wrapForTmux)
