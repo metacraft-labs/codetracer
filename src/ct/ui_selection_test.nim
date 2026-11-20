@@ -36,7 +36,7 @@ import ui_selection
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 298
+const ExpectedAssertions = 316
 
 var countedAssertions = 0
 
@@ -68,7 +68,7 @@ proc planOf(args: openArray[string]; env = ""; config = ""): UiPlan =
 
 suite "PLAT-1 §4: the value set is closed":
 
-  test "every accepted value resolves, and the set has exactly five members":
+  test "every accepted value resolves, and the set has exactly six members":
     var compared = 0
     for value in AcceptedUiValues:
       inc compared
@@ -78,8 +78,8 @@ suite "PLAT-1 §4: the value set is closed":
     # The sweep's own size against its parameter: a loop that ran once would
     # leave three values unasserted and say nothing about them.
     ck compared == AcceptedUiValues.len
-    ck AcceptedUiValues.len == 5
-    ck acceptedUiValuesText() == "electron, gui, gpui, tui, webui"
+    ck AcceptedUiValues.len == 6
+    ck acceptedUiValuesText() == "electron, gui, gpui, tui, webui, zgui"
     # THE ENUM AND THE ARRAY ARE ONE TABLE WRITTEN TWICE, and `parseUiFrontEnd`
     # answers `UiFrontEnd(i)` for the `i`th entry — so a value inserted in one
     # and appended to the other resolves `--ui=tui` to a different front-end
@@ -200,6 +200,30 @@ suite "PLAT-1 §4: the value set is closed":
     let run = planOf(["run", "--ui=gpui", "prog.py"])
     ck run.kind == upkInProcess
     ck run.frontEnd == uiGpui
+
+  test "`zgui` is accepted and reaches its own component, for replay only":
+    let (ok, frontEnd) = parseUiFrontEnd("zgui")
+    ck ok
+    ck frontEnd == uiZgui
+    let plan = planOf(["replay", "--ui=zgui", Trace])
+    ck plan.kind == upkHandoff
+    ck plan.frontEnd == uiZgui
+    ck plan.componentName == "codetracer-zgui"
+    ck plan.componentBin == "codetracer-zgui"
+    # The trace reaches the component as its positional argument, the grammar
+    # `codetracer-zgui` parses.
+    ck plan.handoffArgs == @[Trace]
+    let byFolder = planOf(["replay", "--ui=zgui", "-t", Trace])
+    ck byFolder.kind == upkHandoff
+    ck byFolder.handoffArgs == @[Trace]
+    # A replay front-end only: edit and review are refused by name.
+    for command in ["edit", "review"]:
+      let refused = planOf([command, "--ui=zgui", Trace])
+      ck refused.kind == upkUsageError
+      ck refused.message.contains("zgui front-end")
+    let run = planOf(["run", "--ui=zgui", "prog.py"])
+    ck run.kind == upkInProcess
+    ck run.frontEnd == uiZgui
 
   test "`gui` is an alias for electron TODAY and a separate spelling":
     # §4.1: `gui` names a role, `electron` names an implementation, and the

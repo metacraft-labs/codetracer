@@ -79,6 +79,9 @@ type
     uiTui = "tui"
       ## The terminal front-end — a separate component, reached by handoff.
     uiWebui = "webui"
+    uiZgui = "zgui"
+      ## The proof-of-concept front-end on zgui's retained document
+      ## (`src/frontend/zgui/`), a component binary like `gpui`.
       ## Served in a browser over HTTP: the `ct host` code path, and §7.3 says
       ## there is one of those and two spellings of its entry.
 
@@ -127,8 +130,8 @@ type
         ## One line, already prefixed with `ct: `, for stderr.
 
 const
-  AcceptedUiValues*: array[5, string] = ["electron", "gui", "gpui", "tui",
-                                         "webui"]
+  AcceptedUiValues*: array[6, string] = ["electron", "gui", "gpui", "tui",
+                                         "webui", "zgui"]
     ## §4's table, as the closed set §4.2 requires. The ORDER is the table's,
     ## and it is the same order `UiFrontEnd` declares — see that enum's note on
     ## why that is not a coincidence you may rely on without a test.
@@ -385,6 +388,9 @@ type
       ## A message that names the wrong front-end is how a user spends an
       ## afternoon on the wrong binary.
     atHost
+    atZgui
+      ## The zgui front-end: `atGpui`'s grammar (a positional folder), its own
+      ## name in a refusal.
 
   ArgTranslation = object
     ok: bool
@@ -402,12 +408,14 @@ func frontEndNoun(target: ArgTarget): string =
   of atTui: "the terminal front-end"
   of atGpui: "the GPUI front-end"
   of atHost: "the web front-end"
+  of atZgui: "the zgui front-end"
 
 func frontEndUiValue(target: ArgTarget): string =
   case target
   of atTui: "tui"
   of atGpui: "gpui"
   of atHost: "webui"
+  of atZgui: "zgui"
 
 func translateArgs(command: string; args: openArray[string];
                    target: ArgTarget): ArgTranslation =
@@ -468,7 +476,7 @@ func translateArgs(command: string; args: openArray[string];
     if isFolder or isShortFolder:
       # `-t` / `--trace-folder` NAMES A FOLDER in every spelling.
       case target
-      of atTui, atGpui:
+      of atTui, atGpui, atZgui:
         # Both component front-ends take a folder as their positional argument
         # and have no option for it.
         if folder.len > 0:
@@ -487,7 +495,7 @@ func translateArgs(command: string; args: openArray[string];
     if isId:
       let id = valueOf(args, i, idAttached, idValue)
       case target
-      of atTui, atGpui:
+      of atTui, atGpui, atZgui:
         # NOT resolved here, deliberately. Turning a recording id into a folder
         # means opening the trace index, and §3.1 puts the whole trace layer on
         # the far side of this decision.
@@ -674,6 +682,30 @@ func planUiSelection*(args: openArray[string];
                   componentName: "codetracer-gpui",
                   componentBin: "codetracer-gpui",
                   handoffArgs: gpuiHandoff)
+
+  of uiZgui:
+    # The zgui proof of concept is a replay front-end only: it has no edit
+    # mode and no review mode, and says so here rather than opening a window
+    # that cannot do what was asked.
+    if scan.command in ["edit", "review"]:
+      return usageError(gapMessage(scan.command, declared,
+        "the zgui front-end is a replay front-end and has no " &
+        scan.command & " mode"))
+    if scan.command == "run":
+      # As for `gpui`: `ct run` records first, and the resolved value is
+      # restated on the `ct replay --ui=zgui` it spawns for itself.
+      return UiPlan(kind: upkInProcess, frontEnd: uiZgui,
+                    source: resolution.source, ctArgs: scan.strippedArgs)
+    let translatedZgui = translateArgs(scan.command, scan.strippedArgs, atZgui)
+    if not translatedZgui.ok:
+      return usageError(translatedZgui.message)
+    var zguiHandoff = translatedZgui.args
+    zguiHandoff.add translatedZgui.trailing
+    return UiPlan(kind: upkHandoff, frontEnd: uiZgui,
+                  source: resolution.source,
+                  componentName: "codetracer-zgui",
+                  componentBin: "codetracer-zgui",
+                  handoffArgs: zguiHandoff)
 
   of uiTui:
     if scan.command == "edit":

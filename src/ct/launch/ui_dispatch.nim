@@ -64,6 +64,9 @@ const
     ## PLAT-20. The same override for the GPUI front-end's binary, and the same
     ## reasons hold word for word.
 
+  zguiBinaryEnvVar* = "CODETRACER_ZGUI_BIN"
+    ## The same override for the zgui front-end's binary.
+
 proc configuredUiValue*(): string =
   ## §5's third layer: `ui = "<value>"` in the user's configuration.
   ##
@@ -178,6 +181,10 @@ proc resolveGpuiBinary*(componentBin: string): string =
   ## Where `codetracer-gpui` is. PLAT-20.
   resolveComponentBinary("codetracer-gpui", componentBin, gpuiBinaryEnvVar)
 
+proc resolveZguiBinary*(componentBin: string): string =
+  ## Where `codetracer-zgui` is.
+  resolveComponentBinary("codetracer-zgui", componentBin, zguiBinaryEnvVar)
+
 proc resolveHandoffBinary*(plan: UiPlan): string =
   ## The binary a `upkHandoff` plan names, resolved.
   ##
@@ -189,6 +196,7 @@ proc resolveHandoffBinary*(plan: UiPlan): string =
     return ""
   case plan.frontEnd
   of uiGpui: resolveGpuiBinary(plan.componentBin)
+  of uiZgui: resolveZguiBinary(plan.componentBin)
   else: resolveTuiBinary(plan.componentBin)
 
 proc execHandoff*(binary: string; args: seq[string]) {.noreturn.} =

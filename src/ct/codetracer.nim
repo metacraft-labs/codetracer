@@ -126,7 +126,9 @@ try:
         # belongs beside the search order rather than here.
         let binary = resolveHandoffBinary(plan)
         if binary.len == 0:
-          let envVar = if plan.frontEnd == uiGpui: gpuiBinaryEnvVar
+          let envVar = case plan.frontEnd
+                       of uiGpui: gpuiBinaryEnvVar
+                       of uiZgui: zguiBinaryEnvVar
                        else: tuiBinaryEnvVar
           stderr.writeLine(
             "ct: '--ui=" & $plan.frontEnd & "' needs the '" &
