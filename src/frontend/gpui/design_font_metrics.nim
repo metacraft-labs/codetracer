@@ -41,6 +41,17 @@
 ## tabs measured unkerned and rounded put the bar's "+" 5 px right of the
 ## web's. The other views' flex bases still measure unkerned.
 ##
+## Glyphs past ASCII: `faceGlyphs = true` budgets the few the views set in
+## running text at the face's own advances (`GroteskFaceGlyphAdvance`: the
+## separators `·`, `—`, `–` and `•`, the `…`, the arrows, `×` and the curly
+## quotes, read from the same file with fontTools on 2026-11-20) instead of
+## a capital M. The `·` is 185 units, not 864, so a line holding two of them
+## is about 16 px narrower at 12 px than the M budget says, enough for a
+## caption to wrap where the browser and GPUI's shaper set it on one line
+## (the composer's `Sent to this session · redirected to the manager agent`
+## at sidebar width, CTF-P2c). It is opt-in: the views that size flex bases
+## by the M budget keep it until each is re-measured against its web record.
+##
 ## Pure: no renderer, no font file at run time.
 
 import std/[math, unicode]
@@ -55,6 +66,13 @@ const
     536, 244, 860, 613, 618, 644, 644, 376, 527, 461, 612, 539, 802, 594, 612,
     521, 430, 239, 430, 620]
   GroteskUnitsPerEm = 1000
+  GroteskFaceGlyphAdvance: array[13, (int, int)] = [
+    (0xB7, 185), (0xD7, 620), (0x2013, 608), (0x2014, 912), (0x2019, 249),
+    (0x201C, 420), (0x201D, 420), (0x2022, 358), (0x2026, 672), (0x2190, 800),
+    (0x2191, 620), (0x2192, 800), (0x2193, 620)]
+    ## Space Grotesk Regular's own advances (`hmtx`) of the non-ASCII glyphs
+    ## the views set in running text, by code point: `·`, `×`, `–`, `—`,
+    ## `’`, `“`, `”`, `•`, `…`, `←`, `↑`, `→`, `↓`. Read with `faceGlyphs`.
   GroteskTabularDigitAdvance = 620
     ## Every `tnum` digit (`zero.tf` .. `nine.tf`) of the Regular face.
   GroteskKernPairs: array[886, (char, char, int)] = [
@@ -268,8 +286,14 @@ const
     ## a label's box is sized with `LabelLetterSpacing`, so its glyphs must be
     ## set with exactly that (isonim-gpui's `SpacedText` draws it).
 
+func faceGlyphAdvance(o: int): int =
+  ## The face's advance of a non-ASCII glyph it carries, or -1.
+  for (cp, advance) in GroteskFaceGlyphAdvance:
+    if cp == o: return advance
+  -1
+
 func groteskTextWidth*(s: string; sizePx: float; letterSpacing = 0.0;
-                       tabular = false; kerned = false): float =
+                       tabular = false; kerned = false; faceGlyphs = false): float =
   ## How wide Space Grotesk Regular sets `s` at `sizePx`, unrounded: the
   ## width a browser's fractional layout works with when it decides whether
   ## items still fit on a line. Per character (a UTF-8 rune): one outside
@@ -277,16 +301,19 @@ func groteskTextWidth*(s: string; sizePx: float; letterSpacing = 0.0;
   ## letter spacing is added once per character, as a browser adds it.
   ## `tabular`: the digits are the face's tabular figures, all one width.
   ## `kerned`: the face's pair kerning between ASCII neighbours (none for a
-  ## tabular digit, which has no kerning in the face).
+  ## tabular digit, which has no kerning in the face). `faceGlyphs`: the
+  ## non-ASCII glyphs of `GroteskFaceGlyphAdvance` at their own advances.
   var units = 0
   var chars = 0
   var prev = -1
   for r in s.runes:
     let o = int(r)
     let digit = tabular and o in ord('0') .. ord('9')
+    let face = if faceGlyphs: faceGlyphAdvance(o) else: -1
     units += (if digit: GroteskTabularDigitAdvance
               elif o in GroteskRegularAdvance.low .. GroteskRegularAdvance.high:
                 GroteskRegularAdvance[o]
+              elif face >= 0: face
               else: GroteskRegularAdvance[ord('M')])
     if kerned and not digit and prev in GroteskKern.low .. GroteskKern.high and
         o in GroteskKern.low .. GroteskKern.high:

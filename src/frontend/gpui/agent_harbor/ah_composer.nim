@@ -8,26 +8,38 @@
 ##
 ## The sheet is the omnibox's results surface: the window's ground, a
 ## hairline border, `min(640px, window − 16px)` wide (`sheetWidthFor`) and
-## centred under the field, 6px below the caption bar. Top to bottom: the
-## header (pinned), the body (the whole instruction, what was sent, `Recent`
-## or `In view` with its chips and the add-context menu, the three
-## destinations, the launch or initiative form, the stop message), and the
-## send line (pinned, under a hairline).
+## centred under the field, its top where the web's sheet hangs
+## (`SheetTopPx`). Top to bottom: the header (pinned), the body (the whole
+## instruction, what was sent, `Recent` or `In view` with its chips and the
+## add-context menu, the three destinations, the launch or initiative form,
+## the stop message), and the send line (pinned, under a hairline).
+##
+## Every line of the sheet is on the composer's line pitch (`LinePx`, the
+## 24px the web composer inherits), except a row's reason and delivery
+## (16px, the stylesheet's `line-height: 1.35`) and a field's problem.
 ##
 ## GPUI's layout does not scroll a box or measure an overflow, so the body is
 ## laid out here, section by section, at the heights the stylesheet gives
 ## them (`Block.heightPx`; text wrapped by the face's kerned widths,
 ## `wrappedRows`): the sheet is as tall as its content, or the window less
-## its inset, and a body that holds more ends in the quiet `More below ↓`
-## line; an open schedule is brought into view (the web's
-## `scrollOpenScheduleIntoView`), whole sections at a time.
+## its inset (`max-height`), and a body that holds more is clipped there, as
+## the web's scrollport is, with the quiet `More below ↓` line pinned over its
+## bottom edge; an open schedule is scrolled into view, its end at the
+## scrollport's bottom (the web's `scrollOpenScheduleIntoView`).
 ##
 ## A destination row at laptop width: the title column (116px, the label
 ## role in capitals, tracked), what the destination is (cut by the views'
 ## one rule), the state word and the row's actions; the reason and the
 ## delivery under the label. Below 30rem (`isNarrow`) the title and the
-## state word share a line and the rest each take one. The row the bar
-## marks carries a 2px inset bar in the action border role, never a fill.
+## state word share a line and the rest each take one, the label wrapped
+## rather than cut (at that width a cut loses what the destination does).
+## The row the bar marks carries a 2px inset bar in the action border role,
+## never a fill.
+##
+## A field of the launch and initiative forms is a one-line input: a value
+## wider than it is cut in its middle by the views' one rule for an input
+## (`cut_text_rules.cutInputValue`, the P2c study's D35), so a path keeps its
+## end, the file name, and is never wrapped.
 ##
 ## Presses are routed (Input-Routing-And-Keymaps.md §5.1), as on the web:
 ## each element a press acts on carries its operation (`data-ct-operation`,
@@ -40,8 +52,10 @@
 ## Facts (`data-ah-*`) are the terminal's (`tui/agent_harbor/ah_tui_composer.nim`).
 
 import std/strutils
+from std/unicode import runes, runeSubStr, `$`
 import nim_agents_isonim_viewmodels/agent_harbor/omnibox_composer_vm
 import ../../viewmodel/views/agent_harbor_composer_words
+from ../../viewmodel/views/cut_text_rules import cutInputValue
 import ./ah_theme
 from ./ah_session_activity import wrappedRows
 from ../../viewmodel/input/element_press import OperationAttribute
@@ -52,12 +66,41 @@ const
   CaptionBarPx* = 34      ## `--caption-bar-height` (2.125rem)
   FieldPx* = 380          ## the caption omnibox's width
   FieldHeightPx* = 28     ## COMMAND_INPUT_HEIGHT
-  TriggerGapPx* = 6       ## DROPDOWN_TRIGGER_GAP
+  SheetTopPx* = 33
+    ## Where the sheet's top edge is: on the web it hangs
+    ## `DROPDOWN_TRIGGER_GAP` under the omnibox's box, which puts it at 33px
+    ## in every capture of the layout record (`composer-sheet`), against the
+    ## field's lower edge.
+  SheetInsetPx* = 16      ## `max-height: 100vh − caption bar − 1rem`
   SheetRadiusPx* = 6      ## DROPDOWN_RADIUS
   PadPx* = 12             ## AH_COMPOSER_PAD
   TitleColPx* = 116       ## a row's title column (7.25rem)
   ColumnGapPx* = 8
-  BodyLinePx* = 20
+  LinePx* = 24
+    ## The composer's line pitch: the app's body line-height (1.5rem), which
+    ## every line of the web composer inherits (the stylesheet sets no other
+    ## but a row's reason and delivery, and a field's problem).
+  DetailLinePx = 16       ## a row's reason and delivery (`line-height: 1.35`)
+  TopPadPx = 8            ## `.ah-composer-top`'s padding over the header
+  HeaderPadPx = 6         ## the header's bottom padding (0.375rem)
+  EndPadPx = 8            ## the body's last part's bottom margin (0.5rem)
+  FooterPx = 1 + 8 + ControlPx + 8
+    ## The send line: its hairline, 0.5rem above and below its button.
+  MoreLinePx = 1 + 4 + LinePx + 4
+    ## `More below ↓`: its hairline and a line padded 0.25rem.
+  MenuItemPx = 36         ## a dropdown row (`ct-menu-item`, 2.25rem)
+  FieldTopPx* = 5
+    ## The omnibox field's top in the caption bar: where the web lays out
+    ## `.ah-composer-input-row` (5px in every capture of the layout record),
+    ## its lower edge meeting the sheet's top border (`SheetTopPx`).
+  AddPx = 21
+    ## The `+` control's width as the web lays it out (`.ah-composer-add`,
+    ## measured 21px in the browser), narrower than a square control.
+  LabelWeight = "500"
+    ## The section labels', row titles' and state words' weight
+    ## (`font-weight: 500`, the face's Medium), not the semibold of `bold`.
+  LabelSpacing = "0.04em"
+    ## The section labels' and row titles' `letter-spacing` (0.48px at 12px).
   ChipGapPx* = 6
   ActionAttribute = "data-ah-action"
   TargetAttribute = "data-ah-target"
@@ -107,7 +150,9 @@ proc acts(r: GpuiRenderer; el: GpuiElement; action, target: string;
       press(operation, target))
 
 proc linesOf(text: string; sizePx, availPx: int): int =
-  if text.len == 0: 0 else: wrappedRows(text, sizePx, max(1, availPx))
+  ## How many lines `text` wraps to at `availPx`, its `·`, `…` and arrows at
+  ## the face's own advances, as the window sets them.
+  if text.len == 0: 0 else: wrappedRows(text, sizePx, max(1, availPx), faceGlyphs = true)
 
 proc wrapText(r: GpuiRenderer; s: string; sizePx, lineHeightPx: int; colour: string;
               bold = false): GpuiElement =
@@ -115,6 +160,21 @@ proc wrapText(r: GpuiRenderer; s: string; sizePx, lineHeightPx: int; colour: str
   r.text(s, sizePx, colour, bold = bold, shrink = false,
          pairs = [("white-space", "pre-wrap"), ("line-height", $lineHeightPx & "px"),
                   ("flex-shrink", "1"), ("min-width", "0px")])
+
+proc onLine(r: GpuiRenderer; s: string; sizePx: int; colour: string;
+            bold = false; shrink = true): GpuiElement =
+  ## One line of text on the composer's line pitch (`LinePx`), as the web
+  ## sets every line it does not give a height of its own.
+  r.text(s, sizePx, colour, bold = bold, shrink = shrink,
+         pairs = [("height", $LinePx & "px"), ("line-height", $LinePx & "px"),
+                  ("flex-shrink", if shrink: "1" else: "0")])
+
+proc medium(r: GpuiRenderer; el: GpuiElement; tracked = false): GpuiElement =
+  ## `el` in the face's Medium (`LabelWeight`), and spaced as an uppercase
+  ## label (`LabelSpacing`) when `tracked`. Returns `el`.
+  r.setStyle(el, "font-weight", LabelWeight)
+  if tracked: r.setStyle(el, "letter-spacing", LabelSpacing)
+  el
 
 proc spaced(r: GpuiRenderer; el: GpuiElement; heightPx: int;
             top = 0; bottom = 0): Block =
@@ -126,8 +186,10 @@ proc spaced(r: GpuiRenderer; el: GpuiElement; heightPx: int;
   Block(heightPx: heightPx, el: el)
 
 proc chip(r: GpuiRenderer; p: AhPalette; label, fg: string; border = "";
-          bg = ""; bold = false; dashed = false): (GpuiElement, int) =
+          bg = ""; bold = false; dashed = false; struck = false): (GpuiElement, int) =
   ## A small control sized to its words: 24px, 8px each side, a hairline.
+  ## `struck`: its words struck through (`text-decoration: line-through`),
+  ## as the web draws a context item the operator left out.
   let el = r.box(pairs = [("height", $ControlPx & "px"), ("items", "center"),
                           ("padding-left", "8px"), ("padding-right", "8px"),
                           ("flex-shrink", "0"), ("rounded", $ControlRadiusPx & "px"),
@@ -135,12 +197,14 @@ proc chip(r: GpuiRenderer; p: AhPalette; label, fg: string; border = "";
                           ("border-color", if border.len > 0: border else: p.borderSecondary)])
   if dashed: r.setStyle(el, "border-style", "dashed")
   if bg.len > 0: r.setStyle(el, "background", bg)
-  r.appendChild(el, r.text(label, CaptionPx, fg, bold = bold))
+  let t = r.text(label, CaptionPx, fg, bold = bold)
+  if struck: r.setStyle(t, "text-decoration", "line-through")
+  r.appendChild(el, t)
   (el, textPx(label, CaptionPx) + 18)
 
 proc sectionLabel(r: GpuiRenderer; p: AhPalette; label: string): GpuiElement =
-  result = r.tracked(r.text(label.toUpperAscii, CaptionPx, p.textLabel, bold = true,
-                            shrink = false))
+  result = r.medium(r.onLine(label.toUpperAscii, CaptionPx, p.textLabel, shrink = false),
+                    tracked = true)
   r.tag(result, "section", label)
 
 # ---------------------------------------------------------------------------
@@ -153,18 +217,18 @@ proc recentBlocks(r: GpuiRenderer; p: AhPalette; vm: OmniboxComposerVM;
   if recent.len == 0: return
   let head = r.box()
   r.appendChild(head, r.sectionLabel(p, RecentLabel))
-  result.add r.spaced(head, 4 + CaptionLinePx + 4, top = 4, bottom = 4)
+  result.add r.spaced(head, 4 + LinePx + 4, top = 4, bottom = 4)
   for i, rec in recent:
     let row = r.box(column = true, pairs = [("justify", "center")])
     r.tag(row, "recent", $i)
     r.acts(row, "recall", $i, lay.press)
-    let t = r.text(rec.text, BodyPx, p.textBody)
+    let t = r.onLine(rec.text, BodyPx, p.textBody)
     r.tag(t, "recent-text", rec.text)
     r.appendChild(row, t)
-    let l = r.text(rec.line, CaptionPx, if rec.failed: p.textError else: p.textCaption)
+    let l = r.onLine(rec.line, CaptionPx, if rec.failed: p.textError else: p.textCaption)
     r.tag(l, "recent-line", rec.line)
     r.appendChild(row, l)
-    result.add r.spaced(row, 6 + BodyLinePx + CaptionLinePx + 6, top = 6, bottom = 6)
+    result.add r.spaced(row, 6 + LinePx + LinePx + 6, top = 6, bottom = 6)
 
 proc contextBlocks(r: GpuiRenderer; p: AhPalette; vm: OmniboxComposerVM;
                    lay: Layout): seq[Block] =
@@ -176,7 +240,7 @@ proc contextBlocks(r: GpuiRenderer; p: AhPalette; vm: OmniboxComposerVM;
   items.add FlowItem(el: label, widthPx: textPx(InViewLabel.toUpperAscii, CaptionPx) + 4 +
                                          InViewLabel.len div 2)
   if chips.len == 0:
-    let none = r.text(NothingInView, CaptionPx, p.textCaption, shrink = false)
+    let none = r.onLine(NothingInView, CaptionPx, p.textCaption, shrink = false)
     r.tag(none, "chip-none", NothingInView)
     items.add FlowItem(el: none, widthPx: textPx(NothingInView, CaptionPx))
   for ch in chips:
@@ -184,7 +248,7 @@ proc contextBlocks(r: GpuiRenderer; p: AhPalette; vm: OmniboxComposerVM;
     let (el, w) = case state
       of "cited": r.chip(p, ch.item.label, p.textBody, border = p.borderAction,
                          bg = p.hover)
-      of "uncited": r.chip(p, ch.item.label, p.textDisabled)
+      of "uncited": r.chip(p, ch.item.label, p.textDisabled, struck = true)
       of "note": r.chip(p, ch.item.label, p.textCaption, dashed = true)
       else: r.chip(p, ch.item.label, p.textCaption)
     r.tag(el, "chip", ch.item.id)
@@ -194,7 +258,7 @@ proc contextBlocks(r: GpuiRenderer; p: AhPalette; vm: OmniboxComposerVM;
     r.setStyle(el, "max-width", $lay.widthPx & "px")
     items.add FlowItem(el: el, widthPx: min(w, lay.widthPx))
   if vm.phase == cpComposing:
-    let add = r.box(pairs = [("height", $ControlPx & "px"), ("width", $ControlPx & "px"),
+    let add = r.box(pairs = [("height", $ControlPx & "px"), ("width", $AddPx & "px"),
                              ("items", "center"), ("justify", "center"),
                              ("flex-shrink", "0"), ("rounded", $ControlRadiusPx & "px"),
                              ("border-width", "1px"), ("border-color", p.borderSecondary)])
@@ -203,29 +267,26 @@ proc contextBlocks(r: GpuiRenderer; p: AhPalette; vm: OmniboxComposerVM;
                               shrink = false))
     r.tag(add, "add-context", $addOpen)
     r.acts(add, "add-context", "", lay.press)
-    items.add FlowItem(el: add, widthPx: ControlPx)
-  # Count the lines `flowLines` packs, to size the block.
-  var lines = 1
-  var used = 0
-  for it in items:
-    if used > 0 and used + ChipGapPx + it.widthPx > lay.widthPx:
-      inc lines
-      used = it.widthPx
-    else:
-      used += (if used > 0: ChipGapPx else: 0) + it.widthPx
+    items.add FlowItem(el: add, widthPx: AddPx)
+  # The lines `flowLines` packs them into, to size the block.
+  let lines = flowLineCount(items, lay.widthPx, ChipGapPx)
   let col = r.box(column = true)
-  r.appendChild(col, r.flowLines(items, lay.widthPx, ChipGapPx, ControlPx, ChipGapPx))
+  let flow = r.flowLines(items, lay.widthPx, ChipGapPx, ControlPx, ChipGapPx)
+  r.tag(flow, "flow-lines", $lines)   # the lines the block was sized for
+  r.appendChild(col, flow)
   var h = 4 + lines * ControlPx + (lines - 1) * ChipGapPx
   if addOpen:
     let menu = r.box(column = true, pairs = [("margin-top", "6px"), ("min-width", "192px"),
-                                             ("width", "192px"),
+                                             ("width", "192px"), ("flex-shrink", "0"),
                                              ("background", p.ground), ("border-width", "1px"),
                                              ("border-color", p.borderPrimary),
-                                             ("rounded", $SheetRadiusPx & "px"),
-                                             ("padding-top", "2px"), ("padding-bottom", "2px")])
+                                             ("rounded", $SheetRadiusPx & "px")])
     r.tag(menu, "context-menu", "add-context")
     for item in AddContextItems:
-      let row = r.box(pairs = [("height", "28px"), ("items", "center"),
+      # A dropdown row's own ground (`ct-menu-item`: surface/base/raised).
+      let row = r.box(pairs = [("height", $MenuItemPx & "px"), ("items", "center"),
+                               ("flex-shrink", "0"),
+                               ("background", tokenHexOf(dtColorsUiSurfaceBaseRaised, p.mode)),
                                ("padding-left", "10px"), ("padding-right", "10px")])
       let t = r.text(item, CaptionPx, p.textBody)
       r.tag(t, "context-item", item)
@@ -233,14 +294,14 @@ proc contextBlocks(r: GpuiRenderer; p: AhPalette; vm: OmniboxComposerVM;
       r.acts(row, "attach", item)
       r.appendChild(menu, row)
     r.appendChild(col, menu)
-    h += 6 + 4 + 2 + 28 * AddContextItems.len
+    h += 6 + 2 + MenuItemPx * AddContextItems.len
   let cites = vm.citesShown
   if cites.len > 0:
-    let t = r.text(cites, CaptionPx, p.textCaption, pairs = [("margin-top", "6px"),
-                                                              ("line-height", "16px")])
+    let t = r.onLine(cites, CaptionPx, p.textCaption)
+    r.setStyle(t, "margin-top", "6px")
     r.tag(t, "cites", cites)
     r.appendChild(col, t)
-    h += 6 + CaptionLinePx
+    h += 6 + LinePx
   h += 8
   result.add r.spaced(col, h, top = 4, bottom = 8)
 
@@ -271,7 +332,11 @@ proc rowBlock(r: GpuiRenderer; p: AhPalette; vm: OmniboxComposerVM; lay: Layout;
   let dRole = deliveryRole(row)
   let actions = actionsOf(vm, row)
   let narrow = lay.narrow
-  let textPxAvail = if narrow: lay.widthPx else: lay.widthPx - TitleColPx - ColumnGapPx
+  # The row's text column: the sheet's inner width less the row's own 1px
+  # side margins and the sheet's border (`.ah-composer-row`'s `margin: 0
+  # 0.0625rem`), beside the title column when wide.
+  let rowPx = lay.widthPx - 4
+  let textPxAvail = if narrow: rowPx else: rowPx - TitleColPx - ColumnGapPx
   let el = r.box(column = true, pairs = [("position", "relative")])
   r.tag(el, "dest", $row.target)
   r.tag(el, "marked", $marked)
@@ -281,15 +346,18 @@ proc rowBlock(r: GpuiRenderer; p: AhPalette; vm: OmniboxComposerVM; lay: Layout;
   let labelInk = if unavailable: p.textDisabled else: p.textBody
   let first = r.box(pairs = [("height", $ControlPx & "px"), ("items", "center"),
                              ("gap", $ColumnGapPx & "px")])
-  let title = r.tracked(r.text(row.title.toUpperAscii, CaptionPx, titleInk, bold = true,
-                               shrink = narrow))
+  let title = r.medium(r.text(row.title.toUpperAscii, CaptionPx, titleInk,
+                              shrink = narrow), tracked = true)
   r.tag(title, "dest-title", row.title.toUpperAscii)
   if narrow: r.setStyle(title, "flex-grow", "1")
   else: r.styles(title, [("width", $TitleColPx & "px"), ("min-width", $TitleColPx & "px")])
   r.appendChild(first, title)
   proc labelEl(): GpuiElement =
-    result = r.text(label, BodyPx, labelInk,
-                    pairs = [("flex-grow", "1"), ("min-width", "0px")])
+    # Narrow: wrapped, never cut (the stylesheet's `white-space: normal`
+    # below 30rem); wide: one line, cut by the views' one rule.
+    result = if narrow: r.wrapText(label, BodyPx, LinePx, labelInk)
+             else: r.text(label, BodyPx, labelInk,
+                          pairs = [("flex-grow", "1"), ("min-width", "0px")])
     if unavailable: r.setStyle(result, "font-style", "italic")
     r.tag(result, "label", label)
   if not narrow: r.appendChild(first, labelEl())
@@ -298,7 +366,7 @@ proc rowBlock(r: GpuiRenderer; p: AhPalette; vm: OmniboxComposerVM; lay: Layout;
                   of "quiet": p.textCaption
                   of "error": p.textError
                   else: p.textBody
-    let w = r.text(word, CaptionPx, wordInk, bold = role != "quiet", shrink = false)
+    let w = r.medium(r.text(word, CaptionPx, wordInk, shrink = false))
     r.tag(w, "state", word)
     r.appendChild(first, w)
   var h = 6 + ControlPx + 6
@@ -313,22 +381,23 @@ proc rowBlock(r: GpuiRenderer; p: AhPalette; vm: OmniboxComposerVM; lay: Layout;
   r.appendChild(el, first)
   let under = if narrow: 0 else: TitleColPx + ColumnGapPx
   if narrow:
-    let l = r.box(pairs = [("height", $BodyLinePx & "px"), ("items", "center")])
+    let lines = linesOf(label, BodyPx, textPxAvail)
+    let l = r.box(pairs = [("height", $(LinePx * lines) & "px"), ("flex-shrink", "0")])
     r.appendChild(l, labelEl())
     r.appendChild(el, l)
-    h += BodyLinePx
+    h += LinePx * lines
   if reason.len > 0:
-    let t = r.wrapText(reason, CaptionPx, 16, p.textCaption)
+    let t = r.wrapText(reason, CaptionPx, DetailLinePx, p.textCaption)
     r.styles(t, [("margin-top", "2px"), ("margin-left", $under & "px")])
     r.tag(t, "detail", reason)
     r.appendChild(el, t)
-    h += 2 + 16 * linesOf(reason, CaptionPx, textPxAvail)
+    h += 2 + DetailLinePx * linesOf(reason, CaptionPx, textPxAvail)
   if delivery.len > 0:
-    let t = r.wrapText(delivery, CaptionPx, 16, roleInk(p, dRole))
+    let t = r.wrapText(delivery, CaptionPx, DetailLinePx, roleInk(p, dRole))
     r.styles(t, [("margin-top", "2px"), ("margin-left", $under & "px")])
     r.tag(t, "delivery", delivery)
     r.appendChild(el, t)
-    h += 2 + 16 * linesOf(delivery, CaptionPx, textPxAvail)
+    h += 2 + DetailLinePx * linesOf(delivery, CaptionPx, textPxAvail)
   if narrow and actions.len > 0:
     let a = r.box(pairs = [("gap", "6px"), ("margin-top", "4px"),
                            ("height", $ControlPx & "px")])
@@ -337,27 +406,59 @@ proc rowBlock(r: GpuiRenderer; p: AhPalette; vm: OmniboxComposerVM; lay: Layout;
     h += 4 + ControlPx
   result = r.spaced(el, h, top = 6, bottom = 6)
 
+const
+  FieldValuePadPx = 8 + 1
+    ## A field's value box: 0.5rem of padding and the control's hairline on
+    ## each side of its text.
+  InputCutStartChars = 8
+    ## The most a one-line input's middle cut keeps of its start: its first 8
+    ## characters (D35's 8 cells, as much as says what the value begins
+    ## with, `mileston…`).
+
+proc inputValueShown*(value: string; boxPx: int): string =
+  ## A one-line input's value as a field `boxPx` wide shows it: whole when
+  ## it fits, else cut in its middle by the views' one rule for an input
+  ## (`cutInputValue`, D35), measured as the face sets it. Never wrapped.
+  let room = boxPx - 2 * FieldValuePadPx
+  let measure = proc(t: string): int = int(textWidth(t, BodyPx, faceGlyphs = true) + 0.999)
+  var startChars = ""
+  var n = 0
+  for ch in value.runes:
+    if n == InputCutStartChars: break
+    startChars.add $ch
+    inc n
+  cutInputValue(value, room, measure, measure(Ellipsis), measure(startChars),
+                measure(value.runeSubStr(0, 1)))
+
 proc fieldEl(r: GpuiRenderer; p: AhPalette; label, value, problem: string;
              widthPx: int; placeholder = ""): (GpuiElement, int) =
   ## A field: its label over its value drawn as the app's input field, and
-  ## its problem under it.
+  ## its problem under it. The value is one line, cut in its middle when it
+  ## is wider than the field (`inputValueShown`).
   let el = r.box(column = true, pairs = [("gap", "3px"), ("width", $widthPx & "px"),
                                          ("min-width", "0px"), ("flex-shrink", "0")])
   r.tag(el, "field-label", label)
-  let l = r.text(label, CaptionPx, p.textLabel, shrink = false)
+  let l = r.onLine(label, CaptionPx, p.textLabel, shrink = false)
   r.tag(l, "field-name", label)
   r.appendChild(el, l)
-  let v = r.box(pairs = [("height", $ControlPx & "px"), ("items", "center"),
+  # The value box is the web's `.ah-composer-field-value`: the control's
+  # hairline (border/secondary, as every input of the composer), and its
+  # text on a line as tall as the box (`line-height: 1.5rem`), set from
+  # inside the top hairline as the browser sets it.
+  let v = r.box(pairs = [("height", $ControlPx & "px"), ("items", "start"),
                          ("padding-left", "8px"), ("padding-right", "8px"),
                          ("rounded", $ControlRadiusPx & "px"), ("border-width", "1px"),
-                         ("border-color", if problem.len > 0: p.textError else: p.borderPrimary),
-                         ("background", p.ground)])
-  let shown = if value.len > 0: value else: placeholder
-  let t = r.text(shown, BodyPx, if value.len > 0: p.textBody else: p.textCaption)
-  r.tag(t, "value", shown)
+                         ("border-color", if problem.len > 0: p.textError else: p.borderSecondary),
+                         ("background", p.ground), ("overflow", "hidden")])
+  let whole = if value.len > 0: value else: placeholder
+  let shown = if value.len > 0: inputValueShown(value, widthPx) else: placeholder
+  let t = r.text(shown, BodyPx, if value.len > 0: p.textBody else: p.textCaption,
+                 pairs = [("height", $ControlPx & "px"), ("line-height", $ControlPx & "px")])
+  r.tag(t, "value", whole)
+  r.tag(t, "value-shown", shown)
   r.appendChild(v, t)
   r.appendChild(el, v)
-  var h = CaptionLinePx + 3 + ControlPx
+  var h = LinePx + 3 + ControlPx
   if problem.len > 0:
     let pr = r.wrapText(problem, CaptionPx, 16, p.textError)
     r.tag(pr, "problem", problem)
@@ -371,12 +472,10 @@ proc choiceEl(r: GpuiRenderer; p: AhPalette; label: string; options, chosen: seq
   ## action border (`✓` before each when several may be).
   let el = r.box(column = true, pairs = [("gap", "3px"), ("width", $widthPx & "px")])
   r.tag(el, "field-label", label)
-  let l = r.text(label, CaptionPx, p.textLabel, shrink = false)
+  let l = r.onLine(label, CaptionPx, p.textLabel, shrink = false)
   r.tag(l, "field-name", label)
   r.appendChild(el, l)
   var items: seq[FlowItem]
-  var lines = 1
-  var used = 0
   for o in options:
     let on = o in chosen
     let shown = if several and on: "\xE2\x9C\x93 " & o else: o
@@ -386,12 +485,11 @@ proc choiceEl(r: GpuiRenderer; p: AhPalette; label: string; options, chosen: seq
     r.tag(c, "chosen", $on)
     r.acts(c, "choose-option", o)
     items.add FlowItem(el: c, widthPx: w)
-    if used > 0 and used + 4 + w > widthPx:
-      inc lines
-      used = w
-    else: used += (if used > 0: 4 else: 0) + w
-  r.appendChild(el, r.flowLines(items, widthPx, 4, ControlPx, 4))
-  var h = CaptionLinePx + 3 + lines * ControlPx + (lines - 1) * 4
+  let lines = flowLineCount(items, widthPx, 4)
+  let flow = r.flowLines(items, widthPx, 4, ControlPx, 4)
+  r.tag(flow, "flow-lines", $lines)   # the lines the field was sized for
+  r.appendChild(el, flow)
+  var h = LinePx + 3 + lines * ControlPx + (lines - 1) * 4
   if problem.len > 0:
     let pr = r.wrapText(problem, CaptionPx, 16, p.textError)
     r.tag(pr, "problem", problem)
@@ -433,11 +531,11 @@ proc formBlocks(r: GpuiRenderer; p: AhPalette; vm: OmniboxComposerVM;
   let head = r.box(column = true, pairs = [("border-top-width", "1px"),
                                            ("border-color", p.borderSecondary)])
   r.tag(head, "form", $vm.intent)
-  let title = r.text(vm.formTitle, CaptionPx, p.textCaption)
+  let title = r.onLine(vm.formTitle, CaptionPx, p.textCaption)
   r.tag(title, "form-title", vm.formTitle)
   r.appendChild(head, title)
   let open = vm.optionsOpen.val
-  result.add r.spaced(head, 1 + 8 + CaptionLinePx + 6, top = 8, bottom = 6)
+  result.add r.spaced(head, 1 + 8 + LinePx + 6, top = 8, bottom = 6)
   r.setStyle(head, "margin-top", "4px")
   result[^1].heightPx += 4
   if not open: return
@@ -466,7 +564,10 @@ proc formBlocks(r: GpuiRenderer; p: AhPalette; vm: OmniboxComposerVM;
     # The schedule's head line, and its fields when open.
     let sopen = vm.scheduleOpen.val
     let (summary, problem) = vm.scheduleSummary
-    let sh = r.box(pairs = [("height", "20px"), ("items", "center"), ("gap", "6px")])
+    # The schedule is the form grid's last part (0.5rem under the fields,
+    # the grid's gap, which the block above ends with); closed, the form's
+    # bottom padding follows it, open, its own grid 0.5rem under it.
+    let sh = r.box(pairs = [("height", $LinePx & "px"), ("items", "center"), ("gap", "6px")])
     r.tag(sh, "schedule", $sopen)
     r.acts(sh, "schedule", "")
     r.appendChild(sh, r.text(if sopen: "\xE2\x96\xBE" else: "\xE2\x96\xB8", CaptionPx,
@@ -477,7 +578,7 @@ proc formBlocks(r: GpuiRenderer; p: AhPalette; vm: OmniboxComposerVM;
     let ss = r.text(summary, CaptionPx, if problem: p.textError else: p.textCaption)
     r.tag(ss, "schedule-summary", summary)
     r.appendChild(sh, ss)
-    result.add r.spaced(sh, 20 + 8, bottom = 8)
+    result.add r.spaced(sh, LinePx + (if sopen: 0 else: 8), bottom = if sopen: 0 else: 8)
     result[^1].schedule = not sopen
     if sopen:
       let s = o.schedule
@@ -494,7 +595,7 @@ proc formBlocks(r: GpuiRenderer; p: AhPalette; vm: OmniboxComposerVM;
       sched.add (r.choiceEl(p, "Concurrency", conc, @[$s.concurrency], w), true)
       sched.add (r.choiceEl(p, "Misfire", mis, @[$s.misfire], w), true)
       let (g2, h2) = r.gridOf(sched, narrow)
-      result.add r.spaced(g2, h2 + 8, bottom = 8)
+      result.add r.spaced(g2, 8 + h2 + 8, top = 8, bottom = 8)
       result[^1].schedule = true
   else:
     let f = vm.initiative
@@ -516,23 +617,23 @@ proc bodyBlocks(r: GpuiRenderer; p: AhPalette; vm: OmniboxComposerVM;
   let w = lay.widthPx
   let whole = vm.instructionBlock
   if whole.len > 0 and vm.phase == cpComposing:
-    let t = r.wrapText(whole, BodyPx, BodyLinePx, p.textBody)
+    let t = r.wrapText(whole, BodyPx, LinePx, p.textBody)
     r.tag(t, "instruction", whole)
-    result.add r.spaced(t, 4 + BodyLinePx * linesOf(whole, BodyPx, w) + 8, top = 4, bottom = 8)
+    result.add r.spaced(t, 4 + LinePx * linesOf(whole, BodyPx, w) + 8, top = 4, bottom = 8)
   if vm.phase in {cpSent, cpSendFailed} or
       vm.phase == cpSending and vm.draft.deliveries.len > 1:
     let sent = vm.sentLine
     if sent.len > 0:
       let sentText = vm.draft.sentText
       let col = r.box(column = true, pairs = [("gap", "2px")])
-      let t = r.wrapText(sentText, BodyPx, BodyLinePx, p.textBody)
+      let t = r.wrapText(sentText, BodyPx, LinePx, p.textBody)
       r.tag(t, "sent-text", sentText)
       r.appendChild(col, t)
-      let l = r.wrapText(sent, CaptionPx, 16, p.textCaption)
+      let l = r.wrapText(sent, CaptionPx, LinePx, p.textCaption)
       r.tag(l, "sent-line", sent)
       r.appendChild(col, l)
-      result.add r.spaced(col, BodyLinePx * linesOf(sentText, BodyPx, w) + 2 +
-                                16 * linesOf(sent, CaptionPx, w) + 8, bottom = 8)
+      result.add r.spaced(col, LinePx * linesOf(sentText, BodyPx, w) + 2 +
+                                LinePx * linesOf(sent, CaptionPx, w) + 8, bottom = 8)
   if vm.isEmptyField:
     result.add r.recentBlocks(p, vm, lay)
     return
@@ -551,10 +652,10 @@ proc bodyBlocks(r: GpuiRenderer; p: AhPalette; vm: OmniboxComposerVM;
   if vm.showsForm: result.add r.formBlocks(p, vm, lay)
   let stopMessage = vm.stopMessage.val
   if stopMessage.len > 0:
-    let t = r.wrapText(stopMessage, CaptionPx, 16,
+    let t = r.wrapText(stopMessage, CaptionPx, LinePx,
                        if vm.stopState.val == ssFailed: p.textError else: p.textCaption)
     r.tag(t, "stopped", stopMessage)
-    result.add r.spaced(t, 6 + 16 * linesOf(stopMessage, CaptionPx, w), top = 6)
+    result.add r.spaced(t, 6 + LinePx * linesOf(stopMessage, CaptionPx, w), top = 6)
 
 proc sendLine(r: GpuiRenderer; p: AhPalette; vm: OmniboxComposerVM;
               press: ComposerPress): GpuiElement =
@@ -562,7 +663,7 @@ proc sendLine(r: GpuiRenderer; p: AhPalette; vm: OmniboxComposerVM;
   let canSend = vm.canSend and not sending
   let (hint, more, blocked) = vm.sendHint
   let label = vm.sendLabel
-  result = r.box(pairs = [("height", $(8 + ControlPx + 8) & "px"), ("items", "center"),
+  result = r.box(pairs = [("height", $FooterPx & "px"), ("items", "center"),
                           ("justify", "end"), ("gap", "12px"), ("flex-shrink", "0"),
                           ("padding-left", $PadPx & "px"), ("padding-right", $PadPx & "px"),
                           ("border-top-width", "1px"), ("border-color", p.borderSecondary)])
@@ -606,23 +707,34 @@ proc drawComposer*(r: GpuiRenderer; host: GpuiElement; vm: OmniboxComposerVM;
   r.tag(host, "phase", $vm.phase)
   r.tag(host, "route", $vm.route)
   # The caption bar and its omnibox field.
+  # The field sits where the web's does (`FieldTopPx`), on the panel's
+  # ground with the inputs' hairline (surface/primary/default and
+  # border/secondary, `.ah-composer-input-row`).
   let caption = r.box(pairs = [("height", $CaptionBarPx & "px"), ("flex-shrink", "0"),
-                               ("items", "center"), ("justify", "center"),
+                               ("items", "start"), ("justify", "center"),
                                ("background", p.ground)])
   let fieldW = min(FieldPx, widthPx - 16)
   let field = r.box(pairs = [("width", $fieldW & "px"), ("height", $FieldHeightPx & "px"),
+                             ("margin-top", $FieldTopPx & "px"),
                              ("items", "center"), ("padding-left", "12px"),
                              ("padding-right", "12px"), ("gap", "8px"),
                              ("rounded", $ControlRadiusPx & "px"), ("border-width", "1px"),
-                             ("border-color", p.borderPrimary), ("background", p.panel)])
+                             ("border-color", p.borderSecondary), ("background", p.ground)])
   let fieldText = ComposerPrefix & vm.fieldText
   # Never cut by an ellipsis (P2c D32): the field shows what fits, as an
-  # input scrolled to its start does.
+  # input scrolled to its start does, clipped inside its padding (the web's
+  # input box ends 12px before the border), never under the border.
+  let clip = r.box(pairs = [("flex-grow", "1"), ("flex-shrink", "1"), ("min-width", "0px"),
+                            ("overflow", "hidden"), ("items", "center")])
+  r.tag(clip, "field-clip", "true")
+  # Its text on a line as tall as the box inside the hairline, as the web's
+  # input sets it.
   let ft = r.text(fieldText, BodyPx, p.textBody, shrink = false,
-                  pairs = [("flex-grow", "1"), ("flex-shrink", "1"), ("min-width", "0px"),
-                           ("overflow", "hidden")])
+                  pairs = [("height", $(FieldHeightPx - 2) & "px"),
+                           ("line-height", $(FieldHeightPx - 2) & "px")])
   r.tag(ft, "field", fieldText)
-  r.appendChild(field, ft)
+  r.appendChild(clip, ft)
+  r.appendChild(field, clip)
   let more = vm.moreLines
   if more.len > 0:
     let m = r.text(more, CaptionPx, p.textCaption, shrink = false)
@@ -637,44 +749,55 @@ proc drawComposer*(r: GpuiRenderer; host: GpuiElement; vm: OmniboxComposerVM;
   let lay = Layout(widthPx: sheetW - 2 * PadPx, narrow: narrow, press: press)
   let header = vm.headerText
   let headerLines = linesOf(header, CaptionPx, lay.widthPx)
-  let topPx = 8 + 16 * headerLines + 6
+  let headPx = LinePx * headerLines + HeaderPadPx
+  let topPx = TopPadPx + headPx
   # The send line, as the web draws it: never with nothing typed (`Recent`).
-  let footerPx = if vm.showsSendLine and not vm.isEmptyField: 8 + ControlPx + 8 + 1 else: 0
+  let footerPx = if vm.showsSendLine and not vm.isEmptyField: FooterPx else: 0
   let blocks = r.bodyBlocks(p, vm, lay)
+  # Where each part starts in the body's content; the content ends with the
+  # last part's bottom margin.
+  var starts: seq[int]
   var total = 0
-  for b in blocks: total += b.heightPx
-  let maxH = heightPx - CaptionBarPx - TriggerGapPx - 16
-  let bodyRoom = max(16, maxH - topPx - footerPx - 1)
-  const MoreLinePx = 4 + CaptionLinePx + 4 + 1
-  var first = 0
-  var last = blocks.high
+  for b in blocks:
+    starts.add total
+    total += b.heightPx
+  total += EndPadPx
+  # The sheet is as tall as what it holds, up to the window less the caption
+  # bar and its inset (`max-height`), its two hairlines included.
+  let maxH = heightPx - CaptionBarPx - SheetInsetPx
+  let bodyRoom = max(MoreLinePx + 1, maxH - 2 - topPx - footerPx)
+  var bodyPx = total
+  var scroll = 0
   var moreBelow = false
   if total > bodyRoom:
+    # The web's scrollport: the body is clipped to its room. With the
+    # schedule open its end is brought to the scrollport's bottom, above the
+    # `More below` line (the content's end when only padding follows it);
+    # otherwise the body shows its start, `More below` over its bottom edge.
+    bodyPx = bodyRoom
+    moreBelow = true
     var scheduleEnd = -1
     for i, b in blocks:
       if b.schedule: scheduleEnd = i
     if scheduleEnd >= 0 and vm.scheduleOpen.val:
-      last = scheduleEnd
-      moreBelow = scheduleEnd < blocks.high
-      let room = bodyRoom - (if moreBelow: MoreLinePx else: 0)
-      var used = 0
-      first = scheduleEnd + 1
-      while first > 0 and used + blocks[first - 1].heightPx <= room:
-        dec first
-        used += blocks[first].heightPx
-    else:
-      moreBelow = true
-      var used = 0
-      last = -1
-      while last + 1 < blocks.len and used + blocks[last + 1].heightPx <= bodyRoom - MoreLinePx:
-        inc last
-        used += blocks[last].heightPx
-  var bodyPx = 0
-  for i in first .. last: bodyPx += blocks[i].heightPx
-  if moreBelow: bodyPx += MoreLinePx
-  let sheetH = topPx + bodyPx + footerPx + 1
+      let schedEnd = starts[scheduleEnd] + blocks[scheduleEnd].heightPx
+      if total - schedEnd < 40:
+        scroll = total - bodyPx
+        moreBelow = false
+      else:
+        scroll = max(0, schedEnd + EndPadPx - (bodyPx - MoreLinePx))
+  # The parts the scrollport shows, wholly or in part; the ones it scrolled
+  # past are not drawn, and the sheet says how many (`hidden-above`,
+  # `hidden-below`).
+  var first = blocks.len
+  var last = -1
+  for i, b in blocks:
+    if starts[i] + b.heightPx > scroll and starts[i] < scroll + bodyPx:
+      first = min(first, i)
+      last = max(last, i)
+  let sheetH = 1 + topPx + bodyPx + footerPx + 1
   let sheet = r.box(column = true, pairs = [
-    ("position", "absolute"), ("top", $(CaptionBarPx + TriggerGapPx) & "px"),
+    ("position", "absolute"), ("top", $SheetTopPx & "px"),
     ("left", $((widthPx - sheetW) div 2) & "px"), ("width", $sheetW & "px"),
     ("height", $sheetH & "px"), ("background", p.ground),
     ("border-width", "1px"), ("border-color", p.borderPrimary),
@@ -682,22 +805,40 @@ proc drawComposer*(r: GpuiRenderer; host: GpuiElement; vm: OmniboxComposerVM;
   r.tag(sheet, "sheet", $vm.phase)
   r.tag(sheet, "hidden-above", $first)
   r.tag(sheet, "hidden-below", $(blocks.high - last))
-  let head = r.wrapText(header, CaptionPx, 16, roleInk(p, vm.headerRole))
+  # Where the sheet is laid out, for a check that needs no window
+  # (`test_ctf_p2c_gpui_composer`, against the web's layout record).
+  r.tag(sheet, "sheet-top", $SheetTopPx)
+  r.tag(sheet, "field-top", $FieldTopPx)
+  r.tag(sheet, "sheet-height", $sheetH)
+  let top = r.box(column = true, pairs = [("padding-top", $TopPadPx & "px"),
+                                          ("height", $topPx & "px"), ("flex-shrink", "0")])
+  let head = r.wrapText(header, CaptionPx, LinePx, roleInk(p, vm.headerRole))
   r.styles(head, [("padding-left", $PadPx & "px"), ("padding-right", $PadPx & "px"),
-                  ("padding-top", "8px"), ("padding-bottom", "6px"),
-                  ("height", $topPx & "px"), ("flex-shrink", "0")])
+                  ("padding-bottom", $HeaderPadPx & "px"),
+                  ("height", $headPx & "px"), ("flex-shrink", "0")])
   r.tag(head, "header", header)
-  r.appendChild(sheet, head)
+  r.appendChild(top, head)
+  r.appendChild(sheet, top)
   let body = r.box(column = true, pairs = [("height", $bodyPx & "px"), ("flex-shrink", "0"),
-                                           ("overflow", "hidden")])
-  for i in first .. last: r.appendChild(body, blocks[i].el)
+                                           ("position", "relative"), ("overflow", "hidden")])
+  # The scrolled content: the first part drawn starts `scroll` into the body
+  # above its top edge.
+  let content = r.box(column = true, pairs = [("flex-shrink", "0")])
+  if first < blocks.len:
+    let offset = starts[first] - scroll
+    if offset != 0: r.setStyle(content, "margin-top", $offset & "px")
+    for i in first .. last: r.appendChild(content, blocks[i].el)
+  r.appendChild(body, content)
   if moreBelow:
-    let m = r.box(pairs = [("height", $MoreLinePx & "px"), ("flex-shrink", "0"),
+    let m = r.box(pairs = [("position", "absolute"), ("left", "0px"),
+                           ("top", $(bodyPx - MoreLinePx) & "px"),
+                           ("width", $(sheetW - 2) & "px"),
+                           ("height", $MoreLinePx & "px"),
                            ("items", "center"), ("justify", "end"),
                            ("padding-right", $PadPx & "px"),
                            ("border-top-width", "1px"), ("border-color", p.borderSecondary),
                            ("background", p.ground)])
-    let t = r.text(MoreBelow, CaptionPx, p.textCaption, shrink = false)
+    let t = r.onLine(MoreBelow, CaptionPx, p.textCaption, shrink = false)
     r.tag(t, "more-below", MoreBelow)
     r.appendChild(m, t)
     r.appendChild(body, m)

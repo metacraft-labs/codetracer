@@ -77,14 +77,15 @@ proc sizeOf(line: TimelineLine): int =
 proc lineHeightOf(line: TimelineLine): int =
   if line.kind in CaptionLines: DetailLinePx else: LinePx
 
-proc wrappedRows*(text: string; sizePx, availPx: int): int =
+proc wrappedRows*(text: string; sizePx, availPx: int; faceGlyphs = false): int =
   ## How many lines `text` wraps to at `availPx`: word by word at the
-  ## face's kerned widths, each of its own lines apart.
+  ## face's kerned widths, each of its own lines apart. `faceGlyphs`: the
+  ## non-ASCII glyphs the face carries at their own advances (`textWidth`).
   for para in text.splitLines:
     var rows = 1
     var used = 0.0
     for word in para.splitWhitespace:
-      let w = textWidth(word, sizePx)
+      let w = textWidth(word, sizePx, faceGlyphs = faceGlyphs)
       let space = if used > 0: textWidth(" ", sizePx) else: 0.0
       if used > 0 and used + space + w > float(availPx):
         inc rows
