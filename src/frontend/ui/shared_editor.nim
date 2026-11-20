@@ -1830,6 +1830,10 @@ proc themeRules(dark: bool): string =
   let activeNum = themeHex(dtEditorThemeActiveLineNumber, dark)
   let sel = themeHex(dtEditorThemeSelection, dark)
   let pointer = themeHex(dtEditorThemeExecutionPointer, dark)
+  # Find-And-Incremental-Search OQ-F6: the find tokens, as Monaco's own
+  # editors are now given them, rather than `vs-dark`'s colours.
+  let findAll = themeHex(dtEditorThemeFindMatchHighlight, dark)
+  let findCurrent = themeHex(dtEditorThemeFindMatch, dark)
   scope & " { background: var(--vscode-editor-background, " & ground & ");\n" &
   "  color: var(--vscode-editor-foreground, " & fg & "); }\n" &
   scope & " .margin { background: var(--vscode-editorGutter-background, " & ground & "); }\n" &
@@ -1841,7 +1845,9 @@ proc themeRules(dark: bool): string =
   scope & " .cursor { background: var(--vscode-editorCursor-foreground, " & fg & "); }\n" &
   scope & " .ct-fold-toggle, " & scope & " .inline-folded { color: " & num & "; }\n" &
   scope & " .inputarea.ime-input { color: inherit; background: var(--vscode-editor-background, " & ground & ");\n" &
-  "  border-bottom: 1px solid " & pointer & "; }\n"
+  "  border-bottom: 1px solid " & pointer & "; }\n" &
+  scope & " .findMatch { background: var(--vscode-editor-findMatchHighlightBackground, " & findAll & "); }\n" &
+  scope & " .currentFindMatch { background: var(--vscode-editor-findMatchBackground, " & findCurrent & "); }\n"
 
 proc installSharedEditorStyles() =
   ## The shared editor's own rules, once per page. The colours are the
@@ -1872,8 +1878,6 @@ proc installSharedEditorStyles() =
   border-bottom: 2px dotted var(--vscode-editorInfo-foreground, #3794ff); }
 .ct-shared-editor .ct-fold-toggle { cursor: pointer; text-align: center; }
 .ct-shared-editor .scrollbar .slider { background: rgba(121,121,121,0.4); }
-.ct-shared-editor .findMatch { background: var(--vscode-editor-findMatchHighlightBackground, rgba(234,92,0,0.33)); }
-.ct-shared-editor .currentFindMatch { background: var(--vscode-editor-findMatchBackground, #515c6a); }
 .ct-shared-editor .ct-find-widget { background: var(--vscode-editorWidget-background, #252526);
   border: 1px solid var(--vscode-widget-border, #454545); padding: 4px; gap: 4px; }
 @media (forced-colors: active) {
