@@ -71,6 +71,7 @@ import ./app/edit_binding   # PLAT-43: `EditSession.selectModel`
 import ./app/runtime
 import ./app/clipboard_read
 import ./app/tui_app
+import ./app/capability_note
 import ./host/build_runner
 import ./host/capabilities
 import ./host/edit_host
@@ -708,8 +709,11 @@ proc interactive(command: TuiCommand): int =
   app.caretDrawn = gCaretSupport == caretDrawn
   # The negotiation's note FIRST: the status line clips a long notification
   # from the right, and a trace folder's path is long.
-  app.notification = capabilityNote(negotiation.caps, hintsOn) &
-                     " | opening " & folder & " …"
+  # A late answer rewrites this note only while it is still on the line
+  # (`app/capability_note`): a message written after it stays.
+  var noteSlot: CapabilityNoteSlot
+  app.notification = noteSlot.startupNote(
+    capabilityNote(negotiation.caps, hintsOn), " | opening " & folder & " …")
   # PLAT-16: THE PROJECT A REPLAY SESSION EDITS IS THE WORKING DIRECTORY, and
   # that is a decision rather than a fallback, so it is written down here.
   #
@@ -1618,7 +1622,10 @@ proc interactive(command: TuiCommand): int =
         adoptMouseMetrics(driver, negotiation)
         if changed:
           rt.adoptCaps(negotiation.caps)
-          app.notification = capabilityNote(negotiation.caps, hintsOn)
+          let (write, text) = noteSlot.lateNote(
+            app.notification, capabilityNote(negotiation.caps, hintsOn))
+          if write:
+            app.notification = text
           paint(driver, rt)
         continue
       # §4.3: A STRING (OSC / DCS / APC) IS NEVER A KEY. One that no query of
@@ -1806,6 +1813,9 @@ proc editInteractive(command: TuiCommand): int =
   let negotiation = driver.negotiateOnTerminal(command.editFlags, terminalPrefs)
   adoptMouseMetrics(driver, negotiation)
   let hintsOn = storedPrefs.settings.terminal.terminalHints != "off"
+  # Edit mode writes no start-up note, so a late answer writes its note only
+  # to an empty status line (`app/capability_note`).
+  var noteSlot: CapabilityNoteSlot
 
   var size = driver.size()
   let app = newTuiApp()
@@ -2015,7 +2025,10 @@ proc editInteractive(command: TuiCommand): int =
         adoptMouseMetrics(driver, negotiation)
         if changed:
           rt.adoptCaps(negotiation.caps)
-          app.notification = capabilityNote(negotiation.caps, hintsOn)
+          let (write, text) = noteSlot.lateNote(
+            app.notification, capabilityNote(negotiation.caps, hintsOn))
+          if write:
+            app.notification = text
           paint(driver, rt)
         continue
       if isStringToken(ev.token):
