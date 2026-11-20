@@ -172,6 +172,27 @@ type
       ## that are merely wrong — a space, a quote, a path separator, Unicode
       ## that makes two plugins look like one in a list.
 
+    # -- Extensibility-Model.md §11 (2026-11-20): plugins run out of process.
+    pecBadPackage
+      ## A multi-plugin `plugin.json` (§11.2.2) whose `package`, `host` or
+      ## `plugins` cannot be read, or whose package name is not the component
+      ## it was installed as.
+    pecNativeWithoutProcess
+      ## §11.3: every plugin of a native package must declare `process`. A
+      ## native executable runs with the user's authority, so a plugin that
+      ## did not ask for it is refused rather than granted it by inference.
+    pecNativeViewRefused
+      ## §11.11, answered 2026-11-20: third-party plugins draw no native views.
+    pecReservedKey
+      ## §11.7.6: the palette key and the recovery chord cannot be bound by a
+      ## plugin, in its manifest or in a layer it pushes.
+    pecBindingConflict
+      ## §11.7.2: two plugins binding one key in one scope with `when` clauses
+      ## that can both hold. Reported by name, resolved by the user.
+    pecBadSetting
+      ## §11.2.2: a `plugins.<id>.settings` value the plugin's settings schema
+      ## does not accept.
+
   PluginError* = object
     plugin*: PluginId
       ## ALWAYS set. See the header.
@@ -246,6 +267,18 @@ func codeText*(c: PluginErrorCode): string =
     "a .ctrc pin names a version that is not installed"
   of pecBadPluginId:
     "malformed plugin id"
+  of pecBadPackage:
+    "malformed plugin package"
+  of pecNativeWithoutProcess:
+    "a native plugin that does not declare the 'process' grant"
+  of pecNativeViewRefused:
+    "a third-party plugin may not draw a native view"
+  of pecReservedKey:
+    "a plugin binding takes a reserved key"
+  of pecBindingConflict:
+    "two plugins bind the same key"
+  of pecBadSetting:
+    "a setting the plugin's schema does not accept"
 
 func pluginError*(plugin: PluginId; code: PluginErrorCode;
                   detail: string): PluginError =

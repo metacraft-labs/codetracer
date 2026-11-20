@@ -129,6 +129,7 @@ EXPECTED_WASM_EXCLUSIONS=(
 	src/frontend/viewmodel/tests/unit/test_platform_desktop_native.nim
 	src/frontend/viewmodel/tests/unit/test_plugin_grant_lifecycle.nim
 	src/frontend/viewmodel/tests/unit/test_plugin_io_sdk.nim
+	src/frontend/viewmodel/tests/unit/test_plugin_process_host.nim
 	src/frontend/viewmodel/tests/unit/test_plugin_source_admission.nim
 	src/frontend/viewmodel/tests/unit/test_project_action_runner.nim
 	src/frontend/viewmodel/tests/unit/test_sdk_facade_boundary.nim

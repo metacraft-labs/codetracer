@@ -29,6 +29,8 @@ import ./plugin_model/surfaces
 # package's header draws.
 import ./plugin_model/distribution
 import ./plugin_model/grant_ledger
+# Extensibility-Model.md §11.2.2: a plugin.json listing several plugins.
+import ./plugin_model/package
 
 export diagnostics, manifest, resolution, activation, surfaces,
-       distribution, grant_ledger
+       distribution, grant_ledger, package

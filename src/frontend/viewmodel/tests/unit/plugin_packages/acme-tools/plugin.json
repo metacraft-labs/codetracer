@@ -1,0 +1,141 @@
+{
+  "package": "acme-tools",
+  "host": {
+    "kind": "native",
+    "executable": "bin/acme-tools-plugins"
+  },
+  "plugins": [
+    {
+      "id": "acme-tools.metrics",
+      "displayName": "Metrics",
+      "version": "1.0.0",
+      "requires": {
+        "core": ">=1.0.0 <2.0.0"
+      },
+      "capabilities": [
+        "process"
+      ],
+      "traceEgress": {
+        "acknowledged": true,
+        "statement": "a native plugin process runs with your authority; this one keeps what it reads on this machine"
+      },
+      "activation": [
+        {
+          "event": "trace-opened"
+        }
+      ],
+      "contributes": {
+        "pane": [
+          {
+            "id": "overview",
+            "title": "Metrics",
+            "views": [
+              "Tree",
+              "Text"
+            ]
+          }
+        ],
+        "command": [
+          {
+            "id": "metrics.step",
+            "title": "Metrics: Step forward"
+          },
+          {
+            "id": "metrics.echo",
+            "title": "Metrics: Echo"
+          }
+        ],
+        "statusItem": [
+          {
+            "id": "metrics.status",
+            "title": "Metrics status",
+            "views": [
+              "Text"
+            ]
+          }
+        ],
+        "viewModel": [
+          {
+            "id": "visualisers",
+            "version": "1.0.0"
+          }
+        ]
+      },
+      "keybindings": [
+        {
+          "key": "ctrl+alt+m",
+          "command": "metrics.step",
+          "scope": "window",
+          "when": "plugin.acme-tools.metrics.ready"
+        }
+      ],
+      "settings": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "default": "metrics"
+          }
+        }
+      }
+    },
+    {
+      "id": "acme-tools.flame",
+      "displayName": "Flame",
+      "version": "1.0.0",
+      "requires": {
+        "core": ">=1.0.0 <2.0.0"
+      },
+      "capabilities": [
+        "process"
+      ],
+      "traceEgress": {
+        "acknowledged": true,
+        "statement": "a native plugin process runs with your authority; this one keeps what it reads on this machine"
+      },
+      "activation": [
+        {
+          "event": "trace-opened"
+        }
+      ],
+      "contributes": {
+        "pane": [
+          {
+            "id": "flame",
+            "title": "Flame",
+            "views": [
+              "List"
+            ]
+          }
+        ],
+        "command": [
+          {
+            "id": "flame.refresh",
+            "title": "Flame: Refresh"
+          },
+          {
+            "id": "flame.key",
+            "title": "Flame: Key"
+          }
+        ]
+      },
+      "settings": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "default": "normal"
+          },
+          "ackDelayMs": {
+            "type": "integer",
+            "default": 300
+          },
+          "floodMs": {
+            "type": "integer",
+            "default": 3000
+          }
+        }
+      }
+    }
+  ]
+}
