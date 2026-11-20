@@ -340,7 +340,7 @@ src/frontend/tui/tests/plat59-visual-replay-mutation-control.sha256	src/frontend
 # (`feat(agent-harbor): prototype the omnibox as the agent composer`) moved
 # overlay_rows.nim and scope_path.nim again (the composer scope and its keys).
 src/frontend/tui/tests/plat59-visual-replay-mutation-control.sha256	src/frontend/viewmodel/keymap/overlay_rows.nim	092a2a5123f4201bd27d7756c774dcbc3f2e80b14ea515064b4c6e5c5d97584e	87ea3584854c9c6584de69b5af1951f884cff55689294d63402c7e15a79bcd34
-src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/viewmodel/keymap/scope_path.nim	b6c5ae61a3b680c3360ebbc53a196fdcc68d5b62f76f02d10ca37d6bd383eef2	929323f8490ba35181a5d983419c711c4d466efafe5d1242b2e80f04f59d15bd
+src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/viewmodel/keymap/scope_path.nim	b6c5ae61a3b680c3360ebbc53a196fdcc68d5b62f76f02d10ca37d6bd383eef2	c0d94699fe39deeac7e54efe9099b4cb69fca28d2b77e03df2b5d30a7bbee438
 src/frontend/tui/tests/plat58-requests-mutation-control.sha256	src/frontend/gpui/main.nim	7953de7932634c94ba38056c6f5e8454c74131be118557bc674f6f8c5d6ce036	18a8e69d302cead0bcdbd3688bc980acfdb242ffc480ea517ed3968a70362a1c
 ci/test/plat70i-fit-mutation-control.sha256	src/frontend/gpui/main.nim	7953de7932634c94ba38056c6f5e8454c74131be118557bc674f6f8c5d6ce036	18a8e69d302cead0bcdbd3688bc980acfdb242ffc480ea517ed3968a70362a1c
 ci/test/plat70c-find-mutation-control.sha256	src/frontend/gpui/tests/test_plat70c_gpui_plan.nim	f515428c73dfef1c26b6a13cdbf981173574ed2443d97f1af2f8bfc3ff08df46	439e490ce6982ba70abafbf6234d187d3a7256681f195f84a0c4dc27bbc00160
