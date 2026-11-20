@@ -1165,6 +1165,11 @@ test-rust:
   # It is a path dependency of both, so for the reason above its tests --
   # the checks on that confinement -- run only here.
   ( cd libs/ct-open-beneath && cargo test )
+  # `libs/ct-flow-wire` elides and restores the default fields of a flow
+  # update's step values (`valueEncoding: "elided-defaults-1"`), a path
+  # dependency of src/db-backend, libs/ct-dap-client and
+  # src/backend-manager; its round-trip tests run only here.
+  ( cd libs/ct-flow-wire && cargo test )
   pushd src/db-backend
   # Unit tests (inside the binary)
   cargo nextest run --release --bin replay-server

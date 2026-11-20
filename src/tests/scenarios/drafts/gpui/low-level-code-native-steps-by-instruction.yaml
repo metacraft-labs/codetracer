@@ -12,7 +12,7 @@ stage:
 steps:
   - wait: { until: replay-idle, timeout: 300s }
   - chord: Alt+1
-  - wait: { until: { at: 'pane[title="Low Level Code"]', assert: 'has-row("instruction")' }, timeout: 120s }
+  - wait: { until: { at: 'pane[title="Low Level Code"]', assert: 'has-row("Originating")' }, timeout: 120s }
   - expect: { at: 'pane[title="Low Level Code"]', assert: 'has-row("main")' }
   - key: F10
   - wait: { until: { at: replay-position, assert: "past(1)" }, timeout: 120s }

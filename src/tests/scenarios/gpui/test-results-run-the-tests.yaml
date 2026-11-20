@@ -1,4 +1,3 @@
-# ports: src/frontend/gpui/tests/test_plat53_gpui_plan.nim
 scenario: 1
 name: gpui/test-results-run-the-tests
 pack: codetracer
@@ -17,9 +16,7 @@ steps:
   - click: { at: 'pane-tab[label="Tests"]' }
   - wait: { until: { at: 'pane[title="Tests"]', assert: 'has-row("test_fails")' }, timeout: 60s }
   - expect: { at: 'pane[title="Tests"]', assert: 'has-row("test_passes")' }
-  - chord: Ctrl+P
-  - type: ":Tests: Run"
-  - key: Enter
+  - click: { at: 'pane[title="Tests"]/row[#1]', anchor: row-end }
     settle: false
   - wait: { until: { at: 'pane[title="Tests"]', assert: 'has-row("1 passed")' }, timeout: 300s }
   - expect: { at: 'pane[title="Tests"]', assert: 'has-row("1 failed")' }

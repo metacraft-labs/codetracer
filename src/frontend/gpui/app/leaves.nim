@@ -3522,6 +3522,12 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
   r.setStyle(table, "overflow", "hidden")
   r.setStyle(table, "margin-top", "12px")
   r.setStyle(table, "padding-left", $StateInsetPx & "px")
+  # The table is the pane's scroll box, so it fills what is left of the pane
+  # (as the VCS pane's box does). Sized by its content instead, it was as
+  # tall as the rows LESS their scroll, since the scroller's negative margin
+  # counts against it: in the window a wheel to the end left a box that
+  # clipped every row, while the plan, which lays nothing out, was right.
+  r.setStyle(table, "flex-grow", "1")
   # The rows, moved by the box's scroll (`stateScroll`): the table clips.
   let scroller = r.createElement("div")
   r.setAttribute(scroller, "data-ct-state-scroll",
@@ -3587,6 +3593,12 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
     r.setStyle(el, "items", "center")
     r.setStyle(el, "flex-shrink", "0")
     r.setStyle(el, "height", $StateValueRowPx & "px")
+    # A row takes its natural width so a long value reaches past the pane
+    # (`items: start` on the scroll box), but never less than the pane's: a
+    # press anywhere on a row's line is that row's, as on the desktop. A row
+    # only as wide as its text took no press right of its last control.
+    if paneW > StateInsetPx:
+      r.setStyle(el, "min-width", $(paneW - StateInsetPx) & "px")
     r.setStyle(el, "white-space", "nowrap")
     r.setStyle(el, "overflow", "hidden")
     r.setStyle(el, "gap", "8px")

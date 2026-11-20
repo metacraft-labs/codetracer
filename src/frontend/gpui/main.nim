@@ -1334,6 +1334,12 @@ proc editKey(key: string; mods: seq[string]) =
   ## One key of an EDIT window's editor pane: its `keydown` listener's body,
   ## and what `--window-ops`' `key:` dispatches in an edit window (the editor
   ## holds the focus there).
+  # The capture's sentinel ends the loop whatever the key does here: `F12` is
+  # a replay-only key, which `editKeyInert` takes before the document sees
+  # it, so a check after the key's handling never ran in an Edit window.
+  let sentinel = probeSentinel.len > 0 and key == probeSentinel
+  defer:
+    if sentinel: gpui_quit()
   if openArm.isNil: return
   # K19: the Files pane's name field or Delete question takes the keys
   # while it is open; an open right-click menu closes on `Esc`.
@@ -1366,8 +1372,6 @@ proc editKey(key: string; mods: seq[string]) =
       stderr.writeLine("edit-key " & key & " -> " & applied.name & " " &
                        $applied.outcome & " " & formatFloat(handledMs,
                        ffDecimal, 1) & "ms")
-    if probeSentinel.len > 0 and key == probeSentinel:
-      gpui_quit()
 
 proc editKeyHandler(el: GpuiElement): GpuiEventHandler =
   ## The editor pane's `keydown` listener. Built by a separate proc so `el`
@@ -2258,6 +2262,12 @@ proc drawOverlay(r: GpuiRenderer) =
     r.appendChild(gRoot, e)
 
 let geometryOut = getEnv("CODETRACER_GPUI_GEOMETRY_OUT", "")
+var
+  gGeometryInputs = 0
+    ## Pointer and key events handled, for the geometry report: a capture
+    ## waits until the window has handled its input, not for the screen to
+    ## look still.
+  gGeometryPointer = (x: -1, y: -1)
   ## A window lane's instrument: where the window drew every pane, tab and
   ## divider, rewritten after every redraw — so a lane can AIM a pointer
   ## (which tab to press, where a divider is). What a gesture did is read
@@ -2356,7 +2366,15 @@ proc writeGeometry() =
                                 "openDock": openDock,
                                 "editorVScrollbar":
                                   editorVScrollbarGeometry(rect),
-                                "eventColumns": eventColumns}))
+                                "eventColumns": eventColumns,
+                                # What the window has handled when it wrote
+                                # this: a capture waits on these, since a
+                                # still screen can be one not yet redrawn.
+                                "input": %*{"handled": gGeometryInputs,
+                                            "pointer": [gGeometryPointer.x,
+                                                        gGeometryPointer.y]},
+                                "gesture": %*{"active": gGestures.active,
+                                              "revealing": gGestures.revealing}}))
   except IOError:
     discard
 
@@ -4144,6 +4162,18 @@ proc pressTableHBar(r: GpuiRenderer; x, y: int): bool =
     return true
   false
 
+proc listScrubberAt(x, y: int): bool =
+  ## Whether `(x, y)` is on a list pane's scrubber track (the State pane's
+  ## bar included): the press there is the scrubber's, not the row's under it.
+  for (kind, sm) in listScrubbers():
+    let body = visibleBodyOf(kind)
+    if body.w > 0 and sm.total > 0 and
+       listScrubHit(body, sm, x, y, $kind).onTrack:
+      return true
+  let track = stateBarTrack()
+  track.h > 0 and x >= track.x and x < track.x + track.w and
+    y >= track.y and y < track.y + track.h
+
 proc pressListScrubber(r: GpuiRenderer; x, y: int): bool =
   ## A left press on a list pane's scrubber: the track jumps the view, the
   ## thumb starts a drag.
@@ -4248,6 +4278,11 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
   ## listener (`pointerHandler`) and `--window-ops` (the plan's scripted
   ## pointer) both call this, so a scripted press is the press a user makes.
   defer: applyWindowCursor(r0)
+  gGeometryPointer = (x: x, y: y)
+  defer:
+    if geometryOut.len > 0:
+      inc gGeometryInputs
+      writeGeometry()
   var r = r0
   if kind in {gekPointerDown, gekContextMenu, gekAuxDown}:
     gAltTap.interrupted()        # Alt+press is not Alt tapped
@@ -4818,6 +4853,10 @@ proc windowKey(key: string; mods: seq[string]) =
   ## editor's caret and selection, the palette's and the right-click menu's
   ## keys (their pushed layers), `Esc` ending a layout gesture.
   var r: GpuiRenderer
+  defer:
+    if geometryOut.len > 0:
+      inc gGeometryInputs
+      writeGeometry()
   traceGesture("window key " & key & (if mods.len > 0: " " & $mods else: ""))
   # Any key between Alt's press and release makes it a chord, not a tap.
   if key != "alt":
@@ -6304,6 +6343,11 @@ proc redrawReplayEditor(r: GpuiRenderer) =
         r.setStyle(child, "margin-top", $inset & "px")
         break
   noteEditorTab(r, editorTabLabel(surface.path, false))
+  # The rows just drawn take the design's faces here, whoever asked for the
+  # redraw: a divider's resize redraws the editor through `syncEditorViewport`,
+  # which applied none, and the editor showed its code in the default face
+  # until the next press drew it again.
+  discard applyTextFaces(r, editor)
   # The state pane's code line (`updateCodeStateLine`, what the desktop's
   # editor feeds it): the stop's line and its source, unindented.
   for row in gEditorSurface.rows:
@@ -8055,6 +8099,8 @@ proc applyHoverReply(r: GpuiRenderer; reply: AutoHideReply) =
 
 proc hoverTick() {.cdecl.}
 proc vcsTick() {.cdecl.}
+proc vcsPollTick() {.cdecl.}
+  ## Forward-declared; defined with the VCS pane's refresh.
 proc recordTick() {.cdecl.}
 proc searchTick() {.cdecl.}
 proc requestsTick() {.cdecl.}
@@ -8083,6 +8129,13 @@ proc runGpuiNimTrace(r: GpuiRenderer; action: NimTraceAction; path = "";
   ## Forward-declared; defined with the editor's Nim trace operations.
   ## PLAT-51: how often a welcome tab's running `ct record` is polled.
 var gVcsDirectory = ""
+const VcsPollMs = 50
+  ## How often a VCS read out on the background worker is looked for.
+var gVcsBackground = false
+  ## Whether the VCS pane reads git off the loop's thread: in a window, so a
+  ## slow `git` never holds its input; not in a one-shot report, which must
+  ## hold the read it reports.
+  ## How often a VCS read out on the background worker is looked for.
   ## The repository the VCS pane shows, re-read every `VCSRefreshIntervalMs`
   ## by `vcsTick` and on every return to the window by `vcsWindowActivated`;
   ## "" when the window has no VCS pane.
@@ -8096,6 +8149,13 @@ var gArmedTick = (due: -2'i64, vcs: false)
 proc armHoverTick() =
   ## Wake the loop when the hover machine has something due (a preview, a
   ## dismissal) — the shim's one tick, shared with the VCS refresh.
+  # The gesture trace names the tick each arming chose, so a pane that stops
+  # being pumped (a shell's output never drawn) shows which one took over.
+  let armedBefore = gArmedTick
+  defer:
+    if gArmedTick != armedBefore:
+      traceGesture("tick armed " & $gArmedTick.due &
+                   (if shellLive(): " shell live" else: ""))
   var due = gAutoHide.nextDueMs
   # PLAT-70 Part B: and a truncated cell's tooltip, on the same tick.
   let cellDue = gCellHover.dueMs
@@ -8144,6 +8204,15 @@ proc armHoverTick() =
     if gArmedTick != want:
       gArmedTick = want
       gpui_set_tick(uint32(ShellPollMs), shellTick)
+    return
+  # A VCS read out on the background worker: polled every `VcsPollMs` until
+  # it comes back, so the pane shows it then, not one refresh interval
+  # later.
+  if due < 0 and gpuiVcsBusy():
+    let want = (due: -9'i64, vcs: false)
+    if gArmedTick != want:
+      gArmedTick = want
+      gpui_set_tick(uint32(VcsPollMs), vcsPollTick)
     return
   # PLAT-51: a welcome tab's `ct record` is polled on the same tick, every
   # `RecordPollMs`, while it runs.
@@ -8574,7 +8643,9 @@ proc attachVcs(leafSet: var GpuiLeafSet; directory: string) =
   ## the same rule.
   for leaf in leafSet.leaves.mitems:
     if leaf.kind == glkBuiltin and leaf.builtin == paneVcs:
-      leaf.vm = ViewModel(openGpuiVcs(directory))
+      # In the background: the first read must not hold the window (a slow
+      # `git` froze it at open); `vcsPollTick` applies it when it comes.
+      leaf.vm = ViewModel(openGpuiVcs(directory, background = gVcsBackground))
       gVcsDirectory = directory
   let h = agentHost()
   if not h.isNil:
@@ -10455,13 +10526,39 @@ proc refreshVcsPane() =
   for leaf in gLeafSet.leaves:
     if leaf.kind == glkBuiltin and leaf.builtin == paneVcs and
        not leaf.vm.isNil:
-      if refreshGpuiVcs(VCSVM(leaf.vm), gVcsDirectory):
+      if refreshGpuiVcs(VCSVM(leaf.vm), gVcsDirectory, background = gVcsBackground):
         var r: GpuiRenderer
         let pane = gPanes.getOrDefault($paneVcs)
         redrawWindowLeaf(r, pane, leaf)
         applyTextFaces(r, pane)
         traceGesture("vcs refreshed")
       break
+  # the read it asked for comes back on the worker: poll for it
+  armHoverTick()
+
+proc pollVcsPane() =
+  ## Apply a background read of the VCS pane that has come back (never start
+  ## one), and draw the pane again when what it shows changed.
+  if gVcsDirectory.len == 0:
+    return
+  for leaf in gLeafSet.leaves:
+    if leaf.kind == glkBuiltin and leaf.builtin == paneVcs and
+       not leaf.vm.isNil:
+      if pollGpuiVcs(VCSVM(leaf.vm), gVcsDirectory):
+        var r: GpuiRenderer
+        let pane = gPanes.getOrDefault($paneVcs)
+        redrawWindowLeaf(r, pane, leaf)
+        applyTextFaces(r, pane)
+        traceGesture("vcs refreshed")
+      break
+
+proc vcsPollTick() {.cdecl.} =
+  ## Every `VcsPollMs` while a VCS read is out: apply it when it is back,
+  ## then let the scheduler pick the next tick (this one again while the
+  ## worker is still busy).
+  pollVcsPane()
+  gArmedTick = (due: -2'i64, vcs: false)
+  armHoverTick()
 
 proc followVcsViewport(r: GpuiRenderer) =
   ## THE VCS HISTORY READS WHAT ITS LIST SHOWS (Viewport-Driven-Loading V6):
@@ -10482,10 +10579,13 @@ proc followVcsViewport(r: GpuiRenderer) =
       let vm = VCSVM(leaf.vm)
       let w = vcsHistoryWindow(vcsPaneView(vm).root, vcsScroll.top,
                                vcsScroll.rows)
-      if followGpuiVcsViewport(vm, gVcsDirectory, w.rows, w.firstRow):
+      if followGpuiVcsViewport(vm, gVcsDirectory, w.rows, w.firstRow,
+                               background = gVcsBackground):
         redrawListPane(r, paneVcs)
         traceGesture("vcs history read to " & $vm.commits.val.len)
       break
+  # a further read it asked for comes back on the worker: poll for it
+  armHoverTick()
 
 proc followListViewports(r: GpuiRenderer) =
   ## The call trace and the event log follow the bodies they were laid out
@@ -13041,6 +13141,12 @@ proc buildWindowOperationTables(r: GpuiRenderer) =
                  "view.scroll-right-half", "view.scroll-to-line-start"],
                 act(runGpuiViewOperation(r, c.name)))
   window.bindOp("help.keyboard-shortcuts", act(showShortcutReference(r)))
+  # The desktop's `Ctrl+N` (CUA `session-tabs.new`): a new tab on the
+  # Welcome screen, as the strip's "+" opens one — the element table answers
+  # only the "+"'s press, so the key reaches it here.
+  window.bindOp("session-tabs.new", act do:
+    gHoverTabAdd = false
+    openWelcomeTab(r))
   # PLAT-70 Part C: `Escape` ends a committed search's browsing.
   window.bindOp("modal.return-to-normal", act do:
     gFindBrowsing = false
@@ -13391,6 +13497,12 @@ proc onPaneClick(c: GPaneClick) =
   # not jump the debugger or reorder the log for it.
   if c.button == gbLeft and tableGestureAt(c.x, c.y):
     traceGesture("pane click " & $c.part & " left to the table gesture")
+    return
+  # Likewise a press on a list's scrubber track: the VCS pane's rows run
+  # under its inset track, and the row took the press the track's jump
+  # wanted (the root listener's `pressListScrubber`, which follows).
+  if c.button == gbLeft and listScrubberAt(c.x, c.y):
+    traceGesture("pane click " & $c.part & " left to the list scrubber")
     return
   traceGesture("pane click " & $c.part & " " & c.key & " #" & $c.index &
                " line " & $c.line & " " & $c.button &
@@ -15908,7 +16020,10 @@ proc runEdit(cmd: GpuiCommand): int =
   # pair, so the omnibox lists **Project: Run** and **Project: Run in Current
   # Tab** (with the Tests commands beside them) — a project with no Run says
   # why there, as a lone file's folder does (EMT-D34).
-  gOmnibar.setIndex(replayOpenCommands())
+  # And the menu's own commands, as a replay window's index has them (the
+  # omnibox runs `View › Verification` by name; with only the palette pair
+  # an Edit window answered `:verification` with no match).
+  gOmnibar.setIndex(commandsOf(gMenu) & replayOpenCommands())
   # `PLAT35-F3`: the editor pane's inner width, from the geometry this
   # window is about to be laid out at.
   gEditorSurface = surface
@@ -16505,6 +16620,9 @@ proc main() =
   of gckOpen:
     var cmd = cmd
     applyWindowPolicy(cmd)
+    # An open window reads git in the background; a one-shot plan or frame
+    # reads it before it reports, as it always did.
+    gVcsBackground = opensWindow(cmd)
     try:
       quit(runOpen(cmd))
     except DapLaunchRefusedError as e:

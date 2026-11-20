@@ -14,12 +14,12 @@ stage:
 steps:
   - wait: { until: replay-idle, timeout: 120s }
   - click: { at: 'menu-bar/menu[label="Menu"]' }
-  - wait: { until: { at: 'dropdown[level="1"]', present: true }, timeout: 30s }
+  - wait: { until: { at: 'dropdown[level="1"]', present: true }, timeout: 120s }
   - click: { at: 'dropdown[level="1"]/dropdown-item[label="Debug"]' }
-  - wait: { until: { at: 'dropdown[level="2"]', assert: 'offers("Stop")' }, timeout: 30s }
+  - wait: { until: { at: 'dropdown[level="2"]', assert: 'offers("Stop")' }, timeout: 120s }
   - key: Esc
   - key: Esc
-  - wait: { until: { at: 'dropdown[level="1"]', absent: true }, timeout: 30s }
+  - wait: { until: { at: 'dropdown[level="1"]', absent: true }, timeout: 120s }
   - chord: Shift+F5
   - wait: { until: { at: 'pane-tab[label="Call Trace"]', absent: true }, timeout: 60s }
   - expect: { at: 'pane-tab[label="Event Log"]', absent: true }

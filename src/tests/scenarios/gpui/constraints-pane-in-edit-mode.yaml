@@ -1,4 +1,3 @@
-# ports: src/frontend/gpui/tests/test_plat62_gpui_constraints.nim
 scenario: 1
 name: gpui/constraints-pane-in-edit-mode
 pack: codetracer
@@ -13,12 +12,11 @@ stage:
 
 steps:
   - wait: { until: ready, timeout: 60s }
-  - chord: Ctrl+P
-  - type: ":constraints"
-  - key: Enter
-    settle: false
+  # Edit mode's shared default places the pane (beside Build Output)
   - wait: { until: { at: 'pane-tab[label="Constraints"]', present: true }, timeout: 30s }
   - click: { at: 'pane-tab[label="Constraints"]' }
   - wait: { until: { at: 'pane[title="Constraints"]', assert: 'has-row("ACIR opcodes")' }, timeout: 180s }
   - wait: { until: settled, timeout: 60s }
-  - expect: { at: 'pane[title="Constraints"]', assert: ['has-row("src/main.nr:3")', 'has-row("src/checks.nr:2")'] }
+  # opcode rows name their source line (`main`'s own row is cut at the
+  # pane's width, so its `:3` is not drawn)
+  - expect: { at: 'pane[title="Constraints"]', assert: ['has-row("src/main.nr:4")', 'has-row("src/checks.nr:2")'] }

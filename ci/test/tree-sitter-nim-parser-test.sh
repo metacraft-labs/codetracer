@@ -16,7 +16,8 @@
 #     not (a fake CLI records whether it ran), leaving a newer grammar.js
 #     regenerated rather than shadowed by a stale copy;
 #   * without submodules the package and the dev shell still evaluate, and
-#     the shell does not depend on the package.
+#     the shell names the package either way;
+#   * the package fetches the grammar at the submodule's gitlink.
 # Run by ci/lint/nix.sh.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
@@ -111,19 +112,29 @@ for attr in "packages.${system}.tree-sitter-nim-parser" "devShells.${system}.def
 		"${attr} does not evaluate without submodules" \
 		nix eval --raw "git+file://${root}#${attr}.drvPath" >/dev/null
 done
-# ...and the shell must not NAME the package there: an interpolated store path
-# is a build input of the shell, and `nix develop` then builds the package from
-# an empty source (run 44379188088's macOS legs). With the submodule it must.
+# ...and the shell names the package either way: its grammar is fetched, not
+# read from the submodule, so a plain `nix develop` (no submodules, as every CI
+# job runs it) copies the prebuilt parser too. Run 44384977215's shards, whose
+# shells did not name it, all ran `tree-sitter generate` at 7.6 GB.
 names_pkg() {
 	nix eval --raw "git+file://${root}$1#devShells.${system}.default.shellHook" |
 		grep -q -- '-tree-sitter-nim-parser'
 }
 check "the shell names the prebuilt parser with submodules" \
-	"the shell no longer names the prebuilt parser with submodules" \
+	"the shell does not name the prebuilt parser with submodules" \
 	names_pkg '?submodules=1'
-check "the shell does not name the parser without submodules" \
-	"the shell names the parser without submodules, so nix develop builds it from nothing" \
-	eval '! names_pkg ""'
+check "the shell names the prebuilt parser without submodules" \
+	"the shell does not name the prebuilt parser without submodules, so CI generates it" \
+	names_pkg ''
+
+# The fetched grammar is the submodule's: `rev` is the gitlink. (The gate's
+# sha256 comparison would make a mismatch generate rather than copy a stale
+# parser, but then the cache would be dead weight.)
+gitlink="$(git -C "$root" ls-tree HEAD libs/tree-sitter-nim | awk '{print $3}')"
+pinned="$(nix eval --raw ".?submodules=1#packages.${system}.tree-sitter-nim-parser.src.rev")"
+check "the package fetches the grammar at the submodule's gitlink (${gitlink:0:12})" \
+	"the package fetches ${pinned:0:12}, the submodule is at ${gitlink:0:12}: update rev and hash in nix/packages/default.nix" \
+	test "$pinned" = "$gitlink"
 
 echo
 if [ "$failures" -gt 0 ]; then

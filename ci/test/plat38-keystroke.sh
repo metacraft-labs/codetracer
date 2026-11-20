@@ -307,8 +307,8 @@ capture_one() {
 	# table; the symptom here was every scenario coming back `timedout`
 	# because the SENTINEL never arrived while the scenario's own key did.
 	# shellcheck disable=SC2086  # the key spec must word-split
-	script+="wtype -s ${KEY_GAP_MS} ${keyspec}; sleep 1; "
-	script+="wtype -s ${KEY_GAP_MS} -k Escape"
+	script+="WTYPE_PRIME=0 WTYPE_LEAD_MS=${KEY_GAP_MS} bash '${root}/ci/test/wtype-keys.sh' ${keyspec}; sleep 1; "
+	script+="WTYPE_PRIME=0 WTYPE_LEAD_MS=${KEY_GAP_MS} bash '${root}/ci/test/wtype-keys.sh' -k Escape"
 
 	bash -c "${script}" >"${dir}/${id}.typist.log" 2>&1 &
 	local typist=$!
@@ -402,9 +402,9 @@ capture_vision() {
 	# then the sentinel closes the loop.
 	bash -c "sleep ${SETTLE_S}; grim -t ppm '${after}.pre' >/dev/null 2>&1; \
              cp -f '${after}.pre' '${before}'; \
-             wtype -s ${KEY_GAP_MS} -k Down; sleep 2; \
+             WTYPE_PRIME=0 WTYPE_LEAD_MS=${KEY_GAP_MS} bash '${root}/ci/test/wtype-keys.sh' -k Down; sleep 2; \
              grim -t ppm '${after}' >/dev/null 2>&1; \
-             sleep 0.5; wtype -s ${KEY_GAP_MS} -k Escape" \
+             sleep 0.5; WTYPE_PRIME=0 WTYPE_LEAD_MS=${KEY_GAP_MS} bash '${root}/ci/test/wtype-keys.sh' -k Escape" \
 		>"${dir}/vision.typist.log" 2>&1 &
 	local typist=$!
 	CODETRACER_GPUI_PROBE_SENTINEL="escape" \

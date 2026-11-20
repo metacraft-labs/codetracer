@@ -38,7 +38,7 @@ import ./gpui_child_env
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 29
+const ExpectedAssertions = 30
 
 var countedAssertions = 0
 
@@ -220,6 +220,15 @@ suite "PLAT-63: the Verification pane in the GPUI window":
     # A finding whose file the package does not have says so.
     discard windowPlan(run, Run & ",verify:line:3", tr)
     ck tr.contains("noir_verification_failing/src/main.nr is not in")
+
+  test "the palette runs View › Verification by name in the Edit window":
+    # The omnibox's index holds the menu's commands, as a replay window's
+    # does; with only the palette pair, `:verification` was no match.
+    let run = writeTypeErrRun()
+    defer: run.removeRun()
+    var tr = ""
+    let plan = windowPlan(run, "key:p:control,type::verification,key:enter", tr)
+    ck plan.nodesWith("data-ct-verification-control").len == 1
 
   test "the assertion count":
     echo "CHECKS: " & $countedAssertions

@@ -119,7 +119,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command bash ci/test/gpui-window-captures.sh --shim-only
 
       - name: Pack the products the shards use
-        # src/build-debug is build-once's output (ct, replay-server, the
+        # src/build-debug-repro is build-once's output (ct, replay-server, the
         # db-backend and the front-end bundles); the shim and the virtual
         # pointer are isonim-gpui's. Paths are relative to the workspace's
         # parent, where every sibling checkout sits, so a shard restores them
@@ -127,7 +127,7 @@ jobs:
         run: |
           cd ..
           tar -czf "${RUNNER_TEMP}/ct-build-products.tar.gz" \
-            codetracer/src/build-debug \
+            codetracer/src/build-debug-repro \
             isonim-gpui/rust/target/windowed/debug/libgpui_nim_shim.so \
             isonim-gpui/build/virtual-pointer
           ls -la "${RUNNER_TEMP}/ct-build-products.tar.gz"

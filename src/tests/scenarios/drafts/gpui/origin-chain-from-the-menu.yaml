@@ -14,6 +14,10 @@ steps:
   - wait: { until: replay-idle, timeout: 120s }
   - click: { at: 'event-log/event[#4]' }
   - wait: { until: { at: replay-position, tick: 118 }, timeout: 60s }
+  # at module scope the list is long and `value` sorts below what the pane
+  # shows: the wheel brings it in
+  - wait: { until: { at: 'variables/variable[name="expression"]', present: true }, timeout: 30s }
+  - wheel: { at: 'pane[title="Variables"]', direction: down, amount: 10 }
   - wait: { until: { at: 'variables/variable[name="value"]', present: true }, timeout: 30s }
   - click: { at: 'variables/variable[name="value"]', button: right }
   - wait: { until: { at: context-menu, assert: 'offers("Show value origin")' }, timeout: 20s }

@@ -28,7 +28,7 @@
 ## is `unsupported` here, never answered from elsewhere.
 
 import std/[algorithm, exitprocs, json, options, os, strutils, tables, math]
-from std/unicode import toLower
+from std/unicode import toLower, runeLen
 import demo_video_script_guiassert
 import ../../stages/ct_stages
 import ../../resolver/ct_resolver
@@ -98,6 +98,18 @@ proc launchGpui(ctx: GuiContext; s: StageState) =
     if v.len > 0: lib.add v
   ctx.env["LD_LIBRARY_PATH"] = lib.join(":")
   ctx.env.del("LD_PRELOAD")
+  # The host's interactive-shell state is not the app's: a shell the app
+  # starts (the Shell pane's) would run the host's prompt hook — the repro
+  # shell hook a workstation installs, which walks the directories and may
+  # activate a dev environment between commands — and direnv's. So the
+  # prompt command, the repro hook's own state and direnv's are dropped.
+  # (A system rc file can install the hook again: a scenario that starts a
+  # shell starts it with --norc, as the Shell drafts do.)
+  ctx.env.del("PROMPT_COMMAND")
+  var hostShellState: seq[string]
+  for k, _ in ctx.env:
+    if k.startsWith("__REPRO") or k.startsWith("DIRENV_"): hostShellState.add k
+  for k in hostShellState: ctx.env.del(k)
   if getEnv("CT_GUI_BINDING_DEBUG").len > 0: ctx.env["CODETRACER_GPUI_GESTURE_TRACE"] = "1"
   # The pointer's shapes are the cursor theme's: a window on a display with
   # no theme it can load keeps the X server's own `X` cursor whatever it
@@ -162,6 +174,39 @@ proc words(ctx: GuiContext; f: Frame; x, y, w, h: int; psm = 11): seq[Word] =
     m.h = wd.h div scale
     if m.text.strip.len > 0: result.add m
 
+proc wordsInk(ctx: GuiContext; f: Frame; x, y, w, h: int; level: int; psm = 7): seq[Word] =
+  ## The words in a region read as ink on paper: every pixel lighter than
+  ## `level` black, the rest white, scaled 4x. For small text drawn dim on a
+  ## dark ground (the find field's `3 of 12`), which the gray reading loses.
+  const scale = 4
+  let x0 = max(0, x)
+  let y0 = max(0, y)
+  let ww = max(1, min(w, f.image.width - x0))
+  let hh = max(1, min(h, f.image.height - y0))
+  var img = newImage(GrayImage, ww * scale, hh * scale)
+  # Interpolated before the threshold (bilinear), so a glyph's edges are
+  # cut where its ink crosses the level rather than at whole source pixels.
+  proc lum(x, y: int): float =
+    float(f.luma(clamp(x, 0, f.image.width - 1), clamp(y, 0, f.image.height - 1)))
+  for yy in 0 ..< hh * scale:
+    let sy = (float(yy) + 0.5) / float(scale) - 0.5
+    let iy = int(floor(sy))
+    let fy = sy - float(iy)
+    for xx in 0 ..< ww * scale:
+      let sx = (float(xx) + 0.5) / float(scale) - 0.5
+      let ix = int(floor(sx))
+      let fx = sx - float(ix)
+      let v = (lum(x0 + ix, y0 + iy) * (1 - fx) + lum(x0 + ix + 1, y0 + iy) * fx) * (1 - fy) +
+              (lum(x0 + ix, y0 + iy + 1) * (1 - fx) + lum(x0 + ix + 1, y0 + iy + 1) * fx) * fy
+      img.pixels[yy * ww * scale + xx] = (if v > float(level): char(0) else: char(255))
+  for wd in ctx.recognize(img, psm):
+    var m = wd
+    m.x = x0 + wd.x div scale
+    m.y = y0 + wd.y div scale
+    m.w = wd.w div scale
+    m.h = wd.h div scale
+    if m.text.strip.len > 0: result.add m
+
 proc fl(i: int): float = float(i)
 
 # --- the window's parts ------------------------------------------------------------------
@@ -170,6 +215,7 @@ const
   TopBarH = 36            ## the top bar: menu, transport, omnibox, session tabs
   StripH = 26             ## a box's strip of pane tabs
   FooterH = 32            ## the status line
+  StripTabH = 24          ## a strip's tab, top to bottom
   CopyButtonW = 34        ## the status line's copy button, at its right end
   LocationTailW = 400     ## the status line's location as far as it is read
 
@@ -329,27 +375,49 @@ proc inkRuns(f: Frame; y0, y1, x0, x1: int): seq[(int, int)] =
 proc codeLeft(f: Frame; b: EditorBox; rows: seq[EditorRow]; numbersRight: int): int =
   ## Column 0 of the code: the leftmost text any row starts with, a fold
   ## chevron excepted. The chevrons are drawn in a lane of their own left of
-  ## column 0, so a narrow mark with a gap after it, met at the same place on
-  ## two or more rows, is that lane; a lone narrow first letter (`x` of
-  ## `xprint(1)`) is code.
+  ## column 0, so the lane is a narrow mark with a gap after it at the
+  ## leftmost ink of any row, where no plain row starts, and met
+  ##
+  ## * on two or more rows, or
+  ## * on one (a file with one foldable line: `def scale` in `extra.py`)
+  ##   whose text goes on 4 to 12 px to its right, when another row's text
+  ##   is on the code's columns counted from there (at that column, or
+  ##   indented from it).
+  ##
+  ## A narrow first letter at column 0 (`x` of `xprint(1)`) starts where
+  ## plain rows do, or is followed by a letter that touches it or by a
+  ## blank, two columns on; a narrow letter further in (`r` of an indented
+  ## `return`, its `e` a column on) is not the leftmost ink.
   var firsts: seq[seq[(int, int)]]
-  var narrow = initCountTable[int]()
   for r in rows:
-    let runs = inkRuns(f, r.y + r.h div 5, r.y + r.h - r.h div 5, numbersRight + 4, b.right - 4)
-    firsts.add runs
-    if runs.len > 1 and runs[0][1] - runs[0][0] <= 9 and runs[1][0] - runs[0][1] >= 3:
-      narrow.inc runs[0][0]
+    firsts.add inkRuns(f, r.y + r.h div 5, r.y + r.h - r.h div 5, numbersRight + 4, b.right - 4)
+  proc mark(runs: seq[(int, int)]): bool =
+    runs.len > 1 and runs[0][1] - runs[0][0] <= 9 and runs[1][0] - runs[0][1] >= 3
+  var leftmost = high(int)
+  for runs in firsts:
+    if runs.len > 0: leftmost = min(leftmost, runs[0][0])
+  var marks: seq[int]
+  var plainAtLeft = false
+  for i, runs in firsts:
+    if runs.len == 0 or runs[0][0] > leftmost + 1: continue
+    if runs.mark: marks.add i
+    else: plainAtLeft = true
   var lane = -1
-  for x, n in narrow:
-    var near = 0
-    for x2, n2 in narrow:
-      if abs(x2 - x) <= 1: near += n2
-    if near >= 2 and (lane < 0 or x < lane): lane = x
+  if not plainAtLeft and marks.len >= 2:
+    lane = leftmost
+  elif not plainAtLeft and marks.len == 1:
+    let i = marks[0]
+    let col0 = firsts[i][1][0]
+    if col0 - firsts[i][0][0] in 4 .. 12:
+      for j, other in firsts:
+        if j == i or other.len == 0 or other[0][0] < col0 - 1: continue
+        let cells = float(other[0][0] - col0) / 9.792
+        if abs(cells - round(cells)) * 9.792 <= 1.5: lane = leftmost
   result = high(int)
   for runs in firsts:
     if runs.len == 0: continue
     var first = runs[0]
-    if lane >= 0 and abs(first[0] - lane) <= 1 and first[1] - first[0] <= 9 and runs.len > 1:
+    if lane >= 0 and abs(first[0] - lane) <= 1 and runs.mark:
       first = runs[1]
     result = min(result, first[0])
   if result == high(int): result = numbersRight + 20
@@ -374,17 +442,24 @@ proc readCode(ctx: GuiContext; f: Frame; b: EditorBox; rows: var seq[EditorRow];
     parts.sort(proc (a, c: Word): int = cmp(a.x, c.x))
     var text = ""
     var lastRight = -1
+    var lastEnd = 0
     for p in parts:
-      # words a column or more apart are separated by as many blanks as the
-      # code face's advance says (an indent inside the line, `x  = 1`)
+      # Words a column or more apart are separated by as many blanks as the
+      # code face's advance says (an indent inside the line, `x  = 1`). Two
+      # counts, each too high in a case of its own, and the smaller is taken:
+      # the gap between inks (a word ending in `,` ends its ink mid-cell, and
+      # `value, factor` read as `value,  factor`), and the columns from where
+      # each word starts (a word the engine read with a letter fewer).
+      let startCol = int(round(float(p.x - left) / 9.792))
       if text.len > 0:
         let px = p.x - lastRight
-        let gap = int(round(float(px) / 9.792))
+        let blanks = min(int(round(float(px) / 9.792)), startCol - lastEnd)
         # (none when the engine split one word with no blank between: words
         # that touch)
-        text.add repeat(' ', if px >= 4: max(1, gap) else: max(0, gap))
+        text.add repeat(' ', if px >= 4: max(1, blanks) else: max(0, blanks))
       text.add p.text
       lastRight = p.x + p.w
+      lastEnd = startCol + p.text.runeLen
     # the caret, a bar before the line's first letter, reads as `|`
     if text.len > 1 and text[0] == '|' and text[1] != ' ': text = text[1 .. ^1]
     r.text = text
@@ -438,8 +513,14 @@ proc sessionTabs(ctx: GuiContext; f: Frame): seq[(string, int)] =
   if omniRight < 0: return
   var rest: seq[Word]
   for w in ws:
-    if w.x > omniRight + 24 and w.x < f.image.width - 120 and
-       w.text notin ["x", "X", "×", "+", "*", "~"]:
+    # A tab's close `×` and the strip's `+` are no title: OCR reads them as
+    # `x`, `+` or with stray marks around (`_+_`), never with a letter or a
+    # digit beside them.
+    var titled = false
+    for c in w.text:
+      if c.isAlphaNumeric: titled = true
+    if w.x > omniRight + 24 and w.x < f.image.width - 120 and titled and
+       w.text notin ["x", "X"]:
       rest.add w
   rest.sort(proc (a, b: Word): int = cmp(a.x, b.x))
   var cur = ""
@@ -509,6 +590,7 @@ type
     active: bool
     band: bool               ## the focused box's whole strip (its tabs are cut from it)
     cut: (int, int)          ## on a band: the selected tab, on the window's ground
+    ring: int                ## a focused one-tab box's: its focus ring's colour's luma, else 0
   PaneBox = object
     left, right, top, bottom: int   ## the body, below the strip
     stripTop: int
@@ -690,6 +772,19 @@ proc paneBoxes(ctx: GuiContext; f: Frame): seq[PaneBox] =
           var yy = y + 2
           while yy + 1 < footer and near(f.rgb(col, yy + 1), cb, 2): inc yy
           if yy - y >= 22 and yy - y <= 40: by1 = yy
+        if by1 < 0 and bx1 - x >= 150:
+          # a focused box whose ONE tab is the cut-out: the ring's top edge
+          # runs the box's width and its sides go on down, with the tab on
+          # the window's ground between them (no band to measure)
+          var sides = true
+          for yy in y + 2 .. y + 22:
+            if not near(f.rgb(x, yy), cb, 2) or not near(f.rgb(bx1, yy), cb, 2): sides = false
+          if sides and f.isGround(g, x + 3, y + 12):
+            let sel = PaneTab(x0: x + 1, x1: bx1 - 1, y0: y, y1: y + StripTabH - 1, active: true,
+                              ring: max(1, cb[0]))
+            found.add sel
+            strips.mgetOrPut(y, @[]).add sel
+          continue
         if bx1 - x < 150 or by1 < 0: continue
         var cut = (-1, -1)
         var cx = x + 3
@@ -830,6 +925,15 @@ proc paneBoxes(ctx: GuiContext; f: Frame): seq[PaneBox] =
     var seen: seq[int]
     for t in tabs:
       let yb = t.y1 + 8
+      if t.ring > 0:
+        # a focused one-tab box: its body is inside its ring, whose sides run
+        # down to its bottom edge (the body may be drawn on the ground)
+        var b = t.y1
+        while b + 1 < footer + 4 and f.rgb(t.x0 - 1, b + 1)[0] == t.ring: inc b
+        var box = PaneBox(left: t.x0, right: t.x1, top: t.y1 + 1, bottom: b - 1, stripTop: y)
+        box.tabs.add t
+        result.add box
+        continue
       if f.isGround(g, t.x0 + 2, yb): continue
       var l = t.x0 + 2
       while l > 0 and not f.isGround(g, l - 1, yb): dec l
@@ -929,7 +1033,10 @@ proc normLabel(s: string): string =
   ## A strip tab's caption as the pack names the pane: the window draws the
   ## desktop's caption (`CALLTRACE`, `EVENT LOG`), which is the pane's own
   ## name (`Call Trace`, `Event Log`) by the product's caption rule
-  ## (`pane_names.desktopTabTitle`), read back here.
+  ## (`pane_names.desktopTabTitle`), read back here. An editor tab's caption
+  ## names a file, never a pane, and is answered as drawn: read as a cut
+  ## caption, `request-session/demo_server.py` began `REQUESTS`.
+  if s.split(' ')[0].isSourceName: return s
   let drawn = s.toUpperAscii.splitWhitespace.join(" ")
   for k in PaneKind:
     if desktopTabTitle(k) == drawn or desktopTabTitle(k).replace(" ", "") == drawn.replace(" ", ""):
@@ -948,6 +1055,30 @@ proc normLabel(s: string): string =
           if want[i] != flat[i]: inc diff
         if diff == 1: close.add k
   if close.len == 1: return gpuiPaneName(close[0])
+  # the tab's pin, drawn right after the caption, read as one or two more
+  # characters (`VERIFICATIONS?`): one pane's whole caption and at most two
+  # more, when no other caption is also a start of it
+  var extended: seq[PaneKind]
+  if flat.len >= 5:
+    for k in PaneKind:
+      let want = desktopTabTitle(k).replace(" ", "")
+      if want.len >= 5 and flat.startsWith(want) and flat.len - want.len in 1 .. 2:
+        extended.add k
+  if extended.len == 1: return gpuiPaneName(extended[0])
+  # a caption the tab is too narrow for, cut and followed by the pin's ink
+  # (`PIXEL HISS>` for PIXEL HISTORY): its letters, the last one misread at
+  # the cut, starting exactly one pane's caption
+  var letters = ""
+  for c in flat:
+    if c.isAlphaAscii: letters.add c
+    else: break
+  for cut in [letters, (if letters.len > 0: letters[0 ..< letters.len - 1] else: "")]:
+    if cut.len < 6: continue
+    var starts: seq[PaneKind]
+    for k in PaneKind:
+      let want = desktopTabTitle(k).replace(" ", "")
+      if want.len > cut.len and want.startsWith(cut): starts.add k
+    if starts.len == 1: return gpuiPaneName(starts[0])
   # a short caption (the footer's `BUILD`) is the first word of one pane's
   # name when it is the first word of no other's
   var prefixed: seq[PaneKind]
@@ -1118,9 +1249,21 @@ proc readVariables(ctx: GuiContext; f: Frame; t: var Tree; b: PaneBox) =
   pane.unreadable["focused"] = "keyboard focus has no mark of its own on this pane"
   t.add(t.root, pane)
   var n = 0
+  # A name's first letter is lost to the engine now and then (`value` read
+  # `alue`, its glyph inside the word's box): each row is read again
+  # stretched (cached with the frame), and that reading's name replaces this
+  # one only when it is this one with one or two letters before it restored.
   for r in rows:
-    let (ok, name, value, typ) = splitVariableRow(r.text)
+    var (ok, name, value, typ) = splitVariableRow(r.text)
     if not ok: continue
+    let again = ctx.wordsS(f, b.left, r.y0 - 3, min(320, b.right - b.left), r.y1 - r.y0 + 6, psm = 7)
+    for wd in again:
+      let c = wd.text.find(':')
+      if c <= 0: continue
+      let other = wd.text[0 ..< c]
+      if other.len > name.len and other.len - name.len <= 2 and other.endsWith(name):
+        name = other
+      break
     let v = rowNode("variable", b, r, %*{"name": name, "value": value, "type": typ},
                     @[("name", name)])
     v.unreadable["expanded"] = "an expanded value is told by its disclosure glyph"
@@ -1230,10 +1373,23 @@ proc overlays(f: Frame; boxes: seq[PaneBox]): seq[Overlay] =
         # (a menu's folder level opening against its right edge is no part
         # of it)
         if x >= o.x0 - 2 and x <= o.x1 - 3 and y >= o.y0 - 2 and y <= o.y1 + 2: inside = true
+        # (nor is a pane's field that a menu drawn over it cuts short — the
+        # event log's Find event under a right-click menu at its foot: the
+        # field's top runs into the menu's side, and the menu's side is all
+        # the side it has)
+        # (one row tall: a submenu opening against a menu's side is taller)
+        if y >= o.y0 and y <= o.y1 + 6 and abs(rx - o.x0) <= 12 and y1 - y < 30:
+          inside = true
       var isBox = false
       for b in boxes:
         if (abs(b.left - x) <= 3 and abs(b.right - x1) <= 3) or
            (abs(b.left - lx) <= 3 and abs(b.right - rx) <= 3): isBox = true
+        # a pane's edge that something drawn over it cuts short (a menu
+        # over the line between two panes): its left side and its top on
+        # one of a box's own edges
+        if abs(b.left - lx) <= 3 and
+           (abs(y - b.top) <= 12 or abs(y - b.stripTop) <= 12 or abs(y - b.bottom) <= 12):
+          isBox = true
       # a pane's own bordered field (the search, the watch expression) is
       # one row on the pane's surface; what is drawn over the panes is taller
       # or on the window's ground
@@ -1243,8 +1399,11 @@ proc overlays(f: Frame; boxes: seq[PaneBox]): seq[Overlay] =
       for b in boxes:
         if lx >= b.left - 4 and rx <= b.right + 4 and y >= b.top - 4 and y <= b.bottom and
            ((rx - lx) * 10 >= (b.right - b.left) * 8 or y - b.top <= 16): spansBox = true
-      let field = y1 - y < 40 and not near(f.rgb(lx + 6, y + 4), f.groundOf, 3) and
-                  y > TopBarH + 4 and spansBox
+      # (and a one-row strip wider than any one-entry menu is a field — the
+      # event log's Find event — whatever its ground)
+      let field = (y1 - y < 40 and not near(f.rgb(lx + 6, y + 4), f.groundOf, 3) and
+                   y > TopBarH + 4 and spansBox) or
+                  (y1 - y < 30 and rx - lx > 500 and y > TopBarH + 4)
       if not inside and not isBox and not field and not near(c, f.groundOf, 3):
         seen.add Overlay(x0: lx, x1: rx, y0: y, y1: y1, border: c)
       x = x1 + 1
@@ -1363,6 +1522,11 @@ proc readOverlays(ctx: GuiContext; f: Frame; t: var Tree; boxes: seq[PaneBox]) =
       for r in rows[1 .. ^1]: lines.add r.text
       t.add(t.root, node("popup", fl(o.x0), fl(o.y0), fl(o.x1 - o.x0), fl(o.y1 - o.y0),
                          %*{"title": rows[0].text, "text": lines}))
+    elif o.x1 - o.x0 < 190:
+      # narrower than any right-click menu (`window_clicks.ContextMenuMinPx`,
+      # 200 px): an editor's inline widget (a loop's `iteration 3 from 5`),
+      # no menu
+      discard
     else:
       # a right-click menu: its entries, the enabled ones drawn brighter
       var bright = 0
@@ -1483,22 +1647,6 @@ proc readPanes(ctx: GuiContext; f: Frame; t: var Tree) =
       # the editor: its own role above; its box is also a pane by its title
       for tab in b.tabs:
         if tab.active: ctx.readGenericPane(f, t, b, tab.label)
-      # the in-document find, when open: a field over the editor's first row,
-      # its query then `n of m`
-      let ws = ctx.wordsS(f, b.left + 8, b.top + 2, b.right - b.left - 16, 30, psm = 7)
-      var at = -1
-      for i in 1 ..< ws.len - 1:
-        if ws[i].text == "of" and ws[i - 1].text.allCharsInSet(Digits) and
-           ws[i + 1].text.allCharsInSet(Digits): at = i
-      if at >= 0:
-        var q = ""
-        for wd in ws[0 ..< at - 1]:
-          if q.len > 0: q.add " "
-          q.add wd.text
-        q = q.strip(leading = false, chars = {'|', ' '})
-        let fw = node("find-field", fl(b.left), fl(b.top), fl(b.right - b.left), 30,
-                      %*{"query": q, "count": ws[at - 1].text & " of " & ws[at + 1].text})
-        t.add(t.root, fw)
       continue
     case label
     of "Call Trace": ctx.readCallTrace(f, t, b)
@@ -1558,6 +1706,133 @@ proc readPanes(ctx: GuiContext; f: Frame; t: var Tree) =
       stderr.writeLine "box ", b.left, "..", b.right, " x ", b.top, "..", b.bottom, " ", ls.join(" | ")
     for d in docks: stderr.writeLine "dock ", d.label, " ", d.x0, "..", d.x1
 
+proc readFindField(ctx: GuiContext; f: Frame; left, top, right: int): Option[SurfaceNode] =
+  # the in-document find, when open: a field over the editor's first row,
+  # its query then `n of m`
+  var ws = ctx.wordsS(f, left + 8, top + 2, right - left - 16, 30, psm = 7)
+  proc counterAt(ws: seq[Word]): int =
+    result = -1
+    for i in 1 ..< ws.len - 1:
+      if ws[i].text == "of" and ws[i - 1].text.allCharsInSet(Digits) and
+         ws[i + 1].text.allCharsInSet(Digits): result = i
+  var at = counterAt(ws)
+  var widget = false     # the field's case toggle, `Aa`
+  for wd in ws:
+    if wd.text.startsWith("Aa"): widget = true
+  var counter = ""
+  if getEnv("CT_GUI_BINDING_DEBUG").len > 0:
+    var t: seq[string]
+    for wd in ws: t.add wd.text & "@" & $wd.x
+    stderr.writeLine "find-field words ", $t, " counter-at ", at, " widget ", widget
+  if at < 0 and widget:
+    # The counter is drawn dim and small: read the field's right part again
+    # as ink on paper (its words run together there: `3of12`), and take the
+    # query from the first reading, left of where the counter starts. OCR
+    # misreads its digits often (`20f11`, `Sof11` for 3 of 11), so it is read
+    # at three ink levels and a reading whose two numbers are digits wins;
+    # otherwise the counter is reported AS READ (`S of 11`), never with a
+    # digit guessed for a letter.
+    proc split(joined: string): tuple[a, b: string] =
+      # `n of m` run together: an o-like letter (`o`, `0`, `O`) and `f`
+      # between two short runs.
+      for i in 1 ..< joined.len - 2:
+        if joined[i] in {'o', '0', 'O'} and joined[i + 1] == 'f' and
+           i <= 4 and joined.len - i - 2 in 1 .. 4:
+          return (joined[0 ..< i], joined[i + 2 .. ^1])
+    var fallback = ""
+    var startX = high(int)
+    for level in [77, 100, 60]:
+      let part = ctx.wordsInk(f, right - 150, top + 2, 140, 30, level = level)
+      var joined = ""
+      var sx = high(int)
+      for wd in part:
+        if wd.text.startsWith("Aa"): break
+        joined.add wd.text
+        sx = min(sx, wd.x)
+      if getEnv("CT_GUI_BINDING_DEBUG").len > 0:
+        stderr.writeLine "find-field ink right part at ", level, ": ", joined
+      let (a, b) = split(joined)
+      if a.len == 0: continue
+      startX = min(startX, sx)
+      if a.allCharsInSet(Digits) and b.allCharsInSet(Digits):
+        counter = a & " of " & b
+        break
+      if fallback.len == 0: fallback = a & " of " & b
+    if counter.len == 0: counter = fallback
+    if counter.len > 0:
+      var q: seq[Word]
+      for wd in ws:
+        if wd.x + wd.w < startX - 4: q.add wd
+      ws = q
+  if counter.len > 0:
+    var q = ""
+    for wd in ws:
+      if q.len > 0: q.add " "
+      q.add wd.text
+    q = q.strip(leading = false, chars = {'|', ' '})
+    return some(node("find-field", fl(left), fl(top), fl(right - left), 30,
+                     %*{"query": q, "count": counter}))
+  if at >= 0:
+    var q = ""
+    for wd in ws[0 ..< at - 1]:
+      if q.len > 0: q.add " "
+      q.add wd.text
+    q = q.strip(leading = false, chars = {'|', ' '})
+    let fw = node("find-field", fl(left), fl(top), fl(right - left), 30,
+                  %*{"query": q, "count": ws[at - 1].text & " of " & ws[at + 1].text})
+    result = some(fw)
+
+proc readWelcome(ctx: GuiContext; f: Frame; t: var Tree) =
+  ## A new tab's Welcome Screen (`Welcome to CodeTracer`, its recent lists and
+  ## its row of start actions), which holds no pane: the pack's `welcome`,
+  ## its text line by line and each action by its label.
+  let top = TopBarH + 20
+  let head = ctx.words(f, 0, top, min(700, f.image.width), 90)
+  var heading = ""
+  for w in head:
+    if heading.len > 0: heading.add " "
+    heading.add w.text
+  if not heading.contains("Welcome"): return
+  let bodyH = f.image.height - FooterH - top
+  let ws = ctx.words(f, 0, top, f.image.width, bodyH)
+  # the words in lines (a line's words within half a row of its first), each
+  # line's words in labels (a label's words within a gap of 24 px)
+  var sorted = ws
+  sorted.sort(proc (a, b: Word): int = cmp(a.y, b.y))
+  var lines: seq[seq[Word]]
+  for w in sorted:
+    if lines.len > 0 and abs(w.y - lines[^1][0].y) <= 8: lines[^1].add w
+    else: lines.add @[w]
+  let wel = node("welcome", 0, fl(top), fl(f.image.width), fl(bodyH),
+                 %*{"heading": heading.strip, "text": newJArray()})
+  wel.unreadable["sections"] = "the screen's parts are told by their frames, which this binding does not read"
+  t.add(t.root, wel)
+  for line in lines:
+    var l = line
+    l.sort(proc (a, b: Word): int = cmp(a.x, b.x))
+    var labels: seq[tuple[text: string, x0, x1, y0, y1: int]]
+    for w in l:
+      if labels.len > 0 and w.x - labels[^1].x1 <= 24:
+        labels[^1].text.add " " & w.text
+        labels[^1].x1 = w.x + w.w
+        labels[^1].y1 = max(labels[^1].y1, w.y + w.h)
+      else:
+        labels.add (w.text, w.x, w.x + w.w, w.y, w.y + w.h)
+    var text = ""
+    for lb in labels:
+      if text.len > 0: text.add "  "
+      text.add lb.text
+    wel.props["text"].add %text
+    # the start actions: the row whose labels include Record new trace
+    var actions = false
+    for lb in labels:
+      if lb.text == "Record new trace": actions = true
+    if actions:
+      for lb in labels:
+        t.add(wel, node("welcome-action", fl(lb.x0 - 6), fl(lb.y0 - 6),
+                        fl(lb.x1 - lb.x0 + 12), fl(lb.y1 - lb.y0 + 12),
+                        %*{"label": lb.text}, @[("label", lb.text)]))
+
 proc readSurface*(ctx: GuiContext; f: Frame): Tree =
   # a replay names its position (`main.py:1#1`) on the status line; an Edit
   # window names none
@@ -1590,6 +1865,10 @@ proc readSurface*(ctx: GuiContext; f: Frame): Tree =
   let box = ctx.findEditor(f)
   if box.isSome:
     let b = box.get
+    # the in-document find, when open (the editor's box is found here even
+    # when the field over its first row hides it from the boxes' walk)
+    let ff = ctx.readFindField(f, b.left, b.top, b.right)
+    if ff.isSome: result.add(result.root, ff.get)
     var rows = ctx.editorRows(f, b)
     let left = if rows.len > 0: codeLeft(f, b, rows, rows[0].numbersRight) else: b.left + 110
     if rows.len > 0: ctx.readCode(f, b, rows, left)
@@ -1622,12 +1901,15 @@ proc readSurface*(ctx: GuiContext; f: Frame): Tree =
   result.add(result.root, node("status-line", 0, fl(f.image.height - FooterH), fl(f.image.width),
                                fl(FooterH), %*{"location": loc}))
   ctx.readPanes(f, result)
+  if box.isNone: ctx.readWelcome(f, result)
 
 proc roles(): JsonNode =
   %*{
     "window": {"properties": ["mode", "pointer"], "affordances": []},
     "session-strip": {"properties": ["count"], "affordances": []},
     "session-tab": {"properties": ["title"], "affordances": ["click", "context-click"]},
+    "welcome": {"properties": ["heading", "text"], "affordances": []},
+    "welcome-action": {"properties": ["label"], "affordances": ["click"]},
     "editor": {"properties": ["file", "active", "focused", "current-line", "caret-line",
                               "first-visible", "last-visible"],
                "affordances": ["click", "context-click", "wheel", "focusable", "text-entry"]},
@@ -1701,8 +1983,37 @@ proc ctGuiBinding*(): GuiBinding =
       if n.role != "line" and anchor in ["scrubber-start", "scrubber-end"]:
         # a list's scrubber: the track down the body's right edge (its ends
         # a few pixels in, past the thumb's rounding)
-        let x = int(n.x + n.w) - 5
-        return some((x, if anchor == "scrubber-start": int(n.y) + 4 else: int(n.y + n.h) - 4))
+        var x = int(n.x + n.w) - 5
+        # The track's column, by its thumb: a run 6-16 px wide of one colour
+        # off the body's ground, down 20 px or more, in the pane's last 40 px
+        # (a list inset in its pane, the VCS pane's, draws it short of the
+        # edge, where the press would miss it).
+        let fr = ctx.grab()
+        let right = int(n.x + n.w) - 2
+        let ground = fr.rgb(right - 1, int(n.y) + 8)
+        block find:
+          for yy in countup(int(n.y) + 8, int(n.y + n.h) - 8, 12):
+            var xx = right
+            while xx > right - 40:
+              let c = fr.rgb(xx, yy)
+              if not near(c, ground, 6):
+                var x0 = xx
+                while x0 > right - 40 and near(fr.rgb(x0 - 1, yy), c, 2): dec x0
+                let wid = xx - x0 + 1
+                var tall = 0
+                while yy + tall < int(n.y + n.h) and near(fr.rgb((x0 + xx) div 2, yy + tall), c, 2):
+                  inc tall
+                if wid >= 6 and wid <= 16 and tall >= 20:
+                  x = (x0 + xx) div 2
+                  break find
+                xx = x0 - 1
+              else: dec xx
+        # The track's ends: 4 px in on a list's edge track; a track inset in
+        # its pane (the VCS pane's, `ChromePaddingPx`, 12 px, from every
+        # side) starts and ends that far in, and a press 4 px in misses it.
+        let pad = if x < right - 12: 12 + 4 else: 4
+        return some((x, if anchor == "scrubber-start": int(n.y) + pad
+                        else: int(n.y + n.h) - pad))
       if n.role != "line":
         # a row of a pane: its text's ends, and a call's toggle before it
         let midY = int(n.y + n.h / 2)
@@ -1732,6 +2043,15 @@ proc ctGuiBinding*(): GuiBinding =
             stderr.writeLine "anchor expander on ", n.keyText, " x0=", x0, " y=", midY,
               " runs=", runs, " -> ", box
           return some((box, midY))
+        of "row-end":
+          # the row's last ink, past its text: a button drawn at the row's
+          # right end (the Tests headline's ▶), which OCR does not read as a
+          # word. The pane's own right edge and scrollbar are left out.
+          let runs = inkRuns(ctx.grab(), midY - 5, midY + 5, x0,
+                             int(n.x + n.w) - 8)
+          if runs.len == 0: return none((int, int))
+          let (a, b) = runs[^1]
+          return some(((a + b) div 2, midY))
         of "name":
           let nx = n.props{"$name"}.getInt(-1)
           return (if nx >= 0: some((nx, midY)) else: none((int, int)))

@@ -78,7 +78,7 @@ PY
 	local seq_args=""
 	for _ in $(seq 1 "${DOWNS}"); do seq_args+=" -k Down -s ${PAUSE_MS}"; done
 	for c in t y p e d; do seq_args+=" ${c} -s ${PAUSE_MS}"; done
-	local typing="sleep ${SETTLE_S}; wtype ${seq_args} -s 2000 -k F12"
+	local typing="sleep ${SETTLE_S}; WTYPE_PRIME=0 bash '${root}/ci/test/wtype-keys.sh' ${seq_args} -s 2000 -k F12"
 	bash -c "${typing}" >"${OUT}/${name}.typist.log" 2>&1 &
 	local typist=$!
 	CODETRACER_GPUI_PROBE_SENTINEL="${SENTINEL}" \

@@ -207,7 +207,7 @@ jobs:
 
       - name: Restore ct and the windowed shim from the ct-build job
         # ct-build.yml builds them once per run (this job `needs:` it): ct,
-        # replay-server and the bundles (src/build-debug), and isonim-gpui's
+        # replay-server and the bundles (src/build-debug-repro), and isonim-gpui's
         # windowed shim and virtual pointer. Each shard used to run
         # build-once itself, 24-43 minutes on a cold garm VM.
         id: ct

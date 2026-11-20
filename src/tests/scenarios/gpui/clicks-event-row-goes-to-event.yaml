@@ -1,4 +1,3 @@
-# ports: src/frontend/gpui/tests/test_plat50_gpui_plan.nim
 scenario: 1
 name: gpui/clicks-event-row-goes-to-event
 pack: codetracer
@@ -20,7 +19,10 @@ steps:
   - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(111)" }
   - click: { at: 'event-log/event[#3]', button: right }
   - wait: { until: { at: popup, present: true }, timeout: 30s }
-  - expect: { at: popup, assert: 'shows("6 * 7 = 42")' }
+  # the event's own header, and its output: the proportional face draws
+  # `6 * 7 = 42` with spacing OCR reads as `6*7=42`, so the result is read
+  - expect: { at: popup, title: { contains: "at tick 88" } }
+  - expect: { at: popup, assert: 'shows("42")' }
   - expect: { at: replay-position, tick: 68 }
   - key: Esc
   - wait: { until: { at: popup, absent: true }, timeout: 30s }

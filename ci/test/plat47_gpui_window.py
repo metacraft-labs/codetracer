@@ -72,6 +72,18 @@ import subprocess
 import sys
 import time
 
+# Every lane types through ci/test/wtype-keys.sh, which primes each new
+# virtual keyboard and waits before the keys (its header has why).
+WTYPE_KEYS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wtype-keys.sh")
+
+
+def wtype_keys(args, lead_ms=400, prime=True, popen=False):
+    env = dict(os.environ, WTYPE_LEAD_MS=str(lead_ms), WTYPE_PRIME="1" if prime else "0")
+    cmd = ["bash", WTYPE_KEYS] + list(args)
+    if popen:
+        return subprocess.Popen(cmd, env=env)
+    return subprocess.run(cmd, env=env, check=True)
+
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 WS = os.path.dirname(ROOT)
 ISONIM_GPUI = os.environ.get("ISONIM_GPUI_DIR", os.path.join(WS, "isonim-gpui"))
@@ -164,6 +176,61 @@ def settle(name):
 # The window and the input devices
 # ---------------------------------------------------------------------------
 
+def handled(win):
+    """How many pointer and key events the window has handled (its geometry
+    report's `input.handled`); -1 from a window that does not report it."""
+    try:
+        return win.geom().get("input", {}).get("handled", -1)
+    except (OSError, ValueError):
+        return -1
+
+
+def await_geom(win, what, pred, ceiling_s=60.0):
+    """Wait until the window's geometry report satisfies `pred`, with a
+    generous ceiling; a state that never comes is a failure, named."""
+    deadline = time.time() + ceiling_s
+    while time.time() < deadline:
+        try:
+            if pred(win.geom()):
+                return
+        except (OSError, ValueError):
+            pass
+        time.sleep(0.1)
+    raise RuntimeError(f"PLAT-47: the window never showed {what} within {ceiling_s:.0f}s")
+
+
+def await_input(win, before, what, pointer=None, gesture_active=None,
+                revealing=None, ceiling_s=60.0):
+    """Wait until the window has HANDLED the input just sent — its report
+    counts more events than `before`, at `pointer` (within 2 px) and with the
+    gesture state asked for — and drawn after it. A still screen is not that:
+    under load the grabs can agree on a frame the window has not redrawn yet
+    (an Esc's cancel measured as the drag it cancelled). A state that never
+    comes within the generous ceiling is a failure, named."""
+    if before < 0:
+        return
+    deadline = time.time() + ceiling_s
+    while time.time() < deadline:
+        try:
+            g = win.geom()
+        except (OSError, ValueError):
+            time.sleep(0.1)
+            continue
+        inp = g.get("input", {})
+        ok = inp.get("handled", -1) > before
+        if ok and pointer is not None:
+            px_, py_ = inp.get("pointer", [-9, -9])
+            ok = abs(px_ - pointer[0]) <= 2 and abs(py_ - pointer[1]) <= 2
+        if ok and gesture_active is not None:
+            ok = g.get("gesture", {}).get("active") == gesture_active
+        if ok and revealing is not None:
+            ok = g.get("gesture", {}).get("revealing") == revealing
+        if ok:
+            return
+        time.sleep(0.1)
+    raise RuntimeError(f"PLAT-47: the window never handled {what} within {ceiling_s:.0f}s")
+
+
 class Window:
     def __init__(self, sid, trace, cwd, extra_env=None):
         self.sid = sid
@@ -231,8 +298,7 @@ def key(name):
     # PRIME the virtual keyboard (a new one can lose its first key while the
     # client is still receiving its keymap — PLAT-38's measurement), then
     # the key.
-    subprocess.run(["wtype", "-M", "shift", "-m", "shift", "-s", "400",
-                    "-k", name], check=True)
+    wtype_keys(["-k", name])
 
 
 def centre(r):
@@ -250,7 +316,9 @@ def hover_reveal(win, ptr, rect):
     ptr.jump(lx - 2, ly)
     ptr.move(lx, ly, steps=2)
     rv = None
-    for _ in range(20):
+    # The reveal is waited for with a generous ceiling: the preview delay is
+    # 300 ms, but a loaded host answers late.
+    for _ in range(300):
         time.sleep(0.2)
         rv = win.geom().get("revealed")
         if rv:
@@ -318,9 +386,13 @@ def capture():
         dx, dy = centre(div["rect"])
         ptr.jump(dx, dy)
         ptr.send("down", "sleep 150")
+        n = handled(win)
         ptr.move(dx + 80, dy)
+        await_input(win, n, "the divider dragged 80 px", pointer=(dx + 80, dy))
         steps["resize-live"] = settle("resize-live")
+        n = handled(win)
         ptr.send("up", "sleep 200")
+        await_input(win, n, "the divider released")
         steps["resize-done"] = settle("resize-done")
         g = win.geom()
         eb = node_of(g, "editor")["body"]
@@ -328,7 +400,10 @@ def capture():
         ptr.jump(bx, by)
         ptr.send("down", "sleep 150")
         ptr.move(bx + 80, by)
+        n = handled(win)
         ptr.send("up", "sleep 200")
+        await_input(win, n, "the press on the editor's body released",
+                    pointer=(bx + 80, by))
         steps["press-body"] = settle("press-body")
 
         # --- deliverable 6: the Variables tab over the four drop kinds.
@@ -345,11 +420,16 @@ def capture():
         # frame) — the frame each drop's tint is read against, and the
         # geometry its targets are aimed in.
         ptr.jump(sx, sy)
+        n = handled(win)
         ptr.send("down", "sleep 150")
+        await_input(win, n, "the press on the Variables tab", pointer=(sx, sy))
         # The press alone, before any motion: it focuses the Variables pane
         # (its outline and strip), and is the frame `Esc` must restore.
         steps["drop-pressed"] = settle("drop-pressed")
+        n = handled(win)
         ptr.jump(FRAME_W - 2, FRAME_H // 2)
+        await_input(win, n, "the tab lifted past the layout's edge",
+                    pointer=(FRAME_W - 2, FRAME_H // 2), gesture_active=True)
         steps["drop-lifted"] = settle("drop-lifted")
         shutil.copy(win.geometry, os.path.join(OUT, "a-lift.geometry.json"))
         g = win.geom()
@@ -363,22 +443,36 @@ def capture():
         }
         pointers = {}
         for name, (tx, ty) in targets.items():
+            n = handled(win)
             ptr.move(tx, ty)
+            await_input(win, n, f"the tab over {name}", pointer=(tx, ty),
+                        gesture_active=True)
             pointers[name] = [tx, ty]
             steps[name] = settle(name)
+        n = handled(win)
         key("Escape")
+        await_input(win, n, "Esc during the drag", gesture_active=False)
         steps["drop-cancel"] = settle("drop-cancel")
+        n = handled(win)
         ptr.send("up", "sleep 200")
+        await_input(win, n, "the release after Esc")
         steps["drop-released"] = settle("drop-released")
         # A second drag, released: the split is committed. Lifted the same
         # way first, so the target is where it was aimed above.
         ptr.jump(sx, sy)
         ptr.send("down", "sleep 150")
+        n = handled(win)
         ptr.jump(FRAME_W - 2, FRAME_H // 2)
-        time.sleep(0.5)
+        await_input(win, n, "the second drag's lift", pointer=(FRAME_W - 2, FRAME_H // 2),
+                    gesture_active=True)
         tx, ty = targets["drop-split"]
+        n = handled(win)
         ptr.move(tx, ty)
+        await_input(win, n, "the second drag over its split", pointer=(tx, ty),
+                    gesture_active=True)
+        n = handled(win)
         ptr.send("sleep 300", "up", "sleep 300")
+        await_input(win, n, "the second drag released", gesture_active=False)
         steps["drop-commit"] = settle("drop-commit")
         # --- deliverable 4: a click on the VCS tab.
         g = win.geom()
@@ -406,6 +500,12 @@ def capture():
         # --- the VCS pane refreshes on its own, as the desktop's does: a file
         # written by ANOTHER program, no input to the window, one refresh
         # interval (5 s, `vcs_vm.VCSRefreshIntervalMs`) and a margin.
+        # The refreshes counted are the ones after this write: the pane's
+        # first read is applied in the background and traced the same way.
+        with open(os.path.join(OUT, "a.run.log")) as f:
+            seen = sum(1 for l in f.read().splitlines() if l == "gesture vcs refreshed")
+        with open(os.path.join(OUT, "vcs-refresh.before"), "w") as f:
+            f.write(str(seen))
         with open(os.path.join(repo, "late.txt"), "w") as f:
             f.write("written while the window was open\n")
         time.sleep(7.0)
@@ -421,7 +521,13 @@ def capture():
         # (`x + w - 36`, `y + 5`, `TabPinPx` square).
         ptr.jump(tab[0] + tab[2] - 36 + 7, tab[1] + 5 + 7)
         ptr.send("down", "sleep 120", "up", "sleep 300")
+        n = handled(win)
         ptr.jump(FRAME_W // 2, FRAME_H // 3)
+        await_geom(win, "the Variables pane docked to a strip by its pin",
+                   lambda g: any(sl.get("pane") == "state" for st in g.get("strips", [])
+                                 for sl in st.get("slots", [])))
+        await_input(win, n, "the pointer moved off the pin",
+                    pointer=(FRAME_W // 2, FRAME_H // 3))
         steps["dock-committed"] = settle("dock-committed")
         shutil.copy(win.geometry, os.path.join(OUT, "a-dock.geometry.json"))
         g = win.geom()
@@ -433,8 +539,11 @@ def capture():
             hover_reveal(win, ptr, slot)
             steps["dock-revealed"] = settle("dock-revealed")
             shutil.copy(win.geometry, os.path.join(OUT, "a-revealed.geometry.json"))
+            n = handled(win)
             key("Escape")
             ptr.jump(4, FRAME_H // 2)
+            await_input(win, n, "Esc over the revealed pane, then the pointer away",
+                        pointer=(4, FRAME_H // 2), revealing=False)
             steps["dock-dismissed"] = settle("dock-dismissed")
         else:
             steps["dock-revealed"] = False
@@ -993,7 +1102,8 @@ def record():
     log_a = open(os.path.join(OUT, "a.run.log")).read().splitlines()
     out["vcsRefresh"] = {
         "text": ocr(os.path.join(OUT, "vcs-refresh.ppm"), files["body"], "vcs-refresh"),
-        "refreshes": sum(1 for l in log_a if l == "gesture vcs refreshed"),
+        "refreshes": sum(1 for l in log_a if l == "gesture vcs refreshed") -
+                     int(open(os.path.join(OUT, "vcs-refresh.before")).read()),
         "changedPixels": changed_bbox(frames["vcs"], frames["vcs-refresh"])[1],
         "changedBBox": changed_bbox(frames["vcs"], frames["vcs-refresh"])[0],
         "paneBody": files["body"],

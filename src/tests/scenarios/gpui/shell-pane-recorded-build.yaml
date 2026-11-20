@@ -1,4 +1,3 @@
-# ports: src/frontend/gpui/tests/test_plat61_gpui_shell.nim
 scenario: 1
 name: gpui/shell-pane-recorded-build
 pack: codetracer
@@ -11,7 +10,6 @@ stage:
   - use: write-project
     with:
       files:
-        shellrc: "PS1='$ '\n"
         build.sh: |
           #!/bin/sh
           cd "$(dirname "$0")"
@@ -21,7 +19,9 @@ stage:
           ct record -o rec-build prog.py
   - use: front-end-options
     with:
-      env: { CODETRACER_SHELL_COMMAND: "bash --noprofile --rcfile $project/shellrc -i" }
+      # --norc: no rc file at all, the system's included (a workstation's
+      # /etc/bashrc installs its prompt hooks); the prompt comes from PS1
+      env: { CODETRACER_SHELL_COMMAND: "bash --norc --noprofile -i", PS1: "$ " }
   - use: open-recording
 
 steps:
@@ -33,7 +33,7 @@ steps:
   - type: "sh ./build.sh"
   - key: Enter
     settle: false
-  - wait: { until: { at: 'pane[title="Shell"]', assert: 'has-row("recordingId")' }, timeout: 240s }
+  - wait: { until: { at: 'pane[title="Shell"]', assert: 'has-row("1 recording")' }, timeout: 240s }
   - expect: { at: 'pane[title="Shell"]', assert: ['has-row("sum 5")', 'has-row("done")'] }
-  - click: { at: 'pane[title="Shell"]/row[text="sum 5"]', anchor: text-start }
+  - click: { at: 'pane[title="Shell"]/row[#4]', anchor: text-start }
   - wait: { until: { at: session-strip, count: 2 }, timeout: 120s }

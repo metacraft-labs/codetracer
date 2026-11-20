@@ -1,4 +1,3 @@
-# ports: src/frontend/gpui/tests/test_plat63_gpui_verification.nim
 scenario: 1
 name: gpui/verification-run-lists-findings
 pack: codetracer
@@ -13,15 +12,16 @@ stage:
 
 steps:
   - wait: { until: ready, timeout: 60s }
+  # View › Verification through the palette, which runs the menu's commands
+  # by name (a pointer's way through the menu crosses the other folders)
   - chord: Ctrl+P
-  - type: ":verify"
+  - type: ":verification"
   - key: Enter
-  - wait: { until: { at: 'pane-tab[label="Verification"]', present: true }, timeout: 30s }
-  - click: { at: 'pane-tab[label="Verification"]' }
   - wait: { until: { at: 'pane[title="Verification"]', present: true }, timeout: 30s }
-  - chord: Ctrl+P
-  - type: ":Verification: Run"
-  - key: Enter
+  # the pane's own Run control (▶ at the header's right end)
+  - click: { at: 'pane[title="Verification"]/row[#1]', anchor: row-end }
     settle: false
-  - wait: { until: { at: 'pane[title="Verification"]', assert: 'has-row("Expected type Field, found type u32")' }, timeout: 180s }
+  # the run's verdict, then its findings (the pane cuts their messages at its
+  # width; the file each names is read)
+  - wait: { until: { at: 'pane[title="Verification"]', assert: 'has-row("Nothing was proved")' }, timeout: 180s }
   - expect: { at: 'pane[title="Verification"]', assert: 'has-row("typeerr/src/main.nr")' }

@@ -418,6 +418,8 @@ applicable:
   - ../nim-views/rr-nim-recording-opens-as-nim.yaml
   - ../nim-views/reverse-next-returns-to-the-nim-line.yaml
   - ../nim-views/generated-c-reverse-next-returns.yaml
+  - ../nim-views/next-leaves-a-breakpointed-nim-line-mcr.yaml
+  - ../nim-views/next-with-a-macro-expansion-open-mcr.yaml
   - ../layout/event-log-and-scratchpad-tabs.yaml
   - ../point-list/breakpoint-rows-follow-the-gutter.yaml
   - ../point-list/tracepoint-rows-beside-breakpoints.yaml

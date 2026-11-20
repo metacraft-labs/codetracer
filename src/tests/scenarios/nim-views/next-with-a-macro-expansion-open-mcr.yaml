@@ -1,0 +1,40 @@
+scenario: 1
+name: nim-views/next-with-a-macro-expansion-open-mcr
+pack: codetracer
+summary: >-
+  On an MCR recording of a Nim program stopped on a macro call (line 17),
+  with the call's expansion opened by Toggle Macro Expansion, Next moves the
+  stop on to line 18. It used to answer at the same position: the step was
+  never repeated past the call's first generated C line, because the stop's
+  location was read with rr's loader, which an MCR replay does not answer
+  (codetracer-pm issue 2026-11-19 "Next on an MCR recording of a Nim program
+  stops inside the line it started on").
+
+stage:
+  - use: record-program
+    with: { program: nim_macro_steps/main.nim, backend: mcr }
+  - use: plant-config
+    with: { file: keybindings.json, content: '[ { "key": "ctrl+alt+shift+m", "command": "editor.toggle-macro-expansion" } ]' }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 300s }
+  - wait: { until: { at: 'editor[file="main.nim"]/line[number="17"]', present: true }, timeout: 120s }
+  - click: { at: 'editor[file="main.nim"]/line[number="17"]', anchor: glyph }
+  - click: 'toolbar/toolbar-button[label="continue-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="main.nim"]', current-line: 17 }, timeout: 120s }
+  - wait: { until: replay-idle, timeout: 60s }
+  - expect: { at: 'editor[file="main.nim"]/macro-expansion[line="17"]', present: false }
+  - click: { at: 'editor[file="main.nim"]/line[number="17"]', anchor: text-start }
+  - wait: { until: { at: 'editor[file="main.nim"]', focused: true }, timeout: 10s }
+  # toggleMacroExpansion expands the line under the pointer.
+  - hover: { at: 'editor[file="main.nim"]/line[number="17"]', anchor: text-start, for: 500ms }
+  - chord: Ctrl+Alt+Shift+m
+  - wait: { until: { at: 'editor[file="main.nim"]/macro-expansion[line="17"]', present: true }, timeout: 30s }
+  - expect: { at: 'editor[file="main.nim"]/macro-expansion[line="17"]', text: { contains: "addTwice expansion" } }
+  - expect: { at: 'editor[file="main.nim"]/macro-expansion[line="17"]', text: { contains: "counter += 3" } }
+  - click: 'toolbar/toolbar-button[label="next-image"]'
+    settle: false
+  - wait: { until: { at: 'editor[file="main.nim"]', current-line: 18 }, timeout: 120s }
+  - wait: { until: replay-idle, timeout: 60s }

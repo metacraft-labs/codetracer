@@ -772,7 +772,9 @@ roles:
     properties: { text: text, first: text, selected: bool }
     children: { cell: many }
     affordances: [click, double-click, context-click]
-    anchors: [text-start, text-end]
+    # `row-end`: the last thing drawn at the row's right end, past its text —
+    # a control drawn there (the Tests headline's ▶, the Verification Run).
+    anchors: [text-start, text-end, row-end]
 
   # One column of a row: a run of text set two or more blanks apart from the
   # next (a button, a name, a count).

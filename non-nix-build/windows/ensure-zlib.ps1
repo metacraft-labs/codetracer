@@ -79,7 +79,70 @@ function Resolve-MinGWMakeExe {
     return @{ make = $plainMake; binDir = (Split-Path -Parent $plainMake) }
   }
 
-  throw "Unable to find mingw32-make.exe (or make) on PATH or under '$Root/gcc/'. Cannot build zlib from source. Ensure Ensure-Gcc has run successfully first."
+  # No make: the caller builds with gcc and ar directly (Build-ZlibWithGcc).
+  return $null
+}
+
+function Resolve-ZlibGccBin {
+  # The bin directory of the GCC Ensure-Gcc installed (its pointer, as above),
+  # when it holds gcc.exe and ar.exe; else the directory of a gcc on PATH.
+  param([Parameter(Mandatory = $true)][string]$Root, [Parameter(Mandatory = $true)][hashtable]$Toolchain)
+
+  $gccVersion = $Toolchain["GCC_VERSION"]
+  if (-not [string]::IsNullOrWhiteSpace($gccVersion)) {
+    $gccVersionRoot = Join-Path $Root ("gcc/" + $gccVersion)
+    $gccDir = Resolve-InstallDirFromRelativePathFile `
+      -InstallRoot $Root `
+      -RelativePathFile (Join-Path $gccVersionRoot "gcc.install.relative-path") `
+      -FallbackDir $gccVersionRoot
+    $gccBin = Join-Path $gccDir "bin"
+    if ((Test-Path -LiteralPath (Join-Path $gccBin "gcc.exe") -PathType Leaf) -and
+        (Test-Path -LiteralPath (Join-Path $gccBin "ar.exe") -PathType Leaf)) {
+      return $gccBin
+    }
+  }
+  $gccFromPath = Get-ZlibBuildTool -Name "gcc"
+  if (-not [string]::IsNullOrWhiteSpace($gccFromPath)) {
+    return (Split-Path -Parent $gccFromPath)
+  }
+  return ""
+}
+
+function Build-ZlibWithGcc {
+  <#
+    Build libz.a with gcc and ar alone, as win32/Makefile.gcc's `libz.a`
+    target does (CFLAGS -O3 -Wall; the library's objects are the top-level
+    *.c files; `ar rcs`), for a host whose GCC install has no mingw32-make:
+    garm-tbv1erdr1jbr in codetracer run 44444132651, and win-ci-vm-001
+    (codetracer-pm issue 2026-11-04-windows-diy-env-cannot-build-zlib-because-
+    no-make-is-found). WinLibs ships mingw64/bin/mingw32-make.exe, so the
+    file was removed on those hosts after extraction; nothing here needs it.
+  #>
+  param([Parameter(Mandatory = $true)][string]$SourceDir, [Parameter(Mandatory = $true)][string]$GccBin)
+
+  $gcc = Join-Path $GccBin "gcc.exe"
+  $ar = Join-Path $GccBin "ar.exe"
+  if (-not (Test-Path -LiteralPath $gcc -PathType Leaf)) { $gcc = Join-Path $GccBin "gcc" }
+  if (-not (Test-Path -LiteralPath $ar -PathType Leaf)) { $ar = Join-Path $GccBin "ar" }
+  $sources = @(Get-ChildItem -LiteralPath $SourceDir -File -Filter "*.c" | Sort-Object Name)
+  if ($sources.Count -lt 10) {
+    throw "zlib source at '$SourceDir' has only $($sources.Count) top-level .c files; expected the library's ~15."
+  }
+  $objects = @()
+  foreach ($src in $sources) {
+    $obj = Join-Path $SourceDir ([System.IO.Path]::GetFileNameWithoutExtension($src.Name) + ".o")
+    & $gcc -O3 -Wall -c -o $obj $src.FullName | Out-Host
+    if ($LASTEXITCODE -ne 0) {
+      throw "zlib build failed compiling '$($src.Name)' with '$gcc'."
+    }
+    $objects += $obj
+  }
+  $lib = Join-Path $SourceDir "libz.a"
+  Remove-Item -LiteralPath $lib -Force -ErrorAction SilentlyContinue
+  & $ar rcs $lib @objects | Out-Host
+  if ($LASTEXITCODE -ne 0) {
+    throw "zlib build failed archiving libz.a with '$ar'."
+  }
 }
 
 function Read-ZlibHeaderVersion {
@@ -145,8 +208,8 @@ function Ensure-Zlib {
   $stagingRoot = Join-Path $env:TEMP "codetracer-zlib-build-$version"
 
   $makeInfo = Resolve-MinGWMakeExe -Root $Root -Toolchain $Toolchain
-  $makeExe = [string]$makeInfo.make
-  $makeBinDir = [string]$makeInfo.binDir
+  $makeExe = if ($null -ne $makeInfo) { [string]$makeInfo.make } else { "" }
+  $makeBinDir = if ($null -ne $makeInfo) { [string]$makeInfo.binDir } else { "" }
 
   $tarExe = Get-WindowsTarExe
 
@@ -177,28 +240,38 @@ function Ensure-Zlib {
       throw "Expected zlib win32 GCC Makefile at '$win32Makefile' but it is missing."
     }
 
-    # Build libz.a (static) and headers via the canonical mingw makefile.
-    # Prepend the resolved mingw bin to PATH for the build subshell so that
-    # `gcc`, `ar`, `ranlib` and `mingw32-make`'s recursive invocations resolve.
-    $savedPath = [Environment]::GetEnvironmentVariable("PATH")
-    try {
-      if (-not [string]::IsNullOrWhiteSpace($makeBinDir)) {
-        [Environment]::SetEnvironmentVariable("PATH", ($makeBinDir + ";" + $savedPath), "Process")
+    if ($null -eq $makeInfo) {
+      $gccBin = Resolve-ZlibGccBin -Root $Root -Toolchain $Toolchain
+      if ([string]::IsNullOrWhiteSpace($gccBin)) {
+        throw "Unable to find mingw32-make.exe, make or gcc on PATH or under '$Root/gcc/'. Cannot build zlib from source. Ensure Ensure-Gcc has run successfully first."
       }
-
-      Push-Location -LiteralPath $sourceDir
+      $makes = @(Get-ChildItem -LiteralPath $gccBin -File -Filter "*make*" -ErrorAction SilentlyContinue | ForEach-Object Name)
+      Write-Host "zlib: no mingw32-make or make (make-like files in ${gccBin}: $(if ($makes.Count) { $makes -join ', ' } else { 'none' })); building libz.a with gcc and ar directly."
+      Build-ZlibWithGcc -SourceDir $sourceDir -GccBin $gccBin
+    } else {
+      # Build libz.a (static) and headers via the canonical mingw makefile.
+      # Prepend the resolved mingw bin to PATH for the build subshell so that
+      # `gcc`, `ar`, `ranlib` and `mingw32-make`'s recursive invocations resolve.
+      $savedPath = [Environment]::GetEnvironmentVariable("PATH")
       try {
-        # The win32 makefile defaults are sufficient for libz.a; we explicitly
-        # invoke the static target so we don't waste time building zlib1.dll.
-        & $makeExe -f "win32/Makefile.gcc" libz.a | Out-Host
-        if ($LASTEXITCODE -ne 0) {
-          throw "zlib build failed (mingw32-make -f win32/Makefile.gcc libz.a)."
+        if (-not [string]::IsNullOrWhiteSpace($makeBinDir)) {
+          [Environment]::SetEnvironmentVariable("PATH", ($makeBinDir + ";" + $savedPath), "Process")
+        }
+
+        Push-Location -LiteralPath $sourceDir
+        try {
+          # The win32 makefile defaults are sufficient for libz.a; we explicitly
+          # invoke the static target so we don't waste time building zlib1.dll.
+          & $makeExe -f "win32/Makefile.gcc" libz.a | Out-Host
+          if ($LASTEXITCODE -ne 0) {
+            throw "zlib build failed (mingw32-make -f win32/Makefile.gcc libz.a)."
+          }
+        } finally {
+          Pop-Location
         }
       } finally {
-        Pop-Location
+        [Environment]::SetEnvironmentVariable("PATH", $savedPath, "Process")
       }
-    } finally {
-      [Environment]::SetEnvironmentVariable("PATH", $savedPath, "Process")
     }
 
     $builtLib = Join-Path $sourceDir "libz.a"

@@ -155,7 +155,7 @@ PY
 	local app=$!
 	waited="$(settle "${dir}")"
 	if [ "${waited}" -ge 0 ] 2>/dev/null; then
-		xargs -0 wtype <"${dir}/wtype.args" >"${dir}/wtype.log" 2>&1
+		WTYPE_PRIME=0 WTYPE_LEAD_MS=1 xargs -0 bash "${root}/ci/test/wtype-keys.sh" <"${dir}/wtype.args" >"${dir}/wtype.log" 2>&1
 	fi
 	wait "${app}"
 	rc=$?

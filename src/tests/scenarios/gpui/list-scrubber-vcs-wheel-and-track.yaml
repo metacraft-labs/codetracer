@@ -1,4 +1,3 @@
-# ports: src/frontend/gpui/tests/test_m71_gpui_plan.nim
 scenario: 1
 name: gpui/list-scrubber-vcs-wheel-and-track
 pack: codetracer
@@ -64,7 +63,7 @@ steps:
   - wait: { until: { at: 'pane[title="VCS"]', assert: 'has-row("Working Tree (43)")' }, timeout: 30s }
   - expect: { at: 'pane[title="VCS"]', assert: 'lacks-row("extra-40.txt")' }
   - wheel: { at: 'pane[title="VCS"]', direction: down, amount: 30 }
-  - wait: { until: { at: 'pane[title="VCS"]', assert: 'lacks-row("WORKING TREE (43)")' }, timeout: 20s }
+  - wait: { until: { at: 'pane[title="VCS"]', assert: 'lacks-row("Working Tree (43)")' }, timeout: 20s }
   - wheel: { at: 'pane[title="VCS"]', direction: up, amount: 30 }
   - wait: { until: { at: 'pane[title="VCS"]', assert: 'has-row("Working Tree (43)")' }, timeout: 20s }
   - click: { at: 'pane[title="VCS"]', anchor: scrubber-end }

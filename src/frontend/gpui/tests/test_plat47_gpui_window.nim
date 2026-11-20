@@ -302,7 +302,11 @@ suite "PLAT-47 part B: the GPUI window, read from its pixels":
                   box[0] + box[2] <= editorRight and
                   box[2] <= EditorVScrollbarPx and
                   box[1] >= ring[1] and box[1] + box[3] <= editorBottom
-      if not (caret or hBand or vBand):
+      # The press is held and moved 80 px (the divider drag's gesture), so in
+      # the editor's text it SELECTS what it moved over: one row, no wider
+      # than the motion and a glyph's rounding at each end.
+      let selection = box[3] <= rowPx + 2 and box[2] <= 80 + 2 * 12
+      if not (caret or hBand or vBand or selection):
         unexplained.add $box
     checkpoint("press-body regions not a caret or a scrollbar band: " &
                $unexplained)

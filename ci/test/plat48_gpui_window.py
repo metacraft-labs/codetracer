@@ -69,6 +69,18 @@ import sys
 import termios
 import time
 
+# Every lane types through ci/test/wtype-keys.sh, which primes each new
+# virtual keyboard and waits before the keys (its header has why).
+WTYPE_KEYS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wtype-keys.sh")
+
+
+def wtype_keys(args, lead_ms=400, prime=True, popen=False):
+    env = dict(os.environ, WTYPE_LEAD_MS=str(lead_ms), WTYPE_PRIME="1" if prime else "0")
+    cmd = ["bash", WTYPE_KEYS] + list(args)
+    if popen:
+        return subprocess.Popen(cmd, env=env)
+    return subprocess.run(cmd, env=env, check=True)
+
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 WS = os.path.dirname(ROOT)
 ISONIM_GPUI = os.environ.get("ISONIM_GPUI_DIR", os.path.join(WS, "isonim-gpui"))
@@ -206,8 +218,7 @@ class Pointer:
 def wt(*args):
     # PRIME the virtual keyboard first (a new one can lose its first key while
     # the client is still receiving its keymap — PLAT-38's measurement).
-    subprocess.run(["wtype", "-M", "shift", "-m", "shift", "-s", "400"] + list(args),
-                   check=True)
+    wtype_keys(args)
 
 
 def centre(r):

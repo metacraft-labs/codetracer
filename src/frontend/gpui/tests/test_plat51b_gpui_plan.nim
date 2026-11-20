@@ -46,7 +46,8 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 74
+  ExpectedAssertions = 75
+    ## 74 -> 75 (2026-11-18): Ctrl+N opens the Welcome tab, one check.
     ## 69 -> 74 (2026-11-14): a press in the editor's text moves the focus
     ## strip off the pane pressed before it, five checks.
     ## 63 -> 69: checked-recorder refusal and subprocess-selection controls.
@@ -394,6 +395,11 @@ suite "PLAT-51 part B GPUI: a new tab's Welcome Screen":
       ",key:enter,wait:240000", state, recorder = recorder)
     ck fileExists(invoked)
     ck (if fileExists(invoked): readFile(invoked) else: "") == "record"
+    ck plan.nodesWith("data-ct-welcome").len == 1
+
+  test "Ctrl+N opens it too, as the desktop's New tab does":
+    # CUA `session-tabs.new`; the key, not the "+"'s press.
+    let plan = windowPlan("key:n:control")
     ck plan.nodesWith("data-ct-welcome").len == 1
 
   test "the + opens it: the desktop's start options in its order, the recent panels":

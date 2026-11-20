@@ -247,7 +247,11 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 3231
+  ExpectedAssertions = 3237
+    ## **3231 → 3237, 2026-11-19: EVERY ROW IS AT LEAST THE PANE'S WIDTH**,
+    ## so a press right of a short row's text is that row's: three readings
+    ## (every row has a floor, one floor, a pane's width) at each of the two
+    ## viewports.
     ## **3263 → 3231, 2026-10-30: THE TAB STRIP IS GONE** (`9ae2786b72a`, one
     ## list of variables and watches). Per viewport, the strip case's eight
     ## readings (the strip, its kind, three option indices, the labels, the
@@ -827,6 +831,17 @@ suite "PLAT-40 / PLAT35-F4: the pane draws the desktop's name:value rows":
         if k.has(StateRowAttribute): inc inBox
       ck inBox == pane.bodyRows.len
       ck inBox > 1
+      # A row takes its natural width, but never less than the pane's: a
+      # press anywhere on a row's line is that row's, as on the desktop. A
+      # row only as wide as its text (`value:17 Int`) took no press right of
+      # its last control. Every row has the one floor, whatever its text,
+      # and the floor is a pane's width, not a text's.
+      var floors: seq[int]
+      for k in box.kids:
+        if k.has(StateRowAttribute): floors.add k.pxStyle("min_w")
+      ck floors.len == inBox
+      ck floors.len > 0 and min(floors) == max(floors)
+      ck floors.len > 0 and min(floors) >= w div 8
       var horizontal = 0
       for t in pane.nodesWith(ScrollbarAttr):
         ck t.style("position") == "absolute"
