@@ -7872,6 +7872,23 @@
         "type": "github"
       }
     },
+    "nim-cli-spec": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1794844668,
+        "narHash": "sha256-Z24JH8oEKLM8++9wo6TfizvexTuRjAVFzNRVUGqGc78=",
+        "owner": "metacraft-labs",
+        "repo": "nim-cli-spec",
+        "rev": "c6a8806136e9d3c98875df16502841c3b627e9b4",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "repo": "nim-cli-spec",
+        "rev": "c6a8806136e9d3c98875df16502841c3b627e9b4",
+        "type": "github"
+      }
+    },
     "nim-cli-spec-src": {
       "flake": false,
       "locked": {
@@ -13865,6 +13882,7 @@
         "nim-acp": "nim-acp",
         "nim-agent-harbor": "nim-agent-harbor",
         "nim-agents": "nim-agents",
+        "nim-cli-spec": "nim-cli-spec",
         "nim-everywhere": "nim-everywhere",
         "nim-langserver": "nim-langserver",
         "nim-pty": "nim-pty",

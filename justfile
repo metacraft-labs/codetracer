@@ -4232,6 +4232,10 @@ test-ct-test-certificates:
   mkdir -p test-logs
   exec > >(tee test-logs/test-ct-test-certificates.log) 2>&1
   echo "conformance vectors pin: $(cat src/ct_test/certificate_vectors.pin) (src/ct_test/certificate_vectors.pin)"
+  # The Nix package's monitor (`ct-io-mon`) is handed every source directory
+  # the io-mon this lane builds its monitor from reads. Here because this lane
+  # already requires the io-mon sibling (certificate_untracked_reads_test.nim).
+  bash ci/test/ct-io-mon-source-inputs.sh
   bash ci/lib/run-nim-test-lane.sh ct-test-certificates
 
 # CTC-3i: `ct test run` from the Nix package's own `bin/` — the package's

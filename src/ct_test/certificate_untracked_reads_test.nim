@@ -28,7 +28,9 @@
 ## The monitor is needed at run time: the io-mon CLI and its interpose shim.
 ## They are taken from ``$IO_MON`` / ``PATH`` and ``$REPRO_MONITOR_SHIM_LIB``
 ## when set; otherwise this suite builds both from the workspace's ``io-mon``
-## sibling (and the siblings its build names) into a scratch directory. When
+## sibling (and the siblings its build names: nim-stackable-hooks,
+## nim-shm-queue, nim-shm-gset and, from io-mon efe6dc5 on, nim-cli-spec for
+## the CLI) into a scratch directory. When
 ## neither works the suite FAILS, naming what is missing: a skipped case here
 ## would be a read-set check nobody ran.
 
@@ -76,6 +78,39 @@ proc committedRepo(name: string): string =
   git(result, "add", "-A")
   git(result, "commit", "-q", "-m", "initial")
 
+proc missingCliSpecSource(ioMon: string): string =
+  ## From io-mon efe6dc5 on the ``io-mon`` binary's command line is a clispec
+  ## description: ``cmd/io_mon_snoop.nim`` imports ``io_mon/cli``, which imports
+  ## nim-cli-spec's ``clispec``, and io-mon's ``config.nims`` resolves it
+  ## through ``$CLI_SPEC_SRC``, by default the ``nim-cli-spec`` checkout beside
+  ## io-mon. Returns which clispec module the io-mon at ``ioMon`` imports and
+  ## that source lacks, or "" when it has them all or imports none (an older
+  ## io-mon), so the suite names the sibling instead of relaying ``cannot open
+  ## file: clispec``.
+  ##
+  ## Only the import lines io-mon writes are read: ``import clispec`` and
+  ## ``import clispec/<module>``, one module to a line, in ``src/io_mon``.
+  ## Any other spelling is left to the compiler. So is a nim-cli-spec that has
+  ## every module and an older API: the revision to clone is the one io-mon
+  ## pins.
+  const moduleChars = Letters + Digits + {'_', '/'}
+  let source = getEnv("CLI_SPEC_SRC", ioMon.parentDir / "nim-cli-spec" / "src")
+  for kind, path in walkDir(ioMon / "src" / "io_mon"):
+    if kind != pcFile or not path.endsWith(".nim"):
+      continue
+    for line in lines(path):
+      let words = line.splitWhitespace()
+      if line.startsWith("import") and words.len == 2 and
+          words[0] == "import" and words[1].allCharsInSet(moduleChars) and
+          (words[1] == "clispec" or words[1].startsWith("clispec/")) and
+          not fileExists(source / (words[1] & ".nim")):
+        return "io-mon's " & path.extractFilename & " at '" & ioMon &
+          "' imports " & words[1] & ", and '" & source & "' has no " &
+          words[1] & ".nim (clone nim-cli-spec beside io-mon, at the " &
+          "revision io-mon's .github/sibling-repos pins, or set " &
+          "CLI_SPEC_SRC to its src directory)"
+  ""
+
 proc provisionIoMon(): string =
   ## Make the live monitor available, or return why it is not.
   if ioMonLiveCaptureAvailable():
@@ -98,6 +133,9 @@ proc provisionIoMon(): string =
       if path.extractFilename.startsWith("librepro_monitor_shim"):
         putEnv(IoMonShimEnvVar, path)
   if findSnoopCli().len == 0:
+    let missingCliSpec = missingCliSpecSource(ioMon)
+    if missingCliSpec.len > 0:
+      return missingCliSpec
     let binary = outDir / "bin" / IoMonSnoopBinaryName
     let cli = run("nim", ["c", "--hints:off", "--warnings:off",
                           "--nimcache:" & outDir / "cli-nimcache",

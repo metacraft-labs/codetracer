@@ -75,6 +75,7 @@ for required_file in "${VISUAL_REPLAY_NIM_TESTS[@]}"; do
 	fi
 done
 
+bash ci/test/visual-replay-build-sibling-preflight-test.sh
 bash ci/test/visual-replay-build-sibling-preflight.sh "$REPO_ROOT/.."
 bash ci/test/visual-replay-private-cargo-preflight-test.sh
 bash ci/test/visual-replay-private-cargo-preflight.sh "$NATIVE_BACKEND_REPO"

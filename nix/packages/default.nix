@@ -2048,8 +2048,8 @@
         # `io-mon` CLI and the interpose shim `librepro_monitor_shim`. Built
         # from the `io-mon` input by io-mon's OWN recipe (`just build`, as its
         # flake's `packages.default` does), against the stackable-hooks and
-        # shared-memory sources this flake pins, the ones repro.lock names, so the
-        # shipped monitor is the one io-mon tests. Without it a packaged
+        # shared-memory and clispec sources this flake pins, the ones repro.lock
+        # names, so the shipped monitor is the one io-mon tests. Without it a packaged
         # `ct test run` cannot know which files its tests read, and in the
         # default `reads` mode issues every certificate with
         # `untracked = true` and `read_set = not-captured` (conforming, but
@@ -2067,6 +2067,13 @@
           STACKABLE_HOOKS_SRC = "${inputs.nim-stackable-hooks}/src";
           SHM_QUEUE_SRC = "${inputs.nim-shm-queue}/src";
           SHM_GSET_SRC = "${inputs.nim-shm-gset}/src";
+          # From io-mon efe6dc5 on, the `io-mon` binary's command line is a
+          # clispec description (`src/io_mon/cli.nim`); io-mon's `config.nims`
+          # resolves the library through this variable. An io-mon older than
+          # that ignores it; flake.nix says which nim-cli-spec the newer one
+          # needs. `ci/test/ct-io-mon-source-inputs.sh` holds this list to the
+          # variables io-mon's `config.nims` reads.
+          CLI_SPEC_SRC = "${inputs.nim-cli-spec}/src";
 
           postPatch = ''
             patchShebangs scripts/build_shim.sh
