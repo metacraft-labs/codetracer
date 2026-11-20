@@ -451,11 +451,13 @@ jobs:
             # isonim-gpui 2026-11-19 (a double click is counted by its presses' times).
             # isonim 2026-11-20, after flake.lock and repro.lock moved it to b56bd098
             # (the ui macro's templates, which isonim-zgui's renderer needs).
+            # nim-termctl 2026-11-20, after flake.lock and repro.lock moved it to
+            # 296b778 (the restore runs on whichever thread takes the signal).
             isonim=b56bd098474244ce3eae401312b8a567cf74c30f
             isonim-tui=8e43ce06f7f078530c7a8585c210ad7648fa0051
             isonim-gpui=301c8c9cecbf797fc92b8b46c0501ff7a9f36112
             nim-everywhere=2f5b67a5dafd96ca5d57c9270fc3c2da2c5f2b0b
-            nim-termctl=2283c056343aa2b2b2bdfc6fda3fe8eb11c17d3e
+            nim-termctl=296b778cc7617bcba35ed6b70f479eea4271f34d
             nim-pty=6ffb8d788e8a740ca78ec29c7a3a489a13818bcb
             nim-acp=0bf10b4c35064a08d8c96eb912190521322017e2
             nim-agent-harbor=9694f6b41be21315243df1b19cabd02c5f271d7d
