@@ -79,7 +79,7 @@ template ckEq(a, b: untyped) =
   inc countedAssertions
   check a == b
 
-const ExpectedAssertions = 4671
+const ExpectedAssertions = 5095
   ## Written from a run. See the final case.
 
 # ---------------------------------------------------------------------------
@@ -117,18 +117,17 @@ proc fixture(): RgbaImage =
   initRgbaImage(FixtureWidth, FixtureHeight, px)
 
 const
-  GateTiers = [itHalfBlock, itQuadrant, itSextant, itBraille, itAscii,
-               itProtocol]
+  GateTiers = [itHalfBlock, itQuadrant, itSextant, itOctant, itBraille,
+               itAscii, itProtocol]
     ## EVERY tier of `tiers.CellRenderableTiers`, plus `itProtocol`.
     ##
     ## Tier 0 is in the sweep rather than excluded from it, and that is the
     ## point: `magnifierTier` answers `itHalfBlock` for it, so the gate's
     ## sentence "exact at every tier" covers the tier a reader would assume it
-    ## does not apply to. `itOctant` is absent because it is in NEITHER set —
-    ## it has no glyph table at all — and it has a refusal case of its own
-    ## below, with a renderable tier beside it as the positive twin.
+    ## does not apply to. `itOctant` is in it since its glyph table was
+    ## verified against Unicode 16 (`cell_render.octantGlyph`).
 
-  GateTierCount = 6
+  GateTierCount = 7
 
 # ---------------------------------------------------------------------------
 # §5's first stage: a cell is not a pixel
@@ -514,38 +513,7 @@ suite "PLAT-15 gate: a picked pixel's coordinate is exact at every tier":
 # §2.6: where a tier cannot show it, the pane says so
 # ---------------------------------------------------------------------------
 
-suite "PLAT-15 §2.6: a tier that cannot draw REFUSES by name":
-
-  test "octants refuse a magnifier, and a sextant magnifier is the twin":
-    # PLAT-14 recorded this as residue 3: `--image-tier=octant` parses and
-    # resolves, and refuses only at DRAW time, where a pane meets a
-    # `CellRenderError` rather than a refusal it can report. The refusal is
-    # named here so a caller can ask BEFORE it paints.
-    let img = fixture()
-    let fit = fitToCells(FixtureWidth, FixtureHeight, DefaultCellAspect, 10, 10)
-    let mag = openMagnifier(FixtureWidth, FixtureHeight, fit, itOctant,
-                            3, 2, viewCols = 8, viewRows = 4)
-    var raised = false
-    try:
-      discard renderMagnifier(img, mag, itOctant)
-    except MagnifierError as e:
-      raised = true
-      checkpoint(e.msg)
-      ck e.msg.contains("octant")
-      ck e.msg.contains("--image-tier=sextant")
-      ck e.msg.contains("--image-tier=braille")
-    ck raised
-    # THE POSITIVE TWIN, through the same function: the remedy the message
-    # names actually draws.
-    let sextant = openMagnifier(FixtureWidth, FixtureHeight, fit, itSextant,
-                                3, 2, viewCols = 8, viewRows = 4)
-    let grid = renderMagnifier(img, sextant, itSextant)
-    ckEq grid.tier, itSextant
-    ck grid.cells.len > 0
-    # AND THE TIER IS NOT SUBSTITUTED ON THE WAY IN: `magnifierTier` answers
-    # `itOctant` for `itOctant`, so a pane that pins it reports the tier it
-    # pinned rather than a neighbouring one (§4's "declares its tier").
-    ckEq magnifierTier(itOctant), itOctant
+suite "PLAT-15 §2.6: the overlay's tier, and what the magnifier refuses":
 
   test "tier 0 magnifies at tier 1, and says so":
     # `magnifierTier`'s one substitution, with its reason in the module header.

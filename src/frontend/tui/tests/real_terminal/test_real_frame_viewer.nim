@@ -19,8 +19,8 @@
 ##      that neighbouring cells show DIFFERENT pixels, so the sweep counts
 ##      distinct colours and asserts there are many — §4b's non-vacuity floor,
 ##      on a screen.
-##   3. **A degraded pane still draws the rest of itself on a terminal.**
-##      §2.6 is a statement about what a user sees.
+##   3. **An octant pin draws its 2x4 glyphs on a terminal**, and the rest of
+##      the pane with them.
 ##
 ## **Cross-tier equivalence would be blind to a defect both tiers share**, and
 ## that is why nothing here is a comparison against the in-process screen: both
@@ -60,7 +60,7 @@ import ../../testing/dual_snap
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 69
+const ExpectedAssertions = 68
 
 var countedAssertions = 0
 
@@ -86,13 +86,13 @@ func expectedChannel(x, y: int): (int, int, int) =
   ## standard, never with itself.
   (10 + 15 * x, 6 + 20 * y, 200)
 
-proc spawnChild(mode: string; kitty = false): TuiTestSession =
+proc spawnChild(mode: string; kitty = false; height = 24): TuiTestSession =
   ## `envRemove` for the variables an ambient session may carry: this suite's
   ## own process may be running inside tmux or over ssh, and a child that
   ## inherited `$TMUX` would be resolving a different environment from the one
   ## the case names.
   var b = newTuiTest(appBinaryPath(Stem), @[mode])
-    .width(120).height(24)
+    .width(120).height(height)
     .envRemove("TMUX", "STY", "SSH_TTY", "SSH_CONNECTION", "KITTY_WINDOW_ID",
                "TERM_PROGRAM", "LC_TERMINAL", "NO_COLOR")
     .envSet("LANG", "en_US.UTF-8")
@@ -316,31 +316,41 @@ suite "PLAT-15 Tier 2: a degraded pane, on a real terminal":
     # The pixel history is above it, not overwritten by it.
     ck not sess.screenContents().splitLines()[srow].contains("glDraw")
 
-  test "an octant pin shows a refusal, a remedy, the tier AND the rest":
+  test "an octant pin draws its 2x4 glyphs on the terminal, and the rest":
     compileChildApp(Stem)
-    var sess = spawnChild("degrade")
+    var sess = spawnChild("octant", height = 40)
     defer: sess.close()
     sess.waitForText(ReadyMarker, Barrier)
+    let tier = sess.markerLine("TIER")
+    checkpoint(tier)
+    ck tier.contains("PLAT15 TIER octant grid=16x8")
+    ck sess.markerLine("GAP").contains("PLAT15 GAP none")
+    # WHAT REACHED THE TERMINAL: 128 cells, one per mask the argmin chooses,
+    # each a DIFFERENT code point, every one either in Unicode 16's
+    # U+1CD00-U+1CDE5 run or one of the 15 legacy spellings of masks below 128
+    # (space, quarter and half blocks, quadrants). 113 + 15 = 128.
+    var seen: seq[int] = @[]
+    var run, legacy = 0
+    for r in 0 ..< 8:
+      for c in 0 ..< 16:
+        let cp = int(sess.cellAt(r + 1, c).rune)
+        if cp notin seen: seen.add cp
+        if cp >= 0x1CD00 and cp <= 0x1CDE5: inc run
+        else: inc legacy
+    checkpoint("distinct " & $seen.len & ", run " & $run & ", legacy " & $legacy)
+    ckEq seen.len, 128
+    ckEq run, 113
+    ckEq legacy, 15
+    # The "on" colour is the foreground of a cell with any octant set.
+    let on = sess.cellAt(1, 1)   # mask 1: cell 1 alone
+    ck on.fg.kind == ckRgb
+    ckEq (int(on.fg.r), int(on.fg.g), int(on.fg.b)), (230, 200, 40)
+    # §4: THE TITLE NAMES THE TIER, AND THE REST OF THE PANE RENDERS.
     let screen = sess.screenContents()
-    checkpoint(sess.markerLine("TIER"))
-    checkpoint(sess.markerLine("DEGRADED"))
-    # PLAT-14 RESIDUE 3: the pin resolved, and the pane REPORTED rather than
-    # raising.
-    ck sess.markerLine("TIER").contains("PLAT15 TIER octant")
-    ck sess.markerLine("TIER").contains("gap=tier-not-drawable")
-    # WHAT IS MISSING AND HOW TO GET IT, on the screen.
-    ck screen.contains("--image-tier=sextant")
-    ck screen.contains("--image-tier=braille")
-    # §4: THE TITLE STILL NAMES THE TIER.
     ck screen.contains("FRAME VIEWER")
     ck screen.contains("image-tier=octant")
-    ck screen.contains("frame 7/40")
-    ck screen.contains("16x12px")
-    # §2.6: THE REST OF THE PANE STILL RENDERS.
     ck screen.contains("PIXEL HISTORY")
-    ck screen.contains("glClear")
     ck screen.contains("glDrawElements")
-    ck screen.contains("d:failed")
 
   test "the child exits cleanly in every mode":
     # A child that crashed after drawing would leave every assertion above
@@ -349,7 +359,7 @@ suite "PLAT-15 Tier 2: a degraded pane, on a real terminal":
     # would have forced.
     compileChildApp(Stem)
     var modes = 0
-    for mode in ["magnify", "degrade", "tier0"]:
+    for mode in ["magnify", "octant", "tier0"]:
       var sess = spawnChild(mode, kitty = mode == "tier0")
       sess.waitForText(ReadyMarker, Barrier)
       let code = sess.waitExit(Barrier)

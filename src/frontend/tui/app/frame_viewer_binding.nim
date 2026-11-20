@@ -45,11 +45,10 @@
 ##   * `fdgPlayerAbsent` -> **`pdsAbsent`**. `ct-gfx-player` reconstructs the
 ##     frame in a separate process against a real GPU; starting it is a thing a
 ##     user can do, and the remedy says so.
-##   * `fdgNoDecoder`, `fdgTierNotDrawable`, `fdgProtocolNotPainted`,
-##     `fdgNoRoomForPicture` -> **`pdsUnsupported`**. No PNG decoder in this
-##     build, no verified octant table in this build, no tier-0 transmitter
-##     behind this pane in this build, no rows in this rectangle. Nothing a user
-##     installs changes any of the four.
+##   * `fdgNoDecoder`, `fdgProtocolNotPainted`, `fdgNoRoomForPicture` ->
+##     **`pdsUnsupported`**. No PNG decoder in this build, no tier-0
+##     transmitter behind this pane in this build, no rows in this rectangle.
+##     Nothing a user installs changes any of the three.
 ##
 ##     `fdgProtocolNotPainted` is the one that reads oddest and is still right:
 ##     the terminal is the BEST one for the job and the pane still cannot paint
@@ -128,12 +127,12 @@ const
 
 func frameDependencyState*(gap: FrameDrawGap): PluginDependencyState =
   ## The fifth axis, for one frame viewer. See this module's header on why
-  ## exactly one of the four gaps is `pdsAbsent`.
+  ## exactly one of the gaps is `pdsAbsent`.
   case gap
   of fdgNone: pdsSatisfied
   of fdgPlayerAbsent: pdsAbsent
-  of fdgNoDecoder, fdgTierNotDrawable, fdgProtocolNotPainted,
-     fdgNoRoomForPicture: pdsUnsupported
+  of fdgNoDecoder, fdgProtocolNotPainted, fdgNoRoomForPicture:
+    pdsUnsupported
 
 func frameViewerSnapshot*(core: DegradedStateSnapshot;
                           gap: FrameDrawGap): DegradedStateSnapshot =
@@ -170,8 +169,6 @@ func describeFrameGap*(gap: FrameDrawGap): string =
   of fdgNoDecoder:
     "This frame arrived as an encoded image and this terminal draws cells — " &
     remedyFor(gap) & "."
-  of fdgTierNotDrawable:
-    "The pinned image tier cannot draw — " & remedyFor(gap) & "."
   of fdgProtocolNotPainted:
     "This terminal draws true pixels and this pane paints cells — " &
     remedyFor(gap) & "."

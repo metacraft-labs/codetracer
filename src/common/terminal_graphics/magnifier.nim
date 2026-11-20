@@ -136,12 +136,9 @@ func magnifierTier*(tier: ImageTier): ImageTier =
   ## The tier the MAGNIFIER OVERLAY renders at, given the tier the FRAME
   ## renders at. See this module's header for why tier 0 becomes tier 1.
   ##
-  ## Every other tier is answered unchanged, including `itOctant` — which is
-  ## NOT renderable as cells (`tiers.CellRenderableTiers`) and must reach the
-  ## caller as the tier it is, so the pane can report a refusal instead of a
-  ## `CellRenderError` at draw time. Substituting a neighbouring tier here
-  ## would make "the pane declares its tier in its title" (§4) a lie, which is
-  ## the same rule `cell_render.glyphFor` refuses octants under.
+  ## Every other tier is answered unchanged: each is a cell rendering
+  ## (`tiers.CellRenderableTiers`), and substituting a neighbouring tier here
+  ## would make "the pane declares its tier in its title" (§4) a lie.
   if tier == itProtocol: itHalfBlock else: tier
 
 func coarsePixelRect*(sourceWidth, sourceHeight: int; fit: CellFit;
@@ -320,20 +317,12 @@ func magnifiedRaster*(img: RgbaImage; mag: Magnifier;
   ## resolves each sub-cell to exactly one magnified pixel and the argmin has
   ## no averaging to do. That is what makes the exactness an EQUALITY rather
   ## than a perceptual threshold.
+  # `magnifierTier` never answers `itProtocol`, and every other tier is in
+  # `tiers.CellRenderableTiers` since the octant table was verified — so the
+  # overlay always has a glyph table and there is no refusal left to make
+  # here. `renderCells` still gates on that set, so a tier that ever left it
+  # would be refused there, by name.
   let effective = magnifierTier(tier)
-  if effective notin CellRenderableTiers:
-    # `CellRenderableTiers` AND NOT `DrawableTiers`, which contains `itProtocol`
-    # — the one tier `cell_render.renderCells` refuses. The overlay IS a cell
-    # rendering, so the set to ask is the renderer's own
-    # (Verification-Harness-Traps §14). `magnifierTier` never answers
-    # `itProtocol`, so the two sets agree on every input this function can
-    # receive today; asking the wrong one anyway is how the pane's tier-0
-    # defect was written, one layer up.
-    raise newException(MagnifierError,
-      "image tier '" & tierName(effective) & "' cannot draw a magnifier: " &
-      "it is not in CellRenderableTiers, so there is no glyph table to blow " &
-      "the neighbourhood up with. Pick --image-tier=sextant for 2x3 or " &
-      "--image-tier=braille for 2x4 shape resolution")
   let geom = subCell(effective)
   let w = mag.magnifiedCols() * max(1, geom.cols)
   let h = mag.magnifiedRows() * max(1, geom.rows)

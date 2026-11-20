@@ -39,7 +39,7 @@
 ## Every assertion goes through `ck`/`ckEq`, which are TEMPLATES and not procs
 ## (§13). The last case asserts the tally against a number written from a run.
 
-import std/[math, strutils, unittest]
+import std/[math, strutils, unicode, unittest]
 
 import ../terminal_graphics
 
@@ -53,7 +53,7 @@ template ckEq(a, b: untyped) =
   inc countedAssertions
   check a == b
 
-const ExpectedAssertions = 798
+const ExpectedAssertions = 1106
   ## Written from a run. See the final case.
 
 # ---------------------------------------------------------------------------
@@ -278,25 +278,80 @@ suite "PLAT-14 deliverable 1: the glyph tables":
     ckEq glyphFor(itHalfBlock, 2), "▄"
     ckEq glyphFor(itHalfBlock, 3), "█"
 
-  test "octants REFUSE rather than drawing an unverified table":
-    # `tiers.nim`'s header states the reason. The refusal is asserted on the
-    # MESSAGE and not merely on the exception, because a message that did not
-    # name the remedy would leave a user with a tier that says "no".
-    ck itOctant notin DrawableTiers
-    var refused = false
-    var message = ""
-    try:
-      discard glyphFor(itOctant, 0)
-    except CellRenderError as e:
-      refused = true
-      message = e.msg
-    ck refused
-    ck message.contains("octant")
-    ck message.contains("not implemented")
-    ck message.contains("--image-tier=sextant")
-    # THE POSITIVE TWIN, through the same function: the tier beside it draws,
-    # so the refusal is about octants and not about `glyphFor` being broken.
-    ckEq glyphFor(itSextant, 1), "\u{1FB00}"
+  test "every octant mask has a distinct glyph: the U+1CD00 run and 26 legacy":
+    # The table is checked against Unicode 16.0's character names by
+    # `octant_table_unicode16.py`; this case asserts the same table from the
+    # Nim side, so an edit to `octantGlyph` that the script did not see still
+    # reddens a lane.
+    ck itOctant in DrawableTiers
+    ck itOctant in CellRenderableTiers
+    var seen: seq[string] = @[]
+    var run: seq[int] = @[]
+    for mask in 0 .. 255:
+      let g = glyphFor(itOctant, mask)
+      ck g notin seen
+      seen.add g
+      let cp = int(g.runeAt(0))
+      if cp >= 0x1CD00 and cp <= 0x1CDE5:
+        run.add cp
+    ckEq seen.len, 256
+    # THE RUN: 230 code points, every one used, in increasing mask order —
+    # which is what the index arithmetic assumes.
+    ckEq run.len, 230
+    var ordered = true
+    for i, cp in run:
+      if cp != 0x1CD00 + i: ordered = false
+    ck ordered
+    # THE 26 MASKS THE RUN SKIPS, by value (cells 1 2 / 3 4 / 5 6 / 7 8; bit
+    # `i` is cell `i + 1`).
+    ckEq glyphFor(itOctant, 0b00000000), " "
+    ckEq glyphFor(itOctant, 0b11111111), "█"
+    ckEq glyphFor(itOctant, 0b00001111), "▀"
+    ckEq glyphFor(itOctant, 0b11110000), "▄"
+    ckEq glyphFor(itOctant, 0b01010101), "▌"
+    ckEq glyphFor(itOctant, 0b10101010), "▐"
+    ckEq glyphFor(itOctant, 0b00000101), "▘"
+    ckEq glyphFor(itOctant, 0b10100101), "▚"
+    ckEq glyphFor(itOctant, 0b00000011), "\u{1FB82}"   # upper one quarter
+    ckEq glyphFor(itOctant, 0b11000000), "▂"   # lower one quarter
+    ckEq glyphFor(itOctant, 0b00111111), "\u{1FB85}"   # upper three quarters
+    ckEq glyphFor(itOctant, 0b11111100), "▆"   # lower three quarters
+    ckEq glyphFor(itOctant, 0b00010100), "\u{1FBE6}"   # middle left quarter
+    ckEq glyphFor(itOctant, 0b00101000), "\u{1FBE7}"   # middle right quarter
+    ckEq glyphFor(itOctant, 0b00000001), "\u{1CEA8}"   # cell 1 alone
+    ckEq glyphFor(itOctant, 0b00000010), "\u{1CEAB}"   # cell 2 alone
+    ckEq glyphFor(itOctant, 0b01000000), "\u{1CEA3}"   # cell 7 alone
+    ckEq glyphFor(itOctant, 0b10000000), "\u{1CEA0}"   # cell 8 alone
+    # …and the two ends of the run, which pin the arithmetic: cell 3 alone is
+    # the first mask with no legacy spelling, cells 2-8 the last.
+    ckEq glyphFor(itOctant, 0b00000100), "\u{1CD00}"
+    ckEq glyphFor(itOctant, 0b11111110), "\u{1CDE5}"
+
+  test "an octant rendering is exact on a 2x4 pattern the sextant cannot hold":
+    # Four rows of samples per cell: a band over the middle two rows is a
+    # two-colour mask for an octant cell, and three distinct samples for a
+    # sextant cell (its last row averages rows 2 and 3).
+    var px = newSeq[byte](2 * 4 * 4)
+    for y in 0 ..< 4:
+      for x in 0 ..< 2:
+        let c = if y in 1 .. 2: Red else: Blue
+        let i = (y * 2 + x) * 4
+        px[i] = c.r; px[i + 1] = c.g; px[i + 2] = c.b; px[i + 3] = 255
+    let img = initRgbaImage(2, 4, px)
+    let one = CellFit(cols: 1, rows: 1, aspect: DefaultCellAspect,
+                      sourceWidth: 2, sourceHeight: 4)
+    let grid = renderCells(img, itOctant, one)
+    ckEq grid.cells.len, 1
+    ckEq grid.cells[0].errorSq, 0.0
+    ckEq grid.candidatesEvaluated, 256
+    # The band is cells 3-6: mask 0b00111100, the lowest of it and its
+    # complement (the argmin's tie rule), red on blue.
+    let cell = grid.cells[0]
+    ckEq cell.glyph, glyphFor(itOctant, 0b00111100)
+    ckEq cell.fg, Red
+    ckEq cell.bg, Blue
+    # THE TWIN: the sextant tier cannot be exact on the same picture.
+    ck renderCells(img, itSextant, one).cells[0].errorSq > 0.0
 
   test "the ascii ramp is monotone and stays inside ASCII":
     ckEq asciiGlyph(DefaultAsciiRamp, 0.0), " "
@@ -357,7 +412,7 @@ suite "PLAT-14 deliverable 3: aspect correction, visible in the model":
       ckEq fit.cols, reference.cols
       ckEq fit.rows, reference.rows
       inc compared
-    ckEq compared, 5
+    ckEq compared, 6
 
 suite "PLAT-14 deliverables 1 and 2: the rendering":
 
@@ -462,16 +517,14 @@ suite "PLAT-14 deliverables 1 and 2: the rendering":
     # is what `app/views/frame_viewer.resolveGap` asks BEFORE it paints, so a
     # member here is a member there and the renderer's refusal and the pane's
     # pre-check cannot come apart (Verification-Harness-Traps §14).
-    ckEq CellRenderableTiers, {itHalfBlock, itQuadrant, itSextant, itBraille,
-                               itAscii}
+    ckEq CellRenderableTiers, {itHalfBlock, itQuadrant, itSextant, itOctant,
+                               itBraille, itAscii}
     # AND THE TWO SETS DIFFER IN EXACTLY ONE TIER, in the direction that
     # matters: tier 0 DRAWS (it emits an escape payload) and is NOT renderable
     # as cells. Asserted both ways round, because "drawable" reading as
     # "renderable" is the whole of the defect this case was extended for.
     ck itProtocol in DrawableTiers
     ck itProtocol notin CellRenderableTiers
-    ck itOctant notin DrawableTiers
-    ck itOctant notin CellRenderableTiers
     # …AND EVERY MEMBER ACTUALLY RENDERS, through the same function, so the set
     # is a claim about the renderer rather than a literal agreeing with a
     # comment (§4d).
@@ -479,7 +532,7 @@ suite "PLAT-14 deliverables 1 and 2: the rendering":
     for tier in CellRenderableTiers:
       ck renderCells(solid(4, 4, Red), tier, SquareFit).cells.len > 0
       inc rendered
-    ckEq rendered, 5
+    ckEq rendered, 6
 
   test "a raster whose buffer does not match its extent is refused":
     var refused = false
@@ -499,6 +552,92 @@ suite "PLAT-14 deliverables 1 and 2: the rendering":
     # The edge rule is a CLAMP: sampling past the right edge repeats it.
     ckEq img.pixelAt(99, 99), img.pixelAt(3, 3)
     ckEq img.pixelAt(-5, -5), img.pixelAt(0, 0)
+
+suite "§2: dithering diffuses the quantisation error":
+
+  proc grey(w, h, v: int): RgbaImage =
+    var px = newSeq[byte](w * h * 4)
+    for i in 0 ..< w * h:
+      px[i * 4] = byte(v); px[i * 4 + 1] = byte(v); px[i * 4 + 2] = byte(v)
+      px[i * 4 + 3] = 255
+    initRgbaImage(w, h, px)
+
+  proc gradient(w, h: int): RgbaImage =
+    var px = newSeq[byte](w * h * 4)
+    for y in 0 ..< h:
+      for x in 0 ..< w:
+        let i = (y * w + x) * 4
+        # A DIAGONAL ramp: inside one cell its samples take three or more
+        # values, which two colours per cell cannot carry exactly.
+        let t = (x + y) * 255 div (w + h - 2)
+        px[i] = byte(t); px[i + 1] = byte(40)
+        px[i + 2] = byte(255 - t); px[i + 3] = 255
+    initRgbaImage(w, h, px)
+
+  func levelOf(glyph: string): float =
+    ## The middle of the ramp bin a glyph stands for.
+    let bin = DefaultAsciiRamp.find(glyph)
+    (float(bin) + 0.5) / float(DefaultAsciiRamp.len)
+
+  test "an ASCII field between two ramp steps comes out as both, at its mean":
+    # Grey 31 is luminance 0.1216: inside the '.' bin (0.1-0.2), whose middle
+    # is 0.15. Undithered every cell is '.'; dithered, ' ' (0.05) and '.' mix
+    # so the MEAN of what is drawn is the field's luminance.
+    let img = grey(16, 4, 31)
+    let fit = CellFit(cols: 16, rows: 4, aspect: DefaultCellAspect,
+                      sourceWidth: 16, sourceHeight: 4)
+    let lum = 31.0 / 255.0
+    let plain = renderCells(img, itAscii, fit)
+    let dithered = renderCells(img, itAscii, fit, dither = dmDiffusion)
+    ckEq plain.dither, dmNone
+    ckEq dithered.dither, dmDiffusion
+    var plainSum, ditherSum = 0.0
+    var glyphs: seq[string] = @[]
+    for i in 0 ..< plain.cells.len:
+      plainSum += levelOf(plain.cells[i].glyph)
+      ditherSum += levelOf(dithered.cells[i].glyph)
+      if dithered.cells[i].glyph notin glyphs:
+        glyphs.add dithered.cells[i].glyph
+    let n = float(plain.cells.len)
+    checkpoint("plain mean " & $(plainSum / n) & ", dithered mean " &
+               $(ditherSum / n) & ", source " & $lum)
+    ck abs(plainSum / n - lum) > 0.02
+    ck abs(ditherSum / n - lum) < 0.01
+    ck " " in glyphs
+    ck "." in glyphs
+
+  test "a flat field, and a tier that is exact, are untouched by it":
+    # No residual, so nothing to diffuse: the dithered grid is the plain one.
+    let fit = CellFit(cols: 4, rows: 2, aspect: DefaultCellAspect,
+                      sourceWidth: 8, sourceHeight: 8)
+    var tiers = 0
+    for tier in CellRenderableTiers - {itAscii}:
+      let plain = renderCells(solid(8, 8, Red), tier, fit)
+      let dithered = renderCells(solid(8, 8, Red), tier, fit,
+                                 dither = dmDiffusion)
+      ckEq dithered.cells, plain.cells
+      inc tiers
+    ckEq tiers, 5
+    # The half block carries both of its samples exactly, so even a picture
+    # with detail is unchanged.
+    let img = gradient(8, 8)
+    ckEq renderCells(img, itHalfBlock, fit, dither = dmDiffusion).cells,
+         renderCells(img, itHalfBlock, fit).cells
+
+  test "diffusion moves a gradient's error, and the work bound stays":
+    let img = gradient(16, 8)
+    let fit = CellFit(cols: 4, rows: 2, aspect: DefaultCellAspect,
+                      sourceWidth: 16, sourceHeight: 8)
+    for tier in [itQuadrant, itSextant, itOctant, itBraille]:
+      let plain = renderCells(img, tier, fit)
+      let dithered = renderCells(img, tier, fit, dither = dmDiffusion)
+      checkpoint($tier)
+      # Non-vacuity: the diffusion changed what the argmin saw somewhere.
+      ck dithered.cells != plain.cells
+      # Diffusion moves samples, never how many candidates are evaluated.
+      ckEq dithered.candidatesEvaluated, plain.candidatesEvaluated
+      ckEq dithered.candidatesEvaluated,
+           fit.cols * fit.rows * candidatesPerCell(tier)
 
 suite "PLAT-14: the tally":
 
