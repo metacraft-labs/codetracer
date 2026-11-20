@@ -52,6 +52,8 @@ template ck(condition: untyped) =
   check condition
 
 const ExpectedAssertions = 892
+  ## 483 -> 892 on 2026-11-20: a declared tier and a computed one, through
+  ## both routes at every budget.
 
 # ---------------------------------------------------------------------------
 # One value, two ways

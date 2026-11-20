@@ -51,9 +51,10 @@ import std/[sets, strutils, unittest]
 import ./project_definitions
 import ./toml_subset
 
-const ExpectedAssertions = 1856
+const ExpectedAssertions = 1860
   ## Written from a run, and asserted against the tally at the end of the
-  ## file. `ci/lib/run-nim-test-lane.sh` reads this name.
+  ## file. `ci/lib/run-nim-test-lane.sh` reads this name. 1856 -> 1860 on
+  ## 2026-11-20 with the bounded tie report's case.
 
 var countedAssertions = 0
 
@@ -1168,6 +1169,29 @@ summary = "second"
         ck pr.detail.contains("earlier")
         explained = true
     ck explained
+
+  test "a file of identical rules reports its ties in bounded space":
+    # PLAT-11's residue 8: 256 identical rules in ONE file produced 32,640
+    # problem records and a 12 MB report, from a 12 KB file — a thousandfold
+    # amplification a repository ships. Each tied rule is now named once, at
+    # most `MaxTieReports` of them, and the rest are COUNTED, not dropped.
+    var text = "schema = \"codetracer.visualisers.v1\"\n"
+    for i in 0 ..< MaxVisualiserRules:
+      text.add "\n[[visualiser]]\nmatch = \"Matrix\"\nsummary = \"r" & $i &
+               "\"\n"
+    let loaded = loadProjectDefinitions([visualisersFile(text)])
+    ckEq loaded.project.visualisers.len, MaxVisualiserRules
+    var ties = 0
+    var counted = false
+    for pr in loaded.problems:
+      if pr.code == pdnRuleTieReported:
+        inc ties
+        if pr.detail.contains($(MaxVisualiserRules - 1 - MaxTieReports) &
+                              " more visualiser rule(s) tie"):
+          counted = true
+    ckEq ties, MaxTieReports + 1
+    ck counted
+    ck describeLoad(loaded).len < 64 * 1024
 
   test "a more specific rule outranks a less specific one at the same scope":
     let f = visualisersFile("""
