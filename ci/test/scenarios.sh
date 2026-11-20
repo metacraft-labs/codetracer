@@ -349,20 +349,20 @@ run)
 	flavour="${2:?usage: scenarios.sh run <flavour> <scenario.yaml> [args]}"
 	scenario="${3:?usage: scenarios.sh run <flavour> <scenario.yaml> [args]}"
 	shift 3
-	settle=()
-	# A GPU window drawn by a software renderer on a loaded machine takes
-	# longer than the runner's default 5 s to stop changing after an input,
-	# and so does Electron at a 1-minute load above 100 (each lane says so too).
-	case "${flavour}" in
-	gpui) settle=(--settle-timeout 30000) ;;
-	# the terminal settles only once the application has read its input, which
-	# a loaded host can delay by seconds
-	terminal) settle=(--settle-timeout 15000) ;;
-	electron) settle=(--settle-timeout 15000) ;;
-	esac
+	# One scenario runs with its lane's time limits, which the lane file says
+	# why it needs (a software-rendered window settles slowly; a stage records
+	# a program on a cold fixture cache). `run` once copied only the settle
+	# limits, so a stage got dvs's default 120 s here and 300 s in the lane: a
+	# fresh worktree's first `rr record` of pascal-sudoku took 121 s at load
+	# 80 and failed. Arguments after the scenario come later and win.
+	limits=()
+	for key in settle-timeout stage-timeout; do
+		value="$(sed -n "s/^${key}: *\([0-9][0-9]*\) *$/\1/p" "${S}/lanes/${flavour}.lane.yaml" 2>/dev/null | head -1)"
+		if [ -n "${value}" ]; then limits+=("--${key}" "${value}"); fi
+	done
 	ensure_built "${flavour}"
 	"$(runner_of "${flavour}")" run "${scenario}" --pack "${S}/pack/codetracer.pack.yaml" \
-		--backend "$(backend_of "${flavour}")" --build "${build_dir}" "${settle[@]}" "$@"
+		--backend "$(backend_of "${flavour}")" --build "${build_dir}" "${limits[@]}" "$@"
 	;;
 stage-test)
 	# The stage tool's own tests (stages/*_test.nim): what a stage decides

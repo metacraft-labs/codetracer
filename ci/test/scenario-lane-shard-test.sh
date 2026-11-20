@@ -55,7 +55,7 @@ if grep -q '^name: gpui-shard-2-of-3$' "$out"; then
 else
 	fail "the shard file does not rename the lane"
 fi
-for key in pack backend modes settle-timeout unsupported; do
+for key in pack backend modes settle-timeout stage-timeout unsupported; do
 	grep -q "^$key:" "$out" || fail "the shard file lost '$key:'"
 done
 if [ "$(sed -n '/^applicable:/,/^[^ ]/{s/^ *- //p}' "$out")" = "$(python3 "$shard" "$lane" 2/3 --list)" ]; then

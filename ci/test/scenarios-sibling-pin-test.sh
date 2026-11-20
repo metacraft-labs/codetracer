@@ -26,7 +26,10 @@
 #        (so 2 is the check refusing, not the build failing), with a warning;
 #     4. `run` with that off-pin `dvs` and the opt-out unset rebuilds it,
 #        which refuses, and the off-pin program does not run;
-#     5. back at the pin, `run` rebuilds `dvs` from the pin and runs it.
+#     5. back at the pin, `run` rebuilds `dvs` from the pin and runs it,
+#        with the lane file's settle and stage limits (a stage given dvs's
+#        default 120 s instead of the lane's 300 s failed a first recording);
+#     6. CONTROL: an argument after the scenario overrides the lane's limit.
 #   SCENARIOS_SH=<path> runs the same checks against another copy of the
 #   script: against the `scenarios.sh` before this check, the off-pin build
 #   of 2 compiles, and nothing records what a build used.
@@ -41,8 +44,10 @@ trap '[ -n "${KEEP_SCRATCH:-}" ] || rm -rf "${scratch}"' EXIT
 ws="${scratch}/ws"
 root="${ws}/ct"
 mkdir -p "${root}/ci/test/siblings" "${root}/node_modules/playwright-core" \
-	"${root}/src/tests/scenarios/pack" "${scratch}/tools"
+	"${root}/src/tests/scenarios/pack" "${root}/src/tests/scenarios/lanes" "${scratch}/tools"
 cp "${script}" "${root}/ci/test/scenarios.sh"
+printf 'lane: 1\nname: electron\nsettle-timeout: 15000\nstage-timeout: 300000\n' \
+	>"${root}/src/tests/scenarios/lanes/electron.lane.yaml"
 
 git_in() { git -C "$1" -c user.name=t -c user.email=t@example.invalid -c commit.gpgsign=false "${@:2}"; }
 
@@ -142,8 +147,18 @@ if sh_ run electron some.yaml >"${scratch}/5.log" 2>&1; then
 	grep -q "DemoVideoScript ${pinned}" "${root}/build/bin/.siblings-dvs" ||
 		fail "5: run did not rebuild dvs from the pin"
 	grep -q "/dvs run some.yaml" "${runs}" || fail "5: dvs did not run"
+	tail -n 1 "${runs}" | grep -q -- "--settle-timeout 15000 --stage-timeout 300000" ||
+		fail "5: run did not pass the lane's limits: $(tail -n 1 "${runs}")"
 else
 	fail "5: run at the pin failed: $(cat "${scratch}/5.log")"
+fi
+
+# 6. CONTROL: a limit given after the scenario comes last, so dvs takes it.
+if sh_ run electron some.yaml --stage-timeout 1000 >"${scratch}/6.log" 2>&1; then
+	tail -n 1 "${runs}" | grep -q -- "--stage-timeout 300000 --stage-timeout 1000$" ||
+		fail "6: the caller's limit does not come after the lane's: $(tail -n 1 "${runs}")"
+else
+	fail "6: run with a limit failed: $(cat "${scratch}/6.log")"
 fi
 
 if [ "${failures}" -ne 0 ]; then
