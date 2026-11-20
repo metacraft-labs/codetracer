@@ -314,6 +314,30 @@ suite "Agentic ViewModel M4 matrix":
         fixture.assertWorkspaceSwitch()
       dispose()
 
+  test "test_agentic_vm_workspace_toggle_switches_and_holds":
+    createRoot proc(dispose: proc()) =
+      for backend in [mbAcp, mbHarbor]:
+        let fixture = makeFixture(backend)
+        discard fixture.start()
+        fixture.vm.setUserEditorState("/repo/src/user.nim", "user buffer")
+        fixture.vm.activateAgentTab(backend.expectedTabId())
+        check fixture.vm.workspaceMode.val == awmAgentWorkspace
+
+        # "Switch to User": the user's workspace, and it holds through the
+        # projection a running session's poll redraws the pane from.
+        fixture.vm.toggleWorkspaceMode()
+        check fixture.vm.workspaceMode.val == awmUserWorkspace
+        check fixture.vm.activeEditorPath.val == "/repo/src/user.nim"
+        fixture.vm.refreshActiveProjection()
+        fixture.vm.refreshAgentWorkspaceFiles()
+        check fixture.vm.workspaceMode.val == awmUserWorkspace
+
+        # "Switch to Agent": back to the active agent tab's workspace.
+        fixture.vm.toggleWorkspaceMode()
+        check fixture.vm.workspaceMode.val == awmAgentWorkspace
+        check fixture.vm.activeEditorPath.val == "src/app.nim"
+      dispose()
+
   test "test_agentic_vm_preserves_user_workspace_state":
     createRoot proc(dispose: proc()) =
       for backend in [mbAcp, mbHarbor]:

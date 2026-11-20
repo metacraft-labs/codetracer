@@ -136,6 +136,10 @@ type
       ## folders, etc.).  Cleared after submission along with pastedImages.
     settingsOpen*: Signal[bool]
     settingsRuntime*: Signal[string]
+    settingsExtraRuntimes*: Signal[seq[string]]
+      ## Runtimes the host offers beyond the built-in list, after it:
+      ## "Agent Harbor worktree" when a Harbor server is configured
+      ## (Agentic-Coding-Integration.md §6.8).
     settingsCpu*: Signal[string]
     settingsMemory*: Signal[string]
     settingsNetworkAccess*: Signal[bool]
@@ -478,6 +482,16 @@ proc agentSessionRunning*(session: AgentServiceSessionEntry): bool =
   ## (`headless_app/session_tabs.agentOf`, the same two lifecycles).
   session.lifecycle in {aslConnecting, aslRunning}
 
+proc harborDrivesPane*(harbor: AgentServiceSessionEntry): bool =
+  ## Whether an Agent Harbor worktree session (`harbor`, the launcher's active
+  ## session; an entry with no session id when there is none) drives the Agent
+  ## Activity pane. While it does it owns the pane's conversation, its busy
+  ## state and its session key (`applyAgentSession`): the pane's own ACP flow
+  ## wrote the same ViewModel fields in turn, for its own idle session, so a
+  ## running worktree session never offered Stop and a stopped one never said
+  ## it was cancelled.
+  harbor.backend == asbHarbor and harbor.sessionId.len > 0
+
 proc applyAgentSession*(vm: AgentActivityVM;
                         session: AgentServiceSessionEntry) =
   ## Put a live session into the panel.
@@ -633,6 +647,7 @@ proc createAgentActivityVM*(store: ReplayDataStore): AgentActivityVM =
     let contextPaths = createSignal(newSeq[string]())
     let settingsOpen = createSignal(false)
     let settingsRuntime = createSignal("devcontainer")
+    let settingsExtraRuntimes = createSignal(newSeq[string]())
     let settingsCpu = createSignal("2 cores")
     let settingsMemory = createSignal("4 GB")
     let settingsNetworkAccess = createSignal(false)
@@ -683,6 +698,7 @@ proc createAgentActivityVM*(store: ReplayDataStore): AgentActivityVM =
       contextPaths: contextPaths,
       settingsOpen: settingsOpen,
       settingsRuntime: settingsRuntime,
+      settingsExtraRuntimes: settingsExtraRuntimes,
       settingsCpu: settingsCpu,
       settingsMemory: settingsMemory,
       settingsNetworkAccess: settingsNetworkAccess,

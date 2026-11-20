@@ -7,18 +7,20 @@ from git_cli import gitWorkingDirectory, gitExec, isGitRepository,
 import std/json
 from ../viewmodel/backend/backend_service import BackendService, BackendFuture
 import ../viewmodel/store/replay_data_store
+from ../viewmodel/agent_harbor_task import taskFromAgentPrompt
 from ../viewmodel/store/types as vmtypes import
   AgentActivityMessageEntry, AgentActivityMessageRole,
   AgentActivityDiffEntry, AgentActivityTerminalEntry,
   AgentActivityToolCallEntry, AgentActivitySegment,
-  aamrAgent, aamrUser
+  aamrAgent, aamrUser, AgentServiceSessionEntry
 from ../viewmodel/viewmodels/agent_activity_vm import
   AgentActivityVM, createAgentActivityVM, setMessages, setTerminals,
   setInputValue, setLoading, setReRecordInProgress, setPromptFlags,
   setPermissionInfo, setSessionKey, setBranchState, traceOpen, reviewOpen,
   applyEvidenceDataset, retryPendingEvidenceInspections,
   clearPastedImages, getPastedImages, toggleSettingsOpen,
-  addContextPath, removeContextPath, clearContextPaths, getContextPaths
+  addContextPath, removeContextPath, clearContextPaths, getContextPaths,
+  harborDrivesPane, applyAgentSession
 from ../viewmodel/viewmodels/trace_open import
   TraceOpenService, TraceOpenRequest, TraceOpenPolicy, topCurrentTab, topNewTab
 from ../viewmodel/viewmodels/review_open import ReviewOpenService
@@ -61,6 +63,19 @@ var agentActivityVMInstances*: JsAssoc[int, AgentActivityVM] =
 var agentActivityComponentRefs: JsAssoc[int, AgentActivityComponent] =
   JsAssoc[int, AgentActivityComponent]{}
 var msgSegmentStartOffset = JsAssoc[cstring, int]{}
+
+const AgentHarborWorktreeRuntime* = "Agent Harbor worktree"
+  ## The Runtime choice that sends the prompt to Agent Harbor as a worktree
+  ## session (codetracer-pm DeepReview/Agentic-Coding-Integration.md §6.8).
+
+var startWorktreeSessionHook*: proc(prompt: cstring): bool = nil
+  ## Set by `agentic_session_launcher` (which imports this module): start a
+  ## worktree session with `prompt`; false when it could not (it says why).
+var stopWorktreeSessionHook*: proc(): bool = nil
+  ## Set by `agentic_session_launcher`: stop the running worktree session;
+  ## false when none is running.
+var worktreeRuntimeAvailable*: proc(): bool = nil
+  ## Set by `agentic_session_launcher`: whether a Harbor server is configured.
   ## Buffer byte offset where the current text segment began.
   ## Updated each time a tool call arrives so subsequent text chunks show only
   ## post-tool content rather than the full accumulated message buffer.
@@ -325,6 +340,12 @@ proc ensureAgentActivityVM(self: AgentActivityComponent;
   result.traceOpen = agentActivityTraceOpenService
   # AA-3: the same, for the evidence cards' review datasets.
   result.reviewOpen = agentActivityReviewOpenService
+  # §6.8: the Agent Harbor worktree runtime, when a Harbor server is
+  # configured, and it is the runtime a new pane starts with: configuring a
+  # Harbor server is the user's choice of where agent work runs.
+  if not worktreeRuntimeAvailable.isNil and worktreeRuntimeAvailable():
+    result.settingsExtraRuntimes.val = @[AgentHarborWorktreeRuntime]
+    result.settingsRuntime.val = AgentHarborWorktreeRuntime
   # A panel that mounts into a review already in progress shows that review's
   # session, not an empty conversation.
   replayReviewSessionInto(result)
@@ -438,6 +459,12 @@ proc ensureAgentActivityRuntime(self: AgentActivityComponent) =
     })
     self.acpInitSent = true
 
+var harborSessionHook*: proc(): AgentServiceSessionEntry = nil
+  ## Installed by `ui/agentic_session_launcher`: the Agent Harbor worktree
+  ## session it drives the pane with (no session id when none), which owns the
+  ## pane's conversation, busy state and session key while it runs
+  ## (`agent_activity_vm.harborDrivesPane`, `applyAgentSession`).
+
 proc syncLegacyAgentActivityIntoVM*(self: AgentActivityComponent) =
   if self.isNil:
     return
@@ -446,11 +473,17 @@ proc syncLegacyAgentActivityIntoVM*(self: AgentActivityComponent) =
   let vm = ensureAgentActivityVM(self)
   if vm.isNil:
     return
-  vm.setSessionKey(safeStr(self.currentSessionKey()))
-  vm.setMessages(self.currentMessagesToVm())
+  let harbor =
+    if harborSessionHook.isNil: AgentServiceSessionEntry() else: harborSessionHook()
+  if harbor.harborDrivesPane:
+    # The Harbor session owns the conversation, the busy state and the key.
+    vm.applyAgentSession(harbor)
+  else:
+    vm.setSessionKey(safeStr(self.currentSessionKey()))
+    vm.setMessages(self.currentMessagesToVm())
+    vm.setLoading(self.isLoading)
   vm.setTerminals(self.currentTerminalsToVm())
   vm.setInputValue(safeStr(self.inputValue))
-  vm.setLoading(self.isLoading)
   vm.setReRecordInProgress(self.reRecordInProgress)
   vm.setPermissionInfo(safeStr(self.permissionDescription))
   vm.setPromptFlags(self.wantsPassword, self.wantsPermission)
@@ -601,6 +634,15 @@ proc submitPrompt(self: AgentActivityComponent) =
   if promptText.len == 0:
     return
 
+  # §6.8: with the Agent Harbor worktree runtime chosen, the prompt starts a
+  # worktree session on Harbor instead of going to the ACP agent.
+  let vm = ensureAgentActivityVM(self)
+  if not vm.isNil and vm.settingsRuntime.val == AgentHarborWorktreeRuntime and
+     not startWorktreeSessionHook.isNil:
+    self.clear()
+    discard startWorktreeSessionHook(promptText)
+    return
+
   self.updateAgentUi(promptText)
 
 proc clear(self: AgentActivityComponent) =
@@ -665,8 +707,17 @@ proc afterAgentActivityDynamicRender(self: AgentActivityComponent) =
       terminal.shell.initialized = true
 
   if data.lastAgentPrompt != "" and not data.lastAgentPrompt.isNil:
-    self.updateAgentUi(data.lastAgentPrompt)
+    let prompt = data.lastAgentPrompt
     data.lastAgentPrompt = ""
+    # The omnibox's `/ai <prompt>` (Agentic-Coding-Integration.md §8.1) goes
+    # where the pane's own Send would: to Agent Harbor as a worktree session
+    # when that is the runtime (§6.8).
+    let vm = ensureAgentActivityVM(self)
+    if not vm.isNil and vm.settingsRuntime.val == AgentHarborWorktreeRuntime and
+       not startWorktreeSessionHook.isNil:
+      discard startWorktreeSessionHook(cstring(taskFromAgentPrompt($prompt)))
+    else:
+      self.updateAgentUi(prompt)
 
 when defined(js):
   proc activeEditorSelectionContext(): string =
@@ -723,6 +774,12 @@ when defined(js):
         self.sessionMessageIds[key][^1].isLoading = true
       self.syncLegacyAgentActivityIntoVM()
     result.onStopPrompt = proc() =
+      # §6.8: a running worktree session is stopped on Harbor.
+      if not stopWorktreeSessionHook.isNil and stopWorktreeSessionHook():
+        self.isLoading = false
+        self.promptInFlight = false
+        self.syncLegacyAgentActivityIntoVM()
+        return
       var cancelId = cstring""
       if self.activeAgentMessageId.len > 0:
         cancelId = self.activeAgentMessageId

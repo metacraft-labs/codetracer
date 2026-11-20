@@ -2594,6 +2594,10 @@ proc bindWindowToSession(session: ReplaySession) =
   when not defined(ctWeb):
     initPanelVM("installAgenticWorktreeTestHooks"):
       agentic_worktree_test_hooks.installAgenticWorktreeTestHooks(vm.store)
+    # After the test hooks, which install the launcher with their external
+    # action when a test runs: the product path then reuses it.
+    initPanelVM("installUserWorktreePath"):
+      agentic_session_launcher.installUserWorktreePath(vm.store)
 
 # Every tab switch binds the window to the tab it shows.
 session_switch.setSessionBindProc(bindWindowToSession)

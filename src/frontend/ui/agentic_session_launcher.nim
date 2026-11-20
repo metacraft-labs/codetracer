@@ -6,7 +6,8 @@
 ## hook may provide deterministic launch config and external shell actions, but
 ## it does not provide GUI snapshots.
 
-import std/[json, sequtils, strutils]
+import std/[json, options, sequtils, strutils]
+from std/os import extractFilename
 
 import nim_agent_harbor
 import nim_agents
@@ -17,11 +18,14 @@ import ui_imports
 import ../event_helpers
 import ../utils
 import ../viewmodel/agent_service
+import ../viewmodel/agent_harbor_task
+import ../viewmodel/agent_evidence
 import ../viewmodel/store/replay_data_store
 import ../viewmodel/store/types
 import ../viewmodel/viewmodels/[agent_activity_vm, agent_workspace_vm,
   agentic_session_vm, deepreview_vm, editor_vm, review_entry, vcs_vm]
 import agent_activity, agent_workspace, caption_bar_progress, vcs
+
 
 const
   AgentActivityId* = 7901
@@ -307,15 +311,46 @@ proc deepReviewData(launcher: AgenticSessionLauncher): DeepReviewData =
     files: files,
     callTrace: DeepReviewCallTrace(nodes: @[]))
 
+var
+  panelIds: array[Content, int]
+  panelChosen: array[Content, bool]
+  ## The pane the launcher shows each of its panels in (`ensurePanel`): its
+  ## own id, or that of a pane of the same kind the layout already had.
+
+proc mappedIds(mapping: JsAssoc[int, Component]): seq[int] {.importjs:
+  "Object.keys(#).map(function(k){ return parseInt(k, 10); }).sort(function(a, b){ return a - b; })".}
+  ## The ids a component mapping holds, as numbers (a JavaScript object's keys
+  ## are strings), lowest first.
+
+proc panelId(content: Content; fallback: int): int =
+  if panelChosen[content]: panelIds[content] else: fallback
+
 proc ensurePanel(content: Content; id: int) =
+  ## Show `content`'s panel. A pane of that kind the layout already has is
+  ## the one used: opening the launcher's own beside it left two Agent
+  ## Activity panes, the session in one and an empty prompt in the other,
+  ## which the user (and the scenarios) found first.
   if data.ui.layout.isNil:
     raise newException(ValueError,
       "M7 requires the normal CodeTracer GoldenLayout to be initialized")
+  var existing = -1
   if data.ui.componentMapping[content].hasKey(id) and
       not data.ui.componentMapping[content][id].layoutItem.isNil:
-    data.ui.componentMapping[content][id].layoutItem.parent.setActiveContentItem(
-      data.ui.componentMapping[content][id].layoutItem)
+    existing = id
+  else:
+    for other in mappedIds(data.ui.componentMapping[content]):
+      let component = data.ui.componentMapping[content][other]
+      if not component.isNil and not component.layoutItem.isNil:
+        existing = other
+        break
+  if existing >= 0:
+    panelIds[content] = existing
+    panelChosen[content] = true
+    let item = data.ui.componentMapping[content][existing].layoutItem
+    item.parent.setActiveContentItem(item)
     return
+  panelIds[content] = id
+  panelChosen[content] = true
   data.openLayoutTab(content, id = id)
 
 proc ensureAgenticPanels*(includeDeepReview: bool) =
@@ -336,7 +371,7 @@ proc ensureAgenticPanels*(includeDeepReview: bool) =
 proc syncCaption(launcher: AgenticSessionLauncher) =
   let session = launcher.activeEntry()
   let comp = CaptionBarProgressComponent(
-    data.ui.componentMapping[Content.CaptionBarProgress][CaptionId])
+    data.ui.componentMapping[Content.CaptionBarProgress][panelId(Content.CaptionBarProgress, CaptionId)])
   comp.progress = session.progressFromSession()
   comp.viewState = WorkspaceViewState(
     activeView:
@@ -351,7 +386,7 @@ proc syncCaption(launcher: AgenticSessionLauncher) =
 proc syncActivity(launcher: AgenticSessionLauncher) =
   let session = launcher.activeEntry()
   let comp = AgentActivityComponent(
-    data.ui.componentMapping[Content.AgentActivity][AgentActivityId])
+    data.ui.componentMapping[Content.AgentActivity][panelId(Content.AgentActivity, AgentActivityId)])
   comp.sessionId = cstring session.sessionId
   comp.pendingSessionId = cstring session.tabId
   comp.workspaceDir = cstring session.workspacePath
@@ -378,7 +413,7 @@ proc syncActivity(launcher: AgenticSessionLauncher) =
 proc syncWorkspace(launcher: AgenticSessionLauncher) =
   let session = launcher.activeEntry()
   let comp = AgentWorkspaceComponent(
-    data.ui.componentMapping[Content.AgentWorkspace][AgentWorkspaceId])
+    data.ui.componentMapping[Content.AgentWorkspace][panelId(Content.AgentWorkspace, AgentWorkspaceId)])
   let isAgent = launcher.vm.workspaceMode.val == awmAgentWorkspace
   comp.viewState = WorkspaceViewState(
     activeView: if isAgent: AgentWorkspace else: UserWorkspace,
@@ -415,9 +450,9 @@ proc syncVcs(launcher: AgenticSessionLauncher) =
   launcher.vm.vcs.setGitRepoState(true)
   launcher.vm.vcs.setBranchState("agent-worktree", ["agent-worktree"], false)
   launcher.vm.vcs.setCommits([], [])
-  if not data.ui.componentMapping[Content.VCS].hasKey(VcsId):
+  if not data.ui.componentMapping[Content.VCS].hasKey(panelId(Content.VCS, VcsId)):
     return
-  let comp = VCSComponent(data.ui.componentMapping[Content.VCS][VcsId])
+  let comp = VCSComponent(data.ui.componentMapping[Content.VCS][panelId(Content.VCS, VcsId)])
   if comp.isNil:
     return
   # The panel's first load answers later; one still in flight must not
@@ -509,7 +544,19 @@ proc refreshActiveHarborSession(launcher: AgenticSessionLauncher) =
   launcher.service.refreshHarborSessionInfo(launcher.activeTabId, agentSession,
     launcher.userWorkspacePath)
   let refreshed = launcher.activeEntry()
-  if not launcher.externalAction.isNil and refreshed.workspacePath.len > 0:
+  # A session the omnibox's `/ai` started has no raw input to echo
+  # (`lastInputRaw` is ""): parsing it raised, and the exception ended the
+  # poll that reads the worktree's files and the evidence.
+  # The `scenario-effect` is the legacy M7 bridge's (`agentic-worktree.spec.ts`,
+  # whose payload names its `bridgeExecutable` and `artifactDir`): it writes
+  # the agent's edit from outside. A session whose agent makes its own edits
+  # (every session the prompt or the omnibox starts) has no bridge: the test
+  # build's runner threw "artifactDir is required", a JavaScript error, and
+  # it ended the poll after its first `/info`, so the Agent Workspace kept
+  # the files of before the edit and the prompt never offered Stop.
+  if not launcher.externalAction.isNil and refreshed.workspacePath.len > 0 and
+      launcher.lastInputRaw.len > 0 and
+      parseJson(launcher.lastInputRaw).hasKey("bridgeExecutable"):
     var request = parseJson(launcher.lastInputRaw)
     request["tabId"] = %launcher.activeTabId
     request["sessionId"] = %refreshed.sessionId
@@ -702,6 +749,18 @@ proc installAgenticSessionLauncher*(store: ReplayDataStore;
     externalAction: AgenticSessionExternalAction = nil): AgenticSessionLauncher =
   currentAgenticSessionLauncher = createAgenticSessionLauncher(store,
     externalAction)
+  workspaceToggleHook = proc(): bool =
+    let launcher = currentAgenticSessionLauncher
+    if launcher.isNil or launcher.activeTabId.len == 0:
+      return false
+    launcher.vm.toggleWorkspaceMode()
+    launcher.syncProductPanels()
+    true
+  harborSessionHook = proc(): AgentServiceSessionEntry =
+    let launcher = currentAgenticSessionLauncher
+    if launcher.isNil or launcher.activeTabId.len == 0:
+      return AgentServiceSessionEntry()
+    launcher.activeEntry()
   currentAgenticSessionLauncher
 
 proc configureAgenticWorktreeLaunch*(inputRaw: cstring) =
@@ -710,19 +769,249 @@ proc configureAgenticWorktreeLaunch*(inputRaw: cstring) =
       "CodeTracer agentic session launcher is not installed")
   currentAgenticSessionLauncher.lastInputRaw = $inputRaw
 
-proc startAgenticWorktreeSessionFromCommandPalette*() =
+
+# ---------------------------------------------------------------------------
+# The user's path (codetracer-pm DeepReview/Agentic-Coding-Integration.md §6.8)
+# ---------------------------------------------------------------------------
+
+const
+  HarborEvidencePollMs = 2000
+    ## How often a running worktree session's history is read for evidence.
+
+var worktreeSessionCounter = 0
+
+
+when defined(js):
+  proc promptBoxText(): cstring {.importjs:
+    "((document.querySelector('textarea[id^=\"agent-query-text\"]') || {}).value || '')".}
+    ## The Agent Activity prompt box's text.
+else:
+  proc promptBoxText(): cstring = cstring""
+
+when defined(js):
+  proc orEmpty(value: cstring): cstring {.importjs: "(function(v) { return v == null ? '' : v; })(#)".}
+    ## A config string js-yaml left undefined (the key is absent) reads "".
+  proc cfgString(value: cstring): string = $orEmpty(value)
+else:
+  proc cfgString(value: cstring): string =
+    if value.isNil: "" else: $value
+
+proc harborSettings(): AgentHarborConfig =
+  if data.isNil or data.config.isNil: nil
+  else: data.config.agentHarbor
+
+proc agentHarborConfigured*(): bool =
+  ## Whether the config (or `CODETRACER_AGENT_HARBOR_URL`) names a Harbor
+  ## server.
+  let cfg = harborSettings()
+  not cfg.isNil and cfg.baseUrl.cfgString.len > 0
+
+
+proc harborHeaders(launcher: AgenticSessionLauncher): seq[HttpHeader] =
+  result = @[header("Accept", "application/json")]
+  if launcher.harborApiKey.len > 0:
+    result.add header("X-API-Key", launcher.harborApiKey)
+
+proc harborUrl(launcher: AgenticSessionLauncher; path: string): string =
+  launcher.harborBaseUrl.strip(leading = false, chars = {'/'}) & path
+
+proc worktreeLaunchPayload*(prompt, workspace: string;
+                            cfg: AgentHarborConfig; sessionKey: string): JsonNode =
+  ## The launch the product makes for the user's prompt: the open workspace as
+  ## the task's repository, the agent, its arguments and the model from the
+  ## config.
+  var args = newJArray()
+  # js-yaml leaves `agentArgs` undefined when the config omits it.
+  when defined(js):
+    let hasArgs = not cast[JsObject](cfg)["agentArgs"].isUndefined and
+                  not cast[JsObject](cfg)["agentArgs"].isNull
+  else:
+    let hasArgs = true
+  if hasArgs:
+    for a in cfg.agentArgs:
+      args.add %($a)
+  let firstLine = prompt.strip.splitLines()
+  let title =
+    if firstLine.len > 0 and firstLine[0].len > 0: firstLine[0]
+    else: "Agent worktree task"
+  result = %*{
+    "userWorkspacePath": workspace,
+    "agentHarborBaseUrl": cfg.baseUrl.cfgString,
+    "agentHarborApiKey": cfg.apiKey.cfgString,
+    "prompt": prompt,
+    "taskTitle": (if title.len > 80: title[0 ..< 80] else: title),
+    "acpBinary": cfg.agent.cfgString,
+    "acpArgs": args,
+    "context": newJArray(),
+    "tenantId": "local",
+    "projectId": workspace.extractFilename,
+    "repoUrl": "file://" & workspace,
+    "branch": "HEAD",
+    "commit": "HEAD",
+    "sessionKey": sessionKey
+  }
+  if cfg.model.cfgString.len > 0:
+    result["model"] = %cfg.model.cfgString
+
+proc pollHarborEvidence*(launcher: AgenticSessionLauncher): bool =
+  ## Read the running session's durable history and, when `ct agent
+  ## evidence`'s notification is there, apply it as the RPC would be: DeepReview
+  ## opens. True once applied.
+  if launcher.isNil or launcher.service.isNil:
+    return false
+  let session = launcher.activeEntry()
+  if session.sessionId.len == 0:
+    return false
+  let response = rendererHttpTransport()(newRequest(hmGet,
+    launcher.harborUrl("/api/v1/sessions/" & session.sessionId &
+      "/events/history?limit=200"), "", launcher.harborHeaders()))
+  if response.status < 200 or response.status >= 300:
+    return false
+  var history: JsonNode
+  try:
+    history = parseJson(response.body)
+  except CatchableError:
+    return false
+  let found = evidenceFromHarborHistory(history)
+  if found.isNone:
+    return false
+  let notification = found.get
+  # The evidence belongs to the tab the session runs in, whatever the agent
+  # named in its own flags.
+  notification["tabId"] = %launcher.activeTabId
+  if notification{"sessionId"}.getStr().len == 0:
+    notification["sessionId"] = %session.sessionId
+  if not launcher.vm.handleAgentEvidenceRpcPayload($notification):
+    return false
+  launcher.syncProductPanels()
+  true
+
+proc refreshWorkspaceFiles(launcher: AgenticSessionLauncher;
+                           fileListOnly = false) =
+  try:
+    launcher.vm.refreshAgentWorkspaceFiles(fileListOnly)
+  except CatchableError:
+    cerror "agentic session: reading the agent workspace files failed: " & getCurrentExceptionMsg()
+
+proc scheduleEvidencePoll(launcher: AgenticSessionLauncher; tabId: string) =
+  ## Read the history again until the evidence arrives or the session ends,
+  ## and the worktree's files with it. The agent records its evidence after
+  ## its edits, so the files read when the evidence lands are the edited ones:
+  ## stopping at the evidence without them left the Agent Workspace with the
+  ## files of the tick before the edit.
+  discard windowSetTimeout(proc() =
+    if launcher.activeTabId != tabId:
+      return
+    let entry = launcher.activeEntry()
+    if entry.lifecycle in {aslCancelled, aslError}:
+      return
+    var applied = false
+    try:
+      launcher.refreshActiveHarborSession()
+      launcher.refreshWorkspaceFiles()
+      applied = launcher.pollHarborEvidence()
+      if applied:
+        # The evidence comes after the edits it records; the list read above
+        # may predate them.
+        launcher.refreshWorkspaceFiles(fileListOnly = true)
+      launcher.syncProductPanels()
+    except:
+      # A bare `except`: a JavaScript error is not a `CatchableError`, and
+      # one escaping here ended the poll for good after its first `/info`.
+      cerror "agentic session: the Agent Harbor poll failed: " & getCurrentExceptionMsg()
+    if not applied:
+      launcher.scheduleEvidencePoll(tabId)
+  , HarborEvidencePollMs)
+
+proc stopWorktreeSession*(launcher: AgenticSessionLauncher): bool =
+  ## Stop: cancel the running session's Harbor task. False when there is no
+  ## running worktree session.
+  if launcher.isNil or launcher.service.isNil or launcher.activeTabId.len == 0:
+    return false
+  let entry = launcher.activeEntry()
+  if entry.taskId.len == 0 or entry.lifecycle in {aslCancelled, aslError,
+                                                    aslCompleted}:
+    return false
+  let response = rendererHttpTransport()(newRequest(hmDelete,
+    launcher.harborUrl("/api/v1/tasks/" & entry.taskId), "",
+    launcher.harborHeaders()))
+  if response.status < 200 or response.status >= 300:
+    data.viewsApi.errorMessage(cstring("Agent Harbor did not stop the task: HTTP " &
+      $response.status))
+    return true
+  launcher.service.markSessionCancelled(launcher.activeTabId)
+  launcher.vm.activateAgentTab(launcher.activeTabId)
+  launcher.syncProductPanels()
+  true
+
+proc startWorktreeSessionFromPrompt*(prompt: cstring): bool =
+  ## Send with the Agent Harbor worktree runtime, and the palette's "Start
+  ## agent worktree session": a worktree session on the configured Harbor for
+  ## the open workspace. Says what is missing when it cannot.
   ensureAgenticPanels(includeDeepReview = false)
+  let cfg = harborSettings()
+  if not agentHarborConfigured():
+    data.viewsApi.errorMessage(cstring(
+      "Agent worktree session: no Agent Harbor server is configured " &
+      "(agentHarbor.baseUrl, or CODETRACER_AGENT_HARBOR_URL)"))
+    return false
+  if ($prompt).strip.len == 0:
+    data.viewsApi.errorMessage(cstring(
+      "Agent worktree session: type the task in the Agent Activity prompt first"))
+    return false
+  let workspace = harborTaskWorkspace(
+    if currentAgenticSessionLauncher.isNil: ""
+    else: currentAgenticSessionLauncher.userWorkspacePath,
+    if data.startOptions.folder.isNil: "" else: $data.startOptions.folder,
+    if data.workspaceFolder.isNil: "" else: $data.workspaceFolder)
+  if workspace.len == 0:
+    data.viewsApi.errorMessage(cstring(
+      "Agent worktree session: open a project folder (a git working copy) first"))
+    return false
+  if cfg.agent.cfgString.len == 0:
+    data.viewsApi.errorMessage(cstring(
+      "Agent worktree session: name the agent Agent Harbor runs (agentHarbor.agent)"))
+    return false
   if currentAgenticSessionLauncher.isNil:
     data.viewsApi.errorMessage(cstring(
       "Agent worktree launcher is not configured for this session"))
-    return
-  if currentAgenticSessionLauncher.lastInputRaw.len == 0 or
-      currentAgenticSessionLauncher.lastInputRaw == "{}":
-    data.viewsApi.errorMessage(cstring(
-      "Agent worktree launch requires workspace, Harbor, and prompt configuration"))
-    return
+    return false
+  inc worktreeSessionCounter
+  let key = "user-" & $worktreeSessionCounter
   try:
-    discard currentAgenticSessionLauncher.startWorktreeAgentSession(
-      cstring currentAgenticSessionLauncher.lastInputRaw)
+    discard currentAgenticSessionLauncher.startWorktreeAgentSession(cstring($(
+      worktreeLaunchPayload($prompt, workspace, cfg, key))))
   except CatchableError:
-    data.viewsApi.errorMessage(cstring getCurrentExceptionMsg())
+    cerror "agentic session: starting the worktree session failed: " & getCurrentExceptionMsg()
+    data.viewsApi.errorMessage(cstring("Agent worktree session: " &
+      getCurrentExceptionMsg()))
+    return false
+  currentAgenticSessionLauncher.scheduleEvidencePoll(
+    currentAgenticSessionLauncher.activeTabId)
+  true
+
+proc installUserWorktreePath*(store: ReplayDataStore) =
+  ## Install the launcher for the product (no external action) and connect
+  ## the Agent Activity prompt and Stop to it.
+  if currentAgenticSessionLauncher.isNil:
+    discard installAgenticSessionLauncher(store)
+  agent_activity.worktreeRuntimeAvailable = proc(): bool = agentHarborConfigured()
+  agent_activity.startWorktreeSessionHook = proc(prompt: cstring): bool =
+    startWorktreeSessionFromPrompt(prompt)
+  agent_activity.stopWorktreeSessionHook = proc(): bool =
+    stopWorktreeSession(currentAgenticSessionLauncher)
+
+proc startAgenticWorktreeSessionFromCommandPalette*() =
+  ## The palette's "Start agent worktree session": the prompt box's text, or
+  ## the launch a test configured (`configureAgenticWorktreeLaunch`).
+  ensureAgenticPanels(includeDeepReview = false)
+  if not currentAgenticSessionLauncher.isNil and
+      currentAgenticSessionLauncher.lastInputRaw.len > 0 and
+      currentAgenticSessionLauncher.lastInputRaw != "{}":
+    try:
+      discard currentAgenticSessionLauncher.startWorktreeAgentSession(
+        cstring currentAgenticSessionLauncher.lastInputRaw)
+    except CatchableError:
+      data.viewsApi.errorMessage(cstring getCurrentExceptionMsg())
+    return
+  discard startWorktreeSessionFromPrompt(promptBoxText())
