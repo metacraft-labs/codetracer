@@ -637,3 +637,7 @@ src/frontend/viewmodel/tests/unit/plat9-surface-mutation-control.sha256	src/fron
 # (14 of 14 and 17 of 17 KILLED). Those re-grades also paid the lines plat20 and
 # plat22 owed for src/frontend/gpui/app/leaves.nim, headless_app.nim and
 # test_gpui_editing_surface.nim.
+
+# 2026-11-20, the plat49 capture names the step it fails or is killed in, and
+# shows the prefix build log before its work directory is removed (plat49).
+src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	scripts/plat49-capture-electron.sh	402da1c62cfa7e7ae688cd67e53bea3e2bf2fd2b1cc7e2098f586ebefce2a647	0a6abc6215e4a74255ea62341f285395659a3d5a8697b0b2d6c774894fc3f5e3
