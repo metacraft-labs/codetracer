@@ -33,10 +33,12 @@ import replay_prerequisite
 import ../../tui/tests/fixtures/fixture_provider
 import std/[json, os, osproc, streams, strtabs, strutils, tempfiles, unittest]
 import ./gpui_child_env
+import gpui/design_font_metrics
+import viewmodel/views/cut_text_rules
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 37
+const ExpectedAssertions = 40
 
 var countedAssertions = 0
 
@@ -194,6 +196,28 @@ suite "PLAT-68 GPUI: Debug mode's F-keys are the desktop's (CUA-Keymap.md §4)":
       let w = note[0].px("w")
       checkpoint "note at " & $x & " width " & $w & ", labels end at " & $labelsEnd
       ck x > labelsEnd and x + w <= W and w >= 100
+      # ... and its box holds its words, measured in the face it is drawn
+      # in: the location beside it gives way, cut in its middle, but only
+      # down to its floor, the shortest cut the shared path rule draws (the
+      # file name with its line and ticks). Neither depends on how long the
+      # checkout's path is, so this holds on every host.
+      let words = groteskTextPx(plan.values("data-ct-footer-note")[0], 14.0)
+      checkpoint "the note's words need " & $words & " px"
+      ck w >= words
+      let position = plan.nodesWith("data-ct-footer-position")
+      ck position.len == 1
+      if position.len == 1:
+        let location = position[0].attr("data-ct-footer-position")
+        let cuts = pathCutCandidates(location)
+        let floor = if cuts.len == 0: groteskTextPx(location, 14.0)
+                    else: groteskTextPx(cuts[^1], 14.0)
+        let lw = position[0].px("w")
+        checkpoint "location " & location & " in " & $lw &
+                   " px, its floor " & $floor & " px"
+        ck lw >= floor and
+           position[0].nodesWith("data-ellipsis-at").len == 1 and
+           position[0].nodesWith("data-ellipsis-at")[0].attr(
+             "data-ellipsis-at") == "middle"
 
 suite "PLAT-68 GPUI: the letters under CUA (OQ-1)":
 

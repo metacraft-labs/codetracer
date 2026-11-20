@@ -112,7 +112,26 @@ jobs:
           # runner's ~/.nimble hid its absence (run 43859070538, 6 cold shards:
           # "cannot open file: results").
           CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
-        run: nix develop .#devShells.x86_64-linux.default --command just build-once
+        # Without the repro daemon, bounded at 90 minutes, and dumped if the
+        # bound is hit (ci/build/bounded-build-once.sh). Under repro 0.2.27 a
+        # daemon-hosted build stalls: in run 44612896066 the daemon attempt
+        # was killed at 50 minutes with the worker's reprobuild-nix child a
+        # zombie and nothing logged, and the REPRO_DAEMON=off retry built the
+        # same tree in 24 minutes (32 under 0.2.25). That stall is
+        # reprobuild-pm issues/2026-11-19-a-daemon-hosted-build-blocks-its-
+        # client-forever-when-the-workers-nix-child-has-died.md. When a
+        # pinned reprobuild carries its fix, bring the daemon attempt back by
+        # passing a first bound (e.g. 50) instead of 0.
+        run: nix develop .#devShells.x86_64-linux.default --command bash ci/build/bounded-build-once.sh "${RUNNER_TEMP}/build-once-diagnostics" 0 90
+
+      - name: Upload the build-once stall diagnostics
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-once-diagnostics
+          path: ${{ runner.temp }}/build-once-diagnostics
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Build isonim-gpui's windowed shim and the virtual pointer
         id: shim

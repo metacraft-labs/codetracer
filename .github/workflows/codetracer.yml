@@ -1088,7 +1088,12 @@ jobs:
           consumer-directory: wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer
           workspace-directory: wr3-${{ github.run_id }}-${{ github.run_attempt }}
           sibling-strategy: repro-lock
-          repro-version: v0.2.26
+          # At least the reprobuild repro.lock was written with (33be1e996,
+          # in v0.2.28): v0.2.26 derived another interface digest for the
+          # catalog's tree-sitter and refused the lock ("provisioning
+          # contribution interface mismatch for package tree-sitter",
+          # run 44577379303).
+          repro-version: v0.2.28
           gh-token: ${{ steps.ci_token.outputs.token }}
           # THIS LIST HOLDS ONLY WHAT THE LOCK PATH WILL NOT CLONE. `repro develop
           # --all` materialises what repro.lock pins, but it skips a row a recipe

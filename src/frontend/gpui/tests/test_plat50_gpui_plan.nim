@@ -68,7 +68,9 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 129
+  ExpectedAssertions = 131
+    ## 129 -> 131: the note keeps its words; the location is cut in its
+    ## middle down to its floor, then the certificate label is left out.
     ## 124 -> 129: the status bar's note and location sharing their row.
     ## The native Top action adds two checks of the actual window plan.
     ## Four checks keep a file opened from Files through docking and resize.
@@ -573,19 +575,32 @@ suite "PLAT-50 GPUI: the sweep's other rows":
     ck list.contains("A notes.txt") and list.contains("A unchanged.txt")
 
 suite "PLAT-50 GPUI: the chrome":
-  test "the status bar's location gives way to a note before the note is cut":
-    # Room for both: each keeps its width.
-    ck fitFooterRow(900, 300, 400) == (note: 300, location: 400)
+  test "the status bar's note keeps its words; the location and the certificate give way":
+    # fitFooterRow(available, note, location, location floor, certificate)
+    # Room for all three: each keeps its width.
+    ck fitFooterRow(900, 300, 400, 100, 100) ==
+      (note: 300, location: 400, certificate: 100)
     # A long path (a CI runner's work directory) beside a note: the location
-    # shrinks, the note is whole.
-    ck fitFooterRow(900, 300, 800) == (note: 300, location: 600)
-    # The location keeps at least its tail; past that the note is cut.
-    ck fitFooterRow(500, 400, 800) == (note: 500 - MinFooterLocationPx,
-                                       location: MinFooterLocationPx)
+    # is cut, the note and the certificate are whole.
+    ck fitFooterRow(900, 300, 800, 100, 100) ==
+      (note: 300, location: 500, certificate: 100)
+    # The location at its floor and still no room: the certificate is left
+    # out, and the location takes what the note leaves.
+    ck fitFooterRow(500, 300, 800, 100, 150) ==
+      (note: 300, location: 200, certificate: 0)
+    # The note is cut only with the location at its floor and no
+    # certificate.
+    ck fitFooterRow(500, 450, 800, 100, 100) ==
+      (note: 400, location: 100, certificate: 0)
     # A short location is never widened to the floor.
-    ck fitFooterRow(300, 400, 100) == (note: 200, location: 100)
+    ck fitFooterRow(300, 400, 60, 100, 0) ==
+      (note: 240, location: 60, certificate: 0)
+    # Without a note's need, everything fits as it is.
+    ck fitFooterRow(900, 0, 400, 100, 100) ==
+      (note: 0, location: 400, certificate: 100)
     # No room at all: nothing is negative.
-    ck fitFooterRow(-20, 400, 800) == (note: 0, location: 0)
+    ck fitFooterRow(-20, 400, 800, 100, 100) ==
+      (note: 0, location: 0, certificate: 0)
 
 
   test "the desktop's grounds, a bordered omnibox after the controls":

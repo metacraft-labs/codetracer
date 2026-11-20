@@ -100,6 +100,7 @@ WORKER_TEST="src/frontend/viewmodel/tests/unit/test_wasm_worker.nim"
 NOIR_BUILD="src/frontend/viewmodel/platform/noir_build.nim"
 PRODUCER="src/frontend/viewmodel/viewmodels/noir_build_producer.nim"
 WASM_WORKER="src/frontend/viewmodel/platform/wasm_worker.nim"
+HTML_TEXT="src/common/html_text.nim"
 
 failures=0
 arms=0
@@ -281,15 +282,19 @@ arm "a refusal position is inferred from the line instead of the manifest" \
 	"a missing manifest names a file and no line" \
 	's/  response\.manifest\.len > 0\n/  response.line > 0\n/'
 
+# The tracer reports its step and call counts beside the `.ct` container
+# (`summariseNoirTrace`, since the in-browser replay opens the container); the
+# counts are read from the document's `calls` key, not tallied from an event
+# list.
 arm "calls stop being counted in a trace" \
 	"${NOIR_BUILD}" "${MARSHALLING}" marshalling \
-	"a real trace is counted by tag" \
-	's/      elif event\.hasKey\("Call"\): inc result\.calls\n//'
+	"a real trace is counted" \
+	's/    result\.calls = parsed\["calls"\]\.getInt\n/    discard\n/'
 
 arm "a trace with no steps is not called trivial" \
 	"${NOIR_BUILD}" "${MARSHALLING}" marshalling \
-	"ONE-EVENT-ZERO-STEPS is reported as trivial" \
-	's/not summary\.decoded or summary\.events <= 1 or summary\.steps == 0/not summary.decoded/'
+	"ZERO STEPS is reported as trivial, not as success" \
+	's/  not summary\.decoded or summary\.steps == 0\n/  not summary.decoded\n/'
 
 arm "the template ships an empty Prover.toml" \
 	"src/frontend/viewmodel/platform/noir_template.nim" "${MARSHALLING}" marshalling \
@@ -300,18 +305,22 @@ arm "the template ships an empty Prover.toml" \
 # The producer
 # ---------------------------------------------------------------------------
 
+# The rule moved into `rendererPathFor`, which `rendererPath` now calls (one
+# rule, shared with the generated-code listing).
 arm "a diagnostic keeps the compiler's path spelling" \
 	"${PRODUCER}" "${PRODUCER_TEST}" producer \
 	"a compile error paints a row, a problem and an error, all located" \
-	's/    return producer\.projectRoot & "\/" & vfsPath\[prefix\.len \.\. \^1\]/    return vfsPath/'
+	's/    return projectRoot & "\/" & vfsPath\[prefix\.len \.\. \^1\]/    return vfsPath/'
 
 arm "a warning is coloured as an error in the pane" \
 	"${PRODUCER}" "${PRODUCER_TEST}" producer \
 	"severities reach the pane unflattened" \
 	's/  of ndsWarning: blsWarning/  of ndsWarning: blsError/'
 
+# The producer's escaper is `common/html_text.escapeHtmlText` now, shared with
+# the desktop Event Log; the producer re-exports it.
 arm "the less-than sign reaches innerHTML unescaped" \
-	"${PRODUCER}" "${PRODUCER_TEST}" producer \
+	"${HTML_TEXT}" "${PRODUCER_TEST}" producer \
 	"a diagnostic quoting the user's source cannot inject markup" \
 	"s/    of '<': result.add \"&lt;\"/    of '<': result.add ch/"
 
@@ -329,10 +338,12 @@ arm "a stopped run is reported as a failure" \
 	"a STOP is not a failure" \
 	's/  if exit\.signalled:\n    # `process\.nim`/  if false:\n    # `process.nim`/'
 
+# The guard reads `phase notin {nbpTrace, nbpTestRecord}` since a test
+# recording became a second phase too.
 arm "the trace phase clears the pane too" \
 	"${PRODUCER}" "${PRODUCER_TEST}" producer \
 	"a trace phase does not wipe the compile's warnings" \
-	's/  if phase == nbpCompile:\n    # Only the first phase/  if true:\n    # Only the first phase/'
+	's/  if phase notin \{nbpTrace, nbpTestRecord\}:\n    # Only the SECOND phase/  if true:\n    # Only the SECOND phase/'
 
 arm "a successful compile's warnings are skipped" \
 	"${PRODUCER}" "${PRODUCER_TEST}" producer \

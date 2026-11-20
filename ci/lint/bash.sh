@@ -409,6 +409,11 @@ lint_step "a shard waits for the visual replay tools only while waiting can help
 lint_step "trace-format-nim builds see nim-results, not stew's legacy results" \
 	bash ci/test/trace-format-nim-extra-paths-test.sh
 
+# ct-build's build-once is bounded; a stall leaves its evidence and is
+# retried once without the repro daemon.
+lint_step "a stalled build-once is bounded, dumped and retried without the daemon" \
+	bash ci/test/bounded-build-once-test.sh
+
 # A GPUI shard gives a bare host the Vulkan driver, cursor theme and D-Bus
 # session configuration the window and its compositor need.
 lint_step "a GPUI shard provisions what a bare host lacks" \

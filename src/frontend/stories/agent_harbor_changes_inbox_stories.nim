@@ -149,7 +149,7 @@ const
   InboxPlaybackFixture* = "playback-inbox-run"
     ## The Inbox's playback story: the `inbox-run` scenario.
   inboxStoryFixtures* = [
-    "populated", "long", "fleet", "empty", "prev-next", "prev-next-first",
+    "populated", "long", "fleet", "empty", "emptied", "prev-next", "prev-next-first",
     "prev-next-end", "manager-held", "loading", "error", InboxPlaybackFixture]
     ## Every fixture an `agent-harbor-inbox` story may name.
   InboxScope* = ThisServerLabel
@@ -181,7 +181,11 @@ proc createInboxStoryVM*(fixture: string; playback: AhPlayback = nil): InboxVM =
   ## `prev-next-first` is the walk's first step: Next from no item lands on
   ## the top of the order (`1 of 5`, Previous disabled). `prev-next-end` is
   ## on the last item of the order, reached by stepping back (`5 of 5`): Next
-  ## stays enabled while the inbox holds items. The playback
+  ## stays enabled while the inbox holds items. `emptied` is the inbox
+  ## emptied under a walk: Next put the top item on screen, then every item
+  ## was answered on another front-end, so the inbox reads empty with
+  ## Previous and Next disabled while the gone item's page stays beside it
+  ## (the item on screen stays whatever happens to it). The playback
   ## fixture reads `playback`'s source and replays the operator's presses
   ## through the viewmodel. Raises `ValueError` for an unknown fixture.
   if fixture notin inboxStoryFixtures:
@@ -208,6 +212,19 @@ proc createInboxStoryVM*(fixture: string; playback: AhPlayback = nil): InboxVM =
     result = newInboxVM(inboxFixture("populated"), showPages = true)
     result.load()
     discard result.next()
+  of "emptied":
+    let source = ScriptedActionSource(inboxFixture("populated"))
+    result = newInboxVM(source, showPages = true)
+    result.load()
+    discard result.next()
+    # Answered elsewhere one at a time, each event carrying the order left,
+    # as the server sends them.
+    var left = source.inbox.orderOf
+    while left.len > 0:
+      let gone = left[0]
+      left.delete(0)
+      discard source.sendInbox(InboxEvent(kind: ieResolved, target: gone,
+                                          hasOrder: true, order: left))
   of "prev-next-end":
     let source = ScriptedActionSource(inboxFixture("populated"))
     let order = source.inbox.orderOf

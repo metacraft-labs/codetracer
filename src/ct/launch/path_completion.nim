@@ -18,18 +18,36 @@
 import std/[algorithm, os, strutils]
 
 proc pathCompletions*(prefix: string; fileTypes: openArray[string]): seq[string] =
-  ## The entries of the directory `prefix` names (its parent part, or the
-  ## current directory) whose names start with the rest of `prefix`, sorted.
-  ## Directories end with `/` and are always offered; a file is offered only
-  ## when `fileTypes` is empty or holds its extension (with the dot).
-  let dirPart = prefix.parentDir
-  let basePart = prefix.extractFilename
+  ## The entries of the directory `prefix` names -- the part up to and
+  ## including its last path separator, or the current directory when it has
+  ## none -- whose names start with the rest of `prefix`, sorted.  A partial
+  ## that ends in a separator (`src/`) therefore lists that directory itself.
+  ## The directory part is kept as typed, so a candidate always extends the
+  ## partial.  Directories end with `/` and are always offered; a file is
+  ## offered only when `fileTypes` is empty or holds its extension (with the
+  ## dot).
+  ##
+  ## The split is not `parentDir`/`extractFilename`: `parentDir("pd/sub/")`
+  ## is `pd`, so the partial `pd/sub/` listed `sub`'s siblings (reprobuild-pm
+  ## issue
+  ## 2026-11-18-ct-complete-partial-ending-in-slash-lists-the-parent-directory).
+  ## Joining with `/` also rewrote what the user typed (`pd` came back as
+  ## `./pd/`, `pd//s` as `pd/sub/`), and a shell drops a candidate that does
+  ## not start with the typed word.  The split is the one clispec's
+  ## `cliCompleteFiles` makes; unlike clispec, this listing does not expand
+  ## `~` or hide dot-files.
+  var cut = -1
+  for i in countdown(prefix.high, 0):
+    if prefix[i] == '/' or (DirSep != '/' and prefix[i] == DirSep):
+      cut = i
+      break
+  let dirPart = if cut >= 0: prefix[0 .. cut] else: ""
+  let basePart = if cut >= 0: prefix[cut + 1 .. ^1] else: prefix
   let searchDir = if dirPart.len == 0: getCurrentDir() else: dirPart
   if not dirExists(searchDir): return
-  for kind, child in walkDir(searchDir, relative = (dirPart.len == 0)):
-    let leaf = (if dirPart.len == 0: child else: child.extractFilename)
+  for kind, leaf in walkDir(searchDir, relative = true):
     if not leaf.startsWith(basePart): continue
-    let full = (if dirPart.len == 0: leaf else: dirPart / leaf)
+    let full = dirPart & leaf
     if kind == pcDir:
       result.add full & "/"
       continue

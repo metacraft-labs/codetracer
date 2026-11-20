@@ -1,6 +1,42 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+function Ensure-Innoextract {
+  # innoextract.exe at the pinned version, under the install root; returns its
+  # path. Used to unpack the FreePascal installer without running it.
+  param(
+    [Parameter(Mandatory = $true)][string]$Root,
+    [Parameter(Mandatory = $true)][hashtable]$Toolchain
+  )
+  $version = $Toolchain["INNOEXTRACT_VERSION"]
+  $expected = $Toolchain["INNOEXTRACT_WIN_SHA256"]
+  if ([string]::IsNullOrWhiteSpace($version) -or [string]::IsNullOrWhiteSpace($expected)) {
+    throw "INNOEXTRACT_VERSION and INNOEXTRACT_WIN_SHA256 must be set in toolchain-versions.env."
+  }
+  $dir = Join-Path $Root "innoextract/$version"
+  $exe = Join-Path $dir "innoextract.exe"
+  if (Test-Path -LiteralPath $exe -PathType Leaf) {
+    return $exe
+  }
+  $zip = Join-Path $env:TEMP "innoextract-$version-windows.zip"
+  Download-File -Url "https://github.com/dscharrer/innoextract/releases/download/$version/innoextract-$version-windows.zip" -OutFile $zip
+  try {
+    Assert-FileSha256 -Path $zip -Expected $expected
+    Ensure-CleanDirectory -Path $dir
+    $tarExe = Get-WindowsTarExe
+    & $tarExe -xf $zip -C $dir
+    if ($LASTEXITCODE -ne 0) {
+      throw "Failed to extract '$zip' with '$tarExe' (exit $LASTEXITCODE)."
+    }
+  } finally {
+    Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
+  }
+  if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
+    throw "innoextract $version did not provide '$exe'."
+  }
+  return $exe
+}
+
 function Ensure-Fpc {
   param(
     [Parameter(Mandatory = $true)][string]$Root,
@@ -34,7 +70,6 @@ function Ensure-Fpc {
   }
   $asset = "fpc-$version.win32.and.win64.exe"
   $tempInstaller = Join-Path $env:TEMP $asset
-  $installLog = Join-Path $env:TEMP "fpc-$version-install.log"
 
   # FreePascal's own distribution server first; SourceForge (through curl.exe,
   # which gets past its bot challenge) second. Both serve the pinned bytes.
@@ -56,42 +91,46 @@ function Ensure-Fpc {
   }
 
   try {
-    # Inno Setup silent install: /VERYSILENT + /SP- + /SUPPRESSMSGBOXES keep it
-    # non-interactive; /DIR sets our deterministic install root; /LOG keeps
-    # the installer's own account of a failure. It runs bounded and with a
-    # closed stdin (Invoke-BoundedNativeCommand), which also quotes /DIR=...
-    # and /LOG=... when the paths have spaces. An unbounded `Start-Process
-    # -Wait` could leave an installer running on a persistent host when its job
-    # was cancelled, and Inno Setup exits 1 ("failed to initialize") on
-    # win-ci-vm-001 in codetracer run 44444132651 with nothing said about why.
-    $innoArgs = @("/VERYSILENT", "/SP-", "/SUPPRESSMSGBOXES", "/NORESTART",
-                  "/NOICONS", "/DIR=$fpcVersionRoot", "/LOG=$installLog")
-    $env:__compat_layer = 'RunAsInvoker'
-    $exitCode = 0
-    foreach ($attempt in 1..2) {
-      Ensure-CleanDirectory -Path $fpcVersionRoot
-      Remove-Item -LiteralPath $installLog -Force -ErrorAction SilentlyContinue
-      $exitCode = Invoke-BoundedNativeCommand -FilePath $tempInstaller -ArgumentList $innoArgs `
-        -Activity "the FreePascal $version installer" -TimeoutSeconds 900
-      if ($exitCode -eq 0) { break }
-      Write-Host "FreePascal installer exited with code $exitCode (attempt $attempt of 2)."
-      if (Test-Path -LiteralPath $installLog -PathType Leaf) {
-        Write-Host "--- the installer's log (last 40 lines): $installLog"
-        Get-Content -LiteralPath $installLog -Tail 40 | ForEach-Object { Write-Host "  $_" }
-      } else {
-        Write-Host "--- the installer wrote no log at $installLog (it stopped before Setup initialized)."
+    # The payload is UNPACKED with innoextract, not installed: the installer
+    # (Inno Setup 5.6.1) aborts without administrator rights -- its log on
+    # win-ci-vm-001, codetracer run 44577379303: "User privileges: None ...
+    # You must be logged in as an administrator when installing this
+    # program. Got EAbort exception." -- and the runner service has none.
+    # win-ci-bare-001 passed only because FreePascal was installed there
+    # earlier. Unpacking needs no rights, writes nothing outside the install
+    # root and leaves no registry entries. Inno's {app} files land under
+    # app/; fpc.cfg, which the installer generates at install time, is
+    # written below with the tree's own fpcmkcfg.
+    $innoextract = Ensure-Innoextract -Root $Root -Toolchain $Toolchain
+    $stage = Join-Path $env:TEMP ("fpc-$version-extract-" + [guid]::NewGuid().ToString("N"))
+    try {
+      $exitCode = Invoke-BoundedNativeCommand -FilePath $innoextract `
+        -ArgumentList @("--silent", "--output-dir", $stage, $tempInstaller) `
+        -Activity "innoextract of the FreePascal $version installer" -TimeoutSeconds 900
+      if ($exitCode -ne 0) {
+        throw "innoextract could not unpack the FreePascal installer (exit $exitCode)."
       }
-      $others = @(Get-Process -ErrorAction SilentlyContinue |
-        Where-Object { $_.ProcessName -like "fpc-*" -or $_.ProcessName -like "is-*" } |
-        ForEach-Object {
-          $started = try { [string]$_.StartTime } catch { "unknown" }
-          "$($_.ProcessName) (pid $($_.Id), started $started)"
-        })
-      Write-Host "--- installer processes still running: $(if ($others.Count) { $others -join '; ' } else { 'none' })"
-      if ($attempt -eq 1) { Start-Sleep -Seconds 15 }
+      $appDir = Join-Path $stage "app"
+      if (-not (Test-Path -LiteralPath (Join-Path $appDir "bin/i386-win32/fpc.exe") -PathType Leaf)) {
+        throw "The unpacked FreePascal installer has no app/bin/i386-win32/fpc.exe under '$stage'."
+      }
+      Ensure-CleanDirectory -Path $fpcVersionRoot
+      Get-ChildItem -LiteralPath $appDir -Force | ForEach-Object {
+        Move-Item -LiteralPath $_.FullName -Destination $fpcVersionRoot -Force
+      }
+    } finally {
+      Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue
     }
-    if ($exitCode -ne 0) {
-      throw "FreePascal installer exited with code $exitCode twice; its log and the running installer processes are printed above."
+
+    # What the installer's post-install step writes: fpc.cfg beside fpc.exe,
+    # with the unit search paths rooted at this install.
+    $fpcmkcfg = Join-Path $fpcBinDir "fpcmkcfg.exe"
+    $fpcCfg = Join-Path $fpcBinDir "fpc.cfg"
+    $exitCode = Invoke-BoundedNativeCommand -FilePath $fpcmkcfg `
+      -ArgumentList @("-d", "basepath=$fpcVersionRoot", "-o", $fpcCfg) `
+      -Activity "fpcmkcfg for FreePascal $version" -TimeoutSeconds 120
+    if ($exitCode -ne 0 -or -not (Test-Path -LiteralPath $fpcCfg -PathType Leaf)) {
+      throw "fpcmkcfg did not write '$fpcCfg' (exit $exitCode)."
     }
   } finally {
     Remove-Item -LiteralPath $tempInstaller -Force -ErrorAction SilentlyContinue

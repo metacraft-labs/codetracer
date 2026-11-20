@@ -448,9 +448,10 @@ jobs:
             # nim-agents 2026-11-18, after flake.lock moved it to 2758cde.
             # nim-agents 2026-11-18 again, after flake.lock moved it to 77f8a5a;
             # isonim 2026-11-18, after flake.lock and repro.lock moved it to 38ace5de.
+            # isonim-gpui 2026-11-19 (a double click is counted by its presses' times).
             isonim=38ace5de5bf42c708a22dff54d74ab76270996e6
             isonim-tui=8e43ce06f7f078530c7a8585c210ad7648fa0051
-            isonim-gpui=2fdadfdf9baaa9af67fd4cc9e0039c4c83fb7af0
+            isonim-gpui=301c8c9cecbf797fc92b8b46c0501ff7a9f36112
             nim-everywhere=2f5b67a5dafd96ca5d57c9270fc3c2da2c5f2b0b
             nim-termctl=63560ed41ce0fea563431a44db9e9d852cd703dd
             nim-pty=6ffb8d788e8a740ca78ec29c7a3a489a13818bcb
