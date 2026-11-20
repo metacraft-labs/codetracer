@@ -35,10 +35,10 @@
 ##   `magnify`  build the fixture raster, resolve the capability from the
 ##              environment, open §5's magnifier over a cell, move the pixel
 ##              cursor, and emit the overlay.
-##   `degrade`  pin `--image-tier=octant`, which PLAT-14 recorded as refusing
-##              only at draw time, and print the pane's own text — so the
-##              refusal, the remedy, the title's tier and the pixel-history
-##              rows can all be read off a terminal.
+##   `octant`   pin `--image-tier=octant` and emit a picture in which every
+##              2x4 mask the argmin can choose occurs once, so the glyphs that
+##              reach the terminal can be read off it; then the pane's title
+##              and pixel history, as text.
 ##   `tier0`    the SAME pane on a terminal that resolves to tier 0, and **NOT
 ##              magnified**. Added by PLAT-15's landing pass, which found that
 ##              this child set `magnified = true` unconditionally — so the one
@@ -161,31 +161,42 @@ proc runMagnify() =
   emitLine("PLAT15 GRID " & $grid.cols & "x" & $grid.rows)
   emitLine(ReadyMarker)
 
-proc runDegrade() =
-  ## PLAT-14 RESIDUE 3 ON A TERMINAL. `--image-tier=octant` resolves, and until
-  ## PLAT-15 the pane that drew it met a `CellRenderError`. What a user sees
-  ## now is a refusal, a remedy, the tier still named in the title, and the
-  ## pixel-history list still on the screen.
+proc runOctant() =
+  ## THE OCTANT TIER ON A TERMINAL. A 32x64 raster whose 2x4 blocks carry the
+  ## 128 masks the argmin's tie rule can choose (`m` and `255 - m` draw one
+  ## glyph, so the lower of the two), one per cell of a 16x8 grid, emitted
+  ## through the product's own renderer and emitter.
   let cap = resolved(pinned = true, tier = itOctant)
+  const Cols = 16
+  const Rows = 8
+  var px = newSeq[byte](Cols * 2 * Rows * 4 * 4)
+  for y in 0 ..< Rows * 4:
+    for x in 0 ..< Cols * 2:
+      let mask = (y div 4) * Cols + (x div 2)
+      let on = (mask and (1 shl ((y mod 4) * 2 + (x mod 2)))) != 0
+      let i = (y * Cols * 2 + x) * 4
+      px[i] = (if on: 230'u8 else: 20'u8)
+      px[i + 1] = (if on: 200'u8 else: 30'u8)
+      px[i + 2] = (if on: 40'u8 else: 120'u8)
+      px[i + 3] = 255'u8
+  let img = initRgbaImage(Cols * 2, Rows * 4, px)
+  let fit = CellFit(cols: Cols, rows: Rows, aspect: DefaultCellAspect,
+                    sourceWidth: Cols * 2, sourceHeight: Rows * 4)
+  let grid = renderCells(img, cap.tier, fit)
+  stdout.write(emitCellImage(grid, cwTrueColor, OriginRow, OriginCol).bytes)
+  stdout.flushFile()
+  emitLine("\x1b[" & $(OriginRow + Rows + 1) & ";1HPLAT15 TIER " &
+           tierName(cap.tier) & " grid=" & $grid.cols & "x" & $grid.rows &
+           " origin=" & $OriginRow & "," & $OriginCol)
   var model = baseModel(cap)
   model.gap = model.resolveGap(60, 6)
-  # `describeFrameGap` and NOT `degradedMessageFor(frameViewerDegradation(...))`,
-  # and the distinction is a boundary rather than a shortcut: a
-  # `DegradedStateSnapshot` is the SDK facade's type, and `tests/apps/` carries
-  # no `.sdk-consumer` declaration — only `app/` does. The resolution through
-  # `PaneDegradation` is asserted where the snapshot is legitimately in scope
-  # (`app/tests/test_frame_viewer_pane.nim`); what this child exists to put on a
-  # terminal is the TEXT, and `degradedMessageFor` forwards to exactly this
-  # function for the row this pane owns.
-  model.degradedMessage = describeFrameGap(model.gap)
-  var row = OriginRow
+  emitLine("PLAT15 GAP " & $model.gap)
+  var row = OriginRow + Rows + 3
   for line in frameViewerText(model, 78, 12):
     stdout.write("\x1b[" & $row & ";1H" & line)
     inc row
   stdout.flushFile()
-  emitLine("\x1b[16;1HPLAT15 TIER " & tierName(cap.tier) &
-           " gap=" & $model.gap)
-  emitLine("PLAT15 DEGRADED " & model.degradedMessage)
+  emitLine("")
   emitLine(ReadyMarker)
 
 proc runTier0() =
@@ -228,7 +239,7 @@ when isMainModule:
   let mode = if paramCount() >= 1: paramStr(1) else: "magnify"
   case mode
   of "magnify": runMagnify()
-  of "degrade": runDegrade()
+  of "octant": runOctant()
   of "tier0": runTier0()
   else:
     emitLine("PLAT15 UNKNOWN MODE " & mode)

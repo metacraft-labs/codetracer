@@ -38,7 +38,8 @@ const playbackFixtures* = [
   ("agent-harbor-initiative-progress", "playback-initiative-run"),
   ("agent-harbor-fleet", "playback-front-ends"),
   ("agent-harbor-session-activity", "playback-session-run"),
-  ("agent-harbor-session-activity", "playback-session-run+expanded")]
+  ("agent-harbor-session-activity", "playback-session-run+expanded"),
+  ("agent-harbor-inbox", "playback-inbox-run")]
   ## Every playback story's surface and fixture.
 
 const surfacesWithoutPlayback* = ["agent-harbor-composer", "agent-harbor-results"]

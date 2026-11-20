@@ -34,6 +34,7 @@ import ../window_geometry
 import ../../viewmodel/agent_harbor_activity_cards
 import ../../viewmodel/store/replay_data_store
 import ../../viewmodel/backend/[mock_backend, backend_service]
+import ./ah_changes_inbox_stories
 import ../../viewmodel/input/element_press
 import ../../viewmodel/keymap/[base_keymaps, context_keys, editing_keymap,
                                keymap_router,
@@ -41,7 +42,7 @@ import ../../viewmodel/keymap/[base_keymaps, context_keys, editing_keymap,
 import ../../../common/key_names
 
 export agent_harbor_stories, ah_theme, ah_playback_bar, user_keymap, ah_composer,
-  ah_results
+  ah_results, ah_changes_inbox_stories
 
 const
   GpuiAgentHarborSurfaces* = [
@@ -54,8 +55,12 @@ const
     "agent-harbor-composer",
     "agent-harbor-results",
     "agent-harbor-session-activity",
+    "agent-harbor-changes",
+    "agent-harbor-inbox",
+    "agent-harbor-inbox-item",
   ]
-    ## Every surface of the Agent Harbor section this module draws.
+    ## Every surface of the Agent Harbor section this module draws (the
+    ## Changes panel's and the Inbox's through `ah_changes_inbox_stories`).
   FrameTitlePx = 32          ## `.lm_header`
   FrameInsetPx = 4           ## the golden-layout root's side inset
 
@@ -82,6 +87,8 @@ type
       ## panel's viewmodel. Unset for any other story.
     cardsFeed*: GpuiElement
       ## The comparison story's cards half (nil for any other story).
+    changesInbox*: ChangesInboxMount
+      ## A Changes or Inbox story's viewmodel (`ah_changes_inbox_stories`).
     playback*: AhPlayback
       ## A playback story's playback (nil for any other story): its source
       ## feeds the viewmodel, and the bar under the story controls it.
@@ -420,6 +427,8 @@ proc mountAgentHarborStoryGpui*(r: GpuiRenderer; surface, fixture: string;
         m.timeline = createSessionActivityStoryVM(fixture, pb)
         r.mountSessionActivity(host, m.timeline, p, bodyW, bodyH,
                                activityPresses(keymap, m.timeline, copy))
+    of "agent-harbor-changes", "agent-harbor-inbox", "agent-harbor-inbox-item":
+      m.changesInbox = r.mountChangesInboxStory(host, surface, fixture, pb, p, bodyW)
     else:
       raise newException(ValueError, "no GPUI rendering for the Agent Harbor surface " &
                          surface)
@@ -440,6 +449,7 @@ proc mountAgentHarborStoryGpui*(r: GpuiRenderer; surface, fixture: string;
   let results = m.results
   let timeline = m.timeline
   let cards = m.cards
+  let changesInbox = m.changesInbox
   let playback = m.playback
   m.dispose = proc() =
     if playback != nil: playback.dispose()
@@ -454,5 +464,6 @@ proc mountAgentHarborStoryGpui*(r: GpuiRenderer; surface, fixture: string;
     if cards.cards != nil:
       cards.cards.dispose()
       cards.store.dispose()
+    changesInbox.dispose()
     if rootDisposer != nil: rootDisposer()
   m

@@ -11,6 +11,10 @@ modes: [fast, realistic]
 retention: { runs: 5, failure-days: 7 }
 # a GPU window drawn by a software renderer takes longer to settle
 settle-timeout: 30000
+# A stage that records a program does so on a cold fixture cache in a fresh
+# worktree: a first `rr record` took 121 s at load 80, past the default 120 s
+# (the electron lane's own note has the Crystal case).
+stage-timeout: 300000
 applicable:
   - ../tracing/trace-macro-at-caret.yaml
   - ../gpui/keys-debug-function-keys.yaml

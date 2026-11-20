@@ -1,0 +1,59 @@
+# The Agent Harbor scenario `agentic-coding/worktree-cancel-and-recover` runs
+# its sessions with: the agent edits src/feature.nim in the session's git
+# worktree, then keeps its turn open for ten minutes, so the session is
+# running when the user presses Stop. Agent Harbor's mock agent mocks only
+# the LLM; the runCmd is executed for real in the worktree.
+name: CodeTracer worktree session that keeps running
+description: >
+  Edit src/feature.nim in the agent's git worktree and keep the turn open
+  until the session is cancelled.
+tags: [e2e, rest, codetracer, git_worktree, gui, cancellation]
+acp:
+  capabilities:
+    loadSession: true
+  # Replay the timeline in real time (agent-harbor's mock agent): the turn
+  # holds for the `baseTimeDelta` below instead of answering at once, so the
+  # session is still running when the user presses Stop.
+  realTime: true
+
+timeline:
+  - userInputs:
+      - relativeTime: 0
+        input: 'Make featureValue return 42'
+        expectedResponse:
+          sessionId: 'codetracer-worktree-long-turn'
+          stopReason: cancelled
+
+  - sessionStart:
+      sessionId: 'codetracer-worktree-long-turn'
+
+  - agentToolUse:
+      toolName: runCmd
+      toolCallId: codetracer-feature-edit
+      args:
+        command: |
+          set -eu
+          cat > src/feature.nim <<'NIM'
+          proc featureValue*(): int =
+            42
+          NIM
+      toolExecution:
+        startTimeMs: 0
+        events:
+          - type: completion
+            timeMs: 100
+            exitCode: 0
+      result: 'Updated src/feature.nim.'
+      status: ok
+
+  # Ten minutes before the agent answers: the session runs until it is
+  # cancelled.
+  - baseTimeDelta: 600000
+
+  - llmResponse:
+      - assistant:
+          - relativeTime: 0
+            content: 'featureValue now returns 42.'
+
+expect:
+  stopReason: cancelled

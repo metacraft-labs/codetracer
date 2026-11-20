@@ -81,6 +81,7 @@ when defined(js):
 
 import ./design_fonts
 from sdk/breakpoints import columnBreakpointAt
+from sdk/stop_loader import StopPane, spFlow, setPaneOpen   # the first stop's flow, after the window
 import viewmodels/editor_gutter_lanes
 import std/[cpuinfo, json, math, options, os, sequtils, sets, strutils, tables,
             times, exitprocs]
@@ -104,6 +105,7 @@ import ./window_gestures
 import ./welcome_leaf
 import headless_app/welcome_tabs
 import ./window_top_bar
+import ./hover_label                     # the hover label: a control's tooltip, a menu item's reason
 import ./window_chrome                   # PLAT-69: the top bar as the title bar
 import ../../common/window_policy        # PLAT-69: how the window opens
 from ../../common/ct_home import ctConfigDir
@@ -1411,8 +1413,14 @@ var
   gWindow = WindowId(0)
   gRemember = false
     ## Write a committed rearrangement through to this product's remembered
-    ## layout: a Debug window whose remembered file was readable. Edit mode
-    ## opens its shared default and remembers nothing (PLAT-45).
+    ## DEBUG layout: a Debug window whose remembered file was readable.
+  gRememberEdit = false
+    ## The same for the EDIT arrangement (`gpui-layout-edit.json`,
+    ## Mode-Transitions.md §4b: one store per mode): an Edit window, or a
+    ## folder tab, whose remembered Edit file was readable.
+  gEditWindowShell: GpuiShell = nil
+    ## `ct edit --ui=gpui`'s shell (`runEdit`), whose arrangement is Edit
+    ## mode's.
   gRoot: GpuiElement = nil
   gContainer: GpuiElement = nil
   gTop: GpuiElement = nil
@@ -2559,10 +2567,17 @@ proc applyGestureCommand(r: GpuiRenderer; cmd: LayoutCommand) =
     traceGesture("refused " & $cmd & ": " & $applied.problem.kind)
     return
   traceGesture("applied " & $cmd)
-  # PLAT-51: a folder tab's Edit arrangement is never this product's
-  # remembered (Debug) layout.
-  if gRemember and (gMainShell.isNil or gShell == gMainShell):
-    let failed = saveGpuiLayoutDocument(gShell.saveWindowLayout(gWindow))
+  # Each mode's arrangement is written to that mode's own file: an Edit
+  # window's and a folder tab's (PLAT-51) to the Edit file, a replay
+  # window's to the Debug file — never one into the other's.
+  let editArrangement = gShell == gEditWindowShell or
+    (not gEditShell.isNil and gShell == gEditShell)
+  let remember =
+    if editArrangement: gRememberEdit
+    else: gRemember and (gMainShell.isNil or gShell == gMainShell)
+  if remember:
+    let failed = saveGpuiLayoutDocument(gShell.saveWindowLayout(gWindow),
+                                        if editArrangement: pmEdit else: pmDebug)
     if failed.len > 0:
       stderr.writeLine("codetracer-gpui: the layout could not be saved: " &
                        failed)
@@ -4952,9 +4967,6 @@ proc cancelWindowGesture(): bool =
 # key, hover label and pin / unpin
 # ---------------------------------------------------------------------------
 
-const
-  HoverLabelPx = 24
-
 var
   gMenu: MenuVM = nil
     ## THE SHARED MENU VIEWMODEL — the tree the desktop's menu is built from
@@ -5502,24 +5514,6 @@ proc drawFooter(r: GpuiRenderer) =
       text(r, c, cert)
       gTopEls.add c
 
-proc wrapWords(text: string; maxChars: int): seq[string] =
-  ## `text` broken at spaces into lines of at most `maxChars` characters, the
-  ## way a desktop tooltip wraps at its maximum width. A word longer than
-  ## `maxChars` keeps a line of its own, uncut (cutting could split a UTF-8
-  ## sequence). Joining the lines with one space gives back the words.
-  var line = ""
-  for word in text.splitWhitespace:
-    if line.len == 0:
-      line = word
-    elif line.len + 1 + word.len <= maxChars:
-      line.add ' '
-      line.add word
-    else:
-      result.add line
-      line = word
-  if line.len > 0:
-    result.add line
-
 proc menuRefusalLabel(): tuple[text: string, lines: seq[string], at: PxRect] =
   ## EMT-D14: the open menu's highlighted item, when it is disabled — its
   ## reason, and where the hover label shows it: beside the item's row, to
@@ -5530,9 +5524,6 @@ proc menuRefusalLabel(): tuple[text: string, lines: seq[string], at: PxRect] =
   ## puts it over the popover, wrapped to the window. `lines` has one entry
   ## per drawn line. `("", @[], _)` when the highlighted item is enabled, a
   ## folder, or not drawn.
-  const MinSidePx = 20 * TabCharPx + 2 * TabPadPx
-    ## The narrowest side a wrapped reason is put on: about three words a
-    ## line. Narrower than that, it reads better over the popover.
   if gMenu.isNil or not gMenu.isOpen:
     return
   let it = gMenu.highlightedItem()
@@ -5549,36 +5540,11 @@ proc menuRefusalLabel(): tuple[text: string, lines: seq[string], at: PxRect] =
     for row in p.rows:
       if row.item < 0 or lv.items[row.item].index != gMenu.highlight:
         continue
-      let winW = pendingViewportWidth
-      let oneLine = textPx(text) + 2 * TabPadPx
-      let rightX = p.rect.x + p.rect.w + 4
-      let rightRoom = winW - rightX
-      let leftRoom = p.rect.x - 4
-      # The side: the right where the one line fits, else the left, else
-      # wrapped on the roomier of the two; over the popover only when both
-      # are too narrow even for that.
-      type Side = enum sRight, sLeft, sOver
-      let (side, room) =
-        if oneLine <= rightRoom: (sRight, rightRoom)
-        elif oneLine <= leftRoom: (sLeft, leftRoom)
-        elif rightRoom >= MinSidePx and rightRoom >= leftRoom:
-          (sRight, rightRoom)
-        elif leftRoom >= MinSidePx: (sLeft, leftRoom)
-        else: (sOver, winW)
-      let lines = wrapWords(text, max(1, (room - 2 * TabPadPx) div TabCharPx))
-      var widest = 0
-      for l in lines:
-        widest = max(widest, textPx(l))
-      let w = min(widest + 2 * TabPadPx, max(1, winW))
-      let wanted = case side
-        of sRight: rightX
-        of sLeft: leftRoom - w # flush against the popover's left edge
-        of sOver: 0
-      let x = max(0, min(wanted, winW - w))
-      let h = lines.len * HoverLabelPx
-      let y = max(0, min(row.rect.y + (row.rect.h - HoverLabelPx) div 2,
-                         pendingViewportHeight - h))
-      return (text, lines, PxRect(x: x, y: y, w: w, h: h))
+      # Beside the popover, never over it while a side holds it
+      # (`hoverLabelBeside`).
+      let place = hoverLabelBeside(text, p.rect, row.rect,
+                                   pendingViewportWidth, pendingViewportHeight)
+      return (text, place.lines, place.at)
 
 proc drawPopovers(r: GpuiRenderer) =
   ## The right-click menu and an event's content, over the window.
@@ -5654,14 +5620,15 @@ proc drawCellTooltip(r: GpuiRenderer) =
     var widest = 0
     for l in gCellTooltip:
       widest = max(widest, l.runeLen)
+    # Under the cell, above it where the window has no room below — the
+    # hover label's rule, flush against the cell.
     let a = gCellHoverAnchor
-    let w = min(pendingViewportWidth, pxOfText(widest) + 2 * TabPadPx)
-    let h = gCellTooltip.len * HoverLabelPx
-    let below = a.y + a.h
-    let y = if below + h <= pendingViewportHeight: below else: max(0, a.y - h)
-    let x = max(0, min(a.x, pendingViewportWidth - w))
-    let tb = absBox(r, PxRect(x: x, y: y, w: w, h: h),
-                    chromeOf(crWindowBackground))
+    let at = placeBelowOrAbove(
+      PxRect(x: a.x, y: a.y, h: a.h),
+      min(pendingViewportWidth, pxOfText(widest) + 2 * TabPadPx),
+      gCellTooltip.len * HoverLabelPx, 0,
+      pendingViewportWidth, pendingViewportHeight)
+    let tb = absBox(r, at, chromeOf(crWindowBackground))
     r.setAttribute(tb, CellTooltipAttribute, gCellHover.key & "|" &
                                              gCellHover.column)
     r.setStyle(tb, "display", "flex")
@@ -6038,12 +6005,13 @@ proc drawTopBar(r: GpuiRenderer) =
     for (k, v) in tabStyle(true): r.setStyle(ub, k, v)
     r.appendChild(ub, r.createTextNode("Unpin"))
     gTopEls.add ub
-  # THE HOVER LABEL: a disabled menu item's reason, a control's tooltip and
-  # key, or an auto-hide label's pane, beside the pointer's target.
+  # THE HOVER LABEL (`hover_label.nim`): a disabled menu item's reason, a
+  # control's tooltip and key, or a session tab's tooltip, beside the
+  # pointer's target.
   var hoverText = ""
   var hoverAt = PxRect()
   var hoverLines: seq[string] = @[]
-    ## Set only by a wrapped reason: one entry per line drawn.
+    ## Set only by a wrapped label: one entry per line drawn.
   let refusal = menuRefusalLabel()
   if refusal.text.len > 0:
     # EMT-D14: the highlighted menu item is disabled, by the keyboard or the
@@ -6055,62 +6023,31 @@ proc drawTopBar(r: GpuiRenderer) =
     hoverText = controlTooltip(gHoverControl,
                                gMenu.shortcutFor(
                                  TransportControls[gHoverControl].clientAction))
-    hoverAt = PxRect(x: sg.rect.x, y: sg.rect.y + sg.rect.h + 2,
-                     w: textPx(hoverText) + 2 * TabPadPx, h: HoverLabelPx)
+    hoverAt = hoverLabelBelow(sg.rect, hoverText, 2)
   elif gHoverTab >= 0 and gHoverTab < tabs.len:
     # PLAT-49 part B: a session tab's tooltip — its title, and with an agent
     # in the session its task, state and progress (`SessionTabView.tooltip`).
     let sg = gTopLayout.segOf(gtTab, gHoverTab)
     hoverText = tabs[gHoverTab].tooltip
-    hoverAt = PxRect(x: sg.rect.x, y: sg.rect.y + sg.rect.h + 6,
-                     w: textPx(hoverText) + 2 * TabPadPx, h: HoverLabelPx)
+    hoverAt = hoverLabelBelow(sg.rect, hoverText, 6)
   elif gHoverTabAdd:
     let sg = gTopLayout.segOf(gtTabAdd)
     hoverText = NewSessionTabTitle
-    hoverAt = PxRect(x: sg.rect.x, y: sg.rect.y + sg.rect.h + 6,
-                     w: textPx(hoverText) + 2 * TabPadPx, h: HoverLabelPx)
+    hoverAt = hoverLabelBelow(sg.rect, hoverText, 6)
   elif gHoverTests.title.len > 0:
     # Test-Results-Pane.md §9.6: a Test Results control's title — the
     # desktop's tooltip — beneath the control, wrapped at a tooltip's width
     # and kept inside the window.
     hoverText = gHoverTests.title
-    const TooltipChars = 60
-    hoverLines = wrapWords(hoverText, TooltipChars)
-    var widest = 0
-    for l in hoverLines:
-      widest = max(widest, textPx(l))
-    let w = min(pendingViewportWidth, widest + 2 * TabPadPx)
-    let h = max(1, hoverLines.len) * HoverLabelPx
-    let a = gHoverTests.at
-    let below = a.y + a.h + 2
-    hoverAt = PxRect(x: max(0, min(a.x, pendingViewportWidth - w)),
-                     y: (if below + h <= pendingViewportHeight: below
-                         else: max(0, a.y - h - 2)),
-                     w: w, h: h)
+    hoverLines = hoverLabelLines(hoverText, HoverLabelWrapChars)
+    hoverAt = hoverLabelUnder(gHoverTests.at, hoverLines, 2,
+                              pendingViewportWidth, pendingViewportHeight)
   # (An auto-hide label's hover shows its PANE — the preview, PLAT-49 part B
   # — not a hint label: the desktop's strip tab has none.)
   if hoverText.len > 0:
-    let hb = absBox(r, hoverAt, chromeOf(crWindowBackground))
-    r.setAttribute(hb, "data-ct-hover-label", hoverText)
+    let hb = drawHoverLabel(r, hoverAt, hoverText, hoverLines)
     if gHoverTests.title.len > 0 and hoverText == gHoverTests.title:
       r.setAttribute(hb, "data-ct-tests-hover", "true")
-    r.setStyle(hb, "padding-left", $TabPadPx & "px")
-    r.setStyle(hb, "white-space", "nowrap")
-    for (k, v) in paneOutlineStyle(true): r.setStyle(hb, k, v)
-    if hoverLines.len > 1:
-      # A wrapped reason: one row per line, stacked.
-      r.setStyle(hb, "flex-direction", "column")
-      r.setStyle(hb, "items", "start")
-      for l in hoverLines:
-        let lb = r.createElement("div")
-        r.setAttribute(lb, "data-ct-hover-label-line", l)
-        r.setStyle(lb, "height", $HoverLabelPx & "px")
-        r.setStyle(lb, "items", "center")
-        r.setStyle(lb, "white-space", "nowrap")
-        r.appendChild(lb, r.createTextNode(l))
-        r.appendChild(hb, lb)
-    else:
-      r.appendChild(hb, r.createTextNode(hoverText))
     gTopEls.add hb
   # PLAT-70 Part B (Horizontal-Overflow.md §5.3): A TRUNCATED CELL'S FULL
   # TEXT, after the pointer rested on it 500 ms — under the cell (above it
@@ -6866,8 +6803,13 @@ proc showFolderTab(r: GpuiRenderer; index: int): string =
     gMainShell = gShell
   if gEditShell.isNil:
     gEditShell = newGpuiShell(gMainShell.viewport)
-    discard gEditShell.openWindow(WindowId(0),
-                                  initLayout(sharedEditLayout().tree, sharedEditLayout().docked))
+    # The remembered Edit arrangement, or Edit mode's shared default; an
+    # unreadable file is reported and left alone, as the Debug one is.
+    let remembered = restoreGpuiLayout(pmEdit)
+    gRememberEdit = remembered.status != grsUnreadable
+    if remembered.status == grsUnreadable:
+      stderr.writeLine("codetracer-gpui: " & remembered.message)
+    discard gEditShell.openWindow(WindowId(0), remembered.layout)
   gWelcomeTabs.active = index
   gShell = gEditShell
   gWindow = WindowId(0)
@@ -8116,6 +8058,17 @@ proc applyHoverReply(r: GpuiRenderer; reply: AutoHideReply) =
 
 proc hoverTick() {.cdecl.}
 proc vcsTick() {.cdecl.}
+proc flowAfterWindowTick() {.cdecl.}
+  ## Forward-declared; defined with the replay window's refresh.
+
+var gFlowAfterWindow = false
+  ## The first stop's flow is still to be asked for: an interactive window
+  ## opens on the stop's code, values and call trace, and asks for the flow
+  ## once it has drawn (`runOpen`, `flowAfterWindowTick`).
+
+const FlowAfterWindowPollMs = 50
+  ## How often the deferred flow looks for the window's first frame.
+
 proc vcsPollTick() {.cdecl.}
   ## Forward-declared; defined with the VCS pane's refresh.
 proc recordTick() {.cdecl.}
@@ -8183,6 +8136,14 @@ proc armHoverTick() =
   # (which now delivers certificate answers alongside that activity's work).
   # PLAT-57: a Find in Files search streaming is pumped on the same tick,
   # every `SearchPollMs`, while it runs.
+  # The first stop's flow, once the window has drawn (`runOpen`): before
+  # anything else, so the editor's flow overlay is the first thing filled in.
+  if due < 0 and gFlowAfterWindow:
+    let want = (due: -11'i64, vcs: false)
+    if gArmedTick != want:
+      gArmedTick = want
+      gpui_set_tick(uint32(FlowAfterWindowPollMs), flowAfterWindowTick)
+    return
   if due < 0 and nativeFindInFiles.running:
     let want = (due: -4'i64, vcs: false)
     if gArmedTick != want:
@@ -10875,6 +10836,31 @@ proc afterMove(r: GpuiRenderer) =
   gViewedFile = ""
   refreshReplayWindow(r)
 
+proc flowAfterWindowTick() {.cdecl.} =
+  ## The first stop's flow, asked for once the window has drawn its first
+  ## frame (`runOpen` left it out), then the window drawn again with it: the
+  ## editor's flow overlay and the flow pane fill in. A native flow can take
+  ## minutes on a loaded host, and the window showed nothing while it opened
+  ## on it; its read is on the window's clock, which the engine's progress
+  ## keeps running (ui-selection.md §8b).
+  if gpui_frame_count() == 0'u64:
+    return   # not drawn yet: this tick looks again
+  gFlowAfterWindow = false
+  if not gSession.isNil:
+    # The rows the editor draws with a flow state: none before the flow, the
+    # lines the stop's call ran after it (`gpui-flow-first-window.sh`).
+    proc flowRows(): int =
+      for row in gEditorSurface.rows:
+        if row.flow != efsUnknown: inc result
+    traceGesture("flow requested after the first frame; flow rows " &
+                 $flowRows())
+    gSession.sdk.stops.setPaneOpen(spFlow, true)
+    var r: GpuiRenderer
+    refreshReplayWindow(r)
+    traceGesture("flow applied; flow rows " & $flowRows())
+  gArmedTick = (due: -2'i64, vcs: false)
+  armHoverTick()
+
 proc openContextMenuAt(r: GpuiRenderer; menu: ContextMenuModel; x, y: int) =
   # a shown cell tooltip goes with it: the menu is what the press asked for
   if gCellHover.dismiss():
@@ -13411,6 +13397,12 @@ proc routeWindowKey(r: GpuiRenderer; key: string; mods: seq[string]) =
   ## One GPUI keystroke through the shared router: decoded to its canonical
   ## name (`canonicalKeyOfGpui`, GPUI's one decoder), resolved for THIS
   ## window's scope path and facts, and run (§6.1 step 5).
+  # A capture's sentinel (`CODETRACER_GPUI_PROBE_SENTINEL`) ends the loop
+  # whatever the key does here, as it does in an Edit window (`editKey`), so a
+  # replay window's capture can tell "the typist finished" from the backstop.
+  let sentinel = probeSentinel.len > 0 and key == probeSentinel
+  defer:
+    if sentinel: gpui_quit()
   let name = canonicalKeyOfGpui(key, mods)
   if name.len == 0:
     return
@@ -15995,19 +15987,56 @@ proc runEdit(cmd: GpuiCommand): int =
   defer: stopConstraintsHost()
   var shell = newGpuiShell(DockViewport(width: cmd.width, height: cmd.height,
                                         dockExtent: DefaultGpuiViewport.dockExtent))
+  # EDIT MODE OPENS WHAT IT REMEMBERS (`gpui-layout-edit.json`), or the
+  # shared Edit default — the arrangement the desktop's edit mode and the
+  # terminal's show — at depth 0 (this front-end has no pixel minimums, so it
+  # never folds). Its own file, never the Debug one (Mode-Transitions.md §4b).
+  # An unreadable file is reported by kind and left alone; `--reset-layout`
+  # deletes it.
+  var editLayout = sharedDefaultValue(pmEdit)
+  var editQuarantined = false
+  if cmd.resetLayout:
+    let failed = resetGpuiLayout(pmEdit)
+    if failed.len > 0:
+      stderr.writeLine("codetracer-gpui: the remembered layout could not be " &
+                       "removed: " & failed)
+  else:
+    let remembered = restoreGpuiLayout(pmEdit)
+    editLayout = remembered.layout
+    if remembered.status == grsUnreadable:
+      editQuarantined = true
+      stderr.writeLine("codetracer-gpui: " & remembered.message)
+  # `--layout-ops`, the window's scripted gesture, as a replay window takes
+  # it: applied, then written through to the Edit file unless that file
+  # could not be read.
+  if cmd.layoutOps.len > 0:
+    for op in cmd.layoutOps:
+      let applied = apply(editLayout, op)
+      case applied.kind
+      of loRefused:
+        stderr.writeLine("codetracer-gpui: --layout-ops: " & $op &
+                         " was refused: " & $applied.problem.kind)
+        return 1
+      of loNoOp: discard
+      of loApplied: editLayout = applied.layout
+    if editQuarantined:
+      stderr.writeLine("codetracer-gpui: the rearranged layout was not " &
+                       "saved: the remembered file could not be read and " &
+                       "was left alone")
+    else:
+      let failed = saveGpuiLayout(editLayout, pmEdit)
+      if failed.len > 0:
+        stderr.writeLine("codetracer-gpui: the layout could not be saved: " &
+                         failed)
   let surface = editSurfaceFor(cmd,
-    editorRowsFor(initLayout(sharedEditLayout().tree, sharedEditLayout().docked), shell.viewport, cmd))
+    editorRowsFor(editLayout, shell.viewport, cmd))
   # `openWindow` and not `openWindowForSession`: there is no session. That is a
   # real product state rather than a test affordance — `shell.openWindow`'s own
   # header says so — and it is exactly the state edit mode is in, because edit
   # mode's subject is the working tree and a `HeadlessSessionSlot` is a replay
   # session.
   let windowId = WindowId(0)
-  # PLAT-45: EDIT MODE OPENS THE SHARED EDIT DEFAULT — the arrangement the
-  # desktop's edit mode and the terminal's show — at depth 0 (this front-end
-  # has no pixel minimums, so it never folds). Not remembered: this product's
-  # remembered file holds its Debug arrangement, as the terminal's does.
-  let opened = shell.openWindow(windowId, initLayout(sharedEditLayout().tree, sharedEditLayout().docked))
+  let opened = shell.openWindow(windowId, editLayout)
   if opened.kind == wsRefused:
     stderr.writeLine("codetracer-gpui: could not open a window: " &
                      $opened.problem.kind)
@@ -16057,15 +16086,17 @@ proc runEdit(cmd: GpuiCommand): int =
   # `PLAT35-F3`: the editor pane's inner width, from the geometry this
   # window is about to be laid out at.
   gEditorSurface = surface
-  gEditorViewportPx = editorBodyWidthFor(
-    initLayout(sharedEditLayout().tree, sharedEditLayout().docked), shell.viewport, cmd)
+  gEditorViewportPx = editorBodyWidthFor(editLayout, shell.viewport, cmd)
   let drawn = renderLeaves(r, leafSet, surface, gEditorViewportPx)
   editPane = findEditorPane(drawn.root)
-  # PLAT-47 part B: the window's gestures act on this shell; edit mode opens
-  # its shared default and remembers nothing (PLAT-45).
+  # PLAT-47 part B: the window's gestures act on this shell, and a
+  # rearrangement is written through to the Edit file — never over one this
+  # window could not read.
   gShell = shell
   gWindow = windowId
   gRemember = false
+  gEditWindowShell = shell
+  gRememberEdit = not editQuarantined
   gLeafSet = leafSet
   # PLAT-68: the shared router, under the session's base and the user's
   # `keybindings.json` (read, never written: the one-time import of older
@@ -16368,6 +16399,17 @@ proc runOpen(cmd: GpuiCommand): int =
   # PLAT-52 / Q3: the Terminal Output pane asks for the lines it shows as it
   # is drawn (`drawTerminalPane`), as the terminal's does.
   session.openTerminalOutput()
+  # THE WINDOW OPENS BEFORE THE FIRST STOP'S FLOW. The flow walks the call
+  # the debugger stopped in, and a native one (rr, a step at a time) took
+  # more than a minute on a loaded host, with no window on screen meanwhile.
+  # An interactive window loads the stop's other panes now and asks for the
+  # flow once it has drawn (`flowAfterWindowTick`). A run that reports what
+  # it drew (`--plan-out`) or replays operations first keeps the flow in its
+  # first frame, as before.
+  if opensWindow(cmd) and cmd.planOut.len == 0 and cmd.replayOps.len == 0:
+    session.sdk.stops.setPaneOpen(spFlow, false)
+    gFlowAfterWindow = true
+    traceGesture("flow deferred until the first frame")
   discard session.loadStopPanes()
   # The current call is selected once the call trace holds the section its
   # pane shows (`reportListViewports`, with the first frame's geometry).

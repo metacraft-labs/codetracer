@@ -135,11 +135,12 @@ proc layoutStateRoot*(): string =
   ## keymap preference (PLAT-43) so the two cannot drift apart.
   nativeStateRoot()
 
-proc layoutDocumentPath*(): string =
-  ## THE terminal product's document, under this host's state root. One file
-  ## for the product — PLAT-45 deliverable 8 — not one per recording; see
-  ## `app/layout/persistence.nim`'s header, decision 3.
-  layoutStateRoot() / LayoutDocumentFileName
+proc layoutDocumentPath*(mode = pmDebug): string =
+  ## THE terminal product's document for `mode`, under this host's state
+  ## root. One file per product mode — PLAT-45 deliverable 8 and
+  ## Mode-Transitions.md §4b — not one per recording; see
+  ## `app/layout/persistence.nim`'s header, decisions 3 and 4.
+  layoutStateRoot() / layoutDocumentFileName(mode)
 
 proc restoreLayoutForSession*(rt: TuiRuntime): LayoutRestoreReport =
   ## Bind this session to the terminal's document and adopt it if there is
@@ -154,7 +155,10 @@ proc restoreLayoutForSession*(rt: TuiRuntime): LayoutRestoreReport =
     # always has one since PLAT-45; a Tier-1 host that built a runtime without
     # one is a session with nothing to restore into.
     return LayoutRestoreReport(status: lrsNoDocument, path: "", message: "")
-  let path = layoutDocumentPath()
+  # The document of the mode the session starts in: Debug for a replay,
+  # Edit for `ct edit`. The other mode's is read on the first switch into it
+  # (`stageLayoutForMode`, through `rt.modeDocumentWanted`).
+  let path = layoutDocumentPath(rt.app.layoutBinding.product)
   rt.bindLayoutDocument(path)
   if not fileExists(path):
     return LayoutRestoreReport(status: lrsNoDocument, path: path, message: "")
@@ -171,20 +175,42 @@ proc restoreLayoutForSession*(rt: TuiRuntime): LayoutRestoreReport =
                                     e.msg.splitLines()[0])
   rt.adoptLayoutDocument(path, text)
 
-proc persistLayoutForSession*(rt: TuiRuntime): LayoutPersistReport =
-  ## Carry out this session's persist plan. Called after every committed
-  ## layout change (the write-through, PLAT-45) and once more on the way out.
+proc stageLayoutForMode*(rt: TuiRuntime; mode: ProductMode):
+    LayoutRestoreReport =
+  ## Bind `mode`'s document and stage it into the mode register, for a mode
+  ## the session is about to enter for the first time
+  ## (`runtime.modeDocumentWanted`). The same three answers as
+  ## `restoreLayoutForSession`, and the same rule for a file that will not
+  ## open: it is reported and left alone.
+  if not rt.layoutBindingEnabled():
+    return LayoutRestoreReport(status: lrsNoDocument, path: "", message: "")
+  let path = layoutDocumentPath(mode)
+  rt.bindLayoutDocument(mode, path)
+  if not fileExists(path):
+    return LayoutRestoreReport(status: lrsNoDocument, path: path, message: "")
+  var text = ""
+  try:
+    text = readFile(path)
+  except CatchableError as e:
+    rt.markLayoutDocumentUnreadable(mode)
+    return unreadableLayoutDocument(path, UnreadableFileKind,
+                                    e.msg.splitLines()[0])
+  rt.stageLayoutDocument(mode, path, text)
+
+proc persistLayoutForMode*(rt: TuiRuntime; mode: ProductMode):
+    LayoutPersistReport =
+  ## Carry out the persist plan for one mode's document.
   ##
   ## Nothing here decides anything: the plan is
   ## `runtime.layoutPersistPlanOf`'s, so "write it", "delete the stale one" and
   ## "leave it alone" are one function of the session's own state rather than
   ## three conditions spread across the callers.
-  let path = rt.layoutDocument
-  let plan = rt.layoutPersistPlanOf()
+  let path = rt.layoutDocuments[mode]
+  let plan = rt.layoutPersistPlanOf(mode)
   case plan.intent
   of lpiQuarantine:
     LayoutPersistReport(
-      outcome: (if rt.layoutPersistenceEnabled(): lpoQuarantined
+      outcome: (if rt.layoutPersistenceEnabled(mode): lpoQuarantined
                 else: lpoDisabled),
       path: path, message: "")
   of lpiRemove:
@@ -212,3 +238,19 @@ proc persistLayoutForSession*(rt: TuiRuntime): LayoutPersistReport =
       LayoutPersistReport(
         outcome: lpoFailed, path: path,
         message: "the layout could not be saved: " & path & ": " & e.msg)
+
+proc persistLayoutForSession*(rt: TuiRuntime): LayoutPersistReport =
+  ## Carry out this session's persist plans: the session's own mode's
+  ## document, then each other mode's that this session bound. Called after
+  ## every committed layout change (the write-through, PLAT-45) and once more
+  ## on the way out.
+  ##
+  ## The answer is the session's own mode's report, unless another mode's
+  ## save FAILED, which the user is told about the same way.
+  result = rt.persistLayoutForMode(rt.layoutHome)
+  for mode in ProductMode:
+    if mode == rt.layoutHome or rt.layoutDocuments[mode].len == 0:
+      continue
+    let other = rt.persistLayoutForMode(mode)
+    if other.outcome == lpoFailed and result.outcome != lpoFailed:
+      result = other

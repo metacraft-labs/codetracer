@@ -65,10 +65,14 @@ proc textPx*(text: string; sizePx: int; tabular = false): int =
   ## `tabular`: in tabular figures, as `text(..., tabular = true)` draws it.
   groteskTextPx(text, float(sizePx), tabular = tabular)
 
-proc textWidth*(text: string; sizePx: int; tabular = false): float =
+proc textWidth*(text: string; sizePx: int; tabular = false;
+                faceGlyphs = false): float =
   ## The same, unrounded and KERNED, as a browser and GPUI set it: the width
-  ## an exact line break is decided on (`FlowItem.exactPx`).
-  groteskTextWidth(text, float(sizePx), tabular = tabular, kerned = true)
+  ## an exact line break is decided on (`FlowItem.exactPx`). `faceGlyphs`:
+  ## the non-ASCII glyphs the face carries (`·`, `…`, `—`, arrows) at their
+  ## own advances rather than a capital M (`groteskTextWidth`).
+  groteskTextWidth(text, float(sizePx), tabular = tabular, kerned = true,
+                   faceGlyphs = faceGlyphs)
 
 proc styles*(r: GpuiRenderer; el: GpuiElement;
              pairs: openArray[(string, string)]) =
@@ -314,6 +318,48 @@ type
       ## box ends lower than a larger one's (the fleet's 12px meta beside its
       ## 14px title). 0 for an item that does not move.
 
+proc flowLineStarts*(items: openArray[FlowItem]; availPx, gapPx: int): seq[bool] =
+  ## Where `flowLines` breaks `items` into lines: for each item, whether it
+  ## starts a line. A view that sizes its rows before drawing them counts the
+  ## lines from this, so the room it keeps and the lines drawn always agree.
+  ##
+  ## Each item goes on the current line while it fits beside the ones
+  ## already there. A measured width is a whole pixel, rounded; the
+  ## browser's is fractional. One pixel of slack per item already on the
+  ## line keeps an item whose true width fits exactly from breaking the
+  ## line. When every item on the line knows its exact width, the line
+  ## breaks exactly where the browser's does, with no slack: a line that
+  ## overflows by half a pixel breaks there too.
+  var any = false
+  var used = 0
+  var count = 0
+  var exactUsed = 0.0
+  var allExact = true
+  for item in items:
+    let need = if not any or used == 0: item.widthPx else: used + gapPx + item.widthPx
+    let exact = allExact and item.exactPx > 0
+    let overflows =
+      if exact: exactUsed + float(gapPx) + item.exactPx > float(availPx)
+      else: need > availPx + count
+    let starts = not any or item.ownLine or (used > 0 and overflows)
+    result.add starts
+    if starts:
+      used = 0
+      count = 0
+      exactUsed = 0.0
+      allExact = true
+    any = true
+    exactUsed = if used == 0: item.exactPx else: exactUsed + float(gapPx) + item.exactPx
+    allExact = allExact and item.exactPx > 0
+    used = if used == 0: min(item.widthPx, availPx) else: used + gapPx + item.widthPx
+    inc count
+
+proc flowLineCount*(items: openArray[FlowItem]; availPx, gapPx: int): int =
+  ## How many lines `flowLines` packs `items` into (at least one).
+  for starts in flowLineStarts(items, availPx, gapPx):
+    if starts: inc result
+  result = max(1, result)
+
 proc flowLines*(r: GpuiRenderer; items: openArray[FlowItem]; availPx, gapPx,
                 lineHeightPx, rowGapPx: int): GpuiElement =
   ## A row of items that WRAPS, as CSS `flex-wrap: wrap` lays one out: each
@@ -322,34 +368,19 @@ proc flowLines*(r: GpuiRenderer; items: openArray[FlowItem]; availPx, gapPx,
   ## wider than a whole line gets a line to itself and is cut there. GPUI's
   ## layout has no wrapping, so the lines are packed here, from the natural
   ## widths, into a column of `lineHeightPx` rows `rowGapPx` apart.
+  ## Where each line starts is `flowLineStarts`.
   let column = r.box(column = true, pairs = [("gap", $rowGapPx & "px")])
+  let starts = flowLineStarts(items, availPx, gapPx)
   var line: GpuiElement = nil
-  var used = 0
   var count = 0
   var grows = false
-  var exactUsed = 0.0
-  var allExact = true
-  for item in items:
-    let need = if line == nil or used == 0: item.widthPx else: used + gapPx + item.widthPx
-    # A measured width is a whole pixel, rounded; the browser's is
-    # fractional. One pixel of slack per item already on the line keeps an
-    # item whose true width fits exactly from breaking the line. When every
-    # item on the line knows its exact width, the line breaks exactly where
-    # the browser's does, with no slack: a line that overflows by half a
-    # pixel breaks there too.
-    let exact = allExact and item.exactPx > 0
-    let overflows =
-      if exact: exactUsed + float(gapPx) + item.exactPx > float(availPx)
-      else: need > availPx + count
-    if line == nil or item.ownLine or (used > 0 and overflows):
+  for i, item in items:
+    if starts[i]:
       if line != nil: r.appendChild(column, line)
       line = r.box(pairs = [("height", $lineHeightPx & "px"), ("items", "center"),
                             ("gap", $gapPx & "px"), ("width", $availPx & "px")])
-      used = 0
       count = 0
       grows = false
-      exactUsed = 0.0
-      allExact = true
     if item.dropPx > 0 and count > 0:
       # Baseline-aligned beside what is already on the line: the line's
       # items keep to its top, this one `dropPx` lower, the line that much
@@ -362,9 +393,6 @@ proc flowLines*(r: GpuiRenderer; items: openArray[FlowItem]; availPx, gapPx,
       grows = true
       r.styles(item.el, [("flex-grow", "1"), ("flex-shrink", "1"), ("min-width", "0px")])
     r.appendChild(line, item.el)
-    exactUsed = if used == 0: item.exactPx else: exactUsed + float(gapPx) + item.exactPx
-    allExact = allExact and item.exactPx > 0
-    used = if used == 0: min(item.widthPx, availPx) else: used + gapPx + item.widthPx
     inc count
   if line != nil: r.appendChild(column, line)
   column

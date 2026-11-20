@@ -551,7 +551,15 @@ while read -r f; do
 			"${extra_flags[@]}" --nimcache:"${cache}" -o:"${cache}/${name}.js" "${f}")
 		artifact="${cache}/${name}.js"
 	else
-		compile_cmd=(nim c --hints:off --warnings:off
+		# `--mm:orc` is named here although it is Nim 2's default, so a
+		# native column names the memory manager it was measured under, as
+		# the wasm arm above does: the vm-unit-wasm parity gate compares this
+		# arm's counts against that one's, and a comparison whose one side
+		# inherits a compiler default cannot say what it compared.
+		# ci/test/vm-unit-wasm-lane-test.sh asserts it. A lane whose extra
+		# flags name another manager (`--mm:refc`) still gets that one: the
+		# extra flags come after it, and the last `--mm` wins.
+		compile_cmd=(nim c --hints:off --warnings:off --mm:orc
 			${extra_flags[@]+"${extra_flags[@]}"} --nimcache:"${cache}" -o:"${cache}/${name}" "${f}")
 		artifact="${cache}/${name}"
 	fi

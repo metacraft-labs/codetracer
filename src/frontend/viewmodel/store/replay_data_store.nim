@@ -2228,6 +2228,49 @@ proc clearEventLog*(store: ReplayDataStore) =
 # Point list + tracepoint sweeps
 # ---------------------------------------------------------------------------
 
+func pointRowId*(r: PointListEntry): string =
+  ## A point row's stable identity: WHAT the point is, never where in the
+  ## list it sits.
+  ##
+  ## A collection's point is its collection, kind, file and anchor — not its
+  ## line, which an edit above it moves, and not its index, which a sibling
+  ## added above it moves. A breakpoint is its file, line and column, which is
+  ## what DAP's `setBreakpoints` keys a breakpoint by; a tracepoint is its file
+  ## and line, which is what a sweep merges by (`applyTracepointResults`).
+  if r.collection.len > 0:
+    "collection:" & r.collection & ":" & r.kind & ":" & r.path & ":" &
+      (if r.anchor.len > 0: r.anchor else: r.label)
+  elif r.kind == PointKindBreakpoint:
+    "breakpoint:" & r.path & ":" & $r.line & ":" & $r.column
+  else:
+    r.kind & ":" & r.path & ":" & $r.line &
+      (if r.line == 0: ":" & r.label else: "")
+
+func withoutOrdinal(id: string): string =
+  ## `id` without the `#<n>` `withStableIds` may have appended.
+  let hash = id.rfind('#')
+  if hash < 0 or hash == id.len - 1: return id
+  for c in id[hash + 1 .. ^1]:
+    if c notin {'0' .. '9'}: return id
+  id[0 ..< hash]
+
+func withStableIds*(rows: seq[PointListEntry]): seq[PointListEntry] =
+  ## Every row with its `id`: the one a producer gave it, or `pointRowId`'s.
+  ## Two rows that would share an id — two identical points declared twice —
+  ## are told apart by their order among themselves (`#2`, `#3`), which is
+  ## stable for as long as the declaration is.
+  result = rows
+  var seen: seq[string] = @[]
+  for r in result.mitems:
+    let base = if r.id.len > 0: withoutOrdinal(r.id) else: pointRowId(r)
+    var id = base
+    var n = 1
+    while id in seen:
+      inc n
+      id = base & "#" & $n
+    seen.add id
+    r.id = id
+
 proc applyPointRows*(store: ReplayDataStore; rows: seq[PointListEntry]) =
   ## Replace the declared point rows.
   ##
@@ -2235,7 +2278,7 @@ proc applyPointRows*(store: ReplayDataStore; rows: seq[PointListEntry]) =
   ## ends here, as does `PointListVM.setPoints`. Written unconditionally,
   ## including with an empty seq: disabling every collection has to be able to
   ## empty the pane.
-  store.pointList.rows.val = rows
+  store.pointList.rows.val = withStableIds(rows)
   store.pointList.loadingState.val = lsIdle
 
 type
@@ -2280,9 +2323,17 @@ proc applyVerifiedBreakpoints*(store: ReplayDataStore; path: string;
   ## Navigation M9 and M10) onto its row. `resolution` is `requested` for a
   ## set held before the engine has answered (`sdk/breakpoints.requestBreakpoints`).
   var rows: seq[PointListEntry] = @[]
+  # A PROJECT COLLECTION'S BREAKPOINT IS STILL ITS COLLECTION'S once the
+  # engine has bound it (Project-Definitions §4): the engine's answer for its
+  # line carries the collection, the anchor and the id onto the row, and a
+  # collection point the answer does not mention is kept as it was — reported,
+  # never dropped.
+  var declared: seq[PointListEntry] = @[]
   for r in store.pointList.rows.val:
     if not (r.kind == PointKindBreakpoint and r.path == path):
       rows.add r
+    elif r.collection.len > 0:
+      declared.add r
   var name = path
   let slash = max(path.rfind('/'), path.rfind('\\'))
   if slash >= 0: name = path[slash + 1 .. ^1]
@@ -2294,12 +2345,24 @@ proc applyVerifiedBreakpoints*(store: ReplayDataStore; path: string;
       if sp.enabled != armed or sp.line < 1 or sp.line in lines:
         continue
       lines.add sp.line
-      rows.add PointListEntry(kind: PointKindBreakpoint,
+      var row = PointListEntry(kind: PointKindBreakpoint,
         label: name & ":" & $sp.line &
                (if sp.column > 0: ":" & $sp.column else: ""),
         path: path, line: sp.line, column: max(0, sp.column),
         enabled: sp.enabled, resolution: resolution,
         condition: sp.condition, logMessage: sp.logMessage)
+      for i in 0 ..< declared.len:
+        if declared[i].line == sp.line and declared[i].column == row.column:
+          row.collection = declared[i].collection
+          row.anchor = declared[i].anchor
+          row.label = declared[i].label
+          row.id = declared[i].id
+          row.detail = declared[i].detail
+          declared.delete(i)
+          break
+      rows.add row
+  for d in declared:
+    rows.add d
   store.applyPointRows(rows)
 
 proc applyVerifiedBreakpoints*(store: ReplayDataStore; path: string;
@@ -2478,7 +2541,7 @@ proc applyTracepointResults*(store: ReplayDataStore;
         resolution: resolution,
         detail: detail,
         expression: spec.expression)
-  store.pointList.rows.val = rows
+  store.pointList.rows.val = withStableIds(rows)
   store.pointList.loadingState.val = lsIdle
 
 # ---------------------------------------------------------------------------
@@ -2515,7 +2578,7 @@ proc setTracepointsEnabled*(store: ReplayDataStore; path: string; line: int;
       r.enabled = enabled
       inc result
   if result > 0:
-    store.pointList.rows.val = rows
+    store.pointList.rows.val = withStableIds(rows)
 
 proc deleteTracepoint*(store: ReplayDataStore; path: string; line: int): bool =
   ## Delete the tracepoint at `path:line` — its point-list row and the hits
@@ -2530,7 +2593,7 @@ proc deleteTracepoint*(store: ReplayDataStore; path: string; line: int): bool =
       kept.add r
   if not result:
     return
-  store.pointList.rows.val = kept
+  store.pointList.rows.val = withStableIds(kept)
   var hits: seq[TracepointSweepHit] = @[]
   for h in store.pointList.tracepointHits.val:
     if not (h.path == path and h.line == line):

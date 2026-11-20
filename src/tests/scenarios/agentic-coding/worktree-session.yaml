@@ -16,11 +16,15 @@ stage:
     with: { folder: $project }
 
 steps:
-  - click: { at: 'pane-tab[label="AGENT ACTIVITY"]' }
+  # The omnibox's `/ai` asks the agent (Agentic-Coding-Integration.md §8.1),
+  # and with an Agent Harbor server configured it starts a worktree session
+  # (§6.8). Edit mode's layout has no Agent Activity pane until it opens one.
+  - wait: { until: editor.loaded, timeout: 60s }
+  - chord: Ctrl+p
+  - wait: { until: { at: omnibox, focused: true }, timeout: 10s }
+  - type: "/ai Make featureValue return 42 and record the evidence"
+  - key: Enter
   - wait: { until: { at: agent-activity/agent-prompt, present: true }, timeout: 60s }
-  - click: { at: agent-activity/agent-prompt }
-  - type: "Make featureValue return 42 and record the evidence"
-  - click: { at: 'agent-activity/panel-button[label="Send"]' }
   - wait: { until: { at: caption-progress, text: { matches: "\\d+/\\d+" } }, timeout: 180s }
 
   - beat: agent-workspace

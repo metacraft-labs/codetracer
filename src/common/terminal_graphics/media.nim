@@ -32,42 +32,31 @@ func terminalMediaCapability*(tier: ImageTier;
   ## PLAT-14. What a TERMINAL surface can draw, given the tier and the protocol
   ## `app/theme/image_capability.resolveImageCapability` settled on.
   ##
-  ## ## THE SET IS DECIDED BY THE DECODER, NOT BY THE TIER'S FIDELITY
+  ## ## THE SET IS DECIDED BY THE DECODERS, NOT BY THE TIER'S FIDELITY
   ##
-  ## This is the part that is easy to get optimistically wrong, so it is
-  ## written out. §5.2's media types name ENCODED formats; the cell tiers
-  ## (`terminal_graphics/cell_render.nim`) consume a RASTER. The bridge between
-  ## them is a PNG/JPEG decoder, and this build has none — see
-  ## `terminal_graphics/raster.nim`'s header. So:
+  ## §5.2's media types name ENCODED formats; the cell tiers
+  ## (`terminal_graphics/cell_render.nim`) and Sixel consume PIXELS. The
+  ## bridge is a decoder, and this build has one for PNG (`common/png.
+  ## decodePng`, since 2026-11-20) and none for JPEG. So:
   ##
-  ##   * **Tier 0 draws `image/png`** on Kitty and on iTerm2, because neither
-  ##     needs a decoder in this process: Kitty's `f=100` and iTerm2's
-  ##     `File=inline` both take the encoded bytes and decode them in the
-  ##     terminal. This is the arm PLAT-12 predicted and it is now reachable.
-  ##   * **Tier 0 draws `image/jpeg` on iTerm2 only.** Kitty's `f=100` is PNG;
-  ##     its other `f=` values are raw pixel formats. A JPEG handed to Kitty
-  ##     would be transmitted and rejected, which is a blank region with extra
-  ##     steps.
-  ##   * **Every cell tier draws neither**, and that is the honest answer
-  ##     rather than a missing feature dressed as one. A `image/png` value on a
-  ##     terminal with no graphics protocol degrades through PLAT-9's
-  ##     `pdDependencyMissing`, with `describeMediaGap` naming the type, the
-  ##     surface and the remedy, and with the rest of the value still
-  ##     presenting.
+  ##   * **Every tier draws `image/png`.** Tier 0 on Kitty and iTerm2 hands the
+  ##     encoded bytes to the terminal (`f=100`, `File=inline`); tier 0 on
+  ##     Sixel and every cell tier decode them here first. The ASCII tier's
+  ##     picture is coarse, and it is the same picture (§2.5).
+  ##   * **`image/jpeg` is drawn by tier 0 on iTerm2 only**, which decodes it in
+  ##     the terminal. Kitty's `f=100` is PNG, and there is no JPEG decoder in
+  ##     this process, so everywhere else a JPEG value degrades through
+  ##     PLAT-9's `pdDependencyMissing`, with `describeMediaGap` naming the
+  ##     type, the surface and the remedy.
   ##   * **`image/svg+xml`, the two audio types and the two text types are
   ##     never drawn by a terminal here.** SVG needs a rasteriser, audio needs
   ##     a device, and rendered markdown and HTML are a layout problem rather
-  ##     than a pixel one. Each is outside PLAT-14 and each degrades.
+  ##     than a pixel one. Each degrades.
   ##
   ## `mcOctetStream` is in every answer, because `builtin.byte-buffer`'s
   ## `01 02 ff … (12 bytes)` rendering has been true on every surface since
   ## CTUI-7 and PLAT-14 changes nothing about it.
   result = MediaCapabilityNote
-  if tier != itProtocol:
-    return
-  case protocol
-  of ipKitty: result.incl mcImagePng
-  of ipITerm2:
-    result.incl mcImagePng
+  result.incl mcImagePng
+  if tier == itProtocol and protocol == ipITerm2:
     result.incl mcImageJpeg
-  of ipSixel, ipNone: discard

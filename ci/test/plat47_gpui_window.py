@@ -301,6 +301,47 @@ def key(name):
     wtype_keys(["-k", name])
 
 
+def key_handled(win, name, what, retry_s=15.0, tries=3, **want):
+    """`key(name)`, then `await_input` for it. A key the window never COUNTS
+    (its `input.handled` unchanged) was lost on the way: a new virtual
+    keyboard under load can drop its key while the client is still taking
+    its keymap, and the prime does not always cover it. Such a key is sent
+    again, at most `tries` times. A key that WAS counted is never repeated,
+    so a second Esc cannot act on the state the first one produced
+    (codetracer-pm issue 2026-11-20, "The plat47 capture and the plat70f PTY
+    suite fail under load": "the window never handled Esc during the drag"
+    at load 106)."""
+    n = handled(win)
+    for attempt in range(tries):
+        key(name)
+        deadline = time.time() + retry_s
+        while time.time() < deadline and handled(win) <= n:
+            time.sleep(0.1)
+        if handled(win) > n:
+            break
+        print(f"  {what}: the window did not count the key; sent again", flush=True)
+    await_input(win, n, what, **want)
+
+
+def settle_until(name, holds, ceiling_s=60.0):
+    """`settle(name)` until `holds(frame)` is true of the settled frame, with
+    a generous ceiling. Two identical grabs are not the state a step asks
+    for: under load the window can show the same frame twice before it has
+    handled the input sent just before, and the settle then keeps the frame
+    from before that input. At load 105 the first press's frame was kept
+    without the focus outline the press draws (codetracer-pm issue
+    2026-11-20). The last settle stands either way, and the record reads it."""
+    deadline = time.time() + ceiling_s
+    while True:
+        result = settle(name)
+        path = os.path.join(OUT, name + ".ppm")
+        if result and os.path.exists(path) and holds(read_ppm(path)):
+            return result
+        if time.time() >= deadline:
+            return result
+        time.sleep(POLL_S)
+
+
 def centre(r):
     x, y, w, h = r
     return x + w // 2, y + h // 2
@@ -376,9 +417,13 @@ def capture():
         # the editor is focused and its outline drawn — the first screen
         # every later frame is compared with.
         eb = node_of(g, "editor")["body"]
-        ptr.jump(eb[0] + eb[2] // 2, eb[1] + eb[3] - 40)
+        bx0, by0 = eb[0] + eb[2] // 2, eb[1] + eb[3] - 40
+        ptr.jump(bx0, by0)
+        n = handled(win)
         ptr.send("down", "sleep 120", "up", "sleep 300")
-        steps["base"] = settle("base")
+        await_input(win, n, "the first press on the editor's body", pointer=(bx0, by0))
+        steps["base"] = settle_until(
+            "base", lambda f: ring_box(f, FOCUS_RING) is not None)
         shutil.copy(win.geometry, os.path.join(OUT, "a-base.geometry.json"))
         g = win.geom()
         # --- deliverable 5: the divider between Files and the editor.
@@ -449,9 +494,7 @@ def capture():
                         gesture_active=True)
             pointers[name] = [tx, ty]
             steps[name] = settle(name)
-        n = handled(win)
-        key("Escape")
-        await_input(win, n, "Esc during the drag", gesture_active=False)
+        key_handled(win, "Escape", "Esc during the drag", gesture_active=False)
         steps["drop-cancel"] = settle("drop-cancel")
         n = handled(win)
         ptr.send("up", "sleep 200")
@@ -478,22 +521,42 @@ def capture():
         g = win.geom()
         files = node_of(g, "vcs")
         vx, vy = centre(files["tabs"][files["panes"].index("vcs")])
+        # Each click is waited for as HANDLED (counted at its point), not for
+        # a fixed time: at load 106-120 the editor's click had not been
+        # handled when the frame was read, and the focus ring was still on
+        # the Files/VCS stack the tab click had focused.
         ptr.jump(vx, vy)
+        n = handled(win)
         ptr.send("down", "sleep 120", "up", "sleep 300")
+        await_input(win, n, "the click on the VCS tab", pointer=(vx, vy))
+        await_geom(win, "the VCS tab active",
+                   lambda g: node_of(g, "vcs")["panes"][node_of(g, "vcs")["active"]] == "vcs")
         # Compare active/inactive tabs with the same focus as `base`: the
         # editor owns the focus while the Files/VCS stack stays unfocused.
         g = win.geom()
         eb = node_of(g, "editor")["body"]
-        ptr.jump(eb[0] + eb[2] - 40, eb[1] + eb[3] - 40)
+        ex, ey = eb[0] + eb[2] - 40, eb[1] + eb[3] - 40
+        ptr.jump(ex, ey)
+        n = handled(win)
         ptr.send("down", "sleep 120", "up", "sleep 300")
-        steps["vcs"] = settle("vcs")
+        await_input(win, n, "the click on the editor's body", pointer=(ex, ey))
+        g = win.geom()
+        editor_rect = node_of(g, "editor")["rect"]
+        # The focus has no field in the geometry report, so it is read where
+        # the record reads it, off the frame: settled frames until the ring
+        # is the editor's, within the same generous ceiling.
+        deadline = time.time() + 60.0
+        while True:
+            steps["vcs"] = settle("vcs")
+            focus = ring_box(read_ppm(os.path.join(OUT, "vcs.ppm")), FOCUS_RING)
+            if focus == editor_rect or time.time() >= deadline:
+                break
+            time.sleep(POLL_S)
         shutil.copy(win.geometry, os.path.join(OUT, "a-final.geometry.json"))
         g = win.geom()
         vcs = node_of(g, "vcs")
         if vcs["panes"][vcs["active"]] != "vcs":
             raise RuntimeError("PLAT-47: the VCS sample needs its VCS tab active")
-        editor_rect = node_of(g, "editor")["rect"]
-        focus = ring_box(read_ppm(os.path.join(OUT, "vcs.ppm")), FOCUS_RING)
         if focus != editor_rect:
             raise RuntimeError(
                 f"PLAT-47: the VCS sample needs Editor focus: {focus} != {editor_rect}")

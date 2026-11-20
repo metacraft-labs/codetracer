@@ -462,18 +462,19 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   entries.addEntry("SearchVM", "results", vscBackendAuthoritative,
     "Search results are produced by a backend/search service query.")
 
-  entries.addEntry("PointListVM", "selectedPoint", vscSharedSessionViewState,
-    "Point selection should be shared when points become session objects.",
-    requiresStableId = true,
-    stableIdNote = "Current field is an index; breakpoints/points need stable ids.")
+  entries.addEntry("PointListVM", "selectedPoint", vscRendererLocal,
+    "The selected row's position in THIS front-end's list; a peer's list " &
+    "may order the same points differently. `selectedPointId` is shared.")
+  entries.addEntry("PointListVM", "selectedPointId", vscSharedSessionViewState,
+    "Point selection is collaborative session intent, by the row's stable " &
+    "`PointListEntry.id` (`replay_data_store.pointRowId`).")
   entries.addEntry("PointListVM", "editingPoint", vscRendererLocal,
     "Inline edit focus is local renderer state.",
     requiresStableId = true,
     stableIdNote = "If synchronized later, this index must become a stable point id.")
   entries.addEntry("PointListVM", "points", vscSharedSessionViewState,
-    "Point/breakpoint list is shared session view state.",
-    requiresStableId = true,
-    stableIdNote = "Point rows need stable ids before concurrent list operations.")
+    "Point/breakpoint list is shared session view state. Every row carries " &
+    "a stable `id`, written by the store on every write of the list.")
 
   entries.addMany("ScratchpadVM",
     ["entries", "localsByExpression", "chainEntries"],

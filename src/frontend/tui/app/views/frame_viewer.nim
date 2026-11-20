@@ -24,11 +24,13 @@
 ## `paintFrameViewer` composes a `StyledGrid` the compositor owns, so the only
 ## picture it can draw is a `cell_render.CellGrid`. A tier-0 frame is not one:
 ## it is an escape payload the terminal decodes, emitted out of band by
-## `emit.emitProtocolImage` from the ENCODED bytes — which this model carries as
-## a LENGTH and not as bytes, and which no host in this build sends (bound 1).
+## `emit.emitProtocolImage`. For the Video Player pane, which holds the frame's
+## pixels, the host does exactly that over the cells this pane reserves
+## (`protocolRect`, `host/frame_image.frameImageBytes`).
 ##
-## So the resolved tier being `itProtocol` is a REPORTABLE CONDITION of this
-## pane and not a picture: `fdgProtocolNotPainted`. **PLAT-15's landing pass is
+## For the OVERLAY, which has no such host, the resolved tier being
+## `itProtocol` is a REPORTABLE CONDITION and not a picture:
+## `fdgProtocolNotPainted`. **PLAT-15's landing pass is
 ## why that gap exists.** Before it, `resolveGap` asked `tiers.DrawableTiers`,
 ## which CONTAINS `itProtocol`, answered `fdgNone` for a Kitty terminal, and
 ## `renderCells` — which refuses tier 0 by name — raised out of
@@ -95,7 +97,7 @@ type
   FrameDrawGap* = enum
     ## WHY THE PICTURE REGION HAS NO PICTURE. `fdgNone` when it has one.
     ##
-    ## Four of the five values are PLAT-14 residues, or this pane's own
+    ## Most of the values are PLAT-14 residues, or this pane's own
     ## structure, that became reachable the moment a pane called it, and each is
     ## named here rather than discovered as an exception at draw time.
     fdgNone = "none"
@@ -105,17 +107,10 @@ type
       ## install-shaped remedy, which is why the binding maps it to `pdsAbsent`
       ## and the other three to `pdsUnsupported`.
     fdgNoDecoder = "no-decoder"
-      ## PLAT-14 BOUND 3, ARRIVING AT A USER. The frame came back as an ENCODED
-      ## image and the resolved tier is a CELL tier, which consumes a raster —
-      ## and this build has no PNG or JPEG decoder. Tier 0 is unaffected:
-      ## Kitty's `f=100` and iTerm2's `File=inline` decode in the terminal.
-    fdgTierNotDrawable = "tier-not-drawable"
-      ## PLAT-14 RESIDUE 3, ARRIVING AT A USER. `--image-tier=octant` parses and
-      ## resolves, and PLAT-14 recorded that "a pane that pins it will meet a
-      ## `CellRenderError` rather than a refusal it can report". This is the
-      ## refusal it can report: the pane asks `tiers.CellRenderableTiers` BEFORE
-      ## it paints, so the exception is never reached and the message names the
-      ## two tiers that are.
+      ## PLAT-14 BOUND 3, NARROWED. The frame came back as an ENCODED image this
+      ## build cannot decode — a JPEG (there is no JPEG decoder), or a PNG that
+      ## does not decode — and the resolved tier is a CELL tier, which consumes
+      ## a raster. A PNG frame is decoded (`common/png.decodePng`) and drawn.
     fdgProtocolNotPainted = "protocol-not-painted"
       ## THE RESOLVED TIER IS 0, AND THIS PANE PAINTS CELLS. See the module
       ## header. A tier-0 frame is bytes for the terminal to decode — Kitty's
@@ -353,9 +348,10 @@ func isEmpty*(model: FrameViewerModel): bool =
 func transmitsProtocol*(model: FrameViewerModel): bool =
   ## PLAT-59: whether a tier-0 frame is transmitted for this pane: the Video
   ## Player pane, holding the frame's pixels, on a terminal whose protocol
-  ## this build emits (Kitty's `f=32` raw pixels, iTerm2's inline PNG).
+  ## this build emits (Kitty's and iTerm2's PNG, Sixel's pixels).
   model.pane and model.hasRaster and
-    model.capability.protocol in {ImageProtocol.ipKitty, ImageProtocol.ipITerm2}
+    model.capability.protocol in {ImageProtocol.ipKitty, ImageProtocol.ipITerm2,
+                                  ImageProtocol.ipSixel}
 
 func drawableTierFor*(model: FrameViewerModel): ImageTier =
   ## The tier the PICTURE is drawn at, which is not always the tier the
@@ -394,12 +390,9 @@ func resolveGap*(model: FrameViewerModel; pictureCols, pictureRows: int):
     # contains `itProtocol`, the one tier `cell_render.renderCells` refuses, so
     # asking it here answered "you may paint this" for a Kitty terminal and the
     # exception escaped the shell (§14; the module header carries the
-    # measurement). ONE predicate, asked once, with the two non-members
-    # distinguished by REASON: an octant has no glyph table anywhere, and tier 0
-    # has no cells to have a table for.
-    return
-      if tier == itProtocol: fdgProtocolNotPainted
-      else: fdgTierNotDrawable
+    # measurement). Tier 0 is the set's only non-member since the octant table
+    # was verified, and tier 0 has no cells to paint.
+    return fdgProtocolNotPainted
   if not model.hasRaster:
     # PLAT-14 bound 3. An ENCODED frame on a terminal that must render cells.
     # No `tier != itProtocol` guard any more: tier 0 has already returned above,
@@ -427,13 +420,9 @@ func remedyFor*(gap: FrameDrawGap): string =
     # cannot paint — a remedy naming a route that answers a different refusal is
     # the instruction that does not help, and it is the neighbour a repair
     # leaves behind (Verification-Harness-Traps §15).
-    "this build has no PNG or JPEG decoder, so a cell tier cannot draw an " &
-    "encoded frame, and no --image-tier flag changes that: a Kitty or iTerm2 " &
-    "terminal decodes tier 0 in the TERMINAL, which is the route out, and " &
-    "this pane does not transmit one yet (see protocol-not-painted)"
-  of fdgTierNotDrawable:
-    "image tier 'octant' (U+1CD00) has no verified glyph table in this build; " &
-    "pick --image-tier=sextant for 2x3 or --image-tier=braille for 2x4"
+    "this frame is not a PNG this build can decode (a JPEG, or a damaged " &
+    "file), so a cell tier cannot draw it, and no --image-tier flag changes " &
+    "that: an iTerm2 terminal decodes a JPEG in the TERMINAL"
   of fdgProtocolNotPainted:
     # THE ACTION FIRST, unlike the two remedies above, and for a measured
     # reason: this is the only remedy whose actionable half is a FLAG rather
@@ -766,7 +755,8 @@ proc paintFrameViewer*(g: var StyledGrid; area: CellArea;
     # blank at the fit's extent (the aspect corrected, never enlarged past the
     # rectangle); the host places the picture there after the frame.
     let fit = fitToCells(model.sourceWidth, model.sourceHeight,
-                         DefaultCellAspect, area.width, pictureHeight)
+                         model.capability.cellAspectOf, area.width,
+                         pictureHeight)
     let cols = max(1, min(fit.cols, area.width))
     let rows = max(1, min(fit.rows, pictureHeight))
     for r in 0 ..< rows:
@@ -783,13 +773,14 @@ proc paintFrameViewer*(g: var StyledGrid; area: CellArea;
       if model.magnified:
         renderMagnifier(model.raster, model.magnifier, model.capability.tier)
       else:
-        # THE ASPECT IS `DefaultCellAspect`, NAMED AT THE CALL SITE. Nothing in
-        # this build sends `CSI 16 t` (PLAT-14 bound 9), so `casReported` has
-        # no producer and every shipped rendering corrects against 1:2 — and
-        # this is the call site that would change on the day one appears.
+        # THE ASPECT IS THE TERMINAL'S CELL (`CSI 16 t`, PLAT-14 bound 9's
+        # producer), or §2.4's 1:2 default where it did not say. The frame is
+        # DITHERED (error diffusion, `cell_render`'s header); the magnifier
+        # above is not, because it must show each pixel's own colour.
         renderCells(model.raster, tier,
                     fitToCells(model.sourceWidth, model.sourceHeight,
-                               DefaultCellAspect, area.width, pictureHeight))
+                               model.capability.cellAspectOf, area.width,
+                               pictureHeight), dither = dmDiffusion)
     result.candidatesEvaluated = grid.candidatesEvaluated
     result.pictureCols = min(grid.cols, area.width)
     result.pictureTop = atRow
@@ -889,10 +880,9 @@ proc emitFrameViewerPicture*(model: FrameViewerModel;
   ##
   ## §7's rule that a claim about what a terminal is told is a claim about a
   ## BYTE STRING, applied to this pane: `emit.emitCellImage`, for a CELL tier.
-  ## **Tier 0's `emit.emitProtocolImage` is not called from here and cannot be**
-  ## — it takes the encoded PAYLOAD and this model carries a length — which is
-  ## exactly what `fdgProtocolNotPainted` reports. Nothing else in `app/`
-  ## produces
+  ## Tier 0's bytes are `emit.emitProtocolImage`'s, sent by the host
+  ## (`host/frame_image`) from the frame's pixels, not from here. Nothing else
+  ## in `app/` produces
   ## terminal bytes for an image, and the reason this exists beside the painter
   ## rather than inside it is that the painter's output is a `StyledGrid` the
   ## compositor owns — a tier-0 emission has no cells and cannot go through it.
@@ -932,5 +922,6 @@ proc emitFrameViewerPicture*(model: FrameViewerModel;
     else:
       renderCells(model.raster, tier,
                   fitToCells(model.sourceWidth, model.sourceHeight,
-                             DefaultCellAspect, width, pictureHeight))
+                             model.capability.cellAspectOf, width,
+                             pictureHeight), dither = dmDiffusion)
   emitCellImage(grid, writing)

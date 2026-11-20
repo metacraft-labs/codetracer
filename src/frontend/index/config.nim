@@ -82,6 +82,14 @@ const selfWriteSuppressionMs* = 750.0
   ## and short enough that a real external edit made right after a save is
   ## still picked up.
 
+proc envOrEmpty(name: cstring): cstring {.importjs: "(process.env[#] || '')".}
+  ## An environment variable of the main process, "" when unset.
+
+proc parseJsonStringArray(text: cstring): seq[cstring] {.importjs: """
+  (function(t) { try { var a = JSON.parse(t); return Array.isArray(a) ? a.map(String) : []; }
+                 catch (e) { return []; } })(#)""".}
+  ## A JSON array of strings; empty when `text` is not one.
+
 proc nowMs(): float {.importjs: "Date.now()".}
 
 proc ensureServerTab(filename: cstring, lang: Lang): ServerTab =
@@ -464,6 +472,25 @@ proc loadConfig*(main: js, startOptions: StartOptions, home: cstring = cstring""
       config.sharedEditor = true
     elif sharedEditorEnv == cstring"0":
       config.sharedEditor = false
+    # Agentic-Coding-Integration.md §6.8: the Harbor server's URL and key may
+    # be given for one launch.
+    let harborUrlEnv = envOrEmpty(cstring"CODETRACER_AGENT_HARBOR_URL")
+    let harborKeyEnv = envOrEmpty(cstring"CODETRACER_AGENT_HARBOR_API_KEY")
+    if harborUrlEnv.len > 0 or harborKeyEnv.len > 0:
+      if config.agentHarbor.isNil:
+        config.agentHarbor = AgentHarborConfig(baseUrl: cstring"",
+          apiKey: cstring"", agent: cstring"", model: cstring"")
+      if harborUrlEnv.len > 0:
+        config.agentHarbor.baseUrl = harborUrlEnv
+      if harborKeyEnv.len > 0:
+        config.agentHarbor.apiKey = harborKeyEnv
+      let agentEnv = envOrEmpty(cstring"CODETRACER_AGENT_HARBOR_AGENT")
+      if agentEnv.len > 0:
+        config.agentHarbor.agent = agentEnv
+      # A JSON array of strings.
+      let argsEnv = envOrEmpty(cstring"CODETRACER_AGENT_HARBOR_AGENT_ARGS")
+      if argsEnv.len > 0:
+        config.agentHarbor.agentArgs = parseJsonStringArray(argsEnv)
     return config
   except CatchableError:
     errorPrint "load config or init shortcut map error: ", getCurrentExceptionMsg()

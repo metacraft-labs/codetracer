@@ -25,6 +25,27 @@ suite "design_font_metrics: one budget per character":
     check groteskTextWidth("2\xE2\x80\xA6", 12.0) ==
       groteskTextWidth("2", 12.0) + m
 
+  test "on request, the glyphs the face carries past ASCII are its own advances":
+    # Space Grotesk Regular's `hmtx` (fontTools, 2026-11-20): `·` 185, `…`
+    # 672, `—` 912, `↓` 620 units of the 1000-unit em; a glyph outside
+    # that set stays one capital M.
+    let m = groteskTextWidth("M", 1000.0)
+    check groteskTextWidth("\xC2\xB7", 1000.0, faceGlyphs = true) == 185.0
+    check groteskTextWidth("\xE2\x80\xA6", 1000.0, faceGlyphs = true) == 672.0
+    check groteskTextWidth("\xE2\x80\x94", 1000.0, faceGlyphs = true) == 912.0
+    check groteskTextWidth("\xE2\x86\x93", 1000.0, faceGlyphs = true) == 620.0
+    check groteskTextWidth("\xE2\x9C\x93", 1000.0, faceGlyphs = true) == m  # "✓"
+    # Off by default: every caller that does not ask keeps the M budget.
+    check groteskTextWidth("\xC2\xB7", 1000.0) == m
+    # ASCII and its kerning are the same either way.
+    check groteskTextWidth("To the cap", 12.0, kerned = true, faceGlyphs = true) ==
+      groteskTextWidth("To the cap", 12.0, kerned = true)
+    # The composer's sent line that wrapped at sidebar width under the M
+    # budget fits the 318 px the window and the browser set it in.
+    let sent = "Sent to this session \xC2\xB7 redirected to the manager agent"
+    check groteskTextWidth(sent, 12.0, kerned = true) > 318.0
+    check groteskTextWidth(sent, 12.0, kerned = true, faceGlyphs = true) < 318.0
+
   test "ASCII is unchanged":
     # BUILD at 14 px with the desktop's letter spacing: 38 px, the figure
     # the module's table was checked against.

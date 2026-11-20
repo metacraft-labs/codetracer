@@ -51,7 +51,7 @@ template ckEq(a, b: untyped) =
   inc countedAssertions
   check a == b
 
-const ExpectedAssertions = 952
+const ExpectedAssertions = 974
   ## Written from a run. See the final case.
 
 # ---------------------------------------------------------------------------
@@ -1775,6 +1775,77 @@ suite "PLAT-12: purity, and §5.5's compatibility":
     ck described.contains("hides scratch")
     ckEq describeVisualisers(BuiltinPresenters),
          "no per-type visualisers are active"
+
+suite "§5.3's structural shape (approved 2026-11-20)":
+
+  const Shapes = """
+schema = "codetracer.visualisers.v1"
+
+[[visualiser]]
+matchKind = "shape"
+match = "rows, cols"
+summary = "{rows}x{cols} by shape"
+
+[[visualiser]]
+matchKind = "shape"
+match = "#2"
+summary = "a pair"
+"""
+
+  test "a shape claims a value by its members, not its type name":
+    let presenters = presentersFrom(Shapes)
+    ckEq presenters.visualisers.len, 2
+    # `Matrix` has rows and cols (and two more members): the label shape wins.
+    ckEq present(matrix(), StatePanelBudget, presenters = presenters).root.text,
+         "3x4 by shape"
+    # `Point` has exactly two members: the arity shape claims it.
+    ckEq present(point(), StatePanelBudget, presenters = presenters).root.text,
+         "a pair"
+    # A positional pair — a recorder's tuple — has no labels and two members.
+    let pair = PValue(kind: pvkTuple, typeName: "Tuple", sourceKind: "Tuple",
+                      members: @[member("", i("3")), member("", i("4"))])
+    ckEq present(pair, StatePanelBudget, presenters = presenters).root.text,
+         "a pair"
+    # THE CONTROL: a three-member record and a scalar have neither shape.
+    ck present(image(), StatePanelBudget,
+               presenters = presenters).attribution.presenter.startsWith("builtin.")
+    ck present(i("7"), StatePanelBudget,
+               presenters = presenters).attribution.presenter.startsWith("builtin.")
+
+  test "the member count is the recording's, not the answer's":
+    let partial = PValue(kind: pvkSequence, typeName: "list", sourceKind: "Seq",
+                         members: @[member("", i("1"))], elementsTotal: 2)
+    ck shapeMatches("#2", partial)
+    ck not shapeMatches("#1", partial)
+
+  test "a type name outranks a shape":
+    let presenters = presentersFrom(Shapes & """
+
+[[visualiser]]
+match = "Matrix"
+summary = "named"
+""")
+    ckEq present(matrix(), StatePanelBudget, presenters = presenters).root.text,
+         "named"
+
+  test "a malformed shape is refused at parse time, by name":
+    for bad in ["", "rows,,cols", "#", "#x", "a/b", "rows,"]:
+      let loaded = loadedFrom([("", "schema = \"codetracer.visualisers.v1\"\n" &
+        "[[visualiser]]\nmatchKind = \"shape\"\nmatch = \"" & bad &
+        "\"\nsummary = \"x\"\n")])
+      checkpoint("shape '" & bad & "'")
+      ckEq loaded.project.visualisers.len, 0
+      ck loaded.problems.len > 0
+
+  test "a shape's walk is charged to the render bound":
+    # A wide value under a shape rule spends at least one unit per member it
+    # reads, so a recording cannot make the shape test free.
+    var wide = PValue(kind: pvkSequence, typeName: "list", sourceKind: "Seq")
+    for k in 0 ..< 5000: wide.members.add member("", i($k))
+    let shaped = present(wide, StatePanelBudget,
+                         presenters = presentersFrom(Shapes))
+    let plain = present(wide, StatePanelBudget)
+    ck shaped.expansion.spent >= plain.expansion.spent + 5000
 
   test "every assertion in this file ran":
     # Verification-Harness-Traps §4c. A branch that returned early, a loop that

@@ -262,10 +262,24 @@ proc projectAcpWorkspace(vm: AgenticSessionVM;
   vm.activeEditorContent.val = firstContent
 
 proc projectHarborWorkspace(vm: AgenticSessionVM;
-    session: AgentServiceSessionEntry) =
+    session: AgentServiceSessionEntry; fileListOnly = false) =
   let agentSession = AgentSession(id: session.sessionId,
     taskId: session.taskId, backend: abkHarbor)
-  let changed = vm.service.client.changedFiles(agentSession)
+  # A session Harbor has only queued has no worktree yet, and its files
+  # endpoint answers 404 ("... is not a git worktree"). That is a workspace
+  # with nothing in it so far, not a failed session: the lists stay as they
+  # are, and the next refresh (`refreshAgentWorkspaceFiles`) reads them again.
+  var changed: typeof(vm.service.client.changedFiles(agentSession))
+  try:
+    changed = vm.service.client.changedFiles(agentSession)
+  except CatchableError:
+    return
+  if fileListOnly:
+    var listed: seq[AgentWorkspaceFileEntry] = @[]
+    for item in changed.items:
+      listed.add AgentWorkspaceFileEntry(path: item.path)
+    vm.workspace.setFiles(listed)
+    return
   var files: seq[VCSFileRow] = @[]
   var workspaceFiles: seq[AgentWorkspaceFileEntry] = @[]
   var diffFiles: seq[VCSDiffFileRow] = @[]
@@ -325,6 +339,32 @@ proc activateAgentTab*(vm: AgenticSessionVM; tabId: string) =
     cursorLine: vm.editor.cursorLine.val,
     cursorColumn: vm.editor.cursorColumn.val,
     dirty: false)
+
+proc toggleWorkspaceMode*(vm: AgenticSessionVM) =
+  ## The Agent Workspace's "Switch to User" / "Switch to Agent": the user's
+  ## workspace from the agent's, the active agent tab's from the user's.
+  ##
+  ## The mode has one owner, this ViewModel. The pane's button used to flip
+  ## only its own component's view, and the launcher, which redraws the pane
+  ## from `workspaceMode` on every poll of a running Harbor session, put the
+  ## agent's workspace back within a second: the switch did not hold.
+  if vm.workspaceMode.val == awmAgentWorkspace:
+    vm.restoreUserWorkspace()
+  else:
+    let tabId = vm.store.agentSessions.val.activeTabId
+    if tabId.len > 0:
+      vm.activateAgentTab(tabId)
+
+proc refreshAgentWorkspaceFiles*(vm: AgenticSessionVM;
+                                 fileListOnly = false) =
+  ## Re-read a running Harbor session's changed files while its worktree is
+  ## shown: the agent edits after the tab was activated. `fileListOnly`
+  ## updates the Agent Workspace's file list and leaves the VCS pane and the
+  ## editor to whoever filled them (DeepReview, once the evidence is in).
+  let session = vm.activeSession()
+  if session.tabId.len > 0 and session.backend == asbHarbor and
+      vm.workspaceMode.val == awmAgentWorkspace:
+    vm.projectHarborWorkspace(session, fileListOnly)
 
 proc refreshActiveProjection*(vm: AgenticSessionVM) =
   let session = vm.activeSession()

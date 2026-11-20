@@ -45,6 +45,9 @@ type
 const
   RowPx = 26           ## a row: 5px, a 16px line, 5px
   SecondLinePx = 16
+  CodeLinePx = 20      ## a wrapped program-text title's line (the composer's
+                       ## own lines moved to its 24px pitch; this view keeps
+                       ## its 20px line until it is measured against the web)
   GroupHeadPx = 4 + CaptionLinePx + 4
   GroupGapPx = 8 + 1   ## the gap and the hairline between groups
   MoreLinePx = 4 + CaptionLinePx + 4 + 1
@@ -112,7 +115,7 @@ proc rowBlock(r: GpuiRenderer; p: AhPalette; vm: ResultCommandsVM; g: ShownGroup
                  else: min((if row.location.len > 0: textPx(row.location, CaptionPx) + 8 else: 0) +
                            (if tag.len > 0: textPx(tag, CaptionPx) + 8 else: 0), widthPx * 45 div 100)
   let titleLines = if code: max(1, wrappedRows(row.title, BodyPx, widthPx - rightPx0)) else: 1
-  let h = RowPx + BodyLinePx * (titleLines - 1) + (if underTitle: SecondLinePx else: 0) +
+  let h = RowPx + CodeLinePx * (titleLines - 1) + (if underTitle: SecondLinePx else: 0) +
           SecondLinePx * secondLines
   let el = r.box(column = true, pairs = [("justify", "center"), ("margin-left", "1px"),
                                          ("margin-right", "1px")])
@@ -127,7 +130,7 @@ proc rowBlock(r: GpuiRenderer; p: AhPalette; vm: ResultCommandsVM; g: ShownGroup
   let line = r.box(pairs = [("items", "baseline"), ("gap", "8px"), ("min-width", "0px")])
   if code:
     let t = r.text(row.title, BodyPx, p.textBody, shrink = false,
-                   pairs = [("white-space", "pre-wrap"), ("line-height", $BodyLinePx & "px"),
+                   pairs = [("white-space", "pre-wrap"), ("line-height", $CodeLinePx & "px"),
                             ("min-width", "0px"), ("flex-shrink", "1"), ("flex-grow", "1")])
     r.tag(t, "title", row.title)
     r.appendChild(line, t)
@@ -248,18 +251,30 @@ proc drawResults*(r: GpuiRenderer; host: GpuiElement; vm: ResultCommandsVM;
   r.tag(host, "surface", "agent-harbor-results")
   r.tag(host, "kind", $vm.kind)
   let sheetW = vm.sheetWidthFor(widthPx)
+  # The web draws the composer's own field and sheet here
+  # (`.ah-composer-input-row`, `.ah-composer-sheet`), so they sit where the
+  # composer's do: the field at `FieldTopPx` on the ground with the inputs'
+  # hairline, its text clipped inside its padding, the sheet at `SheetTopPx`.
   let caption = r.box(pairs = [("height", $CaptionBarPx & "px"), ("flex-shrink", "0"),
-                               ("items", "center"), ("justify", "center"),
+                               ("items", "start"), ("justify", "center"),
                                ("background", p.ground)])
   let field = r.box(pairs = [("width", $sheetW & "px"), ("height", $FieldHeightPx & "px"),
+                             ("margin-top", $FieldTopPx & "px"),
                              ("items", "center"), ("padding-left", "12px"),
                              ("padding-right", "12px"),
                              ("rounded", $ControlRadiusPx & "px"), ("border-width", "1px"),
-                             ("border-color", p.borderPrimary), ("background", p.panel)])
+                             ("border-color", p.borderSecondary), ("background", p.ground)])
   let input = vm.input
-  let ft = r.text(endThatFits(input, BodyPx, sheetW - 24), BodyPx, p.textBody, shrink = false)
+  let clip = r.box(pairs = [("flex-grow", "1"), ("flex-shrink", "1"), ("min-width", "0px"),
+                            ("overflow", "hidden"), ("items", "center")])
+  # The end of what is typed, in the box inside the two 1px hairlines and
+  # the 12px paddings (D36).
+  let ft = r.text(endThatFits(input, BodyPx, sheetW - 2 - 24), BodyPx, p.textBody, shrink = false,
+                  pairs = [("height", $(FieldHeightPx - 2) & "px"),
+                           ("line-height", $(FieldHeightPx - 2) & "px")])
   r.tag(ft, "field", input)
-  r.appendChild(field, ft)
+  r.appendChild(clip, ft)
+  r.appendChild(field, clip)
   r.appendChild(caption, field)
   r.appendChild(host, caption)
   let narrow = vm.isNarrow(widthPx)
@@ -270,7 +285,9 @@ proc drawResults*(r: GpuiRenderer; host: GpuiElement; vm: ResultCommandsVM;
   let blocks = r.bodyBlocks(p, vm, innerW, narrow, press)
   var total = 0
   for b in blocks: total += b.heightPx
-  let maxH = heightPx - CaptionBarPx - TriggerGapPx - 16
+  # Up to the window less the caption bar and its inset (the composer's
+  # `max-height`).
+  let maxH = heightPx - CaptionBarPx - SheetInsetPx
   let bodyRoom = max(16, maxH - topPx - 4)
   var last = blocks.high
   var moreBelow = false
@@ -285,7 +302,7 @@ proc drawResults*(r: GpuiRenderer; host: GpuiElement; vm: ResultCommandsVM;
   for i in 0 .. last: bodyPx += blocks[i].heightPx
   if moreBelow: bodyPx += MoreLinePx
   let sheet = r.box(column = true, pairs = [
-    ("position", "absolute"), ("top", $(CaptionBarPx + TriggerGapPx) & "px"),
+    ("position", "absolute"), ("top", $SheetTopPx & "px"),
     ("left", $((widthPx - sheetW) div 2) & "px"), ("width", $sheetW & "px"),
     ("height", $(topPx + bodyPx) & "px"), ("background", p.ground),
     ("border-width", "1px"), ("border-color", p.borderPrimary),

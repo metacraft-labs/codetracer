@@ -61,7 +61,7 @@ import ../app/views/styled_row
 import isonim/viewmodel
 import nim_agents_isonim_viewmodels/agent_harbor/data_source
 from ../../viewmodel/views/agent_harbor_words import trimBeforeEllipsis,
-  trimAfterEllipsis, cutPath
+  trimAfterEllipsis, cutPath, cutInputValue
 import ../../viewmodel/views/agent_harbor_palette
 
 export styled_row, agent_harbor_palette, data_source, viewmodel
@@ -337,32 +337,14 @@ proc elideMiddle*(s: string; cells: int): string =
   ## start, the start gives way to it (`m…/client.py`). It is never wrapped:
   ## an input holds one line at every width. Either side of the "…" is
   ## trimmed by the views' one rule (`trimBeforeEllipsis`,
-  ## `trimAfterEllipsis`).
+  ## `trimAfterEllipsis`). The rule is the views' one rule for an input
+  ## (`cut_text_rules.cutInputValue`, which the GPUI composer draws through
+  ## too), here in cells; two cells or fewer hold no middle cut.
   if cells <= 0: return ""
-  let w = widthOf(s)
-  if w <= cells: return s
+  if widthOf(s) <= cells: return s
   if cells <= 2: return elide(s, cells)
-  let room = cells - 1
-  var startCells = clamp(room div 4, 1, MiddleCutStartCells)
-  let lastSep = s.rfind('/')
-  if lastSep > 0:
-    let lastSegment = widthOf(s[lastSep .. ^1])
-    if lastSegment > room - startCells and lastSegment <= room - 1:
-      startCells = room - lastSegment
-  # A wide glyph straddling the cut is kept whole by `cellSlice` on the side
-  # its first cell is on, so each side is shrunk until it fits its share.
-  var head = cellSlice(s, 0, startCells)
-  var cut = startCells
-  while cut > 0 and widthOf(head) > startCells:
-    dec cut
-    head = cellSlice(s, 0, cut)
-  let endCells = room - widthOf(head)
-  var tail = cellSlice(s, w - endCells, w)
-  var at = w - endCells
-  while at < w and widthOf(tail) > endCells:
-    inc at
-    tail = cellSlice(s, at, w)
-  trimBeforeEllipsis(head) & Ellipsis & trimAfterEllipsis(tail)
+  cutInputValue(s, cells, proc(t: string): int = widthOf(t), widthOf(Ellipsis),
+                MiddleCutStartCells, 1)
 
 proc elidePath*(path: string; cells: int): string =
   ## A file path in at most `cells` columns: whole when it fits, else cut in

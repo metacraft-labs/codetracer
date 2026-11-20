@@ -1483,7 +1483,8 @@ proc renderSettingsPanel[R](r: R; vm: AgentActivityVM;
   # Runtime dropdown appended after the "Runtime" label in env section
   r.appendRenderedChild(sEnvRef,
     renderSettingsDropdown(r, vm, "runtime",
-      proc(): string = vm.settingsRuntime.val, staticOptions(SettingsRuntimeOptions),
+      proc(): string = vm.settingsRuntime.val,
+      proc(): seq[string] = @SettingsRuntimeOptions & vm.settingsExtraRuntimes.val,
       proc(v: string) = vm.settingsRuntime.val = v))
 
   # Delivery section dropdowns

@@ -61,6 +61,30 @@
 #   * a file in the list and NOT in the difference means the list has outlived
 #     its reason, which is how an exclusion becomes permanent by neglect.
 #
+# WHAT THIS GATE DOES NOT READ, AND WHAT CATCHES IT INSTEAD
+# --------------------------------------------------------
+# The exit status. `measure_file` discards it and compares the `[FAILED]`
+# count instead, which is the stronger signal: an exit status is the same
+# number for a compile error, an assertion and an out-of-memory. The case
+# that leaves is narrow: a suite that prints every `[OK]` and THEN exits
+# non-zero on one backend only (a wasm-only `quit(7)` after the last case)
+# agrees with the other column on cases, assertions and failures, and this
+# gate passes it.
+#
+# THE BACKSTOP IS THE LANE, one step earlier in the same job:
+# `just test-vm-unit-wasm` runs ci/lib/run-nim-test-lane.sh, whose
+# `classify_test_run` (ci/lib/test-lane-report.sh) reports exactly
+# `rc != 0 && fails == 0` as a silent failure and turns the lane red. So the
+# case is covered, but by `test-vm-unit-wasm` and `test-vm-unit`, not here;
+# a reader auditing this gate alone should not conclude it is uncovered, and
+# an edit that removes the lane step from the workflow removes the cover.
+#
+# BOTH COLUMNS NAME THEIR MEMORY MANAGER. The wasm compile and the native
+# compile below both pass `--mm:orc`, as the two lane arms in
+# ci/lib/run-nim-test-lane.sh do, so a count compared here was taken under
+# a named memory manager on both sides rather than under the compiler's
+# default on one of them.
+#
 # Run directly:  bash ci/test/vm-unit-wasm-parity.sh
 # Or:            just test-vm-unit-wasm-parity
 #
@@ -105,6 +129,7 @@ EXPECTED_WASM_EXCLUSIONS=(
 	src/frontend/viewmodel/tests/unit/test_platform_desktop_native.nim
 	src/frontend/viewmodel/tests/unit/test_plugin_grant_lifecycle.nim
 	src/frontend/viewmodel/tests/unit/test_plugin_io_sdk.nim
+	src/frontend/viewmodel/tests/unit/test_plugin_process_host.nim
 	src/frontend/viewmodel/tests/unit/test_plugin_source_admission.nim
 	src/frontend/viewmodel/tests/unit/test_project_action_runner.nim
 	src/frontend/viewmodel/tests/unit/test_sdk_facade_boundary.nim
@@ -191,6 +216,7 @@ measure_file() {
 	else
 		artifact="${cache}/${name}"
 		if ! nim c --hints:off --warnings:off \
+			--mm:orc \
 			"${extra[@]}" --nimcache:"${cache}" -o:"${artifact}" "${f}" \
 			>"${cache}.build.log" 2>&1; then
 			printf '0\t0\t0\tbuild-failed\n'

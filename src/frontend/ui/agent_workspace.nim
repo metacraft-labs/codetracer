@@ -420,7 +420,15 @@ proc switchToFile(self: AgentWorkspaceComponent, fileIndex: int) =
 # IsoNim mount
 # ---------------------------------------------------------------------------
 
+var workspaceToggleHook*: proc(): bool = nil
+  ## Installed by `ui/agentic_session_launcher`: the switch made on the
+  ## agentic session's ViewModel, which owns the workspace mode while an agent
+  ## session drives the pane (`agentic_session_vm.toggleWorkspaceMode`).
+  ## False when no agent session does, and the pane switches its own view.
+
 proc toggleWorkspaceView(self: AgentWorkspaceComponent) =
+  if not workspaceToggleHook.isNil and workspaceToggleHook():
+    return
   self.viewState.activeView =
     if self.viewState.activeView == UserWorkspace: AgentWorkspace
     else: UserWorkspace

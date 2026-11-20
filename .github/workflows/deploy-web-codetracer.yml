@@ -449,15 +449,16 @@ jobs:
             # nim-agents 2026-11-18 again, after flake.lock moved it to 77f8a5a;
             # isonim 2026-11-18, after flake.lock and repro.lock moved it to 38ace5de.
             # isonim-gpui 2026-11-19 (a double click is counted by its presses' times).
+            # nim-agents 2026-11-20, after flake.lock moved it to 7cb7159.
             isonim=38ace5de5bf42c708a22dff54d74ab76270996e6
             isonim-tui=8e43ce06f7f078530c7a8585c210ad7648fa0051
             isonim-gpui=301c8c9cecbf797fc92b8b46c0501ff7a9f36112
             nim-everywhere=2f5b67a5dafd96ca5d57c9270fc3c2da2c5f2b0b
-            nim-termctl=63560ed41ce0fea563431a44db9e9d852cd703dd
+            nim-termctl=2283c056343aa2b2b2bdfc6fda3fe8eb11c17d3e
             nim-pty=6ffb8d788e8a740ca78ec29c7a3a489a13818bcb
             nim-acp=0bf10b4c35064a08d8c96eb912190521322017e2
             nim-agent-harbor=9694f6b41be21315243df1b19cabd02c5f271d7d
-            nim-agents=77f8a5a6c4af477f60979063a36290f6d09f77b3
+            nim-agents=7cb7159177929863b5586f4925d0b994c4588420
             # THE REPROBUILD-PACKAGES CATALOG, pinned to the revision the
             # locked reprobuild (flake.lock root input `reprobuild`,
             # 33be1e9964) is tested against: its own `repro.lock` pins

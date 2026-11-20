@@ -27,7 +27,7 @@
 ## `weakerOf` below is the only place the comparison is written, so there is
 ## one predicate and every caller uses it (Verification-Harness-Traps §14).
 ##
-## ## WHY TWO TIERS ARE NOT AUTOMATICALLY SELECTABLE, AND ONE IS NOT DRAWABLE
+## ## WHY THREE TIERS ARE NOT AUTOMATICALLY SELECTABLE
 ##
 ## `AutomaticTiers` is a strict subset of the enum and the gap is deliberate:
 ##
@@ -43,15 +43,12 @@
 ##     optimistic failure §3 forbids: the user gets a grid of tofu, which is
 ##     worse than a low-fidelity picture. They are reachable through
 ##     `--image-tier`, which §2.2 says always wins.
-##   * **`itOctant` is in the model and REFUSES to draw.** See
-##     `cell_render.glyphFor`. The U+1CD00 block maps 256 sub-cell masks onto
-##     230 code points because 26 masks already have legacy spellings, and the
-##     exception table could not be verified against Unicode 16's charts in
-##     this checkout. An unverified table does not degrade the picture, it
-##     draws a DIFFERENT one, which is exactly what §2.5 forbids ("It will not
-##     be a good picture. It must still be a *correct* one"). The tier stays in
-##     the enum because §2.1's table has seven rows and a model that silently
-##     had six would disagree with the document it implements.
+##   * **`itOctant` draws from a table checked against Unicode 16.** The
+##     U+1CD00 block maps 230 of the 256 sub-cell masks; the other 26 already
+##     had spellings and the block skips them. `cell_render.octantGlyph`
+##     carries the 26 and `octant_table_unicode16.py` checks the whole table
+##     against Unicode 16.0's character names, so the picture is the one the
+##     masks describe (§2.5: "It must still be a *correct* one").
 ##
 ## ## AND "DRAWABLE" IS NOT "RENDERABLE AS CELLS" — TWO SETS, NOT ONE
 ##
@@ -80,7 +77,7 @@ type
     itHalfBlock = 1   ## `▀` — 1x2, two full colours per cell
     itQuadrant = 2    ## `▘▝▖▗▚▞█` — 2x2
     itSextant = 3     ## U+1FB00… — 2x3
-    itOctant = 4      ## U+1CD00… — 2x4 (in the model; refuses to draw)
+    itOctant = 4      ## U+1CD00… — 2x4
     itBraille = 5     ## `⠀`-`⣿` — 2x4 shape, one colour pair per cell
     itAscii = 6       ## luminance ramp — 1x1
 
@@ -134,9 +131,9 @@ const
     ## environment cross product rather than over the rows somebody thought of.
 
   DrawableTiers* = {itProtocol, itHalfBlock, itQuadrant, itSextant,
-                    itBraille, itAscii}
-    ## The tiers that produce BYTES FOR A TERMINAL, one way or another.
-    ## `itOctant` is absent — see the header.
+                    itOctant, itBraille, itAscii}
+    ## The tiers that produce BYTES FOR A TERMINAL, one way or another: all
+    ## seven since the octant table was verified (see the header).
     ##
     ## **`itProtocol` IS A MEMBER AND `cell_render.renderCells` REFUSES IT.**
     ## That is not a contradiction — tier 0 produces bytes, they are simply an
@@ -159,8 +156,8 @@ const
     ## predicate, one definition, the rule and its pre-check both calling it —
     ## so "may I render this?" and "will the renderer accept this?" cannot come
     ## to differ. The members are `{itHalfBlock, itQuadrant, itSextant,
-    ## itBraille, itAscii}`; `cell_render_test.nim` asserts that set by
-    ## enumeration rather than trusting the subtraction.
+    ## itOctant, itBraille, itAscii}`; `cell_render_test.nim` asserts that set
+    ## by enumeration rather than trusting the subtraction.
 
 func subCell*(tier: ImageTier): SubCell =
   ## §2.1's geometry column.

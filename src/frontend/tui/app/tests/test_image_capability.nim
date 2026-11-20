@@ -66,7 +66,7 @@ import ../theme/image_capability
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 2122
+const ExpectedAssertions = 2127
 
 var countedAssertions = 0
 
@@ -314,17 +314,25 @@ proc rowsOf(): seq[Row] =
         refusal: prNone, wrapped: false),
 
     Row(name: "a Sixel-only terminal",
-        clause: "this build has no Sixel encoder; the refusal is reported " &
-                "where it can be read, not where it can only abort",
+        clause: "the Sixel encoder (2026-11-20): an advertised Sixel terminal " &
+                "draws real pixels, as Kitty and iTerm2 do",
         env: initTerminalEnv(term = "mlterm", colorterm = "truecolor",
                              lang = "en_US.UTF-8"),
         ienv: initImageEnv(), flags: initCapabilityFlags(),
         probe: GraphicsProbe(), hint: ihPhoto,
-        tier: itHalfBlock, protocol: ipNone,
-        refusal: prSixelHasNoEncoder, wrapped: false)]
+        tier: itProtocol, protocol: ipSixel,
+        refusal: prNone, wrapped: false),
+
+    Row(name: "nothing advertised, and the terminal's own DA1 lists Sixel",
+        clause: "§3 empirical detection: with no multiplexer in the path the " &
+                "DA1 attribute list (`4`) is the terminal's own claim",
+        env: plainEnv(), ienv: initImageEnv(), flags: initCapabilityFlags(),
+        probe: GraphicsProbe(attempted: true, answered: true, sixel: true),
+        hint: ihPhoto, tier: itProtocol, protocol: ipSixel,
+        refusal: prNone, wrapped: false)]
 
 const
-  ExpectedCaseCount = 25
+  ExpectedCaseCount = 26
     ## Asserted against `rowsOf().len`. A sweep whose size nobody checks can
     ## lose a row in a merge and stay green.
   ChecksPerCase = 4
@@ -370,15 +378,14 @@ suite "PLAT-14 Tier 1: which tier, and why not a better one":
         refusals.add cap.refusal
     checkpoint("rows reaching tier 0: " & $reachedTier0)
     checkpoint("distinct refusals: " & $refusals)
-    ck reachedTier0 == 7
-    ck refusals.len == 7
+    ck reachedTier0 == 9
+    ck refusals.len == 6
     ck prNotATerminal in refusals
     ck prMultiplexerUnproven in refusals
     ck prScreenNeverPasses in refusals
     ck prProbeUnanswered in refusals
     ck prGraphicsQuerySilent in refusals
     ck prNoProtocolAdvertised in refusals
-    ck prSixelHasNoEncoder in refusals
 
   test "automatic selection never leaves AutomaticTiers":
     # `tiers.AutomaticTiers` is the CLAIM; this is the sweep that holds it.
@@ -474,7 +481,10 @@ suite "PLAT-14: adding uncertainty never improves the tier":
           inc strictlyWorse
         inc compared
     ck compared == 6
-    ck strictlyWorse == 4
+    # Five: the four Kitty-advertised pairs, and (since the Sixel encoder) the
+    # Sixel-only mlterm, whose advertisement reaches tier 0 until the probe
+    # comes back empty.
+    ck strictlyWorse == 5
 
 suite "PLAT-14 §2.2: an explicit flag beats a probe":
 
@@ -584,31 +594,29 @@ suite "PLAT-14 §2.2: an explicit flag beats a probe":
              probe: kittyProbe(), tier: itProtocol, protocol: ipITerm2,
              refusal: prNone, overridden: false),
 
-      # -- Sixel advertised: THE ROW THAT USED TO RAISE. The pin reached past
-      #    `prSixelHasNoEncoder` and handed the caller `ipSixel`, which
-      #    `emit.emitProtocolImage` raises for — a picture turned into an
-      #    exception by a flag. It refuses now, and says why.
+      # -- Sixel advertised: honoured since the Sixel encoder (2026-11-20).
+      #    Until then these rows refused with `prSixelHasNoEncoder`, and before
+      #    2026-09-14 the pin handed the caller `ipSixel` and the emitter
+      #    raised.
       PinRow(name: "sixel advertised, nothing probed",
              env: sixelEnv, ienv: initImageEnv(),
-             probe: GraphicsProbe(), tier: itHalfBlock, protocol: ipNone,
-             refusal: prSixelHasNoEncoder, overridden: false),
+             probe: GraphicsProbe(), tier: itProtocol, protocol: ipSixel,
+             refusal: prNone, overridden: false),
       PinRow(name: "sixel advertised, NOTHING came back",
              env: sixelEnv, ienv: initImageEnv(),
-             probe: silentProbe(), tier: itHalfBlock, protocol: ipNone,
-             refusal: prProbeUnanswered, overridden: false),
+             probe: silentProbe(), tier: itProtocol, protocol: ipSixel,
+             refusal: prProbeUnanswered, overridden: true),
       PinRow(name: "sixel advertised, only the DA1 fence came back",
              env: sixelEnv, ienv: initImageEnv(),
-             probe: fenceOnlyProbe(), tier: itHalfBlock, protocol: ipNone,
-             refusal: prSixelHasNoEncoder, overridden: false),
-      # …and a MEASUREMENT outranks an advertisement this build cannot use: a
-      # terminal calling itself mlterm that answers the Kitty query has named
-      # a protocol, by reply rather than by name. This is the positive twin
-      # that keeps the three rows above from being "the pin always loses on
-      # mlterm".
+             probe: fenceOnlyProbe(), tier: itProtocol, protocol: ipSixel,
+             refusal: prNone, overridden: false),
+      # The ADVERTISEMENT is consulted first (`emittableProtocol`): a terminal
+      # calling itself mlterm that also answers the Kitty query is spoken to
+      # in Sixel, the protocol it named.
       PinRow(name: "sixel advertised, a KITTY reply came back",
              env: sixelEnv, ienv: initImageEnv(),
-             probe: kittyProbe(), tier: itProtocol, protocol: ipKitty,
-             refusal: prSixelHasNoEncoder, overridden: true),
+             probe: kittyProbe(), tier: itProtocol, protocol: ipSixel,
+             refusal: prNone, overridden: false),
 
       # -- NOTHING advertised: the case the guard exists for, and the two rows
       #    that used to differ only by a fence answering.
@@ -661,12 +669,10 @@ suite "PLAT-14 §2.2: an explicit flag beats a probe":
     # THE NON-VACUITY FLOOR ON BOTH SIDES (§4b). A resolver that honoured every
     # pin and one that refused every pin would each satisfy a table whose rows
     # all agreed with it, so the two outcomes are counted and both asserted.
-    ck honoured == 10
-    ck refused == 6
+    ck honoured == 13
+    ck refused == 3
     # …AND NO PROTOCOL THIS BUILD CANNOT EMIT IS EVER NAMED, over the whole
-    # table, through the product's own set. `emit.emitProtocolImage` RAISES for
-    # `ipSixel`, so this is the assertion that "the picture is not an exception"
-    # rather than a restatement of the rows above.
+    # table, through the product's own set.
     var namedProtocols = 0
     for row in rows:
       let flags = initCapabilityFlags(imageTier = itProtocol,

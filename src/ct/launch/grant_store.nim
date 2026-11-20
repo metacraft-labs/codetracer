@@ -324,3 +324,9 @@ proc ledgerProblemErrors*(parse: LedgerParse): seq[PluginError] =
   ## not attributable to one plugin, so it names the subject it IS about.
   for p in parse.problems:
     result.add pluginError("<capability grant ledger>", pecMalformedManifest, p)
+
+proc pluginSettingsPath*(root = ""): string =
+  ## `plugins.<id>.enabled` and `plugins.<id>.settings` (§11.2.2), beside the
+  ## grant ledger in the launcher's user root.
+  let base = if root.len > 0: root else: launcherUserRoot()
+  base / "plugin-settings.json"

@@ -59,6 +59,14 @@
 ##      file beside this one (`gpui-layout.json`), and none of the three reads
 ##      another's: a layout arranged in the terminal does not change the
 ##      desktop's next start.
+##   4. **ONE DOCUMENT PER PRODUCT MODE.** Mode-Transitions.md §4b's store is
+##      keyed by the mode: `tui-layout.json` holds the Debug arrangement and
+##      `tui-layout-edit.json` the Edit one, so an Edit arrangement survives a
+##      restart without ever replacing the Debug one. A session restores the
+##      document of the mode it starts in (a replay: Debug; `ct edit`: Edit)
+##      and reads the other mode's on its first switch into that mode
+##      (`runtime.modeDocumentWanted`); each is written only from its own
+##      mode's arrangement (`runtime.layoutPersistPlanOf(rt, mode)`).
 ##
 ## ## AN UNREADABLE DOCUMENT IS A REPORT, NEVER A SILENT DEFAULT
 ##
@@ -299,10 +307,13 @@ type
 
 const
   LayoutDocumentFileName* = "tui-layout.json"
-    ## THE terminal product's remembered arrangement, directly under the state
-    ## root. One name, one file — see the module header's decision 3. Named
-    ## here rather than in the host so the layout of the state directory is
-    ## one decision in one place.
+    ## THE terminal product's remembered DEBUG arrangement, directly under the
+    ## state root — see the module header's decisions 3 and 4. Named here
+    ## rather than in the host so the layout of the state directory is one
+    ## decision in one place.
+  EditLayoutDocumentFileName* = "tui-layout-edit.json"
+    ## The terminal product's remembered EDIT arrangement, beside the Debug
+    ## one (decision 4).
 
   NotJsonKind* = "NotJson"
   EmptyDocumentKind* = "EmptyDocument"
@@ -310,6 +321,13 @@ const
     ## The three failures that never reach `layout_model`'s decoder, named in
     ## the same vocabulary as the ones that do, so a caller reporting
     ## `report.kind` has one kind of thing to report.
+
+proc layoutDocumentFileName*(mode: ProductMode): string =
+  ## The document a product mode's arrangement is kept in: one file per mode
+  ## (Mode-Transitions.md §4b, *"a file per mode"*).
+  case mode
+  of pmDebug: LayoutDocumentFileName
+  of pmEdit: EditLayoutDocumentFileName
 
 proc unreadableLayoutDocument*(path, kind, why: string): LayoutRestoreReport =
   ## **THE ONE PLACE A RESTORE FAILURE IS WORDED.** Exported because

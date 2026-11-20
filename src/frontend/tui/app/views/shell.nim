@@ -82,6 +82,7 @@ import ./context_menu
 import ./scratchpad_pane
 import ./terminal_output_pane
 import ./welcome_view
+import ./tooltip   # PLAT-70 Part B: a truncated cell's tooltip
 
 export header, status_bar, profile, project, source_pane, styled_row
 # PLAT-48: the top bar is painted by this module from a `ShellModel` field.
@@ -107,15 +108,11 @@ export context_menu
 export scratchpad_pane
 # PLAT-52: the Terminal Output pane is a `ShellModel` field painted here.
 export terminal_output_pane
+# PLAT-70 Part B: the tooltip (`cellTooltip`) is a `ShellModel` field painted
+# here; its type and placement are `tooltip.nim`'s.
+export tooltip
 
 type
-  CellTooltip* = object
-    ## PLAT-70 Part B: the tooltip's lines (`table_overflow.tooltipView`) and
-    ## the cell it belongs to (its first screen cell): drawn under the cell,
-    ## above it when there is no room below.
-    lines*: seq[string]
-    row*, col*: int
-
   ShellModel* = object
     ## Everything the screen shows, as a value. Constructed by
     ## `app/tui_app.nim` from a `HeadlessApp`; this module never learns that a
@@ -576,11 +573,10 @@ proc switchTo*(reg: var ModeRegister; leaving: LayoutNode;
   ##     all."* There is no path through this procedure that writes `product`
   ##     without also settling `layouts[product]`.
   ##
-  ## §4b's SECOND tier — the device-level store — is NOT implemented here, and
-  ## that is stated rather than implied: `app/layout/persistence.nim` +
-  ## `host/layout_store.nim` persist ONE arrangement per recording and are not
-  ## keyed by mode, so an Edit arrangement made in one session is a default
-  ## again in the next. See PLAT-16's status note.
+  ## §4b's SECOND tier — the device-level store — is not this unbound
+  ## register's: a bound runtime reads a mode's store before its first entry
+  ## (`runtime.modeDocumentWanted`, one document per mode under
+  ## `host/layout_store.nim`) and enters it through `switchBound`.
   if target == reg.product:
     return false
   reg.layouts[reg.product] = leaving
@@ -1180,34 +1176,6 @@ proc frameOverlaysOf*(decorations: seq[LayoutDecoration]): seq[FrameOverlay] =
                                 width: d.area.width, height: 1,
                                 text: d.label, style: DragGhostStyle)
 
-
-const CellTooltipStyle* = CellStyle(role: srChromeText, surface: srSurfaceMenu)
-  ## PLAT-70 Part B: the tooltip's text on the menu's card surface.
-
-proc cellTooltipArea*(t: CellTooltip; width, height: int): CellArea =
-  ## Where the tooltip goes: one cell of padding each side of its widest
-  ## line, under the cell (above it when the screen has no room below),
-  ## moved left to stay on the screen.
-  if t.lines.len == 0 or width <= 0 or height <= 0:
-    return CellArea()
-  var w = 0
-  for l in t.lines:
-    w = max(w, cellWidthOf(l))
-  w = min(width, w + 2)
-  let h = min(height, t.lines.len)
-  let below = t.row + 1
-  let row = if below + h <= height - 1: below else: max(0, t.row - h)
-  let col = max(0, min(t.col, width - w))
-  CellArea(row: row, col: col, width: w, height: h)
-
-proc paintCellTooltip*(g: var StyledGrid; t: CellTooltip; width, height: int) =
-  let a = cellTooltipArea(t, width, height)
-  if a.width <= 0 or a.height <= 0:
-    return
-  g.fillSurface(a.row, a.col, a.width, a.height, srSurfaceMenu)
-  for i in 0 ..< a.height:
-    g.paint(a.row + i, a.col + 1, truncateToCells(t.lines[i], a.width - 2),
-            CellTooltipStyle)
 
 proc shellScreen*(model: ShellModel; width, height: int;
                   policy = DefaultProjectionPolicy): ShellScreen =

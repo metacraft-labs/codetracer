@@ -51,6 +51,8 @@ import std/[sets, strutils]
 
 import ../../../common/project_definitions
 
+import isonim/core/signals
+
 import ./point_list_vm
 
 export point_list_vm.PointListEntry
@@ -75,7 +77,10 @@ func rowOf*(r: PointResolution; collection: string; enabled: bool):
     collection: collection,
     resolution: describe(r.outcome),
     detail: r.detail,
-    expression: r.point.expression)
+    expression: r.point.expression,
+    # The row's identity is derived from the ANCHOR, which an edit does not
+    # move, rather than from the line, which it does (`pointRowId`).
+    anchor: r.point.anchor.text)
 
 func rowsOf*(resolutions: openArray[CollectionResolution];
              enabledCollections: HashSet[string]): seq[PointListEntry] =
@@ -102,6 +107,33 @@ proc applyCollections*(vm: PointListVM;
   ## producer goes through the same door the storybook fixture does and a
   ## reactive consumer sees one write rather than a torn sequence.
   vm.setPoints rowsOf(resolutions, enabledCollections)
+
+proc mergeCollections*(vm: PointListVM;
+                       resolutions: openArray[CollectionResolution];
+                       enabledCollections: HashSet[string];
+                       root = "") =
+  ## Write a checkout's collections into a list that already holds OTHER
+  ## points — the user's breakpoints, a sweep's tracepoints — and keep them.
+  ##
+  ## `applyCollections` replaces the whole list, which is right for a fresh
+  ## list and wrong for a session's: re-reading the definitions after an edit
+  ## must not delete the breakpoint the user set a minute ago. So the rows a
+  ## collection owns (`collection != ""`) are replaced and every other row is
+  ## kept, in its place, with its id.
+  ##
+  ## `root` makes each point's path absolute — the checkout's own directory
+  ## joined to the repository-relative path — so the row names the same file
+  ## the recording's source pane and the engine's breakpoints name. "" keeps
+  ## the paths as declared.
+  var rows: seq[PointListEntry] = @[]
+  for r in vm.points.val:
+    if r.collection.len == 0: rows.add r
+  for r in rowsOf(resolutions, enabledCollections):
+    var row = r
+    if root.len > 0 and row.path.len > 0:
+      row.path = root & "/" & row.path
+    rows.add row
+  vm.setPoints rows
 
 func defaultEnabled*(collections: openArray[PointCollection]): HashSet[string] =
   ## The set a session starts with: every collection whose definition said

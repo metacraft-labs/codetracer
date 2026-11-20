@@ -146,30 +146,59 @@ proc shapesWritten(sess: var TuiTestSession): seq[string] =
     if b.len == 0 or b[0] in {'?', '<'}: continue
     result.add b.strip(chars = {'>'}, trailing = false)
 
+const StateCeilingMs = 60000
+  ## How long a case waits for a STATE it asserts (an OSC 22 written, a tab
+  ## drawn, the child gone). A ceiling, not a delay: each wait returns as soon
+  ## as the state holds. 3 s and 15 s were too short at load 108-130
+  ## (codetracer-pm issue 2026-11-20, "The plat47 capture and the plat70f
+  ## PTY suite fail under load"): a case read the transcript before the
+  ## binary had written to it, and failed on an empty capture.
+
 proc move(sess: var TuiTestSession; row, col: int) =
   ## One report, and time for the answer to it: a loaded host paints late.
+  ## Every caller moves onto an element whose shape differs from the last
+  ## one written, so an OSC 22 is due.
   let before = sess.pointerBytes().len
   sess.sendMouseMove(row, col)
-  let deadline = getMonoTime() + initDuration(milliseconds = 3000)
+  let deadline = getMonoTime() + initDuration(milliseconds = StateCeilingMs)
   while sess.pointerBytes().len == before and getMonoTime() < deadline:
     sleep(30)
 
-proc settlePointer(sess: var TuiTestSession) =
-  ## Until the binary has stopped writing OSC 22: a loaded host answers a burst
-  ## of reports late, so a fixed wait reads a prefix of what it will write.
-  let deadline = getMonoTime() + initDuration(seconds = 15)
+type ShapesHold = proc(shapes: seq[string]): bool
+
+proc settlePointer(sess: var TuiTestSession; beyond = -1;
+                   until: ShapesHold = nil) =
+  ## Until the binary has STARTED answering and then stopped writing OSC 22:
+  ## a loaded host answers a burst of reports late, so a fixed wait reads a
+  ## prefix of what it will write. Started means more than `beyond` OSC 22s
+  ## when the caller is waiting for new ones, and otherwise at least one
+  ## shape written. Not "more than nothing": the query is an OSC 22 written
+  ## at start-up, and settling on it alone read an empty list of shapes at
+  ## load 118. A caller that knows which shapes its input must produce passes
+  ## `until`, and the settle waits for them: a burst of 200 reports at load
+  ## 114 was answered in pauses longer than a second, and a quiet second read
+  ## only its first shape. Stopped means two quiet reads in a row.
+  let deadline = getMonoTime() + initDuration(milliseconds = StateCeilingMs)
   var seen = -1
+  var quiet = 0
   while getMonoTime() < deadline:
     discard sess.drainOutput(500)
     let now = sess.pointerBytes().len
-    if now == seen and now > 0:
-      return
+    let started = (if until != nil: until(sess.shapesWritten())
+                   elif beyond >= 0: now > beyond
+                   else: sess.shapesWritten().len > 0)
+    if started and now == seen:
+      inc quiet
+      if quiet >= 2:
+        return
+    else:
+      quiet = 0
     seen = now
 
 proc waitLast(sess: var TuiTestSession; wanted: proc(last: string): bool): bool =
   ## Until the last OSC 22 written satisfies `wanted`: a `:set` line is handled
   ## when the host gets to it, not when the test sent it.
-  let deadline = getMonoTime() + initDuration(seconds = 15)
+  let deadline = getMonoTime() + initDuration(milliseconds = StateCeilingMs)
   while getMonoTime() < deadline:
     let bytes = sess.pointerBytes()
     if bytes.len > 0 and wanted(bytes[^1]):
@@ -177,10 +206,10 @@ proc waitLast(sess: var TuiTestSession; wanted: proc(last: string): bool): bool 
     sleep(100)
   false
 
-proc sweep(sess: var TuiTestSession; row: int) =
+proc sweep(sess: var TuiTestSession; row: int; until: ShapesHold = nil) =
   for col in 0 ..< Cols:
     sess.sendMouseMove(row, col)
-  sess.settlePointer()
+  sess.settlePointer(until = until)
 
 proc screenText(sess: var TuiTestSession; row: int): string =
   for c in 0 ..< Cols:
@@ -188,19 +217,25 @@ proc screenText(sess: var TuiTestSession; row: int): string =
     result.add(if int(cell.rune) == 0: " " else: $cell.rune)
 
 proc findOnScreen(sess: var TuiTestSession; needle: string; first = 0): (int, int) =
-  discard sess.drainOutput(120)
-  for r in first ..< Rows:
-    let at = sess.screenText(r).find(needle)
-    if at >= 0:
-      return (r, sess.screenText(r)[0 ..< at].len)
-  (-1, -1)
+  ## Where `needle` is drawn, waiting until it is: a loaded host paints the
+  ## chrome late, and a move to (-1, …) points at nothing.
+  let deadline = getMonoTime() + initDuration(milliseconds = StateCeilingMs)
+  while true:
+    discard sess.drainOutput(120)
+    for r in first ..< Rows:
+      let at = sess.screenText(r).find(needle)
+      if at >= 0:
+        return (r, sess.screenText(r)[0 ..< at].len)
+    if getMonoTime() >= deadline:
+      return (-1, -1)
 
 suite "the kitty dialect (PA-3, PA-6)":
   test "the query, one push, sets after it, each only on change":
     var (sess, state) = open(kittyPeer())
     let written = sess.transcriptBytes()
     ck written.contains(PointerQuery)
-    sess.sweep(Rows div 2)
+    sess.sweep(Rows div 2, proc(s: seq[string]): bool =
+      "text" in s and "ew-resize" in s)
     let all = sess.pointerBytes()
     # The query, then exactly one push: the first shape.
     var pushes = 0
@@ -278,11 +313,13 @@ suite "the kitty dialect (PA-3, PA-6)":
     var (sess, state) = open(kittyPeer())
     sess.move(Rows div 2, 60)
     let shown = sess.shapesWritten()[^1]
+    # Each answer is waited for (the focus report is handled when the host
+    # gets to it); the check still names the shape the wait never saw.
     sess.send("\e[O")
-    discard sess.drainOutput(150)
+    discard sess.waitLast(proc(last: string): bool = last == "<")
     ck sess.pointerBytes()[^1] == "<"
     sess.send("\e[I")
-    discard sess.drainOutput(150)
+    discard sess.waitLast(proc(last: string): bool = last == ">" & shown)
     ck sess.pointerBytes()[^1] == ">" & shown
     sess.close(state)
 
@@ -295,8 +332,11 @@ proc endedBy(sess: var TuiTestSession; path: string; sig: cint) =
     sess.send(CtrlQ)
   else:
     sess.sendSignal(sig)
-  discard sess.waitExit(initDuration(seconds = 15))
-  discard sess.drainOutput(120)
+  discard sess.waitExit(initDuration(milliseconds = StateCeilingMs))
+  # Everything the child wrote before it exited: drained until a read
+  # brings nothing more.
+  while sess.drainOutput(200) > 0:
+    discard
 
 suite "the restore (PA-4, PA-8)":
   test "kitty: the pop is the last OSC 22, before the alternate screen is left":
@@ -333,7 +373,7 @@ suite "the restore (PA-4, PA-8)":
 
   test "xterm's shapes are its own names":
     var (sess, state) = open(setOnly("xterm"))
-    sess.sweep(Rows div 2)
+    sess.sweep(Rows div 2, proc(s: seq[string]): bool = "xterm" in s)
     let shapes = sess.shapesWritten()
     ck "xterm" in shapes
     ck "text" notin shapes
@@ -350,7 +390,9 @@ suite "the restore (PA-4, PA-8)":
       # The pty's session is the binary's own, so the kernel discards the stop
       # (an orphaned group) and the continue follows at once.
       sess.sendSignal(SIGTSTP)
-      sess.settlePointer()
+      # Both answers are due (the give-back and the take-again), so the
+      # settle waits for two.
+      sess.settlePointer(beyond = mark + 1)
       let after = sess.pointerBytes()[mark .. ^1]
       checkpoint($after)
       ck after == (if pushing: @["<", ">" & shown] else: @["text", shown])

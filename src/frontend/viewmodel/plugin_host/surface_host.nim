@@ -110,7 +110,7 @@
 ## The revision signal is a real `isonim` signal and the degradation memo is a
 ## real `isonim` memo. There is nothing here standing in for anything.
 
-import std/[sets, strutils, tables]
+import std/[monotimes, sets, strutils, tables, times]
 
 import isonim/core/signals as isonim_signals
 import isonim/core/computation as isonim_computation
@@ -207,6 +207,11 @@ type
     faultLimit*: int
       ## §7's "repeated", as a number the application chooses. The default is
       ## in `DefaultSurfaceFaultLimit`.
+    viewBudget*: Duration
+      ## Extensibility-Model.md §11.10: how long ONE call of an in-process
+      ## view may take. A call that overruns it is a fault exactly like a view
+      ## that raised, so a slow view is disabled after `faultLimit` frames
+      ## instead of slowing every frame for the session.
     records: OrderedTable[string, SurfaceRecord]
     order*: seq[string]
       ## Registration order, so every report is stable.
@@ -235,6 +240,14 @@ const
     ## session on one of those would make the containment worse than the fault.
     ## Three consecutive frames is not a transient.
 
+  DefaultViewBudget* = initDuration(milliseconds = 1_000)
+    ## §11.10's bound on one in-process view call. A second, not a frame's
+    ## budget: this is not frame-time policing (§5.4's effect budget is), it
+    ## stops a view that has gone runaway, and a frame held for a second is
+    ## one the user saw freeze. Smaller values misfire on a loaded machine,
+    ## where a descheduled process takes tens of milliseconds over a
+    ## trivial view.
+
   NoExtensionsFlag* = "--no-extensions"
     ## Spelled here, once, so the CLI's selector and the host's own report
     ## cannot disagree about what a user has to type.
@@ -259,7 +272,7 @@ proc newSurfaceHost*(frontEnd: FrontEnd; extensionsEnabled = true;
   ## flag, it is not toggled. `PluginHost` refuses to activate at all when
   ## extensions are off, which is the other half and is asserted there.
   SurfaceHost(frontEnd: frontEnd, extensionsEnabled: extensionsEnabled,
-              faultLimit: faultLimit,
+              faultLimit: faultLimit, viewBudget: DefaultViewBudget,
               records: initOrderedTable[string, SurfaceRecord](),
               disabledPlugins: initHashSet[PluginId](),
               probeRevision: createSignal(0))
@@ -599,7 +612,19 @@ proc renderSurface*(sh: SurfaceHost; qualifiedId: string;
   if sh.dependencyState(qualifiedId) != pdsSatisfied:
     return sh.degradedNode(qualifiedId)
   try:
+    # §11.10: THE IN-PROCESS PATH IS BOUNDED. Only code compiled into
+    # CodeTracer reaches it — a discovered plugin package runs in its own
+    # process, and its surfaces are drawn from the trees it pushed
+    # (`supervisor.renderSurface`), which runs no plugin code — and even
+    # that code is timed: a call over `viewBudget` is a fault, counted like
+    # an exception, so a slow view is stopped after `faultLimit` frames.
+    let started = getMonoTime()
     result = rec.view()
+    let took = getMonoTime() - started
+    if took > sh.viewBudget:
+      raise newException(PluginSurfaceError,
+        "the view took " & $took.inMilliseconds & " ms, more than its " &
+        $sh.viewBudget.inMilliseconds & " ms budget")
     if result.isNil:
       # A view that returns nil is the blank region by another route, so it is
       # a FAULT rather than an empty pane. Counted like any other, because a

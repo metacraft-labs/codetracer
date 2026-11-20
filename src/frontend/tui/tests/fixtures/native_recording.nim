@@ -48,6 +48,7 @@
 import std/[hashes, os, osproc, strutils, times]
 
 import ./fixture_provider
+import ./performance_cores
 
 type
   NativeRecording* = object
@@ -88,29 +89,6 @@ proc rrAvailable(): bool =
     execCmdEx("rr --version").exitCode == 0
   except OSError:
     false
-
-when defined(linux):
-  type CpuMask = array[128, uint64]
-
-  proc schedSetAffinity(pid: cint; size: csize_t; mask: ptr CpuMask): cint
-    {.importc: "sched_setaffinity", cdecl.}
-
-proc preferPerformanceCores() =
-  ## Nothing on a CPU with one kind of core: the kernel publishes `cpu_core`
-  ## only on a hybrid one. Children inherit the mask, and the rr that replays
-  ## runs below `replay-server` below this process, so this covers record and
-  ## replay alike.
-  when defined(linux):
-    const CoreList = "/sys/devices/cpu_core/cpus"
-    if not fileExists(CoreList): return
-    var mask: CpuMask
-    for part in readFile(CoreList).strip().split(','):
-      let bounds = part.split('-')
-      let first = parseInt(bounds[0])
-      for cpu in first .. parseInt(bounds[^1]):
-        mask[cpu div 64] = mask[cpu div 64] or (1'u64 shl (cpu mod 64))
-    if schedSetAffinity(0, csize_t(sizeof(mask)), addr mask) != 0:
-      raise newOSError(osLastError(), "confining the rr fixture to " & CoreList)
 
 proc nativeRecording*(): NativeRecording =
   ## The rr recording of the sudoku solver, recorded now unless this

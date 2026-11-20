@@ -53,7 +53,7 @@ RUNNER="${REPO_ROOT}/ci/lib/run-nim-test-lane.sh"
 # Every contract below, counted once, whether or not this environment can run
 # it. Bump deliberately when adding one — the reconciliation at the end fails
 # loudly if this disagrees with what actually ran.
-TOTAL_CONTRACTS=12
+TOTAL_CONTRACTS=14
 
 pass_count=0
 skip_count=0
@@ -193,6 +193,42 @@ else
 		"PLAT-17's second deliverable is '--mm:orc under a linear-memory" \
 		"target'. Relying on Nim's default makes the lane's memory manager a" \
 		"property of the compiler version rather than of this repository."
+fi
+
+# 4b. The NATIVE side names its memory manager too. The parity gate compares
+#     the native column against the wasm one, so a rule that holds for one
+#     column and not for the other it is compared with is half a rule: Nim's
+#     default being orc today is a fact about the compiler, not about this
+#     repository. Two places compile that column, and both are read: the
+#     runner's native arm (what `vm-unit` runs) and the parity gate's own
+#     native build (what it compares).
+native_arm="$(awk '
+	/^\telse$/ && seen_wasm { inarm = 1; next }
+	/elif \[ "\$\{backend\}" = "wasm" \]; then/ { seen_wasm = 1 }
+	inarm && /^\tfi$/ { exit }
+	inarm { print }
+' "${RUNNER}" | strip_and_join | tr '\n' ' ')"
+if grep -qE 'compile_cmd=\(nim c [^)]*--mm:orc' <<<"${native_arm}"; then
+	ok "the native compile passes --mm:orc explicitly"
+else
+	fail "the native compile passes --mm:orc explicitly" \
+		"ci/lib/run-nim-test-lane.sh's native arm must name --mm:orc, as its" \
+		"wasm arm does: the parity gate compares the two, and a column that" \
+		"inherits the compiler's default cannot name what it was measured under."
+fi
+parity_native="$(awk '
+	/^measure_file\(\) \{/ { infn = 1 }
+	infn && /^\telse$/ { inarm = 1; next }
+	inarm && /^\tfi$/ { exit }
+	inarm { print }
+' "${REPO_ROOT}/ci/test/vm-unit-wasm-parity.sh" | strip_and_join | tr '\n' ' ')"
+if grep -qE 'nim c .*--mm:orc' <<<"${parity_native}"; then
+	ok "the parity gate's native build passes --mm:orc explicitly"
+else
+	fail "the parity gate's native build passes --mm:orc explicitly" \
+		"ci/test/vm-unit-wasm-parity.sh's measure_file builds the native" \
+		"column itself; without --mm:orc there it compares a named memory" \
+		"manager against the compiler's default."
 fi
 
 # 5. `-sEXIT_RUNTIME=1`. This is the `-d:nodejs` of a wasm lane: without it a

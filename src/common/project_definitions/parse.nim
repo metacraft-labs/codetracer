@@ -620,11 +620,19 @@ proc readVisualisers(r: var FileReader; root: TomlNode;
     if not matchKindByName(matchKindName, v.matchKind):
       r.note(pdcUnknownMatchKind,
         where & " matches by '" & matchKindName & "'. The match kinds are " &
-        knownMatchKinds().join(", ") & " — all three total string " &
-        "comparisons. There is deliberately no regular expression: a regex " &
+        knownMatchKinds().join(", ") & " — total string comparisons, " &
+        "and a shape over the value's members. There is deliberately no regular expression: a regex " &
         "over a cloned repository's text is unbounded work, and " &
         "§2.2 requires matching to terminate by construction")
       continue
+    if v.matchKind == mkShape:
+      var terms: seq[ShapeTerm]
+      let why = shapeTerms(v.match, terms)
+      if why.len > 0:
+        r.note(pdcWrongType, where & "'s shape '" & v.match & "' is refused: " &
+          why & ". A shape lists member labels and '#N' member counts, " &
+          "separated by commas (Project-Definitions §5.3)")
+        continue
     if not r.stringField(entry, "language", where, MaxNameBytes, false,
                          v.language):
       continue
@@ -732,6 +740,13 @@ proc readScratchpad(r: var FileReader; root: TomlNode;
         where & " matches by '" & matchKindName & "'; the match kinds are " &
         knownMatchKinds().join(", "))
       continue
+    if d.matchKind == mkShape:
+      var terms: seq[ShapeTerm]
+      let why = shapeTerms(d.match, terms)
+      if why.len > 0:
+        r.note(pdcWrongType, where & "'s shape '" & d.match & "' is refused: " &
+          why & " (Project-Definitions §5.3)")
+        continue
     var algName = ""
     if not r.stringField(entry, "algorithm", where, MaxNameBytes, true,
                          algName):

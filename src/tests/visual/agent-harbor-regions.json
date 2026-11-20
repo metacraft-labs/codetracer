@@ -97,13 +97,23 @@
     "`surface` is the story's whole window (`.ah-composer-story`), as the GPUI",
     "view's root is. The web story drops the sheet over an editor window",
     "(`.ah-composer-window`), whose own tab header is not the composer's: the",
-    "composer has no frame, so `frame-header` never matches inside that window."
+    "composer has no frame, so `frame-header` never matches inside that window.",
+    "",
+    "The Changes panel's and the Inbox's regions (CTF-P3): the tab bar and its",
+    "active tab (filled), the milestone selector, the first group head, the",
+    "first and last spec card, test row and Code-tab file row, the Inbox's",
+    "Previous / Next group, its first and last row and the row of the item on",
+    "screen (filled), and an item's page and its head. The heads, the first",
+    "rows and the Previous / Next group are compared in pixels too (`px`): a",
+    "row a few pixels taller than the web's drifts the whole list. The item's",
+    "head counts only inside its page (`within`): GPUI tags the session activity",
+    "timeline's lines with `data-ah-item-kind` too."
   ],
   "schemaVersion": 1,
   "regions": [
     {
       "name": "surface",
-      "web": ".ah-tab-caption, .ah-session-list, .agent-harbor-initiatives, .agent-harbor-progress, .agent-harbor-fleet, .agent-harbor-activity, .ah-composer-story",
+      "web": ".ah-tab-caption, .ah-session-list, .agent-harbor-initiatives, .agent-harbor-progress, .agent-harbor-fleet, .agent-harbor-activity, .ah-composer-story, .agent-harbor-changes, .agent-harbor-inbox, .agent-harbor-inbox-item",
       "gpui": {
         "data-ah-surface": ""
       }
@@ -646,6 +656,173 @@
       "gpui": {
         "data-ah-activity-filter": ""
       }
+    },
+    {
+      "name": "changes-tabs",
+      "web": ".ah-changes-tabs",
+      "gpui": {
+        "data-ah-tabs": "changes"
+      },
+      "px": [
+        "y",
+        "h"
+      ]
+    },
+    {
+      "name": "changes-active-tab",
+      "web": ".ah-changes-tab-active",
+      "gpui": {
+        "data-ah-changes-tab": "",
+        "data-ah-active": "true"
+      },
+      "fill": true,
+      "px": [
+        "x",
+        "w"
+      ]
+    },
+    {
+      "name": "milestone-select",
+      "web": ".ah-changes-scope .ah-changes-select",
+      "gpui": {
+        "data-ah-milestone-select": ""
+      }
+    },
+    {
+      "name": "group-head-first",
+      "web": ".ah-changes-group-head",
+      "gpui": {
+        "data-ah-group-head": "true"
+      },
+      "pick": "first",
+      "px": [
+        "y",
+        "h"
+      ]
+    },
+    {
+      "name": "spec-card-first",
+      "web": ".ah-spec-card",
+      "gpui": {
+        "data-ah-card": ""
+      },
+      "pick": "first",
+      "px": [
+        "y",
+        "h"
+      ]
+    },
+    {
+      "name": "spec-card-last",
+      "web": ".ah-spec-card",
+      "gpui": {
+        "data-ah-card": ""
+      },
+      "pick": "last-whole"
+    },
+    {
+      "name": "test-row-first",
+      "web": ".ah-test-row",
+      "gpui": {
+        "data-ah-test": ""
+      },
+      "pick": "first",
+      "px": [
+        "y",
+        "h"
+      ]
+    },
+    {
+      "name": "test-row-last",
+      "web": ".ah-test-row",
+      "gpui": {
+        "data-ah-test": ""
+      },
+      "pick": "last-whole"
+    },
+    {
+      "name": "code-row-first",
+      "web": ".ah-code-file .vcs-file-item",
+      "gpui": {
+        "data-ah-vcs-row": ""
+      },
+      "pick": "first",
+      "px": [
+        "y",
+        "h"
+      ]
+    },
+    {
+      "name": "code-row-last",
+      "web": ".ah-code-file .vcs-file-item",
+      "gpui": {
+        "data-ah-vcs-row": ""
+      },
+      "pick": "last-whole"
+    },
+    {
+      "name": "inbox-stepper",
+      "web": ".ah-inbox-stepper",
+      "gpui": {
+        "data-ah-stepper": "inbox"
+      },
+      "px": [
+        "y",
+        "h"
+      ]
+    },
+    {
+      "name": "inbox-row-first",
+      "web": ".ah-inbox-row",
+      "gpui": {
+        "data-ah-item": ""
+      },
+      "pick": "first",
+      "px": [
+        "y",
+        "h"
+      ]
+    },
+    {
+      "name": "inbox-row-last",
+      "web": ".ah-inbox-row",
+      "gpui": {
+        "data-ah-item": ""
+      },
+      "pick": "last-whole"
+    },
+    {
+      "name": "inbox-current-row",
+      "web": ".ah-inbox-row-current",
+      "gpui": {
+        "data-ah-item": "",
+        "data-ah-current": "true"
+      },
+      "fill": true
+    },
+    {
+      "name": "item-page",
+      "web": ".ah-item-page",
+      "gpui": {
+        "data-ah-item-page": "true"
+      }
+    },
+    {
+      "name": "item-head",
+      "web": ".ah-item-head",
+      "gpui": {
+        "data-ah-item-kind": ""
+      },
+      "within": {
+        "web": ".ah-item-page",
+        "gpui": {
+          "data-ah-item-page": "true"
+        }
+      },
+      "px": [
+        "y",
+        "h"
+      ]
     }
   ]
 }

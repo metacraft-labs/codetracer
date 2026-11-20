@@ -30,21 +30,24 @@ COORDINATE and a DEGRADATION, and the two have different failure modes:
     overlay, a selection marker or a magnifier cursor", and the specific way a
     pane breaks it is to stop drawing the rest of itself. V12 is that arm by
     name.
-  * **the PREDICATE fails by being asked of the wrong SET** (V23, V24), which is
+  * **the PREDICATE fails by being asked of the wrong SET** (V9, V24), which is
     PLAT-15's landing-pass finding and the reason `tiers.nim` is a subject here.
     `DrawableTiers` contains `itProtocol` and `cell_render.renderCells` refuses
     it, so a pane that asked "is this drawable?" before painting was told yes
     for a Kitty terminal and the `CellRenderError` left `shellScreen`'s whole
     paint. V24 collapses the two sets back together and restores that wrong
     answer (`fdgNone` for a Kitty overlay; since PLAT-59's tier-0 branch in
-    `paintFrameViewer` it paints a blank picture rather than raising); V23
-    keeps the guard and loses only the REASON, so the tier-0
-    report and the octant report each have evidence the other cannot satisfy
-    (§32a).
+    `paintFrameViewer` it paints a blank picture rather than raising); V9
+    removes the guard that asks the set. V23 (the guard kept, its REASON lost
+    between tier 0 and the octant) and V4 (the magnifier's refusal of the
+    octant) were DELETED when the octant table was verified against Unicode
+    16: tier 0 became the set's only non-member, so neither had a branch left
+    to grade.
 
 FOUR ARMS WERE ADDED BY THAT LANDING PASS — V21 (the magnifier's opening cursor,
 which `(0, 0)` survived the whole nineteen-case suite), V22 (§5's hand-off, whose
 NEGATIVE twin V14 already had and whose positive half did not), V23 and V24.
+V25 (the frame's dithering) arrived with the error diffusion.
 
 IT IS A SEPARATE FILE FROM THE PLAT-7 … PLAT-14 HARNESSES, for the reason
 PLAT-8's header gives: each records control digests over its own campaign's
@@ -203,7 +206,6 @@ M_SQUARE = "a square cell needs no correction and a 1:2 cell needs a 2x one"
 M_GATE = "every magnifier cell shows the pixel it names, through the renderer"
 M_ROUND = "the cursor's cell and the cursor's pixel are the same fact"
 M_REACH = "the cursor reaches every pixel and never leaves the image"
-M_OCTANT = "octants refuse a magnifier, and a sextant magnifier is the twin"
 M_TIER0 = "tier 0 magnifies at tier 1, and says so"
 M_BLOWUP = "every magnified pixel is a colour the source has"
 M_OPEN = "the magnifier OPENS inside the cell it was opened at, at every tier"
@@ -213,7 +215,9 @@ P_TITLE = "the title names the frame, its pixel extent and the resolved tier"
 P_MAGTITLE = "a magnified pane names the OVERLAY's tier when it differs"
 P_HANDOFF = "the picked pixel reaches the client as the pixel the magnifier named"
 P_NOMAG = "without the magnification step there is no request at all"
-P_OCTANT = "an octant pin degrades through pdDependencyMissing, picture only"
+P_OCTANT = "an octant pin draws its 2x4 cells, and names the tier"
+P_DITHER = "the frame is DITHERED: a field between two ramp steps draws as both"
+P_PNG = "a PNG frame is DECODED and drawn at a cell tier"
 P_DRAWS = "the POSITIVE TWIN: a drawable tier draws, same model, same pane"
 P_DECODER = "an ENCODED frame on a cell terminal is PLAT-14's bound 3, reported"
 P_ABSENT = "no player at all is pdsABSENT, which is a different remedy"
@@ -298,19 +302,6 @@ MUTATIONS: list = [
         control_name="the tier substitution, written as a case",
         control_find="  if tier == itProtocol: itHalfBlock else: tier",
         control_replace="  (case tier\n   of itProtocol: itHalfBlock\n   else: tier)"),
-    Mutation(
-        "V4", MAG,
-        "  if effective notin CellRenderableTiers:",
-        "  if false:",
-        M_OCTANT, NIM_MAG,
-        'is not implemented in this build',
-        why="PLAT-14 RESIDUE 3, RESTORED. Without the guard an octant "
-            "magnifier reaches `cell_render.glyphFor`, which raises a "
-            "`CellRenderError` naming a remedy the PANE cannot report — the "
-            "exception at draw time PLAT-14 recorded as PLAT-15's to decide.",
-        control_name="the renderable test, written as a double negative",
-        control_find="  if effective notin CellRenderableTiers:",
-        control_replace="  if not (effective in CellRenderableTiers):"),
     Mutation(
         "V5", MAG,
         "  if mag.cursorX < mag.window.x:\n    mag.window.x = mag.cursorX",
@@ -453,14 +444,14 @@ MUTATIONS: list = [
         "V9", PANE,
         "  if tier notin CellRenderableTiers:",
         "  if false:",
-        P_OCTANT, NIM_PANE,
-        'Check failed: model.degradedMessage.contains("octant")',
-        why="PLAT-14 RESIDUE 3 AT THE PANE, AND TIER 0 BESIDE IT. This one "
-            "guard is what stops BOTH non-members of `CellRenderableTiers` "
-            "reaching `renderCells`, where each is a `CellRenderError` the pane "
-            "can only propagate — out of `shellScreen`'s whole paint, in the "
-            "tier-0 case. Removing it restores exactly the defect PLAT-15's "
-            "landing pass found, in both of its shapes.",
+        P_TIER0, NIM_PANE,
+        'model.gap was none',
+        why="TIER 0 AT THE PANE. Since the octant table was verified this "
+            "guard has one non-member to stop — `itProtocol` — and without it "
+            "an unmagnified Kitty OVERLAY (one nothing transmits a frame for) "
+            "is told it may paint, and paints an empty picture with no reason "
+            "and no remedy: the defect PLAT-15's landing pass found, in the "
+            "shape PLAT-59's tier-0 branch gives it.",
         control_name="the renderable test, written as a double negative",
         control_find="  if tier notin CellRenderableTiers:",
         control_replace="  if not (tier in CellRenderableTiers):"),
@@ -502,7 +493,7 @@ MUTATIONS: list = [
         "V12", PANE,
         "  if historyHeight >= 1 and atRow < bottom:",
         "  if gap == fdgNone and historyHeight >= 1 and atRow < bottom:",
-        P_OCTANT, NIM_PANE,
+        P_TIER0, NIM_PANE,
         'screen.historyRows was 0',
         why="§2.6 BROKEN IN ITS OWN SHAPE: the pane stops drawing the REST of "
             "itself because one region cannot be drawn. 'Degradation never "
@@ -517,7 +508,7 @@ MUTATIONS: list = [
         "  if not model.hasRaster:\n    # PLAT-14 bound 3.",
         "  if false:\n    # PLAT-14 bound 3.",
         P_DECODER, NIM_PANE,
-        'Check failed: model.degradedMessage.contains("no PNG or JPEG decoder")',
+        'Check failed: model.degradedMessage.contains("not a PNG this build can decode")',
         why="PLAT-14 BOUND 3 UNREPORTED. An encoded frame on a cell terminal "
             "reaches `renderCells` with a zero raster instead of degrading, so "
             "'this build has no PNG decoder' becomes a blank region — which is "
@@ -557,7 +548,10 @@ MUTATIONS: list = [
         "  if gap != fdgNone:\n    raise newException(EmitError,",
         "  if false:\n    raise newException(EmitError,",
         P_EMIT, NIM_PANE,
-        'is not implemented in this build',
+        # RE-DERIVED 2026-11-20: the case's model is an undecodable frame now
+        # (the octant refusal it used is gone), and without the gap refusal
+        # the renderer samples an empty raster.
+        'index out of bounds, the container is empty',
         why="AN EMITTER THAT ANSWERS FOR A MODEL THAT CANNOT DRAW. "
             "`cell_render.glyphFor`'s rule, inverted: a caller that skipped "
             "`resolveGap` gets an exception from two layers down, or bytes for "
@@ -608,28 +602,6 @@ MUTATIONS: list = [
         control_replace="  let picked = model.magnifier.pickedPixel()\n"
                         "  let (x, y) = picked"),
     Mutation(
-        "V23", PANE,
-        "    return\n"
-        "      if tier == itProtocol: fdgProtocolNotPainted\n"
-        "      else: fdgTierNotDrawable",
-        "    return fdgTierNotDrawable",
-        P_TIER0, NIM_PANE,
-        'Check failed: model.gap == fdgProtocolNotPainted',
-        why="THE TWO REASONS COLLAPSED INTO THE OLDER ONE. V9 removes the "
-            "guard; this arm keeps it and loses the DISTINCTION, so a Kitty "
-            "terminal is told its pinned tier has no glyph table and is "
-            "offered sextants — a remedy for a problem it does not have, on "
-            "the terminal that draws the frame best. §32a: two branches of one "
-            "guard need evidence each, or the newer one is graded only as "
-            "collateral of an arm aimed at the older.",
-        control_name="the two reasons, written as a negated equality",
-        control_find="    return\n"
-                     "      if tier == itProtocol: fdgProtocolNotPainted\n"
-                     "      else: fdgTierNotDrawable",
-        control_replace="    return\n"
-                        "      if tier != itProtocol: fdgTierNotDrawable\n"
-                        "      else: fdgProtocolNotPainted"),
-    Mutation(
         "V24", TIERS,
         "  CellRenderableTiers* = DrawableTiers - {itProtocol}",
         "  CellRenderableTiers* = DrawableTiers",
@@ -649,12 +621,36 @@ MUTATIONS: list = [
             "(`pictureRows` 11, `degradedRows` 0), and the encoded shape falls "
             "through to `fdgNoDecoder` — the wrong reason. The needle is the "
             "first check that reads the wrong answer itself: the gap is "
-            "`none`, where V23's mutant (same check) reads `tier-not-drawable`, "
-            "so the two arms stay distinguishable (§32a).",
+            "`none` — as V9's is, which removes the guard that asks the set: "
+            "the two arms grade one predicate from its two sides.",
         control_name="the renderable set, written as the members it has",
         control_find="  CellRenderableTiers* = DrawableTiers - {itProtocol}",
         control_replace="  CellRenderableTiers* = {itHalfBlock, itQuadrant, itSextant,\n"
-                        "                          itBraille, itAscii}"),
+                        "                          itOctant, itBraille, itAscii}"),
+    Mutation(
+        "V25", PANE,
+        "                               pictureHeight), dither = dmDiffusion)",
+        "                               pictureHeight), dither = dmNone)",
+        P_DITHER, NIM_PANE,
+        "Check failed: blanks > 0",
+        why="§2's dithering dropped from the frame: a field between two of "
+            "the ASCII ramp's steps bands into one glyph again, while every "
+            "renderer suite (which asks for diffusion itself) stays green.",
+        control_name="the dither mode, written through its enum's name",
+        control_find="                               pictureHeight), dither = dmDiffusion)",
+        control_replace="                               pictureHeight), dither = DitherMode.dmDiffusion)"),
+    Mutation(
+        "V26", BIND,
+        "      if decoded:\n        result.raster = raster\n        result.hasRaster = true",
+        "      if false:\n        result.raster = raster\n        result.hasRaster = true",
+        P_PNG, NIM_PANE,
+        "Check failed: model.hasRaster",
+        why="PLAT-14 bound 3 reopened at the binding: the PNG frame is decoded "
+            "and thrown away, so a cell terminal reports 'no decoder' for a "
+            "picture this build can draw.",
+        control_name="the decoded test, written as an equality against true",
+        control_find="      if decoded:\n        result.raster = raster\n        result.hasRaster = true",
+        control_replace="      if decoded == true:\n        result.raster = raster\n        result.hasRaster = true"),
 ]
 
 

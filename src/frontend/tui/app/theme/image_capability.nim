@@ -97,14 +97,14 @@
 import std/strutils
 
 import ../../../../common/terminal_graphics/tiers
-import ../../../../common/terminal_graphics/emit
+import ../../../../common/terminal_graphics/[aspect, emit]
 import ./capabilities
 
 # The image axis is an EXTENSION of the colour/border/mouse axes and takes
 # `TerminalCapabilities` as an input, so every consumer of one needs the other.
 # Re-exported for `host/capabilities.nim`'s reason: a caller that had to import
 # both would be importing two halves of one decision.
-export capabilities
+export capabilities, aspect
 
 type
   Multiplexer* = enum
@@ -158,8 +158,9 @@ type
       ## path was MEASURED" rather than as "kitty", which would have to be
       ## edited if a queryable second protocol ever arrived.
     sixel*: bool
-      ## Sixel support as reported in the DA1 attribute list (`;4;`). Recorded
-      ## and never selected — this build has no Sixel encoder.
+      ## Sixel support as reported in the DA1 attribute list (`;4;`). Selects
+      ## Sixel only where no multiplexer could have answered DA1 for the
+      ## terminal, and never as a GRAPHICS reply (`measuredProtocol`).
 
   ProtocolRefusal* = enum
     ## WHY tier 0 was not selected. `prNone` when it was.
@@ -189,7 +190,6 @@ type
       ## unable to draw at all, which is a pessimistic failure with no
       ## measurement behind it.
     prPayloadExceedsLink = "payload-exceeds-link-budget"
-    prSixelHasNoEncoder = "sixel-has-no-encoder"
 
   ImageEnv* = object
     ## EVERY environment variable IMAGE capability resolution reads, and
@@ -238,6 +238,10 @@ type
       ## The most EMITTED BYTES (`emit.EmittedImage.emittedBytes`, and no other
       ## quantity — see that module's header) one tier-0 image may cost here.
       ## `0` means unbounded, which is a local session.
+    cellAspect*: CellAspect
+      ## §2.4: the terminal's cell, as `CSI 16 t` reported it
+      ## (`casReported`), or `DefaultCellAspect`. Every fit of a picture into
+      ## cells corrects against `cellAspectOf` of this value.
 
 const
   KittyTerms* = ["xterm-kitty"]
@@ -245,30 +249,19 @@ const
   ITerm2Programs* = ["iTerm.app", "WezTerm"]
   ITerm2LcTerminals* = ["iTerm2"]
   SixelTerms* = ["mlterm", "yaft-256color", "foot", "foot-extra"]
-    ## Terminals whose terminfo name means Sixel. Present so the ADVERTISEMENT
-    ## is complete.
-    ##
-    ## **`ImageCapability.protocol` is never `ipSixel`, on any path**, and the
-    ## sentence that used to stand here — "detection never SELECTS Sixel" —
-    ## was true of the automatic path and FALSE of `--image-tier=protocol`,
-    ## which reached past `prSixelHasNoEncoder` and handed a caller a protocol
-    ## `emit.emitProtocolImage` raises for. Corrected on 2026-09-14; the rule is
-    ## now one predicate (`emittableProtocol`) that both the pin and the sixel
-    ## refusal are written against, and the pinned Sixel row is in
-    ## `test_image_capability.nim`'s override table rather than in a comment.
+    ## Terminals whose terminfo name means Sixel. Since 2026-11-20 this build
+    ## has a Sixel encoder (`emit.emitSixelImage`, over
+    ## `nim_termctl/sixel.encodeSixel`), so the advertisement is honoured like
+    ## Kitty's and iTerm2's. Until then `prSixelHasNoEncoder` refused it.
 
-  EmittableProtocols* = {ipKitty, ipITerm2}
-    ## The tier-0 protocols THIS BUILD can turn into bytes.
-    ##
-    ## `ipSixel` is absent because `emit.emitProtocolImage` RAISES for it —
-    ## `nim_termctl.emitSixel` needs a quantiser and a dither this build does
-    ## not carry — so naming it as the protocol of a tier-0 rendering does not
-    ## produce a worse picture, it produces an exception where a picture was
-    ## asked for. `ipNone` is absent because it is the absence.
+  EmittableProtocols* = {ipKitty, ipITerm2, ipSixel}
+    ## The tier-0 protocols THIS BUILD can turn into bytes: Kitty and iTerm2
+    ## from an encoded image (`emit.emitProtocolImage`), Sixel from pixels
+    ## (`emit.emitSixelImage`). `ipNone` is absent because it is the absence.
     ##
     ## A SET RATHER THAN A COMPARISON AT EACH SITE, for §14's reason: the
-    ## refusal (`prSixelHasNoEncoder`) and the pin both ask "can this build emit
-    ## it?", and two spellings of that question are two things that can drift.
+    ## automatic path and the pin both ask "can this build emit it?", and two
+    ## spellings of that question are two things that can drift.
 
 func measuredProtocol*(probe: GraphicsProbe): bool =
   ## Whether a GRAPHICS reply — not merely a live path — came back.
@@ -291,8 +284,7 @@ func emittableProtocol*(advertised: ImageProtocol;
   ## neither of them is a precedence rule:
   ##
   ##   * **A protocol this build cannot emit is not a candidate.** See
-  ##     `EmittableProtocols`. An advertisement of `ipSixel` names a real
-  ##     capability of a real terminal and this build still cannot use it.
+  ##     `EmittableProtocols`.
   ##   * **A protocol NOTHING named is never synthesised.** The only thing that
   ##     outranks an absent advertisement is a GRAPHICS reply, which is
   ##     `measuredProtocol` — the module's single predicate for that — and not
@@ -312,6 +304,10 @@ func emittableProtocol*(advertised: ImageProtocol;
   if measuredProtocol(probe):
     if probe.kitty: return ipKitty
     if probe.iterm2: return ipITerm2
+  if probe.attempted and probe.answered and probe.sixel:
+    # The terminal's own DA1 attribute list names Sixel (`4`) — a claim by
+    # whatever answered, which is why it ranks after a graphics reply.
+    return ipSixel
   ipNone
 
 func advertisedProtocol*(env: TerminalEnv; ienv: ImageEnv): ImageProtocol =
@@ -411,7 +407,8 @@ func resolveImageCapability*(env: TerminalEnv; ienv: ImageEnv;
                              caps: TerminalCapabilities;
                              flags: CapabilityFlags;
                              probe = GraphicsProbe();
-                             hint = ihPhoto): ImageCapability =
+                             hint = ihPhoto;
+                             cellAspect = DefaultCellAspect): ImageCapability =
   ## THE whole image decision, as one pure function.
   ##
   ## The default `probe` is the zero value — "nothing was measured" — because a
@@ -459,6 +456,10 @@ func resolveImageCapability*(env: TerminalEnv; ienv: ImageEnv;
       protocol = ipKitty
     elif probe.answered and probe.iterm2:
       protocol = ipITerm2
+    elif probe.attempted and probe.answered and probe.sixel:
+      # DA1 listing Sixel, with no multiplexer in the path (every multiplexer
+      # case is answered above), so the list is the terminal's own.
+      protocol = ipSixel
     else:
       refusal = prNoProtocolAdvertised
   elif advertised == ipKitty and probe.attempted and probe.answered and
@@ -482,12 +483,6 @@ func resolveImageCapability*(env: TerminalEnv; ienv: ImageEnv;
     #
     # `ipITerm2` IS NOT REFUSED HERE. See `prGraphicsQuerySilent`.
     refusal = prGraphicsQuerySilent
-  if refusal == prNone and protocol == ipSixel:
-    # An advertisement this build cannot honour. `emit.emitProtocolImage`
-    # raises for `ipSixel`, so selecting it would turn a picture into an
-    # exception — the refusal is here, where it can be reported, rather than
-    # there, where it can only abort.
-    refusal = prSixelHasNoEncoder
   if refusal != prNone:
     protocol = ipNone
 
@@ -541,7 +536,28 @@ func resolveImageCapability*(env: TerminalEnv; ienv: ImageEnv;
     advertised: advertised, refusal: refusal, overriddenRefusal: overridden,
     multiplexer: mux, overSsh: ssh, repertoire: repertoire,
     wrapForMultiplexer: tier == itProtocol and mux == muxTmux,
-    linkBudget: (if ssh: MaxLinkImageBytes else: 0))
+    linkBudget: (if ssh: MaxLinkImageBytes else: 0),
+    cellAspect: cellAspect)
+
+func sixelCellPx*(cap: ImageCapability): (int, int) =
+  ## The cell a Sixel picture is sized against, in device pixels: the one
+  ## `CSI 16 t` reported, else `emit.DefaultSixelCellPx`. (`cellAspectOf`'s
+  ## default is a RATIO, 1:2, and Sixel needs pixels.)
+  if cap.cellAspect.source == casReported and cap.cellAspect.widthPx > 0 and
+     cap.cellAspect.heightPx > 0:
+    (cap.cellAspect.widthPx, cap.cellAspect.heightPx)
+  else:
+    DefaultSixelCellPx
+
+func cellAspectOf*(cap: ImageCapability): CellAspect =
+  ## The cell the picture is fitted to: the reported one, or §2.4's
+  ## configured default when nothing was reported. A capability built
+  ## without one — the zero `CellAspect` — answers the default too, so no
+  ## fit ever divides by a zero cell.
+  if cap.cellAspect.widthPx <= 0 or cap.cellAspect.heightPx <= 0:
+    DefaultCellAspect
+  else:
+    cap.cellAspect
 
 func withinLinkBudget*(cap: ImageCapability; emittedBytes: int): bool =
   ## Whether an emission of `emittedBytes` bytes is allowed on this link.

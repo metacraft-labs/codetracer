@@ -328,7 +328,8 @@ proc loadCheckoutExecutableTier*(root: string; userRoot = "";
 
 proc visualiseWithCurrentTrust*(d: ExecutableDefinition; input: string;
                                 userRoot = "";
-                                work = MaxExecutableWork): VisualisedText =
+                                work = MaxExecutableWork;
+                                valueInput = ""): VisualisedText =
   ## RUN A HELD HANDLE, AGAINST THE DECISION AS IT IS NOW.
   ##
   ## A session keeps `ExecutableDefinition`s between loads — that is what a
@@ -343,14 +344,74 @@ proc visualiseWithCurrentTrust*(d: ExecutableDefinition; input: string;
   ## user's ledger off disk, and let `stillAdmitted` decide. A ledger that
   ## cannot be read parses to an EMPTY one, which admits nothing — the safe
   ## direction, and the same direction `loadCheckoutExecutableTier` fails in.
-  d.visualiseWith(loadProjectTrust(userRoot).ledger, input, work)
+  d.visualiseWith(loadProjectTrust(userRoot).ledger, input, work, valueInput)
 
 proc diffWithCurrentTrust*(d: ExecutableDefinition; a, b: string;
                            userRoot = "";
-                           work = MaxExecutableWork): DiffAnswer =
+                           work = MaxExecutableWork;
+                           valueA = ""; valueB = ""): DiffAnswer =
   ## `visualiseWithCurrentTrust`'s twin for §7's comparison, through the same
   ## re-read and the same `stillAdmitted` (one predicate, one function).
-  d.diffWith(loadProjectTrust(userRoot).ledger, a, b, work)
+  d.diffWith(loadProjectTrust(userRoot).ledger, a, b, work, valueA, valueB)
+
+type
+  ExecutableReview* = object
+    ## What a user is shown before they decide: the file's digest, read for
+    ## the purpose of the decision and for nothing else.
+    file*: string
+    digest*: string
+    bytes*: int
+    failure*: string
+      ## Why there is no digest, when there is none.
+
+proc reviewExecutableDefinition*(root, scope: string;
+                                 kind: DefinitionFileKind): ExecutableReview =
+  ## READ ONE EXECUTABLE DEFINITION'S BYTES TO DIGEST THEM, AND NOTHING ELSE,
+  ## because the user asked to decide about it.
+  ##
+  ## A grant binds a decision to a digest, and a digest cannot be computed
+  ## without the bytes — so the one moment the host reads an UNGRANTED file is
+  ## the moment the user asks to review it (`trustDisclosure` names the
+  ## digest). The bytes are hashed and dropped: they are never decoded, never
+  ## handed to `project_wasm`, never run. The same three refusals the gated
+  ## reader applies hold here — the exact definition path after `realpath`
+  ## (no symlink anywhere), the size bound from a `stat` before the open, and
+  ## the `O_NOFOLLOW` descriptor `readVerified` checks — so a review cannot be
+  ## made to read outside the checkout either.
+  let reported = definitionPath(scope, kind)
+  result.file = reported
+  if tierOf(kind) != dtExecutable:
+    result.failure = "'" & reported & "' is not an executable definition"
+    return
+  let resolvedRoot = resolvedRealPath(root)
+  if not dirExists(resolvedRoot):
+    result.failure = "the checkout root '" & root & "' is not a directory"
+    return
+  let expected = resolvedRoot / reported
+  if not fileExists(expected):
+    result.failure = "'" & reported & "' is not there"
+    return
+  let resolvedFile = resolvedRealPath(expected)
+  if resolvedFile != expected:
+    result.failure = "'" & reported & "' resolves to '" & resolvedFile &
+      "' rather than to itself, so it was not read"
+    return
+  var size: BiggestInt = 0
+  try:
+    size = getFileSize(expected)
+  except CatchableError as e:
+    result.failure = "could not be measured: " & e.msg
+    return
+  if size > MaxWasmBytes:
+    result.failure = $size & " bytes on disk; the bound is " & $MaxWasmBytes
+    return
+  var bytes = ""
+  let failure = readVerified(expected, bytes)
+  if failure.len > 0:
+    result.failure = failure
+    return
+  result.bytes = bytes.len
+  result.digest = contentDigest(bytes)
 
 proc describeScan*(scan: ExecutableTierScan): string =
   ## What a reader is shown. Every definition that ran and every one that did

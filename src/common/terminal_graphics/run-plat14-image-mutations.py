@@ -100,6 +100,11 @@ EMIT = "src/common/terminal_graphics/emit.nim"
 CAP = "src/frontend/tui/app/theme/image_capability.nim"
 MEDIA = "src/common/terminal_graphics/media.nim"
 CLI = "src/frontend/tui/app/cli.nim"
+PNG = "src/common/png.nim"
+# ADDED 2026-11-20 with the PNG decoder: the cell tiers and Sixel draw an
+# encoded image through `png.decodePng`, so the decoder is graded here (M41-M43)
+# against `png_test.nim`'s corpus, which an independent encoder (Python's
+# `zlib`) writes.
 # ADDED 2026-09-14, and the reason is the whole of finding F2. `--image-tier`
 # was a ticked deliverable whose PARSER no arm and no case reached: deleting
 # the entire branch from `cli.nim`, and deleting only its usage-error arm, both
@@ -108,7 +113,7 @@ CLI = "src/frontend/tui/app/cli.nim"
 # this harness now (M33, M34) and `test_image_capability.nim` calls
 # `parseTuiCommand`.
 
-TOUCHED = [TIERS, RENDER, ASPECT, OKLAB, EMIT, CAP, MEDIA, CLI]
+TOUCHED = [TIERS, RENDER, ASPECT, OKLAB, EMIT, CAP, MEDIA, CLI, PNG]
 
 # TOUCHED IS SHARED WITH OTHER HARNESSES, AND THE OVERLAP IS ENUMERATED RATHER
 # THAN ASSUMED (the landing pass's own correction, 2026-09-14). As of PLAT-15:
@@ -132,6 +137,7 @@ EMIT_SUITE = "src/common/terminal_graphics/emit_test.nim"
 CAP_SUITE = "src/frontend/tui/app/tests/test_image_capability.nim"
 MEDIA_SUITE = ("src/frontend/viewmodel/tests/unit/"
                "test_terminal_media_capability.nim")
+PNG_SUITE = "src/common/png_test.nim"
 
 CONTROL_HASHES = HERE / "plat14-image-mutation-control.sha256"
 LOCK_PATH = HERE / ".plat14-image-mutation.lock"
@@ -180,7 +186,8 @@ R_WEIGHTS = "green is weighted above blue, which is why sRGB error is wrong"
 R_QUADRANT = "every quadrant mask has a distinct glyph in the block-elements range"
 R_SEXTANT = "every sextant mask has a distinct glyph, and the four legacy ones"
 R_BRAILLE = "every braille mask has a distinct glyph inside U+2800..U+28FF"
-R_OCTANT = "octants REFUSE rather than drawing an unverified table"
+R_OCTANT = "every octant mask has a distinct glyph: the U+1CD00 run and 26 legacy"
+R_DITHER = "an ASCII field between two ramp steps comes out as both, at its mean"
 R_RAMP = "the ascii ramp is monotone and stays inside ASCII"
 R_ASPECT = "a square source fits twice as many columns as rows at a 1:2 cell"
 R_SQUARE = "a square cell needs no correction, and the model says so"
@@ -192,6 +199,7 @@ R_BOX = "the box filter is the mean, computed independently"
 
 # `emit_test.nim`
 E_KITTY = "a Kitty transmission is the documented APC, written out"
+E_TMUXEACH = "under tmux each escape is wrapped on its own, and nothing else is"
 E_CHUNKS = "a payload over one chunk is split at exactly the documented size"
 E_PLACE = "a placement re-displays without the payload, in under 64 bytes"
 E_ITERM = "an iTerm2 inline image is the documented OSC, written out"
@@ -199,6 +207,9 @@ E_TMUX = "tmux passthrough doubles every ESC, and only ESC"
 E_CELL = "one half-block cell is one SGR pair and one glyph"
 E_SGR = "SGR is emitted on change only, so a flat region costs one glyph each"
 E_SCRUB = "the second emission of one image carries no payload at all"
+E_SIXEL = "the frame is resampled to the cells and sent as one Sixel escape"
+P_TYPES = "every colour type and bit depth an independent encoder writes"
+P_FILTERS = "the five filters, stored and dynamic-Huffman streams, and Adam7"
 E_BUDGET = "a payload under the budget whose EMISSION is over it is refused"
 E_SCAN = "containsGraphicsEscape finds a graphics escape, and only one"
 E_ASCII = "an ASCII cell carries a foreground and NO background at all"
@@ -220,7 +231,7 @@ C_CLI = ("the CLI parses --image-tier into the flag, and refuses an unknown "
          "name")
 
 # `test_terminal_media_capability.nim`
-M_TABLE = "tier 0 widens the set; every cell tier does not"
+M_TABLE = "every tier draws PNG; only iTerm2's tier 0 draws JPEG"
 M_FLOOR = "the seven declared surface budgets are UNCHANGED by this milestone"
 M_DRAWN = "a PNG declaration DRAWS on a Kitty terminal's tree budget"
 M_DESKTOP = "the SAME value on the desktop's state panel degrades, and says why"
@@ -239,6 +250,7 @@ NIM_RENDER = Suite(RENDER_SUITE, "/tmp/plat14-mut-render")
 NIM_EMIT = Suite(EMIT_SUITE, "/tmp/plat14-mut-emit")
 NIM_CAP = Suite(CAP_SUITE, "/tmp/plat14-mut-cap", extra_path=True)
 NIM_MEDIA = Suite(MEDIA_SUITE, "/tmp/plat14-mut-media", extra_path=True)
+NIM_PNG = Suite(PNG_SUITE, "/tmp/plat14-mut-png")
 
 
 @dataclass
@@ -351,15 +363,22 @@ MUTATIONS: list[Mutation] = [
         control_replace='  if term.startsWith("tmux") or term.startsWith("screen"):'),
     Mutation(
         "M8", CAP,
-        "  if refusal == prNone and protocol == ipSixel:",
-        "  if false and protocol == ipSixel:",
+        "    elif probe.attempted and probe.answered and probe.sixel:\n"
+        "      # DA1 listing Sixel",
+        "    elif false:\n"
+        "      # DA1 listing Sixel",
         C_TABLE, NIM_CAP,
-        "cap.protocol was ipSixel",
-        why="Selecting a protocol this build cannot emit turns a picture into "
-            "an exception (`emit.emitProtocolImage` raises for `ipSixel`).",
-        control_name="the sixel refusal, with the conjunction's operands swapped",
-        control_find="  if refusal == prNone and protocol == ipSixel:",
-        control_replace="  if protocol == ipSixel and refusal == prNone:"),
+        "cap.protocol was ipNone",
+        why="RE-AIMED 2026-11-20. This arm guarded `prSixelHasNoEncoder`, which "
+            "the Sixel encoder retired. It now drops the one piece of Sixel "
+            "evidence that needs no advertisement: a terminal whose own DA1 "
+            "lists Sixel, with no multiplexer to have answered for it, would "
+            "be given a cell tier.",
+        control_name="the DA1 arm, with the conjunction's operands reordered",
+        control_find="    elif probe.attempted and probe.answered and probe.sixel:\n"
+                     "      # DA1 listing Sixel",
+        control_replace="    elif probe.sixel and probe.answered and probe.attempted:\n"
+                        "      # DA1 listing Sixel"),
 
     # -- the bytes, and the unit the budget is written in --------------------
     Mutation(
@@ -382,7 +401,8 @@ MUTATIONS: list[Mutation] = [
         why="placeholder — replaced below"),
     Mutation(
         "M11", EMIT,
-        "    if alreadyUploaded:\n      body = kittyPlace(imageId, placementId, cols, rows)\n"
+        "    if alreadyUploaded:\n      body = kittyPlace(imageId, placementId, cols, rows,\n"
+        "                        holdCursor = reserved, quiet = reserved)\n"
         "      reused = true",
         "    if alreadyUploaded:\n      body = kittyTransmit(payload, imageId, cols, rows)\n"
         "      reused = true",
@@ -393,10 +413,12 @@ MUTATIONS: list[Mutation] = [
             "shape this campaign keeps meeting.",
         control_name="the placement branch, with the two statements' order preserved "
                      "and the flag set first",
-        control_find="    if alreadyUploaded:\n      body = kittyPlace(imageId, placementId, cols, rows)\n"
+        control_find="    if alreadyUploaded:\n      body = kittyPlace(imageId, placementId, cols, rows,\n"
+                     "                        holdCursor = reserved, quiet = reserved)\n"
                      "      reused = true",
         control_replace="    if alreadyUploaded:\n      reused = true\n"
-                        "      body = kittyPlace(imageId, placementId, cols, rows)"),
+                        "      body = kittyPlace(imageId, placementId, cols, rows,\n"
+                        "                        holdCursor = reserved, quiet = reserved)"),
     Mutation(
         "M12", EMIT,
         "      inner.add \"\\x1b\\x1b\"",
@@ -520,27 +542,29 @@ MUTATIONS: list[Mutation] = [
     # -- the media widening, which must follow the EMITTER -------------------
     Mutation(
         "M21", MEDIA,
-        "  if tier != itProtocol:\n    return",
-        "  if false:\n    return",
+        "  result.incl mcImagePng\n  if tier == itProtocol and protocol == ipITerm2:",
+        "  if tier == itProtocol and protocol == ipITerm2:",
         M_TABLE, NIM_MEDIA,
-        "terminalMediaCapability(tier, ipKitty) == MediaCapabilityNote",
-        why="PLAT-12's blank region, put back: a cell tier claiming `image/png` "
-            "declares a capability nothing implements, and the value degrades "
-            "into nothing instead of degrading honestly.",
-        control_name="the tier test, written as a positive membership test",
-        control_find="  if tier != itProtocol:\n    return",
-        control_replace="  if not (tier == itProtocol):\n    return"),
+        "Check failed: KittyMedia == png",
+        why="RE-AIMED 2026-11-20 with the PNG decoder: every tier draws "
+            "`image/png` now (decoded here for the cell tiers and Sixel, in the "
+            "terminal for Kitty and iTerm2). Dropping it puts PLAT-12's "
+            "degradation back on terminals that can draw the picture.",
+        control_name="the PNG member, added as a set union",
+        control_find="  result.incl mcImagePng\n  if tier == itProtocol and protocol == ipITerm2:",
+        control_replace="  result = result + {mcImagePng}\n  if tier == itProtocol and protocol == ipITerm2:"),
     Mutation(
         "M22", MEDIA,
-        "  of ipKitty: result.incl mcImagePng",
-        "  of ipKitty:\n    result.incl mcImagePng\n    result.incl mcImageJpeg",
+        "  if tier == itProtocol and protocol == ipITerm2:",
+        "  if tier == itProtocol and protocol in {ipITerm2, ipKitty}:",
         M_JPEG, NIM_MEDIA,
         "onKitty.mediaGaps.len == 1",
-        why="Kitty's `f=100` is PNG. A JPEG handed to it is transmitted and "
-            "rejected, which is a blank region with extra steps.",
-        control_name="the Kitty arm, written as a set union",
-        control_find="  of ipKitty: result.incl mcImagePng",
-        control_replace="  of ipKitty: result = result + {mcImagePng}"),
+        why="Kitty's `f=100` is PNG, and this build has no JPEG decoder. A JPEG "
+            "handed to Kitty is transmitted and rejected, which is a blank "
+            "region with extra steps.",
+        control_name="the iTerm2 test, written as a set membership",
+        control_find="  if tier == itProtocol and protocol == ipITerm2:",
+        control_replace="  if tier == itProtocol and protocol in {ipITerm2}:"),
     Mutation(
         "M23", CAP,
         "  if cap.tier != itProtocol: return cap",
@@ -554,14 +578,14 @@ MUTATIONS: list[Mutation] = [
         control_replace="  if not (cap.tier == itProtocol): return cap"),
     Mutation(
         "M24", CAP,
-        "  linkBudget: (if ssh: MaxLinkImageBytes else: 0))",
-        "  linkBudget: (if ssh: 0 else: 0))",
+        "    linkBudget: (if ssh: MaxLinkImageBytes else: 0),",
+        "    linkBudget: (if ssh: 0 else: 0),",
         C_LINK, NIM_CAP,
         "remote.linkBudget == MaxLinkImageBytes",
         control_name="the link budget, with the condition negated and the arms "
                      "swapped",
-        control_find="  linkBudget: (if ssh: MaxLinkImageBytes else: 0))",
-        control_replace="  linkBudget: (if not ssh: 0 else: MaxLinkImageBytes))"),
+        control_find="    linkBudget: (if ssh: MaxLinkImageBytes else: 0),",
+        control_replace="    linkBudget: (if not ssh: 0 else: MaxLinkImageBytes),"),
     Mutation(
         "M25", CAP,
         "  if flags.imageTierPinned:",
@@ -617,8 +641,10 @@ MUTATIONS: list[Mutation] = [
         control_replace="    if pinnable == ipNone and flags.imageTier == itProtocol:"),
     Mutation(
         "M28", CAP,
-        "    if probe.iterm2: return ipITerm2\n  ipNone",
-        "    if probe.iterm2: return ipITerm2\n  ipITerm2",
+        "    # whatever answered, which is why it ranks after a graphics reply.\n"
+        "    return ipSixel\n  ipNone",
+        "    # whatever answered, which is why it ranks after a graphics reply.\n"
+        "    return ipSixel\n  ipITerm2",
         C_PINTABLE, NIM_CAP,
         "cap.tier was itProtocol",
         why="U7: the SYNTHESIS, restored. `emittableProtocol`'s last line is "
@@ -627,21 +653,23 @@ MUTATIONS: list[Mutation] = [
             "documented always-false, so that arm was an unconditional guess "
             "at a terminal that had claimed nothing.",
         control_name="the no-protocol answer, written through result",
-        control_find="    if probe.iterm2: return ipITerm2\n  ipNone",
-        control_replace="    if probe.iterm2: return ipITerm2\n  result = ipNone"),
+        control_find="    # whatever answered, which is why it ranks after a graphics reply.\n"
+                     "    return ipSixel\n  ipNone",
+        control_replace="    # whatever answered, which is why it ranks after a graphics reply.\n"
+                        "    return ipSixel\n  result = ipNone"),
     Mutation(
         "M29", CAP,
-        "  if advertised in EmittableProtocols: return advertised",
-        "  if advertised != ipNone: return advertised",
+        "  EmittableProtocols* = {ipKitty, ipITerm2, ipSixel}",
+        "  EmittableProtocols* = {ipKitty, ipITerm2}",
         C_PINTABLE, NIM_CAP,
-        "cap.protocol was ipSixel",
-        why="The admission widened to every advertisement. `ipSixel` reaches "
-            "`emit.emitProtocolImage`, which RAISES for it — the pin turns a "
-            "picture into an exception, which is the exact outcome "
-            "`prSixelHasNoEncoder` exists to prevent on the automatic path.",
-        control_name="the emittable test, written as a double negative",
-        control_find="  if advertised in EmittableProtocols: return advertised",
-        control_replace="  if not (advertised notin EmittableProtocols): return advertised"),
+        "cap.protocol was ipNone",
+        why="RE-AIMED 2026-11-20. The set without Sixel is the build before the "
+            "encoder: a pinned tier 0 on a Sixel terminal refuses again. (The "
+            "old arm widened `advertised in EmittableProtocols` to `!= ipNone`, "
+            "which is the same predicate now that every protocol is emittable.)",
+        control_name="the emittable set, written in another order",
+        control_find="  EmittableProtocols* = {ipKitty, ipITerm2, ipSixel}",
+        control_replace="  EmittableProtocols* = {ipSixel, ipKitty, ipITerm2}"),
     Mutation(
         "M30", CAP,
         "  elif advertised == ipKitty and probe.attempted and probe.answered and\n"
@@ -772,6 +800,104 @@ MUTATIONS: list[Mutation] = [
                      "operands swapped",
         control_find="    if probe.answered and probe.kitty:\n      protocol = ipKitty",
         control_replace="    if probe.kitty and probe.answered:\n      protocol = ipKitty"),
+    Mutation(
+        "M36", RENDER,
+        '    (0b00010100, "\\u{1FBE6}"),  # MIDDLE LEFT ONE QUARTER BLOCK',
+        '    (0b00010100, "\\u{1FBE7}"),  # MIDDLE LEFT ONE QUARTER BLOCK',
+        R_OCTANT, NIM_RENDER,
+        "Check failed: glyphFor(itOctant, "
+        "0b00000000000000000000000000010100) ==",
+        why="One legacy octant spelled with its mirror image: the middle-LEFT "
+            "quarter drawn as the middle-RIGHT one. Every glyph is still a "
+            "block character and the picture is a DIFFERENT one — the exact "
+            "failure the Unicode 16 check exists to stop.",
+        control_name="the legacy entry, with the character written as itself",
+        control_find='    (0b00010100, "\\u{1FBE6}"),  # MIDDLE LEFT ONE QUARTER BLOCK',
+        control_replace='    (0b00010100, "\U0001FBE6"),  # MIDDLE LEFT ONE QUARTER BLOCK'),
+    Mutation(
+        "M37", RENDER,
+        "  $Rune(0x1CD00 + mask - skipped)",
+        "  $Rune(0x1CD00 + mask - skipped - 1)",
+        R_OCTANT, NIM_RENDER,
+        "run.len was 229",
+        why="The U+1CD00 run shifted by one: 229 glyphs one code point early "
+            "and one mask falling outside the block — the off-by-one the "
+            "skipped-mask arithmetic invites.",
+        control_name="the run's offset, written as a sum",
+        control_find="  $Rune(0x1CD00 + mask - skipped)",
+        control_replace="  $Rune(0x1CD00 + (mask - skipped))"),
+    Mutation(
+        "M38", RENDER,
+        "      d.err[i][k] += residual[k] * w",
+        "      d.err[i][k] -= residual[k] * w",
+        R_DITHER, NIM_RENDER,
+        "Check failed: abs(ditherSum / n - lum) < 0.01",
+        why="Error diffusion with the sign flipped pushes each residual the "
+            "wrong way: the drawn mean runs away from the source instead of "
+            "converging on it, which is banding made worse rather than removed.",
+        control_name="the share, written as an explicit product",
+        control_find="      d.err[i][k] += residual[k] * w",
+        control_replace="      d.err[i][k] = d.err[i][k] + w * residual[k]"),
+    Mutation(
+        "M39", EMIT,
+        "    body = if reserved: tmuxPassthroughEach(body) else: tmuxPassthrough(body)",
+        "    body = tmuxPassthrough(body)",
+        E_TMUXEACH, NIM_EMIT,
+        "Check failed: framed.bytes.count(TmuxPassthroughOpen) ==",
+        why="A pane's frame wrapped in ONE passthrough: every chunk of the "
+            "transmission inside a single DCS, which a tmux with a bounded "
+            "passthrough truncates — and the frame never arrives.",
+        control_name="the wrap, written as an if statement",
+        control_find="    body = if reserved: tmuxPassthroughEach(body) else: tmuxPassthrough(body)",
+        control_replace="    if reserved: body = tmuxPassthroughEach(body)\n"
+                        "    else: body = tmuxPassthrough(body)"),
+    Mutation(
+        "M40", EMIT,
+        "  let scaled = img.scaledTo(cols * cellWidthPx, rows * cellHeightPx)",
+        "  let scaled = img.scaledTo(cols * cellWidthPx, rows * cellWidthPx)",
+        E_SIXEL, NIM_EMIT,
+        "1;1;30;40",
+        why="A Sixel picture sized with the cell's WIDTH in both axes: it draws "
+            "half as tall as the cells the pane reserved, and the rows below it "
+            "show whatever was there.",
+        control_name="the target extent, computed through named locals",
+        control_find="  let scaled = img.scaledTo(cols * cellWidthPx, rows * cellHeightPx)",
+        control_replace="  let (tw, th) = (cols * cellWidthPx, rows * cellHeightPx)\n"
+                        "  let scaled = img.scaledTo(tw, th)"),
+    Mutation(
+        "M41", PNG,
+        "  if pa <= pb and pa <= pc: a elif pb <= pc: b else: c",
+        "  if pa <= pb and pa <= pc: a elif pb <= pc: c else: b",
+        P_FILTERS, NIM_PNG,
+        "Check failed: wrong == 0",
+        why="The Paeth predictor's tie order swapped: every row filtered with "
+            "Paeth decodes to a different picture, and only a file written "
+            "with filter 4 shows it.",
+        control_name="the predictor, written with the ties spelled out",
+        control_find="  if pa <= pb and pa <= pc: a elif pb <= pc: b else: c",
+        control_replace="  if pa <= pb and pa <= pc: a\n  elif pb <= pc: b\n  else: c"),
+    Mutation(
+        "M42", PNG,
+        "          if depth == 16: uint8(v shr 8)",
+        "          if depth == 16: uint8(v and 0xFF)",
+        P_TYPES, NIM_PNG,
+        "Check failed: wrong == 0",
+        why="A 16-bit sample keeps its LOW byte: noise where the picture was.",
+        control_name="the high byte, taken by division",
+        control_find="          if depth == 16: uint8(v shr 8)",
+        control_replace="          if depth == 16: uint8(v div 256)"),
+    Mutation(
+        "M43", PNG,
+        "            rep = 3 + r.bits(2)",
+        "            rep = 2 + r.bits(2)",
+        P_FILTERS, NIM_PNG,
+        "png: ",
+        why="DEFLATE's code-length repeat (symbol 16) one short: every "
+            "dynamic-Huffman stream mis-reads its code lengths, which only a "
+            "stream an independent compressor wrote at level 9 exercises.",
+        control_name="the repeat count, written as a sum the other way round",
+        control_find="            rep = 3 + r.bits(2)",
+        control_replace="            rep = r.bits(2) + 3"),
 ]
 
 # M10 is deliberately absent from the table above: `fitsLinkBudget`'s body is

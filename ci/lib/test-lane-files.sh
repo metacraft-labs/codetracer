@@ -1130,6 +1130,11 @@ test_lane_files() {
 		echo src/frontend/tests/debug_toolbar_follows_active_tab_test.nim
 		echo src/frontend/tests/agent_editor_selection_dom_test.nim
 		echo src/frontend/tests/origin_chain_wiring_test.nim
+		# `value_provenance_dom_test.nim` holds the desktop to READING a
+		# checkout's `.codetracer/visualisers.toml` when a trace opens and to
+		# naming the visualiser that drew a value in the value span's `title`
+		# — read back out of the DOM, with the built-in title as its control.
+		echo src/frontend/tests/value_provenance_dom_test.nim
 		# `origin_side_panel_confidence_test.nim` holds the origin side panel
 		# to printing each hop's confidence, and the low-confidence label
 		# below 0.7 (Value-Origin-Tracking.md §3.2.2 "Side panel").
@@ -1671,12 +1676,18 @@ test_lane_files() {
 				'/test_plugin_source_admission\.nim$' \
 				'/test_plugin_surfaces\.nim$' \
 				'/test_plugin_grant_lifecycle\.nim$' \
+				'/test_plugin_process_host\.nim$' \
 				'/test_every_mountable_pane_has_a_factory_arm\.nim$' \
 				'/test_every_status_surface_has_an_entry_point\.nim$' \
 				'/test_view_census\.nim$' \
 				'/test_vcs_working_tree\.nim$' \
 				'/test_vcs_content_id\.nim$' \
 				'/test_native_file_tree_operations\.nim$'
+		# `test_plugin_process_host` (Extensibility-Model.md §11) starts REAL
+		# plugin processes with `fork`/`execve` over `std/posix` pipes — the
+		# native front-ends' plugin supervisor — which this backend has no
+		# process to run; its wire half, `test_plugin_protocol_schema`, runs
+		# here.
 		# `test_native_file_tree_operations` (K19) creates, renames and moves
 		# to a trash REAL files in a temporary directory: its subject,
 		# `host/native_file_tree.nim`, is the native front-ends' disk half and
@@ -1945,7 +1956,10 @@ test_lane_files() {
 				'/test_vcs_content_id\.nim$' \
 				'/test_platform_desktop_native\.nim$' \
 				'/test_project_action_runner\.nim$' \
-				'/test_native_file_tree_operations\.nim$'
+				'/test_native_file_tree_operations\.nim$' \
+				'/test_plugin_process_host\.nim$'
+		# ELEVEN entries since Extensibility-Model.md §11: the plugin
+		# supervisor's suite forks and execs real plugin processes.
 		# TEN entries since K19: `test_native_file_tree_operations` creates,
 		# renames and trashes REAL files in a temporary directory through
 		# `std/posix` (`host/native_file_tree`, a native front-end's disk

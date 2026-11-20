@@ -1,0 +1,48 @@
+{
+ "takenAt": "2026-11-20T09:50:34.000535+00:00",
+ "host": "gpu-server-001",
+ "binary": "codetracer-gpui-window",
+ "rc": 0,
+ "elapsedMs": 24681,
+ "endedOnDeadline": false,
+ "proxy": [
+  {
+   "what": "held",
+   "atMs": 1795168218033
+  },
+  {
+   "what": "released",
+   "atMs": 1795168225228
+  },
+  {
+   "what": "held",
+   "atMs": 1795168232507
+  },
+  {
+   "what": "released",
+   "atMs": 1795168232507
+  }
+ ],
+ "windowMappedWhileHeld": true,
+ "titlesWhileHeld": [
+  "root",
+  "__i3",
+  "__i3_scratch",
+  "HEADLESS-1",
+  "1",
+  "main.py \u2014 CodeTracer"
+ ],
+ "order": [
+  {
+   "event": "deferred"
+  },
+  {
+   "event": "requested",
+   "flowRows": 0
+  },
+  {
+   "event": "applied",
+   "flowRows": 5
+  }
+ ]
+}

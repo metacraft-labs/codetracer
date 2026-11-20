@@ -10,6 +10,10 @@ modes: [fast, realistic]
 # the terminal settles only once the application has read its input, which a
 # loaded host can delay by seconds
 settle-timeout: 15000
+# A stage that records a program does so on a cold fixture cache in a fresh
+# worktree: a first `rr record` took 121 s at load 80, past the default 120 s
+# (the electron lane's own note has the Crystal case).
+stage-timeout: 300000
 retention: { runs: 5, failure-days: 7 }
 applicable:
   - ../tracing/trace-macro-at-caret.yaml

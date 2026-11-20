@@ -125,6 +125,8 @@ import viewmodel/views/isonim_agent_harbor_results_view
 import viewmodel/views/isonim_agent_harbor_session_activity_view
 import viewmodel/agent_harbor_activity_cards
 import stories/dom_activity_presses
+import stories/agent_harbor_changes_inbox_stories
+import viewmodel/views/[isonim_agent_harbor_changes_view, isonim_agent_harbor_inbox_view]
 import ../ct_test/contracts as ct_test_contracts
 
 type
@@ -2094,6 +2096,35 @@ proc mountAgentHarborSessionActivity(container: isonim_dom.Element;
     shownTimeline = nil
     dispose()
 
+proc mountAgentHarborChanges(container: isonim_dom.Element;
+                             fixture: string; options = ""): DisposeProc =
+  ## The Changes panel over the viewmodel `createChangesStoryVM` builds for
+  ## the story's fixture (`stories/agent_harbor_changes_inbox_stories.nim`).
+  mountAgentHarborVM(container,
+    proc(): ChangesVM = createChangesStoryVM(fixture),
+    proc(host: isonim_dom.Element; vm: ChangesVM) =
+      mountAgentHarborChangesPanel(host, vm, changesStoryContext(fixture)))
+
+proc mountAgentHarborInbox(container: isonim_dom.Element;
+                           fixture: string; options = ""): DisposeProc =
+  ## The Inbox panel; its playback story gets the host's playback chrome.
+  let pb = hostPlayback("agent-harbor-inbox", fixture)
+  let requests = StoryHostRequests()
+  mountAgentHarborVM(container,
+    proc(): InboxVM = createInboxStoryVM(fixture, pb),
+    proc(host: isonim_dom.Element; vm: InboxVM) =
+      mountAgentHarborInboxPanel(host, vm, inboxStoryContext(fixture, requests)),
+    pb, options)
+
+proc mountAgentHarborInboxItem(container: isonim_dom.Element;
+                               fixture: string; options = ""): DisposeProc =
+  ## One inbox item's page, as its session tab shows it.
+  let requests = StoryHostRequests()
+  mountAgentHarborVM(container,
+    proc(): InboxItemVM = createInboxItemStoryVM(fixture),
+    proc(host: isonim_dom.Element; page: InboxItemVM) =
+      mountAgentHarborInboxItemPage(host, page, inboxItemStoryContext(fixture, requests)))
+
 proc mountTestResults(container: isonim_dom.Element; fixture: string): DisposeProc =
   ## The Test Results pane over a real `ct test run --events` capture (the
   ## Agent Harbor fixture set's first test run), folded through the pane's
@@ -2890,6 +2921,9 @@ proc mountCodeTracerStory*(container: isonim_dom.Element;
     of "agent-harbor-initiatives": mountAgentHarborInitiatives(container, f, o)
     of "agent-harbor-initiative-progress": mountAgentHarborProgress(container, f, o)
     of "agent-harbor-session-activity": mountAgentHarborSessionActivity(container, f, o)
+    of "agent-harbor-changes": mountAgentHarborChanges(container, f, o)
+    of "agent-harbor-inbox": mountAgentHarborInbox(container, f, o)
+    of "agent-harbor-inbox-item": mountAgentHarborInboxItem(container, f, o)
     of "test-results": mountTestResults(container, f)
     of "build": mountBuild(container, f)
     of "calltrace": mountCalltrace(container, f)

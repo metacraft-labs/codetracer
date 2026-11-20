@@ -44,7 +44,7 @@
 ## component that STOPPED being a plugin at 2.0.0 go on loading its 1.0.0
 ## manifest for ever, silently, which is the shape §4.1 exists to refuse.
 
-import std/[os, strutils]
+import std/[json, os, strutils]
 
 import ./component_roots
 import ../../common/plugin_model
@@ -314,3 +314,57 @@ proc report*(d: PluginDiscovery): string =
     for p in d.plugins: lines.add describe(p)
   for e in d.problems: lines.add render(e)
   lines.join("\n")
+
+# ---------------------------------------------------------------------------
+# Packages (Extensibility-Model.md §11.2.2)
+# ---------------------------------------------------------------------------
+
+type
+  LoadedPackage* = object
+    installed*: InstalledPlugin
+    package*: PluginPackage
+
+  PackageLoad* = object
+    packages*: seq[LoadedPackage]
+    problems*: seq[PluginError]
+      ## Every refusal, naming the plugin: a package that did not parse, a
+      ## plugin whose id is not its component's (`identityProblem`), and a
+      ## manifest that names no executable to run it in.
+
+proc loadPluginPackages*(d: PluginDiscovery): PackageLoad =
+  ## Every installed plugin component, read as a package (§11.2.2). This is
+  ## where `identityProblem` is ENFORCED, not merely available: a one-plugin
+  ## manifest whose id is not its component name is refused here, and a
+  ## package's plugin ids are held to `<component>` / `<component>.<name>` by
+  ## `parsePluginPackage`.
+  result.problems = d.problems
+  for p in d.plugins:
+    var root: JsonNode
+    try:
+      root = parseJson(p.manifestText)
+    except CatchableError as e:
+      result.problems.add pluginError(p.component.name, pecMalformedManifest,
+        p.manifestPath & ": " & e.msg)
+      continue
+    var pkg: PluginPackage
+    if isPackageDocument(root):
+      pkg = parsePluginPackage(p.manifestText, p.manifestPath, p.component.name)
+    else:
+      let parsed = parseManifest(p.manifestText, p.manifestPath)
+      if parsed.manifest.id.len > 0 and parsed.manifest.id != p.component.name:
+        result.problems.add identityProblem(p, parsed.manifest)
+        continue
+      let exe = root{"executable"}.getStr("")
+      if exe.len == 0:
+        result.problems.add pluginError(p.component.name, pecBadPackage,
+          p.manifestPath & ": a plugin runs in a process of its own " &
+          "(Extensibility-Model §11.2), so plugin.json must name it — " &
+          "either \"executable\": \"bin/…\" or the package form with \"host\"")
+        continue
+      pkg = wrapSingleManifest(p.manifestText, p.manifestPath,
+                               p.component.name, exe)
+    if not pkg.isOk:
+      result.problems.add pkg.allErrors
+      continue
+    result.packages.add LoadedPackage(installed: p, package: pkg)
+

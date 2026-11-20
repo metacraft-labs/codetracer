@@ -114,6 +114,67 @@ proc cutPath*(path: string; fits: proc(text: string): bool;
     if fits(candidate): return candidate
   endCut()
 
+proc runeStarts(s: string): seq[int] =
+  ## The byte offset of every rune of `s`, and `s.len` last: where a cut
+  ## may fall. A cut never splits a rune.
+  var i = 0
+  while i < s.len:
+    result.add i
+    let b = ord(s[i])
+    i += (if b < 0x80: 1 elif b < 0xE0: 2 elif b < 0xF0: 3 else: 4)
+  result.add s.len
+
+proc cutInputValue*(value: string; room: int; widthOf: proc(text: string): int;
+                    ellipsisWidth, startMax, startMin: int): string =
+  ## **THE ONE-LINE INPUT RULE** (the P2c study's D35): a one-line input's
+  ## value in at most `room` units of the host (terminal cells, GPUI
+  ## pixels; `widthOf` measures a text in them, `ellipsisWidth` is the
+  ## "…"'s). Whole when it fits; else cut in its MIDDLE with "…", keeping
+  ## its start -- at most `startMax`, a quarter of the room at narrow
+  ## widths, never under `startMin` -- and as much of its end as fits.
+  ## When a path's last segment, with the `/` before it, fits beside
+  ## `startMin` of the start, the start gives way to it, so a path keeps its
+  ## file name whole (`m…/client.py`). An input holds one line at every
+  ## width, so the value is never wrapped. Either side of the "…" follows
+  ## the one trim rule (`trimBeforeEllipsis`, `trimAfterEllipsis`).
+  ##
+  ## Each side is the longest run of whole runes that fits its share, so a
+  ## wide glyph on the cut stays whole on the side its start is on. The
+  ## terminal's `ah_tui_canvas.elideMiddle` and the GPUI composer's fields
+  ## both draw through this, each in its own unit.
+  if room <= 0: return ""
+  if widthOf(value) <= room: return value
+  let avail = room - ellipsisWidth
+  if avail <= 0: return CutEllipsis
+  var startBudget = clamp(avail div 4, startMin, max(startMin, startMax))
+  let lastSep = value.rfind(PathSeparator)
+  if lastSep > 0:
+    let lastSegment = widthOf(value[lastSep .. ^1])
+    if lastSegment > avail - startBudget and lastSegment <= avail - startMin:
+      startBudget = avail - lastSegment
+  let starts = runeStarts(value)
+  # The start: the longest prefix of whole runes within its budget.
+  var headEnd = 0
+  for k in 1 ..< starts.len:
+    if widthOf(value[0 ..< starts[k]]) > startBudget: break
+    headEnd = starts[k]
+  let head = value[0 ..< headEnd]
+  # The end: the longest suffix of whole runes within what is left.
+  let endBudget = avail - widthOf(head)
+  var tailStart = value.len
+  for k in countdown(starts.len - 2, 0):
+    if starts[k] < headEnd or widthOf(value[starts[k] .. ^1]) > endBudget: break
+    tailStart = starts[k]
+  # A zero-width rune (a combining mark) belongs to the rune before it, which
+  # the end did not keep: it goes with that rune.
+  var t = starts.find(tailStart)
+  while t >= 0 and t + 1 < starts.len and tailStart < value.len and
+      widthOf(value[starts[t] ..< starts[t + 1]]) == 0:
+    inc t
+    tailStart = starts[t]
+  let tail = if tailStart < value.len: value[tailStart .. ^1] else: ""
+  trimBeforeEllipsis(head) & CutEllipsis & trimAfterEllipsis(tail)
+
 proc danglesAroundEllipsis*(shown: string): bool =
   ## Whether a drawn cut breaks the trim rule: an end cut (it ends in "…")
   ## by `danglesBeforeEllipsis`; a middle cut on either side of its last

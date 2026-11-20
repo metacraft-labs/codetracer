@@ -45,6 +45,17 @@ type
     autoReveal* {.defaultVal: true.}: bool
     autoDismissOnSuccess* {.defaultVal: true.}: bool
 
+  AgentHarborConfigObj* = object
+    ## The `agentHarbor:` block (codetracer-pm
+    ## DeepReview/Agentic-Coding-Integration.md §6.8): the Agent Harbor server
+    ## a worktree agent session is started on. An empty `baseUrl` means none
+    ## is configured.
+    baseUrl* {.defaultVal: "".}: string
+    apiKey* {.defaultVal: "".}: string
+    agent* {.defaultVal: "".}: string
+    agentArgs* {.defaultVal: @[].}: seq[string]
+    model* {.defaultVal: "".}: string
+
   VcsConfigObj* = object
     ## The `vcs:` block (codetracer-specs GUI/Core-Panes/VCS-Panel.md,
     ## "Configuration").
@@ -130,6 +141,10 @@ type
     ## (codetracer-pm Editor-ViewModel.md §3.2a; the parity table is
     ## docs/shared-editor-parity.md).
     sharedEditor* {.defaultVal: false.}:                  bool
+
+    ## The Agent Harbor server worktree agent sessions start on
+    ## (Agentic-Coding-Integration.md §6.8).
+    agentHarbor* {.defaultVal: AgentHarborConfigObj().}:  AgentHarborConfigObj
 
   Config* = ref ConfigObject
 

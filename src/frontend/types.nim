@@ -2338,6 +2338,10 @@ type
       ## The `vcs:` entry, or nil in a config file written before it existed.
       ## Read through `vcsFileClickOpensFullFile`.
     sharedEditor*:            bool
+    agentHarbor*:             AgentHarborConfig
+      ## `agentHarbor:` (Agentic-Coding-Integration.md §6.8); nil when the
+      ## file has none. `index/config` applies `CODETRACER_AGENT_HARBOR_URL`
+      ## and `CODETRACER_AGENT_HARBOR_API_KEY` over it.
       ## `sharedEditor:` (see `common/config.nim`): the editor pane draws the
       ## shared editing core instead of Monaco. js-yaml leaves it undefined
       ## (falsy) in a config written before it existed; `index/config`
@@ -2348,6 +2352,15 @@ type
       ## whatever the user typed, so they are read defensively
       ## (`index/window.windowLaunchOf`) and validated by
       ## `common/window_policy`, never trusted as typed here.
+
+  AgentHarborConfig* = ref object
+    ## `agentHarbor:` (see `common/config.nim`), as js-yaml read it; nil in a
+    ## config written before it existed. Read through `agentHarborSettings`.
+    baseUrl*:   cstring
+    apiKey*:    cstring
+    agent*:     cstring
+    agentArgs*: seq[cstring]
+    model*:     cstring
 
   VcsConfig* = ref object
     fileClickOpensFullFile*: bool

@@ -288,5 +288,16 @@ newTracePolicy: "tab"
 # command palette's "Developer: Toggle Shared Editor" switches an open window.
 sharedEditor: false
 
+# The Agent Harbor server a worktree agent session starts on (codetracer-pm
+# DeepReview/Agentic-Coding-Integration.md §6.8). Empty baseUrl: none, and the
+# Agent Activity prompt goes to the ACP agent. CODETRACER_AGENT_HARBOR_URL and
+# CODETRACER_AGENT_HARBOR_API_KEY override the first two for one launch.
+agentHarbor:
+  baseUrl: ""
+  apiKey: ""
+  agent: ""
+  agentArgs: []
+  model: ""
+
 # TODO: Use this somehow
 version: "0.1alpha"

@@ -162,7 +162,11 @@ const
     ("onCancelLoad", "origin_binding.nim"),
   ]
 
-  ExpectedAppModules = 132
+  ExpectedAppModules = 134
+    ## 2026-11-20: 133 → 134, `views/tooltip.nim` (the tooltip moved out of
+    ## `views/shell.nim` into a module of its own).
+    ## 2026-11-20: 132 → 133, `capability_note.nim` (`538fb3072`, a
+    ## terminal's late answer on the status line; landed without re-counting).
     ## 2026-11-18: 131 → 132, `views/macro_expansion_pane.nim` (`ac499b2cead`,
     ## Toggle Macro Expansion's pane; landed without re-counting).
     ## 2026-11-12: 129 → 131, `tests/personas/personas.nim` (`39414d8cde1`, the
@@ -478,7 +482,10 @@ const
     ## reachability guard's bucket B). They were deleted to bring that ratchet
     ## back under its ceiling, and `views/search.nim` had no other literal, so
     ## it leaves the styled-file count. No painted colour changed.
-  ExpectedStyledFiles = 49
+  ExpectedStyledFiles = 50
+    ## 2026-11-20: +1, `views/tooltip.nim`: `CellTooltipStyle` moved there
+    ## from `views/shell.nim`, which keeps other literals, so the literal
+    ## count does not move.
     ## 2026-11-18: +1, `views/macro_expansion_pane.nim`.
     ## 2026-11-09: +1, `views/visual_replay_panes.nim`.
     ## 2026-11-05 (PLAT-61): +1, `views/shell_session_pane.nim`.

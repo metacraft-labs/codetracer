@@ -26,6 +26,11 @@
 ##      `--reset-layout` → the shared default returns and ONLY the GPUI file
 ##      is gone; a corrupt file is reported by kind, the window opens on the
 ##      default, and the file is left byte for byte.
+##   4. **Mode-Transitions.md §4b, a store per mode**: the edit window
+##      (`--edit`) remembers ITS arrangement in `gpui-layout-edit.json` —
+##      rearranged, restored on the next `--edit` start, reset alone — and
+##      the Debug window's file and the Edit window's file never receive each
+##      other's arrangement.
 ##
 ## No mocks: the shipped binary, the real shim, the real `replay-server`, a real
 ## recording and real files.
@@ -48,6 +53,7 @@ template ck(cond: untyped) =
 const
   StateDirEnvVar = "CODETRACER_TUI_LAYOUT_DIR"
   GpuiDocument = "gpui-layout.json"
+  GpuiEditDocument = "gpui-layout-edit.json"
   TuiDocument = "tui-layout.json"
 
 let repo = getEnv("CODETRACER_REPO_ROOT", getCurrentDir())
@@ -311,6 +317,61 @@ suite "PLAT-45: the GPUI window and the shared default":
     ck run.rc == 0
     ck sameArrangement(centreArrangement(run.dock),
                        ofTree(sharedEditLayout().tree))
+    removeDir(state)
+    removeDir(config)
+
+  test "the edit window remembers ITS arrangement in its own file, apart from Debug's":
+    let state = createTempDir("plat45-gpui-state-", "")
+    let config = createTempDir("plat45-gpui-config-", "")
+    # A Debug arrangement first, so there is one to keep apart.
+    ck runGpui(state, config, @["--layout-ops=merge:vcs:editor"]).rc == 0
+    let debugText = readFile(state / GpuiDocument)
+    # REARRANGE THE EDIT WINDOW: written through to the Edit file only.
+    let first = runGpui(state, config,
+      @["--edit", "--layout-ops=merge:testResults:fileTree"])
+    if first.rc != 0: checkpoint(first.err)
+    ck first.rc == 0
+    ck fileExists(state / GpuiEditDocument)
+    ck readFile(state / GpuiDocument) == debugText
+    let saved = restoreLayoutDocument(parseJson(readFile(state / GpuiEditDocument)))
+    ck regionOf(saved.tree, paneTestResults) == regionOf(saved.tree, paneFileTree)
+    ck not sameArrangement(ofTree(saved.tree), ofTree(sharedEditLayout().tree))
+    # A RESTART IN EDIT MODE RESTORES IT, with no flag…
+    let second = runGpui(state, config, @["--edit"])
+    ck second.rc == 0
+    ck sameArrangement(centreArrangement(second.dock), ofTree(saved.tree))
+    # …AND A DEBUG START STILL OPENS THE DEBUG ARRANGEMENT, not the Edit one.
+    let debugRun = runGpui(state, config)
+    ck debugRun.rc == 0
+    let debugSaved = restoreLayoutDocument(parseJson(debugText))
+    ck sameArrangement(centreArrangement(debugRun.dock), ofTree(debugSaved.tree))
+    # RESET IN EDIT MODE DELETES ONLY THE EDIT FILE.
+    let reset = runGpui(state, config, @["--edit", "--reset-layout"])
+    ck reset.rc == 0
+    ck not fileExists(state / GpuiEditDocument)
+    ck readFile(state / GpuiDocument) == debugText
+    ck sameArrangement(centreArrangement(reset.dock),
+                       ofTree(sharedEditLayout().tree))
+    removeDir(state)
+    removeDir(config)
+
+  test "an unreadable Edit file is reported, the edit window opens the default, the file is left alone":
+    let state = createTempDir("plat45-gpui-state-", "")
+    let config = createTempDir("plat45-gpui-config-", "")
+    let bytes = "{ not json"
+    writeFile(state / GpuiEditDocument, bytes)
+    let run = runGpui(state, config,
+      @["--edit", "--layout-ops=merge:testResults:fileTree"])
+    checkpoint(run.err.strip())
+    ck run.rc == 0
+    ck run.err.contains("saved layout ignored (NotJson)")
+    # The next start still opens Edit mode's default, the file untouched.
+    let next = runGpui(state, config, @["--edit"])
+    ck next.rc == 0
+    ck sameArrangement(centreArrangement(next.dock),
+                       ofTree(sharedEditLayout().tree))
+    ck readFile(state / GpuiEditDocument) == bytes
+    ck not fileExists(state / GpuiDocument)
     removeDir(state)
     removeDir(config)
 

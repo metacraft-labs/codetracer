@@ -44,6 +44,8 @@ export locals_answer
 import ../../common/value_presentation
 from ../../common/lang import toLangFromFilename, langWireName
 import ../../common/value_presentation/json_adapter
+from ../../common/value_visualisers import inProgramVisualiser,
+  InProgramVisualiserFunction
 import session_vm
 import app/app_vm
 import sdk/[debugger_session, trace_source, breakpoints]
@@ -848,6 +850,13 @@ proc sendBreakpoints(s: HeadlessDebugSession; path: string;
     answeredBreakpoints(plan, resp.getOrDefault("body")))
   true
 
+proc armHeldBreakpoints*(s: HeadlessDebugSession; path: string): bool =
+  ## Send `path`'s held breakpoints to the engine as they are — the set a
+  ## project's point collection put on the list (`point_collection_source
+  ## .mergeCollections`) included — so the ones that are enabled STOP the
+  ## replay. False when the engine refused.
+  s.sendBreakpoints(path, heldBreakpoints(s.session.store, path))
+
 proc heldBreakpoints*(s: HeadlessDebugSession; path: string): seq[BreakpointSpec] =
   ## `path`'s breakpoints as the store holds them, armed and disabled.
   heldBreakpoints(s.session.store, path)
@@ -1604,6 +1613,44 @@ proc loadValueHistory*(s: HeadlessDebugSession; expression: string;
       valueText: presentedValueText(r{"value"}, budget))
   if not s.session.stateVM.isNil:
     s.session.stateVM.updateHistory(expression, result)
+
+proc loadInProgramVisualiser*(s: HeadlessDebugSession;
+                              function = InProgramVisualiserFunction;
+                              limit = 256): Visualiser =
+  ## §5.1 mechanism 1 — the recorded program's OWN visualiser function, as
+  ## the recording remembers it: every call the program made to `function`
+  ## (`ct/search-calltrace`), its first argument and what it returned. See
+  ## `value_visualisers.inProgramVisualiser` for how a value on screen meets
+  ## one of those answers.
+  ##
+  ## A recording whose program defines no such function answers no calls,
+  ## and the visualiser carries no answers — it then claims nothing, and the
+  ## tiers below it render as before. An engine that refuses the search is
+  ## treated the same way: this is an enrichment, never a reason to fail.
+  let pattern = "(^|[.:])" & function & "$"
+  var resp: JsonNode
+  try:
+    resp = s.backend.sendDapRequest("ct/search-calltrace",
+                                    %*{"value": pattern, "limit": limit})
+    discard s.backend.drainEvents()
+  except CatchableError:
+    return inProgramVisualiser(function, [])
+  if resp.isNil or not resp.getOrDefault("success").getBool(false):
+    return inProgramVisualiser(function, [])
+  var answers: seq[ComputedSummary] = @[]
+  for call in resp{"body", "calls"}.getElems:
+    let args = call{"args"}.getElems
+    if args.len == 0: continue
+    let arg = json_adapter.toPValue(args[0]{"value"})
+    let ret = json_adapter.toPValue(call{"returnValue"})
+    # A call whose return the engine did not answer (`None`) is not an
+    # answer: rendering it would put `nil` where the program said something.
+    if arg.isNil or ret.isNil or ret.kind in {pvkNil, pvkNotExpanded}: continue
+    let text =
+      if ret.kind in {pvkString, pvkCString}: ret.text
+      else: presentText(ret, ExecutableInputBudget)
+    answers.add ComputedSummary(input: executableInputOf(arg), text: text)
+  inProgramVisualiser(function, answers)
 
 proc loadValueOrigin*(s: HeadlessDebugSession; expression: string;
                       maxHops = 16): OriginChain =

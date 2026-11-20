@@ -194,6 +194,10 @@ func rankDiffs*(selections: seq[DiffSelection]): seq[DiffSelection] =
     if result == 0: result = cmp(a.file, b.file)
     if result == 0: result = cmp(a.order, b.order))
 
+const
+  MaxTieReports* = 64
+    ## How many tied rules `reportTies` names one by one.
+
 proc reportTies(rules: seq[VisualiserRule];
                 problems: var seq[ProjectDefinitionProblem]) =
   ## §5.4: "ties broken by declaration order **and reported**".
@@ -203,12 +207,31 @@ proc reportTies(rules: seq[VisualiserRule];
   ## Reported as a notice: the tie is resolved, deterministically, by
   ## declaration order, and the point of the report is that a user asking
   ## "why did this one win" gets an answer other than "it was first".
+  ##
+  ## BOUNDED, NOW THAT A SESSION LOADS DEFINITIONS (2026-11-20). Every PAIR
+  ## used to be a ~400-byte record, so one 12 KB file of 256 identical rules
+  ## produced 32,640 problems and a 12 MB report — PLAT-11's residue 8, which
+  ## became reachable the day a shipped front-end called the loader. Each rule
+  ## is now named ONCE, against the first rule it ties with, and at most
+  ## `MaxTieReports` are listed; the rest are counted in one closing notice.
+  ## The tie is still broken the same way, and every tie is still reported —
+  ## in a sentence rather than in a record per pair.
+  var reported = newSeq[bool](rules.len)
+  var listed = 0
+  var unlisted = 0
   for i in 0 ..< rules.len:
+    if reported[i]: continue
     for j in i + 1 ..< rules.len:
+      if reported[j]: continue
       let a = rules[i]
       let b = rules[j]
       if a.match == b.match and a.matchKind == b.matchKind and
          a.language == b.language and scopeDepth(a.scope) == scopeDepth(b.scope):
+        reported[j] = true
+        if listed >= MaxTieReports:
+          inc unlisted
+          continue
+        inc listed
         problems.add problem(b.file, 0, pdnRuleTieReported,
           "this rule matches exactly what the rule declared " &
           (if a.file == b.file: "earlier in this file"
@@ -218,6 +241,11 @@ proc reportTies(rules: seq[VisualiserRule];
           "). Declaration order decided, and the earlier one wins. §5.4 " &
           "requires that a user be able to ask which visualiser rendered a " &
           "value and get an answer, which a silently broken tie does not give")
+  if unlisted > 0:
+    problems.add problem(ProjectDefinitionDir, 0, pdnRuleTieReported,
+      $unlisted & " more visualiser rule(s) tie with an earlier rule and are " &
+      "not listed one by one; the first " & $MaxTieReports & " are above. " &
+      "Declaration order decided every one of them")
 
 proc loadProjectDefinitions*(projectFiles: openArray[DefinitionFile];
                              userFiles: openArray[DefinitionFile] = []):

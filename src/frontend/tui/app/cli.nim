@@ -181,7 +181,8 @@ type
         ## deliverable 8 made both the DEFAULT — every product lets the user
         ## rearrange freely and remembers its own last layout — so the shipped
         ## binary enables the binding on every interactive session and keeps
-        ## ONE document for the terminal (`host/layout_store.nim`). The flag
+        ## one document per product mode for the terminal
+        ## (`host/layout_store.nim`). The flag
         ## still parses, still needs a trace and still contradicts
         ## `--headless` (a settled screen has no prompt to rearrange from), so
         ## a command line written for PLAT-6 means what it meant.

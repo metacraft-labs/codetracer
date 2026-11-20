@@ -63,7 +63,7 @@ template ckEq(a, b: untyped) =
   inc countedAssertions
   check a == b
 
-const ExpectedAssertions = 92
+const ExpectedAssertions = 95
 
 proc i(text: string): PValue =
   PValue(kind: pvkInt, text: text, typeName: "int", sourceKind: "Int")
@@ -113,24 +113,24 @@ let
 
 suite "PLAT-14: what a resolved terminal can draw":
 
-  test "tier 0 widens the set; every cell tier does not":
-    # THE TABLE, written out. `terminal_graphics/media`'s header gives
-    # the reason for each row: the bridge between §5.2's ENCODED types and the
-    # cell tiers' RASTER input is a decoder this build has none of, so a cell
-    # tier draws exactly what it drew before PLAT-14.
-    ckEq KittyMedia, {mcOctetStream, mcImagePng}
+  test "every tier draws PNG; only iTerm2's tier 0 draws JPEG":
+    # THE TABLE, written out. `terminal_graphics/media`'s header gives the
+    # reason for each row: tier 0 on Kitty and iTerm2 decodes in the terminal,
+    # and every other tier (Sixel's tier 0 too) decodes a PNG here
+    # (`common/png.decodePng`, 2026-11-20). There is no JPEG decoder.
+    let png = {mcOctetStream, mcImagePng}
+    ckEq KittyMedia, png
     ckEq ITermMedia, {mcOctetStream, mcImagePng, mcImageJpeg}
     var cellTiers = 0
-    for tier in [itHalfBlock, itQuadrant, itSextant, itBraille, itAscii]:
-      ckEq terminalMediaCapability(tier, ipNone), MediaCapabilityNote
-      # …and a tier below 0 cannot be rescued by naming a protocol beside it.
-      ckEq terminalMediaCapability(tier, ipKitty), MediaCapabilityNote
+    for tier in [itHalfBlock, itQuadrant, itSextant, itOctant, itBraille,
+                 itAscii]:
+      ckEq terminalMediaCapability(tier, ipNone), png
+      # …and naming a protocol beside a cell tier adds nothing.
+      ckEq terminalMediaCapability(tier, ipITerm2), png
       inc cellTiers
-    ckEq cellTiers, 5
-    # Tier 0 with no protocol and with a protocol this build cannot emit are
-    # both the narrow set: the widening follows the EMITTER, not the tier name.
-    ckEq terminalMediaCapability(itProtocol, ipNone), MediaCapabilityNote
-    ckEq terminalMediaCapability(itProtocol, ipSixel), MediaCapabilityNote
+    ckEq cellTiers, 6
+    ckEq terminalMediaCapability(itProtocol, ipNone), png
+    ckEq terminalMediaCapability(itProtocol, ipSixel), png
     # Kitty's `f=100` is PNG. A JPEG handed to it is transmitted and rejected,
     # which is a blank region with extra steps.
     ck mcImageJpeg notin KittyMedia
@@ -205,16 +205,19 @@ suite "PLAT-14: this surface draws it, that one says why not":
     ckEq degraded.root.text, "tick 4211"
     ck degraded.root.text.len > 0
 
-  test "the SAME value on a terminal with no graphics protocol degrades too":
-    # This is the row PLAT-12 could only assert in the abstract: a TERMINAL
-    # surface that cannot draw. The gap names `tui-tree`, not `state-panel`,
-    # so a reader is told which surface refused.
+  test "on a terminal with no graphics protocol a PNG draws and a JPEG degrades":
+    # The row PLAT-12 could only assert in the abstract, now on both sides: a
+    # TERMINAL surface with no graphics protocol draws a PNG (decoded here)
+    # and degrades a JPEG, and the gap names `tui-tree`, not `state-panel`, so
+    # a reader is told which surface refused.
+    ckEq present(frame(), tuiTreeBudget(CellMedia),
+                 presenters = presentersFrom(PngRule)).mediaGaps.len, 0
     let degraded = present(frame(), tuiTreeBudget(CellMedia),
-                           presenters = presentersFrom(PngRule))
+                           presenters = presentersFrom(JpegRule))
     ckEq degraded.mediaGaps.len, 1
     ckEq degraded.mediaGaps[0].surface, "tui-tree"
-    ckEq degraded.mediaGaps[0].mediaType, "image/png"
-    ckEq degraded.mediaGaps[0].class, mcImagePng
+    ckEq degraded.mediaGaps[0].mediaType, "image/jpeg"
+    ckEq degraded.mediaGaps[0].class, mcImageJpeg
     ck degraded.mediaGaps[0].fieldPresent
     ckEq valueDegradation(initDegradedStateSnapshot(), degraded),
          pdDependencyMissing
@@ -273,7 +276,7 @@ suite "PLAT-14: no new degradation concept was added":
     let drawn = present(frame(), tuiTreeBudget(KittyMedia),
                         presenters = presentersFrom(PngRule))
     let gap = present(frame(), tuiTreeBudget(CellMedia),
-                      presenters = presentersFrom(PngRule))
+                      presenters = presentersFrom(JpegRule))
     ckEq mediaDependencyState(drawn), pdsSatisfied
     ckEq mediaDependencyState(gap), pdsUnsupported
     ck mediaDependencyState(gap) != pdsAbsent

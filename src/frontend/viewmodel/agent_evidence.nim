@@ -164,6 +164,102 @@ proc evidenceNotificationFromJson*(node: JsonNode): AgentEvidenceNotification =
     files: files,
     rawMetadata: node{"metadata"})
 
+proc decodedByteArray(node: JsonNode): string =
+  ## A JSON array of byte values as the text it holds; "" when it is not one.
+  ## Agent Harbor's history carries tool output either as a string or as such
+  ## an array.
+  if node.isNil or node.kind != JArray or node.len == 0:
+    return ""
+  for item in node.getElems:
+    if item.kind != JInt or item.getInt < 0 or item.getInt > 255:
+      return ""
+    result.add chr(item.getInt)
+
+proc looksLikeEvidence(node: JsonNode): bool =
+  ## The notification `ct agent evidence` prints: an object naming its
+  ## dataset and its status.
+  node.kind == JObject and node.hasKey("status") and
+    (node.hasKey("datasetPath") or node.hasKey("files"))
+
+proc evidenceInText(text: string): JsonNode =
+  ## The last line of `text` that is an evidence notification, or nil.
+  var start = 0
+  var lines: seq[string] = @[]
+  for i in 0 .. text.len:
+    if i == text.len or text[i] == '\n':
+      if i > start: lines.add text[start ..< i]
+      start = i + 1
+  for i in countdown(lines.len - 1, 0):
+    let line = lines[i]
+    if line.len == 0 or line[0] != '{':
+      continue
+    try:
+      let parsed = parseJson(line)
+      if parsed.looksLikeEvidence:
+        return parsed
+    except:
+      # A bare `except`: on the JavaScript backend `parseJson` reports a line
+      # that is not JSON with JavaScript's `SyntaxError`, which is not a
+      # `CatchableError`. A history holds such lines (the agent's own
+      # command text, a heredoc of the review dataset with lines that open
+      # with `{`), and the error ended the search before it reached the
+      # notification: the product never saw the evidence a worktree session
+      # recorded.
+      discard
+  nil
+
+proc evidenceInEvent(node: JsonNode): JsonNode =
+  if node.isNil:
+    return nil
+  case node.kind
+  of JString:
+    node.getStr.evidenceInText
+  of JArray:
+    let decoded = node.decodedByteArray
+    if decoded.len > 0:
+      return decoded.evidenceInText
+    for item in node.getElems:
+      let found = item.evidenceInEvent
+      if not found.isNil: return found
+    nil
+  of JObject:
+    if node.looksLikeEvidence:
+      return node
+    for _, value in node.pairs:
+      let found = value.evidenceInEvent
+      if not found.isNil: return found
+    nil
+  else: nil
+
+proc evidenceFromHarborHistory*(history: JsonNode): Option[JsonNode] =
+  ## The last evidence notification in an Agent Harbor session's event
+  ## history (`GET /api/v1/sessions/<id>/events/history`: an array of events,
+  ## or an object holding one under `events`), or `none`. A worktree session's
+  ## agent runs `ct agent evidence`, which prints the notification on stdout;
+  ## the history keeps that output, so the product reads the evidence from
+  ## Harbor (Agentic-Coding-Integration.md §6.8).
+  if history.isNil:
+    return none(JsonNode)
+  if history.kind == JString:
+    # The renderer's transport can hand the answer over JSON-encoded, as a
+    # string holding the document (`nim_agents.client.changedFiles` unwraps
+    # the same): read the document inside it.
+    try:
+      return evidenceFromHarborHistory(parseJson(history.getStr))
+    except:
+      return none(JsonNode)
+  let events =
+    if history.kind == JArray: history
+    elif history.kind == JObject and history.hasKey("events"): history["events"]
+    else: nil
+  if events.isNil or events.kind != JArray:
+    return none(JsonNode)
+  for i in countdown(events.len - 1, 0):
+    let found = events[i].evidenceInEvent
+    if not found.isNil:
+      return some(found)
+  none(JsonNode)
+
 when not defined(js):
   const AgentEvidenceRpcPathEnvVar* = "CODETRACER_AGENT_EVIDENCE_RPC_PATH"
     ## Where `ct agent evidence` drops the notification for a running

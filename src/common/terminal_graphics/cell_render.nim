@@ -42,11 +42,36 @@
 ## memory manager and every optimisation level, so it needs no build named
 ## beside it.
 ##
-## ## `itOctant` REFUSES
+## ## `itOctant` DRAWS, FROM A TABLE VERIFIED AGAINST UNICODE 16
 ##
-## See `tiers.nim`'s header. `glyphFor` raises `CellRenderError` naming the
-## reason; it does not fall back to a neighbouring tier, because a silent
-## substitution would make "the pane declares its tier in its title" (§4) a lie.
+## U+1CD00-U+1CDE5 (Symbols for Legacy Computing Supplement, Unicode 16.0) is
+## 230 `BLOCK OCTANT-<cells>` characters for the 256 masks of a 2x4 cell; the
+## other 26 masks already had a spelling and the block skips them. See
+## `octantGlyph` for the table and for how it was checked.
+##
+## ## DITHERING IS ERROR DIFFUSION OVER THE SUB-SAMPLE GRID, AND OPT-IN
+##
+## §2 names dithering beside quantisation. `renderCells(…, dither =
+## dmDiffusion)` is Floyd–Steinberg over the grid of SUB-CELL samples: cells
+## are decided in raster order, each sample enters the argmin with the error
+## its decided neighbours pushed onto it, and once a cell's triple is chosen
+## each sample's residual — what it asked for minus the colour its cell gave it
+## — is spread 7/16 right, 3/16 below-left, 5/16 below and 1/16 below-right.
+## A share that lands in a cell already decided (the current one, or one to
+## its left on a row below inside the current cell row) is dropped rather than
+## re-deciding it. At the ASCII tier the quantity diffused is LUMINANCE against
+## the ramp step a glyph stands for (the middle of its bin), so a field between
+## two steps comes out as a mix of both glyphs whose mean is the field's.
+##
+## WHAT IT CANNOT CHANGE, and the suite asserts both: a flat region has no
+## residual, and a tier whose cell carries every sample exactly (the half
+## block: two samples, two colours) has none either — so dithering costs those
+## pictures nothing. The work bound is unchanged too: diffusion moves the
+## samples the argmin sees, never how many candidates it evaluates.
+##
+## THE DEFAULT IS `dmNone`, because §5's magnifier must show each pixel's OWN
+## colour (an EQUALITY against the source) and diffusion would move it. The
+## frame viewer's picture asks for `dmDiffusion`; the magnifier never does.
 ##
 ## ## SO DOES `itProtocol`, AND `renderCells` ASKS ONE SET ABOUT BOTH
 ##
@@ -78,6 +103,12 @@ type
       ## "a perceptual distance below a threshold", and a threshold asserted
       ## over a mean hides one catastrophic cell in a field of good ones.
 
+  DitherMode* = enum
+    ## Whether a cell rendering diffuses its quantisation error. See the
+    ## module header.
+    dmNone = "none"
+    dmDiffusion = "diffusion"
+
   CellGrid* = object
     cols*: int
     rows*: int
@@ -85,6 +116,9 @@ type
     tier*: ImageTier
     fit*: CellFit
     candidatesEvaluated*: int
+    dither*: DitherMode
+      ## The dithering this grid was rendered with, so a test reads it off the
+      ## model rather than inferring it from the glyphs.
 
   CellRenderError* = object of CatchableError
 
@@ -152,23 +186,73 @@ func brailleGlyph(mask: int): string =
       bits = bits or BrailleDotBits[i]
   $Rune(0x2800 + bits)
 
+const
+  OctantLegacyGlyphs: array[26, (int, string)] = [
+    (0b00000000, " "),          # U+0020 SPACE
+    (0b00000001, "\u{1CEA8}"),  # LEFT HALF UPPER ONE QUARTER BLOCK
+    (0b00000010, "\u{1CEAB}"),  # RIGHT HALF UPPER ONE QUARTER BLOCK
+    (0b00000011, "\u{1FB82}"),  # UPPER ONE QUARTER BLOCK
+    (0b00000101, "▘"),     # U+2598 QUADRANT UPPER LEFT
+    (0b00001010, "▝"),     # U+259D QUADRANT UPPER RIGHT
+    (0b00001111, "▀"),     # U+2580 UPPER HALF BLOCK
+    (0b00010100, "\u{1FBE6}"),  # MIDDLE LEFT ONE QUARTER BLOCK
+    (0b00101000, "\u{1FBE7}"),  # MIDDLE RIGHT ONE QUARTER BLOCK
+    (0b00111111, "\u{1FB85}"),  # UPPER THREE QUARTERS BLOCK
+    (0b01000000, "\u{1CEA3}"),  # LEFT HALF LOWER ONE QUARTER BLOCK
+    (0b01010000, "▖"),     # U+2596 QUADRANT LOWER LEFT
+    (0b01010101, "▌"),     # U+258C LEFT HALF BLOCK
+    (0b01011010, "▞"),     # U+259E QUADRANT UPPER RIGHT AND LOWER LEFT
+    (0b01011111, "▛"),     # U+259B QUADRANT UPPER LEFT, UPPER RIGHT, LOWER LEFT
+    (0b10000000, "\u{1CEA0}"),  # RIGHT HALF LOWER ONE QUARTER BLOCK
+    (0b10100000, "▗"),     # U+2597 QUADRANT LOWER RIGHT
+    (0b10100101, "▚"),     # U+259A QUADRANT UPPER LEFT AND LOWER RIGHT
+    (0b10101010, "▐"),     # U+2590 RIGHT HALF BLOCK
+    (0b10101111, "▜"),     # U+259C QUADRANT UPPER LEFT, UPPER RIGHT, LOWER RIGHT
+    (0b11000000, "▂"),     # U+2582 LOWER ONE QUARTER BLOCK
+    (0b11110000, "▄"),     # U+2584 LOWER HALF BLOCK
+    (0b11110101, "▙"),     # U+2599 QUADRANT UPPER LEFT, LOWER LEFT, LOWER RIGHT
+    (0b11111010, "▟"),     # U+259F QUADRANT UPPER RIGHT, LOWER LEFT, LOWER RIGHT
+    (0b11111100, "▆"),     # U+2586 LOWER THREE QUARTERS BLOCK
+    (0b11111111, "█")]     # U+2588 FULL BLOCK
+    ## The 26 masks U+1CD00's run SKIPS, with the character Unicode 16 gives
+    ## each instead. Bit `i` is octant `i + 1` in Unicode's numbering — 1 2 /
+    ## 3 4 / 5 6 / 7 8, row-major — which is also `renderCells`' sampling order
+    ## (`(row i div 2, col i mod 2)`), so no permutation sits between them.
+    ##
+    ## VERIFIED, NOT TRANSCRIBED FROM A CHART. `octant_table_unicode16.py`
+    ## (beside this file) reads Unicode 16.0's character names from Python's
+    ## `unicodedata` (3.14 carries UCD 16.0.0), parses every
+    ## `BLOCK OCTANT-<cells>` name in U+1CD00-U+1CDE5 into its mask, checks the
+    ## run is in increasing mask order with exactly these 26 masks absent, and
+    ## checks each legacy character's NAME describes the cells its mask sets.
+    ## `cell_render_test.nim` asserts the same table from the Nim side: all
+    ## 256 glyphs distinct, the 230 in the run in mask order, these 26 by value.
+
+func octantGlyph(mask: int): string =
+  ## U+1CD00-U+1CDE5, the Unicode 16 `BLOCK OCTANT` run, or the legacy
+  ## spelling of one of the 26 masks the run skips.
+  ##
+  ## The run is in increasing mask order, so a mask that is not legacy is
+  ## U+1CD00 plus the number of non-legacy masks below it — the sextant run's
+  ## arithmetic with a table of 26 skips instead of four.
+  var skipped = 0
+  for (legacyMask, glyph) in OctantLegacyGlyphs:
+    if legacyMask == mask:
+      return glyph
+    if legacyMask < mask:
+      inc skipped
+  $Rune(0x1CD00 + mask - skipped)
+
 func glyphFor*(tier: ImageTier; mask: int): string =
   ## The glyph a sub-cell mask draws at a tier.
   ##
-  ## RAISES for `itOctant` rather than returning a placeholder. See `tiers.nim`.
+  ## RAISES for the two tiers that have no mask table: tier 0 and ASCII.
   case tier
   of itHalfBlock: HalfBlockGlyphs[mask]
   of itQuadrant: QuadrantGlyphs[mask]
   of itSextant: sextantGlyph(mask)
   of itBraille: brailleGlyph(mask)
-  of itOctant:
-    raise newException(CellRenderError,
-      "image tier 'octant' (U+1CD00) is not implemented in this build: the " &
-      "256 sub-cell masks map onto 230 code points because 26 masks have " &
-      "legacy spellings, and this build carries no verified exception table. " &
-      "An unverified table draws a DIFFERENT picture rather than a coarser " &
-      "one. Pick --image-tier=sextant for 2x3, or --image-tier=braille for " &
-      "2x4 shape resolution")
+  of itOctant: octantGlyph(mask)
   of itProtocol:
     raise newException(CellRenderError,
       "image tier 'protocol' is a graphics-protocol emission, not a cell " &
@@ -222,8 +306,47 @@ func sourceRectOfSubCell*(sourceWidth, sourceHeight: int; fit: CellFit;
   let y1 = max(y0 + 1, (gy + 1) * sourceHeight div subRows)
   PixelRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)
 
+type
+  DiffusionField = object
+    ## The error pushed onto each SUB-CELL sample by its decided neighbours,
+    ## in sRGB units per channel (luminance in `r` at the ASCII tier). Empty
+    ## when the rendering does not dither.
+    subCols, subRows: int
+    err: seq[array[3, float]]
+
+func initDiffusion(fit: CellFit; tier: ImageTier;
+                   dither: DitherMode): DiffusionField =
+  if dither == dmNone:
+    return DiffusionField()
+  let geom = subCell(tier)
+  result.subCols = fit.cols * geom.cols
+  result.subRows = fit.rows * geom.rows
+  result.err = newSeq[array[3, float]](result.subCols * result.subRows)
+
+func active(d: DiffusionField): bool = d.err.len > 0
+
+func push(d: var DiffusionField; tier: ImageTier; gx, gy, col, row: int;
+          residual: array[3, float]) =
+  ## Floyd–Steinberg's four shares of one sample's residual, onto the samples
+  ## that belong to cells not decided yet.
+  let geom = subCell(tier)
+  const shares = [(1, 0, 7.0 / 16.0), (-1, 1, 3.0 / 16.0),
+                  (0, 1, 5.0 / 16.0), (1, 1, 1.0 / 16.0)]
+  for (dx, dy, w) in shares:
+    let tx = gx + dx
+    let ty = gy + dy
+    if tx < 0 or ty < 0 or tx >= d.subCols or ty >= d.subRows:
+      continue
+    let tc = tx div geom.cols
+    let tr = ty div geom.rows
+    if tr < row or (tr == row and tc <= col):
+      continue   # a decided cell: its triple is chosen and stays chosen
+    let i = ty * d.subCols + tx
+    for k in 0 .. 2:
+      d.err[i][k] += residual[k] * w
+
 func sampleCell(img: RgbaImage; fit: CellFit; tier: ImageTier;
-                col, row: int): CellSamples =
+                col, row: int; diffusion: DiffusionField): CellSamples =
   let geom = subCell(tier)
   result.rgbs = newSeq[Rgb](geom.cols * geom.rows)
   result.labs = newSeq[Oklab](geom.cols * geom.rows)
@@ -232,7 +355,14 @@ func sampleCell(img: RgbaImage; fit: CellFit; tier: ImageTier;
       let gx = col * geom.cols + sx
       let gy = row * geom.rows + sy
       let r = sourceRectOfSubCell(img.width, img.height, fit, tier, gx, gy)
-      let c = img.boxSample(r.x, r.y, r.x + r.width, r.y + r.height)
+      var c = img.boxSample(r.x, r.y, r.x + r.width, r.y + r.height)
+      if diffusion.active and tier != itAscii:
+        # The error the decided neighbours pushed here, added before the
+        # argmin sees the sample. (At the ASCII tier the error is luminance
+        # and is added to the ramp lookup instead.)
+        let e = diffusion.err[gy * diffusion.subCols + gx]
+        c = rgb(int(round(float(c.r) + e[0])), int(round(float(c.g) + e[1])),
+                int(round(float(c.b) + e[2])))
       let index = sy * geom.cols + sx
       result.rgbs[index] = c
       result.labs[index] = toOklab(c)
@@ -251,7 +381,7 @@ func meanOf(samples: seq[Rgb]; mask: int; want: bool): Rgb =
   rgb(int(round(sr / n)), int(round(sg / n)), int(round(sb / n)))
 
 func bestTripleFor(tier: ImageTier; s: CellSamples;
-                   evaluated: var int): RenderedCell =
+                   evaluated: var int; chosenMask: var int): RenderedCell =
   ## §2.3's argmin over the fixed candidate set.
   let n = s.rgbs.len
   let candidates = 1 shl n
@@ -287,11 +417,12 @@ func bestTripleFor(tier: ImageTier; s: CellSamples;
       bestMask = mask
       bestFg = fg
       bestBg = bg
+  chosenMask = bestMask
   RenderedCell(glyph: glyphFor(tier, bestMask), fg: bestFg, bg: bestBg,
                errorSq: bestErr)
 
 func renderCells*(img: RgbaImage; tier: ImageTier; fit: CellFit;
-                  ramp = DefaultAsciiRamp): CellGrid =
+                  ramp = DefaultAsciiRamp; dither = dmNone): CellGrid =
   ## One raster into one grid of cells, at `tier`.
   ##
   ## `fit` carries the aspect correction (`aspect.fitToCells`) and this
@@ -303,9 +434,9 @@ func renderCells*(img: RgbaImage; tier: ImageTier; fit: CellFit;
     # asks before it paints (`app/views/frame_viewer.resolveGap`), so the
     # refusal here and the pre-check there are the same question asked through
     # the same function (Verification-Harness-Traps §14); and the diagnosis is
-    # `glyphFor`'s, which already has an arm naming the reason for each of the
-    # two non-members — the octant's missing table and tier 0's
-    # `emit.emitProtocolImage`. This used to be two guards, the second of which
+    # `glyphFor`'s, which names the reason for the one non-member — tier 0,
+    # whose bytes are `emit.emitProtocolImage`'s. This used to be two guards,
+    # the second of which
     # wrote a second protocol message beside the first; the pane that met it
     # could report neither.
     discard glyphFor(tier, 0)
@@ -315,18 +446,40 @@ func renderCells*(img: RgbaImage; tier: ImageTier; fit: CellFit;
       describeAspect(fit))
   result = CellGrid(cols: fit.cols, rows: fit.rows, tier: tier, fit: fit,
                     cells: newSeq[RenderedCell](fit.cols * fit.rows),
-                    candidatesEvaluated: 0)
+                    candidatesEvaluated: 0, dither: dither)
+  var diffusion = initDiffusion(fit, tier, dither)
+  let geom = subCell(tier)
   for row in 0 ..< fit.rows:
     for col in 0 ..< fit.cols:
-      let s = sampleCell(img, fit, tier, col, row)
+      let s = sampleCell(img, fit, tier, col, row, diffusion)
       if tier == itAscii:
         let c = s.rgbs[0]
+        var lum = luminance(c)
+        if diffusion.active:
+          lum += diffusion.err[row * diffusion.subCols + col][0]
         result.cells[row * fit.cols + col] =
-          RenderedCell(glyph: asciiGlyph(ramp, luminance(c)), fg: c, bg: Rgb(),
+          RenderedCell(glyph: asciiGlyph(ramp, lum), fg: c, bg: Rgb(),
                        errorSq: 0.0)
+        if diffusion.active and ramp.len > 0:
+          # The glyph stands for the middle of its ramp bin.
+          let bin = clamp(int(floor(lum * float(ramp.len))), 0, ramp.len - 1)
+          let level = (float(bin) + 0.5) / float(ramp.len)
+          diffusion.push(tier, col, row, col, row, [lum - level, 0.0, 0.0])
       else:
-        result.cells[row * fit.cols + col] =
-          bestTripleFor(tier, s, result.candidatesEvaluated)
+        var mask = 0
+        let cell = bestTripleFor(tier, s, result.candidatesEvaluated, mask)
+        result.cells[row * fit.cols + col] = cell
+        if diffusion.active:
+          for sy in 0 ..< geom.rows:
+            for sx in 0 ..< geom.cols:
+              let i = sy * geom.cols + sx
+              let given = if (mask and (1 shl i)) != 0: cell.fg else: cell.bg
+              let asked = s.rgbs[i]
+              diffusion.push(tier, col * geom.cols + sx, row * geom.rows + sy,
+                             col, row,
+                             [float(asked.r) - float(given.r),
+                              float(asked.g) - float(given.g),
+                              float(asked.b) - float(given.b)])
 
 func cellAt*(grid: CellGrid; col, row: int): RenderedCell =
   if col < 0 or row < 0 or col >= grid.cols or row >= grid.rows:

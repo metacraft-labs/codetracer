@@ -429,6 +429,19 @@ type
       ## the enabled rows AGAIN and must send what the user typed, not what
       ## the pane shows (`enabledTracepointSpecs`). "" for a breakpoint, and
       ## for a row no producer gave one.
+    id*: string
+      ## THE ROW'S STABLE IDENTITY, which a selection, an edit and a
+      ## collaborator's operation name instead of a position in the list.
+      ## Derived from what the point IS — its collection and anchor, or its
+      ## kind and place — by `replay_data_store.pointRowId`, and written by the
+      ## store on every write of the list, so no producer has to remember it.
+      ## Two peers that hold the same points hold the same ids; a list
+      ## re-sorted, or grown by a sweep, keeps every surviving row's id.
+    anchor*: string
+      ## PLAT-11: the anchor text a collection point was declared with — what
+      ## its id is derived from, because a definition's point has no line until
+      ## it is resolved and keeps its identity when an edit moves that line.
+      ## "" for every other producer.
 
   TracepointSweepSpec* = object
     ## One tracepoint to run over the whole recording.

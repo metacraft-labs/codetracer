@@ -51,9 +51,10 @@ import std/[sets, strutils, unittest]
 import ./project_definitions
 import ./toml_subset
 
-const ExpectedAssertions = 1856
+const ExpectedAssertions = 1865
   ## Written from a run, and asserted against the tally at the end of the
-  ## file. `ci/lib/run-nim-test-lane.sh` reads this name.
+  ## file. `ci/lib/run-nim-test-lane.sh` reads this name. 1856 -> 1860 on
+  ## 2026-11-20 with the bounded tie report's case; 1865 with §5.3's shape.
 
 var countedAssertions = 0
 
@@ -423,12 +424,21 @@ suite "PLAT-11: a well-formed definition loads":
     ckEq defs.diffs[1].algorithm, daUnorderedSet
     ckEq defs.diffs[1].tolerance, ""
 
-  test "matching is three total string comparisons and nothing else":
+  test "matching is three total string comparisons and a shape, nothing else":
     # §2.2: "Matching and templating are total and terminate by
-    # construction." Asserted over the whole `MatchKind` enum, so a fourth
+    # construction." Asserted over the whole `MatchKind` enum, so a fifth
     # member — a regex, a glob — arrives with no assertion and the count
-    # below goes red.
-    ckEq ord(high(MatchKind)) + 1, 3
+    # below goes red. The FOURTH, `shape` (§5.3, approved 2026-11-20), is a
+    # list of member labels and `#N` counts over the value — total, and
+    # bounded by the renderer's work bound per member read — and a type
+    # name alone never satisfies it.
+    ckEq ord(high(MatchKind)) + 1, 4
+    ck not VisualiserRule(match: "#2", matchKind: mkShape).matches("Tuple", "")
+    var terms: seq[ShapeTerm]
+    ckEq shapeTerms("rows, cols, #2", terms), ""
+    ckEq terms.len, 3
+    ckEq terms[2].arity, 2
+    ck shapeTerms("rows,,cols", terms).len > 0
     var exact = VisualiserRule(match: "Matrix", matchKind: mkTypeName)
     ck exact.matches("Matrix", "")
     ck not exact.matches("Matrix2", "")
@@ -1168,6 +1178,29 @@ summary = "second"
         ck pr.detail.contains("earlier")
         explained = true
     ck explained
+
+  test "a file of identical rules reports its ties in bounded space":
+    # PLAT-11's residue 8: 256 identical rules in ONE file produced 32,640
+    # problem records and a 12 MB report, from a 12 KB file — a thousandfold
+    # amplification a repository ships. Each tied rule is now named once, at
+    # most `MaxTieReports` of them, and the rest are COUNTED, not dropped.
+    var text = "schema = \"codetracer.visualisers.v1\"\n"
+    for i in 0 ..< MaxVisualiserRules:
+      text.add "\n[[visualiser]]\nmatch = \"Matrix\"\nsummary = \"r" & $i &
+               "\"\n"
+    let loaded = loadProjectDefinitions([visualisersFile(text)])
+    ckEq loaded.project.visualisers.len, MaxVisualiserRules
+    var ties = 0
+    var counted = false
+    for pr in loaded.problems:
+      if pr.code == pdnRuleTieReported:
+        inc ties
+        if pr.detail.contains($(MaxVisualiserRules - 1 - MaxTieReports) &
+                              " more visualiser rule(s) tie"):
+          counted = true
+    ckEq ties, MaxTieReports + 1
+    ck counted
+    ck describeLoad(loaded).len < 64 * 1024
 
   test "a more specific rule outranks a less specific one at the same scope":
     let f = visualisersFile("""

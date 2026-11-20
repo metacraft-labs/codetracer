@@ -7,26 +7,12 @@
 ##
 ## ## WHY THE INPUT IS RGBA AND NOT `image/png`
 ##
-## Because this build has no PNG or JPEG decoder, and saying otherwise would be
-## the scaffolding this repository's milestone hygiene rules out. The split is
-## recorded here because it decides which media a terminal surface may claim
-## (`terminal_graphics/media.terminalMediaCapability` — which is where the
-## function lives; `value_presentation/surfaces.nim` is its CONSUMER and names
-## it in a comment, which is how this header came to name the wrong module):
-##
-##   * **Tier 0 needs no decoder.** Kitty's `f=100` and iTerm2's `File=inline`
-##     both take the ENCODED bytes and decode them in the terminal, so a
-##     `image/png` value on a Kitty terminal is drawn by handing the bytes
-##     across unchanged.
-##   * **Tiers 1-6 need pixels**, and the pixels are what a visual-replay
-##     framebuffer already is: `ct-gfx-player` reconstructs frames against a
-##     real GPU and hands back a raster, which is PLAT-15's input and is why
-##     this module's shape is the one it is.
-##
-## So an `image/png` on a terminal with no graphics protocol degrades, through
-## PLAT-9's `pdDependencyMissing`, naming the missing decoder. That is a real
-## bound of this milestone rather than a rendering nobody wrote, and it is
-## asserted as a degradation rather than described in a comment.
+## Because the cell tiers and Sixel draw pixels, and an encoded image is turned
+## into pixels BEFORE it gets here — by `common/png.decodePng` for a PNG (since
+## 2026-11-20). Tier 0 on Kitty and iTerm2 needs no decoder: `f=100` and
+## `File=inline` take the encoded bytes and decode them in the terminal. There
+## is no JPEG decoder, so a JPEG reaches a cell tier only as a degradation
+## (`terminal_graphics/media.terminalMediaCapability`).
 ##
 ## Nothing here allocates per pixel, does I/O, or depends on anything outside
 ## `std/math`.

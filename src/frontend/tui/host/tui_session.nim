@@ -91,6 +91,7 @@ import ../app/timeline_binding
 import ../app/variables_binding
 import ../app/syntax/highlighter   # lexerContexts: the window's entry state
 import ./native_host
+import ./project_definitions_host   # the checkout's .codetracer/, per session
 import ./session_driver
 
 export native_host
@@ -182,6 +183,20 @@ type
     closed: bool
       ## `close` has run; a second call is a no-op.
     agent*: NativeAgentHost
+    definitions*: SessionDefinitions
+      ## The open checkout's project definitions (Project-Definitions.md),
+      ## read once the session has a project root (`wireDefinitions`) and
+      ## re-read when the author saves one (`pumpDefinitions`). Nil until then.
+    projectService*: ProjectDefinitionsService
+      ## `:project`'s closures over THIS session's definitions, handed to the
+      ## runtime whenever this session's panes are rebuilt (so the tab on
+      ## screen is the one `:project` talks about).
+    pinned*: Table[string, seq[PValue]]
+      ## The VALUES behind the scratchpad's rows, by expression — the last two
+      ## samples of each, captured from the stop's locals when the value was
+      ## pinned — so a row re-renders through the checkout's visualisers (the
+      ## authoring loop) and two samples can be compared the way the project
+      ## says (`project_definitions_host.compare`).
     shell*: NativeShell
       ## PLAT-61: the Shell pane's process side (`wireShell`): the session's
       ## `ShellVM` with its shell on a pty, nil until wired.
@@ -674,8 +689,126 @@ proc scratchpadModelOf*(vm: ScratchpadVM): ScratchpadPaneModel =
     result.rows.add ScratchpadPaneRow(expression: e.expression,
                                       value: e.valueText)
 
+proc onScreenValues(s: TuiSession): seq[PValue] =
+  ## The values a surface is about to show: the stop's locals and their first
+  ## level of members, and the scratchpad's pinned values — what a project's
+  ## executable visualiser is run over (`project_definitions_host`).
+  if not s.state.isNil:
+    for v in s.state.currentVariables.val:
+      if v.presented.isNil: continue
+      result.add v.presented
+      for m in v.presented.members:
+        if not m.value.isNil: result.add m.value
+  for samples in s.pinned.values:
+    if samples.len > 0: result.add samples[^1]
+
+proc visualisersOnScreen(s: TuiSession): seq[Visualiser] =
+  ## The checkout's visualiser tier for the values on screen now.
+  if s.definitions.isNil: @[]
+  else: s.definitions.visualisersFor(s.onScreenValues())
+
 proc refreshScratchpad(s: TuiSession; rt: TuiRuntime) =
   rt.app.scratchpad = scratchpadModelOf(s.session.session.scratchpadVM)
+  if s.pinned.len == 0:
+    return
+  # A PINNED VALUE IS RENDERED THROUGH THE CHECKOUT'S VISUALISERS, so editing
+  # `.codetracer/visualisers.toml` re-renders it (`pumpDefinitions`) — the
+  # authoring loop's live preview, against the recorded value itself. Two
+  # samples of one expression are compared the way the project says.
+  let vis = s.visualisersOnScreen()
+  for row in rt.app.scratchpad.rows.mitems:
+    if row.expression notin s.pinned: continue
+    let samples = s.pinned[row.expression]
+    if samples.len == 0: continue
+    row.value = renderedWith(samples[^1], scratchpadBudget(), vis)
+    if samples.len >= 2:
+      row.value.add "  " &
+        describeComparison(s.definitions.compare(samples[^2], samples[^1]))
+
+proc pinValues(s: TuiSession; values: openArray[(string, string)]) =
+  ## Keep the recorded VALUE behind each pinned expression that names one of
+  ## the stop's locals (the last two samples).
+  if s.state.isNil:
+    return
+  let locals = s.state.currentVariables.val
+  for (name, _) in values:
+    for v in locals:
+      if v.name == name and not v.presented.isNil:
+        var samples = s.pinned.getOrDefault(name)
+        samples.add v.presented
+        if samples.len > 2: samples.delete(0)
+        s.pinned[name] = samples
+        break
+
+proc armCollectionBreakpoints(s: TuiSession) =
+  ## A project collection's ENABLED breakpoints stop the replay, as the user's
+  ## own do: every file one of them names is sent to the engine with its whole
+  ## held set (DAP's `setBreakpoints` replaces a source's set), and the rows
+  ## keep their collection (`applyVerifiedBreakpoints`).
+  var paths: seq[string] = @[]
+  for r in s.session.session.store.pointList.rows.val:
+    if r.collection.len > 0 and r.kind == PointKindBreakpoint and r.enabled and
+       r.line > 0 and r.path notin paths:
+      paths.add r.path
+  for p in paths:
+    discard s.session.armHeldBreakpoints(p)
+
+proc wireDefinitions*(s: TuiSession; rt: TuiRuntime) =
+  ## Read the open checkout's project definitions, once per session, and give
+  ## them to the panes: its collections into the session's point list (the
+  ## Points pane, the gutter, and a collaborator's list), its visualisers to
+  ## every value surface, and `:project` to the user. The checkout is the
+  ## project root this front-end already edits (`rt.app.projectRoot`).
+  if s.ended:
+    return
+  if not s.definitions.isNil:
+    rt.projectDefinitions = s.projectService
+    return
+  s.definitions = openSessionDefinitions(rt.app.projectRoot, [s.entryFile])
+  # §5.1 mechanism 1: the recorded program's own visualiser function, as the
+  # recording remembers its calls — asked once, at the session's first stop,
+  # and only for a checkout that carries a `.codetracer/`: the search walks
+  # the recording's calls, which a session that declared nothing should not
+  # pay for on every open.
+  if s.definitions.defs.present:
+    s.definitions.inProgram = s.session.loadInProgramVisualiser()
+  s.definitions.applyPoints(s.session.session.pointListVM)
+  s.armCollectionBreakpoints()
+  let defs = s.definitions
+  let sess = s
+  s.projectService = ProjectDefinitionsService(
+    report: proc(): string = defs.report(),
+    review: proc(): tuple[ok: bool, text: string] = defs.review(),
+    grant: proc(): string =
+      result = defs.grant()
+      defs.applyPoints(sess.session.session.pointListVM),
+    revoke: proc(): string = defs.revoke(),
+    reload: proc(): string =
+      let changed = defs.reload()
+      defs.applyPoints(sess.session.session.pointListVM)
+      if changed: "re-read the project definitions"
+      else: "the project definitions are unchanged on disk")
+  rt.projectDefinitions = s.projectService
+  let note = s.definitions.openingNotice()
+  if note.len > 0:
+    rt.app.notification = note
+
+proc pumpDefinitions*(s: TuiSession; rt: TuiRuntime; nowMs: int64): bool =
+  ## The idle tick: re-read the definitions when the author saved one, and
+  ## re-render what reads them — the points, the variables, the scratchpad.
+  if s.isNil or s.ended or s.definitions.isNil:
+    return false
+  if not s.definitions.pollChanged(nowMs):
+    return false
+  s.definitions.applyPoints(s.session.session.pointListVM)
+  s.armCollectionBreakpoints()
+  rt.app.points = pointListPaneModelOf(
+    s.session.session.store.pointList.rows.val)
+  rt.app.variables.visualisers = s.visualisersOnScreen()
+  s.refreshScratchpad(rt)
+  rt.app.notification = "project definitions re-read — " &
+    s.definitions.openingNotice()
+  true
 
 proc terminalOutputModelOf*(vm: TerminalOutputVM; ticks: uint64;
                             prior: TerminalOutputPaneModel):
@@ -1701,6 +1834,8 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
   ## the order.
   if s.ended:
     return
+  # The checkout's project definitions, read on the session's first refresh.
+  s.wireDefinitions(rt)
   let tick = s.session.getCurrentRRTicks()
 
   serveSourceWindow(s, tick)
@@ -1769,7 +1904,8 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
     s.showViewedFile(rt)
 
   # PLAT-40. The Points pane reads the same points the gutter just drew.
-  rt.app.points = pointListPaneModelFor(s.points)
+  rt.app.points = pointListPaneModelOf(
+    s.session.session.store.pointList.rows.val)
   # PLAT-57: Find in Files, this session's.
   s.refreshSearch(rt)
   # PLAT-58: the Requests pane, this session's.
@@ -1803,6 +1939,8 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
   rt.app.variables = variablesModelFor(s.state, s.valueTimeline, tick,
                                        tickLabel = "tick " & $tick,
                                        scrollTop = rt.app.variables.scrollTop)
+  # THE CHECKOUT'S VISUALISERS, on the pane every recorded value reaches.
+  rt.app.variables.visualisers = s.visualisersOnScreen()
   if not s.state.isNil:
     rt.app.variables.selectedHop =
       if rt.app.variables.selected.len > 0: s.state.selectedHop.val else: -1
@@ -2096,6 +2234,7 @@ proc applyPaneClick(s: TuiSession; rt: TuiRuntime; c: PaneClickRequest) =
     # K23 / K36: "Add value to scratchpad" / Ctrl+click / "Add all values".
     for (name, value) in c.values:
       session.addToScratchpad(name, value)
+    s.pinValues(c.values)
     s.refreshScratchpad(rt)
     rt.app.notification =
       if c.values.len == 1: "added " & c.values[0].name & " to the scratchpad"

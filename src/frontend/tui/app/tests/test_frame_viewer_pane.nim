@@ -53,7 +53,7 @@
 ## `programResult` goes to 1. Every assertion below goes through `ck`/`ckEq`,
 ## which are templates.
 
-import std/[options, strutils, unittest]
+import std/[base64, options, strutils, unittest]
 from std/unicode import runeLen, runeAtPos, toUTF8
 
 import isonim/core/async_compat
@@ -62,6 +62,7 @@ import isonim_tui
 import codetracer_embed
 
 import ../frame_viewer_binding
+import ../../../../common/png
 import ../theme/capabilities
 import ../theme/image_capability
 import ../views/shell
@@ -72,7 +73,7 @@ import ../views/scrubber_track
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 185
+const ExpectedAssertions = 194
 
 var countedAssertions = 0
 
@@ -127,7 +128,10 @@ type
     pixelRequests: seq[(int, int, int)]
     drawCallRequests: int
 
-proc recordingClient(): RecordedClient =
+proc recordingClient(imageSrc = "data:image/png;base64,AAAA"): RecordedClient =
+  ## `imageSrc` is every frame's `src`. The default is NOT a valid PNG (four
+  ## base64 characters), which is the damaged-file case; a test that wants a
+  ## frame the decoder can read passes a real one.
   result = RecordedClient(pixelRequests: @[], drawCallRequests: 0)
   let rec = result
   rec.client = VisualReplayClient(
@@ -137,18 +141,18 @@ proc recordingClient(): RecordedClient =
                                           height: FrameHeight,
                                           clearFrames: SceneBoundaries)),
     getFrameByGeidProc: proc(geid: uint64): VisualReplayFuture[VisualReplayFrame] =
-      newCompletedFuture(VisualReplayFrame(imageSrc: "data:image/png;base64,AAAA",
+      newCompletedFuture(VisualReplayFrame(imageSrc: imageSrc,
                                            geid: some(geid), frame: some(3),
                                            width: FrameWidth,
                                            height: FrameHeight)),
     getFrameByFrameProc: proc(frame: int): VisualReplayFuture[VisualReplayFrame] =
-      newCompletedFuture(VisualReplayFrame(imageSrc: "data:image/png;base64,AAAA",
+      newCompletedFuture(VisualReplayFrame(imageSrc: imageSrc,
                                            geid: some(uint64(900 + frame)),
                                            frame: some(frame),
                                            width: FrameWidth,
                                            height: FrameHeight)),
     getFrameByDrawProc: proc(draw: int): VisualReplayFuture[VisualReplayFrame] =
-      newCompletedFuture(VisualReplayFrame(imageSrc: "data:image/png;base64,AAAA",
+      newCompletedFuture(VisualReplayFrame(imageSrc: imageSrc,
                                            geid: some(uint64(800 + draw)),
                                            frame: some(3),
                                            width: FrameWidth,
@@ -321,7 +325,7 @@ suite "PLAT-15 §5: the coordinate pixel_history_vm receives is the magnifier's"
     except MagnifierError as e:
       raised = true
       ck e.msg.contains("no decoded frame")
-      ck e.msg.contains("PNG or JPEG decoder")
+      ck e.msg.contains("not a PNG this build can decode")
     ck raised
 
   test "the magnifier CURSOR is on the screen, in an attribute every rung has":
@@ -371,9 +375,10 @@ suite "PLAT-15 §5: the coordinate pixel_history_vm receives is the magnifier's"
 
 suite "PLAT-15 §2.6: a pane that cannot draw says why, and keeps drawing":
 
-  test "an octant pin degrades through pdDependencyMissing, picture only":
-    # PLAT-14 RESIDUE 3, ARRIVING AT A USER. `--image-tier=octant` resolved
-    # fine and refused only at draw time, where a pane met a `CellRenderError`.
+  test "an octant pin draws its 2x4 cells, and names the tier":
+    # PLAT-14 RESIDUE 3, CLOSED. `--image-tier=octant` used to resolve and then
+    # refuse at draw time; the octant table is verified against Unicode 16 now
+    # (`cell_render.octantGlyph`), so the pinned tier draws the frame.
     let rec = recordingClient()
     let frames = rec.loadedFrames()
     let history = createPixelHistoryVM(rec.client)
@@ -385,32 +390,58 @@ suite "PLAT-15 §2.6: a pane that cannot draw says why, and keeps drawing":
                                     initDegradedStateSnapshot(),
                                     raster = frameRaster(), hasRaster = true,
                                     pictureCols = 60, pictureRows = 10)
-    ckEq model.gap, fdgTierNotDrawable
-    # §8.2's REUSE: `resolveDegradation`, the existing precedence, and
-    # `pdDependencyMissing`. No row was added to `PaneDegradation`.
-    ckEq frameDependencyState(model.gap), pdsUnsupported
-    ckEq frameViewerDegradation(initDegradedStateSnapshot(), model.gap),
-         pdDependencyMissing
-    # WHAT IS MISSING AND HOW TO GET IT.
-    checkpoint(model.degradedMessage)
-    ck model.degradedMessage.contains("octant")
-    ck model.degradedMessage.contains("--image-tier=sextant")
-    ck model.degradedMessage.contains("--image-tier=braille")
-    # AND THE REST OF THE PANE STILL RENDERS. The picture region went to zero;
-    # the title and the pixel-history list did not.
+    ckEq model.gap, fdgNone
+    ckEq frameDependencyState(model.gap), pdsSatisfied
+    ckEq model.degradedMessage, ""
     let screen = frameViewerScreen(model, 70, 16)
     checkpoint("picture rows " & $screen.pictureRows & ", degraded rows " &
                $screen.degradedRows & ", history rows " & $screen.historyRows)
-    ckEq screen.pictureRows, 0
-    ck screen.degradedRows >= 2
+    ck screen.pictureRows > 0
+    ckEq screen.degradedRows, 0
     ck screen.historyRows > 0
-    ck rowText(screen.rows[0]).contains("FRAME VIEWER")
+    ckEq screen.tierDrawn, itOctant
     ck rowText(screen.rows[0]).contains("image-tier=octant")
-    var sawHistoryTitle = false
-    for row in screen.rows:
-      if rowText(row).contains("PIXEL HISTORY"):
-        sawHistoryTitle = true
-    ck sawHistoryTitle
+    # THE WORK BOUND at 2x4: 256 candidate masks per cell, as an EQUALITY.
+    ckEq screen.candidatesEvaluated,
+         screen.pictureCols * screen.pictureRows * candidatesPerCell(itOctant)
+    ckEq candidatesPerCell(itOctant), 256
+
+  test "the frame is DITHERED: a field between two ramp steps draws as both":
+    # §2's dithering, at the pane: grey 31 is inside the ASCII ramp's '.' bin,
+    # so the renderer without diffusion draws every cell '.'; the pane draws
+    # the frame with diffusion, so ' ' appears among the '.'s.
+    var px = newSeq[byte](FrameWidth * FrameHeight * 4)
+    for i in 0 ..< FrameWidth * FrameHeight:
+      px[i * 4] = 31; px[i * 4 + 1] = 31; px[i * 4 + 2] = 31; px[i * 4 + 3] = 255
+    let grey = initRgbaImage(FrameWidth, FrameHeight, px)
+    let rec = recordingClient()
+    let frames = rec.loadedFrames()
+    let history = createPixelHistoryVM(rec.client)
+    let cap = capabilityFor("xterm-256color", pinned = true, tier = itAscii)
+    let model = frameViewerModelFor(frames, history, cap,
+                                    initDegradedStateSnapshot(),
+                                    raster = grey, hasRaster = true,
+                                    pictureCols = 60, pictureRows = 10)
+    let screen = frameViewerScreen(model, 70, 16)
+    ck screen.pictureRows > 0
+    var blanks, dots = 0
+    for r in 0 ..< screen.pictureRows:
+      let text = rowText(screen.rows[screen.pictureTop + r])
+      for ch in text[0 ..< min(text.len, screen.pictureCols)]:
+        if ch == ' ': inc blanks
+        elif ch == '.': inc dots
+    checkpoint("blanks " & $blanks & ", dots " & $dots)
+    ck blanks > 0
+    ck dots > 0
+    # THE TWIN: the same raster through the renderer WITHOUT diffusion is one
+    # glyph everywhere, so the mix above is the pane's dithering.
+    let plain = renderCells(grey, itAscii,
+                            fitToCells(FrameWidth, FrameHeight,
+                                       DefaultCellAspect, 70, 10))
+    var plainGlyphs: seq[string] = @[]
+    for c in plain.cells:
+      if c.glyph notin plainGlyphs: plainGlyphs.add c.glyph
+    ckEq plainGlyphs, @["."]
 
   test "the POSITIVE TWIN: a drawable tier draws, same model, same pane":
     # Without this the case above is satisfied by a pane that never draws.
@@ -453,8 +484,8 @@ suite "PLAT-15 §2.6: a pane that cannot draw says why, and keeps drawing":
     ck not model.hasRaster
     ckEq model.gap, fdgNoDecoder
     ckEq frameDependencyState(model.gap), pdsUnsupported
-    ck model.degradedMessage.contains("no PNG or JPEG decoder")
-    ck model.degradedMessage.contains("Kitty or iTerm2")
+    ck model.degradedMessage.contains("not a PNG this build can decode")
+    ck model.degradedMessage.contains("iTerm2")
     # AND THE SAME ENCODED FRAME ON A KITTY TERMINAL MEETS A DIFFERENT WALL —
     # which is what keeps the gap above from being "this pane refuses every
     # encoded frame" (§7a). Tier 0 needs no decoder IN THIS PROCESS, and this
@@ -471,7 +502,7 @@ suite "PLAT-15 §2.6: a pane that cannot draw says why, and keeps drawing":
     ckEq kitty.capability.tier, itProtocol
     ckEq kitty.gap, fdgProtocolNotPainted
     ck kitty.gap != model.gap
-    ck not kitty.degradedMessage.contains("no PNG or JPEG decoder")
+    ck not kitty.degradedMessage.contains("not a PNG this build can decode")
     ck kitty.degradedMessage.contains("paints cells")
     ck kitty.degradedMessage.contains("--image-tier=half-block")
     # THE POSITIVE TWIN FOR THE DECODER GAP, through the same function: the same
@@ -635,22 +666,45 @@ suite "PLAT-15: the bytes reach a driver":
     # satisfied by an emitter that produced nothing at all.
     ck harness.bytesEmitted().contains("\x1b[38;2;")
 
+  test "a PNG frame is DECODED and drawn at a cell tier":
+    # PLAT-14 bound 3, closed: the frame arrives as a `data:` URL holding a
+    # real PNG (this module's own encoder wrote it, and `png_test.nim` grades
+    # the decoder against an independent one), the binding decodes it, and
+    # the half-block picture carries the fixture's pixels.
+    let raster = frameRaster()
+    let png = encodePng(FrameWidth, FrameHeight, raster.pixels)
+    let rec = recordingClient("data:image/png;base64," & base64.encode(png))
+    let frames = rec.loadedFrames()
+    let history = createPixelHistoryVM(rec.client)
+    let model = frameViewerModelFor(frames, history,
+                                    capabilityFor("xterm-256color"),
+                                    initDegradedStateSnapshot(),
+                                    pictureCols = 60, pictureRows = 10)
+    ck model.hasRaster
+    ckEq model.gap, fdgNone
+    ckEq model.raster.width, FrameWidth
+    ckEq model.raster.pixels, raster.pixels
+    let screen = frameViewerScreen(model, 70, 16)
+    ck screen.pictureRows > 0
+    ckEq screen.degradedRows, 0
+
   test "a pane that cannot draw refuses to emit rather than emitting nothing":
+    # An ENCODED frame on a cell terminal (PLAT-14 bound 3): the pane has a
+    # length and no pixels, so there is nothing to emit.
     let rec = recordingClient()
     let frames = rec.loadedFrames()
     let history = createPixelHistoryVM(rec.client)
     let model = frameViewerModelFor(
-      frames, history,
-      capabilityFor("xterm-256color", pinned = true, tier = itOctant),
-      initDegradedStateSnapshot(), raster = frameRaster(), hasRaster = true,
-      pictureCols = 60, pictureRows = 10)
+      frames, history, capabilityFor("xterm-256color"),
+      initDegradedStateSnapshot(), pictureCols = 60, pictureRows = 10)
+    ckEq model.gap, fdgNoDecoder
     var raised = false
     try:
       discard emitFrameViewerPicture(model, 60, 11)
     except EmitError as e:
       raised = true
-      ck e.msg.contains("tier-not-drawable")
-      ck e.msg.contains("--image-tier=sextant")
+      ck e.msg.contains("no-decoder")
+      ck e.msg.contains("not a PNG this build can decode")
     ck raised
 
 suite "PLAT-15: the overlay in the shell":

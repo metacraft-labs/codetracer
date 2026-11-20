@@ -71,6 +71,7 @@ import ./app/edit_binding   # PLAT-43: `EditSession.selectModel`
 import ./app/runtime
 import ./app/clipboard_read
 import ./app/tui_app
+import ./app/capability_note
 import ./host/build_runner
 import ./host/capabilities
 import ./host/edit_host
@@ -245,6 +246,18 @@ proc wireTopBar(rt: TuiRuntime) =
       rt.app.notification = NerdSuggestion
   rt.saveIcons = proc(mode: IconsMode): string = saveIconsPreference(mode)
 
+proc wireLayoutWriteThrough(rt: TuiRuntime) =
+  ## PLAT-45: every committed layout change is written through to the
+  ## terminal's document for the mode it was made in, so a crash loses
+  ## nothing. Both loops install it: the replay loop and `ct edit`.
+  rt.layoutCommitted = proc(rt: TuiRuntime) =
+    # WRITE-THROUGH. A failure is the user's to know about, on the status
+    # line, and is not fatal: the arrangement is still on screen and the exit
+    # save tries again.
+    let saved = persistLayoutForSession(rt)
+    if saved.outcome == lpoFailed:
+      rt.app.notification = saved.message
+
 proc wireLayoutPreferences(rt: TuiRuntime;
                            flags: array[LayoutSetting, string]) =
   ## PLAT-51 deliverables 9 and 11, PLAT-70 Part H: the remembered layout
@@ -306,32 +319,62 @@ var gFrameImage: FrameImageState
   ## per process).
 
 type GraphicsProbeState = object
-  ## PLAT-48: the kitty graphics query sent after the first frame, so the
-  ## `icons` default can be `graphics` on a terminal that draws pictures —
-  ## measured, never assumed from `$TERM`. Sent AFTER frame 0 rather than in
-  ## the start-up round, so the cold-start gate pays nothing for it.
-  open: bool
+  ## THE GRAPHICS PROBE (`host/image_probe`), sent LAZILY: once, after the
+  ## frame that first needs its answer — the controls' pictures (PLAT-48)
+  ## while the icons mode may still be `graphics`, or a recording's Video
+  ## Player frame — and never in the start-up round, so the cold-start gate
+  ## pays nothing for it. Its bytes are `graphicsProbeQuery`'s, through tmux's
+  ## passthrough when the pane has it on (`readTmuxPassthrough`, spawned only
+  ## here); its replies arrive as framed tokens and are read by
+  ## `noteProbeReplies`, the parser `probeGraphics` uses; and after
+  ## `DefaultProbeTimeoutMs` with no fence the path counts as unanswered.
+  ## A reply that arrives after that still counts: the capability is
+  ## re-resolved with it, so a slow terminal ends up at the tier it measured.
+  asked: bool
+  waiting: bool
+    ## Asked and not yet fenced, within the timeout.
+  fenced: bool
+    ## The DA1 fence came back.
   deadlineMs: int64
+  probe: GraphicsProbe
+  ienv: ImageEnv
 
-const GraphicsProbeWaitMs = 500'i64
+proc graphicsWanted(rt: TuiRuntime; hasVisual: bool): bool =
+  ## Whether anything on screen needs to know if the terminal draws pictures:
+  ## the controls' pictures (unless the user chose a mode that is not
+  ## `graphics`, or the screen-reader mode, which reads text), or the Video
+  ## Player's frame.
+  hasVisual or
+    (not rt.caps.screenReader and
+     (not rt.app.iconsChosen or rt.app.icons == imGraphics))
 
-proc startGraphicsProbe(driver: TerminalDriver; rt: TuiRuntime):
-    GraphicsProbeState =
-  ## Ask, unless a multiplexer is in the path (tmux or screen would need a
-  ## passthrough this probe does not negotiate; `image_capability` refuses
-  ## tier 0 there too) or the user already chose a mode that is not
-  ## `graphics`.
-  let env = readImageEnv()
-  if env.tmux.len > 0 or env.sty.len > 0:
+proc askGraphics(state: var GraphicsProbeState; driver: TerminalDriver;
+                 askCellSize: bool) =
+  ## Send the probe, once. Not under `screen` (it never passes graphics, and
+  ## the resolver refuses tier 0 there) nor under a tmux whose
+  ## `allow-passthrough` is not on (the query would not reach the terminal).
+  if state.asked:
     return
-  if rt.app.iconsChosen and rt.app.icons != imGraphics:
+  state.asked = true
+  state.ienv = readImageEnv()
+  if state.ienv.sty.len > 0:
     return
+  let wrap = state.ienv.tmux.len > 0
+  if wrap:
+    state.ienv.passthrough = readTmuxPassthrough()
+    if state.ienv.passthrough != ptOn:
+      return
+  # The cell's size rides with the probe when the start-up round did not ask
+  # it (`--no-mouse`): the picture's aspect is corrected against it.
+  let before = if askCellSize: CellSizeQuery else: ""
   driver.expectReplies(true)
-  writeAll(driver.outFd, ProbeQuery & ProbeFence)
-  GraphicsProbeState(open: true, deadlineMs: nowMs() + GraphicsProbeWaitMs)
+  writeAll(driver.outFd, graphicsProbeQuery(wrap, before))
+  state.probe = GraphicsProbe(attempted: true)
+  state.waiting = true
+  state.deadlineMs = nowMs() + DefaultProbeTimeoutMs
 
-proc isGraphicsProbeReply(token: string): bool =
-  token.startsWith("\x1b_Gi=" & $ProbeImageId & ";")
+proc imageEnvOf(state: GraphicsProbeState): ImageEnv =
+  if state.asked: state.ienv else: readImageEnv()
 
 proc startHighlights(rt: TuiRuntime; driver: TerminalDriver): HighlightWorker =
   ## PLAT-29. The Edit pane's parse moves onto a worker thread: the runtime
@@ -408,6 +451,20 @@ proc paint(driver: TerminalDriver; rt: TuiRuntime) =
     if rt.app.frameViewer.transmitsProtocol: rt.videoPlayerScreen().screen.protocolRect
     else: CellArea()
   epilogue.add frameImageBytes(gFrameImage, frameRect, rt.app.frameViewer)
+  if gFrameImage.repaintNeeded:
+    # An iTerm2 or Sixel frame went away or moved: its pixels stay on the
+    # terminal until the cells under them are written, so this frame writes
+    # every cell, before the epilogue places the frame again.
+    driver.emitter.reset()
+  if gFrameImage.refusedBytes > 0:
+    # §3: on a constrained link this frame costs more emitted bytes than the
+    # budget allows. Nothing was sent; the capability is demoted (the same
+    # `demoteForPayload` that refused it) and the frame is painted as cells.
+    rt.imageCapability = demoteForPayload(rt.imageCapability,
+                                          gFrameImage.refusedBytes)
+    rt.app.frameViewer.capability = rt.imageCapability
+    paint(driver, rt)
+    return
   let (prompting, row, col) = rt.promptCursor()
   if prompting:
     epilogue.add "\x1b[" & $(row + 1) & ";" & $(col + 1) & "H" &
@@ -708,8 +765,11 @@ proc interactive(command: TuiCommand): int =
   app.caretDrawn = gCaretSupport == caretDrawn
   # The negotiation's note FIRST: the status line clips a long notification
   # from the right, and a trace folder's path is long.
-  app.notification = capabilityNote(negotiation.caps, hintsOn) &
-                     " | opening " & folder & " …"
+  # A late answer rewrites this note only while it is still on the line
+  # (`app/capability_note`): a message written after it stays.
+  var noteSlot: CapabilityNoteSlot
+  app.notification = noteSlot.startupNote(
+    capabilityNote(negotiation.caps, hintsOn), " | opening " & folder & " …")
   # PLAT-16: THE PROJECT A REPLAY SESSION EDITS IS THE WORKING DIRECTORY, and
   # that is a decision rather than a fallback, so it is written down here.
   #
@@ -777,8 +837,9 @@ proc interactive(command: TuiCommand): int =
   # recording. PLAT-45 deliverable 8 flips both: every session starts on the
   # shared default (or on the arrangement the user last left the TERMINAL in),
   # the `:` layout verbs and the mouse can rearrange it, and every committed
-  # change is written through to ONE document for the terminal product under
-  # the user's state directory (`host/layout_store.layoutDocumentPath`). The
+  # change is written through to the terminal product's document for the
+  # mode it was made in, under the user's state directory
+  # (`host/layout_store.layoutDocumentPath`). The
   # desktop and the GPUI window keep files of their own and never read this
   # one. `--layout-binding` is still accepted, and asks for what is now the
   # default. What made PLAT-6 keep this an opt-in — the session slot holding a
@@ -790,13 +851,13 @@ proc interactive(command: TuiCommand): int =
   discard rt.enableLayoutBinding()
   wireLayoutPreferences(rt, command.layoutFlags)
   wireColumnWidths(rt)
-  rt.layoutCommitted = proc(rt: TuiRuntime) =
-    # WRITE-THROUGH, so a crash loses nothing. A failure is the user's to
-    # know about, on the status line, and is not fatal: the arrangement is
-    # still on screen and the exit save below tries again.
-    let saved = persistLayoutForSession(rt)
-    if saved.outcome == lpoFailed:
-      rt.app.notification = saved.message
+  wireLayoutWriteThrough(rt)
+  # Mode-Transitions.md §4b: the OTHER mode's remembered arrangement is read
+  # on the first switch into it (`Ctrl+F5` into Edit mode), from that mode's
+  # own document, and an unreadable one is reported as this one is.
+  rt.modeDocumentWanted = proc(rt: TuiRuntime; mode: ProductMode): string =
+    let staged = stageLayoutForMode(rt, mode)
+    if staged.status == lrsUnreadable: staged.message else: ""
   let layoutRestore = restoreLayoutForSession(rt)
   if layoutRestore.message.len > 0:
     app.notification = layoutRestore.message
@@ -920,7 +981,9 @@ proc interactive(command: TuiCommand): int =
     # PLAT-59: the image decision the Video Player draws at, and the
     # recording's graphics — its player and the Visual Replay panes.
     rt.imageCapability = resolveImageCapability(readTerminalEnv(),
-      readImageEnv(), rt.caps, command.flags)
+      readImageEnv(), rt.caps, command.flags,
+      cellAspect = initCellAspect(negotiation.probe.cellWidthPx,
+                                  negotiation.probe.cellHeightPx))
     session.attachVisualReplay(rt, folder, highlights.wakeWriteFd)
     session.syncVisualLayout(rt)
   except DapStalledError as e:
@@ -1461,7 +1524,25 @@ proc interactive(command: TuiCommand): int =
   # ViewModels exist.
   rt.refreshMenuForKeymap()
   paint(driver, rt)
-  var graphicsProbe = startGraphicsProbe(driver, rt)
+  var graphics = GraphicsProbeState()
+  proc imageCapabilityNow(): ImageCapability =
+    ## THE image decision, from everything measured so far: the environment,
+    ## the probe (when it was sent) and the cell's size (`CSI 16 t`, from the
+    ## start-up round or the probe).
+    resolveImageCapability(readTerminalEnv(), graphics.imageEnvOf(),
+      rt.caps, command.flags, graphics.probe,
+      cellAspect = initCellAspect(negotiation.probe.cellWidthPx,
+                                  negotiation.probe.cellHeightPx))
+  proc adoptImageCapability() =
+    ## Re-resolve and, when the answer moved, repaint the Video Player.
+    let next = imageCapabilityNow()
+    if next != rt.imageCapability:
+      rt.imageCapability = next
+      if session.refreshVisualIfShown(rt):
+        paint(driver, rt)
+  if graphicsWanted(rt, not session.visualPanes.isNil):
+    graphics.askGraphics(driver, command.flags.noMouse)
+  adoptImageCapability()
 
   var running = true
   var frameOwed = false
@@ -1499,17 +1580,19 @@ proc interactive(command: TuiCommand): int =
       # is gone, and the only correct thing left is to give the tty back.
       running = false
     of dekIdle:
-      if graphicsProbe.open and nowMs() > graphicsProbe.deadlineMs:
-        # No answer: the terminal draws no pictures. The default stays.
-        graphicsProbe.open = false
-        # PLAT-59: and the Video Player draws its frame as cells.
-        rt.imageCapability = resolveImageCapability(readTerminalEnv(),
-          readImageEnv(), rt.caps, command.flags,
-          GraphicsProbe(attempted: true, answered: true, kitty: false))
-        if session.refreshVisualIfShown(rt):
-          paint(driver, rt)
+      if graphics.waiting and nowMs() > graphics.deadlineMs:
+        # No fence within the timeout: the path counts as unanswered and the
+        # Video Player draws its frame as cells. A late reply still counts.
+        graphics.waiting = false
+        adoptImageCapability()
+      if not graphics.asked and
+         graphicsWanted(rt, not session.visualPanes.isNil):
+        # The first need arrived after start-up (a recording with graphics
+        # opened later, or the icons mode set back to `graphics`).
+        graphics.askGraphics(driver, command.flags.noMouse)
+        adoptImageCapability()
       discard rt.clipboardReadDue(driver)
-      if not graphicsProbe.open and not rt.clipboardRead.open:
+      if not graphics.waiting and not rt.clipboardRead.open:
         negotiation.closeReplyWindow(driver)
       # THE BUILD IS ADVANCED FROM THE SAME LOOP THAT READS THE KEYBOARD, on
       # exactly `editInteractive`'s rule and for §5's reason. A replay session
@@ -1559,10 +1642,13 @@ proc interactive(command: TuiCommand): int =
         session.applyOutcome(rt, bars)
       let barsChanged = bars.repaint
       let keysChanged = rt.pollKeybindings(keybindings)
+      # The checkout's project definitions, when the author saved one.
+      let definitionsChanged = session.pumpDefinitions(rt, nowMs())
       if drainHighlights(rt, highlights, files) or built or vcsChanged or
          hoverChanged or frameOwed or recorded or keysChanged or searched or
          barsChanged or testsChanged or agentChanged or problemsChanged or
-         requestsChanged or verified or constraintsChanged or shellChanged or visualChanged:
+         requestsChanged or verified or constraintsChanged or shellChanged or visualChanged or
+         definitionsChanged:
         paint(driver, rt)
         frameOwed = false
     of dekResize:
@@ -1593,32 +1679,40 @@ proc interactive(command: TuiCommand): int =
     of dekToken:
       if rt.takeClipboardReply(driver, ev.token):
         continue
-      # PLAT-48: THE ANSWER TO THE GRAPHICS QUERY. `OK` means the terminal
-      # draws pictures: the controls default to the desktop's marks, unless
-      # the user chose otherwise. Never a key, never journalled.
-      if isGraphicsProbeReply(ev.token):
-        graphicsProbe.open = false
-        # PLAT-59: the path MEASURED: the Video Player's frame goes at tier 0
-        # only where the Kitty query came back.
-        rt.imageCapability = resolveImageCapability(readTerminalEnv(),
-          readImageEnv(), rt.caps, command.flags,
-          GraphicsProbe(attempted: true, answered: true,
-                        kitty: ev.token.contains(";OK")))
-        session.refreshVisual(rt)
-        if ev.token.contains(";OK"):
+      # THE ANSWERS TO THE GRAPHICS PROBE: the Kitty reply (by the probe's
+      # own image id) whenever it comes, and the DA1 fence behind it — the
+      # first one after the start-up round's own fence. `OK` means the
+      # terminal draws pictures: the controls default to the desktop's
+      # marks, unless the user chose otherwise, and the Video Player's frame
+      # goes at tier 0 where the path allows it. Never a key, never
+      # journalled.
+      if graphics.asked and (isProbeReplyToken(ev.token) or
+          (isFenceToken(ev.token) and not graphics.fenced and
+           negotiation.probe.answered)):
+        if graphics.probe.noteProbeReplies(ev.token):
+          graphics.fenced = true
+        graphics.waiting = graphics.waiting and not graphics.fenced and
+                           not graphics.probe.kitty
+        if graphics.probe.kitty and not rt.app.graphicsDrawn:
           rt.app.graphicsDrawn = true
           if not rt.app.iconsChosen:
             rt.app.icons = imGraphics
           paint(driver, rt)
+        adoptImageCapability()
         continue
       # PLAT-46: A TERMINAL'S LATE ANSWER TO THE START-UP ROUND IS NOT A KEY.
       # It re-decides the capabilities and repaints; it is never journalled.
       let (wasReply, changed) = negotiation.takeReply(driver, ev.token)
       if wasReply:
         adoptMouseMetrics(driver, negotiation)
+        # A late `CSI 16 t`: the picture's aspect follows the cell.
+        adoptImageCapability()
         if changed:
           rt.adoptCaps(negotiation.caps)
-          app.notification = capabilityNote(negotiation.caps, hintsOn)
+          let (write, text) = noteSlot.lateNote(
+            app.notification, capabilityNote(negotiation.caps, hintsOn))
+          if write:
+            app.notification = text
           paint(driver, rt)
         continue
       # §4.3: A STRING (OSC / DCS / APC) IS NEVER A KEY. One that no query of
@@ -1806,6 +1900,9 @@ proc editInteractive(command: TuiCommand): int =
   let negotiation = driver.negotiateOnTerminal(command.editFlags, terminalPrefs)
   adoptMouseMetrics(driver, negotiation)
   let hintsOn = storedPrefs.settings.terminal.terminalHints != "off"
+  # Edit mode writes no start-up note, so a late answer writes its note only
+  # to an empty status line (`app/capability_note`).
+  var noteSlot: CapabilityNoteSlot
 
   var size = driver.size()
   let app = newTuiApp()
@@ -1862,23 +1959,24 @@ proc editInteractive(command: TuiCommand): int =
   # default (`tui_app.enableLayoutBinding`, `profile.layoutValueForMode`), not
   # from Debug's.
   #
-  # NO LAYOUT DOCUMENT IS BOUND, deliberately, and that is the half of the
-  # replay loop's wiring left out: no `restoreLayoutForSession`, no
-  # `rt.layoutCommitted` write-through, no exit save. The terminal's remembered
-  # arrangement (`host/layout_store.layoutDocumentPath`) is ONE document, and
-  # it is not keyed by mode — Mode-Transitions.md §4b's second tier is not
-  # implemented (see `views/shell.switchTo`). It holds the replay loop's Debug
-  # arrangement, so restoring it here would paint Debug's panes into an editor
-  # and saving here would overwrite the user's Debug arrangement with Edit's.
-  # With no document bound, `layoutPersistenceEnabled` is false and
-  # `layoutPersistPlanOf` answers the intent that touches nothing, so an Edit
-  # arrangement lasts for the session — which is what the mode register
-  # already promises for Edit mode (§4b tier 1) — and no file is read or
-  # written.
+  # EDIT MODE'S OWN DOCUMENT IS BOUND, as the replay loop binds Debug's
+  # (Mode-Transitions.md §4b: the store is keyed by the mode). The terminal
+  # keeps one document per mode (`host/layout_store.layoutDocumentPath`):
+  # this loop restores `tui-layout-edit.json`, writes every committed change
+  # through to it, and saves it on the way out, and it never reads or writes
+  # the replay loop's Debug document — so an Edit arrangement survives a
+  # restart and the Debug one is never replaced by it. The rules are the
+  # replay loop's: an unreadable document is reported and left alone, and a
+  # session that ends on Edit mode's default removes a stale one.
   discard rt.enableLayoutBinding()
   var noFlags: array[LayoutSetting, string]
   wireLayoutPreferences(rt, noFlags)
   wireColumnWidths(rt)
+  wireLayoutWriteThrough(rt)
+  block:
+    let restored = restoreLayoutForSession(rt)
+    if restored.message.len > 0:
+      app.notification = restored.message
   # PLAT-29: the Edit pane's parse runs on this worker, never on the render
   # path; stopped when the loop that owns it returns.
   let highlights = startHighlights(rt, driver)
@@ -2015,7 +2113,10 @@ proc editInteractive(command: TuiCommand): int =
         adoptMouseMetrics(driver, negotiation)
         if changed:
           rt.adoptCaps(negotiation.caps)
-          app.notification = capabilityNote(negotiation.caps, hintsOn)
+          let (write, text) = noteSlot.lateNote(
+            app.notification, capabilityNote(negotiation.caps, hintsOn))
+          if write:
+            app.notification = text
           paint(driver, rt)
         continue
       if isStringToken(ev.token):
@@ -2037,6 +2138,13 @@ proc editInteractive(command: TuiCommand): int =
         let barsMoved = rt.tickScrollbars(nowMs()).repaint
         if outcome.repaint or vcsFollowed or barsMoved:
           paint(driver, rt)
+  # THE EDIT ARRANGEMENT IS SAVED ON THE WAY OUT, on the replay loop's terms:
+  # written if it is the user's, removed if it is the default's, left alone if
+  # the session could not read it.
+  let saved = persistLayoutForSession(rt)
+  if saved.outcome == lpoFailed:
+    driver.stop()
+    stderr.writeLine(TuiProgramName & ": " & saved.message)
   ExitOk
 
 proc run(args: seq[string]): int =

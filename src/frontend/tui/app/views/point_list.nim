@@ -34,6 +34,16 @@ type
     enabled*: bool
     column*: int
       ## PLAT-50: a column breakpoint's column, 0 for a line breakpoint.
+    collection*: string
+      ## The project's named collection this point came from
+      ## (`.codetracer/points.toml`), or "" for a point the user set.
+    resolution*: string
+      ## What became of a collection point's anchor in the checkout as it is
+      ## now — `resolved`, `moved`, `unresolvable`, `file absent`. A point that
+      ## could not be located is STILL A ROW (Project-Definitions §4:
+      ## "reported, not dropped"), with `line` 0 and this saying why.
+    id*: string
+      ## The row's stable id (`PointListEntry.id`).
 
   PointListPaneModel* = object
     rows*: seq[PointListPaneRow]
@@ -59,9 +69,14 @@ proc baseName(path: string): string =
 
 proc rowText*(r: PointListPaneRow): string =
   ## One row as the pane draws it.
-  result = r.kind & " " & baseName(r.path) & ":" & $r.line &
+  result = r.kind & " " & baseName(r.path) & ":" &
+           (if r.line > 0: $r.line else: "?") &
            (if r.column > 0: ":" & $r.column else: "")
   if not r.enabled: result.add " (disabled)"
+  if r.collection.len > 0:
+    result.add " [" & r.collection & "]"
+    if r.resolution.len > 0 and r.resolution != "resolved":
+      result.add " " & r.resolution
 
 proc titleText*(model: PointListPaneModel): string =
   "POINTS " & $model.rows.len & " point(s)"

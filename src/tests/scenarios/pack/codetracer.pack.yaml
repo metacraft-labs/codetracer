@@ -2130,8 +2130,9 @@ stages:
       Point the front-end at a real Agent Harbor REST server prepared with the
       CodeTracer worktree scenario (`AGENT_HARBOR_M7_BASE_URL`, and its
       optional key, scenario and mock agent); fails, naming it, when none is
-      configured.
-    params: {}
+      configured. `scenario` is the mock agent's script under
+      `fixtures/agent-harbor/` (default `worktree-feature-evidence`).
+    params: { scenario: text }
   read-only-file:
     summary: >-
       Make a file of the stage's project folder read-only on disk (after it
