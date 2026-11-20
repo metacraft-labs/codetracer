@@ -85,6 +85,7 @@ from sdk/stop_loader import StopPane, spFlow, setPaneOpen   # the first stop's f
 import viewmodels/editor_gutter_lanes
 import std/[cpuinfo, json, math, options, os, sequtils, sets, strutils, tables,
             times, exitprocs]
+from std/monotimes import getMonoTime, ticks
 from std/unicode import runeLen   # PLAT-61: a typed character
 when defined(posix):
   import std/posix   # PLAT-53: `tests:kill`
@@ -2691,21 +2692,53 @@ proc patchChildren(r: GpuiRenderer; live, fresh: GpuiElement;
     r.removeChild(live, old)
     inc result
 
+type PaneRedrawCost = object
+  ## One pane redraw's cost, for `--frame-report`'s `paneRedraws`: the whole
+  ## redraw, and within it what `patchPane` spent printing the two plans,
+  ## parsing them, and applying the difference (or, under a full redraw,
+  ## moving every child).
+  pane: string
+  totalNs, planJsonNs, parseNs, applyNs: int64
+  planBytes, replaced: int
+
+var gPaneRedraws: seq[PaneRedrawCost]
+var gPatchCost: PaneRedrawCost
+  ## `patchPane`'s part of the redraw in progress.
+
 proc patchPane(r: GpuiRenderer; live, fresh: GpuiElement) =
   ## `live`'s content made `fresh`'s (see `patchChildren`), then `fresh` and
   ## whatever it still holds freed.
+  gPatchCost = PaneRedrawCost()
   if gFullRedraw:
+    let t0 = getMonoTime().ticks
     while childCount(live) > 0:
       r.removeChild(live, nthChild(live, childCount(live) - 1))
     while childCount(fresh) > 0:
       let c = nthChild(fresh, 0)
       r.removeChild(fresh, c)
       r.appendChild(live, c)
+      inc gPatchCost.replaced
+    gPatchCost.applyNs = getMonoTime().ticks - t0
   else:
-    let liveJ = parseJson(r.renderPlanJson(live))
-    let freshJ = parseJson(r.renderPlanJson(fresh))
-    patchChildren(r, live, fresh, liveJ, freshJ)
+    let t0 = getMonoTime().ticks
+    let liveS = r.renderPlanJson(live)
+    let freshS = r.renderPlanJson(fresh)
+    let t1 = getMonoTime().ticks
+    let liveJ = parseJson(liveS)
+    let freshJ = parseJson(freshS)
+    let t2 = getMonoTime().ticks
+    gPatchCost.replaced = patchChildren(r, live, fresh, liveJ, freshJ)
+    gPatchCost.applyNs = getMonoTime().ticks - t2
+    gPatchCost.planJsonNs = t1 - t0
+    gPatchCost.parseNs = t2 - t1
+    gPatchCost.planBytes = liveS.len + freshS.len
   gpui_destroy_tree(fresh)
+
+proc notePaneRedraw(pane: string; t0: int64) =
+  var c = gPatchCost
+  c.pane = pane
+  c.totalNs = getMonoTime().ticks - t0
+  gPaneRedraws.add c
 
 proc redrawWindowLeaf(r: GpuiRenderer; pane: GpuiElement; leaf: GpuiLeaf) =
   ## `leaves.redrawLeafBody` for a pane whose heading the window removed:
@@ -2717,6 +2750,7 @@ proc redrawWindowLeaf(r: GpuiRenderer; pane: GpuiElement; leaf: GpuiLeaf) =
   syncLeafContext()
   if pane.isNil:
     return
+  let redrawStart = getMonoTime().ticks
   let fresh = r.createElement("div")
   let stand = r.createElement("div")
   r.appendChild(fresh, stand)
@@ -2726,6 +2760,7 @@ proc redrawWindowLeaf(r: GpuiRenderer; pane: GpuiElement; leaf: GpuiLeaf) =
   applyTextFaces(r, fresh)
   wireDetached(r, fresh)
   patchPane(r, pane, fresh)
+  notePaneRedraw(leaf.paneId, redrawStart)
   # M71 (#838): the Files and VCS panes' scrollbars were the pane's children
   # too; drawn again over what the leaf now shows.
   if leaf.kind == glkBuiltin and leaf.builtin in {paneFileTree, paneVcs}:
@@ -6329,6 +6364,7 @@ proc redrawReplayEditor(r: GpuiRenderer) =
   let editor = gPanes.getOrDefault($paneEditor)
   if editor.isNil or gSourceService.isNil or gSession.isNil:
     return
+  let redrawStart = getMonoTime().ticks
   let surface = editorSurfaceFor(
     source = gSourceService.vm,
     editor = gSession.session.editorVM,
@@ -6380,6 +6416,7 @@ proc redrawReplayEditor(r: GpuiRenderer) =
   applyTextFaces(r, fresh)
   wireDetached(r, fresh)
   patchPane(r, editor, fresh)
+  notePaneRedraw("editor", redrawStart)
   noteEditorTab(r, editorTabLabel(surface.path, false))
   # The rows just drawn take the design's faces here, whoever asked for the
   # redraw: a divider's resize redraws the editor through `syncEditorViewport`,
@@ -14274,6 +14311,14 @@ proc writeFrameReport(path: string; loadStart, loadEnd: string;
                        elapsedMs >= int(deadlineMs) - 500,
   }
   doc["keyHandlerMs"] = %handlerMs
+  doc["fullRedraw"] = %gFullRedraw
+  var redraws = newJArray()
+  for c in gPaneRedraws:
+    redraws.add %*{"pane": c.pane, "totalNs": c.totalNs,
+                   "planJsonNs": c.planJsonNs, "parseNs": c.parseNs,
+                   "applyNs": c.applyNs, "planBytes": c.planBytes,
+                   "replaced": c.replaced}
+  doc["paneRedraws"] = redraws
   if not openArm.isNil:
     doc["documentLines"] = %openArm.doc.state.doc.countLines
     doc["keysApplied"] = %openArm.keys
