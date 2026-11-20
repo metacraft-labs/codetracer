@@ -98,13 +98,23 @@ jobs:
       # EVERY AUTHENTICATED CLONE IS IN THIS BLOCK, at the top of the job: the
       # installation token minted above expires an hour after it is minted (see
       # `viewmodel-tests`), and this job's bound is longer than that.
+      - name: Read the launcher's pin
+        # codetracer-launcher is private, so the public repro.lock cannot pin
+        # it (bbf7dbed4a6); its revision is ci/toolchain.pin's
+        # PRIVATE_SIBLING_CODETRACER_LAUNCHER, named explicitly below.
+        id: private_pins
+        run: |
+          rev="$(sed -n 's/^PRIVATE_SIBLING_CODETRACER_LAUNCHER=\([0-9a-f]\{40\}\)$/\1/p' ci/toolchain.pin)"
+          [ -n "$rev" ] || { echo "::error::ci/toolchain.pin has no 40-hex PRIVATE_SIBLING_CODETRACER_LAUNCHER"; exit 1; }
+          echo "launcher=$rev" >>"$GITHUB_OUTPUT"
+
       - name: Setup db-backend siblings and the launcher
         # The db-backend siblings are what `just build-once` needs to build
         # `replay-server` (see `gpui-window-captures`). The extra one,
         # `codetracer-launcher`, is the real `ct` two suites execute (see "Build
         # the launcher" below), and its source is what `test_caps_file_shape.nim`
-        # imports. It is in this repo's committed `repro.lock`, so it is named
-        # BARE and clones at the revision that lock pins -- not at a branch tip.
+        # imports. It is private, so the public `repro.lock` cannot pin it; it
+        # clones at ci/toolchain.pin's revision (the step above), never bare.
         # The Tier-2 lane's terminal harness (TermAssert, TermAssertClient,
         # nim-libvterm) comes from the test lock with the scenario siblings, in
         # "Provision dependency siblings from repro.lock" below.
@@ -117,7 +127,7 @@ jobs:
           attic-token: ${{ secrets.ATTIC_TOKEN }}
           attic-cache: ${{ vars.ATTIC_CACHE }}
           extra-siblings: |
-            codetracer-launcher
+            codetracer-launcher=${{ steps.private_pins.outputs.launcher }}
 
       - name: Clone runquota sibling
         # `just build-once` compiles `ct`, which imports `runquota_process`
