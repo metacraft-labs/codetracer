@@ -974,17 +974,59 @@ proc gitWorkspace*(s: StageState) =
   s.launch.project = root
   s.launch.workDir = root
 
-proc agentHarbor*(s: StageState) =
+proc agentHarbor*(s: StageState; scenario = "worktree-feature-evidence") =
   ## The real Agent Harbor the worktree session runs on. There is no
   ## stand-in: the session's whole point is Harbor's worktree and its task
   ## history, so without a server this is a missing prerequisite, named.
+  ## `scenario` names the mock agent's script under
+  ## `fixtures/agent-harbor/`.
   let url = getEnv("AGENT_HARBOR_M7_BASE_URL")
   if url.len == 0:
     raise newException(IOError, "agent-harbor: prerequisite missing: AGENT_HARBOR_M7_BASE_URL " &
       "(a real Agent Harbor REST server prepared with the CodeTracer worktree scenario)")
+  # The server runs each session through `ah` (`branch create`, then `agent
+  # record`, the ACP client serving the mock agent's terminal requests); an
+  # `ah` older than the server leaves every command the agent runs at exit -1
+  # with nothing executed. Whoever started the server names the matching
+  # build here, as they put it first on the server's PATH.
+  let ahBin = getEnv("AH_BIN")
+  if ahBin.len == 0 or not fileExists(ahBin):
+    raise newException(IOError, "agent-harbor: prerequisite missing: AH_BIN " &
+      "(the ah CLI built at the same agent-harbor revision as the M7 server, first on " &
+      "its PATH)" & (if ahBin.len > 0: "; no file at " & ahBin else: ""))
+  # …with its own state: a newer `ah` on the machine migrates the user's
+  # Agent Harbor database past what the pinned one reads, and `ah branch
+  # create` then refuses to run ("migration … was previously applied but is
+  # missing"), so no session gets a worktree.
+  if getEnv("AH_HOME").len == 0:
+    raise newException(IOError, "agent-harbor: prerequisite missing: AH_HOME " &
+      "(a state directory of the M7 server's own, not the user's Agent Harbor home)")
   for k in ["AGENT_HARBOR_M7_BASE_URL", "AGENT_HARBOR_M7_API_KEY", "AGENT_HARBOR_M7_SCENARIO",
-            "AGENT_HARBOR_M7_MOCK_AGENT_BINARY"]:
+            "AGENT_HARBOR_M7_MOCK_AGENT_BINARY", "AH_BIN", "AH_HOME"]:
     if existsEnv(k): s.launch.env[k] = getEnv(k)
+  # The front-end's own configuration of that server (codetracer-pm
+  # Agentic-Coding-Integration.md §6.8): its URL and key, and the agent it
+  # runs — Harbor's mock agent, which mocks only the LLM, on the
+  # codetracer-owned scenario whose evidence step runs the real
+  # `ct agent evidence` (fixtures/agent-harbor/worktree-feature-evidence.yaml).
+  s.launch.env["CODETRACER_AGENT_HARBOR_URL"] = url
+  if existsEnv("AGENT_HARBOR_M7_API_KEY"):
+    s.launch.env["CODETRACER_AGENT_HARBOR_API_KEY"] = getEnv("AGENT_HARBOR_M7_API_KEY")
+  let agent = getEnv("AGENT_HARBOR_M7_MOCK_AGENT_BINARY")
+  if agent.len == 0:
+    raise newException(IOError, "agent-harbor: prerequisite missing: " &
+      "AGENT_HARBOR_M7_MOCK_AGENT_BINARY (Agent Harbor's mock agent)")
+  s.launch.env["CODETRACER_AGENT_HARBOR_AGENT"] = agent
+  # `--disable-follower`: the mock agent runs each command as itself. Without
+  # it, it asks for `ah show-sandbox-execution "<cmd>"` instead, which shows a
+  # sandboxed command's output to a terminal client and runs nothing on a
+  # server: every command then ends at exit -1 with no output (Agent Harbor's
+  # own REST harness passes it for the same reason, `rest_task_harness.rs`).
+  let script = repo() / "src/tests/scenarios/fixtures/agent-harbor" / (scenario & ".yaml")
+  if not fileExists(script):
+    raise newException(IOError, "agent-harbor: no mock agent scenario " & script)
+  s.launch.env["CODETRACER_AGENT_HARBOR_AGENT_ARGS"] = $(%*["--disable-follower", "--scenario",
+    script])
 
 proc plantEditLayout*(s: StageState; fixture: string) =
   ## A saved edit-mode layout a previous session left behind
@@ -1414,7 +1456,7 @@ proc runStage*(s: StageState; use: string; args: JsonNode) =
   of "git-workspace":
     s.gitWorkspace()
   of "agent-harbor":
-    s.agentHarbor()
+    s.agentHarbor(argStr(args, "scenario", "worktree-feature-evidence"))
   of "open-welcome":
     s.launch.recording = ""
     s.launch.project = ""

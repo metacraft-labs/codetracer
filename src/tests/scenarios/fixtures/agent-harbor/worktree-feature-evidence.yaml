@@ -1,0 +1,105 @@
+# The Agent Harbor scenario the `agentic-coding/worktree-*` scenarios run
+# their worktree session with (the `agent-harbor` stage points the mock agent
+# at it). Agent Harbor's mock agent mocks only the LLM: each runCmd below is
+# executed for real in the session's git worktree, and its output is what
+# Harbor keeps in the session's history.
+#
+# It is agent-harbor's `tests/scenarios/e2e/codetracer_m7_worktree_feature.yaml`
+# with one difference: the evidence step runs the REAL `ct agent evidence`
+# (`$CODETRACER_CT_BIN`, else `ct` on PATH) on a review dataset of the change,
+# so its stdout carries the notification CodeTracer reads from the history
+# (codetracer-pm DeepReview/Agentic-Coding-Integration.md §6.8). The M7
+# scenario's `ct` is a stand-in that prints a line of text and no
+# notification.
+name: CodeTracer worktree feature with evidence
+description: >
+  Edit src/feature.nim in the agent's git worktree, run its test, and hand
+  the change to CodeTracer with `ct agent evidence`.
+tags: [e2e, rest, codetracer, git_worktree, gui, deepreview]
+acp:
+  capabilities:
+    loadSession: true
+
+timeline:
+  - userInputs:
+      - relativeTime: 0
+        input: 'Make featureValue return 42 and record the evidence'
+        expectedResponse:
+          sessionId: 'codetracer-worktree-feature-evidence'
+          stopReason: end_turn
+
+  - sessionStart:
+      sessionId: 'codetracer-worktree-feature-evidence'
+
+  - agentToolUse:
+      toolName: runCmd
+      toolCallId: codetracer-feature-edit-and-test
+      args:
+        command: |
+          set -eu
+          cat > src/feature.nim <<'NIM'
+          proc featureValue*(): int =
+            42
+          NIM
+          cat > feature_test.nim <<'NIM'
+          import src/feature
+
+          doAssert featureValue() == 42
+          NIM
+          nim c -r --hints:off feature_test.nim
+      toolExecution:
+        startTimeMs: 0
+        events:
+          - type: completion
+            timeMs: 100
+            exitCode: 0
+      result: 'Updated src/feature.nim; feature_test.nim passed.'
+      status: ok
+
+  - agentToolUse:
+      toolName: runCmd
+      toolCallId: codetracer-ct-agent-evidence
+      args:
+        command: |
+          set -eu
+          mkdir -p .ct/review
+          cat > .ct/review/review.json <<'JSON'
+          {
+            "commitSha": "0000000000000000000000000000000000000000",
+            "baseCommitSha": "1111111111111111111111111111111111111111",
+            "collectionTimeMs": 0,
+            "recordingCount": 1,
+            "sessionTitle": "featureValue returns 42",
+            "traceContexts": [{"recordingId": "feature-test", "label": "feature_test"}],
+            "files": [{
+              "path": "src/feature.nim", "contentHash": "", "sourceContent": "",
+              "diff": {"status": "M", "linesAdded": 1, "linesRemoved": 1,
+                "hunks": [{"oldStart": 1, "oldCount": 2, "newStart": 1, "newCount": 2,
+                  "lines": [
+                    {"type": "context", "content": "proc featureValue*(): int =", "oldLine": 1, "newLine": 1},
+                    {"type": "removed", "content": "-  1", "oldLine": 2, "newLine": 0},
+                    {"type": "added", "content": "+  42", "oldLine": 0, "newLine": 2}]}]},
+              "symbols": [], "coverage": [], "functions": [], "loops": [], "flow": [],
+              "flags": {"hasSymbols": false, "hasCoverage": false, "hasFlow": false,
+                        "isUnreachable": false, "isPartial": false}}],
+            "callTrace": {"nodes": []}
+          }
+          JSON
+          "${CODETRACER_CT_BIN:-ct}" agent evidence .ct/review/review.json \
+            --session codetracer-worktree-feature-evidence --workspace "$PWD" || true
+      toolExecution:
+        startTimeMs: 120
+        events:
+          - type: completion
+            timeMs: 180
+            exitCode: 0
+      result: 'ct agent evidence ran for the session.'
+      status: ok
+
+  - llmResponse:
+      - assistant:
+          - relativeTime: 200
+            content: 'featureValue now returns 42, its test passes, and the change is handed to CodeTracer for review.'
+
+expect:
+  stopReason: end_turn

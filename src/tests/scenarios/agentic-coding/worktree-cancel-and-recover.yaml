@@ -7,19 +7,24 @@ summary: >-
 
 stage:
   - use: agent-harbor
+    with: { scenario: worktree-long-turn }
   - use: git-workspace
   - use: open-project
     with: { folder: $project }
 
 steps:
-  - click: { at: 'pane-tab[label="AGENT ACTIVITY"]' }
+  # The omnibox's `/ai` asks the agent (Agentic-Coding-Integration.md §8.1),
+  # and with an Agent Harbor server configured it starts a worktree session
+  # (§6.8). Edit mode's layout has no Agent Activity pane until it opens one.
+  - wait: { until: editor.loaded, timeout: 60s }
+  - chord: Ctrl+p
+  - wait: { until: { at: omnibox, focused: true }, timeout: 10s }
+  - type: "/ai Make featureValue return 42"
+  - key: Enter
   - wait: { until: { at: agent-activity/agent-prompt, present: true }, timeout: 60s }
-  - click: { at: agent-activity/agent-prompt }
-  - type: "Make featureValue return 42"
-  - click: { at: 'agent-activity/panel-button[label="Send"]' }
   - wait: { until: { at: 'agent-activity/panel-button[label="Stop"]', present: true }, timeout: 120s }
   - click: { at: 'agent-activity/panel-button[label="Stop"]' }
-  - wait: { until: { at: agent-activity, conversation: { matches: "(?i)cancel" } }, timeout: 60s }
+  - wait: { until: { at: agent-activity, conversation: { matches: "[Cc]ancel" } }, timeout: 60s }
   - click: { at: agent-activity/agent-prompt }
   - type: "Make featureValue return 42"
   - click: { at: 'agent-activity/panel-button[label="Send"]' }
