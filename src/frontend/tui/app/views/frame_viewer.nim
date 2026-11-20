@@ -107,10 +107,10 @@ type
       ## install-shaped remedy, which is why the binding maps it to `pdsAbsent`
       ## and the other three to `pdsUnsupported`.
     fdgNoDecoder = "no-decoder"
-      ## PLAT-14 BOUND 3, ARRIVING AT A USER. The frame came back as an ENCODED
-      ## image and the resolved tier is a CELL tier, which consumes a raster —
-      ## and this build has no PNG or JPEG decoder. Tier 0 is unaffected:
-      ## Kitty's `f=100` and iTerm2's `File=inline` decode in the terminal.
+      ## PLAT-14 BOUND 3, NARROWED. The frame came back as an ENCODED image this
+      ## build cannot decode — a JPEG (there is no JPEG decoder), or a PNG that
+      ## does not decode — and the resolved tier is a CELL tier, which consumes
+      ## a raster. A PNG frame is decoded (`common/png.decodePng`) and drawn.
     fdgProtocolNotPainted = "protocol-not-painted"
       ## THE RESOLVED TIER IS 0, AND THIS PANE PAINTS CELLS. See the module
       ## header. A tier-0 frame is bytes for the terminal to decode — Kitty's
@@ -348,9 +348,10 @@ func isEmpty*(model: FrameViewerModel): bool =
 func transmitsProtocol*(model: FrameViewerModel): bool =
   ## PLAT-59: whether a tier-0 frame is transmitted for this pane: the Video
   ## Player pane, holding the frame's pixels, on a terminal whose protocol
-  ## this build emits (Kitty's `f=32` raw pixels, iTerm2's inline PNG).
+  ## this build emits (Kitty's and iTerm2's PNG, Sixel's pixels).
   model.pane and model.hasRaster and
-    model.capability.protocol in {ImageProtocol.ipKitty, ImageProtocol.ipITerm2}
+    model.capability.protocol in {ImageProtocol.ipKitty, ImageProtocol.ipITerm2,
+                                  ImageProtocol.ipSixel}
 
 func drawableTierFor*(model: FrameViewerModel): ImageTier =
   ## The tier the PICTURE is drawn at, which is not always the tier the
@@ -419,10 +420,9 @@ func remedyFor*(gap: FrameDrawGap): string =
     # cannot paint — a remedy naming a route that answers a different refusal is
     # the instruction that does not help, and it is the neighbour a repair
     # leaves behind (Verification-Harness-Traps §15).
-    "this build has no PNG or JPEG decoder, so a cell tier cannot draw an " &
-    "encoded frame, and no --image-tier flag changes that: a Kitty or iTerm2 " &
-    "terminal decodes tier 0 in the TERMINAL, which is the route out, and " &
-    "this pane does not transmit one yet (see protocol-not-painted)"
+    "this frame is not a PNG this build can decode (a JPEG, or a damaged " &
+    "file), so a cell tier cannot draw it, and no --image-tier flag changes " &
+    "that: an iTerm2 terminal decodes a JPEG in the TERMINAL"
   of fdgProtocolNotPainted:
     # THE ACTION FIRST, unlike the two remedies above, and for a measured
     # reason: this is the only remedy whose actionable half is a FLAG rather

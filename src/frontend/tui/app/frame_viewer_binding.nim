@@ -67,16 +67,14 @@
 ##     `frameHeight`, `drawCalls`, `selectedDrawCall`, `visualReplayAvailable`
 ##     and `frameImageSrc`.
 ##
-##     **`frameImageSrc` IS A STRING AND NOT PIXELS, and that is a finding
-##     rather than a shortcut.** `VisualReplayFrame` carries `imageSrc` — a URL
-##     or a `data:` URL — and `src/frontend/viewmodel/` has no raster type at
-##     all. A cell tier consumes a RASTER (`terminal_graphics/raster.nim`), and
-##     this build has no PNG or JPEG decoder, so on a terminal with no graphics
-##     protocol the honest answer is PLAT-14's bound 3 arriving at a user:
-##     `fdgNoDecoder`, through `pdDependencyMissing`, with the rest of the pane
-##     still drawn. `rasterFrame` is the door a raster arrives through when one
-##     does; nothing in this repository walks through it today and the
-##     milestone says so rather than shipping a decoder nobody wrote.
+##     **`frameImageSrc` IS A STRING AND NOT PIXELS.** `VisualReplayFrame`
+##     carries `imageSrc` — a URL or a `data:` URL — and
+##     `src/frontend/viewmodel/` has no raster type at all. A cell tier
+##     consumes a RASTER (`terminal_graphics/raster.nim`), so a
+##     `data:image/png;base64,` frame is DECODED here (`common/png.decodePng`,
+##     since 2026-11-20) and drawn. A frame this build cannot decode — a
+##     JPEG, or a damaged PNG — is still `fdgNoDecoder`, through
+##     `pdDependencyMissing`, with the rest of the pane drawn.
 ##   * `PixelHistoryVM` — `entries`, `selectedEntry`, `selectedPixel`. §6.1's
 ##     list, with pass/fail for depth, stencil, blend and cull.
 ##   * an `ImageCapability` — resolved by the HOST, because the probe is a
@@ -94,9 +92,11 @@
 ## HTTP-backed client; tests and StoryBook pass a fake client at this same
 ## boundary"), not a substitute for one.
 
-import std/options
+import std/[base64, options, strutils]
 
 import codetracer_embed
+
+import ../../../common/png
 
 import ./views/frame_viewer
 import ./views/visual_replay_panes
@@ -226,6 +226,28 @@ proc nameDrawCalls*(rows: var seq[PixelHistoryRow];
         row.name = call.name
         break
 
+const PngDataUrlPrefix = "data:image/png;base64,"
+
+var lastSrc {.threadvar.}: string
+var lastDecoded {.threadvar.}: tuple[ok: bool, raster: RgbaImage]
+
+proc decodedFrame*(src: string): tuple[ok: bool, raster: RgbaImage] =
+  ## A `data:image/png;base64,` frame's pixels; `ok` false for any other
+  ## `src` (a JPEG, a URL) or a PNG that does not decode. The last answer is
+  ## kept, because the model is rebuilt on every refresh and a frame is
+  ## decoded once.
+  if src == lastSrc:
+    return lastDecoded
+  lastSrc = src
+  lastDecoded = (false, RgbaImage())
+  if src.startsWith(PngDataUrlPrefix):
+    try:
+      let png = decodePng(base64.decode(src[PngDataUrlPrefix.len .. ^1]))
+      lastDecoded = (true, initRgbaImage(png.width, png.height, png.rgba))
+    except CatchableError:
+      discard
+  lastDecoded
+
 proc frameViewerModelFor*(frames: FrameViewerVM;
                           history: PixelHistoryVM;
                           capability: ImageCapability;
@@ -271,6 +293,11 @@ proc frameViewerModelFor*(frames: FrameViewerVM;
       else: -1
     if not hasRaster and encodedBytes == 0 and
        frames.frameImageSrc.val.len > 0:
+      # A PNG frame is decoded and drawn (PLAT-14 bound 3, closed).
+      let (decoded, raster) = decodedFrame(frames.frameImageSrc.val)
+      if decoded:
+        result.raster = raster
+        result.hasRaster = true
       # THE ENCODED FRAME'S LENGTH, IN BYTES, from the only thing the ViewModel
       # layer has: a `src` string. It is a LENGTH and not the bytes, and the
       # distinction is the one `emit.nim`'s header insists on — a tier-0

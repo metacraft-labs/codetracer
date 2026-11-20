@@ -28,6 +28,10 @@
 ##   * **iTerm2**: the PNG inline at the reserved cells' first cell, sized in
 ##     cells. iTerm2 has no placement registry, so a changed frame or
 ##     rectangle re-sends the image; an unchanged one sends nothing;
+##   * **Sixel**: the frame's pixels resampled to the reserved cells at the
+##     terminal's cell size (`CSI 16 t`, else 10x20), through
+##     `emit.emitSixelImage` (`nim_termctl/sixel`). Re-sent, like iTerm2's,
+##     for a changed frame or rectangle;
 ##   * **over SSH** a frame whose emission is larger than the link budget
 ##     (`ImageCapability.linkBudget`, in emitted bytes) is NOT sent — unless
 ##     `--image-tier=protocol` pinned tier 0, which `demoteForPayload` honours:
@@ -60,6 +64,11 @@ type
     placed*: CellArea
       ## Where it is placed; empty when it is not.
     protocol*: ImageProtocol
+    repaintNeeded*: bool
+      ## An iTerm2 or Sixel picture was taken down or moved. Those protocols
+      ## draw INTO the cells with no id to delete by, so the caller repaints
+      ## every cell this frame (`FrameEmitter.reset`) — a terminal shows the
+      ## old pixels until the cells under them are written again.
     refusedBytes*: int
       ## The emitted size of the last frame the link budget refused, 0 when
       ## the last frame was sent (or nothing was asked). The caller demotes the
@@ -82,12 +91,15 @@ proc frameImageBytes*(state: var FrameImageState; rect: CellArea;
   let cap = model.capability
   let protocol = cap.protocol
   state.refusedBytes = 0
+  state.repaintNeeded = false
   if rect.isEmptyArea or not model.hasRaster or
-     protocol notin {ipKitty, ipITerm2}:
+     protocol notin {ipKitty, ipITerm2, ipSixel}:
     if not state.placed.isEmptyArea and state.protocol == ipKitty:
       result = kittyDelete(FrameImageId, quiet = true)
       if cap.wrapForMultiplexer:
         result = tmuxPassthroughEach(result)
+    elif not state.placed.isEmptyArea:
+      state.repaintNeeded = true
     state.placed = CellArea()
     if protocol != ipKitty:
       state.key = ""
@@ -97,11 +109,18 @@ proc frameImageBytes*(state: var FrameImageState; rect: CellArea;
     return
   let uploaded = protocol == ipKitty and state.protocol == ipKitty and
                  model.rasterKey == state.key
-  let payload = if uploaded: "" else: framePayload(model)
-  let emission = emitProtocolImage(
-    protocol, payload.toOpenArrayByte(0, payload.len - 1), FrameImageId,
-    FramePlacementId, rect.width, rect.height, alreadyUploaded = uploaded,
-    wrapForTmux = cap.wrapForMultiplexer, placement = ppReservedCells)
+  let emission =
+    if protocol == ipSixel:
+      # Sixel carries PIXELS, sized here to the reserved cells.
+      let (cw, ch) = cap.sixelCellPx
+      emitSixelImage(model.raster, rect.width, rect.height, cw, ch,
+                     wrapForTmux = cap.wrapForMultiplexer)
+    else:
+      let payload = if uploaded: "" else: framePayload(model)
+      emitProtocolImage(
+        protocol, payload.toOpenArrayByte(0, payload.len - 1), FrameImageId,
+        FramePlacementId, rect.width, rect.height, alreadyUploaded = uploaded,
+        wrapForTmux = cap.wrapForMultiplexer, placement = ppReservedCells)
   if demoteForPayload(cap, emission.emittedBytes).tier != itProtocol:
     # §3: the link is constrained and this frame costs more than it allows —
     # asked through `demoteForPayload` itself, so the decision here and the
@@ -117,6 +136,9 @@ proc frameImageBytes*(state: var FrameImageState; rect: CellArea;
     body.add kittyDelete(FrameImageId, quiet = true)
     if cap.wrapForMultiplexer:
       body = tmuxPassthroughEach(body)
+  if state.protocol in {ipITerm2, ipSixel} and not state.placed.isEmptyArea and
+     state.placed != rect:
+    state.repaintNeeded = true
   body.add cursorTo(rect)
   body.add emission.bytes
   state.key = model.rasterKey

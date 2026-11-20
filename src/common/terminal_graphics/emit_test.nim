@@ -42,7 +42,7 @@ template ckEq(a, b: untyped) =
   inc countedAssertions
   check a == b
 
-const ExpectedAssertions = 89
+const ExpectedAssertions = 104
   ## Written from a run. See the final case.
 
 const
@@ -347,12 +347,12 @@ suite "PLAT-14 §3: the scrub does not re-transmit":
     ck not bare.wrappedForMultiplexer
     ck bare.bytes != wrapped.bytes
 
-  test "the two protocols this build cannot emit RAISE rather than emitting":
+  test "Sixel is sent from pixels, so an encoded payload is refused by name":
     var sixel = false
     try:
       discard emitProtocolImage(ipSixel, Abc, 1, 1, 0, 0, false)
     except EmitError as e:
-      sixel = e.msg.contains("quantiser")
+      sixel = e.msg.contains("emitSixelImage")
     ck sixel
     var none = false
     try:
@@ -360,6 +360,43 @@ suite "PLAT-14 §3: the scrub does not re-transmit":
     except EmitError as e:
       none = e.msg.contains("emitCellImage")
     ck none
+
+suite "tier 0 on a Sixel terminal":
+
+  test "the frame is resampled to the cells and sent as one Sixel escape":
+    # 2x2 bands, red over blue, into 3x2 cells of 10x20 px: the picture the
+    # terminal is sent is 30x40 pixels, and both colours are registers.
+    let e = emitSixelImage(bandsImage(Red, Blue), 3, 2, 10, 20)
+    ckEq e.protocol, ipSixel
+    ckEq e.tier, itProtocol
+    ck not e.placementReused
+    ck e.bytes.startsWith("\x1bPq\"1;1;30;40")
+    ck e.bytes.endsWith("\x1b\\")
+    ck e.bytes.contains("#0;2;100;0;0")
+    ck e.bytes.contains("#1;2;0;0;100")
+    ck containsGraphicsEscape(e.bytes)
+    # The emission is measured like any other: the link budget applies.
+    ckEq e.emittedBytes, e.bytes.len
+    # Under tmux the whole escape goes through the passthrough.
+    let wrapped = emitSixelImage(bandsImage(Red, Blue), 3, 2, 10, 20,
+                                 wrapForTmux = true)
+    ck wrapped.wrappedForMultiplexer
+    ckEq wrapped.bytes, tmuxPassthrough(e.bytes)
+
+  test "resampling averages down and repeats up":
+    let up = bandsImage(Red, Blue).scaledTo(4, 6)
+    ckEq up.pixelAt(3, 0), Red
+    ckEq up.pixelAt(0, 5), Blue
+    let down = bandsImage(Red, Blue).scaledTo(1, 1)
+    ckEq down.pixelAt(0, 0), Rgb(r: 128, g: 0, b: 128)
+
+  test "an empty cell extent is refused rather than sent":
+    var refused = false
+    try:
+      discard emitSixelImage(bandsImage(Red, Blue), 0, 2, 10, 20)
+    except EmitError as e:
+      refused = e.msg.contains("positive cell extent")
+    ck refused
 
 suite "PLAT-14 §3: the link budget is a bound on EMITTED BYTES":
 

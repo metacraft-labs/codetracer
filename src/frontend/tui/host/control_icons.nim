@@ -8,8 +8,9 @@
 ## (`viewmodel/views/debug_control_marks.ControlMarks`). Here those SAME path
 ## strings are rasterised (`common/terminal_graphics/path_raster`) and sent
 ## to a terminal that was measured to draw pictures — the kitty graphics
-## protocol, the one tier-0 protocol this build can emit (sixel has no
-## encoder: `image_capability.prSixelHasNoEncoder`). The top bar reserves the
+## protocol, the one protocol whose support a terminal ANSWERS (its query
+## comes back `OK`), which is what the controls are gated on. The top bar
+## reserves the
 ## cells (`views/top_bar`: two per control, blank); this module places a
 ## picture over them.
 ##

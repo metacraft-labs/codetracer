@@ -451,6 +451,11 @@ proc paint(driver: TerminalDriver; rt: TuiRuntime) =
     if rt.app.frameViewer.transmitsProtocol: rt.videoPlayerScreen().screen.protocolRect
     else: CellArea()
   epilogue.add frameImageBytes(gFrameImage, frameRect, rt.app.frameViewer)
+  if gFrameImage.repaintNeeded:
+    # An iTerm2 or Sixel frame went away or moved: its pixels stay on the
+    # terminal until the cells under them are written, so this frame writes
+    # every cell, before the epilogue places the frame again.
+    driver.emitter.reset()
   if gFrameImage.refusedBytes > 0:
     # §3: on a constrained link this frame costs more emitted bytes than the
     # budget allows. Nothing was sent; the capability is demoted (the same

@@ -67,7 +67,7 @@ import ./fixtures/visual_fixture
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 125
+const ExpectedAssertions = 131
 
 var countedAssertions = 0
 
@@ -456,6 +456,21 @@ suite "PLAT-59: the Visual Replay panes on the terminal":
       ck fresh.refusedBytes > 64
       ck demoteForPayload(ssh.capability, fresh.refusedBytes).tier ==
          itHalfBlock
+      # SIXEL: the frame's pixels, resampled to the reserved cells at the
+      # default 10x20 px cell, in one Sixel escape after the cursor move.
+      var sixel = kitty
+      sixel.capability.protocol = ipSixel
+      ck sixel.transmitsProtocol
+      var sixelState = FrameImageState()
+      let six = frameImageBytes(sixelState, rect, sixel)
+      ck ("\x1bPq\"1;1;" & $(rect.width * 10) & ";" & $(rect.height * 20)) in six
+      ck six.startsWith("\x1b7\x1b[" & $(rect.row + 1) & ";" &
+                        $(rect.col + 1) & "H\x1bPq")
+      ck frameImageBytes(sixelState, rect, sixel) == ""
+      # Taken down, a Sixel frame has no id to delete: the cells under it are
+      # repainted instead.
+      ck frameImageBytes(sixelState, CellArea(), sixel) == ""
+      ck sixelState.repaintNeeded
       rt.app.frameViewer = saved
 
     test "the vocabulary's Video Player view says the shared words":

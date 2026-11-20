@@ -214,3 +214,186 @@ suite "src/common/png.nim — the capture's container":
   test "a zero extent is refused":
     expect AssertionDefect:
       discard encodePng(0, 4, @[])
+
+# ---------------------------------------------------------------------------
+# The decoder, against files an INDEPENDENT encoder wrote
+# ---------------------------------------------------------------------------
+
+proc encodeWithPython(ctype, depth, interlace, level, filter: int;
+                      width, height: int): seq[uint8] =
+  ## A PNG written by Python's `zlib` and `struct` — not by this module — for
+  ## the pixel formula `formula` below, in the requested colour type, bit
+  ## depth, interlace method, zlib level (0 = stored blocks, 9 = dynamic
+  ## Huffman) and scanline filter (0-4, applied to every row).
+  let script = """
+import struct, sys, zlib
+ctype, depth, inter, level, filt, w, h = map(int, sys.argv[1:8])
+maxv = (1 << depth) - 1
+def px(x, y):
+    # The formula, in 8-bit terms: r, g, b, a.
+    return ((x * 37 + y * 11) % 256, (x * 5 + y * 53) % 256, (x * y * 7) % 256, (255 - x * 9) % 256)
+def scale(v): return v * maxv // 255
+palette = []
+def pal_index(p):
+    key = (p[0] >> 6, p[1] >> 6)  # 16 entries, folded to the depth's range
+    return (key[0] * 4 + key[1]) % (1 << depth)
+def sample_row(y, xs):
+    bits = []
+    for x in xs:
+        r, g, b, a = px(x, y)
+        if ctype == 0: vals = [scale(r)]
+        elif ctype == 2: vals = [scale(r), scale(g), scale(b)]
+        elif ctype == 3: vals = [pal_index(px(x, y))]
+        elif ctype == 4: vals = [scale(r), scale(a)]
+        else: vals = [scale(r), scale(g), scale(b), scale(a)]
+        bits += vals
+    if depth == 16:
+        return b"".join(struct.pack(">H", v) for v in bits)
+    if depth == 8:
+        return bytes(bits)
+    out, acc, n = bytearray(), 0, 0
+    for v in bits:
+        acc = (acc << depth) | v; n += depth
+        if n == 8: out.append(acc); acc, n = 0, 0
+    if n: out.append(acc << (8 - n))
+    return bytes(out)
+channels = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}[ctype]
+bpp = max(1, channels * depth // 8)
+def paeth(a, b, c):
+    p = a + b - c; pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+    return a if pa <= pb and pa <= pc else (b if pb <= pc else c)
+def filtered(lines):
+    out, prev = b"", None
+    for line in lines:
+        prev = prev if prev is not None else bytes(len(line))
+        f = bytearray()
+        for i in range(len(line)):
+            a = line[i - bpp] if i >= bpp else 0
+            b = prev[i]; c = prev[i - bpp] if i >= bpp else 0
+            p = [0, a, b, (a + b) // 2, paeth(a, b, c)][filt]
+            f.append((line[i] - p) & 0xFF)
+        out += bytes([filt]) + bytes(f); prev = line
+    return out
+raw = b""
+if inter == 0:
+    raw = filtered([sample_row(y, range(w)) for y in range(h)])
+else:
+    for x0, y0, dx, dy in [(0,0,8,8),(4,0,8,8),(0,4,4,8),(2,0,4,4),(0,2,2,4),(1,0,2,2),(0,1,1,2)]:
+        xs = list(range(x0, w, dx)); ys = list(range(y0, h, dy))
+        if xs and ys: raw += filtered([sample_row(y, xs) for y in ys])
+def chunk(t, d): return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xffffffff)
+out = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, depth, ctype, 0, 0, inter))
+if ctype == 3:
+    pal = bytearray()
+    for i in range(16): pal += bytes([(i // 4) * 85, (i % 4) * 85, 7])
+    out += chunk(b"PLTE", bytes(pal))
+out += chunk(b"tEXt", b"Comment\x00an ancillary chunk the decoder skips")
+data = zlib.compress(raw, level)
+out += chunk(b"IDAT", data[:len(data) // 2]) + chunk(b"IDAT", data[len(data) // 2:])
+out += chunk(b"IEND", b"")
+sys.stdout.write(out.hex())
+"""
+  let scriptPath = getTempDir() / "codetracer-png-encode.py"
+  writeFile(scriptPath, script)
+  let (output, rc) = execCmdEx(Python & " " & quoteShell(scriptPath) & " " &
+    $ctype & " " & $depth & " " & $interlace & " " & $level & " " & $filter &
+    " " & $width & " " & $height)
+  removeFile(scriptPath)
+  doAssert rc == 0, output
+  let hex = output.strip()
+  result = newSeq[uint8](hex.len div 2)
+  for i in 0 ..< result.len:
+    result[i] = uint8(parseHexInt(hex[i * 2 .. i * 2 + 1]))
+
+func expected(ctype, depth, x, y: int): array[4, int] =
+  ## The formula the script draws, through the same scaling, evaluated here.
+  let r = (x * 37 + y * 11) mod 256
+  let g = (x * 5 + y * 53) mod 256
+  let b = (x * y * 7) mod 256
+  let a = (255 - x * 9 + 256 * 4) mod 256
+  let maxv = (1 shl depth) - 1
+  proc back(v: int): int =
+    let s = v * maxv div 255
+    if depth == 16: s shr 8
+    elif depth == 8: s
+    else: s * 255 div maxv
+  case ctype
+  of 0: [back(r), back(r), back(r), 255]
+  of 2: [back(r), back(g), back(b), 255]
+  of 3:
+    let i = ((r shr 6) * 4 + (g shr 6)) mod (1 shl depth)
+    [(i div 4) * 85, (i mod 4) * 85, 7, 255]
+  of 4: [back(r), back(r), back(r), back(a)]
+  else: [back(r), back(g), back(b), back(a)]
+
+suite "src/common/png.nim — the decoder":
+
+  test "every colour type and bit depth an independent encoder writes":
+    if not pythonAvailable():
+      skip()
+    else:
+      var cases = 0
+      for (ctype, depth) in [(0, 1), (0, 2), (0, 4), (0, 8), (0, 16),
+                             (2, 8), (2, 16), (3, 1), (3, 2), (3, 4), (3, 8),
+                             (4, 8), (4, 16), (6, 8), (6, 16)]:
+        let w = 13
+        let h = 7
+        let d = decodePng(encodeWithPython(ctype, depth, 0, 9, 1, w, h))
+        check d.width == w and d.height == h
+        var wrong = 0
+        for y in 0 ..< h:
+          for x in 0 ..< w:
+            let want = expected(ctype, depth, x, y)
+            for k in 0 .. 3:
+              if int(d.rgba[(y * w + x) * 4 + k]) != want[k]: inc wrong
+        checkpoint("type " & $ctype & " depth " & $depth & ": " & $wrong & " wrong")
+        check wrong == 0
+        inc cases
+      check cases == 15
+
+  test "the five filters, stored and dynamic-Huffman streams, and Adam7":
+    if not pythonAvailable():
+      skip()
+    else:
+      var cases = 0
+      for filter in 0 .. 4:
+        for level in [0, 9]:
+          for interlace in [0, 1]:
+            let w = 19
+            let h = 11
+            let d = decodePng(encodeWithPython(6, 8, interlace, level, filter,
+                                               w, h))
+            var wrong = 0
+            for y in 0 ..< h:
+              for x in 0 ..< w:
+                let want = expected(6, 8, x, y)
+                for k in 0 .. 3:
+                  if int(d.rgba[(y * w + x) * 4 + k]) != want[k]: inc wrong
+            checkpoint("filter " & $filter & " level " & $level &
+                       " interlace " & $interlace & ": " & $wrong & " wrong")
+            check wrong == 0
+            inc cases
+      check cases == 20
+
+  test "this module's own encoder round-trips through the decoder":
+    var rgba = newSeq[uint8](40 * 30 * 4)
+    for i in 0 ..< rgba.len: rgba[i] = uint8((i * 31) mod 256)
+    let d = decodePng(encodePng(40, 30, rgba))
+    check d.width == 40 and d.height == 30
+    check d.rgba == rgba
+
+  test "a damaged file is refused by name, never drawn":
+    let good = encodePng(4, 4, newSeq[uint8](64))
+    var refusals: seq[string] = @[]
+    for (label, bytes) in [
+        ("signature", "x" & good[1 .. ^1]),
+        ("crc", good[0 ..< 30] & char(ord(good[30]) xor 1) & good[31 .. ^1]),
+        ("truncated", good[0 ..< good.len - 20])]:
+      try:
+        discard decodePng(bytes)
+      except PngDecodeError as e:
+        refusals.add label & ": " & e.msg
+    checkpoint($refusals)
+    check refusals.len == 3
+    check refusals[0].contains("signature")
+    check refusals[1].contains("CRC")

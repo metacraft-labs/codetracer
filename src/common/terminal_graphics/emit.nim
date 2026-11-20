@@ -54,6 +54,11 @@ import ./tiers
 import ./cell_render
 import ./raster
 
+import nim_termctl/sixel
+  # The Sixel encoder (`encodeSixel`): pure Nim, no I/O — unlike
+  # `nim_termctl/image`, which this module deliberately does not import (see
+  # the header).
+
 type
   ColourWriting* = enum
     ## How much colour the emission may spend. Mapped from
@@ -375,9 +380,8 @@ func emitProtocolImage*(protocol: ImageProtocol; payload: openArray[byte];
            else: iterm2Inline(payload)
   of ipSixel:
     raise newException(EmitError,
-      "sixel emission needs a quantiser and a dither this build does not " &
-      "carry (nim_termctl.emitSixel raises ImageNotImplementedDefer). " &
-      "Detection never selects it — see app/theme/image_capability.nim")
+      "a Sixel emission carries PIXELS, and this payload is an encoded " &
+      "image: decode it (common/png.decodePng) and call emitSixelImage")
   of ipNone:
     raise newException(EmitError,
       "emitProtocolImage called with ipNone; a cell tier is emitCellImage")
@@ -385,6 +389,60 @@ func emitProtocolImage*(protocol: ImageProtocol; payload: openArray[byte];
     body = if reserved: tmuxPassthroughEach(body) else: tmuxPassthrough(body)
   EmittedImage(bytes: body, tier: itProtocol, protocol: protocol,
                placementReused: reused, imageId: imageId,
+               wrappedForMultiplexer: wrapForTmux)
+
+const
+  DefaultSixelCellPx* = (10, 20)
+    ## The cell, in device pixels, a Sixel picture is sized against when the
+    ## terminal did not report its own (`CSI 16 t`). Sixel draws at the
+    ## terminal's pixel resolution — unlike Kitty's `c=`/`r=` and iTerm2's
+    ## cell sizes, which the terminal scales into — so the picture's pixel
+    ## extent has to be chosen here, and 10x20 is the commonest VT340-style
+    ## cell. A terminal that reports its cell is drawn at its real size.
+
+func scaledTo*(img: RgbaImage; width, height: int): RgbaImage =
+  ## `img` resampled to `width` x `height`: each target pixel the box mean of
+  ## the source rectangle it covers (at least one source pixel), so a
+  ## down-scale averages and an up-scale repeats.
+  var px = newSeq[byte](width * height * 4)
+  for y in 0 ..< height:
+    let y0 = y * img.height div height
+    let y1 = max(y0 + 1, (y + 1) * img.height div height)
+    for x in 0 ..< width:
+      let x0 = x * img.width div width
+      let x1 = max(x0 + 1, (x + 1) * img.width div width)
+      let c = img.boxSample(x0, y0, x1, y1)
+      let i = (y * width + x) * 4
+      px[i] = c.r
+      px[i + 1] = c.g
+      px[i + 2] = c.b
+      px[i + 3] = 255
+  initRgbaImage(width, height, px)
+
+func emitSixelImage*(img: RgbaImage; cols, rows: int;
+                     cellWidthPx, cellHeightPx: int;
+                     wrapForTmux = false): EmittedImage =
+  ## §2.1's tier 0 on a SIXEL terminal: `img` resampled to fill `cols` x
+  ## `rows` cells of `cellWidthPx` x `cellHeightPx` pixels, encoded by
+  ## `nim_termctl/sixel.encodeSixel` (every colour kept up to 256; a
+  ## median-cut palette, Floyd–Steinberg dithered, above that).
+  ##
+  ## Sixel has no placement registry: every draw re-transmits, as iTerm2's
+  ## does, and `placementReused` is false for every Sixel emission.
+  if cols <= 0 or rows <= 0 or cellWidthPx <= 0 or cellHeightPx <= 0:
+    raise newException(EmitError, "a Sixel emission needs a positive cell " &
+      "extent and cell size, got " & $cols & "x" & $rows & " cells of " &
+      $cellWidthPx & "x" & $cellHeightPx & " px")
+  let scaled = img.scaledTo(cols * cellWidthPx, rows * cellHeightPx)
+  var body = ""
+  try:
+    body = encodeSixel(scaled.pixels, scaled.width, scaled.height)
+  except SixelError as e:
+    raise newException(EmitError, e.msg)
+  if wrapForTmux:
+    body = tmuxPassthrough(body)
+  EmittedImage(bytes: body, tier: itProtocol, protocol: ipSixel,
+               placementReused: false, imageId: 0,
                wrappedForMultiplexer: wrapForTmux)
 
 func emittedBytes*(e: EmittedImage): int {.inline.} = e.bytes.len

@@ -8579,11 +8579,11 @@
     "nim-termctl": {
       "flake": false,
       "locked": {
-        "lastModified": 1794784854,
-        "narHash": "sha256-846P4oB3gFRCLDjyhouF+W9fyAi52upBnVtuA3sunCs=",
+        "lastModified": 1795164495,
+        "narHash": "sha256-XtI6xvYMZ+QcNOCePMgSJSMBtEXZuXz/u61qJYApuQU=",
         "owner": "metacraft-labs",
         "repo": "nim-termctl",
-        "rev": "63560ed41ce0fea563431a44db9e9d852cd703dd",
+        "rev": "2283c056343aa2b2b2bdfc6fda3fe8eb11c17d3e",
         "type": "github"
       },
       "original": {

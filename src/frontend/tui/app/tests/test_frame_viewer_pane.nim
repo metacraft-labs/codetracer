@@ -53,7 +53,7 @@
 ## `programResult` goes to 1. Every assertion below goes through `ck`/`ckEq`,
 ## which are templates.
 
-import std/[options, strutils, unittest]
+import std/[base64, options, strutils, unittest]
 from std/unicode import runeLen, runeAtPos, toUTF8
 
 import isonim/core/async_compat
@@ -62,6 +62,7 @@ import isonim_tui
 import codetracer_embed
 
 import ../frame_viewer_binding
+import ../../../../common/png
 import ../theme/capabilities
 import ../theme/image_capability
 import ../views/shell
@@ -72,7 +73,7 @@ import ../views/scrubber_track
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 185
+const ExpectedAssertions = 194
 
 var countedAssertions = 0
 
@@ -127,7 +128,10 @@ type
     pixelRequests: seq[(int, int, int)]
     drawCallRequests: int
 
-proc recordingClient(): RecordedClient =
+proc recordingClient(imageSrc = "data:image/png;base64,AAAA"): RecordedClient =
+  ## `imageSrc` is every frame's `src`. The default is NOT a valid PNG (four
+  ## base64 characters), which is the damaged-file case; a test that wants a
+  ## frame the decoder can read passes a real one.
   result = RecordedClient(pixelRequests: @[], drawCallRequests: 0)
   let rec = result
   rec.client = VisualReplayClient(
@@ -137,18 +141,18 @@ proc recordingClient(): RecordedClient =
                                           height: FrameHeight,
                                           clearFrames: SceneBoundaries)),
     getFrameByGeidProc: proc(geid: uint64): VisualReplayFuture[VisualReplayFrame] =
-      newCompletedFuture(VisualReplayFrame(imageSrc: "data:image/png;base64,AAAA",
+      newCompletedFuture(VisualReplayFrame(imageSrc: imageSrc,
                                            geid: some(geid), frame: some(3),
                                            width: FrameWidth,
                                            height: FrameHeight)),
     getFrameByFrameProc: proc(frame: int): VisualReplayFuture[VisualReplayFrame] =
-      newCompletedFuture(VisualReplayFrame(imageSrc: "data:image/png;base64,AAAA",
+      newCompletedFuture(VisualReplayFrame(imageSrc: imageSrc,
                                            geid: some(uint64(900 + frame)),
                                            frame: some(frame),
                                            width: FrameWidth,
                                            height: FrameHeight)),
     getFrameByDrawProc: proc(draw: int): VisualReplayFuture[VisualReplayFrame] =
-      newCompletedFuture(VisualReplayFrame(imageSrc: "data:image/png;base64,AAAA",
+      newCompletedFuture(VisualReplayFrame(imageSrc: imageSrc,
                                            geid: some(uint64(800 + draw)),
                                            frame: some(3),
                                            width: FrameWidth,
@@ -321,7 +325,7 @@ suite "PLAT-15 §5: the coordinate pixel_history_vm receives is the magnifier's"
     except MagnifierError as e:
       raised = true
       ck e.msg.contains("no decoded frame")
-      ck e.msg.contains("PNG or JPEG decoder")
+      ck e.msg.contains("not a PNG this build can decode")
     ck raised
 
   test "the magnifier CURSOR is on the screen, in an attribute every rung has":
@@ -480,8 +484,8 @@ suite "PLAT-15 §2.6: a pane that cannot draw says why, and keeps drawing":
     ck not model.hasRaster
     ckEq model.gap, fdgNoDecoder
     ckEq frameDependencyState(model.gap), pdsUnsupported
-    ck model.degradedMessage.contains("no PNG or JPEG decoder")
-    ck model.degradedMessage.contains("Kitty or iTerm2")
+    ck model.degradedMessage.contains("not a PNG this build can decode")
+    ck model.degradedMessage.contains("iTerm2")
     # AND THE SAME ENCODED FRAME ON A KITTY TERMINAL MEETS A DIFFERENT WALL —
     # which is what keeps the gap above from being "this pane refuses every
     # encoded frame" (§7a). Tier 0 needs no decoder IN THIS PROCESS, and this
@@ -498,7 +502,7 @@ suite "PLAT-15 §2.6: a pane that cannot draw says why, and keeps drawing":
     ckEq kitty.capability.tier, itProtocol
     ckEq kitty.gap, fdgProtocolNotPainted
     ck kitty.gap != model.gap
-    ck not kitty.degradedMessage.contains("no PNG or JPEG decoder")
+    ck not kitty.degradedMessage.contains("not a PNG this build can decode")
     ck kitty.degradedMessage.contains("paints cells")
     ck kitty.degradedMessage.contains("--image-tier=half-block")
     # THE POSITIVE TWIN FOR THE DECODER GAP, through the same function: the same
@@ -662,6 +666,28 @@ suite "PLAT-15: the bytes reach a driver":
     # satisfied by an emitter that produced nothing at all.
     ck harness.bytesEmitted().contains("\x1b[38;2;")
 
+  test "a PNG frame is DECODED and drawn at a cell tier":
+    # PLAT-14 bound 3, closed: the frame arrives as a `data:` URL holding a
+    # real PNG (this module's own encoder wrote it, and `png_test.nim` grades
+    # the decoder against an independent one), the binding decodes it, and
+    # the half-block picture carries the fixture's pixels.
+    let raster = frameRaster()
+    let png = encodePng(FrameWidth, FrameHeight, raster.pixels)
+    let rec = recordingClient("data:image/png;base64," & base64.encode(png))
+    let frames = rec.loadedFrames()
+    let history = createPixelHistoryVM(rec.client)
+    let model = frameViewerModelFor(frames, history,
+                                    capabilityFor("xterm-256color"),
+                                    initDegradedStateSnapshot(),
+                                    pictureCols = 60, pictureRows = 10)
+    ck model.hasRaster
+    ckEq model.gap, fdgNone
+    ckEq model.raster.width, FrameWidth
+    ckEq model.raster.pixels, raster.pixels
+    let screen = frameViewerScreen(model, 70, 16)
+    ck screen.pictureRows > 0
+    ckEq screen.degradedRows, 0
+
   test "a pane that cannot draw refuses to emit rather than emitting nothing":
     # An ENCODED frame on a cell terminal (PLAT-14 bound 3): the pane has a
     # length and no pixels, so there is nothing to emit.
@@ -678,7 +704,7 @@ suite "PLAT-15: the bytes reach a driver":
     except EmitError as e:
       raised = true
       ck e.msg.contains("no-decoder")
-      ck e.msg.contains("no PNG or JPEG decoder")
+      ck e.msg.contains("not a PNG this build can decode")
     ck raised
 
 suite "PLAT-15: the overlay in the shell":
