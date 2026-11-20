@@ -88,6 +88,13 @@ proc productMenuTree*(program: string; shellUi = false): MenuItem =
       sep(item("Switch File", "switchTabHistory")),
       item("Exit CodeTracer", "aExit", os = OsNonHost or OsNonMac)]),
     folder("Edit", mnemonic = 'i', children = @[
+      # macOS requires application-menu items with the standard roles for
+      # Cmd+Z/X/C/V/A to reach text fields (Electron passes them through the
+      # native menu, not via keyboard-event routing).  Without these the
+      # shortcuts silently do nothing in every input in the app on macOS.
+      macRole("undo"), sep(macRole("redo")),
+      macRole("cut"), macRole("copy"), macRole("paste"),
+      sep(macRole("selectAll")),
       item("Find in Files", "findInFiles"),
       sep(item("Find Symbol", "findSymbol")),
       item("Expand All", "aExpandAll"),
