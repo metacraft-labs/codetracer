@@ -139,6 +139,11 @@ test-check-platform-lock-pins:
 test-build-once-repro-selection:
   bash scripts/test-build-once-repro-selection.sh
 
+# Two concurrent build-once runs share the host's one RunQuota daemon: the
+# script starts no private daemon. Needs `runquota` and `runquotad`.
+test-build-once-shared-runquota-daemon:
+  bash scripts/test-build-once-shared-runquota-daemon.sh
+
 # Assert this repo's `runquota` flake pin equals the `runquota-src` revision
 # its pinned `reprobuild` locks. `runquota.follows = "reprobuild/runquota-src"`
 # derives that input from reprobuild; a half-refreshed lock can still retain
@@ -1377,6 +1382,7 @@ test:
     test-build-once-platform-lock \
     test-check-platform-lock-pins \
     test-build-once-repro-selection \
+    test-build-once-shared-runquota-daemon \
     test-build-freshness \
     test-plat37-shim-gate \
     test-gpui-shim-staging \

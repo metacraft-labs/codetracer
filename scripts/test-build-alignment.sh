@@ -82,8 +82,8 @@ fail() {
 # ---------------------------------------------------------------------------
 
 # Every external command the two scripts invoke, replaced by a stub that
-# records the call. `uname` and `runquotad` need behaviour beyond recording and
-# are written separately below.
+# records the call. `uname` needs behaviour beyond recording and `runquotad`
+# is a tripwire; both are written separately below.
 STUB_COMMANDS=(repro nix xcrun node npm npx)
 # In-repo helper scripts that do real work we neither want nor need here. They
 # are still exercised as CALLS: each records into the trace, so the assertions
@@ -154,15 +154,16 @@ fi
 EOF
 	chmod +x "$sandbox/bin/uname"
 
-	# build-once.sh waits for "runquotad listening" in the daemon's log and
-	# polls `kill -0` on the pid, so this stub must announce readiness and then
-	# stay alive. `exec sleep` keeps the pid the caller recorded, so the
-	# caller's trap actually reaps it.
+	# build-once.sh starts no RunQuota daemon: the endpoint belongs to the host
+	# (see test-build-once-shared-runquota-daemon.sh). This stub is a tripwire:
+	# it records the call and exits non-zero, so a regression that starts a
+	# private daemon fails the scenario instead of going on as if one were
+	# listening.
 	cat >"$sandbox/bin/runquotad" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\t%s\t%s\n' 'runquotad' "$PWD" "$*" >>"$CT_ALIGN_TRACE"
-echo "runquotad listening"
-exec sleep 60
+echo "runquotad must not be started by build-once.sh" >&2
+exit 97
 EOF
 	chmod +x "$sandbox/bin/runquotad"
 
