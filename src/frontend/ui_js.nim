@@ -4343,6 +4343,13 @@ proc onWelcomeScreen(
     discard data.makeWelcomeScreenComponent()
   data.ui.welcomeScreen.syncLegacyWelcomeScreenIntoVM()
 
+  # `onInit` and `onNoTrace` call `createUIComponents()` before `tryInitLayout`,
+  # which creates `data.ui.menu`. Without it `ensureSharedRenderers` skips the
+  # menu render (`if not data.ui.menu.isNil`), so the window control buttons
+  # never appear while the welcome screen is the only view (issue #884).
+  if data.ui.menu.isNil:
+    discard data.makeMenuComponent()
+
   data.ui.initEventReceived = true
   data.tryInitLayout()
 
