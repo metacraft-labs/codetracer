@@ -3615,6 +3615,10 @@ jobs:
         # nothing, which is `vm-js`'s defect wearing a display check.
         run: nix develop .#devShells.x86_64-linux.default --command just test-plat18-slice
 
+      - name: The wasm32 developer profile builds what emcc builds
+        if: ${{ !cancelled() }}
+        run: nix develop .#devShells.x86_64-linux.default --command just test-wasm-dev-profile
+
       - name: PLAT-18 — the developer loop on all three backends
         if: ${{ !cancelled() }}
         # §5's fifth adopt condition. The step fails only on a REGRESSION (5x);

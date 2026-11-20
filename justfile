@@ -4089,6 +4089,16 @@ test-plat18-slice:
   exec > >(tee test-logs/test-plat18-slice.log) 2>&1
   bash ci/test/plat18-electron-slice.sh
 
+# The wasm32 developer profile builds the same program as `emcc`: every object
+# and the linked module byte-identical, the object cache used and never stale
+# after a header change. `ci/lib/wasm-cc.sh` is the wasm lanes' C compiler.
+test-wasm-dev-profile:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-wasm-dev-profile.log) 2>&1
+  bash ci/test/wasm-dev-profile-test.sh
+
 # PLAT-18's fifth §5 criterion: the developer loop. One suite, compiled and run
 # on all three backends, interleaved, with the cache cleared per arm — which is
 # what a developer's edit does.

@@ -256,6 +256,11 @@ def wasm_flags() -> list[str]:
     for tok in shlex.split(raw):
         if tok.startswith(("--nimcache", "-o:", "${", '"${')):
             continue
+        # The C compiler is the runner's `${wasm_cc}`: `emcc`, or under the
+        # developer profile `ci/lib/wasm-cc.sh`, whose objects are the same
+        # bytes (ci/test/wasm-dev-profile-test.sh). This harness compiles
+        # through `emcc`, the path every arm here was written against.
+        tok = tok.replace("${wasm_cc}", "emcc")
         out.append(tok)
     return out
 
