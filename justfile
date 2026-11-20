@@ -4089,6 +4089,32 @@ test-plat18-slice:
   exec > >(tee test-logs/test-plat18-slice.log) 2>&1
   bash ci/test/plat18-electron-slice.sh
 
+# The same slice over a SECOND pane, Call Trace: 600 calls with their
+# arguments, a selection that moves on every step. The driver holds the three
+# arms to the same document (`checkParity`) as well as the same row counts.
+test-plat18-slice-calltrace:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-plat18-slice-calltrace.log) 2>&1
+  CT_P18_PANE=calltrace CT_P18_OUT=test-logs/plat18-slice-calltrace bash ci/test/plat18-electron-slice.sh
+
+# The slice in a BROWSER, not Electron: the built page served over HTTP and
+# opened in Playwright's Chromium and Firefox, both panes. The browser
+# front-end loads the WebAssembly core this way; Electron only resembles it.
+test-plat18-slice-browser:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-plat18-slice-browser.log) 2>&1
+  for host in chromium firefox; do
+    for pane in variables calltrace; do
+      CT_P18_HOST="${host}" CT_P18_PANE="${pane}" \
+        CT_P18_OUT="test-logs/plat18-slice-${pane}-${host}" \
+        bash ci/test/plat18-electron-slice.sh
+    done
+  done
+
 # The wasm32 developer profile builds the same program as `emcc`: every object
 # and the linked module byte-identical, the object cache used and never stale
 # after a header change. `ci/lib/wasm-cc.sh` is the wasm lanes' C compiler.

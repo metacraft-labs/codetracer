@@ -24,6 +24,7 @@
   <head><meta charset="utf-8" /><title>PLAT-18 cold start</title></head>
   <body>
     <div id="ct-p18-root"></div>
+    <script src="samples.js"></script>
     <script src="applier.js"></script>
     <script>
       'use strict';
@@ -113,13 +114,16 @@
           api.mount();
           api.expand();
         }
+        // The pane's own selector and count (`samples.js`, written by the
+        // build script), so the floor is the pane being measured.
+        const pane = globalThis.CT_P18_PANE_CONFIG ||
+          { rowSelector: '.value-expanded-name[data-variable-name]', expandedRows: 602 };
         const rows = api.rows();
-        const domRows =
-          rootEl.querySelectorAll('.value-expanded-name[data-variable-name]').length;
-        if (rows !== 602 || domRows !== 602) {
+        const domRows = rootEl.querySelectorAll(pane.rowSelector).length;
+        if (rows !== pane.expandedRows || domRows !== pane.expandedRows) {
           throw new Error(arm + ': the core says ' + rows + ' row(s) and the document ' +
-                          'holds ' + domRows + ', expected 602 before its resident ' +
-                          'set is read');
+                          'holds ' + domRows + ', expected ' + pane.expandedRows +
+                          ' before its resident set is read');
         }
         const linear = api._module ? api._module.HEAPU8.length : 0;
         console.log('PLAT18-SLICE-LINEAR arm=' + arm + ' linear_memory_bytes=' + linear);

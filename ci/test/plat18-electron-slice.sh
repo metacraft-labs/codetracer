@@ -29,6 +29,22 @@
 # artifact size below is therefore NOT PLAT-17's 1,178,754 B and must not be
 # compared with it as though it were.
 #
+# ## THE PANE AND THE HOST ARE PARAMETERS
+#
+#   CT_P18_PANE=variables   (default) `plat18_slice.nim`, the variables pane
+#   CT_P18_PANE=calltrace   `plat18_calltrace_slice.nim`, the Call Trace pane
+#
+#   CT_P18_HOST=electron    (default) an Electron renderer (`main.js`)
+#   CT_P18_HOST=chromium    a real browser over HTTP (`browser.mjs`): the
+#   CT_P18_HOST=firefox     WebAssembly core in the browser front-end's own
+#   CT_P18_HOST=webkit      setting, in each engine Playwright provides
+#
+# Every combination builds the same three arms and runs the same driver, so
+# the floors and the parity checks are the same code on every host. Only the
+# default combination writes `bench-results/plat18-marshalling.json`; another
+# writes `bench-results/plat18-<pane>-<host>.json`, and the resident-set
+# figure exists only on Electron (a browser does not report one to a page).
+#
 # ## EXIT STATUS
 #
 #   0  every arm ran, every phase's row counts agreed with the document
@@ -47,15 +63,45 @@ source "${repo_root}/ci/lib/nim-cache-root.sh"
 cd "${repo_root}" || exit 2
 
 samples="${CT_P18_SAMPLES:-9}"
+pane="${CT_P18_PANE:-variables}"
+host="${CT_P18_HOST:-electron}"
 out="${CT_P18_OUT:-${repo_root}/test-logs/plat18-slice}"
 host_src="src/frontend/viewmodel/tests/manual/plat18_slice_host"
-slice_src="src/frontend/viewmodel/tests/manual/plat18_slice.nim"
+# The pane's row selector, its row counts, and the attributes its DOM
+# decoration writes on the shipping build only (driver.js's `checkParity`).
+case "${pane}" in
+variables)
+	slice_src="src/frontend/viewmodel/tests/manual/plat18_slice.nim"
+	pane_config="{name: 'variables', rowSelector: '.value-expanded-name[data-variable-name]', rowElementSelector: '.value-expanded-name[data-variable-name]', expandedRows: 602, collapsedRows: 2, directIgnoreAttrs: []}"
+	expanded_rows=602
+	;;
+calltrace)
+	slice_src="src/frontend/viewmodel/tests/manual/plat18_calltrace_slice.nim"
+	pane_config="{name: 'calltrace', rowSelector: '.calltrace-call-line', rowElementSelector: '.calltrace-call-line', expandedRows: 600, collapsedRows: 2, directIgnoreAttrs: []}"
+	expanded_rows=600
+	;;
+*)
+	echo "ERROR: CT_P18_PANE=${pane}: expected variables or calltrace" >&2
+	exit 2
+	;;
+esac
+case "${host}" in
+electron | chromium | firefox | webkit) ;;
+*)
+	echo "ERROR: CT_P18_HOST=${host}: expected electron, chromium, firefox or webkit" >&2
+	exit 2
+	;;
+esac
 
 # ---------------------------------------------------------------------------
 # Prerequisites — named, with the remedy, and fatal
 # ---------------------------------------------------------------------------
 missing=0
-for tool in nim emcc node electron; do
+tools=(nim emcc node)
+if [ "${host}" = electron ]; then
+	tools+=(electron)
+fi
+for tool in "${tools[@]}"; do
 	if ! command -v "${tool}" >/dev/null 2>&1; then
 		echo "ERROR: ${tool} is not on PATH." >&2
 		missing=1
@@ -72,7 +118,7 @@ fi
 # so an absent X server is a prerequisite failure and not a reason to measure
 # something else.
 xvfb_run="$(command -v xvfb-run || true)"
-if [ -z "${DISPLAY:-}" ] && [ -z "${xvfb_run}" ]; then
+if [ "${host}" = electron ] && [ -z "${DISPLAY:-}" ] && [ -z "${xvfb_run}" ]; then
 	# The two tool names are spelled WITHOUT a leading `$` on purpose. Written
 	# as `\$DISPLAY` inside double quotes, pre-commit `shfmt -s` rewrites the
 	# line to single quotes; shellcheck then reports SC2016 on the `$` and
@@ -93,9 +139,9 @@ if [ "${CT_P18_RELEASE:-0}" = "1" ]; then
 fi
 
 nim_common=(--hints:off --warnings:off --path:src/frontend/viewmodel)
-cache_root="$(ct_nim_cache_root "${repo_root}")/plat18-slice-${build_label}"
+cache_root="$(ct_nim_cache_root "${repo_root}")/plat18-slice-${pane}-${build_label}"
 
-echo "=== PLAT-18 vertical slice: variables pane, 600-member fixture ==="
+echo "=== PLAT-18 vertical slice: ${pane} pane, ${expanded_rows}-row fixture, host ${host} ==="
 echo "    build=${build_label} samples=${samples}"
 echo "    host load at start: $(cat /proc/loadavg 2>/dev/null || uptime)"
 
@@ -205,7 +251,7 @@ echo "PLAT18-SLICE-ARTIFACT build=${build_label}" \
 # ---------------------------------------------------------------------------
 cp "${host_src}/applier.js" "${host_src}/driver.js" \
 	"${host_src}/wasm_bridge.js" "${host_src}/main.js" \
-	"${host_src}/coldstart.html" "${out}/"
+	"${host_src}/coldstart.html" "${host_src}/browser.mjs" "${out}/"
 cat >"${out}/package.json" <<'PKG'
 {"name":"plat18-slice","version":"1.0.0","main":"main.js"}
 PKG
@@ -216,17 +262,23 @@ sed -e 's|@APPLIER@|applier.js|' \
 	-e 's|@JS_CROSSING@|arm_js_crossing.js|' \
 	-e 's|@WASM_GLUE@|arm_wasm.js|' \
 	"${host_src}/page.html" >"${out}/page.html"
-printf 'globalThis.CT_P18_SAMPLES = %s;\n' "${samples}" >"${out}/samples.js"
+{
+	printf 'globalThis.CT_P18_SAMPLES = %s;\n' "${samples}"
+	printf 'globalThis.CT_P18_PANE_CONFIG = %s;\n' "${pane_config}"
+} >"${out}/samples.js"
 sed -i 's|<script src="applier.js"></script>|<script src="samples.js"></script>\n    <script src="applier.js"></script>|' \
 	"${out}/page.html"
 
 # ---------------------------------------------------------------------------
 # Run
 # ---------------------------------------------------------------------------
-echo "--- running (electron) ---"
+echo "--- running (${host}) ---"
 load_before="$(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null || echo unknown)"
 run_log="${out}/run.log"
-if [ -n "${DISPLAY:-}" ]; then
+if [ "${host}" != electron ]; then
+	CT_P18_REPO="${repo_root}" node "${out}/browser.mjs" "${out}" "${host}" >"${run_log}" 2>&1
+	rc=$?
+elif [ -n "${DISPLAY:-}" ]; then
 	(cd "${out}" && electron . --no-sandbox) >"${run_log}" 2>&1
 	rc=$?
 else
@@ -238,7 +290,7 @@ load_after="$(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null || echo unknown)"
 grep '^PLAT18-' "${run_log}" || true
 echo "PLAT18-SLICE-HOST cpus=$(nproc 2>/dev/null || echo '?')" \
 	"load_before=\"${load_before}\" load_after=\"${load_after}\"" \
-	"build=${build_label} samples=${samples}"
+	"build=${build_label} samples=${samples} pane=${pane} host=${host}"
 
 if ! grep -q '^PLAT18-SLICE-VERDICT ok$' "${run_log}"; then
 	echo "PLAT-18 slice: FAILED — see ${run_log}"
@@ -305,6 +357,15 @@ fi
 # the floor again, or not at all. The committed artifact's identity is
 # `sha256 2c85998b…`, 22 entries, `load1=40.10`; `sha256sum` it before and
 # after if there is any doubt about which state a tree is in.
+# PARITY: the driver compares every phase's document across arms and throws
+# on a difference, which the verdict above already catches. Requiring the
+# lines as well catches the other failure — a driver that stopped comparing.
+parity_lines="$(grep -c '^PLAT18-SLICE-PARITY ' "${run_log}" || true)"
+if [ "${parity_lines}" -ne 8 ]; then
+	echo "  FAIL: expected 8 parity comparisons (4 phases, 2 pairs), saw ${parity_lines}"
+	exit 1
+fi
+
 bench_min_samples="${CT_P18_BENCH_MIN_SAMPLES:-5}"
 if [ "${samples}" -lt "${bench_min_samples}" ]; then
 	echo "PLAT18-SLICE-BENCH skipped: ${samples} sample(s) is under the" \
@@ -315,12 +376,22 @@ if [ "${samples}" -lt "${bench_min_samples}" ]; then
 fi
 bench_dir="${repo_root}/bench-results"
 mkdir -p "${bench_dir}"
-python3 - "${run_log}" "${bench_dir}/plat18-marshalling.json" \
+bench_file="${bench_dir}/plat18-marshalling.json"
+bench_prefix="plat18"
+if [ "${pane}" != variables ] || [ "${host}" != electron ]; then
+	bench_file="${bench_dir}/plat18-${pane}-${host}.json"
+	bench_prefix="plat18/${pane}/${host}"
+fi
+python3 - "${run_log}" "${bench_file}" \
 	"${build_label}" "${samples}" "${load_before}" \
-	"${js_direct_bytes}" "${wasm_bytes}" "${wasm_glue_bytes}" <<'PYBENCH'
+	"${js_direct_bytes}" "${wasm_bytes}" "${wasm_glue_bytes}" \
+	"${bench_prefix}" "${expanded_rows}" "${host}" "${pane}" <<'PYBENCH'
 import json, re, sys
 
 run_log, out_path, build, samples, load1, js_bytes, wasm_bytes, glue_bytes = sys.argv[1:9]
+prefix, rows, host, pane = sys.argv[9:13]
+where = "one Electron renderer" if host == "electron" else f"one {host} page"
+
 text = open(run_log, errors="replace").read()
 load1 = load1.split()[0] if load1.split() else "unknown"
 
@@ -348,20 +419,27 @@ def add(name, unit, value, extra):
 
 # §4 metric 2 and 3 — step latency, and latency with the large state tree.
 for arm in ("js-direct", "js-crossing", "wasm-crossing"):
-    for ph, what in (("STEP", "one locals update with the 600-member node OPEN"),
-                     ("EXPAND", "the 600-member node expands: 600 rows appear in one update"),
-                     ("MOUNT", "the pane's first render, the node collapsed"),
-                     ("COLLAPSE", "the 600 rows are removed")):
+    phase_what = {
+        "variables": (("STEP", "one locals update with the 600-member node OPEN"),
+                      ("EXPAND", "the 600-member node expands: 600 rows appear in one update"),
+                      ("MOUNT", "the pane's first render, the node collapsed"),
+                      ("COLLAPSE", "the 600 rows are removed")),
+        "calltrace": (("STEP", "the selected call moves one row with 600 calls on screen"),
+                      ("EXPAND", "a 600-call section loads: 600 rows with their arguments appear in one update"),
+                      ("MOUNT", "the pane's first render over a two-call section"),
+                      ("COLLAPSE", "the section goes back to two calls")),
+    }[pane]
+    for ph, what in phase_what:
         d = phases.get((arm, ph))
         if not d:
             continue
-        add(f"plat18/{ph.lower()}-total/{arm}", "ms", float(d["total_ms_median"]),
+        add(f"{prefix}/{ph.lower()}-total/{arm}", "ms", float(d["total_ms_median"]),
             f'samples={d["samples"]} shape="the MEDIAN of {d["samples"]} interleaved '
-            f'repetitions of all three arms against one document in one Electron '
-            f'renderer; one repetition is {what}" '
+            f'repetitions of all three arms against one document in {where}; '
+            f'one repetition is {what}" '
             f'core_ms={d["core_ms_median"]} host_ms={d["host_ms_median"]} '
-            f'min={d["total_ms_min"]} max={d["total_ms_max"]} '
-            f'bytes_crossed={d["bytes"]} ops={d["ops"]} rows=602')
+            f'min={d["total_ms_min"]} max={d["total_ms_max"]} p99={d.get("total_ms_p99", "?")} '
+            f'bytes_crossed={d["bytes"]} ops={d["ops"]} rows={rows}')
 
 # §4 metric 5 — bytes marshalled per step. A COUNT, not a timing: it is a
 # property of the view and the fixture and is the same integer on every
@@ -369,21 +447,21 @@ for arm in ("js-direct", "js-crossing", "wasm-crossing"):
 step = phases.get(("wasm-crossing", "STEP"))
 expand = phases.get(("wasm-crossing", "EXPAND"))
 if step:
-    add("plat18/bytes-per-step", "bytes", int(step["bytes"]),
+    add(f"{prefix}/bytes-per-step", "bytes", int(step["bytes"]),
         'samples=1 shape="a STRUCTURAL count, not a measurement: the flat wire '
-        'size of the operations one locals update issues with 602 rows on screen. '
+        f'size of the operations one step issues with {rows} rows on screen. '
         'Identical on native, nim js and wasm32 — that is what makes the three '
         'comparable" ops=' + step["ops"])
 if expand:
-    add("plat18/bytes-per-expand", "bytes", int(expand["bytes"]),
-        'samples=1 shape="the same count for the worst case in the product: the '
-        '600-member mapping expanding in one update" ops=' + expand["ops"])
+    add(f"{prefix}/bytes-per-expand", "bytes", int(expand["bytes"]),
+        'samples=1 shape="the same count for the pane\'s largest update: '
+        f'{rows} rows appearing at once" ops=' + expand["ops"])
 
 # §4 metric 1 — cold start.
 for arm, d in cold.items():
     if "to_entry_points_ms" not in d:
         continue
-    add(f"plat18/cold-start/{arm}", "ms", float(d["to_entry_points_ms"]),
+    add(f"{prefix}/cold-start/{arm}", "ms", float(d["to_entry_points_ms"]),
         'samples=1 shape="ONE load of ONE renderer process — a cold start is a '
         'property of a process\'s first moments and a second one would not be '
         'cold. Script fetch, parse and evaluate, plus (wasm) compile, instantiate '
@@ -394,20 +472,20 @@ for arm, d in cold.items():
 for arm, d in rss.items():
     if "working_set_kb" not in d:
         continue
-    add(f"plat18/steady-rss/{arm}", "MB", round(int(d["working_set_kb"]) / 1024.0, 3),
+    add(f"{prefix}/steady-rss/{arm}", "MB", round(int(d["working_set_kb"]) / 1024.0, 3),
         'samples=1 shape="ONE read of Electron getAppMetrics() for ONE renderer '
-        'process holding the 602-row pane — a resident set is a state, not a '
+        f'process holding the {rows}-row pane — a resident set is a state, not a '
         'distribution. performance.memory.usedJSHeapSize was tried and rejected: '
         'Chromium coarsens it and all three arms reported the identical '
         '157,000,000 with one of them additionally holding 50 MiB of linear '
         'memory" target<=25%-growth-vs-js-direct')
 
 # §4 metric 6 — artifact size.
-add("plat18/artifact/js-direct", "bytes", int(js_bytes),
+add(f"{prefix}/artifact/js-direct", "bytes", int(js_bytes),
     'samples=1 shape="wc -c of the nim js bundle, UNMINIFIED and unbundled — the '
     'shipped renderer goes through webpack, so this over-states what a user '
     'downloads; the gzip figures in the run log are the closer stand-in"')
-add("plat18/artifact/wasm", "bytes", int(wasm_bytes) + int(glue_bytes),
+add(f"{prefix}/artifact/wasm", "bytes", int(wasm_bytes) + int(glue_bytes),
     'samples=1 shape="wc -c of the .wasm plus its emscripten glue, browser '
     'target (-sENVIRONMENT=web, no NODERAWFS). NOT PLAT-17\'s 1,178,754 B, '
     'which is the node build"')

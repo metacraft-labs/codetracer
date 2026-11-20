@@ -63,6 +63,16 @@ import ../backend/backend_service
 import ../viewmodels/calltrace_vm
 import ../viewport   # `withRows` / `withCols`
 
+when defined(ctPlat18Slice):
+  # The WebAssembly-core evaluation's command-frame renderer
+  # (`tests/manual/plat18_calltrace_slice.nim`). It has to be imported HERE,
+  # before the generic procs below: a generic binds a renderer call such as
+  # `r.insertBefore` at its definition when only one overload is in scope,
+  # so a renderer imported only by the caller is never considered. Set by
+  # `ci/test/plat18-electron-slice.sh` and nothing else; no shipping build
+  # compiles it.
+  import ../tests/manual/plat18_frame_renderer
+
 # A generic view is instantiated where it is called, and the `ui` macro's
 # expansion names `createRenderEffect` and the control-flow components there:
 # exported so a caller needs no IsoNim import of its own to render this view.

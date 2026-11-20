@@ -3615,6 +3615,18 @@ jobs:
         # nothing, which is `vm-js`'s defect wearing a display check.
         run: nix develop .#devShells.x86_64-linux.default --command just test-plat18-slice
 
+      - name: PLAT-18 — the slice over a second pane, Call Trace
+        if: ${{ !cancelled() }}
+        # The same three arms over the Call Trace pane, held to the same
+        # document by the driver's parity check. Display as above.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-plat18-slice-calltrace
+
+      - name: PLAT-18 — the slice in a browser (Chromium, Firefox)
+        if: ${{ !cancelled() }}
+        # Served over HTTP and run in Playwright's browsers from the dev
+        # shell; headless, so no display is needed.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-plat18-slice-browser
+
       - name: The wasm32 developer profile builds what emcc builds
         if: ${{ !cancelled() }}
         run: nix develop .#devShells.x86_64-linux.default --command just test-wasm-dev-profile
