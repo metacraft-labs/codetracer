@@ -126,11 +126,18 @@ try {
   });
   await context.close();
 
-  for (const arm of [
+  // CT_P18_COLDSTART_REPS fresh contexts per arm, rotated, as in main.js.
+  const coldArms = [
     { name: 'js-direct', src: 'arm_js_direct.js', wasm: 0 },
     { name: 'js-crossing', src: 'arm_js_crossing.js', wasm: 0 },
     { name: 'wasm-crossing', src: 'arm_wasm.js', wasm: 1 },
-  ]) {
+  ];
+  const coldReps = Math.max(1, Number(process.env.CT_P18_COLDSTART_REPS || 1));
+  const coldOrder = [];
+  for (let rep = 0; rep < coldReps; rep++) {
+    for (let i = 0; i < coldArms.length; i++) coldOrder.push(coldArms[(i + rep) % coldArms.length]);
+  }
+  for (const arm of coldOrder) {
     const ctx = await browser.newContext();
     const p = await ctx.newPage();
     relay(p, `coldstart(${arm.name})`);
