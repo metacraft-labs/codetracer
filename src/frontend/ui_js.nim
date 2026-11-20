@@ -4400,11 +4400,16 @@ proc onSavedAs(sender: js, response: jsobject(name=cstring, path=cstring)) =
   ## The renderer side of `index/files.onSaveUntitled`'s success path.
   ##
   ## `response.name` is the untitled placeholder (`#untitled{N}`);
-  ## `response.path` is the destination the user chose.  Move both the
-  ## `TabInfo` (in `services.editor.open`) and the `EditorViewComponent` (in
-  ## `ui.editors`) from the old key to the new one, clear the `untitled` flag,
-  ## update the GoldenLayout tab title, and tell Monaco the new language so
-  ## syntax highlighting matches the chosen file extension (issue #836).
+  ## `response.path` is the destination the user chose.
+  ##
+  ## Key design constraint: GoldenLayout captured `editorPathForTab = "#untitled{N}"`
+  ## in the tab's click handler at creation time (layout.nim §"container.on tab").
+  ## That closure fires `data.services.editor.active = "#untitled{N}"` on every
+  ## subsequent click and cannot be patched.  We therefore keep
+  ## `data.ui.editors["#untitled{N}"]` pointing to the SAME editor object so the
+  ## status-bar lookup by `active` still finds it.  The save path uses
+  ## `services.editor.open` (not `active`), so we move only that map to the new
+  ## key to avoid a second save of the same file (issue #836).
   let untitledName = response.name
   let newPath = response.path
   if data.services.editor.open.hasKey(untitledName):
@@ -4417,12 +4422,21 @@ proc onSavedAs(sender: js, response: jsobject(name=cstring, path=cstring)) =
     discard jsDelete(data.services.editor.open[untitledName])
   try:
     if data.ui.editors.hasKey(untitledName):
-      data.ui.editors[newPath] = data.ui.editors[untitledName]
-      discard jsDelete(data.ui.editors[untitledName])
-      let editor = data.ui.editors[newPath]
+      let editor = data.ui.editors[untitledName]
+      # Register under the new path WITHOUT deleting the old key: the GoldenLayout
+      # click handler still fires with the old key (see note above), so both must
+      # find the same editor object.
+      data.ui.editors[newPath] = editor
+      let newLang = fromPath(newPath)
       editor.path = newPath
       editor.name = newPath
-      editor.lang = fromPath(newPath)
+      editor.lang = newLang
+      if not editor.tabInfo.isNil:
+        editor.tabInfo.untitled = false
+        editor.tabInfo.changed = false
+        editor.tabInfo.name = newPath
+        editor.tabInfo.path = newPath
+        editor.tabInfo.lang = newLang
       # Register the new path in the Find-in-Files index.
       if not data.services.search.paths.hasKey(newPath):
         data.services.search.pathsPrepared.add(fuzzysort.prepare(newPath))
@@ -4437,7 +4451,7 @@ proc onSavedAs(sender: js, response: jsobject(name=cstring, path=cstring)) =
         editor.contentItem.config.componentState.label = newPath
         editor.contentItem.config.componentState.fullPath = newPath
       # Re-colour the Monaco model for the new file extension.
-      let langId = cstring(toCLang(fromPath(newPath)))
+      let langId = cstring(toCLang(newLang))
       if not editor.monacoEditor.isNil:
         let model = editor.monacoEditor.toJs.getModel()
         if not model.isNil:
