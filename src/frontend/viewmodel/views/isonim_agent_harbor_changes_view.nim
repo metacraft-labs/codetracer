@@ -59,6 +59,7 @@ import nim_agents_isonim_viewmodels/agent_harbor/changes_vm
 import ./agent_harbor_changes_inbox_words
 import ./agent_harbor_changes_code
 import ./isonim_vcs_view
+from ../keymap/scope_path import ChangesPanelScope
 
 export signals, computation, components, changes_vm, agent_harbor_changes_inbox_words
 
@@ -295,7 +296,8 @@ proc renderSpecCard[R, N](r: R; vm: ChangesVM; card: SpecCardView): N =
   let isPath = card.tier == stSpec or card.title == card.path
   result = ui(r):
     tdiv(class = "ah-spec-card" & (if card.open: " ah-card-open" else: "") &
-                 (if card.staged: " ah-card-staged" else: "")):
+                 (if card.staged: " ah-card-staged" else: "") &
+                 (if card.focused: " ah-card-focused" else: "")):
       tdiv(ref = head, class = "ah-spec-card-head", role = "button", tabindex = "0",
            title = (if card.open: "Close" else: "Open"),
            onclick = proc() = vm.toggleCard(key)):
@@ -308,7 +310,8 @@ proc renderSpecCard[R, N](r: R; vm: ChangesVM; card: SpecCardView): N =
           span(class = "ah-origin-badge", title = "Where the change came from"):
             text card.origin
       tdiv(ref = body, class = "ah-spec-card-body")
-  r.tagFacts(result, [("card", key), ("tier", $card.tier), ("state", card.stateText)])
+  r.tagFacts(result, [("card", key), ("tier", $card.tier), ("state", card.stateText),
+                      ("focused", $card.focused)])
   # The state word sits at the head's right.
   r.appendRendered(head, renderStateWord(r, card.stateText, changeStateRole(card)))
   if not card.open: return
@@ -549,7 +552,8 @@ proc renderFileRow[R, N](r: R; vm: ChangesVM; index: int; row: FileRow): N =
       markPathCut(vcsRow, cstring(row.file.path))
   var host: N
   result = ui(r):
-    tdiv(ref = host, class = "ah-code-file" & (if row.selected: " ah-code-file-selected" else: ""))
+    tdiv(ref = host, class = "ah-code-file" & (if row.selected: " ah-code-file-selected" else: "") &
+                             (if row.focused: " ah-code-file-focused" else: ""))
   r.appendRendered(host, vcsRow)
   if row.file.oldPath.len > 0:
     let old = ui(r):
@@ -626,7 +630,7 @@ proc renderAgentHarborChangesPanel*[R, N](r: R; vm: ChangesVM;
   mixin clearChildren
   var body: N
   let panel = ui(r):
-    tdiv(class = AgentHarborChangesClass):
+    tdiv(class = AgentHarborChangesClass, `data-ct-pane` = ChangesPanelScope, tabindex = "0"):
       tdiv(ref = body, class = "ah-fleet-body ah-changes-body")
   createRenderEffect proc() =
     r.clearChildren(body)

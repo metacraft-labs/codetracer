@@ -190,6 +190,34 @@ proc resultsKey*(m: AhStoryMount; name: string; keymap = UserKeymap()): string =
     return ""
   res.operation
 
+proc changesKey*(m: AhStoryMount; name: string; keymap = UserKeymap()): string =
+  ## A key (its canonical name) while a Changes story is shown, ROUTED in the
+  ## `changes` scope (`overlay_rows`: `Down` / `Up` the keyboard's item,
+  ## `Enter` opens or closes it, `Right` / `Left` the tabs). Runs the
+  ## operation it resolves to and returns it ("" for none, and for the page
+  ## keys: this host's panel does not scroll).
+  if m.changesInbox.changes.isNil: return ""
+  var router = gpuiRouter(keymap)
+  let res = router.route(SessionFacts(), @[element(ekWindow, "window"), pane(ChangesPanelScope)],
+                         nmNormal, name, 0)
+  if res.kind != erOperation or not m.changesInbox.changes.runChangesOperation(res.operation):
+    return ""
+  res.operation
+
+proc inboxKey*(m: AhStoryMount; name: string; keymap = UserKeymap()): string =
+  ## A key while an Inbox or an item's page is shown, ROUTED in the `inbox`
+  ## scope (`]` / `[` Next and Previous, `1`-`4` the item's priority). Runs
+  ## the operation it resolves to and returns it ("" for none).
+  let inbox = m.changesInbox.inbox
+  let item = m.changesInbox.inboxItem
+  if inbox.isNil and item.isNil: return ""
+  var router = gpuiRouter(keymap)
+  let res = router.route(SessionFacts(), @[element(ekWindow, "window"), pane(InboxPanelScope)],
+                         nmNormal, name, 0)
+  let page = if inbox.isNil: item else: inbox.page
+  if res.kind != erOperation or not runInboxOperation(inbox, page, res.operation): return ""
+  res.operation
+
 let ActivityScopePath* = @[element(ekWindow, "window"), pane(SessionActivityScope)]
   ## Where the timeline's keys and presses resolve.
 

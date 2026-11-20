@@ -1,0 +1,56 @@
+ Inbox  ⚲ ✕
+ INBOX  this server                                                                                                                                         40 waiting · 40 blocked
+  ←  31 of 40  →     Auto-switch: off
+   needs your answer
+   Waiting 28 minutes.                                31 of 40 · Waiting 62 minutes.
+ ○ Port the route cache's eviction policy to…  30m
+   waiting for your next instruction                  ● NEEDS YOUR ANSWER  Invented session 31                                                                         Priority… ▾
+   Waiting 30 minutes.
+ ● Invented session 16                         32m    ● Agent has stopped and is waiting for your answer
+   needs your answer
+   Waiting 32 minutes.                                Invented question 31: keep going as planned?
+ ● Invented session 17                         34m
+   needs your answer                                   Your answer
+   Waiting 34 minutes.
+ ○ Invented session 18                         36m
+   waiting for your next instruction
+   Waiting 36 minutes.                                 Submit
+ ● Invented session 19                         38m
+   needs your answer
+   Waiting 38 minutes.
+ ● Port the route cache's eviction policy to…  40m ▃
+   needs your answer                               █
+   Waiting 40 minutes.                             █
+ ○ Invented session 21                         42m █
+   waiting for your next instruction               █
+   Waiting 42 minutes.                             █
+ ● Invented session 22                         44m █
+   needs your answer                               █
+   Waiting 44 minutes.                             █
+ ● Invented session 23                         46m █
+   needs your answer                               █
+   Waiting 46 minutes.                             █
+ ○ Invented session 24                         48m █
+   waiting for your next instruction               █
+   Waiting 48 minutes.                             █
+ ● Port the route cache's eviction policy to…  50m █
+   needs your answer                               █
+   Waiting 50 minutes.                             █
+ ● Invented session 26                         52m █
+   needs your answer                               █
+   Waiting 52 minutes.                             █
+ ○ Invented session 27                         54m █
+   waiting for your next instruction               █
+   Waiting 54 minutes.                             █
+ ● Invented session 28                         56m
+   needs your answer
+   Waiting 56 minutes.
+ ● Invented session 29                         58m
+   needs your answer
+   Waiting 58 minutes.
+ ○ Port the route cache's eviction policy to…   1h
+   waiting for your next instruction
+   Waiting 60 minutes.
+▎● Invented session 31                          1h
+▎  needs your answer
+▎  Waiting 62 minutes.

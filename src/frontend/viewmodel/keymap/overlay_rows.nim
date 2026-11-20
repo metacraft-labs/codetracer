@@ -97,6 +97,33 @@ const
     BaseRow(chords: "Up", operation: "results.previous", table: ResultsTable),
     BaseRow(chords: "Tab", operation: "results.insert", table: ResultsTable),
 
+    # --- The Agent Harbor Changes panel: `Down` / `Up` move the keyboard
+    # through the spec cards or the files, `Enter` opens or closes the one
+    # it is on, `Right` / `Left` step the tabs, `PageDown` / `PageUp`
+    # scroll, the same under every base, as a list pane's keys are.
+    BaseRow(chords: "Down", operation: "changes.focus-next", table: ChangesTable),
+    BaseRow(chords: "Up", operation: "changes.focus-previous", table: ChangesTable),
+    BaseRow(chords: "Enter", operation: "changes.toggle", table: ChangesTable),
+    BaseRow(chords: "Right", operation: "changes.next-tab", table: ChangesTable),
+    BaseRow(chords: "Left", operation: "changes.previous-tab", table: ChangesTable),
+    BaseRow(chords: "PageDown", operation: "changes.page-down", table: ChangesTable),
+    BaseRow(chords: "PageUp", operation: "changes.page-up", table: ChangesTable),
+
+    # --- The Agent Harbor Inbox: `]` / `[` Next and Previous over the
+    # server's cursor (Agent Harbor's own keys for them), `1`-`4` the item's
+    # priority, the arrows and the page keys scroll. A story host's playback
+    # bar keeps `[` / `]` (its scope comes first there).
+    BaseRow(chords: "]", operation: "inbox.next", table: InboxTable),
+    BaseRow(chords: "[", operation: "inbox.previous", table: InboxTable),
+    BaseRow(chords: "1", operation: "inbox.priority-1", table: InboxTable),
+    BaseRow(chords: "2", operation: "inbox.priority-2", table: InboxTable),
+    BaseRow(chords: "3", operation: "inbox.priority-3", table: InboxTable),
+    BaseRow(chords: "4", operation: "inbox.priority-4", table: InboxTable),
+    BaseRow(chords: "Down", operation: "inbox.scroll-down", table: InboxTable),
+    BaseRow(chords: "Up", operation: "inbox.scroll-up", table: InboxTable),
+    BaseRow(chords: "PageDown", operation: "inbox.page-down", table: InboxTable),
+    BaseRow(chords: "PageUp", operation: "inbox.page-up", table: InboxTable),
+
     # --- The Video Player (Visual-Replay.md § Keyboard Shortcuts): its keys
     # while it has the focus, the same under every base, as the desktop's
     # player always had them.

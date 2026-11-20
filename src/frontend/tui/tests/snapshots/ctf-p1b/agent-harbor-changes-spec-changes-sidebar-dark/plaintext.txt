@@ -1,0 +1,56 @@
+ Changes  ⚲ ✕
+ CHANGES
+ Relay backpressure: bound the relay queues
+                              9 files +18 −5
+  Specs 8   Tests 5   Details 6   Code 9
+  All milestones                          ▾
+ REQUIREMENTS (2)
+▎▾ RELAY-AREQ2 Bounded queues     ● modified
+▎  specs/Relay-Backpressure.md
+▎   Summary   Diff
+▎  @@ -10,4 +10,8 @@ The relay forwards tel…
+▎    ### RELAY-AREQ2 Bounded queues
+▎  - Every relay queue holds at most 512 fr…
+▎  + Every relay queue holds at most 256 fr…
+▎    ### RELAY-AREQ3 Ordered delivery
+▎    Frames of one probe arrive in the orde…
+▎  + ### RELAY-AREQ4 Shed the oldest frame
+▎  + When a queue is full, the relay drops…
+▎  + ### Flow control
+▎  + A ground station that falls behind is…
+▎
+▎   Request Changes
+▎
+ ▸ RELAY-AREQ4 Shed the oldest fra…  ● added
+ GOVERNANCE (1)
+ ▸ AGENTS.md                      ● modified
+ SPECS (5)
+ ▸ specs/Relay-Backpressure.md
+   ● approved 2027-01-12 by Dana Reyes (fee…
+ ▸ specs/Relay-Glossary.md       ● editorial
+▎▾ specs/Relay-Metrics.md          ● pending
+▎  SECTIONS  Queue metrics
+▎  COMMITS  0c1d2e3
+▎   Summary   Diff
+▎  Name the queue-depth metric and
+▎  its labels.
+▎
+▎   Approve   Undo / Revert
+▎   Request Changes
+▎
+ ▸ specs/Relay-Ports.md            ● pending
+ ▸ specs/Relay-Retention.md
+   ● approved 2027-01-13 by Sam Okafor (rel…
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             

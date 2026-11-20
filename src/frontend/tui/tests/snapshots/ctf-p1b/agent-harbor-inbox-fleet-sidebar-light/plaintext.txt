@@ -1,0 +1,56 @@
+ Inbox  ⚲ ✕
+ INBOX  fleet: every server you can reach
+                       3 waiting · 3 blocked
+  ←   →     Auto: off
+ Incomplete: orbit-west could not be read
+ (connection refused)
+ this server 1
+ ● Migrate the cac…   urgent   warm 3:12  1m
+   asks for permission
+   Urgent: the migration holds a write lock
+   until you decide.
+ relay-lab 2
+ ● Port the…    high, raised   warm 3:00  4m
+   needs your answer
+   Raised: its model cache is warm for three
+   more minutes.
+ ○ Tidy the upload client's…   expiring  21m
+   waiting for your next instruction
+   Waiting longest of the normal items.
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             

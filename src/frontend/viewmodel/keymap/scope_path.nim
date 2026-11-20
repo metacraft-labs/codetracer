@@ -145,8 +145,17 @@ const
     ## in (`/s`, `/ah…` and an instruction's sigil completions, and their
     ## sheet, `agent_harbor_results_words`). A prototype drawn in story hosts
     ## and no pane of the layout, as the composer.
+  ChangesPanelScope* = "changes"
+    ## The scope the Agent Harbor Changes panel's keys are routed in (a
+    ## session's change in four tabs, `agent_harbor_changes_inbox_words`). A
+    ## prototype drawn in story hosts, no pane of the layout yet.
+  InboxPanelScope* = "inbox"
+    ## The scope the Agent Harbor Inbox's keys are routed in (the Inbox panel
+    ## and an inbox item's page, `agent_harbor_changes_inbox_words`). A
+    ## prototype drawn in story hosts, no pane of the layout yet.
   NonPaneScopes* = [TopBarScope, BreakpointConditionScope, StoryPlaybackScope,
-                    SessionActivityScope, ComposerScope, ResultsScope]
+                    SessionActivityScope, ComposerScope, ResultsScope,
+                    ChangesPanelScope, InboxPanelScope]
     ## The scopes a press names in `paneKind` that are not panes.
 
 func element*(kind: ElementKind; id: string; paneKind = ""): ScopeElement =

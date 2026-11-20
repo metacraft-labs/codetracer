@@ -25,7 +25,8 @@
 
 import std/strutils
 
-import nim_agents_isonim_viewmodels/agent_harbor/[changes_vm, inbox_vm]
+import nim_agents_isonim_viewmodels/agent_harbor/[changes_vm, inbox_vm, inbox_item_vm]
+import ../keymap/[base_keymaps, context_keys, editing_keymap, keymap_router, scope_path]
 
 export changes_vm, inbox_vm
 
@@ -118,11 +119,8 @@ const
   NextArrow* = "\xE2\x86\x92"
   PreviousTitle* = "Previous: back to the item you saw before"
   NextTitle* = "Next: the item at the top of the inbox"
-  StepperShortcutHint* = ""
-    ## The keys in the Previous / Next tooltip. The operations are bound
-    ## in the keymap catalogue with the terminal views;
-    ## until a key is bound the tooltip names none rather than a key that
-    ## does nothing.
+  InboxNextOperation* = "inbox.next"
+  InboxPreviousOperation* = "inbox.previous"
   AutoSwitchOn* = "Auto-switch: on"
   AutoSwitchOff* = "Auto-switch: off"
   AutoOn* = "Auto: on"
@@ -319,8 +317,19 @@ proc autoSwitchText*(on, compact: bool): string =
   if compact: (if on: AutoOn else: AutoOff)
   else: (if on: AutoSwitchOn else: AutoSwitchOff)
 
+proc stepperKey*(next: bool): string =
+  ## The key the base keymap binds to Next or Previous in the Inbox's scope
+  ## (`overlay_rows`: `]` and `[`), as a tooltip names it (IR-3: the key
+  ## shown is one that, typed there, runs it); "" when none does.
+  let router = initKeymapRouter(bkCua, KeyDelivery(frontEnd: feWeb, platform: hostPlatform(),
+                                                   keyProtocol: kpNative))
+  router.chordFor(if next: InboxNextOperation else: InboxPreviousOperation, SessionFacts(),
+                  @[element(ekWindow, "window"), pane(InboxPanelScope)], nmNormal)
+
 proc stepperTitle*(next: bool): string =
-  (if next: NextTitle else: PreviousTitle) & StepperShortcutHint
+  ## Previous's or Next's tooltip: what it does and its key (N6).
+  let key = stepperKey(next)
+  (if next: NextTitle else: PreviousTitle) & (if key.len > 0: " (" & key & ")" else: "")
 
 proc confidenceText*(draft: Draft): string =
   ## `confidence high · by the Manager`, the draft's provenance line.
@@ -343,3 +352,72 @@ proc priorityKeyText*(p: InboxPriority): string =
     of ipNormal: "3"
     of ipLow: "4"
   key & "  " & $p
+
+# ---------------------------------------------------------------------------
+# Keys (the catalogue's `changes.*` and `inbox.*` operations)
+# ---------------------------------------------------------------------------
+#
+# What each of the panels' key operations does, the same in every host. A
+# host resolves a key in the panel's scope through its router (`ChangesPanelScope`,
+# `InboxPanelScope`; the rows are `overlay_rows`') and runs what it resolves to
+# here; scrolling, which is the host's own drawing, it runs itself.
+
+const
+  ChangesFocusNextOperation* = "changes.focus-next"
+  ChangesFocusPreviousOperation* = "changes.focus-previous"
+  ChangesToggleOperation* = "changes.toggle"
+  ChangesNextTabOperation* = "changes.next-tab"
+  ChangesPreviousTabOperation* = "changes.previous-tab"
+  ChangesPageDownOperation* = "changes.page-down"
+  ChangesPageUpOperation* = "changes.page-up"
+  ChangesOperations* = [ChangesFocusNextOperation, ChangesFocusPreviousOperation,
+                        ChangesToggleOperation, ChangesNextTabOperation,
+                        ChangesPreviousTabOperation, ChangesPageDownOperation,
+                        ChangesPageUpOperation]
+    ## The Changes panel's key operations.
+  InboxPriorityOperations* = ["inbox.priority-1", "inbox.priority-2", "inbox.priority-3",
+                              "inbox.priority-4"]
+    ## Keys `1`-`4`: urgent, high, normal, low (`priorityChoices`' order).
+  InboxScrollDownOperation* = "inbox.scroll-down"
+  InboxScrollUpOperation* = "inbox.scroll-up"
+  InboxPageDownOperation* = "inbox.page-down"
+  InboxPageUpOperation* = "inbox.page-up"
+  InboxOperations* = [InboxNextOperation, InboxPreviousOperation, "inbox.priority-1",
+                      "inbox.priority-2", "inbox.priority-3", "inbox.priority-4",
+                      InboxScrollDownOperation, InboxScrollUpOperation,
+                      InboxPageDownOperation, InboxPageUpOperation]
+    ## The Inbox's key operations.
+  ScrollOperations* = [ChangesPageDownOperation, ChangesPageUpOperation,
+                       InboxScrollDownOperation, InboxScrollUpOperation,
+                       InboxPageDownOperation, InboxPageUpOperation]
+    ## The operations a host runs on its own drawing (`runChangesOperation`
+    ## and `runInboxOperation` leave them to it).
+
+proc runChangesOperation*(vm: ChangesVM; operation: string): bool =
+  ## Runs one of the Changes panel's key operations on `vm`: true when it
+  ## changed something. False for a scroll (the host's) and for an
+  ## operation that is not the panel's.
+  if vm.isNil or vm.state.val != asReady: return false
+  case operation
+  of ChangesFocusNextOperation: vm.focusNext()
+  of ChangesFocusPreviousOperation: vm.focusPrevious()
+  of ChangesToggleOperation: vm.toggleFocused()
+  of ChangesNextTabOperation: vm.stepTab(1)
+  of ChangesPreviousTabOperation: vm.stepTab(-1)
+  else: false
+
+proc runInboxOperation*(vm: InboxVM; page: InboxItemVM; operation: string): bool =
+  ## Runs one of the Inbox's key operations: Next and Previous on the Inbox
+  ## panel's viewmodel (`vm`, nil on an item's page standing alone), a
+  ## priority on the page on screen (`page`, nil for none). True when it
+  ## was sent; false for a scroll (the host's), a step that cannot be taken,
+  ## and an operation that is not the Inbox's.
+  let at = InboxPriorityOperations.find(operation)
+  if at >= 0:
+    if page.isNil or page.state.val != asReady: return false
+    return page.setPriority(priorityChoices()[at])
+  if vm.isNil or vm.state.val != asReady: return false
+  case operation
+  of InboxNextOperation: vm.canNext and vm.next()
+  of InboxPreviousOperation: vm.canPrev and vm.prev()
+  else: false

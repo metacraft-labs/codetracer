@@ -1,0 +1,40 @@
+ Inbox  ⚲ ✕
+ ● NEEDS YOUR ANSWER  Port the route cache                                        Priority… ▾
+                                                                                               
+ ● Agent has stopped and is waiting for your answer
+                                                                                               
+ The old cache and the new one disagree on the eviction order for entries written in the same
+ millisecond. Keep the old order behind a flag, or take the new one everywhere and note it in
+ the changelog?
+                                                                                               
+  Keep the old order behind a flag for one release.
+                                                                                               
+                                                                                               
+                                                                                               
+  Submit
+ Answer sent; waiting for the agent to continue.
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               

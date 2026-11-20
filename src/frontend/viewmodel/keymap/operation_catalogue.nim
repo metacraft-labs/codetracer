@@ -108,6 +108,13 @@ const
   ResultsTable* = PaneTablePrefix & "results"
     ## The omnibox's result commands' keys (`agent_harbor_results_words`),
     ## while their field or their sheet has the focus.
+  ChangesTable* = PaneTablePrefix & "changes"
+    ## The Agent Harbor Changes panel's keys (`agent_harbor_changes_inbox_words`),
+    ## while the panel has the focus.
+  InboxTable* = PaneTablePrefix & "inbox"
+    ## The Agent Harbor Inbox's keys (`agent_harbor_changes_inbox_words`):
+    ## Previous / Next over the server's cursor and the item's priority,
+    ## while the Inbox panel or an inbox item's page has the focus.
   PointerTable* = "pointer"
     ## The rows whose key is a pointer gesture (`pointer_rows`). Never on a
     ## scope path: only `keymap_router.routePointer` consults it.
@@ -658,6 +665,28 @@ const
     op("results.insert", ResultsTable, "Results: Insert the Completion"),
     op("results.more", ResultsTable, "Results: Show the Whole Group", oaTarget),
     op("results.all", ResultsTable, "Results: Show Every Group"),
+    # The Agent Harbor Changes panel (`agent_harbor_changes_inbox_words`):
+    # move the keyboard through the spec cards or the files, open or close
+    # the one it is on, step the tabs, scroll a page.
+    op("changes.focus-next", ChangesTable, "Changes: Next Item"),
+    op("changes.focus-previous", ChangesTable, "Changes: Previous Item"),
+    op("changes.toggle", ChangesTable, "Changes: Open or Close the Item"),
+    op("changes.next-tab", ChangesTable, "Changes: Next Tab"),
+    op("changes.previous-tab", ChangesTable, "Changes: Previous Tab"),
+    op("changes.page-down", ChangesTable, "Changes: Scroll Down a Page"),
+    op("changes.page-up", ChangesTable, "Changes: Scroll Up a Page"),
+    # The Agent Harbor Inbox (`agent_harbor_changes_inbox_words`): Previous
+    # and Next over the server's cursor, the item's priority, scrolling.
+    op("inbox.next", InboxTable, "Inbox: Next Item"),
+    op("inbox.previous", InboxTable, "Inbox: Previous Item"),
+    op("inbox.priority-1", InboxTable, "Inbox: Priority Urgent"),
+    op("inbox.priority-2", InboxTable, "Inbox: Priority High"),
+    op("inbox.priority-3", InboxTable, "Inbox: Priority Normal"),
+    op("inbox.priority-4", InboxTable, "Inbox: Priority Low"),
+    op("inbox.scroll-down", InboxTable, "Inbox: Scroll Down"),
+    op("inbox.scroll-up", InboxTable, "Inbox: Scroll Up"),
+    op("inbox.page-down", InboxTable, "Inbox: Scroll Down a Page"),
+    op("inbox.page-up", InboxTable, "Inbox: Scroll Up a Page"),
     op("video-player.toggle-play", VideoPlayerTable, "Video: Play / Pause"),
     op("video-player.rewind", VideoPlayerTable, "Video: Rewind"),
     op("video-player.fast-forward", VideoPlayerTable, "Video: Fast Forward"),

@@ -61,6 +61,7 @@ when defined(js):
 import nim_agents/agent_harbor/fleet_records
 import nim_agents_isonim_viewmodels/agent_harbor/[inbox_vm, inbox_item_vm]
 import ./agent_harbor_changes_inbox_words
+from ../keymap/scope_path import InboxPanelScope
 
 export signals, computation, components, inbox_vm, inbox_item_vm,
   agent_harbor_changes_inbox_words
@@ -514,7 +515,7 @@ proc renderAgentHarborInboxItemPage*[R, N](r: R; page: InboxItemVM;
   mixin clearChildren
   var body: N
   result = ui(r):
-    tdiv(class = AgentHarborInboxItemClass):
+    tdiv(class = AgentHarborInboxItemClass, `data-ct-pane` = InboxPanelScope, tabindex = "0"):
       tdiv(ref = body, class = "ah-fleet-body ah-item-page")
   createRenderEffect proc() =
     r.clearChildren(body)
@@ -643,7 +644,7 @@ proc renderAgentHarborInboxPanel*[R, N](r: R; vm: InboxVM;
   mixin clearChildren, setAttribute
   var body: N
   let panel = ui(r):
-    tdiv(class = AgentHarborInboxClass):
+    tdiv(class = AgentHarborInboxClass, `data-ct-pane` = InboxPanelScope, tabindex = "0"):
       tdiv(ref = body, class = "ah-fleet-body ah-inbox-body")
   let itemCtx = AgentHarborInboxItemContext(nowMs: ctx.nowMs, onOpenSignIn: ctx.onOpenSignIn,
     onTyping: proc(typing: bool) = vm.setTyping(typing),

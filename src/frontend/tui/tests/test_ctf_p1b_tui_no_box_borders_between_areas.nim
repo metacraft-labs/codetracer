@@ -25,7 +25,11 @@
 ##     grounds the areas really have;
 ##   * THE TIMELINE IS CARDLESS: every cell of a session activity timeline's
 ##     line is on the timeline's own ground (`timelineLineProblems`); only
-##     the focus bar `▎` differs, by its ink.
+##     the focus bar `▎` differs, by its ink;
+##   * SO ARE CTF-P3'S ROWS: a spec card, a test, a Code tab file and an
+##     inbox row is one ground from its first row to its last, along both
+##     its edges (`cardlessRowProblems`), so no row is framed by a ground of
+##     its own; the inset bar `▎` differs by its ink only.
 ##
 ## The same views drive the terminal story host that
 ## `real_terminal/test_ctf_p1b_tui_views_cover_web_states.nim` compares, cell
@@ -41,7 +45,7 @@ from std/unicode import runes, Rune, `$`
 import ../agent_harbor/ah_tui_stories
 import ../../styles/generated/design_tokens
 
-const ExpectedAssertions = 14
+const ExpectedAssertions = 17
 
 const Modes = [dmDark, dmLight]
 
@@ -140,6 +144,23 @@ proc timelineLineProblems*(c: AhCanvas): seq[string] =
           return @["the timeline line " & line.attr("line") & " at (" & $r & "," & $col &
                    ") is on " & c.bgAt(r, col) & ", not the timeline's ground " & ground]
 
+const CardlessRowFacts = ["card", "test", "vcs-row", "item"]
+  ## CTF-P3's rows: a spec card, a test, a Code tab file, an inbox row.
+
+proc cardlessRowProblems*(c: AhCanvas): seq[string] =
+  ## Each CTF-P3 row is one ground down both its edges (the cells it draws
+  ## at its first and last column, on every row it spans that is on the
+  ## screen): a row framed by another ground at an edge is a box.
+  for fact in CardlessRowFacts:
+    for n in c.root.all(fact):
+      if n.row >= c.rows or n.width < 2: continue
+      let ground = c.bgAt(n.row, n.col)
+      for r in n.row ..< min(c.rows, n.row + max(1, n.height)):
+        for col in [n.col, n.col + n.width - 1]:
+          if c.bgAt(r, col) != ground:
+            return @["the " & fact & " " & n.attr(fact) & " at (" & $r & "," & $col & ") is on " &
+                     c.bgAt(r, col) & ", its first cell on " & ground]
+
 let section = agentHarborSection()
 
 proc storyProblems(story: CodeTracerStory; cols, rows: int; mode: DesignMode): seq[string] =
@@ -154,6 +175,7 @@ proc storyProblems(story: CodeTracerStory; cols, rows: int; mode: DesignMode): s
   result.add frameProblems(lines)
   result.add areaProblems(m.canvas)
   result.add timelineLineProblems(m.canvas)
+  result.add cardlessRowProblems(m.canvas)
 
 suite "CTF-P1b: no box borders between the terminal's Agent Harbor areas":
   test "test_ctf_p1b_tui_no_box_borders_between_areas":
@@ -222,6 +244,27 @@ suite "CTF-P1b: the checks can fail":
     for col in line.col ..< line.col + line.width:
       discard m.canvas.put(line.row, col, " ", m.canvas.p.textBody, bg = m.canvas.p.menu)
     ck timelineLineProblems(m.canvas).len > 0
+
+  test "a CTF-P3 row framed by a ground of its own is reported, the inset bar is not":
+    # An open spec card carries the action bar `▎` down its left edge (an
+    # ink on the card's ground): not reported. Its right edge repainted on
+    # the card surface frames it: reported.
+    let story = block:
+      var found: CodeTracerStory
+      for s in section.stories:
+        if s.surface == "agent-harbor-changes" and s.fixture == "spec-changes": found = s
+      found
+    let m = mountStory(story, 95, 40, dmDark)
+    defer: m.dispose()
+    ck cardlessRowProblems(m.canvas).len == 0
+    var open: AhNode
+    for card in m.canvas.root.all("card"):
+      if card.attr("open") == "true" and open.isNil: open = card
+    ck open != nil
+    for r in open.row ..< min(m.rows, open.row + open.height):
+      discard m.canvas.put(r, open.col + open.width - 1, " ", m.canvas.p.textBody,
+                           bg = m.canvas.p.menu)
+    ck cardlessRowProblems(m.canvas).len > 0
 
 suite "CTF-P1c: an ended mark and word keep their contrast on every surface":
   # The ended role is grey, and grey has no hue to fall back on: on Light's

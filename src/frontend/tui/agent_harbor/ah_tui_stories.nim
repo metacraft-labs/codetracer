@@ -21,7 +21,7 @@
 ## playback delivers entries; `idle` says when the screen must be drawn
 ## again.
 
-import std/strutils
+import std/[strutils, times]
 
 import ../../stories/agent_harbor_stories
 import ../../stories/codetracer_stories
@@ -39,6 +39,10 @@ import ./ah_tui_results
 import ../../stories/agent_harbor_results_stories
 import ./ah_tui_session_activity
 import ../../stories/agent_harbor_suggested_actions_stories
+import ./ah_tui_changes_panel
+import ./ah_tui_inbox_panel
+import ../../stories/agent_harbor_changes_inbox_stories
+import isonim/core/owner
 import ../app/views/agent_activity_pane
 import ../app/layout/cells
 import ../../viewmodel/agent_harbor_activity_cards
@@ -53,7 +57,8 @@ import ../../viewmodel/keymap/[base_keymaps, context_keys, editing_keymap,
 import ../../../common/key_names
 
 export agent_harbor_stories, codetracer_stories, emit_storybook_stories, ah_tui_canvas,
-  ah_tui_composer, ah_tui_results
+  ah_tui_composer, ah_tui_results, ah_tui_changes_panel, ah_tui_inbox_panel,
+  agent_harbor_changes_inbox_stories
 
 const
   TuiAgentHarborSurfaces* = [
@@ -68,22 +73,31 @@ const
     "agent-harbor-session-activity",
     "agent-harbor-suggested-actions",
     "agent-harbor-pie",
+    "agent-harbor-changes",
+    "agent-harbor-inbox",
+    "agent-harbor-inbox-item",
   ]
     ## Every surface of the Agent Harbor section this module draws.
+  TuiChangesInboxSurfaces* = ["agent-harbor-changes", "agent-harbor-inbox",
+                              "agent-harbor-inbox-item"]
+    ## CTF-P3's surfaces (`ah_tui_changes_panel`, `ah_tui_inbox_panel`): the
+    ## Changes panel, the Inbox panel and an inbox item's page.
   AgentHarborSectionTitle* = "CodeTracer/Agent Harbor"
   StoryIdPrefix* = "codetracer-agent-harbor--"
   TuiSizes* = [("laptop", 180, 56), ("sidebar", 45, 56)]
     ## The brief's laptop 1440×900 and sidebar 360×900, at 8×16 px a cell
     ## (`CellPx`; a row is 16 px).
   TuiPanelSize* = ("panel", 95, 40)
-    ## The brief's panel 760×640: the session activity timeline is a panel,
-    ## so its stories are also captured at this size (`sizesOf`).
+    ## The brief's panel 760×640: the session activity timeline, the Changes
+    ## panel, the Inbox and an inbox item's page are panels, so their stories
+    ## are also captured at this size (`sizesOf`).
 
 proc sizesOf*(surface: string): seq[(string, int, int)] =
   ## The named sizes a story of `surface` is captured at: laptop and sidebar,
-  ## and panel for the session activity timeline.
+  ## and panel for the session activity timeline and CTF-P3's surfaces.
   result = @TuiSizes
-  if surface in ["agent-harbor-session-activity", "agent-harbor-suggested-actions"]:
+  if surface in ["agent-harbor-session-activity", "agent-harbor-suggested-actions"] or
+     surface in TuiChangesInboxSurfaces:
     result.add TuiPanelSize
 
 type
@@ -104,6 +118,23 @@ type
     suggestion*: SuggestedActionsVM
       ## The suggested-actions block at the timeline's end (its stories
       ## only).
+    changes*: ChangesVM
+    inbox*: InboxVM
+    inboxItem*: InboxItemVM
+      ## CTF-P3: a Changes, Inbox or inbox item story's viewmodel, built by
+      ## the web story's constructor (`agent_harbor_changes_inbox_stories`).
+    requests*: StoryHostRequests
+      ## What a CTF-P3 story asked its host that has no viewmodel seam (a
+      ## login's `Open sign-in`), counted as the web story counts it.
+    p3*: AhP3State
+      ## The host's own state for a CTF-P3 story: the dropped select, the
+      ## spinner's frame.
+    p3Root: proc()
+      ## Disposes the reactive root the CTF-P3 viewmodels were built in.
+    animate*: bool
+      ## The spinner of a submitting action turns (`idle`); off in every
+      ## test and capture, so a capture never moves.
+    lastSpin: float
     cards*: ActivityAgainstCards
       ## The comparison story's cards (`agent_harbor_activity_cards`); unset
       ## for any other story.
@@ -126,6 +157,9 @@ type
       ## none), whether or not this host performs it.
     view*: AhNode
       ## The view's own root in it, the node carrying `surface`.
+
+const SpinnerStepSeconds* = 0.1
+  ## A spinner frame's time on screen while animation is on.
 
 proc hasTuiRendering*(surface: string): bool = surface in TuiAgentHarborSurfaces
 
@@ -374,6 +408,13 @@ proc draw*(m: AhTuiMount) =
                     elide("\xE2\x80\xBA " & promptPlaceholder(cards), area.width), c.p.textCaption)
       discard c.node(c.root, top, half, m.cols - half, h,
                      [("card-feed", $min(screen.lines.len, screen.listRows))])
+  of "agent-harbor-changes":
+    c.drawChangesPanel(m.changes, top, 0, m.cols, h, changesStoryContext(m.fixture), m.p3)
+  of "agent-harbor-inbox":
+    c.drawInboxPanel(m.inbox, top, 0, m.cols, h, inboxStoryContext(m.fixture, m.requests), m.p3)
+  of "agent-harbor-inbox-item":
+    c.drawInboxItemPage(m.inboxItem, top, 0, m.cols, h,
+                        inboxItemStoryContext(m.fixture, m.requests), m.p3)
   else: discard
   if not m.playback.isNil:
     c.drawPlaybackBar(m.playback, m.rows - 1, (proc(operation: string) =
@@ -434,6 +475,25 @@ proc mountAgentHarborStoryTui*(surface, fixture: string; cols, rows: int;
     let story = createSuggestedActionsStory(fixture)
     result.timeline = story.timeline
     result.suggestion = story.suggestion
+  of "agent-harbor-changes", "agent-harbor-inbox", "agent-harbor-inbox-item":
+    # Built inside a reactive root, as the web and GPUI mounts build them,
+    # so what a constructor registers for its cleanup (the Inbox playback's
+    # operator) is disposed with the story.
+    let m = result
+    m.requests = StoryHostRequests()
+    m.p3 = AhP3State()
+    createRoot proc(disposeRoot: proc()) =
+      m.p3Root = disposeRoot
+      case surface
+      of "agent-harbor-changes": m.changes = createChangesStoryVM(fixture)
+      of "agent-harbor-inbox":
+        m.inbox = createInboxStoryVM(fixture, pb)
+        # Its pages are visible while it is mounted (their viewing heartbeat
+        # runs), as the web and GPUI mounts make them.
+        if m.inbox.showPages: m.inbox.setPagesVisible(true)
+      else:
+        m.inboxItem = createInboxItemStoryVM(fixture)
+        m.inboxItem.setVisible(true)
   else: discard
   if not pb.isNil: pb.openAtMoment(moment)
   result.draw()
@@ -452,7 +512,20 @@ proc idle*(m: AhTuiMount): bool =
   ## (through the platform's event loop, which the story host polls only
   ## here), and the screen is drawn again when the playback moved since the
   ## last `draw`. True when it was.
-  if m.isNil or m.playback.isNil: return false
+  ##
+  ## With `animate` on, a CTF-P3 story showing a submitting action turns its
+  ## spinner a frame every `SpinnerStepSeconds` (CodeTracer-TUI §3.4,
+  ## "Animation where it informs"); with it off (every test and capture) the
+  ## first frame stays.
+  if m.isNil: return false
+  if m.animate and not m.p3.isNil and m.p3.spinning:
+    let now = epochTime()
+    if now - m.lastSpin >= SpinnerStepSeconds:
+      m.lastSpin = now
+      inc m.p3.spinnerFrame
+      m.draw()
+      return true
+  if m.playback.isNil: return false
   drainPlatformCallbacks()
   if m.playback.changed.val != m.drawnAt:
     m.draw()
@@ -494,7 +567,82 @@ proc activityKey*(m: AhTuiMount; token: string): bool =
   m.draw()
   true
 
+let ChangesScopePath = @[element(ekWindow, "window"), pane(ChangesPanelScope)]
+  ## Where the Changes panel's keys resolve.
+let InboxScopePath = @[element(ekWindow, "window"), pane(InboxPanelScope)]
+  ## Where the Inbox's keys resolve (the panel's and an item's page's).
+
+const WheelRows* = 3
+  ## The rows one notch of the wheel scrolls a region.
+
+proc inboxScrollKey(m: AhTuiMount): string =
+  ## The region the Inbox's scroll keys move: the rows (with the page under
+  ## them, or beside them), or an item's page standing alone.
+  if not m.inboxItem.isNil: return PageScrollKey
+  if m.p3.regionOf(InboxScrollKey).key.len > 0: InboxScrollKey else: InboxListScrollKey
+
+proc changesKey*(m: AhTuiMount; token: string): bool =
+  ## A key while a Changes story is shown, ROUTED (Input-Routing-And-Keymaps.md
+  ## §4): decoded by the terminal's byte decoder and resolved by the story
+  ## host's router in the `changes` scope (`overlay_rows`: `Down` / `Up` the
+  ## keyboard's item, `Enter` opens or closes it, `Right` / `Left` the tabs,
+  ## `PageDown` / `PageUp` scroll). A key that resolves to one of the
+  ## panel's operations runs it, and the screen is drawn again (true).
+  if m.changes.isNil: return false
+  let name = keyName(token)
+  if name.len == 0: return false
+  let res = m.router.route(SessionFacts(), ChangesScopePath, nmNormal, name, 0)
+  m.lastOperation = if res.kind == erOperation: res.operation else: ""
+  if res.kind != erOperation or res.operation notin ChangesOperations: return false
+  case res.operation
+  of ChangesPageDownOperation:
+    discard m.p3.scrollBy(ChangesScrollKey, m.p3.pageOf(ChangesScrollKey))
+  of ChangesPageUpOperation:
+    discard m.p3.scrollBy(ChangesScrollKey, -m.p3.pageOf(ChangesScrollKey))
+  else: discard m.changes.runChangesOperation(res.operation)
+  m.draw()
+  true
+
+proc inboxKey*(m: AhTuiMount; token: string): bool =
+  ## A key while an Inbox or an item's page is shown, ROUTED in the `inbox`
+  ## scope (`overlay_rows`: `]` / `[` Next and Previous, `1`-`4` the item's
+  ## priority, the arrows and the page keys scroll). A key that resolves to
+  ## one of the Inbox's operations runs it, and the screen is drawn again.
+  if m.inbox.isNil and m.inboxItem.isNil: return false
+  let name = keyName(token)
+  if name.len == 0: return false
+  let res = m.router.route(SessionFacts(), InboxScopePath, nmNormal, name, 0)
+  m.lastOperation = if res.kind == erOperation: res.operation else: ""
+  if res.kind != erOperation or res.operation notin InboxOperations: return false
+  let key = m.inboxScrollKey
+  case res.operation
+  of InboxScrollDownOperation: discard m.p3.scrollBy(key, 1)
+  of InboxScrollUpOperation: discard m.p3.scrollBy(key, -1)
+  of InboxPageDownOperation: discard m.p3.scrollBy(key, m.p3.pageOf(key))
+  of InboxPageUpOperation: discard m.p3.scrollBy(key, -m.p3.pageOf(key))
+  else:
+    let page = if m.inbox.isNil: m.inboxItem else: m.inbox.page
+    discard runInboxOperation(m.inbox, page, res.operation)
+  m.draw()
+  true
+
+proc wheel*(m: AhTuiMount; row, col, delta: int): bool =
+  ## The wheel over a scrolling region moves its window `delta` notches
+  ## (negative: up); true when it moved, and the screen is drawn again.
+  if m.p3.isNil: return false
+  let region = m.p3.regionAt(row, col)
+  if region.key.len == 0: return false
+  if not m.p3.scrollBy(region.key, delta * WheelRows): return false
+  m.draw()
+  true
+
 proc dispose*(m: AhTuiMount) =
+  if m.inbox != nil and m.inbox.showPages: m.inbox.setPagesVisible(false)
+  if m.inboxItem != nil: m.inboxItem.setVisible(false)
+  if m.changes != nil: m.changes.dispose()
+  if m.inbox != nil: m.inbox.dispose()
+  if m.inboxItem != nil: m.inboxItem.dispose()
+  if m.p3Root != nil: m.p3Root()
   if m.timeline != nil: m.timeline.dispose()
   if m.cards.cards != nil:
     m.cards.cards.dispose()
@@ -532,8 +680,14 @@ proc handleInput*(m: AhTuiMount; token: string): bool =
   ## A press acts on what is under it; motion moves the hover. True when the
   ## screen must be drawn again.
   let (ok, button, row, col, press) = decodeSgrMouse(token)
-  if not ok: return m.playbackKey(token) or m.activityKey(token) or m.composerKey(token) or
-                    m.resultsKey(token)
+  if not ok:
+    return m.playbackKey(token) or m.activityKey(token) or m.composerKey(token) or
+           m.resultsKey(token) or m.changesKey(token) or m.inboxKey(token)
+  if (button and 64) != 0:
+    # The wheel: SGR reports a notch up as button 64, down as 65
+    # (https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h2-Mouse-Tracking).
+    if press: return m.wheel(row, col, if (button and 1) != 0: 1 else: -1)
+    return false
   if (button and 32) != 0:
     # Motion: SGR adds 32 to the button for a motion report (1003).
     result = m.canvas.pointAt(row, col)

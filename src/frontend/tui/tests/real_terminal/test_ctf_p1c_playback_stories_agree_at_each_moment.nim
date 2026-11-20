@@ -129,7 +129,7 @@ import ../../../gpui/agent_harbor/ah_playback_bar
 import ../../../viewmodel/views/[isonim_agent_harbor_session_tabs_view,
   isonim_agent_harbor_initiatives_view, isonim_agent_harbor_initiative_tabs_view,
   isonim_agent_harbor_fleet_view, isonim_agent_harbor_playback_view,
-  isonim_agent_harbor_session_activity_view]
+  isonim_agent_harbor_session_activity_view, isonim_agent_harbor_inbox_view]
 import ../../../viewmodel/input/element_press
 import ../../../viewmodel/keymap/[base_keymaps, context_keys, editing_keymap,
                                   keymap_router, scope_path]
@@ -142,10 +142,11 @@ const
   LaptopH = 900
   LaptopCols = 180
   LaptopRows = 56
-  MinimumPlaybackStories = 8
+  MinimumPlaybackStories = 9
     ## One per P2a surface: the session tab strip, the session list, the
     ## initiative tab bar, the Initiatives and Initiative Progress panels and
-    ## the fleet list; and the session activity timeline's two (CTF-P2b).
+    ## the fleet list; the session activity timeline's two (CTF-P2b); and the
+    ## Inbox's `InboxPlayback` over `inbox-run` (CTF-P3).
 
 let captureOut = getEnv("CTF_P1C_TUI_OUT")
   ## Where the real-terminal test writes its screens; empty: nowhere.
@@ -261,6 +262,19 @@ proc drawnFacts[N](view: N; surface: string): seq[string] =
       # reason once, as the failure (never again as an activity line).
       for f in row.all("failure"): result.add "failure " & f.attr("failure")
       for a in row.all("activity"): result.add "activity " & a.attr("activity")
+  of "agent-harbor-inbox":
+    # CTF-P3: the counts, where the walk is, auto-switch, the rows in the
+    # server's order with the item on screen, the explanation strip, and the
+    # page under the rows with its answer state.
+    result.add "counts " & view.fact("summary")
+    result.add "position " & view.fact("stepper-position")
+    result.add "auto-switch " & view.fact("inbox-auto-switch")
+    for row in view.all("item"):
+      result.add "item " & row.attr("item") &
+                 (if row.attr("current") == "true": " on screen" else: "")
+    for s in view.all("strip"): result.add "strip " & s.attr("strip")
+    for k in view.all("item-kind"): result.add "page " & k.attr("item-kind")
+    for ph in view.all("phase-text"): result.add "answer " & ph.attr("phase-text")
   of "agent-harbor-session-activity":
     result.add "status " & view.attr("session-status")
     for n in view.all("notice"): result.add "notice " & n.attr("notice")
@@ -390,6 +404,20 @@ proc webFacts(view: MockNode; surface: string): seq[string] =
       result.add timelineLineFacts(l.a("data-ah-line-kind"), l.a("data-ah-text"),
                                    l.a("data-ah-role"), l.a("data-ah-expanded"),
                                    l.a("data-ah-state"))
+  of "agent-harbor-inbox":
+    let a = proc(n: MockNode; name: string): string =
+      if n.attributes.hasKey(name): n.attributes[name] else: ""
+    result.add "counts " & view.textOf("ah-fleet-summary")
+    let stepper = view.byClass("ah-inbox-stepper")
+    result.add "position " & (if stepper.len > 0: stepper[0].a("data-ah-position") else: "")
+    let auto = view.byClass("ah-auto-switch")
+    result.add "auto-switch " & (if auto.len > 0: auto[0].a("data-ah-auto-switch") else: "")
+    for row in view.byClass("ah-inbox-row"):
+      result.add "item " & row.a("data-ah-item") &
+                 (if row.hasClass("ah-inbox-row-current"): " on screen" else: "")
+    for s in view.byClass("ah-inbox-strip"): result.add "strip " & s.textContent
+    for h in view.byClass("ah-item-head"): result.add "page " & h.a("data-ah-kind")
+    for ph in view.byClass("ah-item-phase"): result.add "answer " & ph.textContent
   else: result.add "no reading for surface " & surface
 
 proc webBarFacts(bar: MockNode): string =
@@ -460,6 +488,14 @@ proc mountWeb(story: CodeTracerStory; clock: ClockBase; moment = "";
     of "agent-harbor-session-activity":
       let vm = createSessionActivityStoryVM(story.fixture, pb)
       m.view = renderAgentHarborSessionActivity[MockRenderer, MockNode](r, vm)
+      disposeVm = proc() = vm.dispose()
+    of "agent-harbor-inbox":
+      # `storybook_components`' Inbox mount: the panel over the story's
+      # viewmodel and context, its pages visible while it is mounted.
+      let vm = createInboxStoryVM(story.fixture, pb)
+      m.view = renderAgentHarborInboxPanel[MockRenderer, MockNode](r, vm,
+                                                                    inboxStoryContext(story.fixture))
+      if vm.showPages: vm.setPagesVisible(true)
       disposeVm = proc() = vm.dispose()
     else: raise newException(ValueError, "no web view for " & story.surface)
     m.bar = renderAgentHarborPlaybackBar[MockRenderer, MockNode](r, pb)
@@ -690,7 +726,35 @@ let SpotChecks: seq[SpotCheck] = @[
     "line item | The retry client backs off with full jitter; 18 tests pass. <body>",
     "!line item | Read src/upload/log.py <body>"]),
   ("agent-harbor-session-activity", "session-completes", @["status completed",
-    "line item | Status: completed Retries now wait a random time up to the exponential cap. <ended>"])]
+    "line item | Status: completed Retries now wait a random time up to the exponential cap. <ended>"]),
+  # The Inbox over inbox-run (CTF-P3): the notes session's feedback request
+  # waits from before the run and stays; the route cache asks at +10 s; the
+  # logging session's ended turn (boosted: its cache is warm) and the schema
+  # migration's urgent permission request arrive at +20 s; the operator
+  # presses Next at +30 s (the permission request, top of the order); the
+  # boost ends at +40 s and the server reorders, the page staying; the
+  # operator allows it at +50 s (answered in place, auto-switch off); turns
+  # auto-switch on, takes Next to the question and answers it at +60 s, so
+  # the inbox moves to the next item; Previous at +70 s returns to the
+  # visited question's page, gone from the inbox; Next at +75 s; the ended
+  # turn is answered on another front-end at +80 s (nothing moves); the
+  # login request arrives at +90 s and nothing takes the screen.
+  ("agent-harbor-inbox", "", @["item run-feedback", "auto-switch off", "!page async_feedback"]),
+  ("agent-harbor-inbox", "first-wait", @["item run-question", "item run-feedback",
+    "!item run-question on screen"]),
+  ("agent-harbor-inbox", "four-waiting", @["item run-permission", "item run-ended-turn", "item run-question",
+    "item run-feedback"]),
+  ("agent-harbor-inbox", "next", @["position 1 of 4", "item run-permission on screen",
+    "page permission_gate"]),
+  ("agent-harbor-inbox", "boost-ends", @["item run-permission on screen", "item run-question",
+    "item run-ended-turn"]),
+  ("agent-harbor-inbox", "answered", @["!item run-permission", "!item run-permission on screen",
+    "answer Answer sent; waiting for the agent to continue."]),
+  ("agent-harbor-inbox", "auto-switch", @["auto-switch on", "!item run-question",
+    "item run-ended-turn on screen"]),
+  ("agent-harbor-inbox", "resolved-elsewhere", @["!item run-ended-turn", "item run-feedback"]),
+  ("agent-harbor-inbox", "arrives-while-reading", @["item run-feedback", "item run-login",
+    "!item run-login on screen"])]
 
 proc momentName(moment: string): string =
   if moment.len == 0: "the first frame" else: moment
@@ -711,6 +775,7 @@ const
   Bar = "agent-harbor-initiative-tabs"
   Progress = "agent-harbor-initiative-progress"
   Activity = "agent-harbor-session-activity"
+  Inbox = "agent-harbor-inbox"
 
 let MomentChanges: seq[tuple[moment: string; surfaces: seq[string]]] = @[
   # front-ends: a session's state moves its tab, its row in the list and in
@@ -754,11 +819,25 @@ let MomentChanges: seq[tuple[moment: string; surfaces: seq[string]]] = @[
   ("command-running", @[Activity]),
   ("command-fails", @[Activity]),
   ("agent-asks", @[Activity]),
-  ("answered", @[Activity]),
+  ("answered", @[Activity, Inbox]),
+    # `answered` names a moment of two scenarios: session-run's (the
+    # operator's answer starts a second turn) and inbox-run's (the
+    # permission request answered in place, CTF-P3).
   ("edits-grouped", @[Activity]),
   ("hook-repeats", @[Activity]),
   ("agent-replies", @[Activity]),
-  ("session-completes", @[Activity])]
+  ("session-completes", @[Activity]),
+  # inbox-run (CTF-P3): every moment is an inbox event or an operator's
+  # press, which the Inbox panel draws (a row, the order, the item on
+  # screen, its page, the answer state, auto-switch).
+  ("first-wait", @[Inbox]),
+  ("four-waiting", @[Inbox]),
+  ("next", @[Inbox]),
+  ("boost-ends", @[Inbox]),
+  ("auto-switch", @[Inbox]),
+  ("prev", @[Inbox]),
+  ("resolved-elsewhere", @[Inbox]),
+  ("arrives-while-reading", @[Inbox])]
 
 proc changesOf(moment: string): seq[string] =
   for c in MomentChanges:

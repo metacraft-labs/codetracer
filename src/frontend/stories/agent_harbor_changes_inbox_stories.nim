@@ -50,8 +50,12 @@ const
     "tests", "all-passing", "all-pending", "implementation", "code",
     "code-file-open", "code-filtered", "code-long", "no-plan",
     "no-spec-changes", "milestone", "running", "empty", "loading", "error",
-    "revert-confirm", "reverting", "revert-failed"]
+    "revert-confirm", "reverting", "revert-failed", "keyboard", "code-long-keyboard"]
     ## Every fixture an `agent-harbor-changes` story may name.
+  CodeLongKeyboardSteps* = 120
+    ## How far down the three hundred files `code-long-keyboard`'s reader
+    ## walked with `Down` before `Enter`: far past the foot of every size,
+    ## so the list is scrolled to keep the file in view.
   RevertFailedReason* = "the plan changed on the server since this change was read"
     ## The scripted refusal of `revert-failed` (invented).
 
@@ -61,7 +65,8 @@ proc changesSourceFixture(fixture: string): string =
   case fixture
   of "spec-changes", "request-open", "tests", "implementation", "code",
      "code-file-open", "code-filtered", "milestone", "running",
-     "revert-confirm", "reverting", "revert-failed": "populated"
+     "revert-confirm", "reverting", "revert-failed", "keyboard": "populated"
+  of "code-long-keyboard": "code-long"
   else: fixture
 
 proc changesStoryContext*(fixture: string): AgentHarborChangesContext =
@@ -139,6 +144,20 @@ proc createChangesStoryVM*(fixture: string): ChangesVM =
     result.toggleCard(card)
     discard result.requestRevert(card)
     if fixture != "revert-confirm": discard result.confirmRevert()
+  of "keyboard":
+    # The reader's keys, run as a host runs them: `Down` twice puts the
+    # keyboard on the second card, `Enter` opens it.
+    discard result.runChangesOperation(ChangesFocusNextOperation)
+    discard result.runChangesOperation(ChangesFocusNextOperation)
+    discard result.runChangesOperation(ChangesToggleOperation)
+  of "code-long-keyboard":
+    # `Right` three times to Code, `Down` down the files, `Enter` opens the
+    # file the keyboard is on: its row is far past the list's foot, so a
+    # host keeps it in view by scrolling.
+    for _ in 1 .. 3: discard result.runChangesOperation(ChangesNextTabOperation)
+    for _ in 1 .. CodeLongKeyboardSteps:
+      discard result.runChangesOperation(ChangesFocusNextOperation)
+    discard result.runChangesOperation(ChangesToggleOperation)
   else: discard
 
 # ---------------------------------------------------------------------------
@@ -150,8 +169,12 @@ const
     ## The Inbox's playback story: the `inbox-run` scenario.
   inboxStoryFixtures* = [
     "populated", "long", "fleet", "empty", "emptied", "prev-next", "prev-next-first",
-    "prev-next-end", "manager-held", "loading", "error", InboxPlaybackFixture]
+    "prev-next-end", "manager-held", "loading", "error", InboxPlaybackFixture,
+    "long-keyboard"]
     ## Every fixture an `agent-harbor-inbox` story may name.
+  LongKeyboardAt* = 31
+    ## Where `long-keyboard`'s operator is in the forty items before the key
+    ## (0-based): far past the list's foot at every size.
   InboxScope* = ThisServerLabel
   FleetInboxScope* = "fleet: every server you can reach"
 
@@ -232,6 +255,17 @@ proc createInboxStoryVM*(fixture: string; playback: AhPlayback = nil): InboxVM =
     result = newInboxVM(source, showPages = true)
     result.load()
     discard result.prev()
+  of "long-keyboard":
+    # Far down a walk of the long list (the server's cursor, as `prev-next`
+    # sets it), then `[`, run as a host runs it: the item on screen is past
+    # the list's foot, so a host keeps it in view by scrolling.
+    let source = ScriptedActionSource(inboxFixture("long"))
+    let order = source.inbox.orderOf
+    source.setCursor("default", InboxCursor(current: order[LongKeyboardAt],
+                                            visited: order[0 ..< LongKeyboardAt]))
+    result = newInboxVM(source, showPages = true)
+    result.load()
+    discard runInboxOperation(result, result.page, InboxPreviousOperation)
   else:
     result = newInboxVM(inboxFixture(fixture))
     result.load()

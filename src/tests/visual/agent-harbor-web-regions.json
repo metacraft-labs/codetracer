@@ -1147,6 +1147,218 @@
         }
       }
     },
+    "agent-harbor-changes-code-long-keyboard-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 33
+        },
+        "changes-tabs": {
+          "x": 4,
+          "y": 73,
+          "w": 1432,
+          "h": 33
+        },
+        "changes-active-tab": {
+          "x": 365.109375,
+          "y": 77,
+          "w": 78.609375,
+          "h": 28,
+          "fill": "#282828"
+        },
+        "code-row-first": {
+          "x": 4,
+          "y": 175,
+          "w": 1432,
+          "h": 30,
+          "index": 0
+        },
+        "code-row-last": {
+          "x": 4,
+          "y": 865,
+          "w": 1432,
+          "h": 30,
+          "index": 23
+        }
+      }
+    },
+    "agent-harbor-changes-code-long-keyboard-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 33
+        },
+        "changes-tabs": {
+          "x": 4,
+          "y": 73,
+          "w": 1432,
+          "h": 33
+        },
+        "changes-active-tab": {
+          "x": 365.109375,
+          "y": 77,
+          "w": 78.609375,
+          "h": 28,
+          "fill": "#e6e2db"
+        },
+        "code-row-first": {
+          "x": 4,
+          "y": 175,
+          "w": 1432,
+          "h": 30,
+          "index": 0
+        },
+        "code-row-last": {
+          "x": 4,
+          "y": 865,
+          "w": 1432,
+          "h": 30,
+          "index": 23
+        }
+      }
+    },
+    "agent-harbor-changes-code-long-keyboard-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 59
+        },
+        "changes-tabs": {
+          "x": 4,
+          "y": 99,
+          "w": 352,
+          "h": 33
+        },
+        "changes-active-tab": {
+          "x": 211.921875,
+          "y": 103,
+          "w": 74.609375,
+          "h": 28,
+          "fill": "#282828"
+        },
+        "code-row-first": {
+          "x": 4,
+          "y": 201,
+          "w": 352,
+          "h": 30,
+          "index": 0
+        },
+        "code-row-last": {
+          "x": 4,
+          "y": 861,
+          "w": 352,
+          "h": 30,
+          "index": 22
+        }
+      }
+    },
+    "agent-harbor-changes-code-long-keyboard-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 59
+        },
+        "changes-tabs": {
+          "x": 4,
+          "y": 99,
+          "w": 352,
+          "h": 33
+        },
+        "changes-active-tab": {
+          "x": 211.921875,
+          "y": 103,
+          "w": 74.609375,
+          "h": 28,
+          "fill": "#e6e2db"
+        },
+        "code-row-first": {
+          "x": 4,
+          "y": 201,
+          "w": 352,
+          "h": 30,
+          "index": 0
+        },
+        "code-row-last": {
+          "x": 4,
+          "y": 861,
+          "w": 352,
+          "h": 30,
+          "index": 22
+        }
+      }
+    },
     "agent-harbor-changes-code-long-laptop-dark": {
       "viewport": {
         "width": 1440,
@@ -2026,6 +2238,270 @@
           "w": 352,
           "h": 35,
           "index": 0
+        }
+      }
+    },
+    "agent-harbor-changes-keyboard-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 33
+        },
+        "changes-tabs": {
+          "x": 4,
+          "y": 73,
+          "w": 1432,
+          "h": 33
+        },
+        "changes-active-tab": {
+          "x": 12,
+          "y": 77,
+          "w": 116.46875,
+          "h": 28,
+          "fill": "#282828"
+        },
+        "milestone-select": {
+          "x": 12,
+          "y": 112,
+          "w": 302,
+          "h": 24
+        },
+        "group-head-first": {
+          "x": 4,
+          "y": 143,
+          "w": 1432,
+          "h": 35,
+          "index": 0
+        },
+        "spec-card-first": {
+          "x": 4,
+          "y": 178,
+          "w": 1432,
+          "h": 34,
+          "index": 0
+        },
+        "spec-card-last": {
+          "x": 4,
+          "y": 580,
+          "w": 1432,
+          "h": 34,
+          "index": 7
+        }
+      }
+    },
+    "agent-harbor-changes-keyboard-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 33
+        },
+        "changes-tabs": {
+          "x": 4,
+          "y": 73,
+          "w": 1432,
+          "h": 33
+        },
+        "changes-active-tab": {
+          "x": 12,
+          "y": 77,
+          "w": 116.46875,
+          "h": 28,
+          "fill": "#e6e2db"
+        },
+        "milestone-select": {
+          "x": 12,
+          "y": 112,
+          "w": 302,
+          "h": 24
+        },
+        "group-head-first": {
+          "x": 4,
+          "y": 143,
+          "w": 1432,
+          "h": 35,
+          "index": 0
+        },
+        "spec-card-first": {
+          "x": 4,
+          "y": 178,
+          "w": 1432,
+          "h": 34,
+          "index": 0
+        },
+        "spec-card-last": {
+          "x": 4,
+          "y": 580,
+          "w": 1432,
+          "h": 34,
+          "index": 7
+        }
+      }
+    },
+    "agent-harbor-changes-keyboard-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 59
+        },
+        "changes-tabs": {
+          "x": 4,
+          "y": 99,
+          "w": 352,
+          "h": 33
+        },
+        "changes-active-tab": {
+          "x": 12,
+          "y": 103,
+          "w": 65.234375,
+          "h": 28,
+          "fill": "#282828"
+        },
+        "milestone-select": {
+          "x": 12,
+          "y": 138,
+          "w": 302,
+          "h": 24
+        },
+        "group-head-first": {
+          "x": 4,
+          "y": 169,
+          "w": 352,
+          "h": 35,
+          "index": 0
+        },
+        "spec-card-first": {
+          "x": 4,
+          "y": 204,
+          "w": 352,
+          "h": 34,
+          "index": 0
+        },
+        "spec-card-last": {
+          "x": 4,
+          "y": 624,
+          "w": 352,
+          "h": 52,
+          "index": 7
+        }
+      }
+    },
+    "agent-harbor-changes-keyboard-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 59
+        },
+        "changes-tabs": {
+          "x": 4,
+          "y": 99,
+          "w": 352,
+          "h": 33
+        },
+        "changes-active-tab": {
+          "x": 12,
+          "y": 103,
+          "w": 65.234375,
+          "h": 28,
+          "fill": "#e6e2db"
+        },
+        "milestone-select": {
+          "x": 12,
+          "y": 138,
+          "w": 302,
+          "h": 24
+        },
+        "group-head-first": {
+          "x": 4,
+          "y": 169,
+          "w": 352,
+          "h": 35,
+          "index": 0
+        },
+        "spec-card-first": {
+          "x": 4,
+          "y": 204,
+          "w": 352,
+          "h": 34,
+          "index": 0
+        },
+        "spec-card-last": {
+          "x": 4,
+          "y": 624,
+          "w": 352,
+          "h": 52,
+          "index": 7
         }
       }
     },
@@ -15192,6 +15668,290 @@
         "item-head": {
           "x": 12,
           "y": 48,
+          "w": 336,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-inbox-long-keyboard-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 33
+        },
+        "rows": {
+          "x": 4,
+          "y": 108,
+          "w": 416,
+          "h": 792
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 73,
+          "w": 1432,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 108,
+          "w": 415,
+          "h": 72,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 774,
+          "w": 415,
+          "h": 90,
+          "index": 9
+        },
+        "inbox-current-row": {
+          "x": 4,
+          "y": 2376,
+          "w": 415,
+          "h": 72,
+          "fill": "#333333"
+        },
+        "item-page": {
+          "x": 420,
+          "y": 134,
+          "w": 1016,
+          "h": 220
+        },
+        "item-head": {
+          "x": 428,
+          "y": 142,
+          "w": 1000,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-inbox-long-keyboard-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 1432,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 1432,
+          "h": 33
+        },
+        "rows": {
+          "x": 4,
+          "y": 108,
+          "w": 416,
+          "h": 792
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 73,
+          "w": 1432,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 108,
+          "w": 415,
+          "h": 72,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 774,
+          "w": 415,
+          "h": 90,
+          "index": 9
+        },
+        "inbox-current-row": {
+          "x": 4,
+          "y": 2376,
+          "w": 415,
+          "h": 72,
+          "fill": "#c8c2b5"
+        },
+        "item-page": {
+          "x": 420,
+          "y": 134,
+          "w": 1016,
+          "h": 220
+        },
+        "item-head": {
+          "x": 428,
+          "y": 142,
+          "w": 1000,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-inbox-long-keyboard-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 33
+        },
+        "rows": {
+          "x": 4,
+          "y": 108,
+          "w": 352,
+          "h": 3024
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 73,
+          "w": 352,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 108,
+          "w": 352,
+          "h": 72,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 774,
+          "w": 352,
+          "h": 90,
+          "index": 9
+        },
+        "inbox-current-row": {
+          "x": 4,
+          "y": 2376,
+          "w": 352,
+          "h": 72,
+          "fill": "#333333"
+        },
+        "item-page": {
+          "x": 4,
+          "y": 3158,
+          "w": 352,
+          "h": 268
+        },
+        "item-head": {
+          "x": 12,
+          "y": 3166,
+          "w": 336,
+          "h": 24
+        }
+      }
+    },
+    "agent-harbor-inbox-long-keyboard-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 860
+        },
+        "frame-header": {
+          "x": 4,
+          "y": 0,
+          "w": 352,
+          "h": 32
+        },
+        "head": {
+          "x": 4,
+          "y": 40,
+          "w": 352,
+          "h": 33
+        },
+        "rows": {
+          "x": 4,
+          "y": 108,
+          "w": 352,
+          "h": 3024
+        },
+        "inbox-stepper": {
+          "x": 4,
+          "y": 73,
+          "w": 352,
+          "h": 35
+        },
+        "inbox-row-first": {
+          "x": 4,
+          "y": 108,
+          "w": 352,
+          "h": 72,
+          "index": 0
+        },
+        "inbox-row-last": {
+          "x": 4,
+          "y": 774,
+          "w": 352,
+          "h": 90,
+          "index": 9
+        },
+        "inbox-current-row": {
+          "x": 4,
+          "y": 2376,
+          "w": 352,
+          "h": 72,
+          "fill": "#c8c2b5"
+        },
+        "item-page": {
+          "x": 4,
+          "y": 3158,
+          "w": 352,
+          "h": 268
+        },
+        "item-head": {
+          "x": 12,
+          "y": 3166,
           "w": 336,
           "h": 24
         }
