@@ -5,12 +5,13 @@
 ## the way a user starts it — in the checkout, on the recording — and its
 ## bytes are parsed by libvterm (TermAssert):
 ##
-##   (What the panes draw from the definitions is asserted, stop by stop, by
-##   `../test_project_definitions_session.nim` over the same program.)
-##
 ##   * `:project` puts what the checkout declared on the screen: the point
 ##     collection and what each point resolved to, the visualiser rule, and
 ##     the code the project ships that was NOT run;
+##   * `:continue` stops on the collection's armed breakpoint, where the
+##     Variables pane draws `m` through the recorded program's own visualiser;
+##     a `:break` and a second `:continue` stop on the `print` line, where a
+##     pair the program never rendered is drawn by the declared shape;
 ##   * `:project review` shows the trust disclosure — the file, the checkout,
 ##     the digest — and `:project grant` grants it.
 ##
@@ -28,7 +29,7 @@ import ../../../../common/project_wasm_fixtures
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 7
+const ExpectedAssertions = 9
 
 var countedAssertions = 0
 
@@ -63,7 +64,8 @@ const Visualisers = """
 schema = "codetracer.visualisers.v1"
 
 [[visualiser]]
-match = "Tuple"
+matchKind = "shape"
+match = "#2"
 summary = "a pair"
 """
 
@@ -87,6 +89,16 @@ proc waitScreen(sess: var TuiTestSession; needle: string;
     sleep(50)
   raise newException(AssertionFailedError,
     "'" & needle & "' never appeared; screen:\n" & result.join("\n"))
+
+proc waitGone(sess: var TuiTestSession; needle: string; timeoutMs = 60000) =
+  ## Wait until `needle` is off the screen. An `Esc` followed at once by the
+  ## next key arrives as ONE `ESC <byte>` token — an Alt chord — so the next
+  ## command is typed only once the overlay is seen to have closed.
+  let deadline = getMonoTime() + initDuration(milliseconds = timeoutMs)
+  while getMonoTime() < deadline:
+    if needle notin sess.screen().join("\n"): return
+    sleep(50)
+  raise newException(AssertionFailedError, "'" & needle & "' never went away")
 
 suite "project definitions on a real terminal":
 
@@ -143,6 +155,7 @@ suite "project definitions on a real terminal":
       ck "1 visualiser rule(s)" in shown
       ck "not run: .codetracer/visualisers.wasm" in shown
       sess.send("\x1b")
+      sess.waitGone("PROJECT DEFINITIONS")
 
       # `:project review` — the disclosure, derived from the grant.
       sess.send(":project review\r")
@@ -150,11 +163,31 @@ suite "project definitions on a real terminal":
       ck "visualisers.wasm" in s.join("\n")
       ck "sha256:" in s.join("\n")
       sess.send("\x1b")
+      sess.waitGone("You are being asked to trust")
 
       # `:project grant` — granted, and said so on the status line.
       sess.send(":project grant\r")
       s = sess.waitScreen("granted .codetracer/visualisers.wasm")
       ck "granted .codetracer/visualisers.wasm" in s[^1]
+
+      # NAVIGATION, on the shipped binary. The collection's breakpoint is
+      # ARMED: `:continue` stops in `scale`, on the anchored line, where the
+      # parameter `m` is drawn by the recorded program's own visualiser.
+      sess.send(":continue\r")
+      s = sess.waitScreen("a 3 by 4 matrix")
+      ck "total = m[0] * k" in s.join("\n")
+      # A `:break` on the `print` line, and `:continue` stops there: `n`, a pair
+      # the program's visualiser never saw, is drawn by the declared shape.
+      var printLine = 0
+      var lineNo = 0
+      for l in readFile(checkout / "main.py").splitLines():
+        inc lineNo
+        if "print(label, t, n[0], d)" in l: printLine = lineNo
+      sess.send(":break " & $printLine & "\r")
+      discard sess.waitScreen("breakpoint at")
+      sess.send(":continue\r")
+      s = sess.waitScreen("a pair")
+      ck "a pair" in s.join("\n")
 
       sess.send(":quit\r")
       ck sess.waitExit(initDuration(seconds = 60)).isSome

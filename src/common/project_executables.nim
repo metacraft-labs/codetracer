@@ -177,6 +177,14 @@ const
     ## input at `ptr`, the module returns the address of a NUL-terminated
     ## answer.
   DiffExport* = "ct_diff"
+  VisualiserValueExport* = "ct_visualise_value"
+    ## ABI version 2 (Project-Definitions §7.1): the same signature as
+    ## `ct_visualise`, handed the value as a STRUCTURED tree
+    ## (`executable_value_abi.encodeStructuredValue`) rather than its
+    ## rendering. A module that exports it is called through it whenever the
+    ## host has the value; one that does not keeps version 1.
+  DiffValueExport* = "ct_diff_value"
+    ## The same, for §7's comparison.
     ## `(i32 aPtr, i32 aLen, i32 bPtr, i32 bLen) -> i32`. Zero means equal.
 
   ExecutableScratchBytes* = 1024
@@ -287,8 +295,20 @@ func exportFor*(kind: DefinitionFileKind): string =
   of dfkDiffCode: DiffExport
   of dfkPoints, dfkVisualisers, dfkScratchpad, dfkTest: ""
 
+func valueExportFor*(kind: DefinitionFileKind): string =
+  ## ABI version 2's entry point for a file of this kind, or "".
+  case kind
+  of dfkVisualiserCode: VisualiserValueExport
+  of dfkDiffCode: DiffValueExport
+  of dfkPoints, dfkVisualisers, dfkScratchpad, dfkTest: ""
+
+func takesStructuredValues*(d: ExecutableDefinition): bool =
+  ## Whether the module speaks ABI version 2.
+  let v = valueExportFor(d.kind)
+  v.len > 0 and d.module.exportedFunction(v) >= 0
+
 func hasEntryPoint*(d: ExecutableDefinition): bool =
-  d.module.exportedFunction(exportFor(d.kind)) >= 0
+  d.module.exportedFunction(exportFor(d.kind)) >= 0 or d.takesStructuredValues
 
 # ---------------------------------------------------------------------------
 # The structural comparison, which is what a failure falls back TO
@@ -353,7 +373,8 @@ func prepare(d: ExecutableDefinition; inputs: openArray[string]): Prepared =
 
 func visualiseWith*(d: ExecutableDefinition; trust: ProjectTrustLedger;
                     input: string;
-                    work = MaxExecutableWork): VisualisedText =
+                    work = MaxExecutableWork;
+                    valueInput = ""): VisualisedText =
   ## Run a visualiser definition over one value's rendering input.
   ##
   ## THE LEDGER IS A PARAMETER BECAUSE THE HANDLE IS A CACHED PARSE. A held
@@ -366,7 +387,10 @@ func visualiseWith*(d: ExecutableDefinition; trust: ProjectTrustLedger;
   ## it would have without the declaration — PLAT-12's rule that "the rest of
   ## the value still presents, always".
   result.bound = work
-  let entry = exportFor(d.kind)
+  # ABI version 2 when the module speaks it and the host has the value.
+  let structured = valueInput.len > 0 and d.takesStructuredValues
+  let entry = if structured: valueExportFor(d.kind) else: exportFor(d.kind)
+  let handed = if structured: valueInput else: input
   let current = d.stillAdmitted(trust)
   if not admits(current):
     result.problems.add problem(d.file, codeFor(current),
@@ -374,7 +398,7 @@ func visualiseWith*(d: ExecutableDefinition; trust: ProjectTrustLedger;
       ". The definition was already loaded; it was NOT run")
     result.offender = d.file & (if entry.len > 0: "#" & entry else: "")
     return
-  if entry != VisualiserExport:
+  if entry notin [VisualiserExport, VisualiserValueExport]:
     result.problems.add problem(d.file, etcMissingExport,
       "a '" & definitionFileName(d.kind) & "' is not a visualiser definition")
     result.offender = d.file
@@ -384,7 +408,7 @@ func visualiseWith*(d: ExecutableDefinition; trust: ProjectTrustLedger;
       "it exports no '" & entry & "'")
     result.offender = d.file & "#" & entry
     return
-  var prep = prepare(d, [input])
+  var prep = prepare(d, [handed])
   result.spent = prep.spent
   # `prepare` reports "not enough memory" for a module that declares fewer
   # pages than the host's input needs — including ZERO pages, where
@@ -396,7 +420,7 @@ func visualiseWith*(d: ExecutableDefinition; trust: ProjectTrustLedger;
     result.offender = d.file & "#" & entry
     return
   let run = d.module.runExportIn(prep.instance, entry,
-                                 [int32(ExecutableInputBase), int32(input.len)],
+                                 [int32(ExecutableInputBase), int32(handed.len)],
                                  work, prep.spent)
   result.spent = run.spent
   if not run.ok:
@@ -424,7 +448,8 @@ func visualiseWith*(d: ExecutableDefinition; trust: ProjectTrustLedger;
   result.fromDefinition = true
 
 func diffWith*(d: ExecutableDefinition; trust: ProjectTrustLedger; a, b: string;
-               work = MaxExecutableWork): DiffAnswer =
+               work = MaxExecutableWork;
+               valueA = ""; valueB = ""): DiffAnswer =
   ## §7, whole: run the project's comparison, bound it, and when it does not
   ## answer, report the offender and fall back to the structural comparison.
   ##
@@ -438,7 +463,9 @@ func diffWith*(d: ExecutableDefinition; trust: ProjectTrustLedger; a, b: string;
   ## message.
   result.bound = work
   result.verdict = structuralDiff(a, b)
-  let entry = exportFor(d.kind)
+  let structured = valueA.len > 0 and valueB.len > 0 and d.takesStructuredValues
+  let entry = if structured: valueExportFor(d.kind) else: exportFor(d.kind)
+  let (ha, hb) = if structured: (valueA, valueB) else: (a, b)
 
   template fallBack(code: ExecutableTierCode; detail: string): untyped =
     result.problems.add problem(d.file, code, detail)
@@ -451,20 +478,20 @@ func diffWith*(d: ExecutableDefinition; trust: ProjectTrustLedger; a, b: string;
     fallBack(codeFor(current),
              admissionText(current) & ". " & admissionRemedy(current) &
              ". The definition was already loaded; it was NOT run")
-  if entry != DiffExport:
+  if entry notin [DiffExport, DiffValueExport]:
     result.problems.add problem(d.file, etcMissingExport,
       "a '" & definitionFileName(d.kind) & "' is not a diff definition")
     result.offender = d.file
     return
   if d.module.exportedFunction(entry) < 0:
     fallBack(etcMissingExport, "it exports no '" & entry & "'")
-  var prep = prepare(d, [a, b])
+  var prep = prepare(d, [ha, hb])
   result.spent = prep.spent
   if not prep.ok:
     fallBack(etcOutputRefused, prep.detail)
   let run = d.module.runExportIn(prep.instance, entry,
-    [int32(ExecutableInputBase), int32(a.len),
-     int32(ExecutableInputBase + MaxExecutableInputBytes), int32(b.len)],
+    [int32(ExecutableInputBase), int32(ha.len),
+     int32(ExecutableInputBase + MaxExecutableInputBytes), int32(hb.len)],
     work, prep.spent)
   result.spent = run.spent
   if not run.ok:

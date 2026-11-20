@@ -70,6 +70,11 @@ export presentation_vocabulary.declarableMediaTypes
 # belong to the type and the type is one type.
 export presentation_vocabulary.ValueMatchKind
 export presentation_vocabulary.typeMatches
+# §5.3's structural shape: its term grammar, so the parser refuses a shape
+# the renderer could not evaluate, by the one function both call.
+export presentation_vocabulary.ShapeTerm
+export presentation_vocabulary.shapeTerms
+export presentation_vocabulary.MaxShapeTerms
 
 type
   PointKind* = enum
@@ -334,6 +339,12 @@ func specificity*(rule: VisualiserRule): int =
   ## "ties broken by declaration order and reported" needs to be able to
   ## detect at all.
   result = rule.match.len
+  if rule.matchKind == mkShape:
+    # A SHAPE's specificity is how many terms it states, below every
+    # type-name match (§5.3): naming the type says more than describing it.
+    var terms: seq[ShapeTerm]
+    discard shapeTerms(rule.match, terms)
+    result = terms.len
   if rule.matchKind == mkTypeName: result += 1000
   if rule.language.len > 0: result += 1
 

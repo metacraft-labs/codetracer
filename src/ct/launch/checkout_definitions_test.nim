@@ -208,6 +208,29 @@ suite "the executable tier, as a session meets it":
     check after.computed.len == 0
     check why.len > 0
 
+  test "a version 2 visualiser is handed the value as a tree":
+    # It answers the member count it read from the structured input
+    # (Project-Definitions §7.1).
+    let w = newWorld("abi2")
+    let body = i32Const(16) & localGet(0) & i32Load8U(11) & i32Const(48) &
+               I32Add & i32Store8() & i32Const(17) & i32Const(0) &
+               i32Store8() & i32Const(16)
+    let module = buildWasm([FixtureFunc(params: 2, results: 1, body: body,
+                                        exportName: "ct_visualise_value")])
+    w.write(".codetracer/visualisers.wasm", module)
+    check grantExecutableTier(w.userRoot, w.root, dfkVisualiserCode,
+                              contentDigest(module), At) == ""
+    let d = readCheckoutDefinitions(w.root, trustRoot = w.userRoot)
+    let pair = PValue(kind: pvkTuple, typeName: "Tuple", members: @[
+      PMember(value: PValue(kind: pvkInt, typeName: "Int", text: "3")),
+      PMember(value: PValue(kind: pvkInt, typeName: "Int", text: "4"))])
+    let (vis, ran, _) = computedVisualiser(d, [pair], w.userRoot)
+    check ran
+    check vis.computed.len == 1
+    check vis.computed.len == 1 and vis.computed[0].text == "2"
+    check present(pair, StatePanelBudget,
+                  presenters = withVisualisers(@[vis])).root.text == "2"
+
 suite "the trust ledger's identity and upkeep":
 
   test "a checkout's identity carries its birth marker":

@@ -161,8 +161,7 @@ proc compare*(sd: SessionDefinitions; a, b: PValue): Comparison =
       return compareWithDefinition(def,
         loadProjectTrust(sd.trustRoot).ledger, a, b)
     var sel: DiffSelection
-    let typeName = if a.isNil: "" else: a.typeName
-    if selectDiff(sd.defs.loaded, typeName, sel):
+    if selectDiff(sd.defs.loaded, a, sel):
       return compareValues(a, b, sel, true)
   compareValues(a, b, DiffSelection(), false)
 

@@ -51,6 +51,7 @@ import std/[os, strutils, times]
 
 import ../../common/project_definitions
 import ../../common/project_executables
+import ../../common/executable_value_abi
 import ../../common/value_presentation
 import ../../common/value_visualisers
 
@@ -269,7 +270,11 @@ proc computedVisualiser*(d: CheckoutDefinitions;
        input in seenInputs:
       continue
     seenInputs.add input
-    let answer = def.visualiseWithCurrentTrust(input, trustRoot)
+    # ABI version 2 when the module speaks it: the value as a tree.
+    let structured =
+      if def.takesStructuredValues: encodeStructuredValue(v) else: ""
+    let answer = def.visualiseWithCurrentTrust(input, trustRoot,
+                                               valueInput = structured)
     result.ran = true
     if answer.fromDefinition:
       computed.add ComputedSummary(input: input, text: answer.text)

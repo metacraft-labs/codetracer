@@ -87,7 +87,8 @@ const VisualisersV1 = """
 schema = "codetracer.visualisers.v1"
 
 [[visualiser]]
-match = "Tuple"
+matchKind = "shape"
+match = "#2"
 summary = "a pair"
 """
 

@@ -173,6 +173,9 @@ func admit*(rule: VisualiserRule): bool =
   ## Every bound below is PLAT-11's own constant. There is no number in this
   ## function.
   if rule.match.len == 0 or rule.match.len > MaxTypeMatchBytes: return false
+  if rule.matchKind == mkShape:
+    var terms: seq[ShapeTerm]
+    if shapeTerms(rule.match, terms).len > 0: return false
   if rule.language.len > MaxNameBytes: return false
   if rule.summary.len > MaxSummaryBytes: return false
   if templateProblem(rule.summary) != tpOk: return false

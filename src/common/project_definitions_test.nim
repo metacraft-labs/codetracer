@@ -51,10 +51,10 @@ import std/[sets, strutils, unittest]
 import ./project_definitions
 import ./toml_subset
 
-const ExpectedAssertions = 1860
+const ExpectedAssertions = 1865
   ## Written from a run, and asserted against the tally at the end of the
   ## file. `ci/lib/run-nim-test-lane.sh` reads this name. 1856 -> 1860 on
-  ## 2026-11-20 with the bounded tie report's case.
+  ## 2026-11-20 with the bounded tie report's case; 1865 with §5.3's shape.
 
 var countedAssertions = 0
 
@@ -424,12 +424,21 @@ suite "PLAT-11: a well-formed definition loads":
     ckEq defs.diffs[1].algorithm, daUnorderedSet
     ckEq defs.diffs[1].tolerance, ""
 
-  test "matching is three total string comparisons and nothing else":
+  test "matching is three total string comparisons and a shape, nothing else":
     # §2.2: "Matching and templating are total and terminate by
-    # construction." Asserted over the whole `MatchKind` enum, so a fourth
+    # construction." Asserted over the whole `MatchKind` enum, so a fifth
     # member — a regex, a glob — arrives with no assertion and the count
-    # below goes red.
-    ckEq ord(high(MatchKind)) + 1, 3
+    # below goes red. The FOURTH, `shape` (§5.3, approved 2026-11-20), is a
+    # list of member labels and `#N` counts over the value — total, and
+    # bounded by the renderer's work bound per member read — and a type
+    # name alone never satisfies it.
+    ckEq ord(high(MatchKind)) + 1, 4
+    ck not VisualiserRule(match: "#2", matchKind: mkShape).matches("Tuple", "")
+    var terms: seq[ShapeTerm]
+    ckEq shapeTerms("rows, cols, #2", terms), ""
+    ckEq terms.len, 3
+    ckEq terms[2].arity, 2
+    ck shapeTerms("rows,,cols", terms).len > 0
     var exact = VisualiserRule(match: "Matrix", matchKind: mkTypeName)
     ck exact.matches("Matrix", "")
     ck not exact.matches("Matrix2", "")

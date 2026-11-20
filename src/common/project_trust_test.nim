@@ -44,7 +44,10 @@ import ./project_executables
 import ./project_wasm_fixtures
 import ./plugin_model/capabilities
 
-const ExpectedAssertions = 615
+const ExpectedAssertions = 613
+  ## 615 -> 613 on 2026-11-20: ABI version 2 implements the data and
+  ## data-count sections, so two refusals left the by-id sweep (four checks)
+  ## and two decodes joined it.
   ## Written from a run, and asserted against the tally at the end of the file.
   ## `ci/lib/run-nim-test-lane.sh` reads this name.
 
@@ -407,14 +410,19 @@ suite "PLAT-13: the sandbox is an ALLOW-LIST of nothing, enforced at decode":
 
   test "every section this build does not implement is refused BY ID":
     var checkedSections = 0
-    for id in [4, 6, 8, 9, 11, 12, 13, 200]:
+    # 11 (data) and 12 (data count) are IMPLEMENTED since ABI version 2
+    # (Project-Definitions §7.1, 2026-11-20) and are asserted in
+    # `executable_abi_v2_test`; an empty one of each decodes here.
+    for id in [4, 6, 8, 9, 13, 200]:
       inc checkedSections
       checkpoint("section id " & $id)
       let m = WasmMagic & "\1\0\0\0" & section(id, "\0")
       let decoded = decodeModule(m)
       ck not decoded.ok
       ck decoded.problem.code == wpcUnsupportedSection
-    ckEq checkedSections, 8
+    ckEq checkedSections, 6
+    ck decodeModule(WasmMagic & "\1\0\0\0" & section(11, "\0")).ok
+    ck decodeModule(WasmMagic & "\1\0\0\0" & section(12, "\0")).ok
     # There is no "unsupported, ignored" arm anywhere: a CUSTOM section is the
     # one thing skipped, and it is skipped by LENGTH and never parsed.
     let withCustom = WasmMagic & "\1\0\0\0" &
@@ -424,10 +432,11 @@ suite "PLAT-13: the sandbox is an ALLOW-LIST of nothing, enforced at decode":
     ckEq decoded.module.exports.len, 1
 
   test "a value type, a block type and an opcode outside the subset are refused":
-    # i64 (0x7E) as a parameter.
-    let i64Param = WasmMagic & "\1\0\0\0" &
-      section(1, vec([op(0x60) & uleb(1) & op(0x7E) & uleb(0)]))
-    ckRefusedModule i64Param, wpcUnsupportedType
+    # f32 (0x7D) as a parameter. (i64, 0x7E, is in the subset since ABI
+    # version 2; floats are not.)
+    let f32Param = WasmMagic & "\1\0\0\0" &
+      section(1, vec([op(0x60) & uleb(1) & op(0x7D) & uleb(0)]))
+    ckRefusedModule f32Param, wpcUnsupportedType
     # A block whose type is i32 rather than empty.
     ckRefusedModule buildWasm([FixtureFunc(params: 0, results: 0, locals: 0,
         body: op(0x02) & op(0x7F) & opEndB())]), wpcUnsupportedBlockType

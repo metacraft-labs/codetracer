@@ -46,6 +46,8 @@ type
     params*: int
     results*: int
     locals*: int
+    i64Locals*: int
+      ## ABI version 2: `i64` locals, after the `i32` ones.
     body*: string
     exportName*: string
       ## Empty for a function the module keeps to itself.
@@ -143,11 +145,10 @@ func buildWasm*(funcs: openArray[FixtureFunc]; memPages = 1): string =
     funcEntries.add uleb(i)
     if f.exportName.len > 0:
       exportEntries.add uleb(f.exportName.len) & f.exportName & op(0x00) & uleb(i)
-    var localGroups = ""
-    if f.locals > 0:
-      localGroups = uleb(1) & uleb(f.locals) & op(0x7F)
-    else:
-      localGroups = uleb(0)
+    var groups: seq[string] = @[]
+    if f.locals > 0: groups.add uleb(f.locals) & op(0x7F)
+    if f.i64Locals > 0: groups.add uleb(f.i64Locals) & op(0x7E)
+    let localGroups = vec(groups)
     let body = localGroups & f.body & opEndB()
     codeEntries.add uleb(body.len) & body
 
@@ -158,6 +159,36 @@ func buildWasm*(funcs: openArray[FixtureFunc]; memPages = 1): string =
   if exportEntries.len > 0:
     result.add section(7, vec(exportEntries))
   result.add section(10, vec(codeEntries))
+
+func dataSection*(segments: openArray[(int, string)]): string =
+  ## ABI version 2: an active data section for memory 0, one segment per
+  ## `(offset, bytes)`. Appended AFTER `buildWasm`'s output, because the data
+  ## section's id (11) follows the code section's (10).
+  var entries: seq[string] = @[]
+  for (offset, bytes) in segments:
+    entries.add uleb(0) & i32Const(int32(offset)) & opEndB() &
+                uleb(bytes.len) & bytes
+  section(11, vec(entries))
+
+func i64Const*(v: int64): string =
+  ## `i64.const` with a signed LEB128 immediate.
+  result = op(0x42)
+  var x = v
+  while true:
+    let b = int(x and 0x7F)
+    x = x shr 7
+    if (x == 0 and (b and 0x40) == 0) or (x == -1 and (b and 0x40) != 0):
+      result.add char(b)
+      break
+    result.add char(b or 0x80)
+
+const
+  I64Mul* = "\x7E"
+  I64DivS* = "\x7F"
+  I64Eq* = "\x51"
+  I64GtU* = "\x56"
+  I32WrapI64* = "\xA7"
+  I64ExtendI32U* = "\xAD"
 
 func storeLiteral*(at: int; text: string): string =
   ## The instructions that write `text` into linear memory at `at`, NUL

@@ -328,7 +328,8 @@ proc loadCheckoutExecutableTier*(root: string; userRoot = "";
 
 proc visualiseWithCurrentTrust*(d: ExecutableDefinition; input: string;
                                 userRoot = "";
-                                work = MaxExecutableWork): VisualisedText =
+                                work = MaxExecutableWork;
+                                valueInput = ""): VisualisedText =
   ## RUN A HELD HANDLE, AGAINST THE DECISION AS IT IS NOW.
   ##
   ## A session keeps `ExecutableDefinition`s between loads — that is what a
@@ -343,14 +344,15 @@ proc visualiseWithCurrentTrust*(d: ExecutableDefinition; input: string;
   ## user's ledger off disk, and let `stillAdmitted` decide. A ledger that
   ## cannot be read parses to an EMPTY one, which admits nothing — the safe
   ## direction, and the same direction `loadCheckoutExecutableTier` fails in.
-  d.visualiseWith(loadProjectTrust(userRoot).ledger, input, work)
+  d.visualiseWith(loadProjectTrust(userRoot).ledger, input, work, valueInput)
 
 proc diffWithCurrentTrust*(d: ExecutableDefinition; a, b: string;
                            userRoot = "";
-                           work = MaxExecutableWork): DiffAnswer =
+                           work = MaxExecutableWork;
+                           valueA = ""; valueB = ""): DiffAnswer =
   ## `visualiseWithCurrentTrust`'s twin for §7's comparison, through the same
   ## re-read and the same `stillAdmitted` (one predicate, one function).
-  d.diffWith(loadProjectTrust(userRoot).ledger, a, b, work)
+  d.diffWith(loadProjectTrust(userRoot).ledger, a, b, work, valueA, valueB)
 
 type
   ExecutableReview* = object

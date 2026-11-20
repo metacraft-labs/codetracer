@@ -316,6 +316,33 @@ func computedAnswer*(vis: Visualiser; v: PValue): string =
     if c.input == key: return c.text
   ""
 
+func shapeMatches*(match: string; v: PValue): bool =
+  ## Whether `v` has the structural shape `match` declares
+  ## (Project-Definitions §5.3, `matchKind = "shape"`): every label term names
+  ## a member `v` has, and an `#N` term is `v`'s member count.
+  ##
+  ## Only a container has a shape. The member count is the RECORDING's when
+  ## the answer held some back (`elementsTotal`), so a pair is a pair however
+  ## many of its members the surface asked for. The walk is over `v`'s own
+  ## member list, which the recording sizes: a rendering pays for it through
+  ## `visualiserScanCost`, one unit per member, like every other per-node scan.
+  if v.isNil or not isContainer(v.kind): return false
+  var terms: seq[ShapeTerm]
+  if shapeTerms(match, terms).len > 0: return false
+  let held = if v.kind == pvkMap: v.entries.len else: v.members.len
+  let count = if v.elementsTotal > held: v.elementsTotal else: held
+  for t in terms:
+    if t.arity >= 0:
+      if count != t.arity: return false
+    else:
+      var found = false
+      for m in v.members:
+        if m.label == t.label:
+          found = true
+          break
+      if not found: return false
+  true
+
 func winningVisualiser*(v: PValue; presenters: PresenterSet;
                         language: string): int =
   ## The index of the visualiser that claims `v`, or -1.
@@ -350,6 +377,9 @@ func winningVisualiser*(v: PValue; presenters: PresenterSet;
       # is its way of declining.
       if computedAnswer(vis, v).len == 0:
         continue
+    elif vis.matchKind == mkShape:
+      if vis.language.len > 0 and vis.language != language: continue
+      if not shapeMatches(vis.typeMatch, v): continue
     elif not typeMatches(vis.matchKind, vis.typeMatch, vis.language,
                          v.typeName, language):
       continue
@@ -785,6 +815,8 @@ func visualiserScanCost(v: PValue; presenters: PresenterSet): int =
     # A computed visualiser's scan is a lookup over the host's table: one
     # unit per entry it may compare.
     if vis.computedDeclared: result += vis.computed.len
+    # A shape reads the value's member list: one unit per member.
+    if vis.matchKind == mkShape: result += v.members.len + v.entries.len
 
 func chargedWinner(v: PValue; presenters: PresenterSet; language: string;
                    tally: var RenderTally): int =

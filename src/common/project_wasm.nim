@@ -46,19 +46,35 @@
 ##   | section  | treatment |
 ##   |----------|-----------|
 ##   | custom   | skipped by LENGTH, never parsed |
-##   | type     | function types over `i32` only |
+##   | type     | function types over `i32` and `i64` |
 ##   | import   | refused if it declares ANYTHING |
 ##   | function | type indices |
 ##   | memory   | at most one, bounded by `MaxWasmPages` |
 ##   | export   | functions only |
-##   | code     | locals (`i32` only) and a decoded body |
-##   | anything else (table, global, start, element, data, data-count, unknown) | refused by id |
+##   | code     | locals (`i32`, `i64`) and a decoded body |
+##   | data     | ACTIVE segments for memory 0 at an `i32.const` offset, inside the declared memory |
+##   | data-count | read and checked against the data section |
+##   | anything else (table, global, start, element, unknown) | refused by id |
 ##
-## `data` is refused rather than implemented, and it costs the module its
-## constant pool: a module that wants bytes in memory writes them with
-## `i32.const` + `i32.store8`. That is a real cost and it is taken deliberately,
-## because a data section is a second way for a module's *file* to place bytes
-## at an address, and the host writes the only bytes this ABI is about.
+## ## ABI VERSION 2 (Project-Definitions §7.1, 2026-11-20)
+##
+## `i64` and the `data` section were refusals until the user approved the
+## widening. `data` cost a module its constant pool — every constant written a
+## byte at a time — and the argument for refusing it was that a data section is
+## a second way for a module's FILE to place bytes at an address. That stays
+## true and is now PRICED rather than refused: a segment is copied at
+## instantiation and every byte is charged to the run's allowance before the
+## first instruction (`instantiationCost`), and a segment that would land
+## outside the declared memory is a decode-time refusal by name. Passive
+## segments and `memory.init` stay out.
+##
+## `i64` values share the operand stack with `i32` ones: the stack holds 64-bit
+## slots, an `i32` is held sign-extended and every `i32` instruction reads the
+## low 32 bits, so no instruction can observe the other type's bits except
+## through `i32.wrap_i64` / `i64.extend_i32_*`, which are exactly the
+## conversions wasm defines. There is still no validation pass; a module that
+## mixes the types wrongly computes garbage, inside its own memory and its own
+## allowance.
 ##
 ## Block types are restricted to the empty type (`0x40`). Every label therefore
 ## carries no values, so a branch is "truncate the operand stack to the height
@@ -206,6 +222,7 @@ type
 
   ValType* = enum
     vtI32
+    vtI64
       ## THE ONLY ONE. `i64`, `f32`, `f64`, `v128` and the reference types are
       ## refused at decode with `wpcUnsupportedType`. A float in a visualiser or
       ## a diff would also breach §3.1's determinism requirement on any host
@@ -232,6 +249,16 @@ type
     opI32Add, opI32Sub, opI32Mul
     opI32DivS, opI32DivU, opI32RemS, opI32RemU
     opI32And, opI32Or, opI32Xor, opI32Shl, opI32ShrS, opI32ShrU
+    # ABI version 2: `i64`.
+    opI64Load, opI64Load8U, opI64Store, opI64Store8
+    opI64Const
+    opI64Eqz, opI64Eq, opI64Ne
+    opI64LtS, opI64LtU, opI64GtS, opI64GtU
+    opI64LeS, opI64LeU, opI64GeS, opI64GeU
+    opI64Add, opI64Sub, opI64Mul
+    opI64DivS, opI64DivU, opI64RemS, opI64RemU
+    opI64And, opI64Or, opI64Xor, opI64Shl, opI64ShrS, opI64ShrU
+    opI32WrapI64, opI64ExtendI32S, opI64ExtendI32U
 
   Instr* = object
     ## ONE DECODED INSTRUCTION. `imm` carries the only immediate any opcode in
@@ -240,12 +267,18 @@ type
     ## resolved control-flow destinations, computed at decode.
     op*: Op
     imm*: int32
+    imm64*: int64
+      ## `i64.const`'s immediate.
     memOffset*: uint32
     target*: int32
       ## `block`/`if`: the index of the matching `end`. `loop`: its own index,
       ## which is where a branch to it goes. `else`: the matching `end`.
     alt*: int32
       ## `if`: the index of the matching `else`, or -1 when there is none.
+
+  DataSegment* = object
+    offset*: int
+    bytes*: string
 
   WasmFunction* = object
     typeIndex*: int
@@ -265,6 +298,8 @@ type
     functions*: seq[WasmFunction]
     exports*: seq[WasmExport]
     memoryPages*: int        ## 0 when the module declares no memory
+    data*: seq[DataSegment]
+      ## Active segments, copied into memory at instantiation and charged.
     byteCount*: int          ## what it decoded from, for the report
 
   WasmDecode* = object
@@ -280,6 +315,8 @@ type
     ## forget to.
     ok*: bool
     value*: int32
+    value64*: int64
+      ## The result's full 64 bits, for an export that returns `i64`.
     trap*: WasmTrap
     spent*: int
       ## Every unit the run cost, over all five charged quantities — see the
@@ -508,13 +545,32 @@ func i32leb(c: var Cursor): int32 =
     value = value or (not uint32(0) shl shift)
   cast[int32](value)
 
+func i64leb(c: var Cursor): int64 =
+  var value: uint64 = 0
+  var shift = 0
+  while true:
+    let b = c.u8()
+    if c.failed: return 0
+    value = value or (uint64(b and 0x7F) shl shift)
+    shift += 7
+    if (b and 0x80) == 0:
+      if shift < 64 and (b and 0x40) != 0:
+        value = value or (not uint64(0) shl shift)
+      break
+    if shift >= 70:
+      c.fail(wpcMalformedInteger, "a signed integer longer than ten bytes")
+      return 0
+  cast[int64](value)
+
 func valType(c: var Cursor): ValType =
   ## `i32` and nothing else — see `ValType`.
   let b = c.u8()
   if c.failed: return vtI32
+  if b == 0x7E: return vtI64
   if b != 0x7F:
     c.fail(wpcUnsupportedType,
-           "value type 0x" & toHex(b, 2) & "; this build implements i32 only")
+           "value type 0x" & toHex(b, 2) & "; this build implements i32 and " &
+           "i64 only")
   vtI32
 
 # ---------------------------------------------------------------------------
@@ -572,6 +628,38 @@ func opOf(b: int): (Op, bool) =
   of 0x74: (opI32Shl, true)
   of 0x75: (opI32ShrS, true)
   of 0x76: (opI32ShrU, true)
+  of 0x29: (opI64Load, true)
+  of 0x31: (opI64Load8U, true)
+  of 0x37: (opI64Store, true)
+  of 0x3C: (opI64Store8, true)
+  of 0x42: (opI64Const, true)
+  of 0x50: (opI64Eqz, true)
+  of 0x51: (opI64Eq, true)
+  of 0x52: (opI64Ne, true)
+  of 0x53: (opI64LtS, true)
+  of 0x54: (opI64LtU, true)
+  of 0x55: (opI64GtS, true)
+  of 0x56: (opI64GtU, true)
+  of 0x57: (opI64LeS, true)
+  of 0x58: (opI64LeU, true)
+  of 0x59: (opI64GeS, true)
+  of 0x5A: (opI64GeU, true)
+  of 0x7C: (opI64Add, true)
+  of 0x7D: (opI64Sub, true)
+  of 0x7E: (opI64Mul, true)
+  of 0x7F: (opI64DivS, true)
+  of 0x80: (opI64DivU, true)
+  of 0x81: (opI64RemS, true)
+  of 0x82: (opI64RemU, true)
+  of 0x83: (opI64And, true)
+  of 0x84: (opI64Or, true)
+  of 0x85: (opI64Xor, true)
+  of 0x86: (opI64Shl, true)
+  of 0x87: (opI64ShrS, true)
+  of 0x88: (opI64ShrU, true)
+  of 0xA7: (opI32WrapI64, true)
+  of 0xAC: (opI64ExtendI32S, true)
+  of 0xAD: (opI64ExtendI32U, true)
   else: (opNop, false)
 
 func decodeBody(c: var Cursor; endPos: int): seq[Instr] =
@@ -617,7 +705,10 @@ func decodeBody(c: var Cursor; endPos: int): seq[Instr] =
       ins.imm = int32(c.u32leb())
     of opI32Const:
       ins.imm = c.i32leb()
-    of opI32Load, opI32Load8U, opI32Store, opI32Store8:
+    of opI64Const:
+      ins.imm64 = c.i64leb()
+    of opI32Load, opI32Load8U, opI32Store, opI32Store8,
+       opI64Load, opI64Load8U, opI64Store, opI64Store8:
       discard c.u32leb()               # alignment hint; advisory, ignored
       ins.memOffset = uint32(c.u32leb())
     of opMemorySize:
@@ -679,6 +770,7 @@ func decodeModule*(data: string): WasmDecode =
   var typeCounts: seq[int] = @[]   # function index -> type index
   var lastSection = 0
   var codeSeen = false
+  var dataCount = -1
 
   while not c.atEnd and not c.failed:
     let sectionAt = c.pos
@@ -698,11 +790,14 @@ func decodeModule*(data: string): WasmDecode =
       # `export` before its `function`, are ways to say one thing twice; a
       # decoder that takes the last one read and a producer that meant the
       # first are how a module means two things.
-      if id <= lastSection:
+      # The data-count section (12) sits between element (9) and code (10)
+      # in the spec's order, so the order is compared by RANK, not by id.
+      let rank = if id == 12: 95 else: id * 10
+      if rank <= lastSection:
         c.fail(wpcSectionOutOfOrder,
-               "section id " & $id & " after section id " & $lastSection)
+               "section id " & $id & " out of the spec's order")
         break
-      lastSection = id
+      lastSection = rank
 
     case id
     of 0:
@@ -855,12 +950,49 @@ func decodeModule*(data: string): WasmDecode =
              "a start section. A module runs when the HOST calls an export " &
              "and at no other time; a start function runs at instantiation, " &
              "which is before the host has decided anything")
-    of 9, 11, 12:
+    of 9:
       c.fail(wpcUnsupportedSection,
-             "an element, data or data-count section. See the header: the " &
-             "host writes the only bytes this ABI is about, and a data " &
-             "section is a second way for a module's FILE to place bytes at " &
-             "an address")
+             "an element section. This build implements no table, so an " &
+             "element segment has nothing to fill")
+    of 12:
+      dataCount = c.u32leb()
+    of 11:
+      let n = c.u32leb()
+      if c.failed: break
+      if dataCount >= 0 and n != dataCount:
+        c.fail(wpcBadIndex, $n & " data segments; the data-count section " &
+               "said " & $dataCount)
+        break
+      for _ in 0 ..< n:
+        let flag = c.u32leb()
+        if c.failed: break
+        if flag != 0:
+          c.fail(wpcUnsupportedSection,
+                 "a passive or explicitly indexed data segment (flag " & $flag &
+                 "); this build implements ACTIVE segments for memory 0 only")
+          break
+        let constOp = c.u8()
+        if c.failed: break
+        if constOp != 0x41:
+          c.fail(wpcUnsupportedOpcode, "a data offset that is not an " &
+                 "i32.const; the offset must be a constant")
+          break
+        let offset = c.i32leb()
+        if c.failed: break
+        if c.u8() != 0x0B:
+          c.fail(wpcUnbalancedBlock, "a data offset expression longer than " &
+                 "one i32.const")
+          break
+        let len = c.u32leb()
+        if c.failed: break
+        let bytes = c.bytes(len)
+        if c.failed: break
+        if offset < 0 or int(offset) + len > m.memoryPages * WasmPageSize:
+          c.fail(wpcBadIndex, "a data segment of " & $len & " byte(s) at " &
+                 $offset & " lands outside the declared memory (" &
+                 $(m.memoryPages * WasmPageSize) & " bytes)")
+          break
+        m.data.add DataSegment(offset: int(offset), bytes: bytes)
     else:
       c.fail(wpcUnsupportedSection, "section id " & $id)
     if c.failed: break
@@ -897,13 +1029,18 @@ func instantiate*(m: WasmModule): WasmInstance =
   ## A clean instance. The memory is zeroed, so two runs of one module cannot
   ## communicate — which is §3.1's determinism requirement made structural
   ## rather than requested.
-  WasmInstance(memory: newSeq[byte](m.memoryPages * WasmPageSize))
+  result = WasmInstance(memory: newSeq[byte](m.memoryPages * WasmPageSize))
+  # The data segments, decoded to lie inside the memory, copied in order (a
+  # later segment overwrites an earlier one, as the spec says).
+  for seg in m.data:
+    for i in 0 ..< seg.bytes.len:
+      result.memory[seg.offset + i] = byte(seg.bytes[i])
 
 type
   Frame = object
     fn: int
     pc: int
-    locals: seq[int32]
+    locals: seq[int64]
     stackBase: int
     labels: seq[Label]
 
@@ -920,7 +1057,9 @@ func instantiationCost*(m: WasmModule): int =
   ## instruction retires — a quantity the module chooses and the bound must
   ## therefore see (PLAT-12's lesson: a bound that does not see a quantity the
   ## input multiplies is a bound on the wrong quantity).
-  m.memoryPages * WasmPageSize
+  result = m.memoryPages * WasmPageSize
+  # Every byte a data segment copies is paid for before the first instruction.
+  for seg in m.data: result += seg.bytes.len
 
 proc runExportIn*(m: WasmModule; instance: WasmInstance; name: string;
                   args: openArray[int32]; work: int = MaxExecutableWork;
@@ -957,7 +1096,8 @@ proc runExportIn*(m: WasmModule; instance: WasmInstance; name: string;
   result.spent = spentAlready
   result.instance = instance
 
-  var stack: seq[int32] = @[]
+  var stack: seq[int64] = @[]
+    ## 64-bit slots. An `i32` is held sign-extended and read by its low bits.
   var frames: seq[Frame] = @[]
 
   template spend(n: int): untyped =
@@ -966,17 +1106,23 @@ proc runExportIn*(m: WasmModule; instance: WasmInstance; name: string;
       result.trap = wtWorkExhausted
       return
 
-  template push(v: int32): untyped =
+  template pushRaw(v: int64): untyped =
     if stack.len >= MaxWasmStack:
       result.trap = wtStackOverflow
       return
     stack.add v
 
-  template pop(): int32 =
+  template popRaw(): int64 =
     if stack.len <= frames[^1].stackBase:
       result.trap = wtStackUnderflow
       return
     stack.pop()
+
+  template push(v: int32): untyped = pushRaw(int64(v))
+  template pop(): int32 =
+    cast[int32](uint32(cast[uint64](popRaw()) and 0xFFFF_FFFF'u64))
+  template push64(v: int64): untyped = pushRaw(v)
+  template pop64(): int64 = popRaw()
 
   # The caller's charge is tested here rather than only added, so an allowance
   # already spent on instantiation and input stops the run before its first
@@ -988,7 +1134,7 @@ proc runExportIn*(m: WasmModule; instance: WasmInstance; name: string;
   let ft0 = m.types[m.functions[fi].typeIndex]
   if args.len != ft0.params.len: return
 
-  proc enter(fnIdx: int; m: WasmModule; stack: var seq[int32];
+  proc enter(fnIdx: int; m: WasmModule; stack: var seq[int64];
              frames: var seq[Frame]): bool =
     ## Push a frame, moving the parameters off the operand stack into locals.
     ## `false` on a depth failure or a missing operand; the caller turns that
@@ -1012,7 +1158,7 @@ proc runExportIn*(m: WasmModule; instance: WasmInstance; name: string;
     let base = (if frames.len > 0: frames[^1].stackBase else: 0)
     if stack.len - base < ft.params.len: return false
     var f = Frame(fn: fnIdx, pc: 0)
-    f.locals = newSeq[int32](ft.params.len + fn.localTypes.len)
+    f.locals = newSeq[int64](ft.params.len + fn.localTypes.len)
     for i in countdown(ft.params.len - 1, 0):
       f.locals[i] = stack.pop()
     f.stackBase = stack.len
@@ -1023,7 +1169,7 @@ proc runExportIn*(m: WasmModule; instance: WasmInstance; name: string;
     if stack.len >= MaxWasmStack:
       result.trap = wtStackOverflow
       return
-    stack.add a
+    stack.add int64(a)
   # THE ENTRY FRAME'S LOCALS ARE CHARGED like every other frame's.
   spend(ft0.params.len + m.functions[fi].localTypes.len)
   if not enter(fi, m, stack, frames):
@@ -1091,7 +1237,7 @@ proc runExportIn*(m: WasmModule; instance: WasmInstance; name: string;
       ## write the CALLEE's next index over the CALLER's — a return that lands
       ## in the wrong function.
       let rft = m.types[m.functions[frames[^1].fn].typeIndex]
-      var rv: int32 = 0
+      var rv: int64 = 0
       if rft.results.len == 1:
         if stack.len <= frames[^1].stackBase:
           result.trap = wtStackUnderflow
@@ -1102,7 +1248,9 @@ proc runExportIn*(m: WasmModule; instance: WasmInstance; name: string;
       if rft.results.len == 1: stack.add rv
       if frames.len == 0:
         result.ok = true
-        result.value = (if rft.results.len == 1: rv else: 0)
+        result.value64 = (if rft.results.len == 1: rv else: 0)
+        result.value = cast[int32](uint32(cast[uint64](result.value64) and
+                                          0xFFFF_FFFF'u64))
         return
       continue
 
@@ -1182,29 +1330,29 @@ proc runExportIn*(m: WasmModule; instance: WasmInstance; name: string;
         result.trap = wtStackOverflow
         return
       continue
-    of opDrop: discard pop()
+    of opDrop: discard popRaw()
     of opSelect:
       let c = pop()
-      let b = pop()
-      let a = pop()
-      push(if c != 0: a else: b)
+      let b = popRaw()
+      let a = popRaw()
+      pushRaw(if c != 0: a else: b)
     of opLocalGet:
       if ins.imm < 0 or int(ins.imm) >= frames[^1].locals.len:
         result.trap = wtUnreachable
         return
-      push(frames[^1].locals[int(ins.imm)])
+      pushRaw(frames[^1].locals[int(ins.imm)])
     of opLocalSet:
       if ins.imm < 0 or int(ins.imm) >= frames[^1].locals.len:
         result.trap = wtUnreachable
         return
-      frames[^1].locals[int(ins.imm)] = pop()
+      frames[^1].locals[int(ins.imm)] = popRaw()
     of opLocalTee:
       if ins.imm < 0 or int(ins.imm) >= frames[^1].locals.len:
         result.trap = wtUnreachable
         return
-      let v = pop()
+      let v = popRaw()
       frames[^1].locals[int(ins.imm)] = v
-      push(v)
+      pushRaw(v)
     of opI32Load:
       let a = pop()
       let at = memAt(a, 4)
@@ -1352,6 +1500,101 @@ proc runExportIn*(m: WasmModule; instance: WasmInstance; name: string;
       let b = pop()
       let a = pop()
       push(cast[int32](cast[uint32](a) shr (cast[uint32](b) and 31'u32)))
+    # -- ABI version 2: i64 ----------------------------------------------------
+    of opI64Load:
+      let a = pop()
+      let at = memAt(a, 8)
+      var v: uint64 = 0
+      for k in 0 ..< 8:
+        v = v or (uint64(result.instance.memory[at + k]) shl (8 * k))
+      push64(cast[int64](v))
+    of opI64Load8U:
+      let a = pop()
+      let at = memAt(a, 1)
+      push64(int64(result.instance.memory[at]))
+    of opI64Store:
+      let v = pop64()
+      let a = pop()
+      let at = memAt(a, 8)
+      let u = cast[uint64](v)
+      for k in 0 ..< 8:
+        result.instance.memory[at + k] = byte((u shr (8 * k)) and 0xFF'u64)
+    of opI64Store8:
+      let v = pop64()
+      let a = pop()
+      let at = memAt(a, 1)
+      result.instance.memory[at] = byte(cast[uint64](v) and 0xFF'u64)
+    of opI64Const: push64(ins.imm64)
+    of opI64Eqz:
+      let a = pop64()
+      push(if a == 0: 1'i32 else: 0'i32)
+    of opI64Eq, opI64Ne, opI64LtS, opI64LtU, opI64GtS, opI64GtU, opI64LeS,
+       opI64LeU, opI64GeS, opI64GeU:
+      let b = pop64()
+      let a = pop64()
+      let ua = cast[uint64](a)
+      let ub = cast[uint64](b)
+      let r =
+        case ins.op
+        of opI64Eq: a == b
+        of opI64Ne: a != b
+        of opI64LtS: a < b
+        of opI64LtU: ua < ub
+        of opI64GtS: a > b
+        of opI64GtU: ua > ub
+        of opI64LeS: a <= b
+        of opI64LeU: ua <= ub
+        of opI64GeS: a >= b
+        else: ua >= ub
+      push(if r: 1'i32 else: 0'i32)
+    of opI64Add, opI64Sub, opI64Mul, opI64And, opI64Or, opI64Xor, opI64Shl,
+       opI64ShrS, opI64ShrU:
+      let b = pop64()
+      let a = pop64()
+      let ua = cast[uint64](a)
+      let ub = cast[uint64](b)
+      let n = int(ub and 63'u64)
+      let r =
+        case ins.op
+        of opI64Add: ua + ub
+        of opI64Sub: ua - ub
+        of opI64Mul: ua * ub
+        of opI64And: ua and ub
+        of opI64Or: ua or ub
+        of opI64Xor: ua xor ub
+        of opI64Shl: ua shl n
+        of opI64ShrU: ua shr n
+        else:
+          if a < 0: not ((not ua) shr n) else: ua shr n
+      push64(cast[int64](r))
+    of opI64DivS, opI64DivU, opI64RemS, opI64RemU:
+      let b = pop64()
+      let a = pop64()
+      if b == 0:
+        result.trap = wtDivideByZero
+        return
+      case ins.op
+      of opI64DivS:
+        if a == low(int64) and b == -1'i64:
+          result.trap = wtIntegerOverflow
+          return
+        push64(a div b)
+      of opI64RemS:
+        if a == low(int64) and b == -1'i64: push64(0'i64)
+        else: push64(a mod b)
+      of opI64DivU:
+        push64(cast[int64](cast[uint64](a) div cast[uint64](b)))
+      else:
+        push64(cast[int64](cast[uint64](a) mod cast[uint64](b)))
+    of opI32WrapI64:
+      let a = pop64()
+      push(cast[int32](uint32(cast[uint64](a) and 0xFFFF_FFFF'u64)))
+    of opI64ExtendI32S:
+      let a = pop()
+      push64(int64(a))
+    of opI64ExtendI32U:
+      let a = pop()
+      push64(int64(cast[uint32](a)))
 
     frames[^1].pc = nextPc
 

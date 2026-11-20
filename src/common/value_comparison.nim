@@ -34,6 +34,7 @@
 
 import std/[algorithm, strutils]
 
+import ./executable_value_abi
 import ./project_definitions
 import ./project_executables
 import ./project_trust
@@ -64,7 +65,12 @@ const
     ## rendering ever measured in this repository (a 600-entry mapping) and far
     ## below anything that would stall a pane.
 
-func selectDiff*(loaded: LoadedProjectDefinitions; typeName: string;
+func diffMatches(d: DiffSelection; v: PValue): bool =
+  if v.isNil: return false
+  if d.matchKind == mkShape: shapeMatches(d.match, v)
+  else: typeMatches(d.matchKind, d.match, "", v.typeName, "")
+
+func selectDiff*(loaded: LoadedProjectDefinitions; v: PValue;
                  found: var DiffSelection): bool =
   ## The declaration that governs values of `typeName`, if any.
   ##
@@ -73,12 +79,14 @@ func selectDiff*(loaded: LoadedProjectDefinitions; typeName: string;
   ## definition is a decision about their own screen). Within each, the order
   ## `load.rankDiffs` already put them in: the nearer scope, then the longer
   ## match, then declaration order.
+  ## A selection matches by the value's type name or, with
+  ## `matchKind = "shape"`, by its members (§5.3).
   for d in loaded.user.diffs:
-    if typeMatches(d.matchKind, d.match, "", typeName, ""):
+    if d.diffMatches(v):
       found = d
       return true
   for d in loaded.project.diffs:
-    if typeMatches(d.matchKind, d.match, "", typeName, ""):
+    if d.diffMatches(v):
       found = d
       return true
   false
@@ -232,7 +240,12 @@ func compareWithDefinition*(d: ExecutableDefinition; trust: ProjectTrustLedger;
   ## the structural verdict over the same two inputs — and the note carries
   ## every problem it reported, so a comparison that trapped says so in the
   ## pane that shows the answer.
-  let answer = d.diffWith(trust, canonical(a), canonical(b))
+  # ABI version 2 when the module speaks it: both values as trees.
+  let (va, vb) =
+    if d.takesStructuredValues: (encodeStructuredValue(a), encodeStructuredValue(b))
+    else: ("", "")
+  let answer = d.diffWith(trust, canonical(a), canonical(b), valueA = va,
+                          valueB = vb)
   result.verdict =
     if answer.verdict == dvEqual: cvEqual else: cvDifferent
   if answer.fromDefinition:

@@ -192,6 +192,13 @@ type
     mkTypeName = "typeName"      ## exact equality
     mkTypePrefix = "typePrefix"  ## `startsWith`
     mkTypeSuffix = "typeSuffix"  ## `endsWith`
+    mkShape = "shape"
+      ## STRUCTURAL SHAPE (Project-Definitions §5.3, approved 2026-11-20): the
+      ## `match` is a list of terms over the value's MEMBERS rather than a
+      ## string compared with its type name — see `shapeTerms`. Decided by
+      ## `presenter.shapeMatches`, which reads the value and is charged to the
+      ## renderer's work bound per member it reads; `typeMatches` answers false
+      ## for it, because a type name alone cannot decide a shape.
 
   MediaClass* = enum
     ## What a declared media type IS, as a CLOSED enum.
@@ -780,6 +787,59 @@ func typeMatches*(matchKind: ValueMatchKind; match, ruleLanguage: string;
   of mkTypeSuffix:
     match.len <= typeName.len and
       typeName[typeName.len - match.len .. ^1] == match
+  of mkShape: false
+
+const
+  MaxShapeTerms* = 16
+    ## How many terms one shape may list.
+  MaxShapeLabelBytes* = 80
+    ## The longest member label a shape term may name (PLAT-11's field-name
+    ## bound, restated here because this package cannot see that one).
+  MaxShapeArity* = 1_000_000
+    ## The largest `#N` a shape may state.
+
+type
+  ShapeTerm* = object
+    ## One term of a shape: a member label that must be present, or (when
+    ## `arity >= 0`) the exact member count.
+    label*: string
+    arity*: int
+
+func shapeTerms*(match: string; dest: var seq[ShapeTerm]): string =
+  ## Parse a shape's `match` into its terms, or answer why it is refused.
+  ## "" means it parsed. TOTAL and linear in `match.len`: a comma split, a
+  ## strip per term, a decimal for `#N`, and the same refusals of path-shaped
+  ## and control bytes a member label gets everywhere else.
+  dest = @[]
+  if match.strip().len == 0:
+    return "a shape names no member and no member count"
+  for raw in match.split(','):
+    let term = raw.strip()
+    if term.len == 0:
+      return "a shape has an empty term (two commas, or a trailing one)"
+    if dest.len >= MaxShapeTerms:
+      return "a shape lists more than " & $MaxShapeTerms & " terms"
+    if term[0] == '#':
+      if term.len == 1 or term.len > 8:
+        return "'" & term & "' is not a member count such as #2"
+      var n = 0
+      for c in term[1 .. ^1]:
+        if c notin {'0' .. '9'}:
+          return "'" & term & "' is not a member count such as #2"
+        n = n * 10 + (ord(c) - ord('0'))
+      if n > MaxShapeArity:
+        return "'" & term & "' is larger than " & $MaxShapeArity
+      dest.add ShapeTerm(arity: n)
+    else:
+      if term.len > MaxShapeLabelBytes:
+        return "the member label '" & term[0 ..< 20] & "…' is longer than " &
+          $MaxShapeLabelBytes & " bytes"
+      for c in term:
+        if c in {'/', '\\'} or ord(c) < 0x20 or ord(c) == 0x7F:
+          return "the member label '" & term & "' carries a byte no recorded " &
+            "member label has"
+      dest.add ShapeTerm(label: term, arity: -1)
+  ""
 
 func presentationSpelling*(k: PresentationKind): string =
   ## `pkProgressIndicator` -> `ProgressIndicator`. PLAT-3's own spelling of an

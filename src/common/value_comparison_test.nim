@@ -57,7 +57,7 @@ proc text(t: string; typeName = "Report"): PValue =
 
 proc compareAs(a, b: PValue): Comparison =
   var sel: DiffSelection
-  let found = selectDiff(loaded(), a.typeName, sel)
+  let found = selectDiff(loaded(), a, sel)
   compareValues(a, b, sel, found)
 
 suite "the scratchpad compares the way the project selected":
@@ -116,6 +116,29 @@ suite "the scratchpad compares the way the project selected":
     let c = compareValues(big, big, DiffSelection(), false)
     check c.verdict == cvEqual
     check c.note.contains("larger than one comparison may walk")
+
+suite "a selection may match by shape (§5.3)":
+
+  test "a tuple of two numbers is compared within the tolerance":
+    let l = loadProjectDefinitions([DefinitionFile(kind: dfkScratchpad,
+      origin: doProject, scope: "", path: ".codetracer/scratchpad.toml",
+      text: "schema = \"codetracer.scratchpad.v1\"\n\n[[diff]]\n" &
+            "matchKind = \"shape\"\nmatch = \"#2\"\n" &
+            "algorithm = \"numeric-tolerance\"\ntolerance = \"0.5\"\n")])
+    check l.problems.len == 0
+    let a = PValue(kind: pvkTuple, typeName: "Tuple", members: @[
+      PMember(value: num("1.0")), PMember(value: num("2.0"))])
+    let b = PValue(kind: pvkTuple, typeName: "Tuple", members: @[
+      PMember(value: num("1.2")), PMember(value: num("2.0"))])
+    var sel: DiffSelection
+    check selectDiff(l, a, sel)
+    let c = compareValues(a, b, sel, true)
+    check c.verdict == cvEqual
+    check c.algorithm == "numeric-tolerance 0.5"
+    # A three-member tuple does not have the shape.
+    let three = PValue(kind: pvkTuple, typeName: "Tuple", members: a.members &
+                       @[PMember(value: num("3"))])
+    check not selectDiff(l, three, sel)
 
 suite "the scratchpad runs the project's own comparison":
 
