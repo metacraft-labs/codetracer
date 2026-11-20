@@ -9,7 +9,7 @@
 ## The HeadlessDebugSession, pipes, decoder and subscriber delivery are real;
 ## the real RR producer was separately observed advertising true while this
 ## constructor returned false before any pane request.
-import std/[json, monotimes, os, osproc, strutils, tempfiles, times, unittest]
+import std/[json, monotimes, os, osproc, streams, strutils, tempfiles, times, unittest]
 when defined(posix):
   import std/posix
 import ../../viewmodel/backend/stdio_backend
@@ -407,6 +407,27 @@ suite "stdio DAP diagnostics":
           check not error.msg.contains("engine state:")
           check not dirExists(dumps) or
                 not error.msg.contains(dumps)
+
+  when defined(linux):
+    test "the dump's walk includes a process the tree traces, whatever its parent":
+      # rr drives forks of the replayed process whose parent it has
+      # discarded: they are no longer anyone's child in the tree, but rr
+      # still waits on them, and the dump must say what they are doing.
+      let helper = currentSourcePath().parentDir / "fixtures" / "traced_orphan.py"
+      let tracer = startProcess("python3", args = [helper],
+                                options = {poUsePath})
+      defer:
+        tracer.inputStream.close()
+        discard tracer.waitForExit()
+      let traced = parseInt(tracer.outputStream.readLine().strip)
+      let status = readFile("/proc/" & $traced & "/status")
+      require ("TracerPid:\t" & $tracer.processID) in status
+      # The tracee's parent is not the tracer: the walk of children alone
+      # does not reach it.
+      require not status.contains("PPid:\t" & $tracer.processID & "\n")
+      let walked = descendantsOf(getCurrentProcessId())
+      check (tracer.processID, getCurrentProcessId()) in walked
+      check (traced, tracer.processID) in walked
 
   when defined(posix):
     test "a stall's dump covers the engine's own workers":

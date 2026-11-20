@@ -38,7 +38,7 @@
 ## file that cannot be read is noted and skipped, and nothing here raises —
 ## the stall's own error is what the caller reports.
 
-import std/[monotimes, os, osproc, strutils, times]
+import std/[monotimes, os, osproc, sets, strutils, tables, times]
 
 const
   StallDiagnosticsEnvVar* = "CODETRACER_STALL_DIAGNOSTICS_DIR"
@@ -93,17 +93,56 @@ proc childrenOf(pid: int): seq[int] =
   except CatchableError:
     discard
 
+proc tracedBy(): Table[int, seq[int]] =
+  ## Every process with a tracer, by tracer (`TracerPid` in
+  ## /proc/<pid>/status).
+  try:
+    for kind, path in walkDir("/proc"):
+      let name = path.extractFilename
+      if name.len == 0 or not name.allCharsInSet(Digits): continue
+      let status =
+        try: readFile(path / "status")
+        except CatchableError: ""
+      for line in status.splitLines:
+        if line.startsWith("TracerPid:"):
+          let tracer =
+            try: parseInt(line["TracerPid:".len .. ^1].strip)
+            except ValueError: 0
+          if tracer != 0:
+            result.mgetOrPut(tracer, @[]).add parseInt(name)
+          break
+  except CatchableError:
+    discard
+
 proc descendantsOf*(pid: int): seq[(int, int)] =
   ## Every descendant of `pid` as (pid, parent), breadth first, at most
   ## `MaxDescendants`, within `ToolTimeoutSeconds`.
+  ##
+  ## A process traced by one in the tree is part of it too, whoever its
+  ## parent is now. rr keeps a replay's checkpoints as forks of the replayed
+  ## process; when rr discards the process a fork came from, the fork is
+  ## reparented out of the tree while rr still drives it. In one stall rr sat
+  ## in waitid on exactly such a process, and a walk of children alone could
+  ## not say what it was doing.
   let deadline = getMonoTime() + initDuration(seconds = ToolTimeoutSeconds)
+  var tracees: Table[int, seq[int]]
+  var tracersRead = false
+  var seen = initHashSet[int]()
+  seen.incl pid
   var frontier = @[pid]
   while frontier.len > 0 and result.len < MaxDescendants and
         getMonoTime() < deadline:
     var next: seq[int]
     for parent in frontier:
-      for child in childrenOf(parent):
+      var found = childrenOf(parent)
+      if not tracersRead:
+        tracees = tracedBy()
+        tracersRead = true
+      found.add tracees.getOrDefault(parent)
+      for child in found:
         if result.len >= MaxDescendants: break
+        if child in seen: continue
+        seen.incl child
         result.add (child, parent)
         next.add child
     frontier = next
