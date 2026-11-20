@@ -110,13 +110,24 @@ jobs:
         # reported by the check, which names the cause, rather than here as
         # "--locked was passed"; the committed locks are then restored, since
         # the check compares the committed bytes.
+        #
+        # The restore runs with git hooks OFF. Entering the dev shell installs
+        # reprobuild's managed hooks into this checkout, and `git checkout --
+        # <paths>` fires post-checkout, which then runs whatever `repro` is
+        # on PATH. A runner without one skips it; the ephemeral runners carry
+        # /usr/local/bin/repro, whose post-checkout failed here with
+        # "repro hooks: error: No such file or directory" and failed the job
+        # (run 44495818924). A file restore needs no workspace
+        # reconciliation, so the job's verdict must not depend on which
+        # runner it landed on.
         run: |
           set -euo pipefail
           for crate in src/db-backend src/backend-manager; do
             nix develop .#devShells.x86_64-linux.default --command \
               cargo fetch --manifest-path "$crate/Cargo.toml"
           done
-          git checkout -- src/db-backend/Cargo.lock src/backend-manager/Cargo.lock
+          git -c core.hooksPath=/dev/null \
+            checkout -- src/db-backend/Cargo.lock src/backend-manager/Cargo.lock
 
       - name: Check the sibling Cargo.locks
         # STRICT: a check that could not run is a failure here, not a SKIP.

@@ -842,10 +842,10 @@
       "flake": false,
       "locked": {
         "lastModified": 1793050497,
-        "narHash": "sha256-w4Ahbo3XgnFptT8YGMo8THl9uKdPpUfL8oyMk5o+wK0=",
+        "narHash": "sha256-j+oWt6wkLsnAd+s+ifpeMV0OeQc9kZwHgaoIxtkpgVE=",
         "owner": "metacraft-labs",
         "repo": "codetracer-image-diff",
-        "rev": "e002498eac522ccc90c1dab4800e0b934bdc72fd",
+        "rev": "8cccacebb5c60d69541d3d835723d196d96a6d6e",
         "type": "github"
       },
       "original": {
