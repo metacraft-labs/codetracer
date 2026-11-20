@@ -231,6 +231,12 @@ ANSWER_FILES = [ROOT / "src/tests/visual/answers" / n for n in
                 ("plat49-chrome.electron.json", "plat49-panes.electron.json")]
   # what the desktop gates write; restored after every run (`run_electron`)
 SUITE_TIMEOUT = int(os.environ.get("CT_P49_SUITE_TIMEOUT", "3600"))
+# The desktop gate's own bound. Its capture script first builds this
+# checkout's desktop prefix with `repro build`, and with repro 0.2.27 that one
+# build takes 60-90 minutes on the x86_64-linux workstation (serial producer
+# interface extraction, reprobuild-pm issues 6afc8f22). Under SUITE_TIMEOUT
+# the gate was killed inside the build every time and graded nothing.
+ELECTRON_TIMEOUT = int(os.environ.get("CT_P49_ELECTRON_TIMEOUT", "9000"))
 SHIM = Path(os.environ.get("ISONIM_GPUI_SHIM_DIR",
                            str(ROOT.parent / "isonim-gpui/rust/target/debug")))
 RESULT_LINE = re.compile(r"^\s*(?:\x1b\[[0-9;]*m)*\[(OK|FAILED)\]\s*"
@@ -1317,9 +1323,18 @@ def run_electron(path: str, grep: str) -> RunResult:
     try:
         proc = subprocess.run(["bash", suite_file(path), "-g", grep], cwd=ROOT,
                               capture_output=True, text=True,
-                              timeout=SUITE_TIMEOUT, encoding="utf-8",
+                              timeout=ELECTRON_TIMEOUT, encoding="utf-8",
                               errors="replace", env=env)
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as hung:
+        # The capture names each step as it starts (`PLAT-49: ... step:`), so
+        # what it printed before the kill says which step did not finish.
+        print(f"      ---- {path}: NO RESULT AFTER {ELECTRON_TIMEOUT}s;"
+              " what the capture printed ----")
+        for stream in (hung.stdout, hung.stderr):
+            text = (stream.decode("utf-8", "replace")
+                    if isinstance(stream, bytes) else (stream or ""))
+            for line in text.splitlines()[-15:]:
+                print("      " + line)
         return RunResult(rc=1, ran=False, hung=True)
     finally:
         for a in ANSWER_FILES:
