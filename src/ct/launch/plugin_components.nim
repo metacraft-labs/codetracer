@@ -186,6 +186,28 @@ proc scanLevel(levelPath: string): tuple[
   for i, n in order:
     result.byName.add (name: n, versions: versions[i])
 
+proc selectedVersionsAt*(levelPath: string; pins: openArray[CtrcPin]):
+    seq[tuple[name: string; selection: VersionSelection]] =
+  ## For every component name installed at ONE level, the version the launcher
+  ## takes there: `selectVersion`'s pin, then `active/<name>`, then highest —
+  ## chosen from the directory NAMES, before any file inside one is read.
+  ##
+  ## This is for callers that want every component, not only plugins
+  ## (`help_delegate.scanInstalledComponents`). Without it, a caller walking
+  ## the level itself keeps whichever `<name>@<version>` readdir returns first,
+  ## and that is hash order on ext4 and newest first on tmpfs, not the
+  ## version (issue 2026-11-18-ct-help-component-version-choice-depends-on-
+  ## readdir-order in reprobuild-pm).
+  ##
+  ## A selection whose `version` is empty (`vsrNone`, `vsrPinnedMissing`)
+  ## means the level offers nothing for that name, and the launcher goes on to
+  ## the next level.
+  if not dirExists(levelPath): return
+  for entry in scanLevel(levelPath).byName:
+    result.add (name: entry.name,
+                selection: selectVersion(entry.versions, pinFor(pins, entry.name),
+                                         activeVersionAt(levelPath, entry.name)))
+
 # ---------------------------------------------------------------------------
 # The walk
 # ---------------------------------------------------------------------------

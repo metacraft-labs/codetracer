@@ -58,6 +58,12 @@ import
   ./path_completion,
   confutils/[ defs, runtime_surface, clispec_config ]
 
+# Only the launcher's per-level version choice. A plain `import` would also
+# bring `component_roots`' level list and env-var constants, which this module
+# still spells itself (with no "self" level).
+from ./plugin_components import selectedVersionsAt, loadCtrcPins
+from ../../common/plugin_model import CtrcPin
+
 export defs, runtime_surface
 
 const
@@ -392,14 +398,6 @@ type
     path: string
     label: string
 
-func splitComponentDirName(dirName: string):
-    tuple[name, version: string] =
-  ## ``<component>@<version>`` directory layout, per launcher spec.
-  let atIdx = dirName.rfind('@')
-  if atIdx < 0:
-    return (dirName, "")
-  (dirName[0 ..< atIdx], dirName[atIdx + 1 .. ^1])
-
 const reservedCapabilityKeywords* = [
     "name", "version", "bin", "description", "help-delegate",
     "licensed", "project", "known-extensions"
@@ -500,25 +498,42 @@ proc collectComponentLevels(): seq[ComponentLevel] =
         label: "distro")
 
 proc scanInstalledComponents*(): seq[InstalledComponent] =
-  ## Enumerate every ``<component>@<version>/capabilities`` file under
-  ## the configured component roots. Higher-priority directories come
-  ## first; for any single component, the first directory wins.
+  ## Enumerate the installed components under the configured component
+  ## roots, one per name, as the launcher resolves them. Higher-priority
+  ## directories come first; for any single component, the first directory
+  ## that offers a version wins.
+  ##
+  ## Within one directory the version is the launcher's choice
+  ## (``plugin_components.selectedVersionsAt``: a ``.ctrc`` pin, then
+  ## ``active/<name>``, then the highest), made before its ``capabilities``
+  ## file is read. It used to be whichever ``<name>@<version>`` the
+  ## directory listing returned first, which is not an order.
   let levels = collectComponentLevels()
+  var pins: seq[CtrcPin] = @[]
+  try:
+    discard loadCtrcPins(getCurrentDir(), pins)
+  except CatchableError:
+    # No working directory: no `.ctrc` walk, as the launcher's own
+    # `getcwd` failure gives none. `CODETRACER_CTRC_PATH` was the
+    # other way to reach one, and `loadCtrcPins` read it first.
+    pins = @[]
   var seen = initTable[string, bool]()
   for idx, lvl in levels:
     if not dirExists(lvl.path): continue
-    for kind, child in walkDir(lvl.path):
-      if kind != pcDir: continue
-      let capPath = child / "capabilities"
+    for entry in selectedVersionsAt(lvl.path, pins):
+      # An empty version: this level offers nothing for the name
+      # (a pin or `active` link naming an absent version).
+      if entry.selection.version.len == 0: continue
+      if seen.getOrDefault(entry.name, false): continue
+      let capPath = lvl.path / (entry.name & "@" & entry.selection.version) /
+                    "capabilities"
       if not fileExists(capPath): continue
       var comp = InstalledComponent(
         capPath: capPath,
         levelIdx: idx,
         levelLabel: lvl.label)
-      let (defaultName, defaultVersion) =
-        splitComponentDirName(child.lastPathPart)
-      comp.name = defaultName
-      comp.version = defaultVersion
+      comp.name = entry.name
+      comp.version = entry.selection.version
       try:
         parseCapabilitiesFile(readFile(capPath), comp)
       except CatchableError:
