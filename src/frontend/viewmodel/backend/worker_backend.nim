@@ -219,6 +219,22 @@ proc markWorkerFailed*(w: WorkerBackend; message: string) =
   w.lastError = message
   w.failAllPending(WorkerFailedMessagePrefix & message)
 
+proc expire*(w: WorkerBackend; requestSeq: int; message: string): bool =
+  ## Settle request `requestSeq` with a `success: false` response carrying
+  ## `message`, when it is still waiting; false otherwise. For a host that
+  ## keeps the time a request has waited (the transport is the host's): an
+  ## engine that answers only the newest of overlapping requests leaves the
+  ## older ones unanswered, and a request that never settles keeps its
+  ## ViewModel's duplicate guard closed for good.
+  if not w.pending.hasKey(requestSeq):
+    return false
+  let resolve = w.pending[requestSeq]
+  w.pending.del(requestSeq)
+  let at = w.pendingOrder.find(requestSeq)
+  if at >= 0: w.pendingOrder.delete(at)
+  resolve(failedResponse("", message))
+  true
+
 proc deliver*(w: WorkerBackend; raw: string) =
   ## Feed one inbound payload from the worker, rendered as text.
   ##

@@ -48,10 +48,16 @@ import isonim/web/frame_renderer
 import ../viewmodel/codetracer_embed
 import ../viewmodel/backend/worker_backend
 import ../viewmodel/viewport
+import ../viewmodel/input/pane_presses
 from ../viewmodel/views/state_view import fullValueOf
 import ../viewmodel/views/isonim_state_view
 import ../viewmodel/views/isonim_calltrace_view
 import ../viewmodel/views/isonim_event_log_view
+import ../viewmodel/views/[isonim_build_view, isonim_command_palette_view,
+  isonim_errors_view, isonim_filesystem_view, isonim_low_level_code_view,
+  isonim_point_list_view, isonim_repl_view, isonim_scratchpad_view,
+  isonim_search_results_view, isonim_step_list_view,
+  isonim_terminal_output_view, isonim_trace_log_view]
 
 when defined(emscripten):
   proc hostPostRaw(json: cstring) {.importc: "ctwHostPost".}
@@ -106,11 +112,67 @@ proc mountPanes() =
   if not s.eventLogVM.isNil:
     s.eventLogVM.followStop()
 
+const ExtraPanes* = ["build", "command-palette", "errors", "filesystem",
+                     "low-level-code", "point-list", "repl", "scratchpad",
+                     "search-results", "step-list", "terminal-output",
+                     "trace-log"]
+  ## Panes a host can ask for by name beyond the three every host gets
+  ## (`ctwMountPane`); the panel host's pane kinds, in the views' names.
+
+var extraMounted: seq[string] = @[]
+
+proc renderExtraPane(name: string): bool =
+  ## Draw pane `name` into a container of its own. False for an unknown
+  ## name, or before the session's ViewModels exist.
+  let s = session.session
+  let box = paneContainer(name)
+  var panel: FrameNode
+  case name
+  of "build": panel = renderBuildPanel[FrameRenderer, FrameNode](r, s.buildVM)
+  of "command-palette": panel = renderCommandPalettePanel[FrameRenderer, FrameNode](r, s.commandPaletteVM)
+  of "errors": panel = renderErrorsPanel[FrameRenderer, FrameNode](r, s.errorsVM)
+  of "filesystem": panel = renderFilesystemPanel[FrameRenderer, FrameNode](r, s.fileTreeVM)
+  of "low-level-code": panel = renderLowLevelCodePanel[FrameRenderer, FrameNode](r, s.lowLevelCodeVM)
+  of "point-list": panel = renderPointListPanel[FrameRenderer, FrameNode](r, s.pointListVM)
+  of "repl": panel = renderReplPanel[FrameRenderer, FrameNode](r, s.replVM)
+  of "scratchpad": panel = renderScratchpadPanel[FrameRenderer, FrameNode](r, s.scratchpadVM)
+  of "search-results": panel = renderSearchResultsPanel[FrameRenderer, FrameNode](r, s.searchResultsVM)
+  of "step-list": panel = renderStepListPanel[FrameRenderer, FrameNode](r, s.stepListVM)
+  of "terminal-output": panel = renderTerminalOutputPanel[FrameRenderer, FrameNode](r, s.terminalOutputVM)
+  of "trace-log": panel = renderTraceLogPanel[FrameRenderer, FrameNode](r, s.traceLogVM)
+  else: return false
+  r.appendChild(box, panel)
+  true
+
+var wantedPanes: seq[string] = @[]
+
+proc mountOne(name: string) =
+  ## A proc of its own, so the root's closure captures this pane's name.
+  var ok = false
+  createRoot proc(dispose: proc()) =
+    ok = renderExtraPane(name)
+  if ok: extraMounted.add name
+
+proc mountWanted() =
+  if not mounted: return
+  for name in wantedPanes:
+    if name notin extraMounted:
+      mountOne(name)
+
+proc ctwMountPane(name: cstring) {.exportc.} =
+  ## Ask for a pane beyond the three every host gets; drawn as soon as the
+  ## session's ViewModels exist, into a container named `data-pane=<name>`.
+  let n = $name
+  if n in ExtraPanes and n notin wantedPanes:
+    wantedPanes.add n
+  mountWanted()
+
 proc ctwPump() {.exportc.} =
   ## Run every callback that is due, then mount the panes once the session is
   ## ready. The host calls this from its own loop and after each message.
   drainPlatformCallbacks()
   mountPanes()
+  mountWanted()
   drainPlatformCallbacks()
 
 proc ctwDeliver(json: cstring) {.exportc.} =
@@ -205,6 +267,33 @@ proc ctwEventLogCurrent(): cint {.exportc.} =
 proc ctwEventLogRowPx(): cdouble {.exportc.} =
   if not mounted: 1.0 else: cdouble(session.session.eventLogVM.rowHeightPx.val)
 
+proc ctwCalltraceMeasured(pitch, originX, centerY: cdouble) {.exportc.} =
+  ## Call Trace's rows as the host measured them: their advance and the
+  ## toggle anchor the guides are drawn from.
+  if not mounted: return
+  setFrameGuideMeasure(float(pitch), float(originX), float(centerY))
+  ctwPump()
+
+proc ctwPress(operation, attrsJson: cstring): cint {.exportc.} =
+  ## A pointer press the host hit-tested: `operation` (one of
+  ## `pane_presses.SessionPressOperations`) on the element whose attributes —
+  ## its own, then each ancestor's, the nearest first — are `attrsJson`. The
+  ## same procedure the desktop performs on its own ViewModels
+  ## (`input/dom_pane_presses`), on this core's. 1 when it acted.
+  if not mounted: return 0
+  let attrs = try: parseJson($attrsJson) except CatchableError: newJObject()
+  let reader: AttributeReader = proc(name: string): string =
+    if attrs.kind == JObject: attrs{name}.getStr("") else: ""
+  result = cint(ord(performSessionPress(session.session, $operation, reader)))
+  ctwPump()
+
+proc ctwExpire(requestSeq: cint): cint {.exportc.} =
+  ## The host's request timeout: settle `requestSeq` as failed when it is
+  ## still waiting (`WorkerBackend.expire`). 1 when it was.
+  result = cint(ord(worker.expire(int(requestSeq),
+    "the engine did not answer within the host's request timeout")))
+  ctwPump()
+
 proc ctwPending(): cint {.exportc.} =
   ## Requests sent to the engine and not yet answered.
   cint(worker.pendingCount)
@@ -222,13 +311,15 @@ when defined(js):
   {.emit: """
 globalThis.ctwJsCore = {
   boot: `ctwBoot`, pump: `ctwPump`, deliver: `ctwDeliver`, openFolder: `ctwOpenFolder`,
-  attach: `ctwAttach`,
+  attach: `ctwAttach`, mountPane: `ctwMountPane`, press: `ctwPress`,
+  expire: `ctwExpire`,
   phase: `ctwPhase`, failure: `ctwFailure`, step: `ctwStep`, stepping: `ctwStepping`,
   position: `ctwPosition`, readCrossings: `ctwReadCrossings`,
   setViewport: `ctwSetViewport`, mounted: `ctwMounted`, pending: `ctwPending`,
   fullValueOf: `ctwFullValueOf`, eventLogMetrics: `ctwEventLogMetrics`,
   eventLogSearch: `ctwEventLogSearch`, eventLogTotal: `ctwEventLogTotal`,
   eventLogCurrent: `ctwEventLogCurrent`, eventLogRowPx: `ctwEventLogRowPx`,
+  calltraceMeasured: `ctwCalltraceMeasured`,
   frameBytes: function() { return globalThis.isonimFrameBytes(); },
   frameOps: `frameOps`, frameReset: `frameReset`, frameManifest: `frameManifest`,
   dispatch: `frameDispatch`,

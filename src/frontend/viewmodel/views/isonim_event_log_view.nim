@@ -60,6 +60,7 @@ when defined(ctWasmCore):
   # below for the reason `isonim_calltrace_view.nim` gives: a generic binds a
   # renderer call at its definition when only one overload is in scope.
   import isonim/web/frame_renderer
+  import ./frame_mock_events
 
 import ../store/types
 import ./row_links

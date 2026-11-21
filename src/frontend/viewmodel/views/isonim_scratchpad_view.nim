@@ -39,6 +39,11 @@
 ##   the row list).
 
 import std/sets
+when defined(ctWasmCore):
+  # The command-frame renderer the WebAssembly core draws through
+  # (`src/frontend/web_core`), imported before the generic procs below.
+  import isonim/web/frame_renderer
+  import ./frame_mock_events
 import isonim/core/[signals, computation]
 import isonim/dsl/[ui, components]
 

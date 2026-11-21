@@ -1019,6 +1019,17 @@ proc renderStatePanel*[R, N](r: R; vm: StateVM): N =
   when defined(js):
     when N is isonim_dom.Element:
       wireWatchInputForm(formEl, inputEl, vm)
+  when defined(ctWasmCore):
+    when N is FrameNode:
+      # The watch field, through the frame renderer: the host sends the
+      # form's field value with the submit.
+      let field = inputEl
+      r.addEventListener(formEl, "submit", proc(ev: FrameEvent) =
+        ev.preventDefault()
+        ev.stopPropagation()
+        if ev.value.len > 0:
+          vm.addWatch(ev.value)
+          r.setInputValue(field, ""))
 
   panel
 

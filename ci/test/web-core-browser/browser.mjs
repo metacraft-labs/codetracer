@@ -36,6 +36,11 @@ for (const p of [replayServer, recording]) {
   if (!fs.existsSync(p)) { console.error(`browser.mjs: ${p} does not exist`); process.exit(2); }
 }
 const STEPS = Number(stepsArg || 4);
+// Every pane the desktop's panel host mounts beyond the three, drawn by the
+// core on request (`ctwMountPane`).
+const EXTRA_PANES = ['build', 'command-palette', 'errors', 'filesystem', 'low-level-code',
+  'point-list', 'repl', 'scratchpad', 'search-results', 'step-list', 'terminal-output',
+  'trace-log'];
 // A stop that has not settled in this long is a failure, not a snapshot.
 const SETTLE_MS = Number(process.env.CT_WEB_CORE_SETTLE_MS || 120000);
 const repo = process.env.CT_REPO || process.cwd();
@@ -73,27 +78,50 @@ const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
 
 async function settle(page, timeoutMs, notAt) {
   // Settled: the debugger reports a real stop (a line, and not the one it was
-  // at before the action), no step and no request is in flight, and no frame has been
+  // at before the action), no step and no fresh request is in flight, and no frame has been
   // applied for 2 s — the panes have drawn what that stop loads (a pane debounces its viewport before it asks).
-  const end = Date.now() + timeoutMs;
+  const start = Date.now();
+  const end = start + timeoutMs;
   let last = -1;
   let quietSince = Date.now();
+  let readyAt = 0;
   while (Date.now() < end) {
     const s = await page.evaluate(() => {
       const st = globalThis.ctwHost.state();
       // A pane still showing a loading indicator is still waiting for the
       // engine: the stop has not finished drawing, however quiet the frames.
-      st.loading = [...document.querySelectorAll('.ct-web-core-pane *')].some((el) =>
+      // The three panes a stop reloads; another pane's placeholder (a pane
+      // with nothing to show yet) is not a load in flight.
+      const loads = [...document.querySelectorAll(
+        '[data-pane=state] *, [data-pane=calltrace] *, [data-pane=event-log] *')].filter((el) =>
         el.children.length === 0 && /loading/i.test(el.className + ' ' + el.textContent) &&
         getComputedStyle(el).display !== 'none' && el.offsetParent !== null);
+      st.loading = loads.length > 0;
+      st.inFlight = globalThis.ctwInFlight ? globalThis.ctwInFlight() : st.pending;
+      st.loadingWhat = loads.slice(0, 3).map((el) => el.className || el.tagName).join(' | ');
       return st;
     });
     const stopped = /:[1-9][0-9]*$/.test(s.position) && s.position !== notAt;
-    if (s.frames !== last || s.stepping || !stopped || s.loading || s.pending > 0) { last = s.frames; quietSince = Date.now(); }
-    else if (Date.now() - quietSince >= 2000) return { ...s, settled: true };
-    await sleep(100);
+    const busy = s.stepping || !stopped || s.loading || s.inFlight > 0;
+    // The latency is to the stop drawn: moved, not stepping, nothing loading.
+    // A request still in flight then (a section the engine superseded) is
+    // not part of what the user waits for.
+    const drawn = !s.stepping && stopped && !s.loading;
+    if (!drawn) readyAt = 0;
+    else if (!readyAt) readyAt = Date.now();
+    if (s.frames !== last || busy) { last = s.frames; quietSince = Date.now(); }
+    else if (Date.now() - quietSince >= 2000) return { ...s, settled: true, readyMs: readyAt - start + (notAt ? 50 : 0) };
+    await sleep(25);
   }
   const s = await page.evaluate(() => globalThis.ctwHost.state());
+  const what = await page.evaluate(() => [...document.querySelectorAll(
+    '[data-pane=state] *, [data-pane=calltrace] *, [data-pane=event-log] *')].filter((el) =>
+      el.children.length === 0 && /loading/i.test(el.className + ' ' + el.textContent) &&
+      getComputedStyle(el).display !== 'none' && el.offsetParent !== null)
+    .map((el) => (el.closest('.ct-web-core-pane') || {}).dataset?.pane + ':' + el.className).join(' | '));
+  console.log(`  unsettled: position=${s.position} stepping=${s.stepping} pending=${s.pending}` +
+              ` frames=${s.frames} lastFrames=${last} loading=[${what}]` +
+              ` unanswered=[${await page.evaluate(() => (globalThis.ctwUnanswered ? globalThis.ctwUnanswered() : []).join(', '))}]`);
   return { ...s, settled: false };
 }
 
@@ -101,7 +129,11 @@ async function snapshot(page) {
   return page.evaluate(() => {
     const out = {};
     for (const el of document.querySelectorAll('.ct-web-core-pane')) {
-      out[el.dataset.pane] = el.innerHTML;
+      // The core's document. The scrubbers are the host's own elements, drawn
+      // from layout on a timer of their own, and are left out.
+      const copy = el.cloneNode(true);
+      for (const n of copy.querySelectorAll('.ct-list-scrubber, .ct-hscrubber')) n.remove();
+      out[el.dataset.pane] = copy.innerHTML;
     }
     out.stateRows = document.querySelectorAll('[data-pane=state] .value-expanded-name[data-variable-name]').length;
     out.callRows = document.querySelectorAll('[data-pane=calltrace] .calltrace-call-line').length;
@@ -112,11 +144,13 @@ async function snapshot(page) {
 
 let failures = 0;
 const runs = {};
+const timings = {};
 for (const arm of ['wasm', 'js']) {
   const page = await browser.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
-  const url = `http://127.0.0.1:${port}/page.html?arm=${arm}&folder=${encodeURIComponent(path.resolve(recording))}`;
+  const url = `http://127.0.0.1:${port}/page.html?arm=${arm}&folder=${encodeURIComponent(path.resolve(recording))}` +
+              `&extra=${EXTRA_PANES.join(',')}`;
   const t0 = Date.now();
   await page.goto(url);
   await page.waitForFunction(() => globalThis.ctwHost || globalThis.ctwError, null, { timeout: 60000 });
@@ -129,6 +163,7 @@ for (const arm of ['wasm', 'js']) {
                              null, { timeout: 60000 }).catch(() => {});
   let s = await settle(page, SETTLE_MS);
   const unsettled = [];
+  const stepMs = [];
   if (!s.settled) unsettled.push('open');
   const openMs = Date.now() - t0;
   const problems = [];
@@ -140,13 +175,61 @@ for (const arm of ['wasm', 'js']) {
     await sleep(50);
     s = await settle(page, SETTLE_MS, positions[positions.length - 1]);
     if (!s.settled) unsettled.push(`step ${i + 1}`);
+    else stepMs.push(s.readyMs);
     phases.push(await snapshot(page));
     positions.push(s.position);
   }
   if (!phases.some((p) => p.callRows > 0)) problems.push('Call Trace drew no rows at any stop');
   if (!phases.some((p) => p.stateRows > 0)) problems.push('the variables pane drew no rows at any stop');
   if (new Set(positions).size < 2) problems.push(`the position never moved: ${positions.join(' ')}`);
+  // Expanding a wide value through the core's own press procedure (the one
+  // the desktop's pointer performs): its rows must appear, and the time from
+  // the press to the first frame that holds them is the expand latency.
+  const wide = await page.evaluate(() => {
+    const row = [...document.querySelectorAll('[data-pane=state] [data-variable-path]')]
+      .find((e) => /^wide_/.test(e.getAttribute('data-variable-path') || '')) ||
+      // Before the program builds its wide values, the module's builtins
+      // are the stop's largest value (some hundred and fifty members).
+      [...document.querySelectorAll('[data-pane=state] [data-variable-path]')]
+        .find((e) => e.getAttribute('data-variable-path') === '__builtins__');
+    if (!row) {
+      return { missing: [...document.querySelectorAll('[data-pane=state] [data-variable-path]')]
+        .slice(0, 12).map((e) => e.getAttribute('data-variable-path')) };
+    }
+    const before = document.querySelectorAll('[data-pane=state] [data-variable-path]').length;
+    globalThis.ctwExpandT0 = performance.now();
+    const acted = globalThis.ctwHost.press('variables.toggle-expand', row);
+    return { path: row.getAttribute('data-variable-path'), before, acted };
+  });
+  let expandMs = null;
+  if (wide && wide.missing) console.log(`  note: ${engine}/${arm}: no wide_ value to expand among ${wide.missing.join(', ')}`);
+  if (wide && !wide.missing) {
+    if (!wide.acted) problems.push(`the core did not act on a press to expand ${wide.path}`);
+    const grown = await page.waitForFunction((n) =>
+      document.querySelectorAll('[data-pane=state] [data-variable-path]').length > n + 100,
+      wide.before, { timeout: 120000, polling: 'raf' }).then(() => true, () => false);
+    if (!grown) problems.push(`expanding ${wide.path} did not draw its members`);
+    else expandMs = await page.evaluate(() => performance.now() - globalThis.ctwExpandT0);
+  }
+  timings[arm] = { stepMs, expandMs };
+  // The guide layer the core draws from the host's measurement.
+  const guides = await page.evaluate(() =>
+    document.querySelectorAll('[data-pane=calltrace] svg#svg-content-0 line').length);
+  if (!(guides > 0)) problems.push(`Call Trace drew ${guides} guide line(s)`);
+  // The watch form: a submitted expression becomes a watched row.
+  await page.fill('[data-pane=state] #watch-0', 'ctw_watch_probe');
+  await page.press('[data-pane=state] #watch-0', 'Enter');
+  const watched = await page.waitForFunction(() =>
+    [...document.querySelectorAll('[data-pane=state] [data-variable-name]')]
+      .some((el) => el.getAttribute('data-variable-name') === 'ctw_watch_probe'), null, { timeout: 30000 })
+    .then(() => true, () => false);
+  if (!watched) problems.push('a watch submitted through the form did not appear');
   if (phases[phases.length - 1].decorated !== 3) problems.push(`${phases[phases.length - 1].decorated} of 3 panes decorated by the host`);
+  const drawn = await page.evaluate((names) => names.filter((n) => {
+    const el = document.querySelector(`.ct-web-core-pane[data-pane="${n}"]`);
+    return !el || el.children.length === 0;
+  }), EXTRA_PANES);
+  if (drawn.length) problems.push(`panes not drawn: ${drawn.join(', ')}`);
   if (unsettled.length) problems.push(`did not settle within ${SETTLE_MS} ms after: ${unsettled.join(', ')}`);
   if (s.readCrossings !== 0) problems.push(`${s.readCrossings} read crossing(s)`);
   if (errors.length) problems.push(`page errors: ${errors.join(' | ')}`);
@@ -169,7 +252,7 @@ if (runs.wasm && runs.js) {
     failures++;
   }
   for (let i = 0; i < Math.min(a.phases.length, b.phases.length); i++) {
-    for (const pane of ['state', 'calltrace', 'event-log']) {
+    for (const pane of ['state', 'calltrace', 'event-log', ...EXTRA_PANES]) {
       if (a.phases[i][pane] !== b.phases[i][pane]) {
         const x = a.phases[i][pane] || '', y = b.phases[i][pane] || '';
         let at = 0;
@@ -183,6 +266,11 @@ if (runs.wasm && runs.js) {
   if (!failures) console.log(`WEB-CORE-PARITY ok engine=${engine} phases=${a.phases.length}`);
 }
 
+const med = (xs) => { const a = [...xs].sort((x, y) => x - y); return a.length ? a[Math.floor(a.length / 2)] : null; };
+for (const [arm, t] of Object.entries(timings)) {
+  console.log(`WEB-CORE-LATENCY engine=${engine} arm=${arm} step_ms_median=${med(t.stepMs)} step_ms=${t.stepMs.join(',')}` +
+              ` expand_ms=${t.expandMs === null ? 'na' : t.expandMs.toFixed(1)}`);
+}
 await browser.close();
 relay.kill();
 process.exit(failures ? 1 : 0);

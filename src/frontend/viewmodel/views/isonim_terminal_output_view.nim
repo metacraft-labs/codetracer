@@ -48,6 +48,11 @@
 ## screen step a write back / forward.
 
 import std/[math, strutils, tables]
+when defined(ctWasmCore):
+  # The command-frame renderer the WebAssembly core draws through
+  # (`src/frontend/web_core`), imported before the generic procs below.
+  import isonim/web/frame_renderer
+  import ./frame_mock_events
 import ./field_keys
 
 import isonim/core/[signals, computation]
@@ -134,13 +139,21 @@ proc stepKey*(vm: TerminalOutputVM; key: string): bool =
 # layout to fit and an `Event` to read.
 
 proc valueOf[R, N](r: R; n: N): string =
-  when defined(js):
-    when N is isonim_dom.Element:
-      return $inputValue(isonim_dom.Node(n))
+  template headless(): string = n.attributes.getOrDefault("value", "")
+  template domOrHeadless(): string =
+    when defined(js):
+      when N is isonim_dom.Element: $inputValue(isonim_dom.Node(n))
+      else: headless()
     else:
-      return n.attributes.getOrDefault("value", "")
+      headless()
+  when defined(ctWasmCore):
+    when N is FrameNode:
+      # The value the host sent with the control's last input or change.
+      r.inputValue(n)
+    else:
+      domOrHeadless()
   else:
-    n.attributes.getOrDefault("value", "")
+    domOrHeadless()
 
 proc setValue[R, N](r: R; n: N; v: string) =
   when defined(js):

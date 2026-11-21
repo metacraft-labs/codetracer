@@ -257,7 +257,7 @@ when defined(js):
   proc calltraceObserveResize(el: isonim_dom.Element; onResize: proc())
     {.importjs: "((el, cb) => { if (typeof ResizeObserver !== 'undefined') { new ResizeObserver(() => cb()).observe(el); } })(#, #)".}
 
-  proc measureCallRowPitch(linesContainer: isonim_dom.Element): float =
+  proc measureCallRowPitch*(linesContainer: isonim_dom.Element): float =
     ## The rows' ADVANCE in CSS px — the distance from one row's top to the
     ## next — which is what positions every row. The shipped stylesheet makes
     ## it equal to the row box (`calltrace.styl` keeps every part of a row
@@ -280,7 +280,7 @@ when defined(js):
       (rows[^1].calltraceElementTop() - rows[0].calltraceElementTop()) /
         float(rows.len - 1)
 
-  proc measureCallGuideAnchor(linesContainer, svgContainer: isonim_dom.Element):
+  proc measureCallGuideAnchor*(linesContainer, svgContainer: isonim_dom.Element):
       Option[CallGuideAnchor] =
     ## Where the first rendered row's toggle sits relative to the guide layer
     ## (`svgContainer`, whose user units are its CSS px), with that row's depth
@@ -748,6 +748,79 @@ proc searchResultLabel(res: CalltraceSearchResult): string =
 # The panel
 # ---------------------------------------------------------------------------
 
+when defined(ctWasmCore):
+  # THE CORE'S HALF OF THE DECORATION, for a core that holds no node
+  # (`src/frontend/web_core`). What `decorateCalltracePanel` does against the
+  # DOM it does here through the frame renderer, and what needs layout is
+  # measured by the host (`web_core_decorations.nim`) and reported back.
+  var frameGuideAnchor*: Signal[Option[CallGuideAnchor]]
+    ## The measured toggle anchor, set by `setFrameGuideMeasure`.
+  var frameCalltraceVM: CalltraceVM
+
+  proc setFrameGuideMeasure*(pitch, originX, centerY: float) =
+    ## The host measured the rows: the advance goes to the ViewModel (the
+    ## virtual scroll and the guides), the anchor to the guides.
+    if frameCalltraceVM.isNil or frameGuideAnchor.isNil: return
+    if pitch > 0.0:
+      frameCalltraceVM.setRowHeightPx(pitch)
+    if originX > 0.0 or centerY > 0.0:
+      let prev = frameGuideAnchor.val
+      if prev.isNone or abs(prev.get.originX - originX) > RowHeightEpsilonPx or
+          abs(prev.get.centerY - centerY) > RowHeightEpsilonPx:
+        frameGuideAnchor.val = some(CallGuideAnchor(originX: originX, centerY: centerY))
+
+  proc guideSvg(lines: seq[CallLine]; pitch: float; a: CallGuideAnchor): string =
+    ## The guide layer as markup, the same element `decorateCalltracePanel`
+    ## builds node by node: an `<svg>` parsed by the host's `innerHTML`
+    ## lands in the SVG namespace, which `createElement` cannot reach.
+    var depths = newSeq[int](lines.len)
+    var maxDepth = 0
+    for i, line in lines:
+      depths[i] = line.depth
+      maxDepth = max(maxDepth, line.depth)
+    let width = a.originX + float(maxDepth) * CallDepthIndentPx + 16.0
+    let height = max(float(lines.len) * pitch, 1.0)
+    result = "<svg xmlns=\"http://www.w3.org/2000/svg\" id=\"svg-content-0\" class=\"calltrace-svg-line\" width=\"" &
+      $width & "\" height=\"" & $height & "\" viewBox=\"0 0 " & $width & " " & $height & "\">"
+    for seg in callGuideSegments(depths, pitch, a):
+      result.add "<line x1=\"" & $seg.x1 & "\" y1=\"" & $seg.y1 & "\" x2=\"" & $seg.x2 &
+        "\" y2=\"" & $seg.y2 & "\" stroke-width=\"0.5\"></line>"
+    result.add "</svg>"
+
+  proc decorateCalltraceFrame[R, N](r: R; formEl, inputEl, scrollContainer,
+                                    linesContainer: N; vm: CalltraceVM) =
+    frameCalltraceVM = vm
+    frameGuideAnchor = createSignal(none(CallGuideAnchor))
+    # The search: a submit, or Enter in the field. The field reports its
+    # value on every input, so `inputValue` is answered in the core.
+    r.addEventListener(inputEl, "input", proc() = discard)
+    r.addEventListener(formEl, "submit", proc(ev: FrameEvent) =
+      ev.preventDefault()
+      ev.stopPropagation()
+      vm.setSearchQuery(ev.value))
+    let field = inputEl
+    r.addEventListener(inputEl, KeyDownEvent, proc(ev: FrameEvent) =
+      if fieldKeyOf(ev.key) == fkCommit:
+        ev.preventDefault()
+        ev.stopPropagation()
+        vm.setSearchQuery(r.inputValue(field)))
+    # The guide layer, redrawn from the rows, the advance and the anchor.
+    let guideHost = r.createElement("div")
+    r.setAttribute(guideHost, "class", "calltrace-svg-host")
+    r.appendChild(linesContainer, guideHost)
+    createRenderEffect proc() =
+      let lines = vm.store.calltrace.lines.val
+      let pitch = vm.rowHeightPx.val
+      let a = frameGuideAnchor.val.get(defaultCallGuideAnchor(pitch))
+      r.setInnerHtml(guideHost, guideSvg(lines, pitch, a))
+    # A search result's reveal: the host scrolls the container to the row
+    # (it knows the row advance; the core only names the row).
+    createRenderEffect proc() =
+      let req = vm.revealScroll.val
+      if req.serial != 0:
+        r.setAttribute(scrollContainer, "data-ctw-reveal",
+                       $req.serial & ":" & $req.firstRow)
+
 proc renderCalltracePanel*[R, N](r: R; vm: CalltraceVM;
                                  links: RowLinks = nil): N =
   ## The Call Trace panel — the markup of the legacy Karax calltrace, which
@@ -830,5 +903,9 @@ proc renderCalltracePanel*[R, N](r: R; vm: CalltraceVM;
   when defined(js):
     when N is isonim_dom.Element:
       decorateCalltracePanel(panel, formEl, inputEl, scrollContainer,
+                             linesContainer, vm)
+  when defined(ctWasmCore):
+    when N is FrameNode:
+      decorateCalltraceFrame(r, formEl, inputEl, scrollContainer,
                              linesContainer, vm)
   panel
