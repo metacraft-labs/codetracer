@@ -5,23 +5,17 @@
 ## WHAT THIS COVERS, AND WHAT IT DELIBERATELY DOES NOT.
 ## `ControlMarks` is the one place the strip's twelve marks are written down.
 ## This file checks the properties of that TABLE — that it is complete, that
-## no two controls share a glyph, that every path is real, and that the two
-## chevron pairs are exact 180° rotations of one another. All of that is
-## decidable from the data and needs no browser.
+## no two controls share a glyph, that every path is real, and that the
+## transport marks keep their grammar: every reverse mark is its forward mark
+## mirrored, step in points at its dot and step out away from it. All of that
+## is decidable from the data and needs no browser.
 ##
-## ON THE ONE CHECK HERE THAT IS ABOUT SHAPE.
+## ON THE CHECKS HERE THAT ARE ABOUT SHAPE.
 ## Everything else in this file is about the table's STRUCTURE — a count, a
 ## naming convention, an absence of colour literals — and holds for whatever
-## the strip is drawn with. The pairing check is the exception: it names a
-## property of particular artwork, so it has to say which artwork.
-##
-## It used to assert reflection about x=8, which was true of the codicon-
-## derived set `93be377c` brought in and is not true of the set this product
-## actually has. Correcting it rather than keeping it is the point: a test that
-## names a shape can only ever record which shape was shipped, and if the shape
-## is wrong the test is a second copy of the same mistake, not a check on it.
-## So the assertion now states the pairing the restored marks DO have, and says
-## plainly which pairs have no such pairing rather than inventing one for them.
+## the strip is drawn with. The grammar checks are the exception: they name
+## properties of the transport marks' artwork, which is drawn to that grammar
+## so that a reverse control cannot be mistaken for its forward twin.
 ##
 ## It cannot check the thing that actually broke: whether a mark is PAINTED.
 ## A table can be perfect while the strip renders nothing, which is close to
@@ -149,24 +143,23 @@ proc withoutCollinear(ps: seq[Pt]): seq[Pt] =
     if base < 1e-9 or abs(cross) / base > 0.01:
       result.add p
 
-proc rotated180(ps: seq[Pt]; centre: float): seq[Pt] =
+proc mirrored(ps: seq[Pt]; centre: float): seq[Pt] =
+  ## Reflected about the vertical line x = `centre`.
   for p in ps:
-    result.add (2.0 * centre - p.x, 2.0 * centre - p.y)
+    result.add (2.0 * centre - p.x, p.y)
 
 proc sameShape(a, b: seq[Pt]): bool =
   ## The two point lists describe the same outline.
   ##
-  ## Compared as multisets, not in order: a rotation reverses the direction a
-  ## closed subpath is traversed in, and `reverse_continue_dark.svg`'s dot
-  ## really does run the opposite way round the circle from `continue_dark`'s.
-  ## Direction is not part of what the mark looks like.
+  ## Compared as multisets, not in order: a mirror reverses the direction a
+  ## closed subpath is traversed in (a mirrored dot runs the other way round
+  ## the circle). Direction is not part of what the mark looks like.
   if a.len != b.len: return false
   var remaining = b
   for p in a:
     var hit = -1
     for i, q in remaining:
-      # 1e-3: the asset files truncate. `reverse_continue_dark.svg` writes
-      # 12.3437 where the exact rotation of `continue_dark.svg` is 12.34375.
+      # 1e-3: the coordinates are written to four decimals.
       if abs(p.x - q.x) < 1e-3 and abs(p.y - q.y) < 1e-3:
         hit = i
         break
@@ -237,128 +230,114 @@ suite "Debugger control marks — the table":
       check '#' notin markup
       check "rgb" notin markup
 
-  test "the chevron pairs are exact 180° rotations about (8, 8)":
-    # `continue`/`reverse-continue` and `next`/`reverse-next` are one drawing
-    # each, turned upside down for the reverse direction: dot or rule moves
-    # from the bottom of the box to the top, the V becomes a Λ. That is the
-    # one systematic relationship in this set, so it is the one asserted.
-    #
-    # Both marks are two shapes — the dot-or-rule and the chevron — and both
-    # have to rotate, in the order they are drawn in. A check on the chevron
-    # alone would pass on a mark whose dot had migrated.
-    for (fwd, rev) in [("continue", "reverse-continue"),
-                       ("next", "reverse-next")]:
+  test "every reverse mark is its forward mark mirrored about x = 8":
+    # The grammar's second rule: time runs left to right, so the ONLY
+    # difference between a forward control and its reverse twin is the
+    # direction the mark points. Every shape of the pair has to mirror, in the
+    # order they are drawn in — a check on the arrow alone would pass on a mark
+    # whose dot had stayed where it was.
+    for (fwd, rev) in [("next", "reverse-next"), ("step-in", "reverse-step-in"),
+                       ("step-out", "reverse-step-out"),
+                       ("continue", "reverse-continue")]:
       let
         f = markFor(fwd)
         r = markFor(rev)
       check f.buttonId.len > 0
       check r.buttonId.len > 0
-      check f.shapes.len == 2
-      check r.shapes.len == 2
-      for i in 0 ..< 2:
+      check f.viewBox == "0 0 16 16"
+      check r.viewBox == f.viewBox
+      check f.shapes.len == r.shapes.len
+      for i in 0 ..< min(f.shapes.len, r.shapes.len):
+        check f.shapes[i].stroked == r.shapes[i].stroked
         let
-        # `0 0 16 16`, so the centre of the box is (8, 8).
-          got = rotated180(f.shapes[i].d.points.withoutCollinear, 8.0)
+          got = mirrored(f.shapes[i].d.points.withoutCollinear, 8.0)
           want = r.shapes[i].d.points.withoutCollinear
         check sameShape(got, want)
         if not sameShape(got, want):
-          echo "  '", fwd, "' shape ", i, " rotated is not '", rev, "'s"
-          echo "    rotated: ", got
-          echo "    actual:  ", want
+          echo "  '", fwd, "' shape ", i, " mirrored is not '", rev, "'s"
+          echo "    mirrored: ", got
+          echo "    actual:   ", want
 
-  test "the four step marks have no such pairing, and that is the artwork":
-    # Stated rather than left as an absence, because the obvious reading of
-    # the test above is that the other pairs were forgotten. They were not.
-    #
-    # In this set `step-in` and `reverse-step-out` carry the SAME arrow, and
-    # so do `step-out` and `reverse-step-in`; within each of those two groups
-    # the marks are told apart only by whether the box beside the arrow is
-    # outlined or filled, and by a one-unit difference in viewBox width. There
-    # is no forward/reverse transform to assert because the pairs that share a
-    # drawing are not the forward/reverse pairs.
-    #
-    # This is recorded, not endorsed: it is a fair part of why the strip is
-    # going to a designer. What the check enforces is that the four remain
-    # four DISTINCT marks — the failure that would actually mislead a user is
-    # two controls rendering identically.
-    var ds: seq[string]
-    for a in ["step-in", "reverse-step-in", "step-out", "reverse-step-out"]:
+  test "a pair is not symmetric itself, so the mirror tells it apart":
+    # A mark that is its own mirror image would satisfy the test above while
+    # drawing the forward and reverse controls identically — the defect the
+    # grammar exists to remove.
+    for fwd in ["next", "step-in", "step-out", "continue"]:
+      let f = markFor(fwd)
+      var allSame = true
+      for sh in f.shapes:
+        let ps = sh.d.points.withoutCollinear
+        if not sameShape(mirrored(ps, 8.0), ps): allSame = false
+      check not allSame
+
+  test "the step marks say in or out by where the arrow points":
+    # The grammar's first rule: the dot is where execution is. Step in points
+    # DOWN at its dot, step out starts at its dot and points UP. The head is
+    # the second shape and the dot the third; the head's middle point is its
+    # tip.
+    proc tipAndDot(action: string): (Pt, Pt, Pt) =
+      let m = markFor(action)
+      let head = m.shapes[1].d.points
+      let dot = m.shapes[2].d.points
+      var lo, hi = dot[0]
+      for p in dot:
+        lo = (min(lo.x, p.x), min(lo.y, p.y))
+        hi = (max(hi.x, p.x), max(hi.y, p.y))
+      (head[1], head[0], ((lo.x + hi.x) / 2, (lo.y + hi.y) / 2))
+    for a in ["step-in", "reverse-step-in"]:
+      let (tip, wing, dot) = tipAndDot(a)
+      check tip.y > wing.y                 # the head points down
+      check abs(tip.x - dot.x) < 1e-6      # straight at the dot
+      check tip.y < dot.y
+    for a in ["step-out", "reverse-step-out"]:
+      let (tip, wing, dot) = tipAndDot(a)
+      check tip.y < wing.y                 # the head points up
+      check tip.y < dot.y - 6.0            # far from the dot it leaves
+    for a in ["next", "reverse-next", "step-in", "reverse-step-in",
+              "step-out", "reverse-step-out"]:
       let m = markFor(a)
-      check m.shapes.len == 2
-      var key = ""
-      for s in m.shapes:
-        key.add s.d & "|"
-      check key notin ds
-      ds.add key
-    # The arrows really are shared across the diagonal, which is the claim the
-    # comment above makes. Asserting it means the comment cannot quietly go
-    # stale against the artwork — and it is asserted as what the coordinates
-    # actually say, not as an exact identity they do not have: the same number
-    # of points, the same heights, and x within 0.6 of a 17-or-18 unit box.
-    # The two are one drawing redrawn a shade wider, not a transform of one
-    # another, so no transform is claimed.
-    for (a, b) in [("step-in", "reverse-step-out"),
-                   ("reverse-step-in", "step-out")]:
-      let
-        pa = markFor(a).shapes[0].d.points
-        pb = markFor(b).shapes[0].d.points
-      check pa.len == pb.len
-      if pa.len == pb.len:
-        var maxDx, maxDy = 0.0
-        for i in 0 ..< pa.len:
-          maxDx = max(maxDx, abs(pa[i].x - pb[i].x))
-          maxDy = max(maxDy, abs(pa[i].y - pb[i].y))
-        check maxDy < 0.01     # the same heights, to the file's rounding
-        check maxDx < 0.6      # and within a unit across
-        if maxDy >= 0.01 or maxDx >= 0.6:
-          echo "  '", a, "' and '", b, "' differ by dx=", maxDx,
-               " dy=", maxDy, " — they are no longer the same drawing"
+      check m.shapes.len == 3
+      check m.shapes[0].stroked and m.shapes[1].stroked
+      check not m.shapes[2].stroked        # the dot is solid
 
-  test "run-to-entry is the triangle-and-rules mark this product shipped":
-    # This assertion used to say the opposite: "run-to-entry is a restart
-    # mark, not a transport control", asserting the `debug-restart` codicon
-    # `a30f10cd` redrew it as. That redraw is part of the same
-    # align-with-BlockTracer work the user asked to be taken out of
-    # CodeTracer, so the mark went back and the assertion follows the product
-    # rather than the product being held to the assertion.
-    #
-    # The design argument behind the codicon — the control sends DAP
-    # `restart`, and a bare triangle reads as "start" two buttons from
-    # `continue` — is NOT refuted by this check and is not meant to be. It is
-    # left for the designer, which is the whole point of restoring the old set
-    # rather than picking a third one here.
+  test "forward marks point right, reverse marks left":
+    # Read off the one horizontal cue each pair carries: next's head, the
+    # step marks' horizontal leg running from its free end, continue's
+    # triangle tip.
+    proc tipX(action: string): float =
+      let m = markFor(action)
+      case action
+      of "next", "reverse-next": m.shapes[1].d.points[1].x
+      of "continue", "reverse-continue": m.shapes[1].d.points[1].x
+      else: m.shapes[0].d.points[1].x
+    proc baseX(action: string): float =
+      let m = markFor(action)
+      case action
+      of "continue", "reverse-continue": m.shapes[0].d.points[0].x
+      of "next", "reverse-next": m.shapes[0].d.points[0].x
+      else: m.shapes[0].d.points[0].x
+    for a in ["next", "step-in", "step-out", "continue"]:
+      check tipX(a) > baseX(a)
+      check tipX("reverse-" & a) < baseX("reverse-" & a)
+
+  test "run-to-entry is skip-to-start: two triangles pointing at a bar":
+    # Distinct from reverse-continue, which is ONE triangle pointing away from
+    # its bar: the TUI's text mark for this control is `⏮`, and so is this.
     let m = markFor("run-to-entry")
     check m.buttonId == "run-to-entry-image"
-    check m.shapes.len == 6
-
-    # Five horizontal rules, evenly spaced, all flush to the right edge, and
-    # one of them short — the third, so the triangle's tip has somewhere to
-    # land. Checked as geometry rather than as a string, so the mark can be
-    # renumbered or reformatted without this needing an edit.
-    var rows: seq[float]
-    for i in 0 ..< 5:
-      let s = m.shapes[i]
-      check s.stroked
-      let ps = s.d.points
-      check ps.len == 2
-      check abs(ps[0].y - ps[1].y) < 1e-6     # horizontal
-      check abs(max(ps[0].x, ps[1].x) - 16.0) < 1e-6   # flush right
-      rows.add ps[0].y
-    for i in 1 ..< rows.len:
-      check abs((rows[i - 1] - rows[i]) - 3.0) < 1e-6  # evenly spaced
-
-    # And the triangle: three points, filled, its tip to the RIGHT of its
-    # base, which is what makes it a play mark rather than a rewind one.
-    let tri = m.shapes[5]
-    check not tri.stroked
-    let tp = tri.d.points
-    check tp.len == 3
-    check tp[1].x > tp[0].x
-    check tp[1].x > tp[2].x
-    # A vertical base. 1e-4 and not 1e-6: the file writes the base's two x
-    # coordinates as 7.46011e-07 and -9.01353e-07, Figma's two roundings of
-    # the same zero, so they differ by 1.6e-06 in a 16-unit box.
-    check abs(tp[0].x - tp[2].x) < 1e-4
+    check m.shapes.len == 3
+    check m.shapes[0].stroked
+    let bar = m.shapes[0].d.points
+    check bar.len == 2
+    check abs(bar[0].x - bar[1].x) < 1e-6           # vertical
+    for i in 1 .. 2:
+      let tri = m.shapes[i]
+      check not tri.stroked
+      let tp = tri.d.points
+      check tp.len == 3
+      check tp[1].x < tp[0].x and tp[1].x < tp[2].x   # tip to the LEFT
+      check tp[1].x > bar[0].x                         # right of the bar
+    check markFor("reverse-continue").shapes.len == 2
 
   test "markFor answers nothing for a command the strip does not have":
     check markFor("no-such-command").buttonId.len == 0
