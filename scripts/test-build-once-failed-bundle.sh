@@ -62,13 +62,18 @@ chmod +x "$work/bin/rm"
 
 # run_build <config> <stage> [K=V...]: the real build-once.sh in the sandbox.
 # RUNQUOTA_SOCKET names an endpoint so the script starts no daemon of its own.
+# build-once requires trace-format-nim's tool-path manifest (474095248b9),
+# which the dev shell names; this test runs outside it, against a stub repro.
+printf '{}\n' >"$work/tool-paths.json"
+
 run_build() {
 	local config="$1" stage="$2"
 	shift 2
 	rc=0
 	(cd "$work" && env -u CODETRACER_REPROBUILD_COMMAND CODETRACER_CONFIG="$config" \
 		RUNQUOTA_SOCKET="$work/unused.sock" PATH="$work/bin:$PATH" REAL_RM="$real_rm" \
-		TEST_WORK="$work" FAIL_AT="$stage" "$@" bash scripts/build-once.sh) >"$work/log" 2>&1 || rc=$?
+		TEST_WORK="$work" FAIL_AT="$stage" CODETRACER_TRACE_FORMAT_NIM_TOOL_PATHS="$work/tool-paths.json" \
+		"$@" bash scripts/build-once.sh) >"$work/log" 2>&1 || rc=$?
 }
 
 seed_stale() {
