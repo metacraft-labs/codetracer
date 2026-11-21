@@ -165,8 +165,8 @@ jobs:
           #   ct-mcr accepts the `replay-worker --parent-pid` that this
           #   native-backend passes (see setup-db-backend-siblings/action.yml).
           siblings: |
-            codetracer-native-recorder=${{ github.event.inputs.native_recorder_ref || '195fa723db7d20625fb47270c6fd2fb9554d8869' }}
-            codetracer-native-backend=${{ github.event.inputs.native_backend_ref || 'a7ec45fc8292681708b6f72401cc8d90bdcf1ff3' }}
+            codetracer-native-recorder=${{ github.event.inputs.native_recorder_ref || '6142cc6a30bc3057ee01c6a8c417436744e393ed' }}
+            codetracer-native-backend=${{ github.event.inputs.native_backend_ref || '1c8efb8fb70725557e75189e5bc40c54cdfc2346' }}
             # codetracer-trace-format{,-nim} BY COMMIT, not `=dev`: the two halves of
             # the FFI pair are `/agents` inputs in flake.nix, and trace-format's `dev`
             # tip (051a298, 2026-09-30) predates the FileTable / PathTableKind API that
@@ -176,7 +176,7 @@ jobs:
             codetracer-trace-format=2f01e602e70f69a04675293f3fa0d5bad9f196a1
             codetracer-trace-format-nim=3e50ca3f2bf6316e8f764952a84078cf59b11023
             # Private, so the public repro.lock cannot pin it: flake.lock's revision.
-            codetracer-visual-replay=92d39d8d249356bd05d8fca5db4d526e1ac4505a
+            codetracer-visual-replay=d1bf6605a818b192ab03b8f7b187858e3d3804d5
 
       - name: Run MCR DAP flow tests
         # The single canonical target. scripts/detect-siblings.sh (sourced
