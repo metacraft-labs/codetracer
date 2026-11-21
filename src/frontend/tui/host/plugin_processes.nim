@@ -45,6 +45,9 @@ type
     bisect*: Bisect
     problems*: seq[string]
     launcherRoot: string
+    toStart: seq[string]
+      ## Plugins the host's activation reached, started by `attach` AFTER
+      ## `activateFor` returns (`activationFor`).
 
 proc readSettings(path: string): JsonNode =
   try:
@@ -86,6 +89,20 @@ proc refused(p: SessionPlugins; id: string): bool =
 
 proc nowStamp(): string = now().utc.format("yyyy-MM-dd'T'HH:mm:ss'Z'")
 
+proc activationFor(p: SessionPlugins; id: string): proc(ctx: PluginContext) =
+  ## The host's activation callback for plugin `id`, made HERE rather than in
+  ## the registration loop: a closure built in a Nim loop body shares that
+  ## body's variables, so every plugin's callback named the LAST plugin of
+  ## the package — a plugin whose consent was already recorded was never
+  ## started (measured: of two pre-granted plugins only the second ran).
+  ##
+  ## The start is only recorded: `attach` starts the recorded plugins after
+  ## the host's activation returns, outside its activation scope.
+  let sup = p.sup
+  result = proc(ctx: PluginContext) =
+    p.toStart.add id
+    ctx.onPluginCleanup(proc() = sup.deactivate(id))
+
 proc openSessionPlugins*(session: SessionViewModel; sessionId: string;
                          extensionsEnabled: bool; startDir = getCurrentDir();
                          launcherRoot = ""; frontEnd = "tui";
@@ -118,11 +135,8 @@ proc openSessionPlugins*(session: SessionViewModel; sessionId: string;
     for pp in lp.package.plugins:
       let id = pp.parsed.manifest.id
       installed.add id
-      let sup = p.sup
       p.host.register(pp.text, lp.installed.manifestPath,
-        proc(ctx: PluginContext) =
-          sup.activate(id)
-          ctx.onPluginCleanup(proc() = sup.deactivate(id)))
+                      activationFor(p, id))
   for e in p.sup.bindingConflicts():
     p.problems.add render(e)
   # The ledger: swept of uninstalled plugins, then in force.
@@ -156,6 +170,15 @@ proc attach*(p: SessionPlugins; session: SessionViewModel; sessionId: string) =
   if p.isNil or not p.sup.extensionsEnabled: return
   p.sup.attachSession(session, sessionId)
   discard p.host.activateFor(ActivationEvent(kind: aeTraceOpened))
+  for f in p.host.activationFaults:
+    if f notin p.problems: p.problems.add f
+  let starting = p.toStart
+  p.toStart = @[]
+  for id in starting:
+    try:
+      p.sup.activate(id)
+    except CatchableError as e:
+      p.problems.add "plugin '" & id & "' could not be started: " & e.msg
 
 proc pump*(p: SessionPlugins): bool =
   ## The idle tick. True when something a front-end shows changed.
