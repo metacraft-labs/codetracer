@@ -31,6 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from plat71_mutation_engine import Harness  # noqa: E402
 
 LENS = "src/plugins/ct-lens/ct_lens_plugins.nim"
+WATCH = "src/plugins/ct-lens/lens_watch.nim"
 TOOLS = "src/plugins/ct-lens/lens_tools.nim"
 
 PROCS = "src/frontend/tui/host/plugin_processes.nim"
@@ -39,7 +40,7 @@ RUNTIME = "src/frontend/tui/app/runtime.nim"
 SUITE = "src/frontend/viewmodel/tests/unit/test_ct_lens_plugins.nim"
 PTY = "src/frontend/tui/tests/real_terminal/test_ct_lens_plugins_pty.nim"
 
-SUBJECTS = [LENS, TOOLS, PROCS, RUNTIME]
+SUBJECTS = [LENS, WATCH, TOOLS, PROCS, RUNTIME]
 SUITES = [SUITE, PTY]
 IN_BINARY = {PROCS, RUNTIME}
 
@@ -68,19 +69,19 @@ ARMS = [
              "      discard result.process.waitForExit()")],
      [(SUITE, SLOW)],
      "the handler waits for the tool, holding the sibling plugin"),
-    ("M4", [(LENS, "  p.pushEnablement(\"watch.add-changed\", pending.len > 0, reason)",
+    ("M4", [(WATCH, "  p.pushEnablement(\"watch.add-changed\", pending.len > 0, reason)",
              "  p.pushEnablement(\"watch.add-changed\", true, reason)")],
      [(SUITE, NOTHING)],
      "the command stays enabled when the step changed nothing"),
-    ("M5", [(LENS, "  let have = watched.toHashSet",
+    ("M5", [(WATCH, "  let have = watched.toHashSet",
              "  let have = initHashSet[string]()")],
      [(SUITE, WATCHES)],
      "values already watched are offered again"),
-    ("M6", [(LENS, "      p.relay(\"state\", \"addWatch\", %*{\"expression\": path})",
+    ("M6", [(WATCH, "      p.relay(\"state\", \"addWatch\", %*{\"expression\": path})",
              "      discard path")],
      [(SUITE, WATCHES)],
      "the command does not reach the core State ViewModel"),
-    ("M7", [(LENS, "  p.pushContext(\"hasChanges\", %(pending.len > 0))",
+    ("M7", [(WATCH, "  p.pushContext(\"hasChanges\", %(pending.len > 0))",
              "  p.pushContext(\"hasChanges\", %false)")],
      [(SUITE, CHANGED)],
      "the binding's context key never holds, so the key is never live"),
@@ -88,7 +89,7 @@ ARMS = [
              "  discard")],
      [(SUITE, FUNCTION)],
      "the idle loop never finishes a tool run; the history never arrives"),
-    ("M9", [(LENS, "  p.publish(\"visualisers\", %*[",
+    ("M9", [(WATCH, "  p.publish(\"visualisers\", %*[",
              "  p.publish(\"visualisers-unpublished\", %*[")],
      [(SUITE, VISUAL)],
      "the visualisers go out under a name the host does not read"),
