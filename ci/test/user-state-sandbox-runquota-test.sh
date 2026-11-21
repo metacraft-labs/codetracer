@@ -109,6 +109,37 @@ if [ -z "${_CT_USS_RQ_IN_T:-}" ]; then
 		echo "user-state-sandbox-runquota-test: FAIL: missing on PATH:${missing} (run it in the dev shell)" >&2
 		exit 1
 	fi
+	# THE DAEMON MUST BE THE PINNED ONE. The unmapped-client control asserts
+	# what flake.lock's runquota specifies (served, its foreign-namespace uid
+	# excused: RunQuota 6d739bdc). Every runquota reports "0.1.3", so the
+	# version says nothing, and outside the dev shell PATH can hold an older
+	# build. ~/.nix-profile's runquota-0.1.3 did, and it failed that control
+	# for being old, not for being wrong. So the suite refuses, by name, a
+	# runquotad that lacks the judgement, probed by a diagnostic string only
+	# that code emits. A control runs the probe against a stand-in with the
+	# string and one without it first, so a probe that accepts everything
+	# cannot pass.
+	rq_has_namespace_judgement() { # $1 = runquotad (a Nix wrapper is followed)
+		local f="$1" w
+		w="$(dirname "$f")/.$(basename "$f")-wrapped"
+		[ -f "$w" ] && f="$w"
+		grep -aqF 'namespace tokens describe the client' "$f"
+	}
+	probe_ctl="$(mktemp -d)"
+	printf 'x namespace tokens describe the client x\n' >"${probe_ctl}/runquotad"
+	printf 'an older runquotad\n' >"${probe_ctl}/old-runquotad"
+	if ! rq_has_namespace_judgement "${probe_ctl}/runquotad" || rq_has_namespace_judgement "${probe_ctl}/old-runquotad"; then
+		rm -rf "${probe_ctl}"
+		echo "user-state-sandbox-runquota-test: FAIL: the runquotad probe cannot tell a judging daemon from an older one" >&2
+		exit 1
+	fi
+	rm -rf "${probe_ctl}"
+	rqd="$(readlink -f "$(command -v runquotad)")"
+	if ! rq_has_namespace_judgement "${rqd}"; then
+		pinned="$(python3 -c 'import json,sys; l=json.load(open(sys.argv[1])); n=l["nodes"]; print(n[n[l["root"]]["inputs"]["runquota"]]["locked"]["rev"])' "${repo_root}/flake.lock" 2>/dev/null)"
+		echo "user-state-sandbox-runquota-test: FAIL: ${rqd} predates RunQuota 6d739bdc (serve clients in other namespaces), which flake.lock's runquota ${pinned:-?} carries; run the suite in the dev shell, or put that runquota first on PATH" >&2
+		exit 1
+	fi
 	if ! unshare --user --map-root-user --mount true 2>/dev/null; then
 		echo "user-state-sandbox-runquota-test: FAIL: this host refuses unprivileged user namespaces, so neither the fixture nor the sandbox can run" >&2
 		exit 1
