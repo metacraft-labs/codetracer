@@ -100,6 +100,7 @@ GROUP = "*::a program past its deadline is killed with its whole process group"
 SWEEP = "*::a loopback listener and a connection; deactivation closes them and kills what it started"
 PONG = "*::a pong never waits behind a frame the plugin is writing (measured)"
 INFLIGHT = "*::the chord landing while a routine ping is in flight still probes the plugin"
+COMPUTED = "*::a plugin computes answers for the values on screen; an answer for another stop is never shown"
 HOOK = "*::a front-end's own route takes a relayed action, and its refusal is the plugin's, by name"
 
 M_ROUTES = "*::steps, the call trace jump, the watch and the seek move the stop the screen shows"
@@ -107,6 +108,7 @@ M_TAB = "*::while another tab is shown only a plain step runs; the rest is refus
 M_CASE = "*::the modifiers' spelling is folded, the key's own case is not"
 M_ALT = "*::an Alt chord a plugin binds reaches the plugin pass whole; `J` and `j` are two keys"
 P_MOVES = "*::a plugin's relayed jump, watch and step out are shown at once, with no :next"
+P_VIS = "*::a plugin's computed visualiser answers reach the Variables pane AND the editor's values"
 
 ARMS = [
     ("M1", [(SUP, "  if p.kind == pkQuery and not samePosition(e, sup.epoch):",
@@ -216,30 +218,46 @@ ARMS = [
      [(HOST, INFLIGHT)],
      "§11.7.6: a chord-suspect plugin is asked again only at the liveness "
      "interval; a healthy one stays not responding while a ping was in flight"),
-    ("M16", [(SERVICE, "  of pmkOutcome, pmkRelayMove:\n    if move.session != shown:",
+    ("M40", [(SERVICE, "  of pmkOutcome, pmkRelayMove:\n    if move.session != shown:",
               "  of pmkOutcome, pmkRelayMove:\n    if false:")],
      [(MOVES, M_TAB)],
      "a plugin's jump classified against its session runs on whichever tab is shown"),
-    ("M18", [(KEYS, "    if c >= '!' and c <= '~':\n      return $c",
+    ("M41", [(SUP, "        if not samePosition(held.epoch, sup.epoch) or held.answers.len == 0:",
+              "        if held.answers.len == 0:")],
+     [(HOST, COMPUTED)],
+     "§11.4.5: a computed visualiser's answers from the previous stop are shown at the next"),
+    ("M42", [(KEYS, "    if c >= '!' and c <= '~':\n      return $c",
               "    if c >= '!' and c <= '~':\n      return ($c).toLowerAscii")],
      [(MOVES, M_CASE)],
      "§11.7.2: a binding's bare letter is folded to lower case, so `J` takes `j`"),
-    ("M19", [(RUNTIME, "      not rt.plugins.claimsKey(rt.lastKey)):",
+    ("M43", [(RUNTIME, "      not rt.plugins.claimsKey(rt.lastKey)):",
               "      true):")],
      [(MOVES, M_ALT)],
      "an Alt chord only a plugin binds is read as the bare key (Ctrl+Alt+k arrives as Ctrl+k)"),
-    ("M22", [(SERVICE, "      move.outcome.jumpsToCall = true",
+    ("M44", [(SUP, "  if sup.visualiseRequests.hasKey(id):",
+              "  if false:")],
+     [(HOST, COMPUTED)],
+     "a computed visualiser's answer is queued for nobody and never presented"),
+    ("M45", [(SUP, "    sup.sendVisualiseQueries()",
+              "    discard")],
+     [(HOST, COMPUTED)],
+     "the values on screen are never asked of a computed visualiser"),
+    ("M46", [(SERVICE, "      move.outcome.jumpsToCall = true",
               "      move.outcome.jumpsToCall = false")],
      [(MOVES, M_ROUTES)],
      "a relayed call trace jump is not the call trace pane's own jump"),
-    ("M23", [(SUP, "      if refusal.len > 0:\n        sup.refuse(s, refusal)\n        return",
+    ("M47", [(SUP, "      if refusal.len > 0:\n        sup.refuse(s, refusal)\n        return",
               "      if false:\n        sup.refuse(s, refusal)\n        return")],
      [(HOST, HOOK)],
      "an action the front-end refused is applied to the session behind it anyway"),
-    ("M24", [(MAIN, "        session.applyOutcome(rt, moved)\n        owedRefresh = false",
+    ("M48", [(MAIN, "        session.applyOutcome(rt, moved)\n        owedRefresh = false",
               "        discard moved\n        owedRefresh = false")],
      [(PTY, P_MOVES)],
      "a relayed jump, watch or step out is taken and never carried out by the terminal's loop"),
+    ("M49", [(MAIN, "        session.renderValuesAgain(rt)",
+              "        discard rt")],
+     [(PTY, P_VIS)],
+     "a computed visualiser's answers arrive and the values on screen are not drawn again"),
 ]
 
 

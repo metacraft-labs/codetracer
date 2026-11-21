@@ -1032,6 +1032,14 @@ proc interactive(command: TuiCommand): int =
   plugins.routeMoves(pluginMoves, rt)
   session.pluginVisualisers = proc(): seq[Visualiser] =
     plugins.sup.pluginVisualisers()
+  # A plugin's COMPUTED visualiser is asked about the values on screen, never
+  # waited for: the loop renders them again when its answers arrive.
+  session.askPluginVisualisers = proc(values: seq[PValue]) =
+    var asked: seq[VisualiseValue]
+    for v in values:
+      if not v.isNil: asked.add (input: executableInputOf(v), typeName: v.typeName)
+    plugins.sup.requestVisualisations(asked)
+  var shownVisualiserRevision = plugins.sup.visualiserRevision
   app.pluginEntries = plugins.paletteEntries()
   app.refreshOmnibarIndex()
   app.recordings = recordingsBeside(folder)
@@ -1703,6 +1711,12 @@ proc interactive(command: TuiCommand): int =
       if owedRefresh:
         session.applyOutcome(rt, RuntimeOutcome(refreshesSession: true,
                                                 repaint: true))
+      # A plugin's visualisers changed — new rows, or a computed visualiser's
+      # answers for the values on screen: they are rendered again.
+      if plugins.sup.visualiserRevision != shownVisualiserRevision:
+        shownVisualiserRevision = plugins.sup.visualiserRevision
+        session.renderValuesAgain(rt)
+        pluginsChanged = true
       block:
         let pluginNote = rt.plugins.takeNote()
         if pluginNote.len > 0:

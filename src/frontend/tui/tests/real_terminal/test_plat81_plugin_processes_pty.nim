@@ -109,6 +109,19 @@ proc tickShown(screen: string): int =
       at = screen.find(marker, at + marker.len)
   -1
 
+proc annotatedAndPlain(line, needle: string): tuple[annotated, plain: bool] =
+  ## Whether `needle` is on `line` inside an editor annotation (`/* … */`),
+  ## and whether it is there outside one (another pane on the same row).
+  var rest = line
+  while true:
+    let open = rest.find("/*")
+    if open < 0: break
+    let close = rest.find("*/", open + 2)
+    let stop = if close < 0: rest.len else: close + 2
+    if needle in rest[open ..< stop]: result.annotated = true
+    rest = rest[0 ..< open] & rest[stop .. ^1]
+  if needle in rest: result.plain = true
+
 proc settledTick(sess: var TuiTestSession; ceilingMs = 60_000): int =
   ## The tick of a stop that HOLDS STILL: the same on three reads in a row.
   ## The panes redraw in pieces after a move, so one read can catch the
@@ -242,6 +255,41 @@ suite "Extensibility-Model §11 on a real terminal":
     sess.command("plugins run acme-tools.metrics metrics.stepout")
     let stepped = sess.tickMoves(jumped)
     check stepped > jumped
+    sess.send(":quit\r")
+    discard sess.waitExit(initDuration(seconds = 30))
+    sess.close()
+    removeDir(home)
+
+  test "a plugin's computed visualiser answers reach the Variables pane AND the editor's values":
+    # `metrics` with `computeVisualiser` on publishes a COMPUTED row: the
+    # terminal asks it about the values on screen (a `visualise` query, never
+    # waited for) and renders them again with its answers (`acme=<value>`) —
+    # in the Variables pane and in the source pane's inline values alike.
+    let home = newHome(settings = %*{"plugins": {"acme-tools.metrics":
+      {"settings": {"computeVisualiser": true}}}})
+    var sess = spawnTui(home)
+    settleOnDebugger(sess, Cols, Rows)
+    sess.command("plugins grant acme-tools.metrics")
+    sess.command("plugins grant acme-tools.flame")
+    check sess.commandShows("plugins", "acme-tools.metrics  running")
+    # A stop inside `mul`, where `left` and `right` are ints on screen.
+    let start = sess.settledTick()
+    sess.command("plugins run acme-tools.metrics metrics.jump")
+    discard sess.tickMoves(start)
+    var inPane, inEditor = false
+    var waited = 0
+    while waited < 60_000 and not (inPane and inEditor):
+      for line in sess.screen.splitLines:
+        let (annotated, plain) = annotatedAndPlain(line, "acme=")
+        if annotated: inEditor = true
+        if plain: inPane = true
+      if not (inPane and inEditor):
+        sleep(300)
+        waited += 300
+    if not (inPane and inEditor):
+      checkpoint "pane " & $inPane & " editor " & $inEditor & "\n" & sess.screen
+    check inPane
+    check inEditor
     sess.send(":quit\r")
     discard sess.waitExit(initDuration(seconds = 30))
     sess.close()

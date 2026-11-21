@@ -273,9 +273,31 @@ p.publish("visualisers", %*[
    "language": "python", "summary": "function (ct-lens)", "rank": 1}])
 ```
 
-`summary` is a template over the value's field names (`"{rows}x{cols}"`). The
-plugin must declare `{"viewModel": [{"id": "visualisers", "version": "1.0.0"}]}`
+`summary` is a template over the value's field names (`"{rows}x{cols}"`);
+`hide` lists fields to leave out (`"hide": ["password"]`). A row is checked as
+a project's visualiser rows are, and a row that fails the check is dropped.
+The plugin must declare `{"viewModel": [{"id": "visualisers", "version": "1.0.0"}]}`
 in its contributions, or the rows are ignored.
+
+A row with `"computed": true` is answered by your plugin. For the values on
+screen (the Variables pane, the scratchpad, the values beside the editor's
+lines) CodeTracer sends a `visualise` query and keeps drawing while it waits:
+
+```nim
+p.publish("visualisers", %*[{"id": "units", "computed": true,
+                             "typeMatch": "int"}])
+p.onQuery("visualise", proc(p: Plugin; input: JsonNode; req: Request) =
+  var answers = newJArray()
+  for v in input{"values"}:        # {"input": "42", "type": "int"}
+    answers.add %*{"input": v{"input"}, "text": v{"input"}.getStr & " ms"}
+  p.answer(req, %*{"answers": answers}))
+```
+
+`typeMatch` (with `matchKind` and `language`) narrows which values are sent.
+Each answer's `input` names the value it is for. When the answers arrive the
+values are drawn again with them. An answer for a stop the debugger has left is
+dropped. Empty answers, and answers longer than a summary may be, are
+ignored.
 
 ## Building
 

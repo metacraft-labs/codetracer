@@ -9,12 +9,11 @@
 ## `metrics` is the well-behaved one. Its pane shows the debugger's current
 ## line from its MIRRORED session, stamped with the epoch it was computed at;
 ## its command steps the primary forward through the action relay; it pushes a
-## status item, enablement and a context key, and answers `values` queries
-## for a visualiser. It also DECORATES the current line of the source the
-## debugger is in (`decorations`, a marker reading `metrics: line N`),
-## re-pushed at every stop, so the decoration follows a step; and it MARKS
-## the same line through its declared `hotspot` marker surface (a `★` in the
-## gutter's mark column).
+## status item, enablement and a context key, and answers `values` queries.
+## Its `visualisers` are declarative rows (a summary, a hidden field, and one
+## row the host must refuse) and, with its `computeVisualiser` setting on, a
+## COMPUTED row: it answers the host's `visualise` query for the values on
+## screen with `acme=<value>`.
 ##
 ## `ctrl+alt+k` (what a terminal sends as `ESC 0x0b`) steps like
 ## `metrics.step`, and `J` counts (`metrics.count`, read back by
@@ -25,6 +24,12 @@
 ## (`calltrace.doubleClickEntry`), `metrics.watch` adds the watch `left*9`
 ## (`state.addWatch`) and `metrics.stepout` steps out
 ## (`debugControls.stepOut`).
+##
+## It also DECORATES the current line of the source the debugger is in
+## (`decorations`, a marker reading `metrics: line N`), re-pushed at every
+## stop, so the decoration follows a step; and it MARKS
+## the same line through its declared `hotspot` marker surface (a `★` in the
+## gutter's mark column).
 ##
 ## `flame`'s list answers `view-event`: activating a row (Enter, or a click)
 ## re-pushes the list with that row marked `✓` and selected, which is how a
@@ -162,9 +167,16 @@ proc setupMetrics(sdk: PluginSdk) =
     p.pushContext("ready", %true)
     # A per-type visualiser for the value panes (PLAT-12's plugin tier): data,
     # not code — the host presents the value with it.
-    p.publish("visualisers", %*[
+    var rows = %*[
       {"id": "matrix", "typeMatch": "Matrix", "matchKind": "typeName",
-       "summary": "matrix (acme-tools)", "rank": 1}])
+       "summary": "matrix (acme-tools)", "rank": 1},
+      {"id": "secret", "typeMatch": "Account", "matchKind": "typeName",
+       "hide": ["password"]},
+      # Refused by the host: a hidden field must be a field's label.
+      {"id": "broken", "typeMatch": "Broken", "hide": ["a/b"]}]
+    if p.settings{"computeVisualiser"}.getBool(false):
+      rows.add %*{"id": "readings", "computed": true}
+    p.publish("visualisers", rows)
   m.onSignals = proc(p: Plugin) =
     p.pushView("overview", metricsView(p))
     p.pushLineDecoration(decorated)
@@ -230,15 +242,16 @@ proc setupMetrics(sdk: PluginSdk) =
       p.pushView("overview", viewTreeNode("big", "big", kids, expanded = true))
     p.done(req))
   m.onQuery("visualise", proc(p: Plugin; input: JsonNode; req: Request) =
-    # A value visualiser's producer: the value it was given, as a table.
-    let v = input{"value"}
-    var rows: seq[seq[string]]
-    if not v.isNil and v.kind == JArray:
-      for i, x in v.getElems:
-        rows.add @[$i, $x]
-    else:
-      rows.add @["value", $v]
-    p.answer(req, viewTable("metrics.visual", @["index", "value"], rows).toJson))
+    # The COMPUTED visualiser: an answer for each value the host has on
+    # screen, keyed by the input the host sent.
+    var answers = newJArray()
+    let values = input{"values"}
+    if not values.isNil and values.kind == JArray:
+      for v in values:
+        let text = v{"input"}.getStr("")
+        if text.len > 0:
+          answers.add %*{"input": text, "text": "acme=" & text}
+    p.answer(req, %*{"visualiser": input{"visualiser"}, "answers": answers}))
 
 proc spin(p: Plugin) =
   var x = 0
