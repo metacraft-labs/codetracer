@@ -5263,6 +5263,16 @@ test-identity-live-device-grant:
 # — which is precisely how `online_sharing_test.nim` came to be found rotted
 # against three signatures at once.  It is also not test-shaped, so
 # `test-lane-coverage.sh` would never have asked for a lane for it.
+# Plugins' TLS connections (PLAT-8): a real TLS server, certificates minted per
+# run, a plugin connecting through `connectTcp(tls = true)`; the chain AND the
+# name are checked. Needs `openssl` and `python3`.
+test-plugin-tls:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-plugin-tls.log) 2>&1
+  bash ci/lib/run-nim-test-lane.sh plugin-tls
+
 test-identity-device-grant-compile:
   #!/usr/bin/env bash
   set -euo pipefail

@@ -260,6 +260,8 @@ cliConfiguration(CtCli, "ct", exported = true):
     flag gfxReplayBackend is string, perSource = [cli = "backend"], help = "Rendering backend selector " & "(e.g. 'software' or 'hardware').", env = ["BACKEND"]
   subcmd "doctor":
     pos doctorLanguage is string, required = false, help = "Recorder to probe " & "(python, ruby, javascript, ...), or `terminal` for this " & "terminal's capability report and glyph test card. " & "Omit to probe every known recorder.", env = ["DOCTORLANGUAGE"]
+  subcmd "plugins":
+    pos pluginsAction is string, required = false, help = "status (the default): every installed plugin, whether it is enabled, its grants, why a package did not load, and the last session's plugin faults.", env = ["PLUGINSACTION"]
   subcmd "ct-describe-commands":
     discard
   subcmd "ct-help":

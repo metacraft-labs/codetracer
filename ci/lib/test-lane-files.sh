@@ -291,6 +291,7 @@ frontend-js
 vm-unit
 vm-unit-js
 vm-unit-wasm
+plugin-tls
 vm-collab-units
 vm-collab-integration
 vm-native
@@ -343,6 +344,7 @@ test_lane_description() {
 	vm-unit) echo "ViewModel unit suites under src/frontend/viewmodel/tests/unit" ;;
 	vm-unit-js) echo "the same ViewModel unit suites, JS backend via node" ;;
 	vm-unit-wasm) echo "the same ViewModel unit suites, WASM backend (nim c --cpu:wasm32 via Emscripten) under node" ;;
+	plugin-tls) echo "plugins' TLS connections against a real TLS server (needs -d:ssl and openssl)" ;;
 	vm-collab-units) echo "collaboration ViewModel unit suites" ;;
 	vm-collab-integration) echo "collaboration integration + soak suites" ;;
 	vm-native) echo "GUI ViewModel headless suites, native (C) backend" ;;
@@ -649,6 +651,11 @@ test_lane_run_library_path() {
 	gpui-shell | gpui-native | tui | tui-native | vm-collab-integration)
 		echo "${CODETRACER_GPUI_RUNTIME_LIB_PATH:-}"
 		;;
+	plugin-tls)
+		# std/openssl loads libssl/libcrypto with dlopen; the dev shell's
+		# OpenSSL is on CT_LD_LIBRARY_PATH, not on the loader's default path.
+		echo "${CT_LD_LIBRARY_PATH:-}"
+		;;
 	*) echo "" ;;
 	esac
 }
@@ -662,6 +669,11 @@ test_lane_extra_flags() {
 		# compile without an SSL backend selected. Nothing here opens a TLS
 		# connection; the define is a link-time requirement only.
 		echo "-d:ssl -d:useOpenssl3"
+		;;
+	plugin-tls)
+		# The suite opens real TLS connections through `plugin_io.connectTcp`;
+		# without an SSL backend its TLS arm answers `ioUnsupported`.
+		echo "--path:src/frontend/viewmodel -d:ssl -d:useOpenssl3"
 		;;
 	identity-device-grant-live)
 		# Same define, a DIFFERENT reason, and the difference matters: this
@@ -1643,7 +1655,19 @@ test_lane_files() {
 		# `ci/test/vm-unit-js-only-suites-test.sh` asserts that no suite in this
 		# lane imports a JS-only module, and proves the discovery on synthetic
 		# suites nobody listed.
-		_tlf_vm_unit_candidates | _tlf_js_only_suites reject
+		_tlf_vm_unit_candidates | _tlf_js_only_suites reject |
+			_tlf_reject '/test_plugin_tls\.nim$'
+		# `test_plugin_tls` opens real TLS connections, which need a build with
+		# an SSL backend and OpenSSL at run time: it is `plugin-tls`'s.
+		;;
+
+	plugin-tls)
+		# PLAT-8's TLS row with evidence: a plugin's `connectTcp(tls = true)`
+		# against a real python TLS server whose certificates `openssl` mints
+		# per run. Its own lane because it needs `-d:ssl` (below) and OpenSSL's
+		# libraries at run time (`test_lane_run_library_path`), which no other
+		# ViewModel suite does.
+		echo src/frontend/viewmodel/tests/unit/test_plugin_tls.nim
 		;;
 
 	vm-unit-js)

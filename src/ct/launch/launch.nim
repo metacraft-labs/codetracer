@@ -15,6 +15,7 @@ import
   ../globals,
   ../stylus/[deploy, record, arb_node_utils],
   ../doctor,
+  ../plugins_cli,
   ui_dispatch,
   ../gfx_replay,
   backends,
@@ -692,6 +693,9 @@ proc runInitial*(conf: CodetracerConf; uiSelection: string = "") =
           quit(1)
         execHandoff(tui, @["--capabilities", "--card"])
       quit(doctorCommand(conf.doctorLanguage))
+    of StartupCommand.plugins:
+      # Extensibility-Model.md §11.6.5: the Plugins pane's report from disk.
+      quit(pluginsCommand(conf.pluginsAction))
     of StartupCommand.`ct-describe-commands`:
       # M7: emit the line-oriented description used by the launcher's
       # help-delegate algorithm. See spec §2.6.

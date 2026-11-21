@@ -140,6 +140,7 @@ type
     trace,         ## ct trace <sub> — graphics extraction / portable export
     `gfx-replay`,  ## ct gfx-replay — forwards to ``ct_gfx_player``
     doctor,        ## ct doctor [<lang>] — recorder readiness probe
+    plugins,       ## ct plugins [status] — installed plugins and their faults
 
     # M7 (CodeTracer Launcher campaign): help delegate subcommands.
     # These power the `help-delegate` protocol from the launcher
@@ -643,6 +644,11 @@ type
     of StartUpCommand.doctor:
       doctorLanguage*: string
 
+    # Extensibility-Model.md §11.6.5: `ct plugins status` prints what the
+    # Plugins pane shows, from what is on disk.
+    of StartUpCommand.plugins:
+      pluginsAction*: string
+
     # M7: Help delegate subcommands. The full machinery lives in
     # ``src/ct/launch/help_delegate.nim``; here we just declare the
     # subcommand surfaces so confutils accepts them on the command
@@ -974,6 +980,9 @@ proc toCodetracerConf*(c: CtCli): CodetracerConf =
   of CtCliCommand.`doctor`:
     result = CodetracerConf(cmd: StartUpCommand.`doctor`)
     result.doctorLanguage = c.`doctor`.doctorLanguage
+  of CtCliCommand.`plugins`:
+    result = CodetracerConf(cmd: StartUpCommand.`plugins`)
+    result.pluginsAction = c.`plugins`.pluginsAction
   of CtCliCommand.`ctDescribeCommands`:
     result = CodetracerConf(cmd: StartUpCommand.`ct-describe-commands`)
   of CtCliCommand.`ctHelp`:
@@ -996,7 +1005,7 @@ proc toCodetracerConf*(c: CtCli): CodetracerConf =
   result.newWindow = c.newWindow
 
 const CtCompletionTree: seq[CtCompCommand] = @[
-  (path: @[], subs: @["noCommand", "replay", "run", "remote", "install", "upload", "download", "login", "set-default-org", "get-default-org", "activate", "check-license", "build", "record", "record-test", "console", "host", "import", "arb", "ci", "index-diff", "edit", "review", "list", "print", "help", "electron", "trace-metadata", "start_backend", "trace", "gfx-replay", "doctor", "ct-describe-commands", "ct-help", "ct-complete", "ct-completions"], opts: @[
+  (path: @[], subs: @["noCommand", "replay", "run", "remote", "install", "upload", "download", "login", "set-default-org", "get-default-org", "activate", "check-license", "build", "record", "record-test", "console", "host", "import", "arb", "ci", "index-diff", "edit", "review", "list", "print", "help", "electron", "trace-metadata", "start_backend", "trace", "gfx-replay", "doctor", "plugins", "ct-describe-commands", "ct-help", "ct-complete", "ct-completions"], opts: @[
     (name: "cwd", abbr: "", isBool: false, values: @[]),
     (name: "env-file", abbr: "", isBool: false, values: @[]),
     (name: "env0-file", abbr: "", isBool: false, values: @[]),
@@ -1007,7 +1016,7 @@ const CtCompletionTree: seq[CtCompCommand] = @[
     (name: "remote-debugging-pipe", abbr: "", isBool: true, values: @[]),
     (name: "new-tab", abbr: "", isBool: true, values: @[]),
     (name: "new-window", abbr: "", isBool: true, values: @[]),
-    (name: "cmd", abbr: "", isBool: false, values: @["noCommand", "replay", "run", "remote", "install", "upload", "download", "login", "set-default-org", "get-default-org", "activate", "check-license", "build", "record", "record-test", "console", "host", "import", "arb", "ci", "index-diff", "edit", "review", "list", "print", "help", "electron", "trace-metadata", "start_backend", "trace", "gfx-replay", "doctor", "ct-describe-commands", "ct-help", "ct-complete", "ct-completions"]),
+    (name: "cmd", abbr: "", isBool: false, values: @["noCommand", "replay", "run", "remote", "install", "upload", "download", "login", "set-default-org", "get-default-org", "activate", "check-license", "build", "record", "record-test", "console", "host", "import", "arb", "ci", "index-diff", "edit", "review", "list", "print", "help", "electron", "trace-metadata", "start_backend", "trace", "gfx-replay", "doctor", "plugins", "ct-describe-commands", "ct-help", "ct-complete", "ct-completions"]),
   ]),
   (path: @["noCommand"], subs: @[], opts: @[
   ]),
@@ -1264,6 +1273,9 @@ const CtCompletionTree: seq[CtCompCommand] = @[
   ]),
   (path: @["doctor"], subs: @[], opts: @[
     (name: "doctorLanguage", abbr: "", isBool: false, values: @[]),
+  ]),
+  (path: @["plugins"], subs: @[], opts: @[
+    (name: "pluginsAction", abbr: "", isBool: false, values: @[]),
   ]),
   (path: @["ct-describe-commands"], subs: @[], opts: @[
   ]),
