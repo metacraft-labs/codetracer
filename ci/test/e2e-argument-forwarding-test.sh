@@ -14,6 +14,10 @@ real_just="$(command -v just)"
 real_bash="$(command -v bash)"
 export real_bash
 mkdir -p "$work/bin" "$work/tree/src/tests/gui" "$work/tree/ci/lib"
+# A `calc` recording, so plat35-capture-electron forwards its arguments
+# instead of first recording the fixture with the terminal lanes' provider
+# (fa64b72e146), whose sources this scratch tree does not carry.
+mkdir -p "$work/tree/test-logs/tui-fixtures/calc-argument-test"
 cp "$repo/justfile" "$work/tree/justfile"
 cp "$repo/ci/lib/npm-install.sh" "$work/tree/ci/lib/"
 cat >"$work/bin/npm" <<'EOF'
