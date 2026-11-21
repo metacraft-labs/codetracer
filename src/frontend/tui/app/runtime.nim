@@ -512,6 +512,22 @@ type
     busy*: proc(): bool {.closure.}
       ## Something is in flight (a key's deadline, a process starting): the
       ## loop polls on `PluginPollMs` instead of its idle interval.
+    panes*: proc(): seq[tuple[id, title: string; running: bool]] {.closure.}
+      ## Every pane an installed plugin contributes, and whether its plugin is
+      ## running. An id a saved layout names that is NOT in this list is a
+      ## pane from an extension that is not loaded (`prUnloadedExtension`).
+    paneView*: proc(id: string):
+      tuple[lines: seq[string]; cursor: int; stale: bool] {.closure.}
+      ## A plugin pane's rows, from the tree its plugin last pushed, and the
+      ## row the reader's attention is on (-1 for none).
+    paneKey*: proc(id, key: string): bool {.closure.}
+      ## A key on the focused plugin pane: true when the pane's view took it
+      ## (and its plugin was sent the `view-event`).
+    paneClick*: proc(id: string; row: int): bool {.closure.}
+      ## A click on content row `row` of a plugin pane (`view-event`).
+    decorations*: proc(document: string):
+      seq[tuple[line: int; glyph, text, plugin: string]] {.closure.}
+      ## The plugins' editor decorations for a document (§11.4.4).
 
   TerminalService* = ref object
     ## PLAT-71 (Terminal-Adaptation §5, §10): what only the host can do
@@ -941,6 +957,11 @@ proc layoutBindingEnabled*(rt: TuiRuntime): bool =
   not rt.isNil and not rt.app.isNil and not rt.app.layoutBinding.isNil
 
 proc layoutGeometry*(rt: TuiRuntime): LayoutGeometry
+
+proc contributedFocus*(rt: TuiRuntime): string
+  ## Forward-declared: the key router and the frame read it; defined with
+  ## the plugin pane model before `shellScreenOf`.
+proc showContributedPane(rt: TuiRuntime; id: string): bool
 
 proc rebuildFocus(rt: TuiRuntime) =
   ## Re-derive focus from the visible layout, or the committed tree during
@@ -1884,6 +1905,11 @@ proc runCommandLine(rt: TuiRuntime; line: string; outcome: var RuntimeOutcome;
       outcome.repaint = true
       if rt.plugins.isNil:
         rt.note("this session runs no plugins")
+      elif words.len > 2 and words[1] == "show" and
+           rt.showContributedPane(words[2]):
+        # A plugin pane is shown IN THE LAYOUT — docked beside a core pane,
+        # its tab selected and focused — rather than as an overlay.
+        rt.note("showing " & words[2])
       else:
         let (title, body) = rt.plugins.control(words[1 .. ^1])
         if title.len > 0:
@@ -6548,6 +6574,23 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
   # (`isonim_calltrace_view.rowHandlers`).
   # PLAT-70 Part B (Horizontal-Overflow.md §5.3): a press on a cut cell's
   # `…` opens its row's detail, in every table pane.
+  # A PRESS ON A PLUGIN PANE'S CONTENT acts on the row under it (a list
+  # row activated, a checkbox toggled, a button pressed) through the
+  # pane's view, and the plugin is sent the `view-event`.
+  if acted.status == lasNoGesture and not inGesture and
+     event.kind == mekPress and event.button == mbLeft and
+     not rt.plugins.isNil and not rt.plugins.paneClick.isNil:
+    let c = geometry.contributedIndexAt(event.row, event.col)
+    if c >= 0:
+      let region = geometry.projection.contributed[c]
+      if event.row > region.area.row:
+        var row = event.row - region.area.row - 1
+        if not rt.plugins.paneView.isNil and
+           rt.plugins.paneView(region.id).stale:
+          dec row   # the stale banner is the first row
+        discard rt.plugins.paneClick(region.id, row)
+      outcome.repaint = true
+      return
   if acted.status == lasNoGesture and not inGesture and
      rt.routeEllipsisClick(event, outcome):
     return
@@ -10391,10 +10434,29 @@ proc handleTokenUnwatched(rt: TuiRuntime; token: string;
         if route.note.len > 0: rt.note(route.note)
         result.repaint = true
         return
+  # A FOCUSED PLUGIN PANE'S VIEW takes the keys its vocabulary entry reads
+  # (a list's arrows and Enter, a checkbox's Space): `applyKey` runs on the
+  # pushed tree in the host and the plugin is sent the `view-event`. Every
+  # other key is the terminal's, and one that moves the focus off the pane
+  # gives the focus back to the built-in panes.
+  let pluginPane = rt.contributedFocus()
+  if pluginPane.len > 0 and not rt.plugins.isNil and
+     not rt.plugins.paneKey.isNil and name.len > 0 and
+     not rt.prompt.open and not rt.app.omnibar.isOpen and
+     not rt.app.content.open and
+     name.toLowerAscii notin ["tab", "shift+tab", "backtab", ":"]:
+    if rt.plugins.paneKey(pluginPane, name):
+      result.repaint = true
+      return
+  let focusBefore = rt.focus.focusedPane()
   # EVERY OTHER KEY GOES THROUGH THE ROUTER (Base-Keymaps §6.1): the
   # canonical name, this terminal's scope path and facts, the shared
   # resolver; the answer is dispatched by `runResolution`.
   rt.runResolution(rt.routeKey(name, nowMs), nowMs, result)
+  if pluginPane.len > 0 and rt.layoutBindingEnabled() and
+     (rt.focus.focusedPane() != focusBefore or
+      name.toLowerAscii in ["tab", "shift+tab", "backtab"]):
+    rt.app.layoutBinding.focusContributed = ""
   if recovery:
     # §11.7.6: the third `Escape` within a second popped every plugin layer;
     # the recovery dialog says which plugins held the keyboard.
@@ -10517,6 +10579,96 @@ proc deliverHighlight*(rt: TuiRuntime; res: HighlightResult): bool =
       return true
   false
 
+proc contributedFocus*(rt: TuiRuntime): string =
+  ## The plugin pane that has the keyboard, or "" — read off the binding
+  ## (`LayoutBinding.focusContributed`), and only while that pane is on
+  ## screen.
+  if not rt.layoutBindingEnabled(): return ""
+  let id = rt.app.layoutBinding.focusContributed
+  if id.len == 0: return ""
+  if rt.layoutGeometry().projection.regionForContributed(id).isEmptyArea:
+    return ""
+  id
+
+proc syncContributedPanes*(rt: TuiRuntime): bool =
+  ## A plugin's panes go into the layout when the plugin first activates and
+  ## the layout does not hold them (`LayoutBinding.placeContributedPane`): a
+  ## tab beside a core pane, the user's tabs left showing. Whether the layout
+  ## changed. A pane the layout already holds — placed, docked, or restored
+  ## from a saved arrangement — is left where it is, and one the user closed
+  ## stays closed.
+  if rt.plugins.isNil or rt.plugins.panes.isNil or
+     not rt.layoutBindingEnabled():
+    return false
+  let b = rt.app.layoutBinding
+  if b.interaction.kind in GestureInteractions:
+    return false
+  # NOT WHILE A HOST MODAL IS OPEN: placing re-derives the focus ring, and a
+  # ring rebuilt under an open prompt took the prompt's pushed layer with it
+  # (measured: Enter and Esc stopped reaching `:`, every later key was typed
+  # into a prompt that could not be submitted). The next frame after it
+  # closes places the pane.
+  if rt.prompt.open or rt.app.omnibar.isOpen or rt.app.content.open or
+     rt.app.menu.isOpen:
+    return false
+  for pane in rt.plugins.panes():
+    if not pane.running: continue
+    if b.placeContributedPane(pane.id, pane.title).status == lasApplied:
+      result = true
+  if result:
+    rt.afterLayoutCommit()
+    rt.rebuildFocus()
+
+proc showContributedPane(rt: TuiRuntime; id: string): bool =
+  ## `:plugins show <id>` with a layout: the pane is placed if it is not,
+  ## its tab is selected and it takes the focus.
+  if not rt.layoutBindingEnabled() or rt.plugins.isNil or
+     rt.plugins.panes.isNil:
+    return false
+  var known = false
+  var title = id
+  for p in rt.plugins.panes():
+    if p.id == id:
+      known = true
+      title = p.title
+  if not known: return false
+  let b = rt.app.layoutBinding
+  let r = contributedRef(id)
+  var kept: seq[string] = @[]
+  for c in b.closedContributed:
+    if c != id: kept.add c
+  b.closedContributed = kept
+  if b.layout.dockedIndex(r) >= 0:
+    discard b.dispatch(cmdRestoreDocked(r))
+  elif not b.layout.tree.contains(r):
+    discard b.placeContributedPane(id, title)
+  discard b.dispatch(cmdActivateTab(r))
+  b.focusOn(r)
+  rt.afterLayoutCommit()
+  rt.rebuildFocus()
+  true
+
+proc contributedPaneModel(rt: TuiRuntime; model: var ShellModel) =
+  ## The plugin panes' rows and the decorations on the source document, from
+  ## what the plugins last pushed (`PluginsService`). A contributed pane the
+  ## layout holds whose extension is not loaded gets no view, and the shell
+  ## says so in its slot.
+  model.focusedContributed = rt.contributedFocus()
+  if rt.plugins.isNil:
+    return
+  if not rt.plugins.panes.isNil and not rt.plugins.paneView.isNil:
+    var loaded: seq[string] = @[]
+    for p in rt.plugins.panes(): loaded.add p.id
+    for id in allContributedPanes(model.layout):
+      if id in loaded:
+        let v = rt.plugins.paneView(id)
+        model.contributedViews[id] = ContributedPaneView(
+          lines: v.lines, cursor: v.cursor, stale: v.stale)
+  if not rt.plugins.decorations.isNil and model.source.path.len > 0:
+    for d in rt.plugins.decorations(model.source.path):
+      model.sourceDecorations.add SourceDecorationMark(
+        line: d.line, glyph: d.glyph, text: d.text, plugin: d.plugin)
+
 proc shellScreenOf*(rt: TuiRuntime): ShellScreen =
   ## The whole frame for this runtime, at its current size.
   ##
@@ -10530,6 +10682,9 @@ proc shellScreenOf*(rt: TuiRuntime): ShellScreen =
   rt.syncOutputViews()
   # PLAT-70 Part I: the table panes' views over this frame's fit.
   rt.syncTableViews()
+  # Extensibility-Model.md §6: a plugin's panes are placed when it first
+  # activates, before the frame is taken from the layout.
+  discard rt.syncContributedPanes()
   var model = rt.app.shellModel(rt.width, rt.height)
   model.status.mode = statusMode(rt.modal.mode)
   # PLAT-68: the indicator's text is the router's (a pending prefix, a
@@ -10566,6 +10721,19 @@ proc shellScreenOf*(rt: TuiRuntime): ShellScreen =
   let (hasFocus, focused) = rt.focus.focusedPane()
   model.hasFocus = hasFocus
   model.focused = focused
+  # The plugin panes and decorations (Extensibility-Model.md §6, §11.4.4).
+  rt.contributedPaneModel(model)
+  if not rt.app.source.isEmpty:
+    # A decoration on the CURRENT line says what it says on the status line
+    # too, where a reader of the code can see it whatever the pane's width.
+    for d in model.sourceDecorations:
+      if d.line == rt.app.source.executionLine and d.text.len > 0:
+        let note = d.plugin & ": " & d.text
+        model.status.notification =
+          if model.status.notification.len > 0:
+            model.status.notification & "  " & note
+          else: note
+        break
   model.scrollbars = rt.scrollbarFrame()
   model.glyphs = glyphProfileOf(rt.caps)
   model.ambiguous = ambiguousPolicyOf(rt.caps)

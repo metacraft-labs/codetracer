@@ -185,6 +185,20 @@ def handled(win):
         return -1
 
 
+def keys(win):
+    """How many KEY events the window has handled (`input.keys`), apart from
+    pointer events. `key_handled` decides by this whether its key arrived:
+    by `handled`, a pointer event the compositor delivered late read as the
+    key, and a lost Esc was never sent again (load-loop run #1 under
+    generated load, 2026-11-21: "the window never handled Esc during the
+    drag within 60s", the drag still active, no key in the window's trace).
+    -1 from a window that does not report it."""
+    try:
+        return win.geom().get("input", {}).get("keys", -1)
+    except (OSError, ValueError):
+        return -1
+
+
 def await_geom(win, what, pred, ceiling_s=60.0):
     """Wait until the window's geometry report satisfies `pred`, with a
     generous ceiling; a state that never comes is a failure, named."""
@@ -294,14 +308,23 @@ class Pointer:
         self.proc.wait(timeout=20)
 
 
-def key(name):
+def key(name, lead_ms=400):
     # PRIME the virtual keyboard (a new one can lose its first key while the
     # client is still receiving its keymap — PLAT-38's measurement), then
-    # the key.
-    wtype_keys(["-k", name])
+    # the key, `lead_ms` after the priming.
+    wtype_keys(["-k", name], lead_ms=lead_ms)
 
 
-def key_handled(win, name, what, retry_s=15.0, tries=3, **want):
+KEY_LEADS_MS = (400, 3000, 10000)
+    # The wait between a new virtual keyboard's priming and its key, per
+    # attempt. A retry with the SAME lead repeats the loss: under generated
+    # load (25 workers on the capture's 6 CPUs) the window took none of three
+    # Esc keys sent 400 ms after their keyboards (`input.keys` 0 throughout,
+    # no `window key` in its trace). Each attempt gives the client longer to
+    # take the keymap.
+
+
+def key_handled(win, name, what, retry_s=15.0, tries=len(KEY_LEADS_MS), **want):
     """`key(name)`, then `await_input` for it. A key the window never COUNTS
     (its `input.handled` unchanged) was lost on the way: a new virtual
     keyboard under load can drop its key while the client is still taking
@@ -312,14 +335,20 @@ def key_handled(win, name, what, retry_s=15.0, tries=3, **want):
     suite fail under load": "the window never handled Esc during the drag"
     at load 106)."""
     n = handled(win)
+    # By the window's KEY count: its `handled` also moves for a late pointer
+    # event. A window too old to report `keys` falls back to `handled`.
+    count = keys if keys(win) >= 0 else handled
+    k = count(win)
     for attempt in range(tries):
-        key(name)
-        deadline = time.time() + retry_s
-        while time.time() < deadline and handled(win) <= n:
+        lead = KEY_LEADS_MS[min(attempt, len(KEY_LEADS_MS) - 1)]
+        key(name, lead_ms=lead)
+        deadline = time.time() + retry_s + lead / 1000.0
+        while time.time() < deadline and count(win) <= k:
             time.sleep(0.1)
-        if handled(win) > n:
+        if count(win) > k:
             break
-        print(f"  {what}: the window did not count the key; sent again", flush=True)
+        print(f"  {what}: the window did not count the key "
+              f"(sent {lead} ms after its keyboard); sent again", flush=True)
     await_input(win, n, what, **want)
 
 

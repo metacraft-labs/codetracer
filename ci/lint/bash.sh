@@ -414,6 +414,11 @@ lint_step "trace-format-nim builds see nim-results, not stew's legacy results" \
 lint_step "a stalled build-once is bounded, dumped and retried without the daemon" \
 	bash ci/test/bounded-build-once-test.sh
 
+# The jobs' background helpers (memory sampler, token refresher) end with the
+# job that started them, on a persistent runner too.
+lint_step "the CI's background helpers end with their job" \
+	bash ci/test/job-lifetime-test.sh
+
 # A GPUI shard gives a bare host the Vulkan driver, cursor theme and D-Bus
 # session configuration the window and its compositor need.
 lint_step "a GPUI shard provisions what a bare host lacks" \

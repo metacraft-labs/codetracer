@@ -46,6 +46,50 @@ rc=$?
 set -e
 check "a missing archive exits 3" "a missing archive exited ${rc}" test "$rc" = 3
 
+# The products' recorded runtime closure is realised where this store lacks
+# it (run 44612896066: ct ran against glibc-2.40-66, missing on every GPUI
+# shard, and `ct record` exited 127). A fake nix-store records what it is
+# asked; a path already present is not asked for.
+missing=/nix/store/00000000000000000000000000000000-glibc-test-only
+present="$(readlink -f "$(command -v bash)" | grep -oE '^/nix/store/[^/]+' || echo /)"
+mkdir -p "$work/isrc/codetracer/src/build-debug-repro/bin" "$work/idl" "$work/idest" "$work/idest2" "$work/fakebin"
+printf '%s\n%s\n' "$missing" "$present" >"$work/isrc/codetracer/src/build-debug-repro/nix-runtime-closure.txt"
+tar -czf "$work/idl/ct-build-products.tar.gz" -C "$work/isrc" codetracer
+# shellcheck disable=SC2016 # the fake's own script, expanded when it runs
+printf '#!/usr/bin/env bash\necho "$*" >>"%s/realised"\nexit "${FAKE_NIX_STORE_RC:-0}"\n' "$work" >"$work/fakebin/nix-store"
+chmod +x "$work/fakebin/nix-store"
+# shellcheck disable=SC2016 # bash -c expands its own positional parameters
+check "an archive with a runtime closure unpacks" "it did not unpack: $(cat "$work/out")" \
+	env PATH="$work/fakebin:$PATH" CT_BUILD_PRODUCTS_DEST="$work/idest" \
+	bash -c 'bash ci/unpack-ct-build-products.sh "$1" >"$2" 2>&1' _ "$work/idl" "$work/out"
+check "and only the closure's missing paths are realised" "nix-store was asked: $(cat "$work/realised" 2>/dev/null)" \
+	grep -qx -- "--realise ${missing}" "$work/realised"
+check "and says so" "no 'realised' message: $(cat "$work/out")" grep -q "realised 1 store path(s)" "$work/out"
+# shellcheck disable=SC2016 # bash -c expands its own positional parameters
+check "a path that cannot be realised is named, and the unpack still succeeds" "it failed or said nothing: $(cat "$work/out")" \
+	env PATH="$work/fakebin:$PATH" CT_BUILD_PRODUCTS_DEST="$work/idest2" FAKE_NIX_STORE_RC=1 \
+	bash -c 'bash ci/unpack-ct-build-products.sh "$1" >"$2" 2>&1 && grep -q "could not be realised.*${3}" "$2"' _ "$work/idl" "$work/out" "$missing"
+
+# The recorder takes an ELF file's interpreter and RUNPATH, closed over: run
+# on this shell's own bash, it lists bash's glibc, and skips a non-ELF file.
+if command -v readelf >/dev/null 2>&1 && command -v nix-store >/dev/null 2>&1 && [ "$present" != / ]; then
+	printf 'not elf\n' >"$work/plain"
+	bash ci/build/record-runtime-closure.sh "$work/closure" "$(readlink -f "$(command -v bash)")" "$work/plain" >/dev/null
+	check "the recorder lists an ELF file's interpreter's store path" "its list: $(cat "$work/closure")" \
+		grep -qE '^/nix/store/[a-z0-9]{32}-glibc-' "$work/closure"
+	glibc="$(grep -m1 -E '^/nix/store/[a-z0-9]{32}-glibc-' "$work/closure" || true)"
+	check "and closes over it" "its list lacks some of ${glibc}'s closure" \
+		test -n "$glibc" -a -z "$(nix-store -qR "$glibc" | sort -u | comm -23 - "$work/closure")"
+else
+	echo "  skip the recorder checks: readelf or nix-store is not on PATH"
+fi
+for f in .github/workflows/ct-build.yml .github/workflows/visual-replay-tools.yml; do
+	check "$f records the runtime closure into what it packs" "$f does not record it" \
+		grep -qF 'bash ci/build/record-runtime-closure.sh' "$f"
+done
+check "visual-replay-tools packs its closure list" "visual-replay-tools.yml does not pack it" \
+	grep -qF 'files+=(codetracer-visual-replay/nix-runtime-closure.txt)' .github/workflows/visual-replay-tools.yml
+
 # shellcheck disable=SC2016 # the workflow lines, literally
 for f in .github/workflows/gpui-window-captures.yml .github/workflows/tui-tests.yml; do
 	check "$f unpacks through the script, and may fail into a retry" "$f: no checked unpack step" \

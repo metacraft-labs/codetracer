@@ -34,12 +34,45 @@
 // because the property is the one STEP and COLLAPSE need: neither changes the
 // row count, so the two checks above them are satisfied by a frame that was
 // applied only half way.
+//
+// ## THE PANE, AND PARITY
+//
+// The slice drives more than one pane (`CT_P18_PANE` in the build script);
+// `globalThis.CT_P18_PANE_CONFIG` names the pane's row selector and its row
+// counts, so the floors above are the pane's own.
+//
+// And the arms must draw THE SAME DOCUMENT, not only the same number of
+// rows. On the first sample, after every phase, each arm's document is
+// snapshotted and compared (`checkParity`):
+//
+//   * `js-crossing` against `wasm-crossing`: the WHOLE document, byte for
+//     byte. Same Nim source, same renderer, same host applier, two
+//     compilers — any difference is a defect in one of the two cores.
+//   * `js-direct` against `js-crossing`: the pane's ROWS (each row's
+//     markup). `js-direct` is the shipping build and draws through
+//     `WebRenderer`, whose panel chrome can differ from the generic panel's
+//     (the variables pane's does), so the rows are what the two are held
+//     to. Attributes the pane's own DOM decoration writes on `js-direct`
+//     only are named in the config (`directIgnoreAttrs`) and removed from
+//     both sides before the comparison, so a difference anywhere else still
+//     fails.
+//
+// A mismatch voids the run, like the floors above.
 
 'use strict';
 
 const SAMPLES = Number(globalThis.CT_P18_SAMPLES || 9);
-const EXPECTED_ROWS = 602;   // the 600-member mapping, its own row, and `counter`
-const EXPECTED_COLLAPSED_ROWS = 2;
+const PANE = globalThis.CT_P18_PANE_CONFIG || {
+  name: 'variables',
+  // the 600-member mapping, its own row, and `counter`
+  rowSelector: '.value-expanded-name[data-variable-name]',
+  rowElementSelector: '.value-expanded-name[data-variable-name]',
+  expandedRows: 602,
+  collapsedRows: 2,
+  directIgnoreAttrs: [],
+};
+const EXPECTED_ROWS = PANE.expandedRows;
+const EXPECTED_COLLAPSED_ROWS = PANE.collapsedRows;
 
 function rootEl() { return document.getElementById('ct-p18-root'); }
 
@@ -58,7 +91,68 @@ function clearRoot() {
 // is also the class `plat18_marshalling_probe.countRows` filters on, so the
 // two instruments count the same thing.
 function domRows() {
-  return rootEl().querySelectorAll('.value-expanded-name[data-variable-name]').length;
+  return rootEl().querySelectorAll(PANE.rowSelector).length;
+}
+
+/** The pane's rows as markup, with the decoration-owned attributes removed. */
+function rowSnapshot(ignoreAttrs) {
+  const out = [];
+  for (const el of rootEl().querySelectorAll(PANE.rowElementSelector)) {
+    const copy = el.cloneNode(true);
+    if (ignoreAttrs.length) {
+      for (const n of [copy, ...copy.querySelectorAll('*')]) {
+        for (const a of ignoreAttrs) n.removeAttribute(a);
+      }
+    }
+    out.push(copy.outerHTML);
+  }
+  return out;
+}
+
+function snapshot() {
+  return {
+    document: rootEl().innerHTML,
+    rows: rowSnapshot([]),
+    rowsUndecorated: rowSnapshot(PANE.directIgnoreAttrs || []),
+  };
+}
+
+function firstDifference(a, b) {
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  return i;
+}
+
+/** Compare two arms' snapshots of one phase. Throws on a mismatch. */
+function checkParity(phaseName, left, leftSnap, right, rightSnap, mode) {
+  let a, b, items;
+  if (mode === 'document') {
+    a = [leftSnap.document];
+    b = [rightSnap.document];
+  } else {
+    a = leftSnap.rowsUndecorated;
+    b = rightSnap.rowsUndecorated;
+  }
+  items = a.length;
+  if (a.length !== b.length) {
+    throw new Error(`parity ${left}/${right} ${phaseName} (${mode}): ${a.length} ` +
+                    `against ${b.length} item(s)`);
+  }
+  let bytes = 0;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) {
+      const at = firstDifference(a[i], b[i]);
+      throw new Error(`parity ${left}/${right} ${phaseName} (${mode}): item ${i} differs ` +
+                      `at character ${at}: ${JSON.stringify(a[i].slice(Math.max(0, at - 60), at + 80))} ` +
+                      `against ${JSON.stringify(b[i].slice(Math.max(0, at - 60), at + 80))}`);
+    }
+    bytes += a[i].length;
+  }
+  if (bytes === 0) {
+    throw new Error(`parity ${left}/${right} ${phaseName} (${mode}): compared nothing`);
+  }
+  console.log(`PLAT18-SLICE-PARITY pane=${PANE.name} phase=${phaseName} ${left}=${right}` +
+              ` mode=${mode} items=${items} chars=${bytes}`);
 }
 
 function now() { return performance.now(); }
@@ -139,6 +233,15 @@ function median(xs) {
   return s[Math.floor(s.length / 2)];
 }
 
+/** The nearest-rank percentile: the smallest sample at least `p` of the
+ *  samples are at or below. At 100 samples p99 is the 99th order statistic;
+ *  at fewer than 100 it is the maximum, and the line says how many samples
+ *  it was taken over. */
+function percentile(xs, p) {
+  const s = xs.slice().sort((a, b) => a - b);
+  return s[Math.min(s.length - 1, Math.max(0, Math.ceil(p * s.length) - 1))];
+}
+
 function report(arm, phaseName, samples) {
   const core = samples.map((s) => s.coreMs);
   const host = samples.map((s) => s.hostMs);
@@ -158,7 +261,8 @@ function report(arm, phaseName, samples) {
     ` host_ms_median=${median(host).toFixed(3)}` +
     ` total_ms_median=${median(total).toFixed(3)}` +
     ` total_ms_min=${Math.min(...total).toFixed(3)}` +
-    ` total_ms_max=${Math.max(...total).toFixed(3)}`);
+    ` total_ms_max=${Math.max(...total).toFixed(3)}` +
+    ` total_ms_p99=${percentile(total, 0.99).toFixed(3)}`);
 }
 
 // TWO CHECKS, NOT ONE, AND THEY HAVE DISJOINT EVIDENCE.
@@ -175,7 +279,7 @@ function report(arm, phaseName, samples) {
 function checkAttached(arm, phaseName) {
   const n = rootEl().childElementCount;
   if (n === 0) {
-    throw new Error(`${arm.name}/${phaseName}: the panel never reached the document ` +
+    throw new Error(`${PANE.name} pane, ${arm.name}/${phaseName}: the panel never reached the document ` +
                     `— the container holds ${n} child element(s)`);
   }
 }
@@ -184,7 +288,7 @@ function checkRows(arm, phaseName, expected) {
   const core = arm.api.rows();
   const dom = domRows();
   if (core !== expected || dom !== expected) {
-    throw new Error(`${arm.name}/${phaseName}: core says ${core} row(s), the document ` +
+    throw new Error(`${PANE.name} pane, ${arm.name}/${phaseName}: core says ${core} row(s), the document ` +
                     `holds ${dom}, expected ${expected}`);
   }
 }
@@ -207,6 +311,13 @@ function run() {
     results[a.name] = { MOUNT: [], EXPAND: [], STEP: [], COLLAPSE: [] };
   }
 
+  // Sample 0's documents, per arm and phase, for `checkParity`.
+  const snaps = {};
+  for (const a of arms) snaps[a.name] = {};
+  const snap = (i, arm, phaseName) => {
+    if (i === 0) snaps[arm.name][phaseName] = snapshot();
+  };
+
   for (let i = 0; i < SAMPLES; i++) {
     for (const arm of arms) {
       clearRoot();
@@ -217,15 +328,19 @@ function run() {
       results[arm.name].MOUNT.push(phase(arm, 'MOUNT', () => arm.api.mount()));
       checkAttached(arm, 'MOUNT');
       checkRows(arm, 'MOUNT', EXPECTED_COLLAPSED_ROWS);
+      snap(i, arm, 'MOUNT');
 
       results[arm.name].EXPAND.push(phase(arm, 'EXPAND', () => arm.api.expand()));
       checkRows(arm, 'EXPAND', EXPECTED_ROWS);
+      snap(i, arm, 'EXPAND');
 
       results[arm.name].STEP.push(phase(arm, 'STEP', () => arm.api.step()));
       checkRows(arm, 'STEP', EXPECTED_ROWS);
+      snap(i, arm, 'STEP');
 
       results[arm.name].COLLAPSE.push(phase(arm, 'COLLAPSE', () => arm.api.collapse()));
       checkRows(arm, 'COLLAPSE', EXPECTED_COLLAPSED_ROWS);
+      snap(i, arm, 'COLLAPSE');
 
       if (arm.crossing && arm.api.readCrossings() !== 0) {
         throw new Error(`${arm.name}: ${arm.api.readCrossings()} read crossing(s); the ` +
@@ -254,6 +369,17 @@ function run() {
     console.log(`PLAT18-SLICE-MEMORY arm=${arm.name} rows=${EXPECTED_ROWS}` +
       ` js_heap_bytes=${jsHeap} linear_memory_bytes=${linear}` +
       ` total_bytes=${jsHeap + linear}`);
+  }
+
+  for (const p of ['MOUNT', 'EXPAND', 'STEP', 'COLLAPSE']) {
+    if (snaps['js-crossing'] && snaps['wasm-crossing']) {
+      checkParity(p, 'js-crossing', snaps['js-crossing'][p],
+                  'wasm-crossing', snaps['wasm-crossing'][p], 'document');
+    }
+    if (snaps['js-direct'] && snaps['js-crossing']) {
+      checkParity(p, 'js-direct', snaps['js-direct'][p],
+                  'js-crossing', snaps['js-crossing'][p], 'rows');
+    }
   }
 
   for (const arm of arms) {

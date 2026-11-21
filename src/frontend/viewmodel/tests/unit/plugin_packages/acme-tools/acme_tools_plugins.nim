@@ -10,7 +10,13 @@
 ## line from its MIRRORED session, stamped with the epoch it was computed at;
 ## its command steps the primary forward through the action relay; it pushes a
 ## status item, enablement and a context key, and answers `values` queries
-## for a visualiser.
+## for a visualiser. It also DECORATES the current line of the source the
+## debugger is in (`decorations`, a marker reading `metrics: line N`),
+## re-pushed at every stop, so the decoration follows a step.
+##
+## `flame`'s list answers `view-event`: activating a row (Enter, or a click)
+## re-pushes the list with that row marked `✓` and selected, which is how a
+## front-end's round trip through the plugin is seen on screen.
 ##
 ## `flame` misbehaves on request. Its `mode` setting picks the fault the
 ## misbehaving-plugin suite drives:
@@ -27,7 +33,7 @@
 ##   exit            exits with status 3 on `flame.refresh`
 ##   protocol        writes a frame of garbage on `flame.refresh`
 
-import std/[monotimes, os, posix, strutils, times]
+import std/[monotimes, os, posix, strutils, times, volatile]
 
 import codetracer_plugin_sdk
 
@@ -37,6 +43,21 @@ proc currentLine(p: Plugin): string =
     return "(no session)"
   let d = s.store.debugger.val
   d.location.file.extractFilename & ":" & $d.location.line
+
+proc pushLineDecoration(p: Plugin; lastDoc: var string) =
+  ## A marker on the debugger's current line, in the document the mirrored
+  ## session names; the document it was on before is cleared.
+  let s = p.session
+  if s.isNil or s.store.isNil: return
+  let d = s.store.debugger.val
+  let doc = d.location.file
+  if doc.len == 0 or d.location.line <= 0: return
+  if lastDoc.len > 0 and lastDoc != doc:
+    p.pushDecorations(lastDoc, newJArray())
+  lastDoc = doc
+  p.pushDecorations(doc, %*[{"line": d.location.line, "glyph": "◆",
+                             "text": "metrics: line " & $d.location.line,
+                             "kind": "marker"}])
 
 proc metricsView(p: Plugin): ViewNode =
   let e = p.epoch
@@ -48,8 +69,10 @@ proc metricsView(p: Plugin): ViewNode =
 
 proc setupMetrics(sdk: PluginSdk) =
   let m = sdk.addPlugin("acme-tools.metrics", "1.0.0")
+  var decorated = ""
   m.onActivate = proc(p: Plugin) =
     p.pushView("overview", metricsView(p))
+    p.pushLineDecoration(decorated)
     p.pushStatus("metrics.status", viewText("metrics.status", "metrics ok"))
     p.pushEnablement("metrics.step", true)
     p.pushContext("ready", %true)
@@ -60,6 +83,7 @@ proc setupMetrics(sdk: PluginSdk) =
        "summary": "matrix (acme-tools)", "rank": 1}])
   m.onSignals = proc(p: Plugin) =
     p.pushView("overview", metricsView(p))
+    p.pushLineDecoration(decorated)
   m.onSettingsChanged = proc(p: Plugin) =
     p.pushView("overview", metricsView(p))
   m.onInvoke("metrics.step", proc(p: Plugin; args: JsonNode; req: Request) =
@@ -95,15 +119,38 @@ proc spin(p: Plugin) =
     x = (x + 1) mod 1000
     if p.isNil: break
 
+const FlameRows = [("a", "main 60%"), ("b", "work 40%")]
+
+proc flameList(activated: int): ViewNode =
+  ## The flame list, with the row a front-end activated marked and selected.
+  var options: seq[ViewOption]
+  for i, (id, label) in FlameRows:
+    options.add ViewOption(id: id,
+      label: (if i == activated: "✓ " & label & " (activated)" else: label))
+  result = viewList("flame.list", options,
+                    highlight = (if activated >= 0: activated else: 0))
+  result.selected = activated
+
 proc setupFlame(sdk: PluginSdk) =
   let f = sdk.addPlugin("acme-tools.flame", "1.0.0")
   var layerToken = ""
+  f.onViewEvent = proc(p: Plugin; surface: string; event: JsonNode) =
+    # §11.4.4 `view-event`: the host's `applyKey` activated a row of the
+    # list. The answer is a new tree, marking it.
+    p.log("view-event " & surface & " " & $event)
+    if surface == "flame" and event{"transition"}.getStr("") == "trActivate":
+      p.pushView("flame", flameList(event{"index"}.getInt(-1)))
   f.onActivate = proc(p: Plugin) =
     let mode = p.settings{"mode"}.getStr("normal")
     case mode
     of "segfault":
-      var q: ptr int = nil
-      q[] = 1
+      # A REAL invalid access, and one no optimiser may remove: the address is
+      # known only at run time and the store is volatile. A plain
+      # `q[] = 1` through a nil `ptr` is undefined behaviour that clang
+      # deleted in a release build on aarch64-darwin (measured 2026-11-21: the
+      # plugin activated instead of crashing).
+      let address = parseInt(getEnv("ACME_TOOLS_FAULT_ADDRESS", "0"))
+      volatileStore(cast[ptr int](address), 1)
     of "hang-activate":
       p.spin()
     of "flood":

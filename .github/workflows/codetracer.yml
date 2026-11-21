@@ -1957,61 +1957,10 @@ jobs:
           owner: metacraft-labs
 
       - name: Evict stale git credentials from this runner's persistent home
-        # MODE 1 of the self-hosted checkout outage. A stale, owner-scoped
-        # `http.https://github.com/metacraft-labs/.extraHeader` left in the
-        # runner's reused `~/.gitconfig` OUTRANKS the fresh broader header
-        # actions/checkout installs (git matches `http.<url>.*` by longest URL
-        # prefix), so checkout authenticates with a dead token, GitHub answers
-        # 401, and git dies on `could not read Username`. checkout COPIES
-        # `$HOME/.gitconfig` into its temp HOME, so this file is live during the
-        # failing fetch. Full rationale, the reproduction, and why this targets
-        # the file by path rather than via `--global`: see the copy of this step
-        # in the `test-non-gui` job.
-        run: |
-          set -uo pipefail
-          cfg="$HOME/.gitconfig"
-          echo "cred-evict: runner=${RUNNER_NAME:-?} home=$HOME"
-          if [ ! -f "$cfg" ]; then
-            echo "cred-evict: removed 0 (no $cfg on this runner - nothing reusable to poison)"
-            exit 0
-          fi
-          echo "cred-evict: inspecting $cfg"
-          removed=0
-          while IFS= read -r key; do
-            [ -n "$key" ] || continue
-            case "$key" in
-              http.*.extraheader|http.*.extraHeader) ;;
-              url.*x-access-token*) ;;
-              *) continue ;;
-            esac
-            echo "cred-evict:   removing '$key' (value withheld)"
-            git config --file "$cfg" --unset-all "$key" 2>/dev/null || true
-            git config --file "$cfg" --remove-section "${key%.*}" 2>/dev/null || true
-            removed=$((removed + 1))
-          done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
-          # Recount in PURE BASH. `grep` and `sed` are NOT on PATH in a raw
-          # `run:` step on these nix-darwin runners -- the first version of
-          # this step used `grep -ciE` here, grep exited 127, `|| true`
-          # swallowed it, and the step printed "removed 1 key(s);  still
-          # present" with an EMPTY count. That is precisely the failure this
-          # step is supposed to be immune to: a verification that silently
-          # verifies nothing and still reads like a pass. No external
-          # commands in the check.
-          left=0
-          while IFS= read -r k; do
-            case "$k" in
-              *extraheader*|*extraHeader*|*x-access-token*) left=$((left + 1)) ;;
-            esac
-          done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
-          echo "cred-evict: removed $removed credential-bearing key(s); $left still present"
-          if [ "$removed" -eq 0 ]; then
-            echo "cred-evict: NOTHING FOUND - this host was already clean, mode 1 did not apply here"
-          fi
-          if [ "$left" -ne 0 ]; then
-            echo "cred-evict: WARNING $left credential-shaped key(s) SURVIVED the sweep"
-          fi
-          echo "cred-evict: keys remaining in $cfg:"
-          while IFS= read -r k; do echo "  $k"; done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
+        # Before any git operation: a stale owner-scoped extraHeader in this
+        # reused runner's ~/.gitconfig outranks checkout's fresh one. A remote
+        # action, so it needs no checkout; the rationale is in its action.yml.
+        uses: metacraft-labs/metacraft-github-actions/evict-stale-git-credentials@2c12f82a56d5000bd47c42ad8c25a3596820057c
 
       - name: Checkout
         uses: actions/checkout@v5
@@ -2032,6 +1981,52 @@ jobs:
           attic-token: ${{ secrets.ATTIC_TOKEN }}
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Read the HCR tests' sibling pins
+        # The HCR MCR DAP test builds ../codetracer-native-recorder (whose
+        # ct_interpose imports ../nim-stackable-hooks) and
+        # ../codetracer-native-backend. Unprovisioned, it built whatever an
+        # earlier job left in this reused workspace (run 44864106832).
+        id: hcr_pins
+        run: >-
+          nix develop . --command bash ci/lib/sibling-pin-outputs.sh
+          native_recorder=flake:codetracer-native-recorder
+          native_backend=flake:codetracer-native-backend
+          stackable_hooks=lock:nim-stackable-hooks
+
+      - name: Mint a token for the clones below
+        id: late_token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      - name: Clone codetracer-native-recorder
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-native-recorder
+          ref: ${{ steps.hcr_pins.outputs.native_recorder }}
+          path: ${{ github.workspace }}/../codetracer-native-recorder
+          gh-token: ${{ steps.late_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Clone codetracer-native-backend
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-native-backend
+          ref: ${{ steps.hcr_pins.outputs.native_backend }}
+          path: ${{ github.workspace }}/../codetracer-native-backend
+          gh-token: ${{ steps.late_token.outputs.token }}
+          submodules: 'true'
+
+      - name: Clone nim-stackable-hooks
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/nim-stackable-hooks
+          ref: ${{ steps.hcr_pins.outputs.stackable_hooks }}
+          path: ${{ github.workspace }}/../nim-stackable-hooks
+          gh-token: ${{ steps.late_token.outputs.token }}
+          submodules: 'false'
 
       - name: Run Reprobuild macOS smoke
         run: nix develop . --command just test-reprobuild-macos-smoke
@@ -2160,61 +2155,10 @@ jobs:
           owner: metacraft-labs
 
       - name: Evict stale git credentials from this runner's persistent home
-        # MODE 1 of the self-hosted checkout outage. A stale, owner-scoped
-        # `http.https://github.com/metacraft-labs/.extraHeader` left in the
-        # runner's reused `~/.gitconfig` OUTRANKS the fresh broader header
-        # actions/checkout installs (git matches `http.<url>.*` by longest URL
-        # prefix), so checkout authenticates with a dead token, GitHub answers
-        # 401, and git dies on `could not read Username`. checkout COPIES
-        # `$HOME/.gitconfig` into its temp HOME, so this file is live during the
-        # failing fetch. Full rationale, the reproduction, and why this targets
-        # the file by path rather than via `--global`: see the copy of this step
-        # in the `test-non-gui` job.
-        run: |
-          set -uo pipefail
-          cfg="$HOME/.gitconfig"
-          echo "cred-evict: runner=${RUNNER_NAME:-?} home=$HOME"
-          if [ ! -f "$cfg" ]; then
-            echo "cred-evict: removed 0 (no $cfg on this runner - nothing reusable to poison)"
-            exit 0
-          fi
-          echo "cred-evict: inspecting $cfg"
-          removed=0
-          while IFS= read -r key; do
-            [ -n "$key" ] || continue
-            case "$key" in
-              http.*.extraheader|http.*.extraHeader) ;;
-              url.*x-access-token*) ;;
-              *) continue ;;
-            esac
-            echo "cred-evict:   removing '$key' (value withheld)"
-            git config --file "$cfg" --unset-all "$key" 2>/dev/null || true
-            git config --file "$cfg" --remove-section "${key%.*}" 2>/dev/null || true
-            removed=$((removed + 1))
-          done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
-          # Recount in PURE BASH. `grep` and `sed` are NOT on PATH in a raw
-          # `run:` step on these nix-darwin runners -- the first version of
-          # this step used `grep -ciE` here, grep exited 127, `|| true`
-          # swallowed it, and the step printed "removed 1 key(s);  still
-          # present" with an EMPTY count. That is precisely the failure this
-          # step is supposed to be immune to: a verification that silently
-          # verifies nothing and still reads like a pass. No external
-          # commands in the check.
-          left=0
-          while IFS= read -r k; do
-            case "$k" in
-              *extraheader*|*extraHeader*|*x-access-token*) left=$((left + 1)) ;;
-            esac
-          done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
-          echo "cred-evict: removed $removed credential-bearing key(s); $left still present"
-          if [ "$removed" -eq 0 ]; then
-            echo "cred-evict: NOTHING FOUND - this host was already clean, mode 1 did not apply here"
-          fi
-          if [ "$left" -ne 0 ]; then
-            echo "cred-evict: WARNING $left credential-shaped key(s) SURVIVED the sweep"
-          fi
-          echo "cred-evict: keys remaining in $cfg:"
-          while IFS= read -r k; do echo "  $k"; done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
+        # Before any git operation: a stale owner-scoped extraHeader in this
+        # reused runner's ~/.gitconfig outranks checkout's fresh one. A remote
+        # action, so it needs no checkout; the rationale is in its action.yml.
+        uses: metacraft-labs/metacraft-github-actions/evict-stale-git-credentials@2c12f82a56d5000bd47c42ad8c25a3596820057c
 
       - name: Checkout
         uses: actions/checkout@v5
@@ -2279,61 +2223,10 @@ jobs:
           owner: metacraft-labs
 
       - name: Evict stale git credentials from this runner's persistent home
-        # MODE 1 of the self-hosted checkout outage. A stale, owner-scoped
-        # `http.https://github.com/metacraft-labs/.extraHeader` left in the
-        # runner's reused `~/.gitconfig` OUTRANKS the fresh broader header
-        # actions/checkout installs (git matches `http.<url>.*` by longest URL
-        # prefix), so checkout authenticates with a dead token, GitHub answers
-        # 401, and git dies on `could not read Username`. checkout COPIES
-        # `$HOME/.gitconfig` into its temp HOME, so this file is live during the
-        # failing fetch. Full rationale, the reproduction, and why this targets
-        # the file by path rather than via `--global`: see the copy of this step
-        # in the `test-non-gui` job.
-        run: |
-          set -uo pipefail
-          cfg="$HOME/.gitconfig"
-          echo "cred-evict: runner=${RUNNER_NAME:-?} home=$HOME"
-          if [ ! -f "$cfg" ]; then
-            echo "cred-evict: removed 0 (no $cfg on this runner - nothing reusable to poison)"
-            exit 0
-          fi
-          echo "cred-evict: inspecting $cfg"
-          removed=0
-          while IFS= read -r key; do
-            [ -n "$key" ] || continue
-            case "$key" in
-              http.*.extraheader|http.*.extraHeader) ;;
-              url.*x-access-token*) ;;
-              *) continue ;;
-            esac
-            echo "cred-evict:   removing '$key' (value withheld)"
-            git config --file "$cfg" --unset-all "$key" 2>/dev/null || true
-            git config --file "$cfg" --remove-section "${key%.*}" 2>/dev/null || true
-            removed=$((removed + 1))
-          done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
-          # Recount in PURE BASH. `grep` and `sed` are NOT on PATH in a raw
-          # `run:` step on these nix-darwin runners -- the first version of
-          # this step used `grep -ciE` here, grep exited 127, `|| true`
-          # swallowed it, and the step printed "removed 1 key(s);  still
-          # present" with an EMPTY count. That is precisely the failure this
-          # step is supposed to be immune to: a verification that silently
-          # verifies nothing and still reads like a pass. No external
-          # commands in the check.
-          left=0
-          while IFS= read -r k; do
-            case "$k" in
-              *extraheader*|*extraHeader*|*x-access-token*) left=$((left + 1)) ;;
-            esac
-          done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
-          echo "cred-evict: removed $removed credential-bearing key(s); $left still present"
-          if [ "$removed" -eq 0 ]; then
-            echo "cred-evict: NOTHING FOUND - this host was already clean, mode 1 did not apply here"
-          fi
-          if [ "$left" -ne 0 ]; then
-            echo "cred-evict: WARNING $left credential-shaped key(s) SURVIVED the sweep"
-          fi
-          echo "cred-evict: keys remaining in $cfg:"
-          while IFS= read -r k; do echo "  $k"; done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
+        # Before any git operation: a stale owner-scoped extraHeader in this
+        # reused runner's ~/.gitconfig outranks checkout's fresh one. A remote
+        # action, so it needs no checkout; the rationale is in its action.yml.
+        uses: metacraft-labs/metacraft-github-actions/evict-stale-git-credentials@2c12f82a56d5000bd47c42ad8c25a3596820057c
 
       - name: Checkout
         uses: actions/checkout@v5
@@ -2560,7 +2453,12 @@ jobs:
     # with 16 real steps skipped, so the 24.3m worst failure covers under half
     # the body and is a LOWER bound. 75m is ~3x that; the unmeasured half
     # includes the recorder-gated tests and a `ct` build.
-    timeout-minutes: 75
+    # +90: the wait for gpui-window-captures' frames, bounded at 90 minutes.
+    timeout-minutes: 165
+    permissions:
+      contents: read
+      id-token: write
+      actions: read  # ci/wait-for-run-artifact.sh
     name: ViewModel headless tests (native + JS)
     steps:
       - name: Generate CI token
@@ -2611,7 +2509,7 @@ jobs:
       # `Generate CI token` above is this job's ONLY mint -- `ci/test/
       # sibling-provisioning-test.sh` asserts that "no job mints more than one
       # installation token", so refreshing it mid-job is not available here --
-      # and this job's `timeout-minutes` is 75. Every authenticated git
+      # and this job runs past an hour. Every authenticated git
       # operation must therefore happen near the TOP of the job.
       #
       # `codetracer-js-recorder` and `runquota` used to be cloned next to the
@@ -2690,6 +2588,8 @@ jobs:
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          # The screen oracle's pixel readers and its case floor (test lock).
+          test-siblings: GuiAssert,codetracer-pm
 
       - name: Assert the JS ViewModel lane can observe its own failures (full suite)
         # The same contract suite `ci-verdict` runs, but here it runs INSIDE the
@@ -3546,6 +3446,22 @@ jobs:
         # nothing, which is `vm-js`'s defect wearing a display check.
         run: nix develop .#devShells.x86_64-linux.default --command just test-plat18-slice
 
+      - name: PLAT-18 — the slice over a second pane, Call Trace
+        if: ${{ !cancelled() }}
+        # The same three arms over the Call Trace pane, held to the same
+        # document by the driver's parity check. Display as above.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-plat18-slice-calltrace
+
+      - name: PLAT-18 — the slice in a browser (Chromium, Firefox)
+        if: ${{ !cancelled() }}
+        # Served over HTTP and run in Playwright's browsers from the dev
+        # shell; headless, so no display is needed.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-plat18-slice-browser
+
+      - name: The wasm32 developer profile builds what emcc builds
+        if: ${{ !cancelled() }}
+        run: nix develop .#devShells.x86_64-linux.default --command just test-wasm-dev-profile
+
       - name: PLAT-18 — the developer loop on all three backends
         if: ${{ !cancelled() }}
         # §5's fifth adopt condition. The step fails only on a REGRESSION (5x);
@@ -3812,6 +3728,32 @@ jobs:
         env:
           PLAT68_SPEC: tests/keymaps/plat64-desktop-pointer-rows.spec.ts
         run: nix develop .#devShells.x86_64-linux.default --command just plat68-desktop-keys
+
+      - name: The screen oracle's Electron frames (PLAT-35's capture)
+        id: plat35_electron
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        # Captured here, never committed; read below with the GPUI frames.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat35-capture-electron
+
+      - name: Wait for the GPUI window frames
+        id: gpui_frames
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && steps.plat35_electron.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: nix develop .#ci --command bash ci/wait-for-run-artifact.sh plat35-gpui-window-frames "gpui-window-captures / GPUI window captures (headless sway) (1/20)" 5400
+
+      - name: Restore the GPUI window frames
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && steps.gpui_frames.outcome == 'success' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: plat35-gpui-window-frames
+          path: build/plat35/gpui-window
+
+      - name: The screen oracle reads both front-ends' frames
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && steps.gpui_frames.outcome == 'success' }}
+        # PLAT-39: the six Electron frames against the DOM's own models, and
+        # the GPUI window's frames against them, from pixels alone.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat39-case-floor
 
       - name: Upload test logs
         if: always()
@@ -4175,6 +4117,17 @@ jobs:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
+      - name: Mint a token for the clone below
+        # An installation token lives an hour, and the clone below comes after
+        # 'Provision dependency siblings from repro.lock', which can take most of
+        # one on a cold runner: hand it a token minted here, not the job's first
+        # (ci/test/late-clone-token-test.py).
+        id: late_token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
       - name: Clone runquota sibling
         # The build (`just build-once`) compiles `ct`, and src/ct/codetracer.nim
         # -> ../ct_test/ct_test -> src/ct_test/process_exec.nim opens with
@@ -4189,7 +4142,7 @@ jobs:
           repo: metacraft-labs/runquota
           ref: dev
           path: ${{ github.workspace }}/../runquota
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
           submodules: 'false'
 
       - name: Allow direnv in cloned codetracer-native-recorder
@@ -4422,61 +4375,10 @@ jobs:
           owner: metacraft-labs
 
       - name: Evict stale git credentials from this runner's persistent home
-        # MODE 1 of the self-hosted checkout outage. A stale, owner-scoped
-        # `http.https://github.com/metacraft-labs/.extraHeader` left in the
-        # runner's reused `~/.gitconfig` OUTRANKS the fresh broader header
-        # actions/checkout installs (git matches `http.<url>.*` by longest URL
-        # prefix), so checkout authenticates with a dead token, GitHub answers
-        # 401, and git dies on `could not read Username`. checkout COPIES
-        # `$HOME/.gitconfig` into its temp HOME, so this file is live during the
-        # failing fetch. Full rationale, the reproduction, and why this targets
-        # the file by path rather than via `--global`: see the copy of this step
-        # in the `test-non-gui` job.
-        run: |
-          set -uo pipefail
-          cfg="$HOME/.gitconfig"
-          echo "cred-evict: runner=${RUNNER_NAME:-?} home=$HOME"
-          if [ ! -f "$cfg" ]; then
-            echo "cred-evict: removed 0 (no $cfg on this runner - nothing reusable to poison)"
-            exit 0
-          fi
-          echo "cred-evict: inspecting $cfg"
-          removed=0
-          while IFS= read -r key; do
-            [ -n "$key" ] || continue
-            case "$key" in
-              http.*.extraheader|http.*.extraHeader) ;;
-              url.*x-access-token*) ;;
-              *) continue ;;
-            esac
-            echo "cred-evict:   removing '$key' (value withheld)"
-            git config --file "$cfg" --unset-all "$key" 2>/dev/null || true
-            git config --file "$cfg" --remove-section "${key%.*}" 2>/dev/null || true
-            removed=$((removed + 1))
-          done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
-          # Recount in PURE BASH. `grep` and `sed` are NOT on PATH in a raw
-          # `run:` step on these nix-darwin runners -- the first version of
-          # this step used `grep -ciE` here, grep exited 127, `|| true`
-          # swallowed it, and the step printed "removed 1 key(s);  still
-          # present" with an EMPTY count. That is precisely the failure this
-          # step is supposed to be immune to: a verification that silently
-          # verifies nothing and still reads like a pass. No external
-          # commands in the check.
-          left=0
-          while IFS= read -r k; do
-            case "$k" in
-              *extraheader*|*extraHeader*|*x-access-token*) left=$((left + 1)) ;;
-            esac
-          done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
-          echo "cred-evict: removed $removed credential-bearing key(s); $left still present"
-          if [ "$removed" -eq 0 ]; then
-            echo "cred-evict: NOTHING FOUND - this host was already clean, mode 1 did not apply here"
-          fi
-          if [ "$left" -ne 0 ]; then
-            echo "cred-evict: WARNING $left credential-shaped key(s) SURVIVED the sweep"
-          fi
-          echo "cred-evict: keys remaining in $cfg:"
-          while IFS= read -r k; do echo "  $k"; done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
+        # Before any git operation: a stale owner-scoped extraHeader in this
+        # reused runner's ~/.gitconfig outranks checkout's fresh one. A remote
+        # action, so it needs no checkout; the rationale is in its action.yml.
+        uses: metacraft-labs/metacraft-github-actions/evict-stale-git-credentials@2c12f82a56d5000bd47c42ad8c25a3596820057c
 
       - name: Checkout
         uses: actions/checkout@v5
@@ -4882,61 +4784,10 @@ jobs:
     steps:
 
       - name: Evict stale git credentials from this runner's persistent home
-        # MODE 1 of the self-hosted checkout outage. A stale, owner-scoped
-        # `http.https://github.com/metacraft-labs/.extraHeader` left in the
-        # runner's reused `~/.gitconfig` OUTRANKS the fresh broader header
-        # actions/checkout installs (git matches `http.<url>.*` by longest URL
-        # prefix), so checkout authenticates with a dead token, GitHub answers
-        # 401, and git dies on `could not read Username`. checkout COPIES
-        # `$HOME/.gitconfig` into its temp HOME, so this file is live during the
-        # failing fetch. Full rationale, the reproduction, and why this targets
-        # the file by path rather than via `--global`: see the copy of this step
-        # in the `test-non-gui` job.
-        run: |
-          set -uo pipefail
-          cfg="$HOME/.gitconfig"
-          echo "cred-evict: runner=${RUNNER_NAME:-?} home=$HOME"
-          if [ ! -f "$cfg" ]; then
-            echo "cred-evict: removed 0 (no $cfg on this runner - nothing reusable to poison)"
-            exit 0
-          fi
-          echo "cred-evict: inspecting $cfg"
-          removed=0
-          while IFS= read -r key; do
-            [ -n "$key" ] || continue
-            case "$key" in
-              http.*.extraheader|http.*.extraHeader) ;;
-              url.*x-access-token*) ;;
-              *) continue ;;
-            esac
-            echo "cred-evict:   removing '$key' (value withheld)"
-            git config --file "$cfg" --unset-all "$key" 2>/dev/null || true
-            git config --file "$cfg" --remove-section "${key%.*}" 2>/dev/null || true
-            removed=$((removed + 1))
-          done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
-          # Recount in PURE BASH. `grep` and `sed` are NOT on PATH in a raw
-          # `run:` step on these nix-darwin runners -- the first version of
-          # this step used `grep -ciE` here, grep exited 127, `|| true`
-          # swallowed it, and the step printed "removed 1 key(s);  still
-          # present" with an EMPTY count. That is precisely the failure this
-          # step is supposed to be immune to: a verification that silently
-          # verifies nothing and still reads like a pass. No external
-          # commands in the check.
-          left=0
-          while IFS= read -r k; do
-            case "$k" in
-              *extraheader*|*extraHeader*|*x-access-token*) left=$((left + 1)) ;;
-            esac
-          done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
-          echo "cred-evict: removed $removed credential-bearing key(s); $left still present"
-          if [ "$removed" -eq 0 ]; then
-            echo "cred-evict: NOTHING FOUND - this host was already clean, mode 1 did not apply here"
-          fi
-          if [ "$left" -ne 0 ]; then
-            echo "cred-evict: WARNING $left credential-shaped key(s) SURVIVED the sweep"
-          fi
-          echo "cred-evict: keys remaining in $cfg:"
-          while IFS= read -r k; do echo "  $k"; done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
+        # Before any git operation: a stale owner-scoped extraHeader in this
+        # reused runner's ~/.gitconfig outranks checkout's fresh one. A remote
+        # action, so it needs no checkout; the rationale is in its action.yml.
+        uses: metacraft-labs/metacraft-github-actions/evict-stale-git-credentials@2c12f82a56d5000bd47c42ad8c25a3596820057c
 
       - name: Checkout
         # Only so that `uses: ./.github/actions/setup-nix` below resolves; no
@@ -5335,123 +5186,10 @@ jobs:
           owner: metacraft-labs
 
       - name: Evict stale git credentials from this runner's persistent home
-        # MODE 1 of the self-hosted checkout outage, and the fix for it.
-        #
-        # SYMPTOM. On m3-mcl-004 and m3-mcl-005, `actions/checkout` died three
-        # times 20s apart with
-        #   fatal: could not read Username for 'https://github.com':
-        #   terminal prompts disabled
-        # one line after it installed a freshly minted App token as
-        # `http.https://github.com/.extraheader`. m3-mcl-001 and m3-mcl-006 ran
-        # the identical step in the same run and succeeded. The variable is the
-        # HOST, not the token.
-        #
-        # MECHANISM (reproduced exactly, against the real github.com):
-        #   git config --local  http.https://github.com/.extraheader  <FRESH>
-        #   git config --global http.https://github.com/metacraft-labs/.extraHeader <STALE>
-        #   git ls-remote https://github.com/metacraft-labs/codetracer
-        #   -> fatal: could not read Username for 'https://github.com'
-        # Git resolves `http.<url>.*` by LONGEST matching URL prefix, so the
-        # owner-scoped `.../metacraft-labs/` key WINS over checkout's broader
-        # `https://github.com/` key. `git config --get-urlmatch http <url>`
-        # confirms only one header is applied -- this is not a duplicate-header
-        # 400, it is checkout's fresh credential being silently replaced by a
-        # dead one. GitHub answers 401, git falls back to a credential prompt,
-        # prompts are disabled, and you get the message above. The message is
-        # the SYMPTOM OF A 401; it is not evidence that no credential existed.
-        #
-        # WHY IT SURVIVES. actions/checkout COPIES `$HOME/.gitconfig` into
-        # `_temp/<uuid>/.gitconfig` and overrides HOME before its own `--global`
-        # writes. So the runner's persistent `~/.gitconfig` IS in effect during
-        # the failing fetch -- an earlier fix for this same message was written
-        # to `--global` and landed in the throwaway temp copy that the failing
-        # step never read. That is why this step targets `$HOME/.gitconfig` BY
-        # PATH rather than via `--global`: `--global` follows XDG and can
-        # resolve to `~/.config/git/config`, which checkout does NOT copy, so a
-        # `--global --unset` can report success while leaving the actual
-        # offending file untouched.
-        #
-        # CONFIRMED ON THE HOSTS, not merely reproduced. A six-leg diagnostic
-        # (run 33729089916) dumped `git config --list --show-origin` from the
-        # m3 pool before checkout. m3-mcl-004 and m3-mcl-005 -- the two that
-        # failed -- carried, in `/private/var/lib/github-runners/mcl-00N/.gitconfig`:
-        #     http.https://github.com/metacraft-labs/.extraheader  (553 bytes)
-        # m3-mcl-001 -- which succeeded -- had the SAME seven other keys and
-        # NOT that one (243-byte file vs 856-byte file). One variable, and it
-        # is this key. This step then removed it on m3-mcl-004 and the very
-        # next `Checkout` on that host went green.
-        #
-        # STILL UNKNOWN: WHO WRITES IT. `configure-git-auth.sh` in
-        # metacraft-labs/metacraft-github-actions installs exactly this key but
-        # deliberately passes it through `$GITHUB_ENV`, which is job-scoped, so
-        # on its documented path nothing should reach this file. Something on
-        # these runners writes it anyway (mcl-004's copy was stamped 08:15 on
-        # the day of the outage). Until that writer is found this step is a
-        # mitigation, not a cure -- it runs before every checkout precisely
-        # because the poison can come back.
-        #
-        # WHY IT IS NEVER LEGITIMATE. An `http.*.extraHeader` in a home
-        # directory that is reused across jobs is a minted installation token
-        # outliving the job that minted it: dead within the hour, and a live
-        # secret readable by whatever runs next until then. Nothing should carry
-        # one across jobs -- `configure-git-auth.sh` deliberately passes its
-        # credential through `$GITHUB_ENV`, which is job-scoped, precisely so
-        # this file stays clean. Anything found here is residue.
-        #
-        # COUNT WHAT IS REMOVED. `--unset` on a key that is not there exits
-        # cleanly and reads exactly like a fix that worked, so this step reports
-        # how many keys it removed and prints what is left. "removed 0" is a
-        # real, reportable result: it means this host was clean and mode 1 is
-        # not what broke this job.
-        #
-        # Credential-FREE `url.https://github.com/.insteadOf` rewrites are
-        # deliberately preserved: they carry no secret, they are inert, and
-        # `.gitmodules` resolution depends on them.
-        run: |
-          set -uo pipefail
-          cfg="$HOME/.gitconfig"
-          echo "cred-evict: runner=${RUNNER_NAME:-?} home=$HOME"
-          if [ ! -f "$cfg" ]; then
-            echo "cred-evict: removed 0 (no $cfg on this runner - nothing reusable to poison)"
-            exit 0
-          fi
-          echo "cred-evict: inspecting $cfg"
-          removed=0
-          while IFS= read -r key; do
-            [ -n "$key" ] || continue
-            case "$key" in
-              http.*.extraheader|http.*.extraHeader) ;;
-              url.*x-access-token*) ;;
-              *) continue ;;
-            esac
-            echo "cred-evict:   removing '$key' (value withheld)"
-            git config --file "$cfg" --unset-all "$key" 2>/dev/null || true
-            git config --file "$cfg" --remove-section "${key%.*}" 2>/dev/null || true
-            removed=$((removed + 1))
-          done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
-          # Recount in PURE BASH. `grep` and `sed` are NOT on PATH in a raw
-          # `run:` step on these nix-darwin runners -- the first version of
-          # this step used `grep -ciE` here, grep exited 127, `|| true`
-          # swallowed it, and the step printed "removed 1 key(s);  still
-          # present" with an EMPTY count. That is precisely the failure this
-          # step is supposed to be immune to: a verification that silently
-          # verifies nothing and still reads like a pass. No external
-          # commands in the check.
-          left=0
-          while IFS= read -r k; do
-            case "$k" in
-              *extraheader*|*extraHeader*|*x-access-token*) left=$((left + 1)) ;;
-            esac
-          done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
-          echo "cred-evict: removed $removed credential-bearing key(s); $left still present"
-          if [ "$removed" -eq 0 ]; then
-            echo "cred-evict: NOTHING FOUND - this host was already clean, mode 1 did not apply here"
-          fi
-          if [ "$left" -ne 0 ]; then
-            echo "cred-evict: WARNING $left credential-shaped key(s) SURVIVED the sweep"
-          fi
-          echo "cred-evict: keys remaining in $cfg:"
-          while IFS= read -r k; do echo "  $k"; done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
+        # Before any git operation: a stale owner-scoped extraHeader in this
+        # reused runner's ~/.gitconfig outranks checkout's fresh one. A remote
+        # action, so it needs no checkout; the rationale is in its action.yml.
+        uses: metacraft-labs/metacraft-github-actions/evict-stale-git-credentials@2c12f82a56d5000bd47c42ad8c25a3596820057c
 
       - name: Checkout
         uses: actions/checkout@v5
@@ -5500,7 +5238,16 @@ jobs:
       # find through ``test_harness::find_beam_recorder()`` (built per leg
       # below), are members of this repo's develop set, so the
       # "Provision dependency siblings from repro.lock" step above clones
-      # them, on both legs, at the revisions repro.lock pins.
+      # them at repro.lock's revisions -- all but the private two, which the
+      # public lock cannot pin (bbf7dbed4a6); they are cloned below at
+      # flake.lock's (run 44864106832: build.rs panicked without them).
+
+      - name: Read the private siblings' pins
+        id: private_pins
+        run: >-
+          nix develop . --command bash ci/lib/sibling-pin-outputs.sh
+          native_recorder=flake:codetracer-native-recorder
+          native_backend=flake:codetracer-native-backend
 
       - name: Mint a token for the clones below
         # An installation token lives an hour, and the clones below come after
@@ -5512,6 +5259,24 @@ jobs:
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      - name: Clone codetracer-native-recorder
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-native-recorder
+          ref: ${{ steps.private_pins.outputs.native_recorder }}
+          path: ${{ github.workspace }}/../codetracer-native-recorder
+          gh-token: ${{ steps.late_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Clone codetracer-native-backend
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-native-backend
+          ref: ${{ steps.private_pins.outputs.native_backend }}
+          path: ${{ github.workspace }}/../codetracer-native-backend
+          gh-token: ${{ steps.late_token.outputs.token }}
+          submodules: 'true'
 
       - name: Clone python-recorder (macOS)
         if: matrix.platform == 'macos'
@@ -5958,61 +5723,10 @@ jobs:
           owner: metacraft-labs
 
       - name: Evict stale git credentials from this runner's persistent home
-        # MODE 1 of the self-hosted checkout outage. A stale, owner-scoped
-        # `http.https://github.com/metacraft-labs/.extraHeader` left in the
-        # runner's reused `~/.gitconfig` OUTRANKS the fresh broader header
-        # actions/checkout installs (git matches `http.<url>.*` by longest URL
-        # prefix), so checkout authenticates with a dead token, GitHub answers
-        # 401, and git dies on `could not read Username`. checkout COPIES
-        # `$HOME/.gitconfig` into its temp HOME, so this file is live during the
-        # failing fetch. Full rationale, the reproduction, and why this targets
-        # the file by path rather than via `--global`: see the copy of this step
-        # in the `test-non-gui` job.
-        run: |
-          set -uo pipefail
-          cfg="$HOME/.gitconfig"
-          echo "cred-evict: runner=${RUNNER_NAME:-?} home=$HOME"
-          if [ ! -f "$cfg" ]; then
-            echo "cred-evict: removed 0 (no $cfg on this runner - nothing reusable to poison)"
-            exit 0
-          fi
-          echo "cred-evict: inspecting $cfg"
-          removed=0
-          while IFS= read -r key; do
-            [ -n "$key" ] || continue
-            case "$key" in
-              http.*.extraheader|http.*.extraHeader) ;;
-              url.*x-access-token*) ;;
-              *) continue ;;
-            esac
-            echo "cred-evict:   removing '$key' (value withheld)"
-            git config --file "$cfg" --unset-all "$key" 2>/dev/null || true
-            git config --file "$cfg" --remove-section "${key%.*}" 2>/dev/null || true
-            removed=$((removed + 1))
-          done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
-          # Recount in PURE BASH. `grep` and `sed` are NOT on PATH in a raw
-          # `run:` step on these nix-darwin runners -- the first version of
-          # this step used `grep -ciE` here, grep exited 127, `|| true`
-          # swallowed it, and the step printed "removed 1 key(s);  still
-          # present" with an EMPTY count. That is precisely the failure this
-          # step is supposed to be immune to: a verification that silently
-          # verifies nothing and still reads like a pass. No external
-          # commands in the check.
-          left=0
-          while IFS= read -r k; do
-            case "$k" in
-              *extraheader*|*extraHeader*|*x-access-token*) left=$((left + 1)) ;;
-            esac
-          done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
-          echo "cred-evict: removed $removed credential-bearing key(s); $left still present"
-          if [ "$removed" -eq 0 ]; then
-            echo "cred-evict: NOTHING FOUND - this host was already clean, mode 1 did not apply here"
-          fi
-          if [ "$left" -ne 0 ]; then
-            echo "cred-evict: WARNING $left credential-shaped key(s) SURVIVED the sweep"
-          fi
-          echo "cred-evict: keys remaining in $cfg:"
-          while IFS= read -r k; do echo "  $k"; done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
+        # Before any git operation: a stale owner-scoped extraHeader in this
+        # reused runner's ~/.gitconfig outranks checkout's fresh one. A remote
+        # action, so it needs no checkout; the rationale is in its action.yml.
+        uses: metacraft-labs/metacraft-github-actions/evict-stale-git-credentials@2c12f82a56d5000bd47c42ad8c25a3596820057c
 
       - name: Checkout
         uses: actions/checkout@v5
@@ -7084,61 +6798,10 @@ jobs:
           fi
 
       - name: Evict stale git credentials from this runner's persistent home
-        # MODE 1 of the self-hosted checkout outage. A stale, owner-scoped
-        # `http.https://github.com/metacraft-labs/.extraHeader` left in the
-        # runner's reused `~/.gitconfig` OUTRANKS the fresh broader header
-        # actions/checkout installs (git matches `http.<url>.*` by longest URL
-        # prefix), so checkout authenticates with a dead token, GitHub answers
-        # 401, and git dies on `could not read Username`. checkout COPIES
-        # `$HOME/.gitconfig` into its temp HOME, so this file is live during the
-        # failing fetch. Full rationale, the reproduction, and why this targets
-        # the file by path rather than via `--global`: see the copy of this step
-        # in the `test-non-gui` job.
-        run: |
-          set -uo pipefail
-          cfg="$HOME/.gitconfig"
-          echo "cred-evict: runner=${RUNNER_NAME:-?} home=$HOME"
-          if [ ! -f "$cfg" ]; then
-            echo "cred-evict: removed 0 (no $cfg on this runner - nothing reusable to poison)"
-            exit 0
-          fi
-          echo "cred-evict: inspecting $cfg"
-          removed=0
-          while IFS= read -r key; do
-            [ -n "$key" ] || continue
-            case "$key" in
-              http.*.extraheader|http.*.extraHeader) ;;
-              url.*x-access-token*) ;;
-              *) continue ;;
-            esac
-            echo "cred-evict:   removing '$key' (value withheld)"
-            git config --file "$cfg" --unset-all "$key" 2>/dev/null || true
-            git config --file "$cfg" --remove-section "${key%.*}" 2>/dev/null || true
-            removed=$((removed + 1))
-          done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
-          # Recount in PURE BASH. `grep` and `sed` are NOT on PATH in a raw
-          # `run:` step on these nix-darwin runners -- the first version of
-          # this step used `grep -ciE` here, grep exited 127, `|| true`
-          # swallowed it, and the step printed "removed 1 key(s);  still
-          # present" with an EMPTY count. That is precisely the failure this
-          # step is supposed to be immune to: a verification that silently
-          # verifies nothing and still reads like a pass. No external
-          # commands in the check.
-          left=0
-          while IFS= read -r k; do
-            case "$k" in
-              *extraheader*|*extraHeader*|*x-access-token*) left=$((left + 1)) ;;
-            esac
-          done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
-          echo "cred-evict: removed $removed credential-bearing key(s); $left still present"
-          if [ "$removed" -eq 0 ]; then
-            echo "cred-evict: NOTHING FOUND - this host was already clean, mode 1 did not apply here"
-          fi
-          if [ "$left" -ne 0 ]; then
-            echo "cred-evict: WARNING $left credential-shaped key(s) SURVIVED the sweep"
-          fi
-          echo "cred-evict: keys remaining in $cfg:"
-          while IFS= read -r k; do echo "  $k"; done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
+        # Before any git operation: a stale owner-scoped extraHeader in this
+        # reused runner's ~/.gitconfig outranks checkout's fresh one. A remote
+        # action, so it needs no checkout; the rationale is in its action.yml.
+        uses: metacraft-labs/metacraft-github-actions/evict-stale-git-credentials@2c12f82a56d5000bd47c42ad8c25a3596820057c
 
       - name: Checkout CodeTracer
         uses: actions/checkout@v5

@@ -331,9 +331,15 @@ type
       ## pointer keeps the two together.
     kind*: LayoutNodeKind
     pane*: PaneKind
-      ## Meaningful only when `kind == lnPane`; `PaneKind.low` otherwise, and a
-      ## caller must branch on `kind` first. Not an `Option` because the branch
-      ## is already mandatory for every other field here.
+      ## Meaningful only when `kind == lnPane` AND `contributedPane` is empty;
+      ## `PaneKind.low` otherwise, and a caller must branch on `kind` first.
+      ## Not an `Option` because the branch is already mandatory for every
+      ## other field here.
+    contributedPane*: string
+      ## The leaf's contributed pane id, or `""` for a built-in pane and for
+      ## every container. A copied string, like every field here: a caller
+      ## that reads `pane` without checking this would name `paneEditor` for an
+      ## extension's tab — `paneRef` is the reading that cannot.
     title*: string
     weight*: float
     childCount*: int
@@ -352,9 +358,16 @@ proc nodeInfoAtPath*(root: LayoutNode; path: string): Option[NodeInfo] =
     return none(NodeInfo)
   some(NodeInfo(
     path: path, kind: node.kind,
-    pane: (if node.kind == lnPane: node.pane else: PaneKind.low),
+    pane: (if node.kind == lnPane and not node.isContributed: node.pane
+           else: PaneKind.low),
+    contributedPane: (if node.isContributed: node.contributedPane else: ""),
     title: node.title, weight: node.weight, childCount: node.children.len,
     activeIndex: (if node.kind == lnStack: node.activeIndex else: -1)))
+
+func paneRef*(info: NodeInfo): PaneRef =
+  ## A leaf's identity in its own namespace. Only meaningful for a leaf.
+  if info.contributedPane.len > 0: contributedRef(info.contributedPane)
+  else: builtinRef(info.pane)
 
 proc parentPath*(path: string): Option[string] =
   ## The path of the node one level up, or `none` for the root — which has no
@@ -378,6 +391,11 @@ proc childPathOf*(path: string; index: int): string =
 proc panePath*(layout: Layout; kind: PaneKind): Option[string] =
   ## The path of the leaf holding `kind`, or `none` when it is not placed.
   let leaf = layout.tree.find(kind)
+  if leaf.isNil: none(string) else: nodePath(layout.tree, leaf)
+
+proc panePath*(layout: Layout; r: PaneRef): Option[string] =
+  ## The path of the leaf holding the pane `r` names, in either namespace.
+  let leaf = layout.tree.find(r)
   if leaf.isNil: none(string) else: nodePath(layout.tree, leaf)
 
 # ---------------------------------------------------------------------------
@@ -801,8 +819,9 @@ proc dropIndicationOf*(interaction: Interaction): DropIndication =
     result.kind = diRootBand
     result.side = t.edge
 
-proc beginResize*(layout: Layout; pane: PaneKind): Option[Interaction] =
-  ## Start resizing the region holding `pane` against its siblings.
+proc beginResize*(layout: Layout; pane: PaneRef): Option[Interaction] =
+  ## Start resizing the region holding `pane` — in either namespace — against
+  ## its siblings.
   ##
   ## `none` when there is nothing to resize: the pane is not placed, it is the
   ## whole root, or its parent is a STACK — tabs share one region, so there is
@@ -821,6 +840,10 @@ proc beginResize*(layout: Layout; pane: PaneKind): Option[Interaction] =
     weights.add(effectiveWeight(c))
   some(Interaction(kind: ikResizingSplit, node: path.get, proposed: weights,
                    divider: none(SplitSide)))
+
+proc beginResize*(layout: Layout; pane: PaneKind): Option[Interaction] =
+  ## `beginResize` for a built-in pane.
+  beginResize(layout, builtinRef(pane))
 
 proc beginResizeDivider*(layout: Layout; containerPath: string;
                          divider: int): Option[Interaction] =

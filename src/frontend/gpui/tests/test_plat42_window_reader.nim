@@ -82,8 +82,7 @@ proc columnFrame(bands: openArray[(int, int)]): GrayImage =
   for (y, gray) in bands: result.rect(0, 200, y, y + 1, gray)
 
 proc splits(img: GrayImage; gutterTone: int): seq[GutterRun] =
-  splitRect(img, Rect(x: 0, y: 0, w: 200, h: 300), vertical = false,
-            minGutter = MinInteriorRowGutter, gutterTone = gutterTone)
+  rowSplits(img, Rect(x: 0, y: 0, w: 200, h: 300), separatorTone = gutterTone)
 
 suite "PLAT-42 window reader: a sticky-scroll shadow is not a splitter":
   const

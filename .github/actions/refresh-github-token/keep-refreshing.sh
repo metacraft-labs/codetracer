@@ -80,8 +80,12 @@ minted_at() {
 }
 
 [ -n "$cred_dir" ] && echo "$$" >"$cred_dir/github-token-refresher.pid"
+# It ends with the job that started it: a persistent runner does not end it,
+# and one started on 2026-11-19 was still minting tokens two days later.
+# shellcheck source=ci/lib/job-lifetime.sh disable=SC1091
+. "$(dirname "${BASH_SOURCE[0]}")/../../../ci/lib/job-lifetime.sh"
 next_try=0
-while true; do
+while job_still_running; do
 	now="$(date +%s)"
 	age=$((now - $(minted_at)))
 	requested=0

@@ -20,7 +20,9 @@ permissions:
 jobs:
   plugin-transport-darwin:
     runs-on: aarch64-darwin  # CIP-5: nix macOS job -> self-hosted m3 (aarch64-darwin)
-    timeout-minutes: 60
+    # The first run (44851939713) spent 55 minutes realising the dev shell and
+    # its siblings before the suite started, and was cancelled at 60.
+    timeout-minutes: 180
     steps:
       - name: Mint installation token for cross-repo sibling access
         id: ci_token
@@ -31,24 +33,10 @@ jobs:
           owner: metacraft-labs
 
       - name: Evict stale git credentials from this runner's persistent home
-        # The same step as `origin-dap-macos` (codetracer.yml), for the same
-        # reason: a stale extraHeader in the reused ~/.gitconfig outranks the
-        # fresh one actions/checkout installs. Pure bash: grep and sed are not
-        # on PATH in a raw `run:` step on these runners.
-        run: |
-          set -uo pipefail
-          cfg="$HOME/.gitconfig"
-          [ -f "$cfg" ] || exit 0
-          while IFS= read -r key; do
-            [ -n "$key" ] || continue
-            case "$key" in
-              http.*.extraheader|http.*.extraHeader) ;;
-              url.*x-access-token*) ;;
-              *) continue ;;
-            esac
-            git config --file "$cfg" --unset-all "$key" 2>/dev/null || true
-            git config --file "$cfg" --remove-section "${key%.*}" 2>/dev/null || true
-          done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
+        # Before any git operation: a stale owner-scoped extraHeader in this
+        # reused runner's ~/.gitconfig outranks checkout's fresh one. A remote
+        # action, so it needs no checkout; the rationale is in its action.yml.
+        uses: metacraft-labs/metacraft-github-actions/evict-stale-git-credentials@2c12f82a56d5000bd47c42ad8c25a3596820057c
 
       - name: Checkout
         uses: actions/checkout@v5

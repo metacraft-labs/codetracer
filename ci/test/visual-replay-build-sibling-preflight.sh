@@ -50,3 +50,56 @@ for required_file in "${REQUIRED_BUILD_SIBLING_FILES[@]}"; do
 		exit 1
 	fi
 done
+
+# io-mon and nim-cli-spec are a matched pair too, from io-mon efe6dc5 on: the
+# `io-mon` binary's command line is a clispec description (`io_mon/cli`, which
+# cmd/io_mon_snoop.nim imports), and io-mon's `config.nims` resolves the library
+# through `CLI_SPEC_SRC`, by default the `../nim-cli-spec/src` sibling. Without
+# it, or with a nim-cli-spec that predates a module io-mon imports, the CLI
+# build a test lane runs from this checkout dies late with
+#
+#     cannot open file: clispec
+#     cannot open file: clispec/splice
+#
+# The requirement is read from the io-mon checked out here rather than standing
+# in the list above: every `import clispec` / `import clispec/<module>` line
+# in its `src/io_mon` must find its module. An io-mon older than efe6dc5 has
+# none, and a workspace provisioned for one carries no nim-cli-spec. The
+# library half (`io_mon`, `io_mon/depfile`, the shim) never imports clispec.
+#
+# Only those two spellings, one module to a line and unindented, are read
+# (they are the ones io-mon writes); any other is left to the compiler. So is
+# a nim-cli-spec that has every module and an older API: the revision to
+# provision is the one io-mon pins.
+# ci/test/visual-replay-build-sibling-preflight-test.sh covers both sides.
+#
+# A set `CLI_SPEC_SRC` is the only place io-mon's build looks, even when it is
+# empty, so `-` and not `:-`.
+cli_spec_src="${CLI_SPEC_SRC-$WORKSPACE_ROOT/nim-cli-spec/src}"
+cli_spec_shown="../nim-cli-spec/src"
+if [[ -n ${CLI_SPEC_SRC+set} ]]; then
+	cli_spec_shown="\$CLI_SPEC_SRC ('$CLI_SPEC_SRC')"
+fi
+io_mon_modules=()
+for io_mon_module in "$WORKSPACE_ROOT"/io-mon/src/io_mon/*.nim; do
+	if [[ -f $io_mon_module ]]; then
+		io_mon_modules+=("$io_mon_module")
+	fi
+done
+io_mon_clispec_imports=()
+if [[ ${#io_mon_modules[@]} -gt 0 ]]; then
+	io_mon_clispec_imports_text="$(sed -n \
+		's/^import[[:space:]]\{1,\}\(clispec\(\/[A-Za-z0-9_]\{1,\}\)*\)[[:space:]]*$/\1/p' \
+		"${io_mon_modules[@]}")"
+	if [[ -n $io_mon_clispec_imports_text ]]; then
+		mapfile -t io_mon_clispec_imports < <(printf '%s\n' "$io_mon_clispec_imports_text" | sort -u)
+	fi
+fi
+for module in ${io_mon_clispec_imports[@]+"${io_mon_clispec_imports[@]}"}; do
+	if [[ ! -f $cli_spec_src/$module.nim ]]; then
+		echo "Missing required visual replay build sibling source: $cli_spec_shown/$module.nim" >&2
+		echo "  the io-mon checked out here imports $module for its command line (io-mon config.nims: CLI_SPEC_SRC);" >&2
+		echo "  clone nim-cli-spec at the revision io-mon pins (nim-cli-spec in io-mon's .github/sibling-repos)" >&2
+		exit 1
+	fi
+done

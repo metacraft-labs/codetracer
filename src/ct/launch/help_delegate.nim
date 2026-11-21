@@ -58,6 +58,12 @@ import
   ./path_completion,
   confutils/[ defs, runtime_surface, clispec_config ]
 
+# Only the launcher's per-level version choice. A plain `import` would also
+# bring `component_roots`' level list and env-var constants, which this module
+# still spells itself (with no "self" level).
+from ./plugin_components import selectedVersionsAt, loadCtrcPins
+from ../../common/plugin_model import CtrcPin
+
 export defs, runtime_surface
 
 const
@@ -375,6 +381,10 @@ type
     levelIdx*: int        ## 0 = user, 1 = $COMPONENTS_PATH, 2 = system, 3 = distro
     levelLabel*: string   ## human label for the provenance column
     isHelpDelegate*: bool ## true if the capabilities file declares help-delegate
+    relisted*: bool
+      ## true for a later directory's version of a name an earlier directory
+      ## already lists (see :proc:`scanInstalledComponents`). Its
+      ## ``declaredCommands`` are then only the commands that reach it.
     description*: string  ## description from the capabilities file (when present)
     declaredCommands*: seq[string]
       ## command names declared in the capabilities file, in the order
@@ -391,14 +401,6 @@ type
   ComponentLevel = object
     path: string
     label: string
-
-func splitComponentDirName(dirName: string):
-    tuple[name, version: string] =
-  ## ``<component>@<version>`` directory layout, per launcher spec.
-  let atIdx = dirName.rfind('@')
-  if atIdx < 0:
-    return (dirName, "")
-  (dirName[0 ..< atIdx], dirName[atIdx + 1 .. ^1])
 
 const reservedCapabilityKeywords* = [
     "name", "version", "bin", "description", "help-delegate",
@@ -500,25 +502,60 @@ proc collectComponentLevels(): seq[ComponentLevel] =
         label: "distro")
 
 proc scanInstalledComponents*(): seq[InstalledComponent] =
-  ## Enumerate every ``<component>@<version>/capabilities`` file under
-  ## the configured component roots. Higher-priority directories come
-  ## first; for any single component, the first directory wins.
+  ## Enumerate the installed components under the configured component
+  ## roots, as the launcher resolves them. Higher-priority directories come
+  ## first, and so does the directory whose version of a component the
+  ## launcher prefers.
+  ##
+  ## A NAME CAN BE LISTED MORE THAN ONCE, because the launcher routes by
+  ## command and not by name. As ``plugin_components`` describes it, it takes
+  ## the first directory whose selected version of some component declares
+  ## the command. With ``foo@2`` declaring only ``cmd-v2`` in the user
+  ## directory and ``foo@1`` declaring ``cmd-v1`` in a system one,
+  ## ``ct cmd-v1`` then runs ``foo@1``. So a later directory's version of an
+  ## already listed name is listed too (``relisted``), when it declares a
+  ## command that no entry from an earlier directory declares. Its
+  ## ``declaredCommands`` keep only those commands. A later version of a
+  ## listed name whose every command is declared earlier is left out.
+  ## Consumers take the first entry that declares a command.
+  ##
+  ## The help delegate itself is never relisted: its commands come from the
+  ## running binary, whichever versions are installed.
+  ##
+  ## Within one directory the version is the launcher's choice
+  ## (``plugin_components.selectedVersionsAt``: a ``.ctrc`` pin, then
+  ## ``active/<name>``, then the highest), made before its ``capabilities``
+  ## file is read. It used to be whichever ``<name>@<version>`` the
+  ## directory listing returned first, which is not an order.
   let levels = collectComponentLevels()
+  var pins: seq[CtrcPin] = @[]
+  try:
+    discard loadCtrcPins(getCurrentDir(), pins)
+  except CatchableError:
+    # No working directory: no `.ctrc` walk, as the launcher's own
+    # `getcwd` failure gives none. `CODETRACER_CTRC_PATH` was the
+    # other way to reach one, and `loadCtrcPins` read it first.
+    pins = @[]
   var seen = initTable[string, bool]()
+  # Every command declared by an entry listed so far, in any directory
+  # searched before the current one.
+  var declaredEarlier = initTable[string, bool]()
   for idx, lvl in levels:
     if not dirExists(lvl.path): continue
-    for kind, child in walkDir(lvl.path):
-      if kind != pcDir: continue
-      let capPath = child / "capabilities"
+    let firstAtLevel = result.len
+    for entry in selectedVersionsAt(lvl.path, pins):
+      # An empty version: this level offers nothing for the name
+      # (a pin or `active` link naming an absent version).
+      if entry.selection.version.len == 0: continue
+      let capPath = lvl.path / (entry.name & "@" & entry.selection.version) /
+                    "capabilities"
       if not fileExists(capPath): continue
       var comp = InstalledComponent(
         capPath: capPath,
         levelIdx: idx,
         levelLabel: lvl.label)
-      let (defaultName, defaultVersion) =
-        splitComponentDirName(child.lastPathPart)
-      comp.name = defaultName
-      comp.version = defaultVersion
+      comp.name = entry.name
+      comp.version = entry.selection.version
       try:
         parseCapabilitiesFile(readFile(capPath), comp)
       except CatchableError:
@@ -527,9 +564,24 @@ proc scanInstalledComponents*(): seq[InstalledComponent] =
         # safe and keep going" stance.
         continue
       if comp.name.len == 0: continue
-      if seen.getOrDefault(comp.name, false): continue
-      seen[comp.name] = true
+      if seen.getOrDefault(comp.name, false):
+        # The name is listed from an earlier directory. This version is
+        # listed as well only for the commands that reach it.
+        if comp.name == helpDelegateComponentName: continue
+        var reached: seq[string] = @[]
+        for c in comp.declaredCommands:
+          if not declaredEarlier.getOrDefault(c, false):
+            reached.add c
+        if reached.len == 0: continue
+        comp.relisted = true
+        comp.declaredCommands = reached
       result.add comp
+    # Only now: two components in ONE directory do not shadow each other
+    # here, as they did not before a name could be listed twice.
+    for i in firstAtLevel ..< result.len:
+      seen[result[i].name] = true
+      for c in result[i].declaredCommands:
+        declaredEarlier[c] = true
 
 # ---------------------------------------------------------------------------
 # Component binary execution: run `<binary> ct-describe-commands`.
@@ -699,6 +751,14 @@ proc gatherInstalledSurfaces(asm0: var HelpAssembly) =
       comp.surface = selfSurface()
     else:
       comp.surface = runDescribeCommands(comp)
+      if comp.relisted:
+        # Only the commands that reach this version. Its other commands run
+        # from an earlier directory, and merging them here would replace
+        # that version's descriptions with this one's.
+        var kept: seq[RuntimeCommand] = @[]
+        for c in comp.surface.commands:
+          if c.name in comp.declaredCommands: kept.add c
+        comp.surface.commands = kept
     asm0.installed[i] = comp
 
 proc mergeInstalledIntoUnified(asm0: var HelpAssembly) =
@@ -717,9 +777,15 @@ proc detectUpgradeCommands(asm0: var HelpAssembly) =
   ## given component but not present in the installed component's
   ## describe output. These are surfaced under
   ## "Commands (available with upgrade)" in the help screen.
+  ##
+  ## A component can be listed more than once (see
+  ## ``scanInstalledComponents``). Its installed version is the first entry's,
+  ## the one the launcher prefers, and a command any of its entries describes
+  ## already runs and needs no upgrade.
   var installedByName = initTable[string, InstalledComponent]()
   for comp in asm0.installed:
-    installedByName[comp.name] = comp
+    if comp.name notin installedByName:
+      installedByName[comp.name] = comp
   for entry in asm0.registry:
     let installed = installedByName.getOrDefault(entry.name)
     if installed.name.len == 0: continue
@@ -727,10 +793,13 @@ proc detectUpgradeCommands(asm0: var HelpAssembly) =
     if installed.version == entry.latest: continue
     for cmdName in entry.commands:
       var found = false
-      for c in installed.surface.commands:
-        if c.name == cmdName:
-          found = true
-          break
+      for comp in asm0.installed:
+        if comp.name != entry.name: continue
+        for c in comp.surface.commands:
+          if c.name == cmdName:
+            found = true
+            break
+        if found: break
       if not found:
         var rc = newRuntimeCommand(cmdName)
         for c2 in asm0.merged.commands:
@@ -830,7 +899,9 @@ proc renderInstalledSection(asm0: HelpAssembly): string =
     line.add padRight(comp.version, versionWidth + 2)
     line.add "(" & comp.levelLabel & ")"
     let latest = asm0.latestByComponent.getOrDefault(comp.name, "")
-    if latest.len > 0 and latest != comp.version:
+    # A relisted row is an older version kept for its own commands; the
+    # component's first row says whether a newer one is available.
+    if latest.len > 0 and latest != comp.version and not comp.relisted:
       line.add "  [" & latest & " available]"
     result.add line & "\n"
   result.add "\n"
@@ -965,8 +1036,9 @@ proc findComponentForCommand*(cmdName: string): InstalledComponent =
   ## Return the highest-priority installed component whose capability
   ## file declares ``cmdName``. Returns an empty component (``name ==
   ## ""``) if no installed component handles it. ``scanInstalledComponents``
-  ## already returns the per-component first-wins list in priority
-  ## order, so we just take the first hit.
+  ## returns its entries in the launcher's priority order, and lists a
+  ## component again from a later directory when that version declares a
+  ## command nothing earlier does, so we just take the first hit.
   for comp in scanInstalledComponents():
     if comp.name == helpDelegateComponentName: continue
     if cmdName in comp.declaredCommands:

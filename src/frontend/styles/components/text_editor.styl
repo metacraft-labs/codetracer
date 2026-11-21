@@ -1340,7 +1340,10 @@ else
 // THE GLYPH COLUMN (Editor-Pane.md MC.5): Monaco's glyph margin, one lane, one
 // mark per line, centred. The hint is `gutter.breakpoint.hint`, a colour of its
 // own, distinct from the enabled breakpoint's red and the disabled one's ground.
-.monaco-editor .margin-view-overlays .cgmr
+// Monaco draws these `cgmr` nodes in `.glyph-margin-widgets`, not in
+// `.margin-view-overlays`: a rule scoped to the latter matched nothing, and the
+// breakpoint disc was never painted.
+.monaco-editor .cgmr
   &.gutter-glyph-breakpoint,
   &.gutter-glyph-breakpoint-disabled,
   &.gutter-glyph-breakpoint-tracepoint,

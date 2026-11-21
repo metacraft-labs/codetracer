@@ -14,8 +14,9 @@ name: zgui front-end
 # and 2026-11-08): it refuses the drift, and with the drift allowed it
 # refuses the lock's cargo pin.
 #
-# isonim-zgui is not in repro.lock (nothing in this repository's dependency
-# graph reaches it but the zgui front-end), so its revision is pinned here.
+# isonim-zgui is private, so the public repro.lock can neither declare nor pin
+# it (ci/test/sibling-provisioning-test.sh UNLOCKED_SIBLINGS); its revision is
+# ci/toolchain.pin's PRIVATE_SIBLING_ISONIM_ZGUI, which each job reads.
 
 on:
   push:
@@ -24,14 +25,12 @@ on:
       - 'src/frontend/zgui/**'
       - 'src/frontend/view_vocabulary/**'
       - '.github/workflows/zgui.yml'
+      - 'ci/toolchain.pin'
   workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-
-env:
-  ISONIM_ZGUI_REV: a432efd1eb79787996ed96e5724c6e37f076fafa
 
 jobs:
   linux:
@@ -93,6 +92,12 @@ jobs:
       - name: Check out the pinned isonim-zgui revision
         run: |
           set -euo pipefail
+          # Bash builtins only: the darwin runner has no sed before the dev shell.
+          ISONIM_ZGUI_REV=""
+          while IFS= read -r line; do
+            [[ "$line" =~ ^PRIVATE_SIBLING_ISONIM_ZGUI=([0-9a-f]{40})$ ]] && ISONIM_ZGUI_REV="${BASH_REMATCH[1]}"
+          done <ci/toolchain.pin
+          [ -n "$ISONIM_ZGUI_REV" ] || { echo "::error::ci/toolchain.pin has no 40-hex PRIVATE_SIBLING_ISONIM_ZGUI"; exit 1; }
           git -C "${GITHUB_WORKSPACE}/../isonim-zgui" fetch --quiet origin "${ISONIM_ZGUI_REV}" || true
           git -C "${GITHUB_WORKSPACE}/../isonim-zgui" checkout --quiet --detach "${ISONIM_ZGUI_REV}"
           git -C "${GITHUB_WORKSPACE}/../isonim-zgui" log --oneline -1
@@ -205,6 +210,12 @@ jobs:
       - name: Check out the pinned isonim-zgui revision
         run: |
           set -euo pipefail
+          # Bash builtins only: the darwin runner has no sed before the dev shell.
+          ISONIM_ZGUI_REV=""
+          while IFS= read -r line; do
+            [[ "$line" =~ ^PRIVATE_SIBLING_ISONIM_ZGUI=([0-9a-f]{40})$ ]] && ISONIM_ZGUI_REV="${BASH_REMATCH[1]}"
+          done <ci/toolchain.pin
+          [ -n "$ISONIM_ZGUI_REV" ] || { echo "::error::ci/toolchain.pin has no 40-hex PRIVATE_SIBLING_ISONIM_ZGUI"; exit 1; }
           git -C "${GITHUB_WORKSPACE}/../isonim-zgui" fetch --quiet origin "${ISONIM_ZGUI_REV}" || true
           git -C "${GITHUB_WORKSPACE}/../isonim-zgui" checkout --quiet --detach "${ISONIM_ZGUI_REV}"
           git -C "${GITHUB_WORKSPACE}/../isonim-zgui" log --oneline -1

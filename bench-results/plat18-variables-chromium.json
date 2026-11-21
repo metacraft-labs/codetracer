@@ -1,0 +1,116 @@
+[
+  {
+    "name": "plat18/variables/chromium/step-total/js-direct",
+    "unit": "ms",
+    "value": 15.545,
+    "extra": "load1=71.35 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one chromium page; one repetition is one locals update with the 600-member node OPEN\" core_ms=15.545 host_ms=0.000 min=9.455 max=147.205 p99=123.660 bytes_crossed=0 ops=0 rows=602"
+  },
+  {
+    "name": "plat18/variables/chromium/expand-total/js-direct",
+    "unit": "ms",
+    "value": 972.31,
+    "extra": "load1=71.35 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one chromium page; one repetition is the 600-member node expands: 600 rows appear in one update\" core_ms=972.310 host_ms=0.000 min=457.215 max=5810.595 p99=3869.140 bytes_crossed=0 ops=0 rows=602"
+  },
+  {
+    "name": "plat18/variables/chromium/mount-total/js-direct",
+    "unit": "ms",
+    "value": 3.815,
+    "extra": "load1=71.35 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one chromium page; one repetition is the pane's first render, the node collapsed\" core_ms=3.815 host_ms=0.000 min=1.980 max=1449.585 p99=184.205 bytes_crossed=0 ops=0 rows=602"
+  },
+  {
+    "name": "plat18/variables/chromium/collapse-total/js-direct",
+    "unit": "ms",
+    "value": 5.2,
+    "extra": "load1=71.35 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one chromium page; one repetition is the 600 rows are removed\" core_ms=5.200 host_ms=0.000 min=2.920 max=166.605 p99=77.465 bytes_crossed=0 ops=0 rows=602"
+  },
+  {
+    "name": "plat18/variables/chromium/step-total/js-crossing",
+    "unit": "ms",
+    "value": 16.36,
+    "extra": "load1=71.35 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one chromium page; one repetition is one locals update with the 600-member node OPEN\" core_ms=16.235 host_ms=0.120 min=7.855 max=254.820 p99=99.285 bytes_crossed=656 ops=24 rows=602"
+  },
+  {
+    "name": "plat18/variables/chromium/expand-total/js-crossing",
+    "unit": "ms",
+    "value": 1234.63,
+    "extra": "load1=71.35 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one chromium page; one repetition is the 600-member node expands: 600 rows appear in one update\" core_ms=1107.560 host_ms=92.850 min=603.260 max=6264.780 p99=5985.575 bytes_crossed=1335988 ops=63633 rows=602"
+  },
+  {
+    "name": "plat18/variables/chromium/mount-total/js-crossing",
+    "unit": "ms",
+    "value": 4.715,
+    "extra": "load1=71.35 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one chromium page; one repetition is the pane's first render, the node collapsed\" core_ms=4.035 host_ms=0.510 min=2.675 max=130.315 p99=103.145 bytes_crossed=9671 ops=292 rows=602"
+  },
+  {
+    "name": "plat18/variables/chromium/collapse-total/js-crossing",
+    "unit": "ms",
+    "value": 5.58,
+    "extra": "load1=71.35 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one chromium page; one repetition is the 600 rows are removed\" core_ms=2.995 host_ms=2.410 min=3.150 max=171.325 p99=148.305 bytes_crossed=9795 ops=634 rows=602"
+  },
+  {
+    "name": "plat18/variables/chromium/step-total/wasm-crossing",
+    "unit": "ms",
+    "value": 1.265,
+    "extra": "load1=71.35 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one chromium page; one repetition is one locals update with the 600-member node OPEN\" core_ms=1.150 host_ms=0.105 min=0.700 max=149.535 p99=71.100 bytes_crossed=656 ops=24 rows=602"
+  },
+  {
+    "name": "plat18/variables/chromium/expand-total/wasm-crossing",
+    "unit": "ms",
+    "value": 133.695,
+    "extra": "load1=71.35 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one chromium page; one repetition is the 600-member node expands: 600 rows appear in one update\" core_ms=39.945 host_ms=90.395 min=72.630 max=2759.120 p99=2623.370 bytes_crossed=1335988 ops=63633 rows=602"
+  },
+  {
+    "name": "plat18/variables/chromium/mount-total/wasm-crossing",
+    "unit": "ms",
+    "value": 0.78,
+    "extra": "load1=71.35 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one chromium page; one repetition is the pane's first render, the node collapsed\" core_ms=0.290 host_ms=0.495 min=0.465 max=12.750 p99=11.340 bytes_crossed=9671 ops=292 rows=602"
+  },
+  {
+    "name": "plat18/variables/chromium/collapse-total/wasm-crossing",
+    "unit": "ms",
+    "value": 2.655,
+    "extra": "load1=71.35 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one chromium page; one repetition is the 600 rows are removed\" core_ms=0.295 host_ms=2.340 min=1.345 max=87.265 p99=66.450 bytes_crossed=9795 ops=634 rows=602"
+  },
+  {
+    "name": "plat18/variables/chromium/bytes-per-step",
+    "unit": "bytes",
+    "value": 656,
+    "extra": "load1=71.35 cpus=24 build=release samples=1 shape=\"a STRUCTURAL count, not a measurement: the flat wire size of the operations one step issues with 602 rows on screen. Identical on native, nim js and wasm32 \u2014 that is what makes the three comparable\" ops=24"
+  },
+  {
+    "name": "plat18/variables/chromium/bytes-per-expand",
+    "unit": "bytes",
+    "value": 1335988,
+    "extra": "load1=71.35 cpus=24 build=release samples=1 shape=\"the same count for the pane's largest update: 602 rows appearing at once\" ops=63633"
+  },
+  {
+    "name": "plat18/variables/chromium/cold-start/js-direct",
+    "unit": "ms",
+    "value": 1386.625,
+    "extra": "load1=71.35 cpus=24 build=release samples=9 shape=\"the MEDIAN of 9 loads, each in a FRESH renderer process (a second load in one process would not be cold), the arms rotated. Script fetch, parse and evaluate, plus (wasm) compile, instantiate and run main, to the point where the entry points exist\" min=710.8 max=1750.8 target<=20%-regression-vs-js-direct"
+  },
+  {
+    "name": "plat18/variables/chromium/cold-start/js-crossing",
+    "unit": "ms",
+    "value": 2082.905,
+    "extra": "load1=71.35 cpus=24 build=release samples=9 shape=\"the MEDIAN of 9 loads, each in a FRESH renderer process (a second load in one process would not be cold), the arms rotated. Script fetch, parse and evaluate, plus (wasm) compile, instantiate and run main, to the point where the entry points exist\" min=426.9 max=7834.7 target<=20%-regression-vs-js-direct"
+  },
+  {
+    "name": "plat18/variables/chromium/cold-start/wasm-crossing",
+    "unit": "ms",
+    "value": 602.73,
+    "extra": "load1=71.35 cpus=24 build=release samples=9 shape=\"the MEDIAN of 9 loads, each in a FRESH renderer process (a second load in one process would not be cold), the arms rotated. Script fetch, parse and evaluate, plus (wasm) compile, instantiate and run main, to the point where the entry points exist\" min=399.6 max=820.2 target<=20%-regression-vs-js-direct"
+  },
+  {
+    "name": "plat18/variables/chromium/artifact/js-direct",
+    "unit": "bytes",
+    "value": 2591159,
+    "extra": "load1=71.35 cpus=24 build=release samples=1 shape=\"wc -c of the nim js bundle, UNMINIFIED and unbundled \u2014 the shipped renderer goes through webpack, so this over-states what a user downloads; the gzip figures in the run log are the closer stand-in\""
+  },
+  {
+    "name": "plat18/variables/chromium/artifact/wasm",
+    "unit": "bytes",
+    "value": 684583,
+    "extra": "load1=71.35 cpus=24 build=release samples=1 shape=\"wc -c of the .wasm plus its emscripten glue, browser target (-sENVIRONMENT=web, no NODERAWFS). NOT PLAT-17's 1,178,754 B, which is the node build\""
+  }
+]

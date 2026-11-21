@@ -44,126 +44,99 @@
   "declaredAgentReadings": 6,
   "reviews": {
     "entry-shell": {
-      "reviewer": "claude-opus-5.5 (re-reading of the 2026-10-17 capture: shared first-run layout, editor at its declared 25% share)",
+      "reviewer": "claude-opus-5.5 (re-reading of the 2026-11-21 capture at codetracer agents 78b86c90681 plus this change: the transport marks redrawn, the breakpoint disc's selector repaired)",
       "reviewerKind": "agent",
-      "reviewedAt": "2026-10-17",
+      "reviewedAt": "2026-11-21",
       "viewportPixels": "1920x1080",
-      "againstUiBundleMtime": "2026-10-17T06:18:07.464Z",
-      "score": 6,
-      "summary": "Expected elements: present. The debug-controls strip with its transport icons; FILES | VCS | TESTS at 20%, the editor at 25% with its gutter and the execution mark on line 1, and the 55% region with STATE | SCRATCHPAD beside CALLTRACE | AGENT ACTIVITY over EVENT LOG | TERMINAL OUTPUT — exactly the brief's 20 / 25 / 55 arrangement, with no Timeline tab. The state pane is correctly empty at the entry and says so. A dense, consistent dark surface.",
+      "againstUiBundleMtime": "2026-11-20T21:20:42.399Z",
+      "score": 8,
+      "summary": "Expected elements: present. The nine transport marks are distinct and each reads as its operation (arc over a dot for next, an arrow down into a dot for step in, up out of one for step out, play and skip-to-start triangles), each reverse mark the mirror of its forward twin; FILES | VCS | TESTS, the editor with its gutter and the pointer on line 1, VARIABLES | SCRATCHPAD beside CALLTRACE | AGENT ACTIVITY over EVENT LOG | TERMINAL OUTPUT at 20/25/55. The state pane is empty with its own message, as an unstepped program should be.",
       "findings": [
         {
           "kind": "design",
-          "text": "Editor pane, every long line: at its declared 25% (480 px at 1920) the editor cuts lines 2-25 of the module docstring at its right edge with no wrap, so the pane the view is about shows the least of its content of the three columns."
-        },
-        {
-          "kind": "design",
-          "text": "Editor, def lines 29-44: the greyed inline chips read `__builtins__` — the interpreter's builtins dictionary, not a value the program bound — and are cut at the pane edge."
+          "text": "Call trace at 1920: the longest rows run into the pane's vertical scrollbar, so their ellipsis sits under it (`=> 6`, `=>.4`)."
         }
       ]
     },
     "stepped-editor": {
-      "reviewer": "claude-opus-5.5 (re-reading of the 2026-10-17 capture: shared first-run layout, editor at its declared 25% share)",
+      "reviewer": "claude-opus-5.5 (re-reading of the 2026-11-21 capture at codetracer agents 78b86c90681 plus this change: the transport marks redrawn, the breakpoint disc's selector repaired)",
       "reviewerKind": "agent",
-      "reviewedAt": "2026-10-17",
+      "reviewedAt": "2026-11-21",
       "viewportPixels": "1920x1080",
-      "againstUiBundleMtime": "2026-10-17T06:18:07.464Z",
-      "score": 6,
-      "summary": "Expected elements: present. One execution pointer, on line 44 (`def div(left, right):`), with the row's background distinguished; the state pane lists named values with types; the call trace marks `<__main__> #1` current; line numbers 22-65 are contiguous. The stop is at module level, so the variables are the module's.",
+      "againstUiBundleMtime": "2026-11-20T21:20:42.399Z",
+      "score": 8,
+      "summary": "Expected elements: present. One execution pointer on line 44 with the row's band; the state pane lists named, typed values ending in `…` where cut; the call trace marks `<__main__> #1` current; line numbers 22-65 contiguous.",
       "findings": [
         {
           "kind": "design",
-          "text": "State pane: the first eight rows are the interpreter's module attributes (`__builtins__`, `__cached__`, `__doc__`, `__file__`, `__loader__`, `__name__`, `__package__`, `__spec__`) before any name the program bound, and `__builtins__` / `__doc__` / `__file__` run past the pane's right edge."
-        },
-        {
-          "kind": "design",
-          "text": "Editor, def lines 29-44 and 53-57: the inline chips (`__builtins__`, `add <function add at 0`) are cut at the 25% editor's right edge, so they show only that a value exists."
+          "text": "Call trace at 1920: the longest rows' ellipsis sits under the pane's scrollbar."
         }
       ]
     },
     "advanced-state": {
-      "reviewer": "claude-opus-5.5 (re-reading of the 2026-10-17 capture: shared first-run layout, editor at its declared 25% share)",
+      "reviewer": "claude-opus-5.5 (re-reading of the 2026-11-21 capture at codetracer agents 78b86c90681 plus this change: the transport marks redrawn, the breakpoint disc's selector repaired)",
       "reviewerKind": "agent",
-      "reviewedAt": "2026-10-17",
+      "reviewedAt": "2026-11-21",
       "viewportPixels": "1440x900",
-      "againstUiBundleMtime": "2026-10-17T06:18:07.464Z",
-      "score": 3,
-      "summary": "Expected elements: DISTORTED at the narrower viewport. The scenario reached its state — line 56 inside the `OPERATIONS` table, inline value chips beside lines 53-57, a state pane that differs from `stepped-editor`'s (it now holds `div`) — but this block requires that at the narrower viewport nothing is clipped, and the value text is cut mid-glyph. Reported first and rated below 4 per the brief's own rule; `PLAT35-PD1` stands.",
+      "againstUiBundleMtime": "2026-11-20T21:20:42.399Z",
+      "score": 7,
+      "summary": "Expected elements: present. Line 56 inside `OPERATIONS` with inline value chips on lines 53-57; the state pane differs from stepped-editor's (it holds `div`). At 1440 the clipping PLAT35-PD1 recorded is gone: every cut value ends in `…` (`add:<function add at 0x71…`, `__builtins__:a[(\"__name__…`), every cut call-trace row ends in `…` (`apply_op #4 ( symbol=\"+\", left=2…`), the pane titles and the watch field are whole.",
       "findings": [
         {
-          "kind": "missing-element",
-          "text": "Value text cut mid-glyph, the case this block names: state pane `add:<function add at 0x7fffe862c400> Ob`, `__file__:\"/home/zahary/m/codetracer/tes`; call-trace pane `evaluate #3 (expression=\"2 + 3\") =>`, `apply_op #4 (symbol=\"+\", left=2, r`. No ellipsis, no scrollbar."
-        },
-        {
-          "kind": "missing-element",
-          "text": "Truncated control text at 1440 wide: the state pane's watch field reads `Enter a watch expres`, cut mid-word."
-        },
-        {
           "kind": "design",
-          "text": "The inline value chips beside lines 53-57 are clipped to `add <fun` / `sub <fun`, so the annotation shows only that a value exists."
+          "text": "The inline value chips beside lines 53-57 are cut at the editor's right edge (`add <fun`); the editor is a code view that scrolls sideways, so this is the editor's overflow, not a table cell's."
         }
       ]
     },
     "returned-calltrace": {
-      "reviewer": "claude-opus-5.5 (re-reading of the 2026-10-17 capture: shared first-run layout, editor at its declared 25% share)",
+      "reviewer": "claude-opus-5.5 (re-reading of the 2026-11-21 capture at codetracer agents 78b86c90681 plus this change: the transport marks redrawn, the breakpoint disc's selector repaired)",
       "reviewerKind": "agent",
-      "reviewedAt": "2026-10-17",
+      "reviewedAt": "2026-11-21",
       "viewportPixels": "1440x900",
-      "againstUiBundleMtime": "2026-10-17T06:18:07.464Z",
-      "score": 5,
-      "summary": "Expected elements: present. The call trace marks `main #2` current with `evaluate #3` behind it; the editor shows `main`'s body with the pointer on line 110, the statement after the `evaluate(...)` call; the state pane is populated and labelled. The capture is correct; the polish is held back by clipping in the narrow editor and one overlap.",
+      "againstUiBundleMtime": "2026-11-20T21:20:42.399Z",
+      "score": 8,
+      "summary": "Expected elements: present. `main #2` is current in the call trace with `evaluate #3` behind it; the editor shows main's body with the pointer on line 110; the state pane is populated and labelled, its cut values ending in `…`.",
       "findings": [
         {
           "kind": "design",
-          "text": "Editor, top rows: the sticky-scroll header (`def evaluate(expression):` / `while index < len(tok`) is drawn over line 84, so two lines of text overlap at the top of the pane."
-        },
-        {
-          "kind": "design",
-          "text": "Narrow-viewport clipping: at its 25% share (360 px at 1440) the editor cuts `results.append(va`, `print(\"%s = %d\" %` and the loop control's chips at its right edge; state and call-trace values are cut too (`add:<function add at 0x7fffe862c400> Ol`, `evaluate #3 (expression=\"2 + 3\") =>`)."
+          "text": "The state pane's last visible row is cut by the pane's bottom edge mid-line; the pane scrolls."
         }
       ]
     },
     "continued-event-log": {
-      "reviewer": "claude-opus-5.5 (re-reading of the 2026-10-17 capture: shared first-run layout, editor at its declared 25% share)",
+      "reviewer": "claude-opus-5.5 (re-reading of the 2026-11-21 capture at codetracer agents 78b86c90681 plus this change: the transport marks redrawn, the breakpoint disc's selector repaired)",
       "reviewerKind": "agent",
-      "reviewedAt": "2026-10-17",
+      "reviewedAt": "2026-11-21",
       "viewportPixels": "1920x1080",
-      "againstUiBundleMtime": "2026-10-17T06:18:07.464Z",
-      "score": 7,
-      "summary": "Expected elements: present. The event-log table is populated with six distinct rows under `tick`, `#` and `output` headers, its footer reads `Rows 1 to 6 of 6`, the transport strip is present and the session ended without an error banner. A dense, legible table, and the editor shows the final `return results` with its value chip.",
+      "againstUiBundleMtime": "2026-11-20T21:20:42.399Z",
+      "score": 8,
+      "summary": "Expected elements: present. The event log holds seven rows under TICK, # and OUTPUT headers, aligned to them, with `Rows 1 to 7 of 7` in its footer; the transport strip is present and no error banner shows.",
       "findings": [
         {
           "kind": "design",
-          "text": "Event-log pane: the `tick` figures carry an underline bar that reads as a link or a progress bar; the header does not say what it measures."
-        },
-        {
-          "kind": "design",
-          "text": "The table shows no kind column by default (`tick`, `#`, `output`), so the block's `kind` column is one `Columns +` press away rather than on screen."
+          "text": "Call trace at 1920: the longest rows' ellipsis sits under the pane's scrollbar."
         }
       ]
     },
     "breakpoint-editor": {
-      "reviewer": "claude-opus-5.5 (re-reading of the 2026-10-17 capture: shared first-run layout, editor at its declared 25% share)",
+      "reviewer": "claude-opus-5.5 (re-reading of the 2026-11-21 capture at codetracer agents 78b86c90681 plus this change: the transport marks redrawn, the breakpoint disc's selector repaired)",
       "reviewerKind": "agent",
-      "reviewedAt": "2026-10-17",
+      "reviewedAt": "2026-11-21",
       "viewportPixels": "1440x900",
-      "againstUiBundleMtime": "2026-10-17T06:18:07.464Z",
-      "score": 5,
-      "summary": "Expected elements: present. A red breakpoint disc in the gutter on line 26 and the execution pointer on line 44 — different rows, different glyphs, different colours, both legible. This block does not carry the `nothing is clipped` clause, so the clipping below is a design finding rather than a missing element.",
+      "againstUiBundleMtime": "2026-11-20T21:20:42.399Z",
+      "score": 3,
+      "summary": "Expected elements: MISSING — the execution pointer. The breakpoint disc is back on line 26 (its rule was scoped to a Monaco container the glyph is not drawn in, and painted nothing; repaired), but the editor shows lines 8-43 while the program stands on line 44: the DOM lists line 44 as the editor's last row (`editor-row-count` last=44) and it is under the pane's bottom edge. That is PLAT35-PD4 — the editor's scroll is not re-normalised after its content grows — and it removes one of the two marks this block exists to show.",
       "findings": [
         {
-          "kind": "design",
-          "text": "The breakpoint disc and the execution pointer share one gutter lane at different rows, so they are distinguishable only because they never coincide; the block asks for different LANES."
-        },
-        {
-          "kind": "design",
-          "text": "Mid-glyph clipping at the narrower viewport, in the 360 px editor and the panes beside it: `\"\"\"Integer addition,`, `add:<function add at 0x7fffe862c400> Ob`, `evaluate #3 (expression=\"2 + 3\") =>`."
+          "kind": "missing-element",
+          "text": "No execution pointer or execution band on screen: line 44 is under the editor's bottom edge (PLAT35-PD4)."
         }
       ]
     }
   },
   "knownRed": {
     "_comment": [
+      "2026-11-21: PLAT35-PD1 (advanced-state, value text amputated at 1440) is RESOLVED — the desktop now ends cut state values and call-trace rows in `…` (Horizontal-Overflow.md §5.1) and the re-read scores 7 — and its entry is deleted. The quarantine now holds breakpoint-editor under PLAT35-PD4. The text below is the quarantine's original rationale and still applies.",
       "PLAT-35 — THE QUARANTINE, AND WHY IT IS NOT AN EXEMPTION LIST.",
       "",
       "One of the six tier-4 readings scores 3 (two did until PLAT-40 repaired `PLAT35-PD2`), and `score < 4` BLOCKS. `PLAT-35`",
@@ -230,12 +203,12 @@
     "declaredKnownRed": 1,
     "expiresOn": "2026-12-31",
     "scenarios": {
-      "advanced-state": {
-        "defect": "PLAT35-PD1",
+      "breakpoint-editor": {
+        "defect": "PLAT35-PD4",
         "subject": "front-end",
-        "owner": "codetracer-specs/Front-Ends/Electron-GUI.md — the spec that owns this front-end. It has no milestones file, so no milestone owns these panes today; the first Electron-GUI milestone inherits this, and `expiresOn` is what stops that from meaning nobody does.",
-        "measurement": "AT 1440x900 THE ELECTRON PANES AMPUTATE TEXT WITH NO ELISION AFFORDANCE. Measured 2026-09-21 off the capture at its declared viewport: the state pane draws `add:<function add at 0x7fffe7` and `__file__:\"/home/zahary/m/code`, the call-trace pane draws `evaluate #2 (expression=\"`, and the right-hand stack's header reads `AGENT ACTI...`. The value text has no ellipsis and no horizontal scrollbar, so nothing on screen says the value continues; the pane title at least carries an ellipsis. It is not elision, it is amputation, and the object identity a reader opened the pane for is the part removed.",
-        "remedy": "decide ONCE what this front-end does when a pane is narrower than its content — a middle ellipsis keeps the informative end of a `<function ... at 0x...>`, a horizontal scrollbar keeps all of it — and apply it consistently. IT IS NOT A MISSING AFFORDANCE: `text-overflow` appears 102 times across 37 of the 61 stylesheets in `src/frontend/styles/components/`, and `state.styl` alone uses `clip`, `ellipsis` and `visible` in six places. `.value-line-view-text` and `.value-expanded-view-text` are `display: flex` with `text-overflow: visible`, and on a flex row the property applies to the children — which that file's own comment on the current-line row already says."
+        "owner": "codetracer-specs/Front-Ends/Electron-GUI.md — the spec that owns this front-end; PLAT35-PD4 is filed in layout_questions.productDefectRegister() with the same owner and reviewBy 2026-12-31.",
+        "measurement": "AT 1440x900 THE EXECUTION LINE IS UNDER THE EDITOR'S BOTTOM EDGE. Measured 2026-11-21 off the capture at its declared viewport (codetracer agents 78b86c90681 plus this change): the program stands on line 44 (capture stoppedLine 44), the editor draws lines 8-43, and the DOM answers `editor-row-count rows=38;first=7;last=44` — the editor revealed line 44 as its last row and its content then grew. The pixel oracle (PLAT-39) reads no execution band in this frame for the same reason.",
+        "remedy": "re-normalise the editor's scroll when its content height changes after a move, so the execution line revealed by `revealLineInCenterIfOutsideViewport` stays inside the viewport (Monaco `onDidContentSizeChange`), then re-take this capture and its reading."
       }
     }
   }

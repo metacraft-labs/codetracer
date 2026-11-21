@@ -32,6 +32,22 @@
     "stepIn=79@22",
     "stepOut=110@37"
   ],
+  "entrySettle": {
+    "state": {
+      "line": 1,
+      "path": "test-programs/calc/main.py",
+      "rrTicks": 1,
+      "busy": false
+    },
+    "firstSample": {
+      "line": 1,
+      "path": "test-programs/calc/main.py",
+      "rrTicks": 1,
+      "busy": false
+    },
+    "polls": 2,
+    "waitedMs": 130
+  },
   "viewportCss": "1440x900",
   "capturePixels": "1440x900",
   "capture": "src/tests/visual/captures/electron/returned-calltrace.png",

@@ -69,11 +69,24 @@ app.whenReady().then(async () => {
     // COLD START — §4 metric 1, §5's first criterion and the one the user
     // named as the veto. One arm per renderer, because a cold start is a
     // property of a process's first moments and the page above is warm.
-    for (const arm of [
+    //
+    // CT_P18_COLDSTART_REPS loads, each arm in a fresh renderer every time,
+    // the arms rotated per repetition. One load is one sample of a quantity
+    // the host's scheduler moves by hundreds of milliseconds at high load,
+    // so the shell script publishes the MEDIAN of these.
+    const coldArms = [
       { name: 'js-direct', src: 'arm_js_direct.js', wasm: 0 },
       { name: 'js-crossing', src: 'arm_js_crossing.js', wasm: 0 },
       { name: 'wasm-crossing', src: 'arm_wasm.js', wasm: 1 },
-    ]) {
+    ];
+    const coldReps = Math.max(1, Number(process.env.CT_P18_COLDSTART_REPS || 1));
+    const coldOrder = [];
+    for (let rep = 0; rep < coldReps; rep++) {
+      for (let i = 0; i < coldArms.length; i++) {
+        coldOrder.push(coldArms[(i + rep) % coldArms.length]);
+      }
+    }
+    for (const arm of coldOrder) {
       const w = new BrowserWindow({
         show: false, width: 800, height: 600,
         webPreferences: { nodeIntegration: false, contextIsolation: false, webSecurity: false },

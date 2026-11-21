@@ -7438,7 +7438,7 @@
       "flake": false,
       "locked": {
         "lastModified": 1795125846,
-        "narHash": "sha256-+WsvZwqsaxEFW5kPG8Pr72oT/4OISYLb/0dJYWuyXrs=",
+        "narHash": "sha256-A3VXqZS1ImcgheXdNhjRGHlvE+LtPSJpIGMRXOolt50=",
         "owner": "metacraft-labs",
         "repo": "isonim",
         "rev": "b56bd098474244ce3eae401312b8a567cf74c30f",
@@ -7869,6 +7869,23 @@
         "owner": "nim-lang",
         "repo": "checksums",
         "rev": "0b8e46379c5bc1bf73d8b3011908389c60fb9b98",
+        "type": "github"
+      }
+    },
+    "nim-cli-spec": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1794844668,
+        "narHash": "sha256-Z24JH8oEKLM8++9wo6TfizvexTuRjAVFzNRVUGqGc78=",
+        "owner": "metacraft-labs",
+        "repo": "nim-cli-spec",
+        "rev": "c6a8806136e9d3c98875df16502841c3b627e9b4",
+        "type": "github"
+      },
+      "original": {
+        "owner": "metacraft-labs",
+        "repo": "nim-cli-spec",
+        "rev": "c6a8806136e9d3c98875df16502841c3b627e9b4",
         "type": "github"
       }
     },
@@ -13003,17 +13020,17 @@
     "noir": {
       "flake": false,
       "locked": {
-        "lastModified": 1792718477,
-        "narHash": "sha256-zFR5ompUbVJPFx0cx9SVOHj377obJzcVOAfUpCi9xko=",
+        "lastModified": 1795120076,
+        "narHash": "sha256-HTY/ArI5xvxnpA0ZKeACEU6R2i6k2ShrWSVeMLcHXSc=",
         "ref": "codetracer",
-        "rev": "a5e92b847ec95a7f20eadee36745b55d7c8f9659",
-        "revCount": 8650,
+        "rev": "f09f459714b839a5952b59e09ce0546a936c797e",
+        "revCount": 8656,
         "type": "git",
         "url": "https://github.com/metacraft-labs/noir.git"
       },
       "original": {
         "ref": "codetracer",
-        "rev": "a5e92b847ec95a7f20eadee36745b55d7c8f9659",
+        "rev": "f09f459714b839a5952b59e09ce0546a936c797e",
         "type": "git",
         "url": "https://github.com/metacraft-labs/noir.git"
       }
@@ -13865,6 +13882,7 @@
         "nim-acp": "nim-acp",
         "nim-agent-harbor": "nim-agent-harbor",
         "nim-agents": "nim-agents",
+        "nim-cli-spec": "nim-cli-spec",
         "nim-everywhere": "nim-everywhere",
         "nim-langserver": "nim-langserver",
         "nim-pty": "nim-pty",

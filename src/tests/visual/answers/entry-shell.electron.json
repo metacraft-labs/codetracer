@@ -39,13 +39,13 @@
     },
     {
       "question": "focus-order",
-      "value": "editor,commandPalette,filesystem,state,calltrace,eventLog",
+      "value": "commandPalette,filesystem,editor,state,calltrace,eventLog",
       "tier": "captured"
     }
   ],
   "provenance": {
-    "capturedAt": "2026-10-17T06:20:06.082Z",
-    "uiBundleBytes": 29332418,
-    "uiBundleMtime": "2026-10-17T06:18:07.464Z"
+    "capturedAt": "2026-11-21T00:04:56.269Z",
+    "uiBundleBytes": 43656873,
+    "uiBundleMtime": "2026-11-20T21:20:42.399Z"
   }
 }

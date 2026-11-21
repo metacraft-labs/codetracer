@@ -322,6 +322,7 @@ ui-selection
 ct-host-admission
 ct-host-manifest
 screen-oracle
+scenario-stages
 EOF
 }
 
@@ -374,6 +375,7 @@ test_lane_description() {
 	ui-selection) echo 'PLAT-1 --ui front-end selection, end to end: the real launcher, the real ct, the real TUI and a real ct host server' ;;
 	ct-host-admission) echo 'ct host admission, session isolation and lifetime, end to end: the real ct host refuses a client without its session secret or from a foreign origin, gives every client its own replay and session, and leaves no process behind when it is signalled or killed; and it refuses a trace container it cannot read with one error line naming the reason' ;;
 	ct-host-manifest) echo 'ct host --manifest slice selection, end to end: the real ct host opens the mcr_slices slice the replay start (or CODETRACER_START_SLICE_KEY) names, refuses one it does not list' ;;
+	scenario-stages) echo "the scenario pack's stage tool: what a stage decides without a product build (which fixture-cache entries are whole)" ;;
 	screen-oracle) echo "PLAT-39 unprivileged screen oracle: the committed record's gate, and the live pixel suite over the six Electron captures (just plat35-capture-electron) and the two GPUI window frames (the plat37-capture recipe, a compositor lane no workflow runs)" ;;
 	*)
 		echo "unknown lane '$1'" >&2
@@ -485,6 +487,12 @@ test_lane_recipe() {
 		# The pane-census regression needs no captured frames and has its own
 		# recipe, because delegation here bypasses the generic file runner.
 		echo "plat39-record-gate test-pane-census plat39-case-floor"
+		;;
+	scenario-stages)
+		# `ci/test/scenarios.sh stage-test` compiles each against the stage
+		# tool's own modules beside it, which is also how every scenario lane
+		# runs them first; the runner has no such path.
+		echo "scenario-stage-test"
 		;;
 	*) ;;
 	esac
@@ -2455,6 +2463,14 @@ test_lane_files() {
 		# says. `test_plat39_record.nim` asserts the committed record
 		# and runs anywhere.
 		_tlf_glob src/tests/visual/screen_oracle 'test_*.nim'
+		;;
+
+	scenario-stages)
+		# The stage tool's own suites, run first by every scenario lane. The
+		# first of them, `stage_cache_test.nim`, sat in NO lane and failed
+		# lint-nim's coverage check in run 44612896066; discovery over the
+		# directory keeps the next one in this lane.
+		_tlf_glob src/tests/scenarios/stages '*_test.nim'
 		;;
 
 	ui-selection)

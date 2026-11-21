@@ -67,7 +67,7 @@
     # THIS INPUT WAS A FLAKE.  Dropping ``flake = true`` is what let the pin
     # move to a branch that produces a trace this product can open.
     noir = {
-      url = "git+https://github.com/metacraft-labs/noir.git?ref=codetracer&rev=a5e92b847ec95a7f20eadee36745b55d7c8f9659";
+      url = "git+https://github.com/metacraft-labs/noir.git?ref=codetracer&rev=f09f459714b839a5952b59e09ce0546a936c797e";
       flake = false;
     };
 
@@ -449,6 +449,25 @@
     };
     nim-shm-gset = {
       url = "github:metacraft-labs/nim-shm-gset/0b2896adc65d0d62c0ee84af1356c909da2975d0";
+      flake = false;
+    };
+
+    # Non-flake input: the clispec library (nim-cli-spec, stdlib only), for
+    # the `io-mon` binary. From io-mon efe6dc5 on, its command line is declared
+    # with clispec (`src/io_mon/cli.nim`, and `cli_description.nim` from
+    # 8b8faa8; io-mon `config.nims` resolves the library through
+    # `CLI_SPEC_SRC`), so `ct-io-mon` in nix/packages/default.nix hands this to
+    # io-mon's build. `ct`'s own command line is built against the
+    # `libs/nim-cli-spec` submodule (config.nims), not this input. Pinned, like
+    # the two libraries above, at the revision repro.lock pins (the push gate
+    # requires the two locks to agree). The `io-mon` input locked today
+    # (5839ebac) predates efe6dc5 and reads none of it, and this pin is OLDER
+    # than a clispec io-mon builds against: io-mon needs the revision its own
+    # flake.nix and .github/sibling-repos pin (f6065a9c at efe6dc5, fcd5b309
+    # from 8b8faa8). Move this input and repro.lock's nim-cli-spec
+    # (`repro lock update`) in the change that moves `io-mon` past efe6dc5.
+    nim-cli-spec = {
+      url = "github:metacraft-labs/nim-cli-spec/c6a8806136e9d3c98875df16502841c3b627e9b4";
       flake = false;
     };
 

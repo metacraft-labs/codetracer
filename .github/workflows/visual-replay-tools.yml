@@ -91,13 +91,24 @@ jobs:
           } | tee -a "$GITHUB_OUTPUT"
           grep -q '^snapshot_codecs=[0-9a-f]\{40\}$' "$GITHUB_OUTPUT"
 
+      - name: Mint a token for the clones below
+        # An installation token lives an hour, and these clones come after
+        # 'Provision dependency siblings from repro.lock', which can take most
+        # of one on a cold runner: hand them a token minted here, not the
+        # job's first (ci/test/late-clone-token-test.py).
+        id: late_token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
       - name: Clone codetracer-native-backend
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-native-backend
           ref: ${{ steps.private_pins.outputs.native_backend }}
           path: ${{ github.workspace }}/../codetracer-native-backend
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
           submodules: 'true'
 
       - name: Clone codetracer-native-recorder
@@ -106,7 +117,7 @@ jobs:
           repo: metacraft-labs/codetracer-native-recorder
           ref: ${{ steps.private_pins.outputs.native_recorder }}
           path: ${{ github.workspace }}/../codetracer-native-recorder
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
           submodules: 'false'
 
       - name: Clone codetracer-visual-replay
@@ -115,7 +126,7 @@ jobs:
           repo: metacraft-labs/codetracer-visual-replay
           ref: ${{ steps.private_pins.outputs.visual_replay }}
           path: ${{ github.workspace }}/../codetracer-visual-replay
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
           submodules: 'false'
 
       - name: Clone codetracer-snapshot-codecs
@@ -124,7 +135,7 @@ jobs:
           repo: metacraft-labs/codetracer-snapshot-codecs
           ref: ${{ steps.private_pins.outputs.snapshot_codecs }}
           path: ${{ github.workspace }}/../codetracer-snapshot-codecs
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
           submodules: 'false'
 
       - name: Build ct-native-replay, ct_gfx_player and ct-mcr
@@ -155,6 +166,11 @@ jobs:
             isonim-gpui/rust/target/debug/libgpui_nim_shim.so
           )
           [ ! -e codetracer-visual-replay/ct-native-replay ] || files+=(codetracer-visual-replay/ct-native-replay)
+          # The store paths these run against (glibc-2.40-224, lldb,
+          # vulkan-loader, ...), which a shard realises after unpacking.
+          (cd codetracer && nix develop .#devShells.x86_64-linux.default --command bash ci/build/record-runtime-closure.sh \
+            ../codetracer-visual-replay/nix-runtime-closure.txt "${files[@]/#/../}")
+          files+=(codetracer-visual-replay/nix-runtime-closure.txt)
           tar -czf "${RUNNER_TEMP}/visual-replay-tools.tar.gz" "${files[@]}"
           ls -la "${RUNNER_TEMP}/visual-replay-tools.tar.gz"
 

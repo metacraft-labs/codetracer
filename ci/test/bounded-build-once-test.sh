@@ -71,9 +71,14 @@ check "the retry ran with REPRO_DAEMON=off" "retry env: $(sed -n 2p "$work/log")
 	grep -qx "call 2 REPRO_DAEMON=off" "$work/log"
 check "the first attempt kept the daemon" "first env: $(sed -n 1p "$work/log")" \
 	grep -qx "call 1 REPRO_DAEMON=unset" "$work/log"
-for f in ps-forest.txt zombies.txt repro-daemon.txt repro-daemon-log.txt; do
+for f in ps-forest.txt build-tree.txt zombies.txt repro-daemon.txt repro-daemon-log.txt; do
 	check "the stall's dump has ${f}" "no ${f} in the dump" test -s "$diag/daemon-stall/$f"
 done
+check "the dump was taken while the stalled build was alive (its process is in build-tree.txt)" \
+	"build-tree.txt: $(cat "$diag/daemon-stall/build-tree.txt" 2>/dev/null)" \
+	grep -q "sleep 600" "$diag/daemon-stall/build-tree.txt"
+check "the stalled build is gone after the attempt" "a 'sleep 600' from the fake build is still running" \
+	bash -c "! pgrep -f '^sleep 600\$' -u \"\$(id -u)\" >/dev/null"
 check "the dump holds the daemon's status and sessions" "repro-daemon.txt: $(cat "$diag/daemon-stall/repro-daemon.txt" 2>/dev/null)" \
 	grep -q "fake repro daemon sessions" "$diag/daemon-stall/repro-daemon.txt"
 check "each attempt's duration is printed" "no per-attempt lines: $out" \

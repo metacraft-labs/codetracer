@@ -162,8 +162,12 @@ while IFS= read -r candidate_name; do
 	[ -n "$candidate_name" ] || continue
 	locale_targets+=("$candidate_name")
 done < <(
-	printf '%s\n' "$drift_names" | grep -E '^[A-Z]' | head -2
-	printf '%s\n' "$drift_names" | grep -E '^nim-' | head -4
+	# Either set may be empty -- repro.lock has had no upper-case name since
+	# TermAssert left it -- and under errexit an empty `grep` here ended the
+	# substitution before the nim-* names were read ("has no upper-case or
+	# nim-* dependency", run 44864106832). Each half stands alone.
+	{ printf '%s\n' "$drift_names" | grep -E '^[A-Z]' || true; } | head -2
+	{ printf '%s\n' "$drift_names" | grep -E '^nim-' || true; } | head -4
 )
 
 # A locale whose ordering of THESE names differs from C's. Nothing is written

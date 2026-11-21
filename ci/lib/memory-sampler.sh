@@ -8,8 +8,12 @@
 # 43996043232). The last samples before such a kill name what held the memory;
 # the job uploads LOG when it does not succeed.
 #
-# Best effort: it never fails the job, and the runner ends it with the job.
+# Best effort: it never fails the job. It ends with the job: when the job's
+# Runner.Worker is gone (ci/lib/job-lifetime.sh), since a persistent runner
+# does not end it.
 set -u
+# shellcheck source=ci/lib/job-lifetime.sh disable=SC1091
+. "$(dirname "${BASH_SOURCE[0]}")/job-lifetime.sh"
 log="${1:?usage: memory-sampler.sh LOG [INTERVAL]}"
 interval="${2:-15}"
 top="${MEMORY_SAMPLER_TOP:-15}"
@@ -25,7 +29,7 @@ total() {
 	awk '/^MemTotal:/ {t=$2} /^MemAvailable:/ {a=$2} END {printf "host used %d MiB of %d MiB\n", (t-a)/1024, t/1024}' /proc/meminfo
 }
 
-while true; do
+while job_still_running; do
 	{
 		echo "=== $(date -u +%FT%TZ) $(total 2>/dev/null)"
 		# rss in KiB; args truncated so one line stays one line.

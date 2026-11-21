@@ -91,7 +91,12 @@ ct_nim_cache_root() {
 	[ -n "${checkout}" ] || checkout="$(pwd)"
 
 	tag="$(printf '%s' "${checkout}" | cksum | awk '{print $1}')"
-	printf '%s' "/tmp/ct-nim-cache/$(basename "${checkout}")-${tag}"
+	# Per account as well: /tmp is shared, and on the m3 runners each runner
+	# (mcl-001..006) is its own user, so a /tmp/ct-nim-cache created by one
+	# refused every other one ("mkdir: cannot create directory
+	# '/tmp/ct-nim-cache/codetracer-522654881': Permission denied", run
+	# 44864106832's macOS test-agent-api-contract lane).
+	printf '%s' "/tmp/ct-nim-cache-$(id -u)/$(basename "${checkout}")-${tag}"
 }
 
 # Run directly rather than sourced: print the root and exit. `${BASH_SOURCE[0]}`

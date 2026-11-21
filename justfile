@@ -4089,6 +4089,42 @@ test-plat18-slice:
   exec > >(tee test-logs/test-plat18-slice.log) 2>&1
   bash ci/test/plat18-electron-slice.sh
 
+# The same slice over a SECOND pane, Call Trace: 600 calls with their
+# arguments, a selection that moves on every step. The driver holds the three
+# arms to the same document (`checkParity`) as well as the same row counts.
+test-plat18-slice-calltrace:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-plat18-slice-calltrace.log) 2>&1
+  CT_P18_PANE=calltrace CT_P18_OUT=test-logs/plat18-slice-calltrace bash ci/test/plat18-electron-slice.sh
+
+# The slice in a BROWSER, not Electron: the built page served over HTTP and
+# opened in Playwright's Chromium and Firefox, both panes. The browser
+# front-end loads the WebAssembly core this way; Electron only resembles it.
+test-plat18-slice-browser:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-plat18-slice-browser.log) 2>&1
+  for host in chromium firefox; do
+    for pane in variables calltrace; do
+      CT_P18_HOST="${host}" CT_P18_PANE="${pane}" \
+        CT_P18_OUT="test-logs/plat18-slice-${pane}-${host}" \
+        bash ci/test/plat18-electron-slice.sh
+    done
+  done
+
+# The wasm32 developer profile builds the same program as `emcc`: every object
+# and the linked module byte-identical, the object cache used and never stale
+# after a header change. `ci/lib/wasm-cc.sh` is the wasm lanes' C compiler.
+test-wasm-dev-profile:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  mkdir -p test-logs
+  exec > >(tee test-logs/test-wasm-dev-profile.log) 2>&1
+  bash ci/test/wasm-dev-profile-test.sh
+
 # PLAT-18's fifth §5 criterion: the developer loop. One suite, compiled and run
 # on all three backends, interleaved, with the cache cleared per arm — which is
 # what a developer's edit does.
@@ -4232,6 +4268,10 @@ test-ct-test-certificates:
   mkdir -p test-logs
   exec > >(tee test-logs/test-ct-test-certificates.log) 2>&1
   echo "conformance vectors pin: $(cat src/ct_test/certificate_vectors.pin) (src/ct_test/certificate_vectors.pin)"
+  # The Nix package's monitor (`ct-io-mon`) is handed every source directory
+  # the io-mon this lane builds its monitor from reads. Here because this lane
+  # already requires the io-mon sibling (certificate_untracked_reads_test.nim).
+  bash ci/test/ct-io-mon-source-inputs.sh
   bash ci/lib/run-nim-test-lane.sh ct-test-certificates
 
 # CTC-3i: `ct test run` from the Nix package's own `bin/` — the package's
@@ -5583,6 +5623,11 @@ scenario-build *parts:
 # The scenario linter over every scenario: no step may reach application code.
 scenario-lint:
   bash ci/test/scenarios.sh lint
+
+# The scenario stage tool's own suites (src/tests/scenarios/stages/*_test.nim):
+# the `scenario-stages` test lane.
+scenario-stage-test:
+  bash ci/test/scenarios.sh stage-test
 
 # One flavour's lane: `terminal`, `gpui` or `electron` (the last two need a
 # display: run them under Xvfb, as `scenario-lane-xvfb` does).

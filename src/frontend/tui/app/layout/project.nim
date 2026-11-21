@@ -115,6 +115,25 @@ type
     activeTab*: int
       ## Index into `tabs`, or -1 when the pane is not stacked.
 
+  ContributedRegion* = object
+    ## One visible CONTRIBUTED pane — an extension's — and the cells it owns.
+    ##
+    ## A SEPARATE TYPE IN A SEPARATE LIST, not a `PaneRegion` with an extra
+    ## field, and the reason is every `region.pane == kind` loop in the
+    ## terminal: a contributed leaf's `pane` holds the enum's zero value
+    ## (`paneEditor`), so a contributed region carried in `regions` would be
+    ## painted, focused, hit-tested and resized as the editor by code that
+    ## never learned the second namespace. In `contributed` no such loop can
+    ## see it; the code that draws and focuses an extension's pane reads this
+    ## list by name.
+    id*: string
+      ## The qualified id (`<plugin>/<surface>`).
+    title*: string
+    area*: CellArea
+    tabs*: seq[string]
+    activeTab*: int
+      ## As `PaneRegion`'s: the enclosing stack's tab titles, or empty and -1.
+
   ProjectionStatus* = enum
     ## Why a projection is what it is.
     prOk = "ok"
@@ -143,6 +162,10 @@ type
     ## The result of projecting one `LayoutNode` onto one area.
     area*: CellArea
     regions*: seq[PaneRegion]
+      ## The BUILT-IN panes' regions.
+    contributed*: seq[ContributedRegion]
+      ## The contributed panes' regions. `regions` and `contributed` together
+      ## partition `area` (`coverageProblems(Projection)`).
     status*: ProjectionStatus
     problems*: seq[LayoutProblem]
       ## Whatever `validate` said, carried so a report can name it.
@@ -191,6 +214,10 @@ type
       ## How many cells share this problem — the size of the overlap or of the
       ## hole. "One cell differs" and "half the screen is missing" must not be
       ## the same report.
+    contributed*: string
+    otherContributed*: string
+      ## Set instead of `pane` / `other` when the claimant is a CONTRIBUTED
+      ## region (`coverageProblems(Projection)`); `""` otherwise.
 
 const
   DefaultProjectionPolicy* = when defined(release): ppDegrade else: ppPanic
@@ -212,14 +239,16 @@ proc cellCount*(a: CellArea): int =
 proc describe*(p: CoverageProblem): string =
   ## One line naming the kind, the pane(s) and the cell. "The regions do not
   ## partition the area" is not a diagnosis and this never emits one.
+  let first = if p.contributed.len > 0: p.contributed else: $p.pane
+  let second = if p.otherContributed.len > 0: p.otherContributed else: $p.other
   case p.kind
   of cpEmptyRegion:
-    "EmptyRegion: pane '" & $p.pane & "' was given no cells"
+    "EmptyRegion: pane '" & first & "' was given no cells"
   of cpOutsideArea:
-    "OutsideArea: pane '" & $p.pane & "' reaches outside the body area (" &
+    "OutsideArea: pane '" & first & "' reaches outside the body area (" &
       $p.cells & " cell(s), first at row " & $p.row & ", col " & $p.col & ")"
   of cpOverlap:
-    "Overlap: panes '" & $p.pane & "' and '" & $p.other & "' both claim " &
+    "Overlap: panes '" & first & "' and '" & second & "' both claim " &
       $p.cells & " cell(s), first at row " & $p.row & ", col " & $p.col
   of cpUncovered:
     "Uncovered: " & $p.cells & " cell(s) belong to no pane, first at row " &
@@ -327,6 +356,40 @@ proc coverageProblems*(regions: seq[PaneRegion]; area: CellArea):
                                other: PaneKind.low, row: firstRow,
                                col: firstCol, cells: uncovered)
 
+proc coverageProblems*(p: Projection): seq[CoverageProblem] =
+  ## `coverageProblems` over BOTH lists: the built-in regions and the
+  ## contributed ones must partition the area together. Run over stand-ins
+  ## for the contributed regions (so the cell walk is the one above, not a
+  ## second copy) whose problems are then renamed into the contributed fields.
+  var all = p.regions
+  for c in p.contributed:
+    all.add PaneRegion(pane: PaneKind.low, title: c.title, area: c.area)
+  let builtins = p.regions.len
+  # Index the stand-ins by area so a problem can be traced back: a problem
+  # names a pane, and the stand-ins all name `PaneKind.low`, so the AREA (and
+  # the first offending cell) is what identifies the claimant.
+  proc ownerAt(row, col: int; skip = -1): int =
+    for i, r in all:
+      if i != skip and r.area.contains(row, col): return i
+    -1
+  for prob in coverageProblems(all, p.area):
+    var q = prob
+    case prob.kind
+    of cpEmptyRegion, cpOutsideArea:
+      for i in builtins ..< all.len:
+        if all[i].area.row == prob.row and all[i].area.col == prob.col or
+           (prob.kind == cpOutsideArea and all[i].area.contains(prob.row, prob.col)):
+          q.contributed = p.contributed[i - builtins].id
+          break
+    of cpOverlap:
+      let a = ownerAt(prob.row, prob.col)
+      let b = ownerAt(prob.row, prob.col, a)
+      if a >= builtins: q.contributed = p.contributed[a - builtins].id
+      if b >= builtins: q.otherContributed = p.contributed[b - builtins].id
+    of cpUncovered:
+      discard
+    result.add q
+
 proc coveredCells*(regions: seq[PaneRegion]; area: CellArea): int =
   ## How many DISTINCT cells of `area` the regions cover.
   ##
@@ -345,6 +408,13 @@ proc coveredCells*(regions: seq[PaneRegion]; area: CellArea): int =
   for s in seen:
     if s:
       inc result
+
+proc coveredCells*(p: Projection): int =
+  ## `coveredCells` over both lists.
+  var all = p.regions
+  for c in p.contributed:
+    all.add PaneRegion(pane: PaneKind.low, area: c.area)
+  coveredCells(all, p.area)
 
 # ---------------------------------------------------------------------------
 # Integer distribution — the snap rule, kept where it can be tested alone
@@ -386,6 +456,12 @@ proc degradedProjection(node: LayoutNode; area: CellArea;
   result.regions.add PaneRegion(pane: chosen, title: $chosen, area: area,
                                 tabs: @[], activeTab: -1)
 
+proc contributedTabName*(id: string): string =
+  ## An untitled contributed tab's label: its surface's name, which is what
+  ## the extension called the pane (`<plugin>/<surface>`).
+  let s = surfaceOf(id)
+  if s.len > 0: s else: id
+
 proc weightShare(n: LayoutNode): float =
   ## A node's share of its parent's axis. `layout_model` documents `0` as
   ## "equal share with the other zero-weighted siblings", and one is the
@@ -419,7 +495,7 @@ proc projectLayout*(node: LayoutNode; area: CellArea;
 
   if area.width <= 0 or area.height <= 0:
     return degradedProjection(node, area, prNoSpace, @[])
-  if visiblePanes(node).len == 0:
+  if visiblePanes(node).len == 0 and visibleContributedPanes(node).len == 0:
     return degradedProjection(node, area, prEmptyLayout, @[])
 
   # ---- The Yoga tree. One handle per node, allocated depth-first. ----------
@@ -501,13 +577,21 @@ proc projectLayout*(node: LayoutNode; area: CellArea;
   # closure ("cannot be captured as it would violate memory safety"), and the
   # placement walk below is recursive, so it has to be one.
   var placed: seq[PaneRegion] = @[]
+  var placedContributed: seq[ContributedRegion] = @[]
 
   proc place(index: int; where: CellArea; tabs: seq[string]; active: int) =
     let n = handles[index]
     case n.kind
     of lnPane:
-      placed.add PaneRegion(pane: n.pane, title: n.title, area: where,
-                            tabs: tabs, activeTab: active)
+      if n.isContributed:
+        # AN EXTENSION'S PANE GETS ITS OWN REGION TYPE, IN ITS OWN LIST — see
+        # `ContributedRegion`: in `placed` it would be read as `paneEditor`.
+        placedContributed.add ContributedRegion(
+          id: n.contributedPane, title: n.title, area: where, tabs: tabs,
+          activeTab: active)
+      else:
+        placed.add PaneRegion(pane: n.pane, title: n.title, area: where,
+                              tabs: tabs, activeTab: active)
     of lnStack:
       # The active tab occupies the whole stack region; the tab strip is chrome
       # the VIEW draws inside that region, so the projection stays total.
@@ -519,7 +603,9 @@ proc projectLayout*(node: LayoutNode; area: CellArea;
       for c in n.children:
         # PLAT-45: an untitled tab (every tab of the shared default) takes
         # the terminal's own name for its pane, not the enum's spelling.
-        titles.add(if c.title.len > 0: c.title else: terminalPaneName(c.pane))
+        titles.add(if c.title.len > 0: c.title
+                   elif c.isContributed: contributedTabName(c.contributedPane)
+                   else: terminalPaneName(c.pane))
       place(kids[0], where, titles, n.activeIndex)
     of lnRow, lnColumn:
       let kids = childIndices[index]
@@ -561,11 +647,20 @@ proc projectLayout*(node: LayoutNode; area: CellArea;
   if noSpace:
     return degradedProjection(node, area, prNoSpace, @[])
   result.regions = placed
+  result.contributed = placedContributed
 
 proc regionFor*(p: Projection; kind: PaneKind): CellArea =
   ## The cells `kind` owns, or a zero area when it is not visible.
   for r in p.regions:
     if r.pane == kind:
+      return r.area
+  CellArea()
+
+proc regionForContributed*(p: Projection; id: string): CellArea =
+  ## The cells contributed pane `id` owns, or a zero area when it is not
+  ## visible.
+  for r in p.contributed:
+    if r.id == id:
       return r.area
   CellArea()
 
@@ -581,4 +676,6 @@ proc describe*(p: Projection): string =
   parts.add $p.status & " over " & $p.area
   for r in p.regions:
     parts.add $r.pane & "=" & $r.area
+  for r in p.contributed:
+    parts.add r.id & "=" & $r.area
   parts.join(" | ")

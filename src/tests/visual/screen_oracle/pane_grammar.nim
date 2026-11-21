@@ -308,6 +308,21 @@ func parseGutterDigits*(text: string): tuple[ok: bool, line: int] =
   if digits.len == 0: return (false, 0)
   (true, parseInt(digits))
 
+const NumberColumnConfusions* = [('a', '4')]
+  ## The glyph confusions `parseNumberColumn` forgives, each MEASURED: in the
+  ## GPUI window's gutter face the open-topped `4` reads `a` at every margin
+  ## and upscale tried (2026-11-21, `editor` window frame: `44` -> `a4`). Only
+  ## inside a crop of the line-number COLUMN, which holds digits and nothing
+  ## else; `parseGutterDigits` forgives none.
+
+func parseNumberColumn*(text: string): tuple[ok: bool, line: int] =
+  ## `parseGutterDigits` over a crop of the number column alone, with
+  ## `NumberColumnConfusions` mapped back to their digits first.
+  var t = text
+  for (seen, digit) in NumberColumnConfusions:
+    t = t.replace($seen, $digit)
+  parseGutterDigits(t)
+
 func isVisiblePrefixOf*(visible, full: string): bool =
   ## The declared comparison for `value`. `visible` is what the pane drew;
   ## `full` is what the DOM holds. Equality is the special case where the pane
@@ -517,6 +532,13 @@ func nameKeysMatch(a, b: string): bool =
   ## Two names agree by `variableNameKey`; a name the pane truncated
   ## (`isTruncatedName`) agrees with any name its visible stem begins.
   if variableNameKey(a) == variableNameKey(b): return true
+  # OCR LOSES A LEADING GLYPH of a short name drawn in the link colour: the
+  # GPUI window's `div` read `iv` on two of six frames (2026-11-21, the
+  # `state` and `calltrace` window frames), every other name exact. Only the
+  # FIRST character, only one, only for a name of at least three.
+  let (ka, kb) = (variableNameKey(a), variableNameKey(b))
+  if ka.len >= 2 and kb.len == ka.len + 1 and kb.endsWith(ka): return true
+  if kb.len >= 2 and ka.len == kb.len + 1 and ka.endsWith(kb): return true
   if isTruncatedName(a) and not isTruncatedName(b):
     let stem = variableNameKey(truncatedNameStem(a))
     return stem.len > 0 and variableNameKey(b).startsWith(stem)

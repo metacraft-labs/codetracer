@@ -27,3 +27,29 @@ if ! gzip -t "$archive" 2>"$err"; then
 fi
 tar -xzf "$archive" -C "$dest"
 echo "unpacked ${archive} ($(stat -c %s "$archive") bytes)"
+
+# The once-per-run jobs record the Nix store closure their binaries run
+# against (ci/build/record-runtime-closure.sh) as a nix-runtime-closure.txt
+# in what they pack. build-once links ct through repro's own Nix tool
+# provisioning, against a glibc and libraries the dev shell does not pull in,
+# and in run 44612896066 every GPUI shard's `ct record` exited 127 on the
+# missing glibc-2.40-66 loader; the visual-replay tools likewise name
+# glibc-2.40-224, lldb and vulkan-loader. Whatever of a closure this store
+# lacks is realised here (it is substitutable); what cannot be is named, since
+# a later step will fail on it.
+missing=()
+while IFS= read -r member; do
+	while IFS= read -r p; do
+		[ -n "$p" ] && [ ! -e "$p" ] && missing+=("$p")
+	done <"$dest/$member"
+done < <(tar -tzf "$archive" | grep -E '(^|/)nix-runtime-closure\.txt$' || true)
+if [ "${#missing[@]}" -gt 0 ]; then
+	mapfile -t missing < <(printf '%s\n' "${missing[@]}" | sort -u)
+	if command -v nix-store >/dev/null 2>&1 && nix-store --realise "${missing[@]}" >/dev/null 2>"$err"; then
+		echo "unpack-ct-build-products: realised ${#missing[@]} store path(s) of the products' runtime closure"
+	else
+		still=()
+		for p in "${missing[@]}"; do [ -e "$p" ] || still+=("$p"); done
+		echo "unpack-ct-build-products: ${#still[@]} store path(s) of the products' runtime closure are not in this store and could not be realised, so the binaries needing them will not run: ${still[*]} ($(tail -1 "$err" 2>/dev/null))" >&2
+	fi
+fi

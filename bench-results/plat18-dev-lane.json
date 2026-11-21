@@ -1,0 +1,80 @@
+[
+  {
+    "name": "plat18/dev-lane/cold/js",
+    "unit": "s",
+    "value": 10139.0,
+    "extra": "load1=83.18 cpus=24 commit=4c736b3e2f9 samples=1 shape=\"ONE full-lane run per arm, the arms run CONCURRENTLY (each saw the same host at the same moment), cold = an empty CT_NIM_CACHE_ROOT; ci/test/plat18-dev-lane.sh\" files=197"
+  },
+  {
+    "name": "plat18/dev-lane/cold/wasm",
+    "unit": "s",
+    "value": 13414.4,
+    "extra": "load1=83.18 cpus=24 commit=4c736b3e2f9 samples=1 shape=\"ONE full-lane run per arm, the arms run CONCURRENTLY (each saw the same host at the same moment), cold = an empty CT_NIM_CACHE_ROOT; ci/test/plat18-dev-lane.sh\" files=202"
+  },
+  {
+    "name": "plat18/dev-lane/cold/native",
+    "unit": "s",
+    "value": 18690.9,
+    "extra": "load1=83.18 cpus=24 commit=4c736b3e2f9 samples=1 shape=\"ONE full-lane run per arm, the arms run CONCURRENTLY (each saw the same host at the same moment), cold = an empty CT_NIM_CACHE_ROOT; ci/test/plat18-dev-lane.sh\" files=212"
+  },
+  {
+    "name": "plat18/dev-lane/cold/wasm-over-js",
+    "unit": "ratio",
+    "value": 1.323,
+    "extra": "load1=83.18 cpus=24 commit=4c736b3e2f9 samples=1 shape=\"the lane-total ratio; \u00a75 threshold 2.0\""
+  },
+  {
+    "name": "plat18/dev-lane/edit/js",
+    "unit": "s",
+    "value": 8374.0,
+    "extra": "load1=81.84 cpus=24 commit=4c736b3e2f9 samples=1 shape=\"ONE full-lane run per arm, the arms run CONCURRENTLY (each saw the same host at the same moment), cold = an empty CT_NIM_CACHE_ROOT; ci/test/plat18-dev-lane.sh\" files=197"
+  },
+  {
+    "name": "plat18/dev-lane/edit/wasm",
+    "unit": "s",
+    "value": 8392.4,
+    "extra": "load1=81.84 cpus=24 commit=4c736b3e2f9 samples=1 shape=\"ONE full-lane run per arm, the arms run CONCURRENTLY (each saw the same host at the same moment), cold = an empty CT_NIM_CACHE_ROOT; ci/test/plat18-dev-lane.sh\" files=202"
+  },
+  {
+    "name": "plat18/dev-lane/edit/native",
+    "unit": "s",
+    "value": 13176.9,
+    "extra": "load1=81.84 cpus=24 commit=4c736b3e2f9 samples=1 shape=\"ONE full-lane run per arm, the arms run CONCURRENTLY (each saw the same host at the same moment), cold = an empty CT_NIM_CACHE_ROOT; ci/test/plat18-dev-lane.sh\" files=212"
+  },
+  {
+    "name": "plat18/dev-lane/edit/wasm-over-js",
+    "unit": "ratio",
+    "value": 1.002,
+    "extra": "load1=81.84 cpus=24 commit=4c736b3e2f9 samples=1 shape=\"the lane-total ratio; \u00a75 threshold 2.0\""
+  },
+  {
+    "name": "plat18/dev-lane/typeedit/js",
+    "unit": "s",
+    "value": 7190.0,
+    "extra": "load1=108.21 cpus=24 commit=4c736b3e2f9 samples=1 shape=\"ONE full-lane run per arm, the arms run CONCURRENTLY (each saw the same host at the same moment), cold = an empty CT_NIM_CACHE_ROOT; ci/test/plat18-dev-lane.sh\" files=197"
+  },
+  {
+    "name": "plat18/dev-lane/typeedit/wasm",
+    "unit": "s",
+    "value": 7184.8,
+    "extra": "load1=108.21 cpus=24 commit=4c736b3e2f9 samples=1 shape=\"ONE full-lane run per arm, the arms run CONCURRENTLY (each saw the same host at the same moment), cold = an empty CT_NIM_CACHE_ROOT; ci/test/plat18-dev-lane.sh\" files=202"
+  },
+  {
+    "name": "plat18/dev-lane/typeedit/wasm-over-js",
+    "unit": "ratio",
+    "value": 0.999,
+    "extra": "load1=108.21 cpus=24 commit=4c736b3e2f9 samples=1 shape=\"the lane-total ratio; \u00a75 threshold 2.0\""
+  },
+  {
+    "name": "plat18/dev-lane/cold/wasm-over-js-per-suite-median",
+    "unit": "ratio",
+    "value": 1.69,
+    "extra": "load1=83.18 cpus=24 commit=4c736b3e2f9 samples=191 shape=\"median over the 191 suites both lanes run of the per-suite wall-time ratio, from each suite nimcache birth time; quartiles 0.96 and 3.10\""
+  },
+  {
+    "name": "plat18/dev-lane/cold/wasm-over-js-without-chord-lookup",
+    "unit": "ratio",
+    "value": 1.51,
+    "extra": "load1=83.18 cpus=24 commit=4c736b3e2f9 samples=190 shape=\"sum ratio over the common suites minus test_plat68_chord_lookup, which hit the 1800 s file limit on nim js only\""
+  }
+]

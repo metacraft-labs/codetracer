@@ -2,7 +2,7 @@
 ##
 ## Reads every pinned frame and prints what came back, so a human can look at
 ## the oracle's output next to the screenshots. Also re-derives the two
-## published thresholds (`OcrConfidenceFloor`, `GutterMedianThreshold`) over
+## published thresholds (`OcrConfidenceFloor`, `locatorThresholds`) over
 ## the current corpus and prints the candidate table, which is what makes them
 ## §36b parameters with visible losers rather than constants with a story.
 ##

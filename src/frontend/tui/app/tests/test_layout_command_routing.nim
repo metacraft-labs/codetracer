@@ -104,7 +104,10 @@ import ../theme/capabilities
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it.
-const ExpectedAssertions = 583
+const ExpectedAssertions = 597
+# 583 → 597: one more layout verb (`:close-pane`) — four checks in each of
+# the three geometries of the off-by-default sweep, and two in the
+# every-verb-reaches-the-binding sweep.
 # PLAT-48: 421 → 474 — the footer strip checks (one decoration, a strip, per
 # geometry: +40), the footer row before and after `:dock bottom`, and the
 # top strip counted apart from the bottom one.

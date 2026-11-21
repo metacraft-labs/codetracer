@@ -42,8 +42,10 @@ export class ProgramStateVariable {
     this.root = root;
   }
 
+  /** The variable's name, without the `: ` separator the label draws with it. */
   async name(): Promise<string> {
-    return (await this.root.locator(".value-name").textContent()) ?? "";
+    const label = (await this.root.locator(".value-name").first().textContent()) ?? "";
+    return label.trim().replace(/:$/, "").trim();
   }
 
   async valueType(): Promise<string> {
@@ -51,10 +53,9 @@ export class ProgramStateVariable {
   }
 
   async value(): Promise<string> {
-    return (
-      (await this.root.locator(".value-expanded-text").getAttribute("textContent")) ??
-      ""
-    );
+    // The drawn text. `getAttribute("textContent")` read an attribute no
+    // element has, so every value came back empty.
+    return ((await this.root.locator(".value-expanded-text").first().textContent()) ?? "").trim();
   }
 }
 

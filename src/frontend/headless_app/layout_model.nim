@@ -205,8 +205,9 @@ type
     ## classification CHANGES when an extension loads or unloads, and Nim
     ## forbids assigning a new discriminator to an existing object. The cost is
     ## that `builtin` is meaningless when `kind != prBuiltin` and `id` is
-    ## meaningless when it is; `paneRefOf` and `classify` are the only two
-    ## constructors, so the cost is paid in two places rather than everywhere.
+    ## meaningless when it is; `builtinRef`, `contributedRef`, `paneRefOf` and
+    ## `classify` are the constructors, so the cost is paid in four small
+    ## functions rather than everywhere.
     kind*: PaneRefKind
     builtin*: PaneKind
     id*: string
@@ -394,6 +395,14 @@ type
     ## region-occupying panes and that projection is untouched by this
     ## milestone.
     pane*: PaneKind
+      ## Meaningful only when `contributedPane` is empty — the same flat-record
+      ## rule `LayoutNode.pane` follows, for the same reason.
+    contributedPane*: string
+      ## A docked CONTRIBUTED pane's namespaced id, or `""` for a built-in one.
+      ## Written under its own JSON key (`contributedPane`, schema version 11),
+      ## so a docked extension pane is never read back as `paneEditor` —
+      ## `pane` holds the enum's zero value here, and every query consults
+      ## `isContributed` before reading it.
     title*: string
     edge*: LayoutEdge
     order*: int
@@ -420,6 +429,10 @@ type
       ## instead of appending it to the root. Persisted (`"beside"`);
       ## `none` for a pane that was never placed (the shared default's footer
       ## panels) or was docked alone in its container.
+    besideContributed*: string
+      ## `beside`'s contributed twin: the CONTRIBUTED pane this one sat beside
+      ## when it was docked, or `""`. At most one of the two is set; persisted
+      ## as `besideContributedPane`.
     weight*: float
       ## PLAT-48: the share the pane had in its container when it was docked,
       ## given back on restore (0 — the neutral share — when it had none).
@@ -476,14 +489,20 @@ type
       ## lists `lcAddPane` and programmatic stack creation, and an extension
       ## contributing a pane is precisely the caller those exist for."
       ##
-      ## TWO COMMAND KINDS RATHER THAN A WIDENED `lcAddPane`, and the reason is
-      ## the same one that keeps the two identities in separate fields: every
-      ## other command in this algebra is typed on `PaneKind`, and widening all
-      ## of them to a `PaneRef` would make every existing caller — the terminal
-      ## front-end's motions, its bindings, its profiles and its persistence —
-      ## pass a value where a closed enum is what they mean. The contributed
-      ## namespace gets its own two verbs; the eight PaneKind-typed ones are
-      ## untouched and still refuse a name they do not know.
+      ## TWO COMMAND KINDS RATHER THAN A WIDENED `lcAddPane`: adding a pane
+      ## says which namespace the new leaf is in, and a contributed one is
+      ## validated against the id grammar first.
+      ##
+      ## THE OTHER COMMANDS SPEAK BOTH IDENTITIES. Each pane a command names
+      ## has a `PaneKind` field and a contributed twin (`…Contributed`, `""`
+      ## for a built-in pane): the `PaneKind` constructors fill only the first,
+      ## so every existing caller builds exactly the command it always did,
+      ## and the `PaneRef` constructors (`cmdActivateTab(builtinRef(…))`,
+      ## `cmdMoveTab(contributedRef(id), …)`) fill whichever the reference
+      ## names. `subjectRef` and `anchorRef` read a command back as references.
+      ## `apply` resolves every pane through `PaneRef`, so a contributed pane
+      ## can be activated, resized, moved, split, merged, docked and renamed
+      ## by the same rules as a built-in one.
     lcRemoveContributedPane = "removeContributedPane"
 
   SplitAxis* = enum
@@ -519,8 +538,10 @@ type
     case kind*: LayoutCommandKind
     of lcActivateTab:
       activateTarget*: PaneKind
+      activateContributed*: string
     of lcSetWeight:
       weightTarget*: PaneKind
+      weightContributed*: string
       weightValue*: float
       weightDivider*: Option[SplitSide]
         ## `none` — every caller before this field existed — sets the weight
@@ -553,6 +574,8 @@ type
         ## after it. `none` means "the root container". When the receiving
         ## container is a stack the new tab is selected, which is what
         ## today's `addPane` does.
+      addAfterContributed*: string
+        ## The anchor is a CONTRIBUTED pane (`addAfter` is then `none`).
     of lcRemovePane:
       removedPane*: PaneKind
     of lcMoveTab:
@@ -564,14 +587,18 @@ type
         ## this, `ahRestore` was its only way back and it places AFTER an
         ## anchor, so a stack's first slot was unreachable in one command. A
         ## pane in both places is `lpPaneBothPlacedAndDocked`.
+      movedContributed*: string
       moveBeside*: PaneKind
         ## A pane in the DESTINATION stack. Named by pane rather than by path
         ## because a path is a renderer's way of pointing and this module has
         ## no renderer.
+      moveBesideContributed*: string
       moveIndex*: int
     of lcSplit:
       splitTarget*: PaneKind
+      splitTargetContributed*: string
       splitNewPane*: PaneKind
+      splitNewContributed*: string
       splitNewTitle*: string
       splitAxis*: SplitAxis
       splitSide*: SplitSide
@@ -616,7 +643,9 @@ type
       mergedPane*: PaneKind
         ## Placed or DOCKED, as `movedPane` — a docked pane dropped onto a
         ## bare pane makes the same two-tab stack a placed one does.
+      mergedContributed*: string
       mergeBeside*: PaneKind
+      mergeBesideContributed*: string
       mergeWholeRegion*: bool
         ## The §8-decision-1 gesture: drag a whole SPLIT into a tab, rather
         ## than one pane. Kept expressible so it can be REFUSED by kind
@@ -626,26 +655,27 @@ type
     of lcSetAutoHide:
       autoHideDirection*: AutoHideDirection
       autoHidePane*: PaneKind
+      autoHideContributed*: string
       autoHideEdge*: LayoutEdge
       autoHideOrder*: int
         ## Negative means "append to the end of that edge's strip". An
         ## explicit index already taken is `lpDockOrderCollision`.
       autoHideTitle*: string
       autoHideRestoreBeside*: Option[PaneKind]
+      autoHideRestoreBesideContributed*: string
     of lcRename:
       renameTarget*: PaneKind
+      renameContributed*: string
       renameTitle*: string
     of lcAddContributedPane:
       addedContributedPane*: string
       addedContributedTitle*: string
       addedContributedWeight*: float
       addContributedAfter*: Option[PaneKind]
-        ## Anchored on a BUILT-IN pane, deliberately: "put the extension's
-        ## pane beside the editor" is the gesture a front-end actually has, and
-        ## anchoring on another contributed pane would need the anchor to be a
-        ## `PaneRef` — which is the widening this pair of commands exists to
-        ## avoid. `none` means the root container, exactly as `lcAddPane`'s
-        ## does.
+        ## A BUILT-IN anchor. `none` (with `addContributedAfterId` empty) means
+        ## the root container, exactly as `lcAddPane`'s does.
+      addContributedAfterId*: string
+        ## A CONTRIBUTED anchor: "put this extension's pane beside that one".
     of lcRemoveContributedPane:
       removedContributedPane*: string
 
@@ -733,7 +763,7 @@ type
     detail*: string
 
 const
-  LayoutSchemaVersion* = 10
+  LayoutSchemaVersion* = 11
     ## Bumped when the serialised shape changes incompatibly. A decoder that
     ## meets a version it does not know raises `ldeUnknownVersion` rather than
     ## guessing — the failure mode `savedLayoutConfig` has no way to express,
@@ -801,6 +831,14 @@ const
     ##       §E15) — the open macro expansions, placed beside the source when
     ##       one opens. Shape unchanged; `migrateV9toV10` re-stamps the
     ##       version. |
+    ## | 11 | a `docked` entry may name a CONTRIBUTED pane (an extension's,
+    ##       Extensibility-Model.md §10 decision 2) under `contributedPane`
+    ##       instead of `pane`, and remember a contributed neighbour under
+    ##       `besideContributedPane` instead of `beside` — the layout verbs
+    ##       dock extension panes now. Every v10 document is a v11 document,
+    ##       so `migrateV10toV11` re-stamps the version; the bump makes an
+    ##       older build refuse a document whose docked entry it could only
+    ##       read as `ldeMissingField`. |
     ##
     ## ### The v2→v3 migration changes nothing, and that is not a reason to
     ## ### have skipped the bump
@@ -932,6 +970,68 @@ func describe*(r: PaneRef): string =
   of prUnloadedExtension:
     "pane '" & surfaceOf(r.id) & "' from the extension '" & pluginOf(r.id) &
       "', which is not loaded in this session"
+
+func builtinRef*(kind: PaneKind): PaneRef =
+  ## A reference to a built-in pane. With `contributedRef` and `paneRefOf`,
+  ## one of the constructors: a command or a query that speaks both
+  ## identities is handed one of these.
+  PaneRef(kind: prBuiltin, builtin: kind)
+
+func contributedRef*(id: string): PaneRef =
+  ## A reference to a contributed pane by its qualified id. Not classified
+  ## against a session (`classify` does that): a layout command names a slot,
+  ## and the slot is the same whether its extension is loaded or not.
+  PaneRef(kind: prContributed, id: id)
+
+func isContributed*(r: PaneRef): bool =
+  ## Either contributed arm — loaded or not, the slot is in the contributed
+  ## namespace and `builtin` is meaningless.
+  r.kind != prBuiltin
+
+func sameSlot*(a, b: PaneRef): bool =
+  ## Identity, ignoring whether the extension is loaded: `prContributed` and
+  ## `prUnloadedExtension` with the same id are the same slot. Not `==`,
+  ## which stays the field-wise comparison a classification test needs.
+  if a.isContributed != b.isContributed: return false
+  if a.isContributed: a.id == b.id else: a.builtin == b.builtin
+
+func `$`*(r: PaneRef): string =
+  if r.isContributed: r.id else: $r.builtin
+
+func refOf(kind: PaneKind; contributed: string): PaneRef =
+  ## A command field pair read back as one reference: the contributed twin
+  ## wins when it is set, which is the only way the pair is ever filled.
+  if contributed.len > 0: contributedRef(contributed) else: builtinRef(kind)
+
+func optRefOf(anchor: Option[PaneKind]; contributed: string): Option[PaneRef] =
+  if contributed.len > 0: some(contributedRef(contributed))
+  elif anchor.isSome: some(builtinRef(anchor.get))
+  else: none(PaneRef)
+
+func matches*(n: LayoutNode; r: PaneRef): bool =
+  ## Whether leaf `n` holds the pane `r` names — in the right namespace. THE
+  ## ONE COMPARISON every reference-taking walker below makes, so none of
+  ## them can read `pane` off a contributed leaf.
+  if n.isNil or n.kind != lnPane: return false
+  if r.isContributed: n.isContributed and n.contributedPane == r.id
+  else: not n.isContributed and n.pane == r.builtin
+
+func isContributed*(d: DockedPane): bool = d.contributedPane.len > 0
+
+func paneRefOf*(d: DockedPane): PaneRef =
+  if d.isContributed: contributedRef(d.contributedPane)
+  else: builtinRef(d.pane)
+
+func besideRef*(d: DockedPane): Option[PaneRef] =
+  ## Where a docked pane came from, in whichever namespace that neighbour is.
+  optRefOf(d.beside, d.besideContributed)
+
+proc leafOf(r: PaneRef; title = ""; weight = 0.0): LayoutNode =
+  if r.isContributed:
+    LayoutNode(kind: lnPane, contributedPane: r.id, title: title,
+               weight: weight)
+  else:
+    LayoutNode(kind: lnPane, pane: r.builtin, title: title, weight: weight)
 
 proc row*(children: openArray[LayoutNode]; weight: float = 0.0): LayoutNode =
   ## A left-to-right container.
@@ -1113,6 +1213,38 @@ proc findContributed*(node: LayoutNode; id: string): LayoutNode =
       return hit
   nil
 
+proc find*(node: LayoutNode; r: PaneRef): LayoutNode =
+  ## The leaf holding the pane `r` names, in its own namespace, or nil.
+  if node.isNil:
+    return nil
+  if node.kind == lnPane:
+    return if node.matches(r): node else: nil
+  for c in node.children:
+    let hit = find(c, r)
+    if not hit.isNil:
+      return hit
+  nil
+
+proc contains*(node: LayoutNode; r: PaneRef): bool =
+  not find(node, r).isNil
+
+proc isVisible*(node: LayoutNode; r: PaneRef): bool =
+  ## Whether the pane `r` names is placed AND on the active side of every
+  ## stack above it.
+  if node.isNil:
+    return false
+  case node.kind
+  of lnPane:
+    node.matches(r)
+  of lnStack:
+    node.activeIndex >= 0 and node.activeIndex < node.children.len and
+      isVisible(node.children[node.activeIndex], r)
+  of lnRow, lnColumn:
+    for c in node.children:
+      if isVisible(c, r):
+        return true
+    false
+
 proc equalTrees*(a, b: LayoutNode): bool =
   ## Structural equality over exactly the fields `toJson` writes.
   ##
@@ -1153,7 +1285,7 @@ proc equalTrees*(a, b: LayoutNode): bool =
 # reference into it).
 # ---------------------------------------------------------------------------
 
-proc activate*(node: LayoutNode; kind: PaneKind): bool
+proc activate*(node: LayoutNode; r: PaneRef): bool
   ## Forward-declared: `apply` selects a tab through the SAME routine
   ## `session_switch.nim` calls, rather than through a private copy of the
   ## index assignment. Two implementations of "make this tab visible" is one
@@ -1332,6 +1464,11 @@ proc detachContributedPane(node: LayoutNode; id: string): bool =
     node.children = kept
   removed
 
+proc detachRef(node: LayoutNode; r: PaneRef): bool =
+  ## `detachPane` / `detachContributedPane` by reference.
+  if r.isContributed: detachContributedPane(node, r.id)
+  else: detachPane(node, r.builtin)
+
 proc parentOf*(root: LayoutNode; target: LayoutNode): LayoutNode =
   ## The node whose `children` contains `target`, or nil when `target` is the
   ## root or is not in the tree.
@@ -1353,6 +1490,25 @@ proc indexIn(parent: LayoutNode; child: LayoutNode): int =
     if c == child:
       return i
   -1
+
+proc pinPlaceOf*(layout: Layout; pane: PaneRef):
+    tuple[beside: Option[PaneRef], before: bool] =
+  ## `pinPlaceOf` for a pane in either namespace, whose neighbour may be in
+  ## either namespace too.
+  let leaf = find(layout.tree, pane)
+  let parent = parentOf(layout.tree, leaf)
+  if leaf.isNil or parent.isNil:
+    return (none(PaneRef), false)
+  let at = indexIn(parent, leaf)
+  for i in countdown(at - 1, 0):
+    let c = parent.children[i]
+    if c.kind == lnPane:
+      return (some(paneRefOf(c)), false)
+  for i in at + 1 ..< parent.children.len:
+    let c = parent.children[i]
+    if c.kind == lnPane:
+      return (some(paneRefOf(c)), true)
+  (none(PaneRef), false)
 
 proc pinPlaceOf*(layout: Layout; pane: PaneKind):
     tuple[beside: Option[PaneKind], before: bool] =
@@ -1398,7 +1554,7 @@ proc wrapRootAround(root: LayoutNode; leaf: LayoutNode; leafFirst: bool) =
   let kids = if leafFirst: @[leaf, inner] else: @[inner, leaf]
   root.becomes(LayoutNode(kind: lnRow, weight: root.weight, children: kids))
 
-proc insertBeside(root: LayoutNode; anchor: Option[PaneKind];
+proc insertBeside(root: LayoutNode; anchor: Option[PaneRef];
                   leaf: LayoutNode; before = false): bool =
   ## `lcAddPane`'s placement rule, shared by `ahRestore`.
   ##
@@ -1454,18 +1610,24 @@ proc clone*(layout: Layout): Layout =
   Layout(tree: layout.tree.clone(), docked: layout.docked,
          version: layout.version)
 
-proc dockedIndex*(layout: Layout; kind: PaneKind): int =
-  ## Where `kind` sits in `docked`, or -1.
+proc dockedIndex*(layout: Layout; r: PaneRef): int =
+  ## Where the pane `r` names sits in `docked`, or -1.
   for i, d in layout.docked:
-    if d.pane == kind:
+    if sameSlot(d.paneRefOf, r):
       return i
   -1
 
-proc placement*(layout: Layout; kind: PaneKind): PanePlacement =
-  ## Where `kind` is. Total, and three-valued — see `PanePlacement` for why
-  ## the absence of a fourth answer is the floating-panel non-goal.
-  let inTree = layout.tree.contains(kind)
-  let docked = layout.dockedIndex(kind) >= 0
+proc dockedIndex*(layout: Layout; kind: PaneKind): int =
+  ## Where `kind` sits in `docked`, or -1. A docked CONTRIBUTED entry is never
+  ## an answer: its `pane` is the enum's zero value.
+  layout.dockedIndex(builtinRef(kind))
+
+proc placement*(layout: Layout; r: PaneRef): PanePlacement =
+  ## Where the pane `r` names is. Total, and three-valued — see
+  ## `PanePlacement` for why the absence of a fourth answer is the
+  ## floating-panel non-goal.
+  let inTree = layout.tree.contains(r)
+  let docked = layout.dockedIndex(r) >= 0
   if inTree and docked:
     # Both at once is `lpPaneBothPlacedAndDocked`, which `validate` reports.
     # This query answers with the placement that OCCUPIES A REGION, because a
@@ -1475,11 +1637,22 @@ proc placement*(layout: Layout; kind: PaneKind): PanePlacement =
   elif docked: plDocked
   else: plAbsent
 
+proc placement*(layout: Layout; kind: PaneKind): PanePlacement =
+  layout.placement(builtinRef(kind))
+
 proc allPanes*(layout: Layout): seq[PaneKind] =
   ## Every pane the layout knows about, placed ones first then docked ones.
   result = allPanes(layout.tree)
   for d in layout.docked:
-    result.add(d.pane)
+    if not d.isContributed:
+      result.add(d.pane)
+
+proc allContributedPanes*(layout: Layout): seq[string] =
+  ## Every contributed pane the layout knows about, placed then docked.
+  result = allContributedPanes(layout.tree)
+  for d in layout.docked:
+    if d.isContributed:
+      result.add(d.contributedPane)
 
 proc visiblePanes*(layout: Layout): seq[PaneKind] =
   ## Every pane a user can currently see. A docked pane is not visible even
@@ -1613,52 +1786,207 @@ proc cmdAddContributedPane*(id: string; title = ""; weight = 0.0;
 proc cmdRemoveContributedPane*(id: string): LayoutCommand =
   LayoutCommand(kind: lcRemoveContributedPane, removedContributedPane: id)
 
+# -- The same commands over `PaneRef`: either namespace, for every pane the
+# command names. Each fills the `PaneKind` field for a built-in reference and
+# the contributed twin for a contributed one, so a command built here from a
+# built-in reference is the command the `PaneKind` constructor above builds.
+
+func kindOf(r: PaneRef): PaneKind =
+  if r.isContributed: PaneKind.low else: r.builtin
+
+func idOf(r: PaneRef): string =
+  if r.isContributed: r.id else: ""
+
+func kindOf(r: Option[PaneRef]): Option[PaneKind] =
+  if r.isSome and not r.get.isContributed: some(r.get.builtin)
+  else: none(PaneKind)
+
+func idOf(r: Option[PaneRef]): string =
+  if r.isSome: idOf(r.get) else: ""
+
+proc cmdActivateTab*(pane: PaneRef): LayoutCommand =
+  LayoutCommand(kind: lcActivateTab, activateTarget: kindOf(pane),
+                activateContributed: idOf(pane))
+
+proc cmdSetWeight*(pane: PaneRef; weight: float): LayoutCommand =
+  LayoutCommand(kind: lcSetWeight, weightTarget: kindOf(pane),
+                weightContributed: idOf(pane), weightValue: weight,
+                weightDivider: none(SplitSide), weightLevel: 0)
+
+proc cmdSetDivider*(pane: PaneRef; weight: float; side: SplitSide;
+                    level = 0): LayoutCommand =
+  LayoutCommand(kind: lcSetWeight, weightTarget: kindOf(pane),
+                weightContributed: idOf(pane), weightValue: weight,
+                weightDivider: some(side), weightLevel: level)
+
+proc cmdAddPane*(pane: PaneKind; title = ""; weight = 0.0;
+                 after: Option[PaneRef]): LayoutCommand =
+  ## `lcAddPane` anchored on a pane in either namespace.
+  LayoutCommand(kind: lcAddPane, addedPane: pane, addedTitle: title,
+                addedWeight: weight, addAfter: kindOf(after),
+                addAfterContributed: idOf(after))
+
+proc cmdAddContributedPane*(id: string; title = ""; weight = 0.0;
+                            after: Option[PaneRef]): LayoutCommand =
+  ## `lcAddContributedPane` anchored on a pane in either namespace.
+  LayoutCommand(kind: lcAddContributedPane, addedContributedPane: id,
+                addedContributedTitle: title, addedContributedWeight: weight,
+                addContributedAfter: kindOf(after),
+                addContributedAfterId: idOf(after))
+
+proc cmdMoveTab*(pane: PaneRef; beside: PaneRef; index: int): LayoutCommand =
+  LayoutCommand(kind: lcMoveTab, movedPane: kindOf(pane),
+                movedContributed: idOf(pane), moveBeside: kindOf(beside),
+                moveBesideContributed: idOf(beside), moveIndex: index)
+
+proc cmdSplit*(target: PaneRef; newPane: PaneRef; axis: SplitAxis;
+               side: SplitSide = ssAfter; title = ""): LayoutCommand =
+  LayoutCommand(kind: lcSplit, splitTarget: kindOf(target),
+                splitTargetContributed: idOf(target),
+                splitNewPane: kindOf(newPane),
+                splitNewContributed: idOf(newPane),
+                splitNewTitle: title, splitAxis: axis, splitSide: side,
+                splitMovesPane: false)
+
+proc cmdSplitMove*(target: PaneRef; movedPane: PaneRef; axis: SplitAxis;
+                   side: SplitSide = ssAfter; title = ""): LayoutCommand =
+  LayoutCommand(kind: lcSplit, splitTarget: kindOf(target),
+                splitTargetContributed: idOf(target),
+                splitNewPane: kindOf(movedPane),
+                splitNewContributed: idOf(movedPane),
+                splitNewTitle: title, splitAxis: axis, splitSide: side,
+                splitMovesPane: true)
+
+proc cmdSplitRootMove*(movedPane: PaneRef; axis: SplitAxis;
+                       side: SplitSide = ssAfter; title = ""): LayoutCommand =
+  LayoutCommand(kind: lcSplit, splitTarget: kindOf(movedPane),
+                splitTargetContributed: idOf(movedPane),
+                splitNewPane: kindOf(movedPane),
+                splitNewContributed: idOf(movedPane),
+                splitNewTitle: title, splitAxis: axis, splitSide: side,
+                splitMovesPane: true, splitRoot: true)
+
+proc cmdMergeIntoStack*(pane: PaneRef; beside: PaneRef;
+                        wholeRegion = false): LayoutCommand =
+  LayoutCommand(kind: lcMergeIntoStack, mergedPane: kindOf(pane),
+                mergedContributed: idOf(pane), mergeBeside: kindOf(beside),
+                mergeBesideContributed: idOf(beside),
+                mergeWholeRegion: wholeRegion)
+
+proc cmdDock*(pane: PaneRef; edge: LayoutEdge; order = -1;
+              title = ""): LayoutCommand =
+  LayoutCommand(kind: lcSetAutoHide, autoHideDirection: ahDock,
+                autoHidePane: kindOf(pane), autoHideContributed: idOf(pane),
+                autoHideEdge: edge, autoHideOrder: order,
+                autoHideTitle: title,
+                autoHideRestoreBeside: none(PaneKind))
+
+proc cmdRestoreDocked*(pane: PaneRef;
+                       beside: Option[PaneRef] = none(PaneRef)):
+    LayoutCommand =
+  LayoutCommand(kind: lcSetAutoHide, autoHideDirection: ahRestore,
+                autoHidePane: kindOf(pane), autoHideContributed: idOf(pane),
+                autoHideEdge: leLeft, autoHideOrder: -1, autoHideTitle: "",
+                autoHideRestoreBeside: kindOf(beside),
+                autoHideRestoreBesideContributed: idOf(beside))
+
+proc cmdOpenDocked*(pane: PaneRef): LayoutCommand =
+  LayoutCommand(kind: lcSetAutoHide, autoHideDirection: ahOpen,
+                autoHidePane: kindOf(pane), autoHideContributed: idOf(pane),
+                autoHideEdge: leLeft, autoHideOrder: -1, autoHideTitle: "",
+                autoHideRestoreBeside: none(PaneKind))
+
+proc cmdCloseDocked*(pane: PaneRef): LayoutCommand =
+  LayoutCommand(kind: lcSetAutoHide, autoHideDirection: ahClose,
+                autoHidePane: kindOf(pane), autoHideContributed: idOf(pane),
+                autoHideEdge: leLeft, autoHideOrder: -1, autoHideTitle: "",
+                autoHideRestoreBeside: none(PaneKind))
+
+proc cmdRename*(pane: PaneRef; title: string): LayoutCommand =
+  LayoutCommand(kind: lcRename, renameTarget: kindOf(pane),
+                renameContributed: idOf(pane), renameTitle: title)
+
+proc subjectRef*(cmd: LayoutCommand): PaneRef =
+  ## The pane a command acts ON, in whichever namespace the command names it:
+  ## the tab activated, the leaf resized, the pane added, removed, moved,
+  ## split in, merged, docked or renamed.
+  case cmd.kind
+  of lcActivateTab: refOf(cmd.activateTarget, cmd.activateContributed)
+  of lcSetWeight: refOf(cmd.weightTarget, cmd.weightContributed)
+  of lcAddPane: builtinRef(cmd.addedPane)
+  of lcRemovePane: builtinRef(cmd.removedPane)
+  of lcMoveTab: refOf(cmd.movedPane, cmd.movedContributed)
+  of lcSplit: refOf(cmd.splitNewPane, cmd.splitNewContributed)
+  of lcMergeIntoStack: refOf(cmd.mergedPane, cmd.mergedContributed)
+  of lcSetAutoHide: refOf(cmd.autoHidePane, cmd.autoHideContributed)
+  of lcRename: refOf(cmd.renameTarget, cmd.renameContributed)
+  of lcAddContributedPane: contributedRef(cmd.addedContributedPane)
+  of lcRemoveContributedPane: contributedRef(cmd.removedContributedPane)
+
+proc anchorRef*(cmd: LayoutCommand): Option[PaneRef] =
+  ## The OTHER pane a command names, if any: an add's anchor, a move's or a
+  ## merge's destination, a split's target, a restore's neighbour.
+  case cmd.kind
+  of lcAddPane: optRefOf(cmd.addAfter, cmd.addAfterContributed)
+  of lcAddContributedPane:
+    optRefOf(cmd.addContributedAfter, cmd.addContributedAfterId)
+  of lcMoveTab: some(refOf(cmd.moveBeside, cmd.moveBesideContributed))
+  of lcSplit:
+    if cmd.splitRoot: none(PaneRef)
+    else: some(refOf(cmd.splitTarget, cmd.splitTargetContributed))
+  of lcMergeIntoStack: some(refOf(cmd.mergeBeside, cmd.mergeBesideContributed))
+  of lcSetAutoHide:
+    if cmd.autoHideDirection == ahRestore:
+      optRefOf(cmd.autoHideRestoreBeside, cmd.autoHideRestoreBesideContributed)
+    else: none(PaneRef)
+  else: none(PaneRef)
+
 proc `$`*(cmd: LayoutCommand): string =
   ## One line for a failure message. Not a serialisation format.
+  let subject = $cmd.subjectRef
+  let anchor = cmd.anchorRef
+  let anchorText = if anchor.isSome: $anchor.get else: "root"
   case cmd.kind
-  of lcActivateTab: "activateTab(" & $cmd.activateTarget & ")"
+  of lcActivateTab: "activateTab(" & subject & ")"
   of lcSetWeight:
     if cmd.weightDivider.isSome:
-      "setDivider(" & $cmd.weightTarget & "^" & $cmd.weightLevel & ", " &
+      "setDivider(" & subject & "^" & $cmd.weightLevel & ", " &
         $cmd.weightValue & ", " & $cmd.weightDivider.get & ")"
     else:
-      "setWeight(" & $cmd.weightTarget & ", " & $cmd.weightValue & ")"
+      "setWeight(" & subject & ", " & $cmd.weightValue & ")"
   of lcAddPane:
-    "addPane(" & $cmd.addedPane & ", after=" &
-      (if cmd.addAfter.isSome: $cmd.addAfter.get else: "root") & ")"
-  of lcRemovePane: "removePane(" & $cmd.removedPane & ")"
+    "addPane(" & subject & ", after=" & anchorText & ")"
+  of lcRemovePane: "removePane(" & subject & ")"
   of lcMoveTab:
-    "moveTab(" & $cmd.movedPane & " -> beside " & $cmd.moveBeside & " @" &
+    "moveTab(" & subject & " -> beside " & anchorText & " @" &
       $cmd.moveIndex & ")"
   of lcSplit:
     (if cmd.splitRoot:
-       "splitRoot(" & $cmd.splitNewPane & ", " & $cmd.splitAxis & ", " &
+       "splitRoot(" & subject & ", " & $cmd.splitAxis & ", " &
          $cmd.splitSide & ")"
      else:
        (if cmd.splitMovesPane: "splitMove(" else: "split(") &
-         $cmd.splitTarget & ", " & $cmd.splitNewPane & ", " &
+         anchorText & ", " & subject & ", " &
          $cmd.splitAxis & ", " & $cmd.splitSide & ")")
   of lcMergeIntoStack:
-    "mergeIntoStack(" & $cmd.mergedPane & " -> " & $cmd.mergeBeside &
+    "mergeIntoStack(" & subject & " -> " & anchorText &
       (if cmd.mergeWholeRegion: ", wholeRegion" else: "") & ")"
   of lcSetAutoHide:
     case cmd.autoHideDirection
     of ahDock:
-      "dock(" & $cmd.autoHidePane & ", " & $cmd.autoHideEdge & ", order=" &
+      "dock(" & subject & ", " & $cmd.autoHideEdge & ", order=" &
         $cmd.autoHideOrder & ")"
     of ahRestore:
-      "restoreDocked(" & $cmd.autoHidePane & ")"
+      "restoreDocked(" & subject & ")"
     of ahOpen:
-      "openDocked(" & $cmd.autoHidePane & ")"
+      "openDocked(" & subject & ")"
     of ahClose:
-      "closeDocked(" & $cmd.autoHidePane & ")"
-  of lcRename: "rename(" & $cmd.renameTarget & ", '" & cmd.renameTitle & "')"
+      "closeDocked(" & subject & ")"
+  of lcRename: "rename(" & subject & ", '" & cmd.renameTitle & "')"
   of lcAddContributedPane:
-    "addContributedPane(" & cmd.addedContributedPane & ", after=" &
-      (if cmd.addContributedAfter.isSome: $cmd.addContributedAfter.get
-       else: "root") & ")"
+    "addContributedPane(" & subject & ", after=" & anchorText & ")"
   of lcRemoveContributedPane:
-    "removeContributedPane(" & cmd.removedContributedPane & ")"
+    "removeContributedPane(" & subject & ")"
 
 # ---------------------------------------------------------------------------
 # §2.1 / §2.3 — `apply`
@@ -1681,6 +2009,11 @@ proc refusedForContributed(kind: LayoutProblemKind;
                 problem: LayoutProblem(kind: kind, path: "",
                                        pane: none(PaneKind), contributed: id))
 
+proc refusedFor(kind: LayoutProblemKind; r: PaneRef): LayoutOutcome =
+  ## A refusal about a pane in either namespace, naming it in the right field.
+  if r.isContributed: refusedForContributed(kind, r.id)
+  else: refusedFor(kind, r.builtin)
+
 proc noOp(): LayoutOutcome = LayoutOutcome(kind: loNoOp)
 
 proc appliedTo(l: Layout): LayoutOutcome =
@@ -1693,9 +2026,9 @@ proc maxOrderAt(layout: Layout; edge: LayoutEdge): int =
       result = d.order
 
 proc orderTaken(layout: Layout; edge: LayoutEdge; order: int;
-                excluding: PaneKind; hasExclusion: bool): bool =
+                excluding: PaneRef; hasExclusion: bool): bool =
   for d in layout.docked:
-    if hasExclusion and d.pane == excluding:
+    if hasExclusion and sameSlot(d.paneRefOf, excluding):
       continue
     if d.edge == edge and d.order == order:
       return true
@@ -1720,55 +2053,57 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
   case cmd.kind
 
   of lcActivateTab:
-    if not tree.contains(cmd.activateTarget):
-      return refusedFor(lpPaneNotPlaced, cmd.activateTarget)
-    if tree.isVisible(cmd.activateTarget):
+    let target = cmd.subjectRef
+    if not tree.contains(target):
+      return refusedFor(lpPaneNotPlaced, target)
+    if tree.isVisible(target):
       return noOp()
-    discard tree.activate(cmd.activateTarget)
+    discard tree.activate(target)
     return appliedTo(next)
 
   of lcSetWeight:
+    let target = cmd.subjectRef
     if cmd.weightDivider.isSome:
       # A DIVIDER DRAG: two weights move, their sum does not, so every other
       # sibling keeps its share exactly. Compared and computed on EFFECTIVE
       # weights (a zero is "one neutral share"), because that is what a
       # renderer divides by and therefore what "did not move" means.
-      let leaf = tree.find(cmd.weightTarget)
+      let leaf = tree.find(target)
       if leaf.isNil:
-        return refusedFor(lpPaneNotPlaced, cmd.weightTarget)
+        return refusedFor(lpPaneNotPlaced, target)
       if cmd.weightLevel < 0:
-        return refusedFor(lpNoDivider, cmd.weightTarget)
+        return refusedFor(lpNoDivider, target)
       var node = leaf
       for _ in 0 ..< cmd.weightLevel:
         node = parentOf(tree, node)
         if node.isNil:
-          return refusedFor(lpNoDivider, cmd.weightTarget)
+          return refusedFor(lpNoDivider, target)
       let parent = parentOf(tree, node)
       if parent.isNil or parent.kind == lnStack:
-        return refusedFor(lpNoDivider, cmd.weightTarget)
+        return refusedFor(lpNoDivider, target)
       let at = indexIn(parent, node)
       let across = if cmd.weightDivider.get == ssBefore: at - 1 else: at + 1
       if at < 0 or across < 0 or across >= parent.children.len:
-        return refusedFor(lpNoDivider, cmd.weightTarget)
+        return refusedFor(lpNoDivider, target)
       let sibling = parent.children[across]
       if cmd.weightValue <= 0.0:
-        return refusedFor(lpNegativeWeight, cmd.weightTarget)
+        return refusedFor(lpNegativeWeight, target)
       let pair = effectiveWeight(node) + effectiveWeight(sibling)
       let rest = pair - cmd.weightValue
       if rest <= 0.0:
         # The neighbour would be squeezed to nothing or less: refused by the
         # same kind a negative weight is, because that is what it would be.
-        return refusedFor(lpNegativeWeight, cmd.weightTarget)
+        return refusedFor(lpNegativeWeight, target)
       if effectiveWeight(node) == cmd.weightValue:
         return noOp()
       node.weight = cmd.weightValue
       sibling.weight = rest
       return appliedTo(next)
     if cmd.weightValue < 0.0:
-      return refusedFor(lpNegativeWeight, cmd.weightTarget)
-    let leaf = tree.find(cmd.weightTarget)
+      return refusedFor(lpNegativeWeight, target)
+    let leaf = tree.find(target)
     if leaf.isNil:
-      return refusedFor(lpPaneNotPlaced, cmd.weightTarget)
+      return refusedFor(lpPaneNotPlaced, target)
     if leaf.weight == cmd.weightValue:
       return noOp()
     leaf.weight = cmd.weightValue
@@ -1781,10 +2116,11 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
       # Placing a pane that is docked would put it in both at once, which is
       # exactly the invariant §3.3 names. `ahRestore` is the way to move it.
       return refusedFor(lpPaneBothPlacedAndDocked, cmd.addedPane)
-    if cmd.addAfter.isSome and not tree.contains(cmd.addAfter.get):
-      return refusedFor(lpPaneNotPlaced, cmd.addAfter.get)
+    let anchor = cmd.anchorRef
+    if anchor.isSome and not tree.contains(anchor.get):
+      return refusedFor(lpPaneNotPlaced, anchor.get)
     let leaf = pane(cmd.addedPane, cmd.addedTitle, cmd.addedWeight)
-    if not insertBeside(tree, cmd.addAfter, leaf):
+    if not insertBeside(tree, anchor, leaf):
       return refusedFor(lpPaneNotPlaced, cmd.addedPane)
     return appliedTo(next)
 
@@ -1798,13 +2134,18 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
                                    cmd.addedContributedPane)
     if tree.containsContributed(cmd.addedContributedPane):
       return refusedForContributed(lpDuplicatePane, cmd.addedContributedPane)
-    if cmd.addContributedAfter.isSome and
-       not tree.contains(cmd.addContributedAfter.get):
-      return refusedFor(lpPaneNotPlaced, cmd.addContributedAfter.get)
+    if next.dockedIndex(cmd.subjectRef) >= 0:
+      # Docked already: placing it too would put it in both places at once.
+      # `ahRestore` is the way back, exactly as for a built-in pane.
+      return refusedForContributed(lpPaneBothPlacedAndDocked,
+                                   cmd.addedContributedPane)
+    let anchor = cmd.anchorRef
+    if anchor.isSome and not tree.contains(anchor.get):
+      return refusedFor(lpPaneNotPlaced, anchor.get)
     let leaf = contributedPaneNode(cmd.addedContributedPane,
                                    cmd.addedContributedTitle,
                                    cmd.addedContributedWeight)
-    if not insertBeside(tree, cmd.addContributedAfter, leaf):
+    if not insertBeside(tree, anchor, leaf):
       return refusedForContributed(lpPaneNotPlaced, cmd.addedContributedPane)
     return appliedTo(next)
 
@@ -1832,20 +2173,22 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
     return appliedTo(next)
 
   of lcMoveTab:
-    let source = tree.find(cmd.movedPane)
-    let dockedFrom = next.dockedIndex(cmd.movedPane)
+    let moving = cmd.subjectRef
+    let besideRef = cmd.anchorRef.get
+    let source = tree.find(moving)
+    let dockedFrom = next.dockedIndex(moving)
     if dockedFrom >= 0 and not source.isNil:
       # §3.3 broken on the INPUT; which copy would move is not a question
       # this command can answer — `lcSplit`'s move arm refuses it the same way.
-      return refusedFor(lpPaneBothPlacedAndDocked, cmd.movedPane)
+      return refusedFor(lpPaneBothPlacedAndDocked, moving)
     if source.isNil and dockedFrom < 0:
-      return refusedFor(lpPaneNotPlaced, cmd.movedPane)
-    let anchor = tree.find(cmd.moveBeside)
+      return refusedFor(lpPaneNotPlaced, moving)
+    let anchor = tree.find(besideRef)
     if anchor.isNil:
-      return refusedFor(lpPaneNotPlaced, cmd.moveBeside)
+      return refusedFor(lpPaneNotPlaced, besideRef)
     let destination = parentOf(tree, anchor)
     if destination.isNil or destination.kind != lnStack:
-      return refusedFor(lpTargetNotAStack, cmd.moveBeside)
+      return refusedFor(lpTargetNotAStack, besideRef)
     if dockedFrom >= 0:
       # FROM AN AUTO-HIDE STRIP, at any index — including 0. The same
       # decision PLAT-4's closing pass took for `splitMovesPane`: "the pane
@@ -1855,10 +2198,10 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
       # command. Nothing leaves the tree, so no collapse rule fires and the
       # outcome is never `loNoOp`; the strip's title travels with the pane.
       if cmd.moveIndex < 0 or cmd.moveIndex > destination.children.len:
-        return refusedFor(lpIndexOutOfRange, cmd.movedPane)
+        return refusedFor(lpIndexOutOfRange, moving)
       let entry = next.docked[dockedFrom]
       next.docked.delete(dockedFrom)
-      destination.children.insert(pane(entry.pane, entry.title),
+      destination.children.insert(leafOf(entry.paneRefOf, entry.title),
                                   cmd.moveIndex)
       destination.activeIndex = cmd.moveIndex
       return appliedTo(next)
@@ -1868,7 +2211,7 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
       if sameStack: destination.children.len
       else: destination.children.len + 1
     if cmd.moveIndex < 0 or cmd.moveIndex >= finalLen:
-      return refusedFor(lpIndexOutOfRange, cmd.movedPane)
+      return refusedFor(lpIndexOutOfRange, moving)
     if sameStack:
       let at = indexIn(destination, source)
       if at == cmd.moveIndex:
@@ -1884,15 +2227,15 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
     # the ref taken above may no longer be in the tree. The anchor pane is
     # unique, so finding its parent again is exact.
     let moved = copyOf(source)
-    discard detachPane(tree, cmd.movedPane)
+    discard detachRef(tree, moving)
     if not normaliseInPlace(tree):
-      return refusedFor(lpEmptyRoot, cmd.movedPane)
-    let anchorAgain = tree.find(cmd.moveBeside)
+      return refusedFor(lpEmptyRoot, moving)
+    let anchorAgain = tree.find(besideRef)
     if anchorAgain.isNil:
-      return refusedFor(lpPaneNotPlaced, cmd.moveBeside)
+      return refusedFor(lpPaneNotPlaced, besideRef)
     let destAgain = parentOf(tree, anchorAgain)
     if destAgain.isNil or destAgain.kind != lnStack:
-      return refusedFor(lpTargetNotAStack, cmd.moveBeside)
+      return refusedFor(lpTargetNotAStack, besideRef)
     let at = min(cmd.moveIndex, destAgain.children.len)
     destAgain.children.insert(moved, at)
     destAgain.activeIndex = at
@@ -1900,23 +2243,29 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
 
   of lcSplit:
     var movedTitle = cmd.splitNewTitle
+    let newRef = cmd.subjectRef
+    let targetRef = refOf(cmd.splitTarget, cmd.splitTargetContributed)
+    if newRef.isContributed and paneIdProblem(newRef.id) != pipOk:
+      # The decoder and `lcAddContributedPane` refuse a malformed id; a split
+      # is the third door a new contributed leaf can come through.
+      return refusedFor(lpMalformedContributedPane, newRef)
     if cmd.splitMovesPane:
       # PLAT-5's drop gesture: the pane is already placed and the split MOVES
       # it. Every guard here is the mirror of the branch below — "must not be
       # in the tree" becomes "must be", and the detach brings §2.4's collapse
       # rules with it exactly as `lcMoveTab`'s cross-stack path does.
-      if cmd.splitNewPane == cmd.splitTarget and not cmd.splitRoot:
-        return refusedFor(lpDuplicatePane, cmd.splitNewPane)
-      let dockedAt = next.dockedIndex(cmd.splitNewPane)
-      let moving = tree.find(cmd.splitNewPane)
+      if sameSlot(newRef, targetRef) and not cmd.splitRoot:
+        return refusedFor(lpDuplicatePane, newRef)
+      let dockedAt = next.dockedIndex(newRef)
+      let moving = tree.find(newRef)
       if dockedAt >= 0 and not moving.isNil:
         # Both at once is §3.3's invariant broken on the INPUT; which copy
         # would move is not a question this command can answer.
-        return refusedFor(lpPaneBothPlacedAndDocked, cmd.splitNewPane)
+        return refusedFor(lpPaneBothPlacedAndDocked, newRef)
       if dockedAt < 0 and moving.isNil:
-        return refusedFor(lpPaneNotPlaced, cmd.splitNewPane)
-      if not cmd.splitRoot and tree.find(cmd.splitTarget).isNil:
-        return refusedFor(lpPaneNotPlaced, cmd.splitTarget)
+        return refusedFor(lpPaneNotPlaced, newRef)
+      if not cmd.splitRoot and tree.find(targetRef).isNil:
+        return refusedFor(lpPaneNotPlaced, targetRef)
       if dockedAt >= 0:
         # From the auto-hide strip: leave `docked`, keep the strip's title.
         # The tree loses nothing, so there is nothing to collapse.
@@ -1926,25 +2275,25 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
       else:
         if movedTitle.len == 0:
           movedTitle = moving.title
-        discard detachPane(tree, cmd.splitNewPane)
+        discard detachRef(tree, newRef)
         if not normaliseInPlace(tree):
-          return refusedFor(lpEmptyRoot, cmd.splitNewPane)
+          return refusedFor(lpEmptyRoot, newRef)
     else:
-      if tree.contains(cmd.splitNewPane):
-        return refusedFor(lpDuplicatePane, cmd.splitNewPane)
-      if next.dockedIndex(cmd.splitNewPane) >= 0:
-        return refusedFor(lpPaneBothPlacedAndDocked, cmd.splitNewPane)
+      if tree.contains(newRef):
+        return refusedFor(lpDuplicatePane, newRef)
+      if next.dockedIndex(newRef) >= 0:
+        return refusedFor(lpPaneBothPlacedAndDocked, newRef)
     if cmd.splitRoot:
       # GOLDENLAYOUT'S GROUND DROP (`GroundItem.onDrop`), on the tree as it
       # is after the detach.
       if not cmd.splitMovesPane:
-        return refusedFor(lpPaneNotPlaced, cmd.splitNewPane)
-      if not tree.find(cmd.splitNewPane).isNil:
+        return refusedFor(lpPaneNotPlaced, newRef)
+      if not tree.find(newRef).isNil:
         # The pane was the whole tree: nothing is left to split beside it
         # (the only pane of a layout can be dragged nowhere).
-        return refusedFor(lpEmptyRoot, cmd.splitNewPane)
+        return refusedFor(lpEmptyRoot, newRef)
       let containerKind = if cmd.splitAxis == saRow: lnRow else: lnColumn
-      let fresh = pane(cmd.splitNewPane, movedTitle, 0.0)
+      let fresh = leafOf(newRef, movedTitle, 0.0)
       if tree.kind == containerKind and tree.children.len > 0:
         # The root already runs along that axis: join it at that end; the
         # end sibling gives the newcomer half of its share.
@@ -1968,9 +2317,9 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
     # RE-FOUND AFTER THE DETACH, for `lcMoveTab`'s reason: collapsing can
     # rewrite a container in place, so a ref taken before it may no longer be
     # in the tree. The target pane is unique, so finding it again is exact.
-    let leaf = tree.find(cmd.splitTarget)
+    let leaf = tree.find(targetRef)
     if leaf.isNil:
-      return refusedFor(lpPaneNotPlaced, cmd.splitTarget)
+      return refusedFor(lpPaneNotPlaced, targetRef)
     # Splitting a TABBED pane splits the whole stack, not the tab: a user who
     # drags a new pane to the right of a tabbed region expects the region to
     # move, and a stack nested inside a row inside a stack is not a shape this
@@ -1981,7 +2330,7 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
       replaced = leafParent
     let share = replaced.weight
     let inner = copyOf(replaced)
-    let fresh = pane(cmd.splitNewPane, movedTitle, share)
+    let fresh = leafOf(newRef, movedTitle, share)
     let kids =
       if cmd.splitSide == ssBefore: @[fresh, inner] else: @[inner, fresh]
     let containerKind = if cmd.splitAxis == saRow: lnRow else: lnColumn
@@ -1996,23 +2345,25 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
     return appliedTo(next)
 
   of lcMergeIntoStack:
-    if cmd.mergedPane == cmd.mergeBeside:
-      return refusedFor(lpDuplicatePane, cmd.mergedPane)
-    let source = tree.find(cmd.mergedPane)
-    let mergedFrom = next.dockedIndex(cmd.mergedPane)
+    let merging = cmd.subjectRef
+    let besideRef = cmd.anchorRef.get
+    if sameSlot(merging, besideRef):
+      return refusedFor(lpDuplicatePane, merging)
+    let source = tree.find(merging)
+    let mergedFrom = next.dockedIndex(merging)
     if mergedFrom >= 0 and not source.isNil:
-      return refusedFor(lpPaneBothPlacedAndDocked, cmd.mergedPane)
+      return refusedFor(lpPaneBothPlacedAndDocked, merging)
     if source.isNil and mergedFrom < 0:
-      return refusedFor(lpPaneNotPlaced, cmd.mergedPane)
-    if tree.find(cmd.mergeBeside).isNil:
-      return refusedFor(lpPaneNotPlaced, cmd.mergeBeside)
+      return refusedFor(lpPaneNotPlaced, merging)
+    if tree.find(besideRef).isNil:
+      return refusedFor(lpPaneNotPlaced, besideRef)
     if cmd.mergeWholeRegion:
       # Open decision 1 of §8, answered: stacks hold only panes, and dragging
       # a whole SPLIT into a tab is refused BY KIND rather than silently
       # reinterpreted as dragging the one pane under the cursor. The
       # restriction stays until a user asks for it to be lifted, and this is
       # the typed outcome that says so.
-      return refusedFor(lpStackChildNotPane, cmd.mergedPane)
+      return refusedFor(lpStackChildNotPane, merging)
     var moved: LayoutNode
     if mergedFrom >= 0:
       # From an auto-hide strip — `lcMoveTab`'s docked arm, for a bare-pane
@@ -2020,20 +2371,20 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
       # the outcome is never `loNoOp`.
       let entry = next.docked[mergedFrom]
       next.docked.delete(mergedFrom)
-      moved = pane(entry.pane, entry.title)
+      moved = leafOf(entry.paneRefOf, entry.title)
     else:
       let sourceParent = parentOf(tree, source)
-      let anchorParent = parentOf(tree, tree.find(cmd.mergeBeside))
+      let anchorParent = parentOf(tree, tree.find(besideRef))
       if not anchorParent.isNil and anchorParent.kind == lnStack and
          sourceParent == anchorParent:
         return noOp()
       moved = copyOf(source)
-      discard detachPane(tree, cmd.mergedPane)
+      discard detachRef(tree, merging)
       if not normaliseInPlace(tree):
-        return refusedFor(lpEmptyRoot, cmd.mergedPane)
-    let anchorAgain = tree.find(cmd.mergeBeside)
+        return refusedFor(lpEmptyRoot, merging)
+    let anchorAgain = tree.find(besideRef)
     if anchorAgain.isNil:
-      return refusedFor(lpPaneNotPlaced, cmd.mergeBeside)
+      return refusedFor(lpPaneNotPlaced, besideRef)
     let destAgain = parentOf(tree, anchorAgain)
     if not destAgain.isNil and destAgain.kind == lnStack:
       let at = indexIn(destAgain, anchorAgain)
@@ -2053,9 +2404,10 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
     return appliedTo(next)
 
   of lcSetAutoHide:
+    let hiding = cmd.subjectRef
     case cmd.autoHideDirection
     of ahDock:
-      let already = next.dockedIndex(cmd.autoHidePane)
+      let already = next.dockedIndex(hiding)
       if already >= 0:
         let d = next.docked[already]
         # A negative order means "the end of that edge's strip" (`cmdDock`).
@@ -2070,60 +2422,66 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
           else: maxOrderAt(next, cmd.autoHideEdge) + 1
         if d.edge == cmd.autoHideEdge and d.order == wanted:
           return noOp()
-        if orderTaken(next, cmd.autoHideEdge, wanted, cmd.autoHidePane, true):
-          return refusedFor(lpDockOrderCollision, cmd.autoHidePane)
+        if orderTaken(next, cmd.autoHideEdge, wanted, hiding, true):
+          return refusedFor(lpDockOrderCollision, hiding)
         next.docked[already].edge = cmd.autoHideEdge
         next.docked[already].order = wanted
         return appliedTo(next)
-      let leaf = tree.find(cmd.autoHidePane)
+      let leaf = tree.find(hiding)
       if leaf.isNil:
-        return refusedFor(lpPaneNotPlaced, cmd.autoHidePane)
-      if allPanes(tree).len <= 1:
+        return refusedFor(lpPaneNotPlaced, hiding)
+      if paneCount(tree) <= 1:
         # Docking the last placed pane would empty the root — §2.4 rule 3
-        # again, reached from the other direction.
-        return refusedFor(lpEmptyRoot, cmd.autoHidePane)
+        # again, reached from the other direction. Counted over BOTH
+        # namespaces, as `lcRemovePane` counts: a tree that keeps an
+        # extension's pane is not empty.
+        return refusedFor(lpEmptyRoot, hiding)
       let order =
         if cmd.autoHideOrder < 0: maxOrderAt(next, cmd.autoHideEdge) + 1
         else: cmd.autoHideOrder
-      if orderTaken(next, cmd.autoHideEdge, order, cmd.autoHidePane, false):
-        return refusedFor(lpDockOrderCollision, cmd.autoHidePane)
+      if orderTaken(next, cmd.autoHideEdge, order, hiding, false):
+        return refusedFor(lpDockOrderCollision, hiding)
       let title =
         if cmd.autoHideTitle.len > 0: cmd.autoHideTitle else: leaf.title
-      # Where it came from, read before it leaves (PLAT-48).
-      let (beside, besideBefore) = Layout(tree: tree).pinPlaceOf(cmd.autoHidePane)
+      # Where it came from, read before it leaves (PLAT-48) — in whichever
+      # namespace that neighbour is.
+      let (beside, besideBefore) = Layout(tree: tree).pinPlaceOf(hiding)
       let weight = leaf.weight
-      discard detachPane(tree, cmd.autoHidePane)
+      discard detachRef(tree, hiding)
       if not normaliseInPlace(tree):
-        return refusedFor(lpEmptyRoot, cmd.autoHidePane)
-      next.docked.add(DockedPane(pane: cmd.autoHidePane, title: title,
+        return refusedFor(lpEmptyRoot, hiding)
+      next.docked.add(DockedPane(pane: kindOf(hiding),
+                                 contributedPane: idOf(hiding), title: title,
                                  edge: cmd.autoHideEdge, order: order,
-                                 revealed: false, beside: beside,
+                                 revealed: false, beside: kindOf(beside),
+                                 besideContributed: idOf(beside),
                                  besideBefore: besideBefore,
                                  weight: weight))
       return appliedTo(next)
     of ahRestore:
-      let at = next.dockedIndex(cmd.autoHidePane)
+      let at = next.dockedIndex(hiding)
       if at < 0:
-        return refusedFor(lpPaneNotDocked, cmd.autoHidePane)
-      if tree.contains(cmd.autoHidePane):
-        return refusedFor(lpPaneBothPlacedAndDocked, cmd.autoHidePane)
-      if cmd.autoHideRestoreBeside.isSome and
-         not tree.contains(cmd.autoHideRestoreBeside.get):
-        return refusedFor(lpPaneNotPlaced, cmd.autoHideRestoreBeside.get)
+        return refusedFor(lpPaneNotDocked, hiding)
+      if tree.contains(hiding):
+        return refusedFor(lpPaneBothPlacedAndDocked, hiding)
+      let named = cmd.anchorRef
+      if named.isSome and not tree.contains(named.get):
+        return refusedFor(lpPaneNotPlaced, named.get)
       let entry = next.docked[at]
-      let leaf = pane(entry.pane, entry.title)
+      let leaf = leafOf(entry.paneRefOf, entry.title)
       leaf.weight = entry.weight
       # No anchor named: back beside the pane it was docked from, while that
       # pane is placed (PLAT-48); otherwise `lcAddPane`'s root placement.
-      let remembered = cmd.autoHideRestoreBeside.isNone and
-                       entry.beside.isSome and tree.contains(entry.beside.get)
+      let cameFrom = entry.besideRef
+      let remembered = named.isNone and cameFrom.isSome and
+                       tree.contains(cameFrom.get)
       let anchor =
-        if cmd.autoHideRestoreBeside.isSome: cmd.autoHideRestoreBeside
-        elif remembered: entry.beside
-        else: none(PaneKind)
+        if named.isSome: named
+        elif remembered: cameFrom
+        else: none(PaneRef)
       if not insertBeside(tree, anchor, leaf,
                           before = remembered and entry.besideBefore):
-        return refusedFor(lpPaneNotPlaced, cmd.autoHidePane)
+        return refusedFor(lpPaneNotPlaced, hiding)
       next.docked.delete(at)
       return appliedTo(next)
     of ahOpen, ahClose:
@@ -2131,9 +2489,9 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
       # pane stays docked — its label stays on the strip — so nothing moves
       # in the tree; the binding projects the tree into what the open pane
       # leaves.
-      let at = next.dockedIndex(cmd.autoHidePane)
+      let at = next.dockedIndex(hiding)
       if at < 0:
-        return refusedFor(lpPaneNotDocked, cmd.autoHidePane)
+        return refusedFor(lpPaneNotDocked, hiding)
       let opening = cmd.autoHideDirection == ahOpen
       var changed = false
       for i in 0 ..< next.docked.len:
@@ -2150,18 +2508,19 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
       return appliedTo(next)
 
   of lcRename:
-    let leaf = tree.find(cmd.renameTarget)
+    let renaming = cmd.subjectRef
+    let leaf = tree.find(renaming)
     if not leaf.isNil:
       if leaf.title == cmd.renameTitle:
         return noOp()
       leaf.title = cmd.renameTitle
       return appliedTo(next)
-    let at = next.dockedIndex(cmd.renameTarget)
+    let at = next.dockedIndex(renaming)
     if at < 0:
       # Neither in the tree nor in `docked`: there is nothing to rename, and
       # saying so by kind is the difference between a reportable condition
       # and a rename that quietly did nothing.
-      return refusedFor(lpPaneNeitherPlacedNorDocked, cmd.renameTarget)
+      return refusedFor(lpPaneNeitherPlacedNorDocked, renaming)
     if next.docked[at].title == cmd.renameTitle:
       return noOp()
     next.docked[at].title = cmd.renameTitle
@@ -2194,9 +2553,10 @@ proc layoutOr*(outcome: LayoutOutcome; fallback: Layout): Layout =
 # aliasing bug in exchange for one less line here.
 # ---------------------------------------------------------------------------
 
-proc activate*(node: LayoutNode; kind: PaneKind): bool =
-  ## Make `kind` visible by selecting it in every stack that encloses it.
-  ## Returns false, changing nothing, when the pane is not in the tree.
+proc activate*(node: LayoutNode; r: PaneRef): bool =
+  ## Make the pane `r` names visible by selecting it in every stack that
+  ## encloses it. Returns false, changing nothing, when the pane is not in
+  ## the tree.
   ##
   ## This is the model's answer to `callInitLayoutSafe(session
   ## .savedLayoutConfig, targetContainer)`: selecting a tab is an index
@@ -2204,13 +2564,20 @@ proc activate*(node: LayoutNode; kind: PaneKind): bool =
   if node.isNil:
     return false
   if node.kind == lnPane:
-    return node.pane == kind
+    # `matches`, not `node.pane == kind`: a contributed leaf's `pane` is the
+    # enum's zero value, and comparing it selected an extension's tab when
+    # the editor was asked for.
+    return node.matches(r)
   for i, c in node.children:
-    if activate(c, kind):
+    if activate(c, r):
       if node.kind == lnStack:
         node.activeIndex = i
       return true
   false
+
+proc activate*(node: LayoutNode; kind: PaneKind): bool =
+  ## `activate` for a built-in pane.
+  activate(node, builtinRef(kind))
 
 proc setWeight*(node: LayoutNode; kind: PaneKind; weight: float): bool =
   ## Resize the region holding `kind`. False when the pane is absent, and —
@@ -2266,7 +2633,7 @@ proc addPane*(node: LayoutNode; leaf: LayoutNode): bool =
   ## false when the pane is already placed, which would be `lpDuplicatePane`.
   if node.isNil or leaf.isNil or node.kind == lnPane:
     return false
-  if leaf.kind == lnPane and node.contains(leaf.pane):
+  if leaf.kind == lnPane and node.contains(paneRefOf(leaf)):
     return false
   node.children.add(leaf)
   if node.kind == lnStack:
@@ -2417,18 +2784,30 @@ proc validate*(layout: Layout; owned: set[PaneKind]): seq[LayoutProblem] =
   if layout.tree.isNil or paneCount(layout.tree) == 0:
     result.add(LayoutProblem(kind: lpEmptyRoot, path: "", pane: none(PaneKind)))
   var seenDocked = initTable[PaneKind, bool]()
+  var seenDockedContributed = initTable[string, bool]()
   var seenSlot = initTable[string, bool]()
   for i, d in layout.docked:
-    if layout.tree.contains(d.pane):
-      result.add(LayoutProblem(kind: lpPaneBothPlacedAndDocked,
-                               path: "docked/" & $i, pane: some(d.pane)))
-    if seenDocked.hasKeyOrPut(d.pane, true):
-      result.add(LayoutProblem(kind: lpDuplicatePane, path: "docked/" & $i,
-                               pane: some(d.pane)))
+    # Each problem names the docked pane in ITS namespace: a contributed
+    # entry's `pane` is the enum's zero value and must never be reported.
+    template problem(k: LayoutProblemKind): LayoutProblem =
+      if d.isContributed:
+        LayoutProblem(kind: k, path: "docked/" & $i, pane: none(PaneKind),
+                      contributed: d.contributedPane)
+      else:
+        LayoutProblem(kind: k, path: "docked/" & $i, pane: some(d.pane))
+    if d.isContributed and paneIdProblem(d.contributedPane) != pipOk:
+      result.add(problem(lpMalformedContributedPane))
+    if layout.tree.contains(d.paneRefOf):
+      result.add(problem(lpPaneBothPlacedAndDocked))
+    let dup =
+      if d.isContributed:
+        seenDockedContributed.hasKeyOrPut(d.contributedPane, true)
+      else: seenDocked.hasKeyOrPut(d.pane, true)
+    if dup:
+      result.add(problem(lpDuplicatePane))
     let slot = $d.edge & "#" & $d.order
     if seenSlot.hasKeyOrPut(slot, true):
-      result.add(LayoutProblem(kind: lpDockOrderCollision,
-                               path: "docked/" & $i, pane: some(d.pane)))
+      result.add(problem(lpDockOrderCollision))
   for p in owned:
     if not layout.tree.contains(p) and layout.dockedIndex(p) < 0:
       result.add(LayoutProblem(kind: lpPaneNeitherPlacedNorDocked, path: "",
@@ -2486,12 +2865,19 @@ proc toJson*(d: DockedPane): JsonNode =
   ## be a bug. The field not being written is what prevents it — a decoder
   ## cannot resurrect what an encoder never wrote.
   result = newJObject()
-  result["pane"] = %($d.pane)
+  # Two keys, never both — the tree leaf's rule (`toJson(LayoutNode)`), for
+  # the same reason: a contributed id is never read back as a built-in pane.
+  if d.isContributed:
+    result["contributedPane"] = %d.contributedPane
+  else:
+    result["pane"] = %($d.pane)
   result["edge"] = %($d.edge)
   result["order"] = %d.order
   if d.title.len > 0:
     result["title"] = %d.title
-  if d.beside.isSome:
+  if d.besideContributed.len > 0:
+    result["besideContributedPane"] = %d.besideContributed
+  elif d.beside.isSome:
     result["beside"] = %($d.beside.get)
   if d.weight > 0.0:
     result["weight"] = %d.weight
@@ -2745,6 +3131,13 @@ proc migrateV9toV10(doc: JsonNode): JsonNode =
   result = copy(doc)
   result["version"] = %10
 
+proc migrateV10toV11(doc: JsonNode): JsonNode =
+  ## A docked entry may name a contributed pane (`contributedPane`,
+  ## `besideContributedPane`). No v10 document has one, so this re-stamps the
+  ## version, for the v3→v4 reason.
+  result = copy(doc)
+  result["version"] = %11
+
 proc migrateDocument(doc: JsonNode): JsonNode =
   ## Walk a document forward, ONE VERSION AT A TIME, to this build's schema
   ## version (§6).
@@ -2779,6 +3172,8 @@ proc migrateDocument(doc: JsonNode): JsonNode =
       result = migrateV8toV9(result)
     of 9:
       result = migrateV9toV10(result)
+    of 10:
+      result = migrateV10toV11(result)
     else:
       # Unreachable while the chain is complete, and this is what makes
       # "complete" checkable: a bump that forgets its migration lands here
@@ -2811,17 +3206,38 @@ proc restoreLayoutDocument*(j: JsonNode): Layout =
   for entry in doc["docked"]:
     if entry.kind != JObject:
       raiseDecode(ldeNotAnObject, "docked entry is " & $entry.kind)
-    for field in ["pane", "edge", "order"]:
+    let hasBuiltin = entry.hasKey("pane")
+    let hasContributed = entry.hasKey("contributedPane")
+    if hasBuiltin and hasContributed:
+      raiseDecode(ldePaneAndContributedPane,
+        "a docked entry carries both 'pane' and 'contributedPane'")
+    if not hasBuiltin and not hasContributed:
+      raiseDecode(ldeMissingField, "docked.pane")
+    for field in ["edge", "order"]:
       if not entry.hasKey(field):
         raiseDecode(ldeMissingField, "docked." & field)
-    if entry["pane"].kind != JString:
+    var contributedId = ""
+    if hasContributed:
+      if entry["contributedPane"].kind != JString:
+        raiseDecode(ldeWrongFieldType,
+          "docked.contributedPane is " & $entry["contributedPane"].kind)
+      contributedId = entry["contributedPane"].getStr
+      # The tree leaf's rule at the docked door: a malformed id names no
+      # extension and is corruption; a well-formed one naming nothing loaded
+      # is a slot (`prUnloadedExtension`, decided by `classify`).
+      let problem = paneIdProblem(contributedId)
+      if problem != pipOk:
+        raiseDecode(ldeBadContributedPane, describe(problem, contributedId))
+    elif entry["pane"].kind != JString:
       raiseDecode(ldeWrongFieldType, "docked.pane is " & $entry["pane"].kind)
     if entry["edge"].kind != JString:
       raiseDecode(ldeWrongFieldType, "docked.edge is " & $entry["edge"].kind)
     if entry["order"].kind != JInt:
       raiseDecode(ldeWrongFieldType, "docked.order is " & $entry["order"].kind)
     var d = DockedPane(
-      pane: parsePaneKind(entry["pane"].getStr),
+      pane: (if hasContributed: PaneKind.low
+             else: parsePaneKind(entry["pane"].getStr)),
+      contributedPane: contributedId,
       edge: parseEdge(entry["edge"].getStr),
       order: entry["order"].getInt,
       revealed: false)
@@ -2836,6 +3252,18 @@ proc restoreLayoutDocument*(j: JsonNode): Layout =
       if entry["beside"].kind != JString:
         raiseDecode(ldeWrongFieldType, "docked.beside is " & $entry["beside"].kind)
       d.beside = some(parsePaneKind(entry["beside"].getStr))
+    if entry.hasKey("besideContributedPane"):
+      if entry.hasKey("beside"):
+        raiseDecode(ldePaneAndContributedPane,
+          "a docked entry carries both 'beside' and 'besideContributedPane'")
+      if entry["besideContributedPane"].kind != JString:
+        raiseDecode(ldeWrongFieldType, "docked.besideContributedPane is " &
+                    $entry["besideContributedPane"].kind)
+      let id = entry["besideContributedPane"].getStr
+      let problem = paneIdProblem(id)
+      if problem != pipOk:
+        raiseDecode(ldeBadContributedPane, describe(problem, id))
+      d.besideContributed = id
     if entry.hasKey("besideBefore"):
       if entry["besideBefore"].kind != JBool:
         raiseDecode(ldeWrongFieldType,
@@ -2883,7 +3311,7 @@ proc `$`*(node: LayoutNode): string =
     $node.kind & "(" & parts.join(", ") & ")"
 
 proc `$`*(d: DockedPane): string =
-  $d.pane & "@" & $d.edge & "#" & $d.order
+  $d.paneRefOf & "@" & $d.edge & "#" & $d.order
 
 proc `$`*(layout: Layout): string =
   ## A one-line rendering for test failure output. `revealed` is not printed

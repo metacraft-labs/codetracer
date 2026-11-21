@@ -143,7 +143,15 @@ jobs:
         # pointer are isonim-gpui's. Paths are relative to the workspace's
         # parent, where every sibling checkout sits, so a shard restores them
         # to its own checkout whatever its runner's workspace path.
+        # nix-runtime-closure.txt lists the store paths those binaries run
+        # against, which a shard realises after unpacking: ct is linked
+        # through repro's own Nix provisioning, not the dev shell's.
         run: |
+          nix develop .#devShells.x86_64-linux.default --command bash ci/build/record-runtime-closure.sh \
+            src/build-debug-repro/nix-runtime-closure.txt \
+            src/build-debug-repro \
+            ../isonim-gpui/rust/target/windowed/debug/libgpui_nim_shim.so \
+            ../isonim-gpui/build/virtual-pointer
           cd ..
           tar -czf "${RUNNER_TEMP}/ct-build-products.tar.gz" \
             codetracer/src/build-debug-repro \

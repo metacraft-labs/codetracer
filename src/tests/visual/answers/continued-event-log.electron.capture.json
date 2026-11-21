@@ -11,6 +11,22 @@
     "entry=1@1",
     "continueForward=113@171"
   ],
+  "entrySettle": {
+    "state": {
+      "line": 1,
+      "path": "test-programs/calc/main.py",
+      "rrTicks": 1,
+      "busy": false
+    },
+    "firstSample": {
+      "line": 1,
+      "path": "test-programs/calc/main.py",
+      "rrTicks": 1,
+      "busy": false
+    },
+    "polls": 2,
+    "waitedMs": 236
+  },
   "viewportCss": "1920x1080",
   "capturePixels": "1920x1080",
   "capture": "src/tests/visual/captures/electron/continued-event-log.png",

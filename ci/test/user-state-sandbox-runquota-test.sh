@@ -61,8 +61,10 @@
 # the relay runs in one more user namespace that maps it back to 0. Only those
 # clients: a client on the direct endpoint is refused by the trust check before
 # any Hello, and that refusal is the defect the fixture must keep. The suite
-# shows that the compensation removes nothing but this artefact: unmapped, the
-# relayed client is answered by the daemon itself, with exactly that refusal.
+# once showed that the compensation removed nothing but this artefact:
+# unmapped, the relayed client got exactly that refusal. RunQuota since
+# 6d739bdc serves such a client, excusing its foreign-namespace uid, so the
+# control below now requires it to be served.
 #
 # THE MISSING-TOOL ARMS SHADOW ONE MORE THING. To show that the library does
 # not forward an endpoint it cannot have RunQuota check (no `runquota`) or
@@ -105,6 +107,37 @@ if [ -z "${_CT_USS_RQ_IN_T:-}" ]; then
 	done
 	if [ -n "${missing}" ]; then
 		echo "user-state-sandbox-runquota-test: FAIL: missing on PATH:${missing} (run it in the dev shell)" >&2
+		exit 1
+	fi
+	# THE DAEMON MUST BE THE PINNED ONE. The unmapped-client control asserts
+	# what flake.lock's runquota specifies (served, its foreign-namespace uid
+	# excused: RunQuota 6d739bdc). Every runquota reports "0.1.3", so the
+	# version says nothing, and outside the dev shell PATH can hold an older
+	# build. ~/.nix-profile's runquota-0.1.3 did, and it failed that control
+	# for being old, not for being wrong. So the suite refuses, by name, a
+	# runquotad that lacks the judgement, probed by a diagnostic string only
+	# that code emits. A control runs the probe against a stand-in with the
+	# string and one without it first, so a probe that accepts everything
+	# cannot pass.
+	rq_has_namespace_judgement() { # $1 = runquotad (a Nix wrapper is followed)
+		local f="$1" w
+		w="$(dirname "$f")/.$(basename "$f")-wrapped"
+		[ -f "$w" ] && f="$w"
+		grep -aqF 'namespace tokens describe the client' "$f"
+	}
+	probe_ctl="$(mktemp -d)"
+	printf 'x namespace tokens describe the client x\n' >"${probe_ctl}/runquotad"
+	printf 'an older runquotad\n' >"${probe_ctl}/old-runquotad"
+	if ! rq_has_namespace_judgement "${probe_ctl}/runquotad" || rq_has_namespace_judgement "${probe_ctl}/old-runquotad"; then
+		rm -rf "${probe_ctl}"
+		echo "user-state-sandbox-runquota-test: FAIL: the runquotad probe cannot tell a judging daemon from an older one" >&2
+		exit 1
+	fi
+	rm -rf "${probe_ctl}"
+	rqd="$(readlink -f "$(command -v runquotad)")"
+	if ! rq_has_namespace_judgement "${rqd}"; then
+		pinned="$(python3 -c 'import json,sys; l=json.load(open(sys.argv[1])); n=l["nodes"]; print(n[n[l["root"]]["inputs"]["runquota"]]["locked"]["rev"])' "${repo_root}/flake.lock" 2>/dev/null)"
+		echo "user-state-sandbox-runquota-test: FAIL: ${rqd} predates RunQuota 6d739bdc (serve clients in other namespaces), which flake.lock's runquota ${pinned:-?} carries; run the suite in the dev shell, or put that runquota first on PATH" >&2
 		exit 1
 	fi
 	if ! unshare --user --map-root-user --mount true 2>/dev/null; then
@@ -366,11 +399,21 @@ case "$(probe socket)" in
 "${scratch}/tmp/ct-uss-rq."*/rq.sock) t_pass "stage: the sandboxed command was given the relay's private socket" ;;
 *) t_fail "stage: the sandboxed command was given the relay's private socket (RUNQUOTA_SOCKET=$(probe socket))" ;;
 esac
-# The compensation's control: unmapped, the relayed client got as far as the
-# daemon, which refused it for the declared uid alone.
-if [ "$(probe unmapped.rc)" != "" ] && [ "$(probe unmapped.rc)" != 0 ] &&
-	grep -q "client declared uid 1004 but its peer credentials say uid 0" "${scratch}/tmp/probe/unmapped.err"; then
-	t_pass "stage: unmapped, the relayed client is answered by the daemon itself (the fixture's declared-uid artefact only)"
+# The compensation's control: unmapped, the relayed client gets as far as the
+# daemon, so the answer is the daemon's own. What the pinned RunQuota
+# (aad94ad) specifies for it is SERVED: 6d739bdc ("serve clients that run in
+# other namespaces") excuses the declared uid of a client that reports a user
+# namespace other than the daemon's, and only that check. Its owner stays the
+# peer credential, and the declared uid is deliberately not recorded or
+# logged, so there is no excuse line to look for. The status it serves is the
+# evidence, together with the absence of the old refusal, "client declared uid
+# 1004 but its peer credentials say uid 0". That refusal is now a regression
+# and fails here, as does a client-side endpoint refusal or no answer. Run
+# 44864106832's nixos leg was served (rc=0, "sessions: 0 / leases: 0").
+unmapped_rc="$(probe unmapped.rc)"
+if [ "$unmapped_rc" = 0 ] && grep -q '^sessions: ' "${scratch}/tmp/probe/unmapped.err" &&
+	! grep -q "client declared uid" "${scratch}/tmp/probe/unmapped.err"; then
+	t_pass "stage: unmapped, the relayed client is served by the daemon itself, its foreign-namespace uid excused"
 else
 	t_fail "stage: unmapped, the relayed client is answered by the daemon itself (rc=$(probe unmapped.rc))"
 	show "${scratch}/tmp/probe/unmapped.err"

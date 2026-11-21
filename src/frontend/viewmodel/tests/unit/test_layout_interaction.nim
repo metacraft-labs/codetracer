@@ -328,8 +328,10 @@ suite "Interaction — separate from Layout, structurally (§4.1)":
     # back to, never where it is drawn. PLAT-49 part B added `DockedPane.open`
     # (docked OPEN, inline at its edge: a state a command sets, like
     # `revealed` not persisted, and no extent — the binding derives the band),
-    # so the docked pane's arity is 9.
-    check checkedFields == 7 + 9 + 3
+    # so the docked pane's arity is 9. Docked contributed panes added
+    # `DockedPane.contributedPane` and `DockedPane.besideContributed`
+    # (identities, persisted, not transient), so it is 11.
+    check checkedFields == 7 + 11 + 3
 
   test "layout_model names none of the transient types, and cannot":
     # `layout_interaction` imports `layout_model`; the reverse import is a

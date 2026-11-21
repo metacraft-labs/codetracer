@@ -1,0 +1,116 @@
+[
+  {
+    "name": "plat18/calltrace/firefox/step-total/js-direct",
+    "unit": "ms",
+    "value": 15.28,
+    "extra": "load1=100.67 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one firefox page; one repetition is the selected call moves one row with 600 calls on screen\" core_ms=15.280 host_ms=0.000 min=11.820 max=943.000 p99=617.940 bytes_crossed=0 ops=0 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/firefox/expand-total/js-direct",
+    "unit": "ms",
+    "value": 6063.54,
+    "extra": "load1=100.67 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one firefox page; one repetition is a 600-call section loads: 600 rows with their arguments appear in one update\" core_ms=6063.540 host_ms=0.000 min=2651.620 max=34411.620 p99=32029.760 bytes_crossed=0 ops=0 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/firefox/mount-total/js-direct",
+    "unit": "ms",
+    "value": 4.14,
+    "extra": "load1=100.67 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one firefox page; one repetition is the pane's first render over a two-call section\" core_ms=4.140 host_ms=0.000 min=1.480 max=114.900 p99=103.480 bytes_crossed=0 ops=0 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/firefox/collapse-total/js-direct",
+    "unit": "ms",
+    "value": 122.36,
+    "extra": "load1=100.67 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one firefox page; one repetition is the section goes back to two calls\" core_ms=122.360 host_ms=0.000 min=82.580 max=2108.660 p99=1155.880 bytes_crossed=0 ops=0 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/firefox/step-total/js-crossing",
+    "unit": "ms",
+    "value": 23.34,
+    "extra": "load1=100.67 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one firefox page; one repetition is the selected call moves one row with 600 calls on screen\" core_ms=18.660 host_ms=3.940 min=16.600 max=596.420 p99=507.440 bytes_crossed=69335 ops=1800 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/firefox/expand-total/js-crossing",
+    "unit": "ms",
+    "value": 7189.94,
+    "extra": "load1=100.67 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one firefox page; one repetition is a 600-call section loads: 600 rows with their arguments appear in one update\" core_ms=6886.000 host_ms=253.200 min=2957.120 max=25684.480 p99=25555.540 bytes_crossed=1768147 ops=86119 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/firefox/mount-total/js-crossing",
+    "unit": "ms",
+    "value": 3.7,
+    "extra": "load1=100.67 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one firefox page; one repetition is the pane's first render over a two-call section\" core_ms=1.700 host_ms=0.880 min=1.320 max=71.780 p99=42.320 bytes_crossed=6815 ops=330 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/firefox/collapse-total/js-crossing",
+    "unit": "ms",
+    "value": 115.64,
+    "extra": "load1=100.67 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one firefox page; one repetition is the section goes back to two calls\" core_ms=103.200 host_ms=10.060 min=75.600 max=1348.200 p99=1330.580 bytes_crossed=51393 ops=3595 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/firefox/step-total/wasm-crossing",
+    "unit": "ms",
+    "value": 11.98,
+    "extra": "load1=100.67 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one firefox page; one repetition is the selected call moves one row with 600 calls on screen\" core_ms=8.240 host_ms=3.840 min=9.280 max=240.520 p99=108.100 bytes_crossed=69335 ops=1800 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/firefox/expand-total/wasm-crossing",
+    "unit": "ms",
+    "value": 3817.08,
+    "extra": "load1=100.67 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one firefox page; one repetition is a 600-call section loads: 600 rows with their arguments appear in one update\" core_ms=3495.800 host_ms=199.500 min=1833.920 max=15458.600 p99=14482.680 bytes_crossed=1768147 ops=86119 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/firefox/mount-total/wasm-crossing",
+    "unit": "ms",
+    "value": 1.64,
+    "extra": "load1=100.67 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one firefox page; one repetition is the pane's first render over a two-call section\" core_ms=0.740 host_ms=0.860 min=1.060 max=17.820 p99=15.620 bytes_crossed=6815 ops=330 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/firefox/collapse-total/wasm-crossing",
+    "unit": "ms",
+    "value": 49.6,
+    "extra": "load1=100.67 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one firefox page; one repetition is the section goes back to two calls\" core_ms=39.000 host_ms=9.900 min=38.540 max=604.280 p99=589.680 bytes_crossed=51393 ops=3595 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/firefox/bytes-per-step",
+    "unit": "bytes",
+    "value": 69335,
+    "extra": "load1=100.67 cpus=24 build=release samples=1 shape=\"a STRUCTURAL count, not a measurement: the flat wire size of the operations one step issues with 600 rows on screen. Identical on native, nim js and wasm32 \u2014 that is what makes the three comparable\" ops=1800"
+  },
+  {
+    "name": "plat18/calltrace/firefox/bytes-per-expand",
+    "unit": "bytes",
+    "value": 1768147,
+    "extra": "load1=100.67 cpus=24 build=release samples=1 shape=\"the same count for the pane's largest update: 600 rows appearing at once\" ops=86119"
+  },
+  {
+    "name": "plat18/calltrace/firefox/cold-start/js-direct",
+    "unit": "ms",
+    "value": 3674.66,
+    "extra": "load1=100.67 cpus=24 build=release samples=9 shape=\"the MEDIAN of 9 loads, each in a FRESH renderer process (a second load in one process would not be cold), the arms rotated. Script fetch, parse and evaluate, plus (wasm) compile, instantiate and run main, to the point where the entry points exist\" min=593.7 max=8976.6 target<=20%-regression-vs-js-direct"
+  },
+  {
+    "name": "plat18/calltrace/firefox/cold-start/js-crossing",
+    "unit": "ms",
+    "value": 1190.04,
+    "extra": "load1=100.67 cpus=24 build=release samples=9 shape=\"the MEDIAN of 9 loads, each in a FRESH renderer process (a second load in one process would not be cold), the arms rotated. Script fetch, parse and evaluate, plus (wasm) compile, instantiate and run main, to the point where the entry points exist\" min=323.8 max=7862.6 target<=20%-regression-vs-js-direct"
+  },
+  {
+    "name": "plat18/calltrace/firefox/cold-start/wasm-crossing",
+    "unit": "ms",
+    "value": 478.92,
+    "extra": "load1=100.67 cpus=24 build=release samples=9 shape=\"the MEDIAN of 9 loads, each in a FRESH renderer process (a second load in one process would not be cold), the arms rotated. Script fetch, parse and evaluate, plus (wasm) compile, instantiate and run main, to the point where the entry points exist\" min=129.4 max=1183.1 target<=20%-regression-vs-js-direct"
+  },
+  {
+    "name": "plat18/calltrace/firefox/artifact/js-direct",
+    "unit": "bytes",
+    "value": 2671043,
+    "extra": "load1=100.67 cpus=24 build=release samples=1 shape=\"wc -c of the nim js bundle, UNMINIFIED and unbundled \u2014 the shipped renderer goes through webpack, so this over-states what a user downloads; the gzip figures in the run log are the closer stand-in\""
+  },
+  {
+    "name": "plat18/calltrace/firefox/artifact/wasm",
+    "unit": "bytes",
+    "value": 619963,
+    "extra": "load1=100.67 cpus=24 build=release samples=1 shape=\"wc -c of the .wasm plus its emscripten glue, browser target (-sENVIRONMENT=web, no NODERAWFS). NOT PLAT-17's 1,178,754 B, which is the node build\""
+  }
+]

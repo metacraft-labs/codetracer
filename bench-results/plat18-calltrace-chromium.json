@@ -1,0 +1,116 @@
+[
+  {
+    "name": "plat18/calltrace/chromium/step-total/js-direct",
+    "unit": "ms",
+    "value": 12.505,
+    "extra": "load1=109.09 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one chromium page; one repetition is the selected call moves one row with 600 calls on screen\" core_ms=12.505 host_ms=0.000 min=7.650 max=300.015 p99=193.415 bytes_crossed=0 ops=0 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/chromium/expand-total/js-direct",
+    "unit": "ms",
+    "value": 4076.27,
+    "extra": "load1=109.09 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one chromium page; one repetition is a 600-call section loads: 600 rows with their arguments appear in one update\" core_ms=4076.270 host_ms=0.000 min=1874.785 max=12302.235 p99=12094.115 bytes_crossed=0 ops=0 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/chromium/mount-total/js-direct",
+    "unit": "ms",
+    "value": 1.875,
+    "extra": "load1=109.09 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one chromium page; one repetition is the pane's first render over a two-call section\" core_ms=1.875 host_ms=0.000 min=0.970 max=349.610 p99=35.735 bytes_crossed=0 ops=0 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/chromium/collapse-total/js-direct",
+    "unit": "ms",
+    "value": 82.675,
+    "extra": "load1=109.09 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one chromium page; one repetition is the section goes back to two calls\" core_ms=82.675 host_ms=0.000 min=57.300 max=1627.385 p99=945.320 bytes_crossed=0 ops=0 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/chromium/step-total/js-crossing",
+    "unit": "ms",
+    "value": 23.18,
+    "extra": "load1=109.09 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one chromium page; one repetition is the selected call moves one row with 600 calls on screen\" core_ms=19.760 host_ms=2.625 min=14.070 max=783.025 p99=446.400 bytes_crossed=69335 ops=1800 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/chromium/expand-total/js-crossing",
+    "unit": "ms",
+    "value": 4939.75,
+    "extra": "load1=109.09 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one chromium page; one repetition is a 600-call section loads: 600 rows with their arguments appear in one update\" core_ms=4583.440 host_ms=141.560 min=1983.825 max=16229.080 p99=15421.015 bytes_crossed=1768147 ops=86119 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/chromium/mount-total/js-crossing",
+    "unit": "ms",
+    "value": 2.68,
+    "extra": "load1=109.09 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one chromium page; one repetition is the pane's first render over a two-call section\" core_ms=1.765 host_ms=0.640 min=1.140 max=40.275 p99=33.830 bytes_crossed=6815 ops=330 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/chromium/collapse-total/js-crossing",
+    "unit": "ms",
+    "value": 105.305,
+    "extra": "load1=109.09 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one chromium page; one repetition is the section goes back to two calls\" core_ms=94.720 host_ms=10.555 min=58.465 max=1288.655 p99=921.450 bytes_crossed=51393 ops=3595 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/chromium/step-total/wasm-crossing",
+    "unit": "ms",
+    "value": 5.095,
+    "extra": "load1=109.09 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one chromium page; one repetition is the selected call moves one row with 600 calls on screen\" core_ms=2.230 host_ms=2.715 min=3.675 max=246.435 p99=120.405 bytes_crossed=69335 ops=1800 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/chromium/expand-total/wasm-crossing",
+    "unit": "ms",
+    "value": 1075.02,
+    "extra": "load1=109.09 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one chromium page; one repetition is a 600-call section loads: 600 rows with their arguments appear in one update\" core_ms=834.735 host_ms=142.095 min=514.305 max=7904.655 p99=6219.515 bytes_crossed=1768147 ops=86119 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/chromium/mount-total/wasm-crossing",
+    "unit": "ms",
+    "value": 0.825,
+    "extra": "load1=109.09 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one chromium page; one repetition is the pane's first render over a two-call section\" core_ms=0.200 host_ms=0.605 min=0.460 max=60.875 p99=35.890 bytes_crossed=6815 ops=330 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/chromium/collapse-total/wasm-crossing",
+    "unit": "ms",
+    "value": 19.44,
+    "extra": "load1=109.09 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one chromium page; one repetition is the section goes back to two calls\" core_ms=8.875 host_ms=10.570 min=13.165 max=482.970 p99=371.695 bytes_crossed=51393 ops=3595 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/chromium/bytes-per-step",
+    "unit": "bytes",
+    "value": 69335,
+    "extra": "load1=109.09 cpus=24 build=release samples=1 shape=\"a STRUCTURAL count, not a measurement: the flat wire size of the operations one step issues with 600 rows on screen. Identical on native, nim js and wasm32 \u2014 that is what makes the three comparable\" ops=1800"
+  },
+  {
+    "name": "plat18/calltrace/chromium/bytes-per-expand",
+    "unit": "bytes",
+    "value": 1768147,
+    "extra": "load1=109.09 cpus=24 build=release samples=1 shape=\"the same count for the pane's largest update: 600 rows appearing at once\" ops=86119"
+  },
+  {
+    "name": "plat18/calltrace/chromium/cold-start/js-direct",
+    "unit": "ms",
+    "value": 679.47,
+    "extra": "load1=109.09 cpus=24 build=release samples=9 shape=\"the MEDIAN of 9 loads, each in a FRESH renderer process (a second load in one process would not be cold), the arms rotated. Script fetch, parse and evaluate, plus (wasm) compile, instantiate and run main, to the point where the entry points exist\" min=219.1 max=10290.5 target<=20%-regression-vs-js-direct"
+  },
+  {
+    "name": "plat18/calltrace/chromium/cold-start/js-crossing",
+    "unit": "ms",
+    "value": 427.885,
+    "extra": "load1=109.09 cpus=24 build=release samples=9 shape=\"the MEDIAN of 9 loads, each in a FRESH renderer process (a second load in one process would not be cold), the arms rotated. Script fetch, parse and evaluate, plus (wasm) compile, instantiate and run main, to the point where the entry points exist\" min=193.6 max=1163.9 target<=20%-regression-vs-js-direct"
+  },
+  {
+    "name": "plat18/calltrace/chromium/cold-start/wasm-crossing",
+    "unit": "ms",
+    "value": 430.845,
+    "extra": "load1=109.09 cpus=24 build=release samples=9 shape=\"the MEDIAN of 9 loads, each in a FRESH renderer process (a second load in one process would not be cold), the arms rotated. Script fetch, parse and evaluate, plus (wasm) compile, instantiate and run main, to the point where the entry points exist\" min=202.9 max=1002.4 target<=20%-regression-vs-js-direct"
+  },
+  {
+    "name": "plat18/calltrace/chromium/artifact/js-direct",
+    "unit": "bytes",
+    "value": 2671043,
+    "extra": "load1=109.09 cpus=24 build=release samples=1 shape=\"wc -c of the nim js bundle, UNMINIFIED and unbundled \u2014 the shipped renderer goes through webpack, so this over-states what a user downloads; the gzip figures in the run log are the closer stand-in\""
+  },
+  {
+    "name": "plat18/calltrace/chromium/artifact/wasm",
+    "unit": "bytes",
+    "value": 619963,
+    "extra": "load1=109.09 cpus=24 build=release samples=1 shape=\"wc -c of the .wasm plus its emscripten glue, browser target (-sENVIRONMENT=web, no NODERAWFS). NOT PLAT-17's 1,178,754 B, which is the node build\""
+  }
+]

@@ -60,7 +60,7 @@
 # timeout (run 43859070538). --list-shard prints the shard's files and exits.
 #
 # Environment:
-#   CT_NIM_CACHE_ROOT  nimcache root (default /tmp/ct-nim-cache)
+#   CT_NIM_CACHE_ROOT  nimcache root (default /tmp/ct-nim-cache-<uid>/<checkout>-<tag>)
 #   CT_LANE_TIMEOUT    per-file timeout in seconds (default 1800)
 
 set -uo pipefail
@@ -225,7 +225,9 @@ if [ -n "${CT_NIM_CACHE_ROOT:-}" ]; then
 else
 	_ct_checkout="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 	_ct_tag="$(printf '%s' "${_ct_checkout}" | cksum | awk '{print $1}')"
-	cache_root="/tmp/ct-nim-cache/$(basename "${_ct_checkout}")-${_ct_tag}"
+	# Per account too, as ci/lib/nim-cache-root.sh says: a shared /tmp root
+	# created by one runner user refuses the others.
+	cache_root="/tmp/ct-nim-cache-$(id -u)/$(basename "${_ct_checkout}")-${_ct_tag}"
 fi
 lane_timeout="${CT_LANE_TIMEOUT:-1800}"
 
@@ -395,8 +397,29 @@ fi
 
 mkdir -p test-logs "${cache_root}"
 
+# THE WASM DEVELOPER PROFILE (ci/lib/wasm-dev-profile.sh): each C file is
+# compiled by Emscripten's clang directly rather than through the `emcc`
+# Python driver (the same object bytes, without a Python start-up per file),
+# and objects are shared between the lane's files through a content-keyed
+# cache beside their nimcaches. Set up once per lane. When Emscripten cannot
+# answer the questions the profile asks, the lane builds through `emcc` as
+# before; the missing-`emcc` check above has already failed the lane if it
+# is absent altogether. CT_WASM_CC=emcc forces the old path.
+wasm_cc=emcc
+if [ "${backend}" = "wasm" ]; then
+	# shellcheck source=ci/lib/wasm-dev-profile.sh
+	# shellcheck disable=SC1091 # resolved at runtime from $repo_root
+	source "${repo_root}/ci/lib/wasm-dev-profile.sh"
+	if ct_wasm_dev_profile "${cache_root}/wasm-objects"; then
+		wasm_cc="${CT_WASM_CC_FLAGS[1]#--clang.exe:}"
+	fi
+fi
+
 echo "=== ${lane}: $(test_lane_description "${lane}") ==="
 echo "    (${_ct_uss_note})"
+if [ "${backend}" = "wasm" ]; then
+	echo "    (wasm C compiler: ${wasm_cc})"
+fi
 if [ "${compile_only}" -eq 1 ]; then
 	echo "    (compile-only: these files are never executed — see"
 	echo "     ci/lib/test-lane-files.sh for why)"
@@ -483,10 +506,13 @@ while read -r f; do
 		#       The explicit spelling of the same thing, for anything that
 		#       branches on the toolchain rather than the cpu.
 		#
-		#   --cc:clang --clang.exe:emcc --clang.linkerexe:emcc
-		#       Route Nim's C compile and link through the Emscripten
-		#       wrappers. `emcc` IS clang, so `--cc:clang`'s flag vocabulary
-		#       is the right one.
+		#   --cc:clang --clang.exe:… --clang.linkerexe:emcc
+		#       Route Nim's C compile and link through Emscripten. `emcc` IS
+		#       clang, so `--cc:clang`'s flag vocabulary is the right one.
+		#       The compiler is `ci/lib/wasm-cc.sh` under the developer
+		#       profile set up above the loop (Emscripten's clang with
+		#       `emcc --cflags`, and the shared object cache), `emcc` without
+		#       it; the link is `emcc` either way.
 		#
 		#   --mm:orc
 		#       PLAT-17's deliverable, and not a default: Nim 2.x's default
@@ -542,7 +568,7 @@ while read -r f; do
 		#       the real toolchain instead of grepping for it.
 		compile_cmd=(nim c --hints:off --warnings:off
 			--cpu:wasm32 --os:linux -d:emscripten
-			--cc:clang --clang.exe:emcc --clang.linkerexe:emcc
+			--cc:clang --clang.exe:"${wasm_cc}" --clang.linkerexe:emcc
 			--mm:orc --threads:off
 			--passL:-sSTACK_SIZE=8388608
 			--passL:-sNODERAWFS=1

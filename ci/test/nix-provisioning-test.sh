@@ -285,7 +285,12 @@ done
 # 44 -> 45: visual-replay-tools.yml's `visual-replay-tools`, which builds
 # ct-native-replay, ct_gfx_player and ct-mcr once per run for GPUI shard 1 and
 # the TUI player shard. It provisions Nix the same way as ct-build.
-readonly EXPECTED_NIX_JOBS=45
+#
+# 45 -> 48: zgui.yml's `linux` and `macos` (67d4140e2a2, the zgui front-end's
+# lane) and plugin-transport-darwin.yml's `plugin-transport-darwin`
+# (d959a95c0a5). Each installs Nix through ./.github/actions/setup-nix before
+# its first `nix`.
+readonly EXPECTED_NIX_JOBS=48
 
 if [ "${#nix_jobs[@]}" -eq "$EXPECTED_NIX_JOBS" ]; then
 	ok "the scanner still classifies the nix-using jobs (${#nix_jobs[@]})"

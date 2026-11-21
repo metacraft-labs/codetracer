@@ -20,19 +20,23 @@
     "does catch is a recorded pixel-derived value disagreeing with the",
     "committed DOM-derived answers, and those two share no code."
   ],
-  "takenAt": "2026-09-23T10:12:34Z",
+  "takenAt": "2026-11-21T02:36:39Z",
   "host": "gpu-server-001",
   "expectedScenarios": 6,
-  "expectedGpuiScenarios": 2,
+  "expectedGpuiScenarios": 6,
   "frameDigests": {
-    "electron/entry-shell": "0FA0FAFF2D78E383762BB2D06C83E0C4E643507B",
-    "electron/stepped-editor": "4ABDBF5288B770553ACA7356FA97C9B18D471172",
-    "electron/advanced-state": "5C452D07FF3799533AAD1ED3092A28429302D8CE",
-    "electron/returned-calltrace": "5062DDF543B30D660AB6566A86305E11B65556E5",
-    "electron/continued-event-log": "90679B07C3DDECF257A20E11F828809932FE7FB5",
-    "electron/breakpoint-editor": "ED16CEFE63E594DF8948897E07A64CD083230B29",
-    "gpui/stepped-editor": "260BFABF94E7A84E51741599865C8C060B47F02C",
-    "gpui/advanced-state": "46BECB4849E929C4FC69910B6E4ED66B37F26B94"
+    "electron/entry-shell": "0DC86BDB1D63BEE6628F2715E54F4CBC9624188B",
+    "electron/stepped-editor": "3F1CD93E032BE0D069DF7BAAC91EE2487B38622E",
+    "electron/advanced-state": "E5FEFBC8941A118CB9AD780380655C241650DA85",
+    "electron/returned-calltrace": "5FB3F4249EC020CE1FCE67E9A2CD308051049266",
+    "electron/continued-event-log": "6A414DF943D9A8795D5B9EF2B324E1171B8D8745",
+    "electron/breakpoint-editor": "4BBCD28971BBECE3461FA845ADFA49890B0CCE27",
+    "gpui/entry-shell": "0950BDE38EC6C599B63F9EFAAA7F1B4F7CC22F9E",
+    "gpui/stepped-editor": "3985BECE5F126D382861A442221FF851793BC88D",
+    "gpui/advanced-state": "4602D0C70D09B23A392FBB3EB06E35D1A0B35962",
+    "gpui/returned-calltrace": "9709E9C6EBDE346FE70A278FC953BF35A557B002",
+    "gpui/continued-event-log": "07F69E524557F955F4499E347B9980879749253D",
+    "gpui/breakpoint-editor": "5944657C47E41022E8EC0A0953A8026FFD7128E2"
   },
   "electron": {
     "entry-shell": {
@@ -43,8 +47,8 @@
       },
       "eventLog": {
         "kind": "read",
-        "events": 6,
-        "ofRows": 6
+        "events": 7,
+        "ofRows": 7
       },
       "editor": {
         "kind": "read",
@@ -57,6 +61,7 @@
       "programState": {
         "kind": "read",
         "variableNames": [
+          "__builtins__",
           "__cached__",
           "__doc__",
           "__file__",
@@ -68,12 +73,12 @@
           "mul",
           "sub"
         ],
-        "count": 10
+        "count": 11
       },
       "eventLog": {
         "kind": "read",
-        "events": 6,
-        "ofRows": 6
+        "events": 7,
+        "ofRows": 7
       },
       "editor": {
         "kind": "read",
@@ -86,24 +91,25 @@
       "programState": {
         "kind": "read",
         "variableNames": [
+          "__builtins__",
           "__cached__",
           "__doc__",
           "__file__",
           "__loader__",
           "__name__",
+          "__package__",
           "__spec__",
           "add",
-          "builtins__",
           "div",
           "mul",
           "sub"
         ],
-        "count": 11
+        "count": 12
       },
       "eventLog": {
         "kind": "read",
-        "events": 6,
-        "ofRows": 6
+        "events": 7,
+        "ofRows": 7
       },
       "editor": {
         "kind": "read",
@@ -127,14 +133,15 @@
           "__spec__",
           "add",
           "apply_op",
-          "div"
+          "div",
+          "evaluate"
         ],
-        "count": 12
+        "count": 13
       },
       "eventLog": {
         "kind": "read",
-        "events": 6,
-        "ofRows": 6
+        "events": 7,
+        "ofRows": 7
       },
       "editor": {
         "kind": "read",
@@ -168,8 +175,180 @@
       },
       "eventLog": {
         "kind": "read",
-        "events": 6,
-        "ofRows": 6
+        "events": 7,
+        "ofRows": 7
+      },
+      "editor": {
+        "kind": "read",
+        "highlightedLine": 113
+      }
+    },
+    "breakpoint-editor": {
+      "width": 1440,
+      "height": 900,
+      "programState": {
+        "kind": "read",
+        "variableNames": [
+          "__builtins__",
+          "__cached__",
+          "__doc__",
+          "__file__",
+          "__loader__",
+          "__name__",
+          "__package__",
+          "__spec__",
+          "add",
+          "mul",
+          "sub"
+        ],
+        "count": 11
+      },
+      "eventLog": {
+        "kind": "read",
+        "events": 7,
+        "ofRows": 7
+      },
+      "editor": {
+        "kind": "read",
+        "highlightedLine": -1
+      }
+    }
+  },
+  "gpui": {
+    "entry-shell": {
+      "width": 1920,
+      "height": 1080,
+      "programState": {
+        "kind": "empty"
+      },
+      "eventLog": {
+        "kind": "read",
+        "events": 7,
+        "ofRows": 7
+      },
+      "editor": {
+        "kind": "read",
+        "highlightedLine": 1
+      }
+    },
+    "stepped-editor": {
+      "width": 1920,
+      "height": 1080,
+      "programState": {
+        "kind": "read",
+        "variableNames": [
+          "__cached__",
+          "__doc__",
+          "__file__",
+          "__name__",
+          "__package__",
+          "__spec__",
+          "add",
+          "builtins__",
+          "mul",
+          "sub"
+        ],
+        "count": 10
+      },
+      "eventLog": {
+        "kind": "read",
+        "events": 7,
+        "ofRows": 7
+      },
+      "editor": {
+        "kind": "read",
+        "highlightedLine": 44
+      }
+    },
+    "advanced-state": {
+      "width": 1440,
+      "height": 900,
+      "programState": {
+        "kind": "read",
+        "variableNames": [
+          "__cached__",
+          "__doc__",
+          "__file__",
+          "__name__",
+          "__package__",
+          "__spec__",
+          "add",
+          "builtins__",
+          "iv",
+          "mul",
+          "sub"
+        ],
+        "count": 11
+      },
+      "eventLog": {
+        "kind": "read",
+        "events": 7,
+        "ofRows": 7
+      },
+      "editor": {
+        "kind": "read",
+        "highlightedLine": 56
+      }
+    },
+    "returned-calltrace": {
+      "width": 1440,
+      "height": 900,
+      "programState": {
+        "kind": "read",
+        "variableNames": [
+          "EXPRESSIONS",
+          "OPERATIONS",
+          "__cached__",
+          "__doc__",
+          "__file__",
+          "__name__",
+          "__package__",
+          "__spec__",
+          "add",
+          "apply_op",
+          "iv"
+        ],
+        "count": 11
+      },
+      "eventLog": {
+        "kind": "read",
+        "events": 7,
+        "ofRows": 7
+      },
+      "editor": {
+        "kind": "read",
+        "highlightedLine": 110
+      }
+    },
+    "continued-event-log": {
+      "width": 1920,
+      "height": 1080,
+      "programState": {
+        "kind": "read",
+        "variableNames": [
+          "EXPRESSIONS",
+          "OPERATIONS",
+          "__cached__",
+          "__doc__",
+          "__file__",
+          "__loader__",
+          "__name__",
+          "__package__",
+          "__spec__",
+          "add",
+          "apply_op",
+          "div",
+          "evaluate",
+          "expression",
+          "main",
+          "mul"
+        ],
+        "count": 16
+      },
+      "eventLog": {
+        "kind": "read",
+        "events": 7,
+        "ofRows": 7
       },
       "editor": {
         "kind": "read",
@@ -185,8 +364,8 @@
           "__cached__",
           "__doc__",
           "__file__",
-          "__loader__",
           "__name__",
+          "__package__",
           "__spec__",
           "add",
           "builtins__",
@@ -197,75 +376,12 @@
       },
       "eventLog": {
         "kind": "read",
-        "events": 6,
-        "ofRows": 6
+        "events": 7,
+        "ofRows": 7
       },
       "editor": {
         "kind": "read",
         "highlightedLine": 44
-      }
-    }
-  },
-  "gpui": {
-    "stepped-editor": {
-      "width": 1920,
-      "height": 1080,
-      "programState": {
-        "kind": "read",
-        "variableNames": [
-          "__builtins__",
-          "__cached__",
-          "__doc__",
-          "__file__",
-          "__loader__",
-          "__name__",
-          "__package_",
-          "__spec__",
-          "add",
-          "mul",
-          "sub"
-        ],
-        "count": 11
-      },
-      "eventLog": {
-        "kind": "read",
-        "events": 6,
-        "ofRows": 0
-      },
-      "editor": {
-        "kind": "read",
-        "highlightedLine": 44
-      }
-    },
-    "advanced-state": {
-      "width": 1920,
-      "height": 1080,
-      "programState": {
-        "kind": "read",
-        "variableNames": [
-          "__builtins__",
-          "__cached__",
-          "__doc__",
-          "__file__",
-          "__loader__",
-          "__name__",
-          "__package_",
-          "__spec__",
-          "add",
-          "div",
-          "mul",
-          "sub"
-        ],
-        "count": 12
-      },
-      "eventLog": {
-        "kind": "read",
-        "events": 6,
-        "ofRows": 0
-      },
-      "editor": {
-        "kind": "read",
-        "highlightedLine": 56
       }
     }
   }

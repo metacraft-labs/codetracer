@@ -675,6 +675,7 @@ declare -A UNLOCKED_SIBLINGS=(
 	["codetracer-launcher"]="private"
 	["codetracer-native-test-programs"]="private"
 	["codetracer-snapshot-codecs"]="private"
+	["isonim-zgui"]="private; the zgui lane clones it at ci/toolchain.pin's PRIVATE_SIBLING_ISONIM_ZGUI"
 	["codetracer-evm-recorder"]="public, but its tools/source_inputs.nim collides with another recorder's in the provider nimcache, so repro.nim cannot declare it"
 )
 unlocked_now_pinned=()

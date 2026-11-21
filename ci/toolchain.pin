@@ -185,7 +185,15 @@ LOCK_FENIX=dd2c80d0b88463ccc0402c86e9e72dbb354ac091
 # --test-name`). Both descend from 1786e598 and keep its trace-format pin,
 # `codetracer-trace-format` c8e57b1, so `nargo trace` still writes `meta.dat`
 # version 7.
-LOCK_NOIR=a5e92b847ec95a7f20eadee36745b55d7c8f9659
+#
+# Moved to f09f4597 (`codetracer`): nargo_cli writes `--watch`'s escape
+# sequences itself instead of through termion, which builds only on Unix and
+# kept nargo from compiling for Windows (codetracer run 44577379303). It also
+# takes the five tracer fixes the branch carried since 2026-10-28 (main public
+# return values, mutable reference snapshots, constant-body call anchoring,
+# shadowed-binding order, the schema-6 fixture recorder); same trace-format
+# pin, so `nargo trace` still writes `meta.dat` version 7.
+LOCK_NOIR=f09f459714b839a5952b59e09ce0546a936c797e
 
 # ## Private siblings a CI lane clones by revision
 #
@@ -193,7 +201,7 @@ LOCK_NOIR=a5e92b847ec95a7f20eadee36745b55d7c8f9659
 # declared nor pinned there (bbf7dbed4a6; ci/test/sibling-provisioning-test.sh
 # UNLOCKED_SIBLINGS). A lane that needs one names it with an explicit
 # revision. Where flake.lock pins the repo (native-backend, native-recorder,
-# visual-replay) the lane takes flake.lock's revision; these two have no
+# visual-replay) the lane takes flake.lock's revision; those below have no
 # flake input, so their revision lives here.
 #
 # The revisions codetracer's repro.lock last pinned before bbf7dbed4a6 dropped
@@ -201,3 +209,7 @@ LOCK_NOIR=a5e92b847ec95a7f20eadee36745b55d7c8f9659
 # jobs built.
 PRIVATE_SIBLING_CODETRACER_LAUNCHER=7aafc5efe2bde5d8c81bc849116c4df589a8ef6b
 PRIVATE_SIBLING_CODETRACER_SNAPSHOT_CODECS=3e503da83b73e805f30096d4baa45c18d138f6d3
+# isonim-zgui, which only the zgui lane (.github/workflows/zgui.yml) clones:
+# the revision that workflow pinned in its own env when it was added
+# (67d4140e2a2).
+PRIVATE_SIBLING_ISONIM_ZGUI=a432efd1eb79787996ed96e5724c6e37f076fafa

@@ -71,14 +71,14 @@ printf 'echo 1\n' >"$rb/apps/repro.nim"
 printf 'readme\n' >"$rb/README.md"
 git -C "$rb" init -q
 git -C "$rb" -c user.name=t -c user.email=t@t add -A
-git -C "$rb" -c user.name=t -c user.email=t@t commit -qm base
+git -C "$rb" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qm base
 base_rev="$(git -C "$rb" rev-parse HEAD)"
 # A commit HEAD does not contain: a pin past the sibling. Only README.md
 # differs, which is outside the guard's source roots, so returning to the base
 # commit leaves the sibling's build fresh by mtime.
 git -C "$rb" checkout -q -b ahead
 printf 'readme 2\n' >"$rb/README.md"
-git -C "$rb" -c user.name=t -c user.email=t@t commit -qam ahead
+git -C "$rb" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qam ahead
 ahead_rev="$(git -C "$rb" rev-parse HEAD)"
 git -C "$rb" checkout -q -
 cat >"$work/stub.c" <<'C'

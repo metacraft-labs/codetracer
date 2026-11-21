@@ -83,11 +83,11 @@ ARMS = [
     (
         "R3-a", "LAW-R3",
         f"{ORACLE}/region_locator.nim",
-        "  medians.allIt(it == first)",
+        "  float(top) >= BlankShare * float(n)",
         "  false",
-        "isDegenerate never fires, so a blank frame is partitioned instead of "
-        "refused and the three types come back srEmpty or srRead; LAW-R3's "
-        "'a blank frame is unreadable' cases fail.",
+        "isDegenerate never fires, so a blank frame reaches the detector, which "
+        "finds no rectangle and refuses it as region-not-located instead of "
+        "frame-blank; LAW-R3's reason-2 cases fail.",
     ),
     (
         "R3-b", "LAW-R3",
@@ -125,6 +125,28 @@ ARMS = [
         "fails. (PLAT-42's cluster rule, added 2026-09-23.)",
     ),
     (
+        "LOC-a", "the locator",
+        f"{ORACLE}/region_locator.nim",
+        "  let rects = detectWindowRects(img, threshold = threshold,",
+        "  let rects = detectWindowRects(img, threshold = threshold, subdivideFullBleed = false,",
+        "DECLARED SURVIVOR, measured 2026-11-21 on the six Electron and six GPUI "
+        "frames: both front-ends draw a separator under the tool bar and over the "
+        "status bar, so at the frame's own threshold every pane is its own "
+        "component and none goes through the full-bleed split; all frames still "
+        "locate five panes. The split is graded where it is load-bearing: "
+        "test_pane_census.nim's full-bleed case and GuiAssert's tvision_windows.",
+    ),
+    (
+        "LOC-b", "the locator",
+        f"{ORACLE}/region_locator.nim",
+        "  let t = separatorTones(img)",
+        "  let t = (threshold: otsuThreshold(img), separatorTone: -1)",
+        "Otsu splits the text from the ground (threshold 105 on both front-ends' "
+        "frames), so the panes and their separators fall into one class and no "
+        "pane rectangle survives: every frame is region-not-located and the "
+        "'all three panes are identified' cases fail.",
+    ),
+    (
         "TITLE-a", "the title classifier",
         f"{ORACLE}/vision_producer.nim",
         "  if bestDist <= TitleMatchTolerance and bestDist < runnerUp:",
@@ -137,7 +159,7 @@ ARMS = [
 
 # Arms that MUST survive, with the reason. A declared survivor is evidence the
 # harness is not simply reddening everything it touches.
-DECLARED_SURVIVORS = {"R2-b"}
+DECLARED_SURVIVORS = {"R2-b", "LOC-a"}
 
 
 def run_suite():

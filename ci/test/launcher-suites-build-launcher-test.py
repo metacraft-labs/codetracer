@@ -23,10 +23,14 @@ them, build the path of the launcher BINARY (`"out" / "launcher"` or
 `codetracer-launcher/out/launcher` outside a comment). Every such job must,
 before the first step that runs such a lane:
 
-  1. clone `codetracer-launcher` as a BARE entry of a `siblings:` /
-     `extra-siblings:` input, which `clone-siblings` resolves to the revision
-     this commit's `repro.lock` pins. An entry with an explicit `=<ref>` names a
-     branch tip or a hand-copied commit, not the lock;
+  1. clone `codetracer-launcher` through a `siblings:` / `extra-siblings:`
+     input at a revision this commit records: either BARE, which
+     `clone-siblings` resolves to the revision `repro.lock` pins, or as
+     `=${{ steps.<id>.outputs.<name> }}` where step `<id>`, earlier in the job,
+     reads `PRIVATE_SIBLING_CODETRACER_LAUNCHER` from `ci/toolchain.pin`. The
+     launcher is private, so the public `repro.lock` cannot pin it
+     (bbf7dbed4a6) and `ci/toolchain.pin` does. Any other `=<ref>` names a
+     branch tip or a hand-copied commit, not a recorded pin;
   2. build it, after the clone: a `run:` command line that enters
      `../codetracer-launcher` and runs its `just build` (or `build.sh`) --
      `just build-once` or `just build-gpui` beside a mention of the checkout
@@ -42,7 +46,8 @@ CONTROLS
     executes no binary. The live workflow has at least one job that runs a
     launcher suite, and `tui-tests` is one of them.
   * Negative: copies of the live workflow with the build step removed, with the
-    clone entry removed, with the entry pinned to `=agents`, with the build
+    clone entry removed, with the entry pinned to `=agents`, with the pin step
+    no longer reading `ci/toolchain.pin`, with the build
     moved after the lanes, and with the build step running `just lint` instead
     of `just build` must each be reported, naming `tui-tests`. These prove
     the checker sees the absence it exists to report.
@@ -171,6 +176,30 @@ LAUNCHER_BUILD_RE = re.compile(
     rf"\bcd\s+\S*\.\./{LAUNCHER_REPO}(?![\w-]).*?(\bjust\s+build(?![\w-])|\bbuild\.sh\b)")
 
 
+# `=${{ steps.<id>.outputs.<name> }}`, the one explicit revision that is a
+# recorded pin, when step <id> reads it from ci/toolchain.pin.
+STEP_OUTPUT_RE = re.compile(r"^=\$\{\{steps\.([\w-]+)\.outputs\.[\w-]+\}\}$")
+TOOLCHAIN_PIN_KEY = "PRIVATE_SIBLING_CODETRACER_LAUNCHER"
+
+
+def _squeeze_expressions(line):
+    """`${{ a.b }}` as `${{a.b}}`, so an expression is one whitespace token."""
+    return re.sub(r"\$\{\{\s*(.*?)\s*\}\}", lambda m: "${{" + m.group(1).replace(" ", "") + "}}", line)
+
+
+def toolchain_pinned(entry, earlier_steps):
+    """Whether `entry` takes its revision from an earlier step that reads the
+    launcher's pin out of ci/toolchain.pin."""
+    m = STEP_OUTPUT_RE.match(entry[len(LAUNCHER_REPO):]) if entry.startswith(LAUNCHER_REPO) else None
+    if not m:
+        return False
+    for s in earlier_steps:
+        if isinstance(s, dict) and s.get("id") == m.group(1):
+            run = step_run(s)
+            return TOOLCHAIN_PIN_KEY in run and "ci/toolchain.pin" in run
+    return False
+
+
 def clone_entries(step):
     """The `codetracer-launcher` entries `step`'s sibling-list inputs hold."""
     found = []
@@ -178,7 +207,7 @@ def clone_entries(step):
         if key not in SIBLING_INPUTS or not isinstance(value, str):
             continue
         for ln in value.splitlines():
-            for token in ln.split("#")[0].split():
+            for token in _squeeze_expressions(ln.split("#")[0]).split():
                 name = token.split("=", 1)[0].split("/")[-1]
                 if name == LAUNCHER_REPO:
                     found.append(token)
@@ -213,11 +242,12 @@ def check_workflow(workflow, recipes):
         clone_at = None
         for i, step in enumerate(steps[:first_lane_step]):
             entries = clone_entries(step)
-            pinned = [e for e in entries if "=" in e]
+            pinned = [e for e in entries if "=" in e and not toolchain_pinned(e, steps[:i])]
             if pinned:
                 violations.append(
-                    f"{what}, and clones the launcher as {', '.join(pinned)}: name it BARE "
-                    "so clone-siblings takes the revision this commit's repro.lock pins")
+                    f"{what}, and clones the launcher as {', '.join(pinned)}: name it BARE, or "
+                    f"take it from an earlier step that reads {TOOLCHAIN_PIN_KEY} from "
+                    "ci/toolchain.pin, so the clone is at a revision this commit records")
             if clone_at is None and entries and not pinned:
                 clone_at = i
         if clone_at is None:
@@ -285,7 +315,7 @@ def main():
     if violations:
         bad(f"{len(violations)} violation(s) in {WORKFLOW.relative_to(REPO_ROOT)}", *violations)
     else:
-        ok("every such job clones the launcher at the lock's revision and builds it first")
+        ok("every such job clones the launcher at a revision this commit records and builds it first")
     print()
 
     print("Step 3: negative controls — copies with one step changed are each reported")
@@ -326,10 +356,20 @@ def main():
         for s in steps:
             for key, value in (s.get("with") or {}).items():
                 if isinstance(value, str):
-                    new = re.sub(rf"(?m)^(\s*){LAUNCHER_REPO}\s*$", rf"\g<1>{LAUNCHER_REPO}=agents", value)
+                    new = re.sub(rf"(?m)^(\s*){LAUNCHER_REPO}(=.*)?$", rf"\g<1>{LAUNCHER_REPO}=agents", value)
                     if new != value:
                         s["with"][key] = new
                         changed = True
+        return changed
+
+    def pin_step_reads_elsewhere(steps):
+        # The entry still names a step output, but the step no longer reads
+        # ci/toolchain.pin: an output is only as good as where it came from.
+        changed = False
+        for s in steps:
+            if isinstance(s, dict) and TOOLCHAIN_PIN_KEY in step_run(s) and isinstance(s.get("run"), str):
+                s["run"] = 'echo "launcher=agents" >>"$GITHUB_OUTPUT"\n'
+                changed = True
         return changed
 
     def build_after_lanes(steps):
@@ -353,6 +393,7 @@ def main():
         arm("without the build step", drop_build)
         arm("without the clone entry", drop_clone)
         arm("with the clone entry pinned to `=agents`", pin_clone)
+        arm("with the pin step no longer reading ci/toolchain.pin", pin_step_reads_elsewhere)
         arm("with the build moved after the lanes", build_after_lanes)
         arm("with the launcher step running `just lint` instead of `just build`", build_other_recipe)
 

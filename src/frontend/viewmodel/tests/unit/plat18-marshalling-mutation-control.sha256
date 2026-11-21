@@ -1,8 +1,8 @@
 # Control digests for run-plat18-marshalling-mutations.py.
 #
 # The bytes every arm restores to, and the bytes every arm's verdict
-# was taken against. Both halves of TOUCHED are here — the seven
-# mutation subjects AND the four graders no arm mutates — which is
+# was taken against. Both halves of TOUCHED are here — the twelve
+# mutation subjects AND the five graders no arm mutates — which is
 # §16c's gap paid rather than inherited.
 #
 # TWO ENTRIES ARE OUTSIDE THIS REPOSITORY:
@@ -22,7 +22,12 @@ e13a65b6d2133d798c64de3024322884cc2b0c299ce0c26a1fe66d89dea49c6d  src/frontend/v
 2bf5cf331cabc68c9a48c2f6a055ae5e8f473d9992dced21a86f1848e346aa34  src/frontend/viewmodel/views/isonim_state_view.nim
 8229a49af44dc5703e2ce5a189c079d9aaf8f4e478c0f59fe0920bb0304e077a  ci/test/plat18-fake-timer-builds.sh
 49cbc3ff48245a981cfbdfda47a5bb890d50022f011cd0ca3a4a6389224b2ece  ci/test/plat18-dev-loop.sh
-3ad5543a03f08a60199dd65ee3e5543a8f45771b1aaabc8b05e83d9ae753cb40  ci/test/plat18-electron-slice.sh
+f0f7c4980c4f6b2885e6c1f4e7857c0791e7bc11c03ad7a95ff8ad5809b0f4c2  src/frontend/viewmodel/tests/manual/plat18_calltrace_slice.nim
+4bed090ce130f4dee097ce52cbacbb74e328d2421266f989b74544c1348ac705  src/frontend/viewmodel/tests/manual/plat18_slice_host/browser.mjs
+3b46fa76fcde5542b8546c49084b95306c02e1bafebd33cfcc1078430ab1a344  ci/lib/wasm-cc.sh
+91e32fcadcc96389a67f311cce7bc3781b3881cc59c79b5d99fde37a3a8e6eed  ci/test/plat18-electron-slice.sh
 4300816fb9e49279e51c9f2bccfc2e91e15f76566db506b54e219c2324b2d95d  ../isonim/src/isonim/testing/mock_dom.nim
-8d3e757784b6a01bb8138a23b2fb17310187331ff086ec0aa0f28dedbcce1d19  src/frontend/viewmodel/tests/manual/plat18_slice_host/driver.js
+5eb04ffd886a0b4d012228e76fefc480ce5263e92e4f2e5466687a3584078593  src/frontend/viewmodel/tests/manual/plat18_slice_host/driver.js
 f82d5d9bb1d134cba0df3de54c3d44c78ba0f978c8d884a5bd2dabe9c4ed5a98  src/frontend/viewmodel/tests/manual/wasm_fake_timer_probe.nim
+cc855a9bdf52a947e8b99020bbe5b5b5c35f72a3ca8048cf22fba5c54cae439e  ci/test/wasm-dev-profile-test.sh
+17255eb58ff07aa77a4fcac5e84ab7e9e3a2318ba88a7d5be29e7322b8d93a52  src/frontend/viewmodel/views/isonim_calltrace_view.nim
