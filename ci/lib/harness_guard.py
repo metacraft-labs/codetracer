@@ -95,6 +95,36 @@ def refuse_undeclared_arms(argv: list, namespace: dict) -> int:
     return 0
 
 
+BUILD_TIMEOUT_ENV = "CT_MUTATION_BUILD_TIMEOUT"
+
+
+def build_timeout(default: int, environ=None) -> int:
+    """The seconds a harness's `build_with` gives one build: `default`, the
+    harness's own TIMEOUT, unless `$CT_MUTATION_BUILD_TIMEOUT` names a positive
+    integer. Every harness reads it through here, so the variable is spelled
+    once.
+
+    Why it exists: with repro 0.2.27 a desktop rebuild under load takes longer
+    than the harnesses' 3600 s (reprobuild-pm issues 6afc8f22, serial producer
+    interface extraction). plat54, plat60 and plat70f were killed inside their
+    builds and graded nothing. The suites keep their own TIMEOUT; only the
+    build step is widened. A value that is not a positive integer exits 2, the
+    harnesses' usage-error code, rather than falling back silently."""
+    import os
+    env = os.environ if environ is None else environ
+    raw = env.get(BUILD_TIMEOUT_ENV, "")
+    if raw == "":
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        value = 0
+    if value <= 0:
+        print(f"{BUILD_TIMEOUT_ENV}={raw!r}: wanted a positive number of seconds")
+        raise SystemExit(2)
+    return value
+
+
 def _self_test() -> int:
     """The guard's own contract, run by `ci/test/harness-argument-refusal.sh`
     before it probes the harnesses: it accepts declared ids and the flags
@@ -126,8 +156,26 @@ def _self_test() -> int:
         if refuse_undeclared_arms([], {"ARMS": []}) != 2:
             print("harness_guard self-test: a harness with no arms was not refused")
             failed += 1
+    timeout_cases = [({}, 3600), ({BUILD_TIMEOUT_ENV: ""}, 3600),
+                     ({BUILD_TIMEOUT_ENV: "9000"}, 9000)]
+    for env, want in timeout_cases:
+        got = build_timeout(3600, env)
+        if got != want:
+            print(f"harness_guard self-test: build_timeout {env} -> {got}, want {want}")
+            failed += 1
+    for bad in ["0", "-5", "soon"]:
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                build_timeout(3600, {BUILD_TIMEOUT_ENV: bad})
+            print(f"harness_guard self-test: build_timeout accepted {bad!r}")
+            failed += 1
+        except SystemExit as e:
+            if e.code != 2:
+                print(f"harness_guard self-test: build_timeout {bad!r} exit {e.code}, want 2")
+                failed += 1
     if failed == 0:
-        print(f"harness_guard self-test: {len(cases) + 1} cases as required")
+        print(f"harness_guard self-test: {len(cases) + 1 + len(timeout_cases) + 3}"
+              " cases as required")
     return 1 if failed else 0
 
 
