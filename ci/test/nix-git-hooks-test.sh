@@ -33,6 +33,38 @@ fail() {
 	echo "FAIL: $*" >&2
 	exit 1
 }
+# Why an indirect root is invisible. On garm runners `nix-store --query
+# --roots` printed nothing at all for the hook config (lint-nix, runs
+# 44648381899 and 44864106832), and no login there was available. So a
+# failure prints what decides it: who we are, what the daemon trusts, the
+# indirect-roots directory, our link and its target, and a fresh root taken
+# here and queried at once.
+diagnose_roots() {
+	local link="$1" target="$2" probe
+	{
+		echo "== diagnose_roots: link=$link target=$target"
+		echo "-- id: $(id)"
+		echo "-- NIX_REMOTE=${NIX_REMOTE:-} NIX_STATE_DIR=${NIX_STATE_DIR:-}"
+		nix config show 2>/dev/null | grep -E '^(trusted-users|allowed-users|keep-outputs|keep-derivations|keep-env-derivations|gc-keep|store|min-free|max-free|auto-optimise-store) ' ||
+			nix show-config 2>/dev/null | grep -E '^(trusted-users|allowed-users|keep-outputs|keep-derivations|store) ' || echo "(no nix config output)"
+		echo "-- link: $(ls -l "$link" 2>&1)"
+		echo "-- readlink -f link: $(readlink -f "$link" 2>&1)"
+		echo "-- realpath of the link's directory: $(cd "$(dirname "$link")" 2>/dev/null && pwd -P)"
+		for d in /nix/var/nix/gcroots /nix/var/nix/gcroots/auto /nix/var/nix/gcroots/per-user "/nix/var/nix/gcroots/per-user/$(id -un)"; do
+			echo "-- $d: $(ls -ld "$d" 2>&1)"
+		done
+		echo "-- auto roots pointing into this test's scratch:"
+		find /nix/var/nix/gcroots/auto -maxdepth 1 -type l 2>/dev/null | while IFS= read -r r; do
+			case "$(readlink "$r" 2>/dev/null)" in "$scratch"/* | "$(cd "$scratch" && pwd -P)"/*) echo "   $r -> $(readlink "$r")" ;; esac
+		done
+		probe="$scratch/diagnose-probe-root"
+		echo "-- nix-store --add-root $probe --indirect --realise $target:"
+		nix-store --add-root "$probe" --indirect --realise "$target" 2>&1 | sed 's/^/   /'
+		echo "-- nix-store --query --roots $target (stderr kept):"
+		nix-store --query --roots "$target" 2>&1 | grep -v 'stale temporary roots' | sed 's/^/   /'
+		echo "== end diagnose_roots"
+	} >&2
+}
 git init -q --bare "$scratch/origin.git"
 git init -q "$scratch/main"
 mkdir -p "$scratch/main/ci/dev"
@@ -161,6 +193,7 @@ if grep -Fq -- "$scratch/no-gc-wt/.pre-commit-config.yaml ->" "$scratch/config-r
 fi
 grep -Fq -- "$scratch/wt/.pre-commit-config.yaml -> $upgraded_config_file" "$scratch/config-roots.log" || {
 	cat "$scratch/config-roots.log" >&2
+	diagnose_roots "$scratch/wt/.pre-commit-config.yaml" "$upgraded_config_file"
 	fail 'new shared hook configuration is not rooted by the migrated worktree'
 }
 [ "$(readlink "$scratch/wt/.pre-commit-config.yaml")" = "$upgraded_config_file" ] || fail 'linked migration did not create its new worktree config link'
