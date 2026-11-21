@@ -236,9 +236,11 @@ suite "PLAT-45 deliverable 1 — LayoutSchemaVersion 3 -> 4 (and PLAT-48's 5, PL
   # PLAT-63 bumped it to 8 (`verification`); a v7 document is re-stamped.
   # PLAT-59 bumped it to 9 (`videoPlayer`, `pixelHistory`, `shaderDebug`); a v8
   # document is re-stamped. Editor-Hosted-Front-Ends §E15 bumped it to 10
-  # (`macroExpansion`); a v9 document is re-stamped.
-  test "the version is 10 and the chain still starts at 1":
-    ck LayoutSchemaVersion == 10
+  # (`macroExpansion`); a v9 document is re-stamped. Docked contributed panes
+  # (Extensibility-Model.md §10 decision 2) bumped it to 11; a v10 document is
+  # re-stamped.
+  test "the version is 11 and the chain still starts at 1":
+    ck LayoutSchemaVersion == 11
     ck FirstLayoutSchemaVersion == 1
 
   test "every committed v3 document restores unchanged, migrated to the current version":
@@ -270,7 +272,7 @@ suite "PLAT-45 deliverable 1 — LayoutSchemaVersion 3 -> 4 (and PLAT-48's 5, PL
   test "a current document naming the new panes round-trips":
     let layout = initLayout(sharedDefaultLayout().tree)
     let doc = saveLayout(layout)
-    ck doc["version"].getInt == 10
+    ck doc["version"].getInt == 11
     let back = restoreLayoutDocument(parseJson($doc))
     ck equalTrees(back.tree, layout.tree)
     ck panesOf(back.tree) == panesOf(layout.tree)
@@ -279,7 +281,7 @@ suite "PLAT-45 deliverable 1 — LayoutSchemaVersion 3 -> 4 (and PLAT-48's 5, PL
     var doc = saveLayout(initLayout(defaultReplayLayout()))
     doc["version"] = %3
     let back = restoreLayoutDocument(doc)
-    ck back.version == 10
+    ck back.version == 11
     ck equalTrees(back.tree, defaultReplayLayout())
 
   test "a v4 document as the previous build wrote it restores exactly, docked panes included":
@@ -295,7 +297,7 @@ suite "PLAT-45 deliverable 1 — LayoutSchemaVersion 3 -> 4 (and PLAT-48's 5, PL
       for field in ["beside", "weight"]:
         if d.hasKey(field): d.delete(field)
     let back = restoreLayoutDocument(doc)
-    ck back.version == 10
+    ck back.version == 11
     ck equalTrees(back.tree, docked.layout.tree)
     ck back.docked.len == 1
     ck back.docked[0].pane == paneFileTree and back.docked[0].edge == leLeft
@@ -335,7 +337,7 @@ suite "PLAT-51 — LayoutSchemaVersion 5 -> 6: the Timeline panel is removed":
         {"kind": "pane", "pane": "timeline", "weight": 1.0},
         {"kind": "pane", "pane": "terminalOutput", "weight": 1.0}]}]})
     let back = restoreLayoutDocument(doc)
-    ck back.version == 10
+    ck back.version == 11
     ck ofTree(back.tree).canonical ==
       "column(editor,stack[eventLog*,terminalOutput])"
     ck validate(back, {}).len == 0

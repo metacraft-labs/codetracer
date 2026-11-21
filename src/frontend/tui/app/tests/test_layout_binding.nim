@@ -89,7 +89,10 @@ const
     ## The three sizes CTUI-3's own suites walk, so the profile each one
     ## selects is the profile this binding is exercised on.
 
-  NodeInfoFieldCount = 7
+  NodeInfoFieldCount = 8
+    ## Eight since `contributedPane` (a copied string, the leaf's contributed
+    ## identity): a new field moves this count on purpose, so the walk below
+    ## is re-read whenever `NodeInfo` grows.
     ## The counted control for the reference-freedom walk below
     ## (Verification-Harness-Traps §4b): a `fieldPairs` loop that visited
     ## nothing would satisfy "no field is a reference" for free.
