@@ -2059,13 +2059,22 @@ jobs:
             } | tee -a "$GITHUB_OUTPUT"
           '
 
+      - name: Mint a token for the clones below
+        # The step above enters the dev shell, which can take most of the
+        # first token's hour on a cold runner (ci/test/late-clone-token-test.py).
+        id: late_token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
       - name: Clone codetracer-native-recorder
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
         with:
           repo: metacraft-labs/codetracer-native-recorder
           ref: ${{ steps.hcr_pins.outputs.native_recorder }}
           path: ${{ github.workspace }}/../codetracer-native-recorder
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
           submodules: 'false'
 
       - name: Clone codetracer-native-backend
@@ -2074,7 +2083,7 @@ jobs:
           repo: metacraft-labs/codetracer-native-backend
           ref: ${{ steps.hcr_pins.outputs.native_backend }}
           path: ${{ github.workspace }}/../codetracer-native-backend
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
           submodules: 'true'
 
       - name: Clone nim-stackable-hooks
@@ -2083,7 +2092,7 @@ jobs:
           repo: metacraft-labs/nim-stackable-hooks
           ref: ${{ steps.hcr_pins.outputs.stackable_hooks }}
           path: ${{ github.workspace }}/../nim-stackable-hooks
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
           submodules: 'false'
 
       - name: Run Reprobuild macOS smoke
