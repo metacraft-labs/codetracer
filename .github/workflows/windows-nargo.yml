@@ -8,13 +8,22 @@
 # on PATH for the trace writer's build script (9f58aafabcf), and a PowerShell
 # host that cannot stop at a [DBG] prompt (3c9e5bebf23).
 #
-# Nightly and on demand only, so it adds no load per push.
+# Nightly and on demand, plus a push that changes the nargo bootstrap itself,
+# so ordinary pushes add no load. GitHub runs `schedule` and offers
+# `workflow_dispatch` only for a workflow on the default branch, so until this
+# file is promoted to dev, the path-filtered push is what runs it on agents.
 name: Windows nargo
 
 on:
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:
+  push:
+    branches: [agents, dev]
+    paths:
+      - ".github/workflows/windows-nargo.yml"
+      - "non-nix-build/windows/ensure-nargo.ps1"
+      - "non-nix-build/windows/toolchain-versions.env"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}

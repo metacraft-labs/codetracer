@@ -183,7 +183,7 @@ suite "the Nim producer reads the generated C's line directives":
 
   when not defined(js):
    test "Edit mode: the C the compiler writes now":
-     if findExe("nim").len == 0 and getEnv("CODETRACER_NIM").len == 0:
+     if not nimCCompilerAvailable():
        echo "  MISSING-PREREQ SKIP: no nim on the PATH"
        skip()
      else:
