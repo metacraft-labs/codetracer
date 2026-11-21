@@ -293,7 +293,11 @@ done
 #
 # 48 -> 49: screen-oracle.yml's `screen-oracle` (e2a37617f76), the PLAT-39
 # screen oracle moved out of viewmodel-tests into a job of its own.
-readonly EXPECTED_NIX_JOBS=49
+#
+# 49 -> 50: scenario-inventory.yml's `scenario-inventory`, the scenario
+# inventory and linter on every push to `agents`. It installs Nix through
+# ./.github/actions/setup-nix before its `nix shell` for Nim and Node.
+readonly EXPECTED_NIX_JOBS=50
 
 if [ "${#nix_jobs[@]}" -eq "$EXPECTED_NIX_JOBS" ]; then
 	ok "the scanner still classifies the nix-using jobs (${#nix_jobs[@]})"
