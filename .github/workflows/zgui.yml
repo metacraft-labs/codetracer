@@ -61,11 +61,21 @@ jobs:
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
 
+      # The token minted at the start can be over an hour old by here: the
+      # checkout alone took 64 minutes on a macOS runner (run 44906061572), and
+      # the sibling clone below then failed on the expired token.
+      - name: Mint a token for the sibling setup
+        id: setup_token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
       - name: Setup db-backend siblings
         uses: ./.github/actions/setup-db-backend-siblings
         with:
           env-flavor: nix
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.setup_token.outputs.token }}
           # The same cache settings as `Install Nix` above. This action
           # installs and configures Nix again, and without them the
           # configuration it writes names no Attic cache: on an ephemeral
@@ -196,11 +206,21 @@ jobs:
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
 
+      # The token minted at the start can be over an hour old by here: the
+      # checkout alone took 64 minutes on a macOS runner (run 44906061572), and
+      # the sibling clone below then failed on the expired token.
+      - name: Mint a token for the sibling setup
+        id: setup_token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
       - name: Setup db-backend siblings
         uses: ./.github/actions/setup-db-backend-siblings
         with:
           env-flavor: nix
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.setup_token.outputs.token }}
           # The same cache settings as `Install Nix` above. This action
           # installs and configures Nix again, and without them the
           # configuration it writes names no Attic cache: on an ephemeral
