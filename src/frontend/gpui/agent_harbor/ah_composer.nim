@@ -661,16 +661,25 @@ proc bodyBlocks(r: GpuiRenderer; p: AhPalette; vm: OmniboxComposerVM;
     r.tag(t, "stopped", stopMessage)
     result.add r.spaced(t, 6 + LinePx * linesOf(stopMessage, CaptionPx, w), top = 6)
 
-proc sendLine(r: GpuiRenderer; p: AhPalette; vm: OmniboxComposerVM;
-              press: ComposerPress): GpuiElement =
+proc sendLine*(r: GpuiRenderer; p: AhPalette; vm: OmniboxComposerVM;
+               press: ComposerPress; ruled = true): GpuiElement =
+  ## The send line: the hint (the reason it cannot send), its `· N more`,
+  ## and the primary button. `ruled`: the sheet's footer, under a hairline
+  ## and padded to the sheet's sides; otherwise the bare line, as the
+  ## control center draws it under its form.
   let sending = vm.phase == cpSending
   let canSend = vm.canSend and not sending
   let (hint, more, blocked) = vm.sendHint
   let label = vm.sendLabel
-  result = r.box(pairs = [("height", $FooterPx & "px"), ("items", "center"),
-                          ("justify", "end"), ("gap", "12px"), ("flex-shrink", "0"),
-                          ("padding-left", $PadPx & "px"), ("padding-right", $PadPx & "px"),
-                          ("border-top-width", "1px"), ("border-color", p.borderSecondary)])
+  result =
+    if ruled:
+      r.box(pairs = [("height", $FooterPx & "px"), ("items", "center"),
+                     ("justify", "end"), ("gap", "12px"), ("flex-shrink", "0"),
+                     ("padding-left", $PadPx & "px"), ("padding-right", $PadPx & "px"),
+                     ("border-top-width", "1px"), ("border-color", p.borderSecondary)])
+    else:
+      r.box(pairs = [("height", $ControlPx & "px"), ("items", "center"),
+                     ("justify", "end"), ("gap", "12px"), ("flex-shrink", "0")])
   r.tag(result, "send", label)
   r.tag(result, "send-enabled", $canSend)
   r.tag(result, "send-blocked", $blocked)
@@ -698,6 +707,27 @@ proc sendLine(r: GpuiRenderer; p: AhPalette; vm: OmniboxComposerVM;
   r.tag(b, "button", label)
   r.acts(b, "send", "", press)
   r.appendChild(result, b)
+
+proc drawLaunchForm*(r: GpuiRenderer; p: AhPalette; vm: OmniboxComposerVM;
+                     innerPx: int; narrow: bool;
+                     press: ComposerPress = nil; padPx = PadPx): (GpuiElement, int) =
+  ## The launch or initiative form's fields, without the sheet's form title
+  ## (a host that draws the form outside the sheet, the control center, has
+  ## a heading of its own): one column whose parts are padded `padPx` to
+  ## either side of `innerPx` (the sheet's `PadPx` by default; the host's
+  ## inset where it has its own), and its height. The same blocks the sheet
+  ## draws (`formBlocks`), so the two never differ.
+  let blocks = r.formBlocks(p, vm, Layout(widthPx: innerPx, narrow: narrow, press: press))
+  let col = r.box(column = true, pairs = [("width", $(innerPx + 2 * padPx) & "px"),
+                                          ("flex-shrink", "0")])
+  var h = 0
+  for i, b in blocks:
+    if i == 0: continue          # the sheet's form title
+    r.styles(b.el, [("padding-left", $padPx & "px"), ("padding-right", $padPx & "px")])
+    r.appendChild(col, b.el)
+    h += b.heightPx
+  r.setStyle(col, "height", $h & "px")
+  (col, h)
 
 proc drawComposer*(r: GpuiRenderer; host: GpuiElement; vm: OmniboxComposerVM;
                    p: AhPalette; widthPx, heightPx: int; press: ComposerPress = nil) =

@@ -1,0 +1,40 @@
+ LAUNCH                                     INITIATIVES  waiting for the Agent Harbor server
+  New task   New initiative
+                                                                                               
+ For
+  No initiative
+                                                                                               
+ Instruction
+  What the task should do
+                                                                                               
+ Repository
+  noir-space-ship
+                                                                                               
+ Branch
+  default branch
+                                                                                               
+ Agents
+  ✓ Claude   Codex   Grok   Opencode
+  Antigravity
+                                                                                               
+ Runs on
+  This machine   Executor                                  Loading initiatives…
+  The server's choice
+                                                                                               
+ Session name
+  named by the server
+                                                                                               
+ Opens in
+  New tab   Split   Beside
+                                                                                               
+ ▸ Schedule  Runs once, now
+                                                                                               
+ Type the instruction to launch   Launch
+                                                                                               
+ RECENT LAUNCHES
+ Nothing launched from here yet.
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               

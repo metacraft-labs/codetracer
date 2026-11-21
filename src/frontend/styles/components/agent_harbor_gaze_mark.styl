@@ -1,0 +1,66 @@
+// The status line's gaze mark (isonim_agent_harbor_gaze_mark_view.nim):
+// while gaze is tracked an eye and `Gaze` in the quiet role; while paused
+// the eye struck through and `Gaze paused` (Eye-Tracking-Context "Privacy
+// and control"; P2c study D5, D65). A status-line item, at the bar's own
+// size; the eye is drawn in `currentColor`, so it takes the mark's ink.
+
+.ah-gaze-host:empty
+  display: none
+
+// One line at the status bar's own pitch, never wrapped and never shrunk:
+// the zone gap gives up the room first.
+.ah-gaze-mark
+  display: inline-flex
+  align-items: center
+  gap: 0.25rem
+  flex-shrink: 0
+  white-space: nowrap
+  line-height: inherit
+  vertical-align: middle
+  color: colors-ui-text-primary-caption
+
+  &:hover
+    color: colors-ui-text-primary-body
+
+// The eye sized to the caption's line box, so it never lifts the words.
+.ah-gaze-glyph
+  display: inline-flex
+  align-items: center
+  height: 0.75rem
+
+  svg
+    display: block
+    width: 0.75rem
+    height: 0.75rem
+
+.ah-gaze-story
+  height: 100vh
+  display: flex
+  flex-direction: column
+
+.ah-gaze-window
+  flex: 1 1 0
+  background: colors-ui-surface-base-canvas
+
+.ah-gaze-status-host
+  display: inline-flex
+  align-items: center
+  align-self: stretch
+  flex-shrink: 0
+
+// The story's status line keeps every item on one line, as the app's does
+// at a window's width: with the mark in it, a narrow window's language and
+// encoding no longer wrap.
+.ah-gaze-story #status .status-inline,
+.ah-gaze-story #status .file-info-status-language,
+.ah-gaze-story #status .file-info-status-encoding
+  white-space: nowrap
+
+// And the right-hand zone, which holds the mark, keeps its width: at a
+// sidebar's width the left zone's empty readouts give up the room.
+.ah-gaze-story #status .status-right
+  flex-shrink: 0
+
+.ah-gaze-story #status #file-info-status
+  min-width: 0
+  overflow: hidden

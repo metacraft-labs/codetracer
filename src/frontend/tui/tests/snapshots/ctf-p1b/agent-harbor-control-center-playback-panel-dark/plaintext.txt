@@ -1,0 +1,40 @@
+ LAUNCH                                     WAITING FOR YOU                          1 session
+  New task   New initiative                 Answer the question about the config format
+                                            needs input  No initiative · 1m
+ For                                        Asked a single-choice question
+  No initiative
+  Route cache on the new storage layer      INITIATIVES
+                                            playback: sessions from several front-ends, and
+ Instruction                                their initiative's milestones
+  What the task should do                       1 initiative · 2 sessions · 2 in no initiative
+                                            ▾ ● Route cache on the new storage lay…  1/4 · 25%
+ Repository                                     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀       ● 1  ● 1  ● 2
+  noir-space-ship                               CURRENT RC-M1: Data model
+                                                orbit-labs/route-cache
+ Branch                                          ● Migrate cached routes without a c…  running
+  default branch                                 ● Port the route cache to the new s…  running
+                                                                                               
+ Agents
+  ✓ Claude   Codex   Grok   Opencode
+  Antigravity
+                                                                                               
+ Runs on
+  This machine   Executor
+  The server's choice
+                                                                                               
+ Session name
+  named by the server
+                                                                                               
+ Opens in
+  New tab   Split   Beside
+                                                                                               
+ ▸ Schedule  Runs once, now
+                                                                                               
+ Type the instruction to launch   Launch
+                                                                                               
+ RECENT LAUNCHES
+ Nothing launched from here yet.
+                                                                                               
+                                                                                               
+                                                                                               
+  Play   Step   ◀ Moment   Moment ▶   Rewind   first frame  +0:00

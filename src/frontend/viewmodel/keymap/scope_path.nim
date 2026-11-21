@@ -145,8 +145,15 @@ const
     ## in (`/s`, `/ah…` and an instruction's sigil completions, and their
     ## sheet, `agent_harbor_results_words`). A prototype drawn in story hosts
     ## and no pane of the layout, as the composer.
+  ControlCenterScope* = "controlCenter"
+    ## The scope the control center's keys and presses are routed in (the
+    ## full-window tab that launches tasks and initiatives and shows every
+    ## initiative, `agent_harbor_control_center_words`). A prototype drawn in
+    ## story hosts and no pane of the layout, as the composer; its launch
+    ## form is the composer's, in the `composer` scope inside it.
   NonPaneScopes* = [TopBarScope, BreakpointConditionScope, StoryPlaybackScope,
-                    SessionActivityScope, ComposerScope, ResultsScope]
+                    SessionActivityScope, ComposerScope, ResultsScope,
+                    ControlCenterScope]
     ## The scopes a press names in `paneKind` that are not panes.
 
 func element*(kind: ElementKind; id: string; paneKind = ""): ScopeElement =

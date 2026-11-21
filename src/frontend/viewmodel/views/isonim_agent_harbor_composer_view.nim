@@ -238,7 +238,11 @@ proc renderField[R](r: R; label, value: string; problem = "";
   ## terminal cut it, so a goal keeps its end and a plan file its file name;
   ## the element keeps the whole value as its text (what a reader and the
   ## accessibility tree read) and in its tooltip. A placeholder is cut at
-  ## its end like any line.
+  ## its end like any line. The value is a read-only text box
+  ## (`role="textbox"`, `aria-readonly`, labelled by its field): what
+  ## assistive technology announces, and what StoryBook's render check
+  ## counts as a control, so an empty field's placeholder is never read as
+  ## an empty state (P2c study D72).
   let shown = if value.len > 0: value else: placeholder
   let cut = if value.len > 0: CutInputValue else: "line"
   ui(r):
@@ -247,7 +251,8 @@ proc renderField[R](r: R; label, value: string; problem = "";
          `data-ah-field` = label):
       span(class = "ah-composer-field-label"):
         text label
-      span(`data-ah-cut` = cut, title = shown,
+      span(`data-ah-cut` = cut, title = shown, role = "textbox", `aria-readonly` = "true",
+           `aria-label` = label,
            class = "ah-composer-field-value" & (if value.len == 0: " ah-composer-field-empty" else: "")):
         text shown
       if problem.len > 0:
@@ -284,7 +289,9 @@ proc renderChoice[R](r: R; label: string; options: openArray[string];
     r.appendRendered(host, t)
   node
 
-proc renderLaunchForm[R, N](r: R; vm: OmniboxComposerVM; host: N) =
+proc renderLaunchForm*[R, N](r: R; vm: OmniboxComposerVM; host: N) =
+  ## The launch form's fields into `host` (the composer's sheet, the control
+  ## center's launch column).
   let o = vm.launch
   let problems = vm.problems
   r.appendRendered(host, renderField(r, "Repository", o.repository,
@@ -334,7 +341,8 @@ proc renderLaunchForm[R, N](r: R; vm: OmniboxComposerVM; host: N) =
     r.appendRendered(sched, renderChoice(r, "Misfire", mis, [$s.misfire]))
   r.appendRendered(host, schedNode)
 
-proc renderInitiativeForm[R, N](r: R; vm: OmniboxComposerVM; host: N) =
+proc renderInitiativeForm*[R, N](r: R; vm: OmniboxComposerVM; host: N) =
+  ## The new-initiative form's fields into `host`, as `renderLaunchForm`.
   let f = vm.initiative
   let problems = vm.problems
   r.appendRendered(host, renderField(r, "Goal", f.goal, problemOf(problems, "goal"),

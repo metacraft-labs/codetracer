@@ -174,7 +174,7 @@ suite "CTF-P2c: the GPUI composer's sheet is laid out as the web's":
         for (mode, theme) in [(dmDark, "dark"), (dmLight, "light")]:
           problems.add sheetLayoutProblems(record, story, size, w, h, mode, theme)
     for p in problems: checkpoint p
-    check stories == 29
+    check stories == 30
     check problems.len == 0
 
 suite "CTF-P2c: the GPUI composer sizes each wrapping row for the lines it draws":

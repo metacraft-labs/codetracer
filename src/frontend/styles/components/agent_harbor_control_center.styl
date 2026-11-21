@@ -1,0 +1,278 @@
+// Agent Harbor control center (isonim_agent_harbor_control_center_view.nim):
+// the tab titled `Control Center` that fills the window, as the Welcome
+// Page does (P2c study D24, D64-D74). A file of its own, as the composer's
+// and the timeline's rules are.
+//
+// Two columns on the panel's ground, launching on the left and the overview
+// on the right, a column of window ground between them where the layout's
+// panels have one (no rule: areas are told apart by their grounds); one
+// column below 720px, launching first. The launch column draws the
+// composer's own form parts (agent_harbor_composer.styl: its section
+// labels, toggles, fields and send line), so the two never differ. Each
+// column opens with the head band of a panel (the Initiatives panel's own
+// `.ah-fleet-section-header`), so the heads line up across the tab, and its
+// content sits at the panel's inset. The overview holds the sessions waiting
+// for the operator, as tall as their rows and at most 45% (study D73), then
+// the Initiatives panel, unchanged, filling the rest: one row each, no dot
+// and no card, the state word in the role every sessions view gives it
+// (P2a). Every colour is a design-system role, its Light value under
+// COLOR_MODE = "Light".
+
+AH_CC_PAD = PANEL_INSET      // the panels' inset, the Initiatives panel's rows
+AH_CC_GAP = 0.25rem          // between the columns: the layout's splitter
+
+// The launch column 45% of the tab, never under 20rem and never over 40rem
+// (a form wider than that only stretches its fields).
+.ah-control-center
+  height: 100%
+  min-height: 0
+  display: grid
+  grid-template-columns: clamp(20rem, 45%, 40rem) minmax(0, 1fr)
+  gap: AH_CC_GAP
+  background: colors-ui-surface-base-canvas
+  color: colors-ui-text-primary-body
+  font-size: ah-rem(type-ui-size-body-md)
+  overflow: hidden
+
+  // Narrow: one column, launching first; the whole tab scrolls, and the
+  // overview fills at least what is left of the window.
+  &[data-ah-columns="one"]
+    grid-template-columns: minmax(0, 1fr)
+    grid-template-rows: max-content minmax(max-content, 1fr)
+    overflow-y: auto
+
+    .ah-cc-overview
+      overflow: visible
+
+    .ah-cc-waiting
+      max-height: none
+
+    // The panel's ground runs to the tab's foot, and its own loading and
+    // error lines get the room they are centred in.
+    .ah-cc-initiatives
+      flex: 1 0 auto
+      display: flex
+      flex-direction: column
+      background: colors-ui-surface-base-panel
+
+      .agent-harbor-initiatives
+        flex: 1 0 auto
+        height: auto
+        min-height: 12rem
+
+  // An empty fleet: the line in the panel's place.
+  &[data-ah-cc-empty="true"] .ah-cc-initiatives
+    display: none
+
+// The tab's own head bands are the Initiatives panel's: their parts are
+// set on the band's line, the body size's 1.5 (inside the panel the line
+// height reaches them already computed; here it would be re-computed at
+// their caption size), so every head of the tab is the panel's height and
+// the heads line up.
+.ah-control-center .ah-cc-launch .ah-fleet-section-header > span,
+.ah-control-center .ah-cc-waiting .ah-fleet-section-header > span,
+.ah-control-center .ah-cc-empty .ah-fleet-section-header > span
+  line-height: ah-rem(type-ui-size-body-md) * 1.5
+
+.ah-cc-launch
+  display: flex
+  flex-direction: column
+  min-width: 0
+  min-height: 0
+  overflow: hidden
+  background: colors-ui-surface-base-panel
+
+.ah-cc-launch-body
+  flex: 1 1 auto
+  min-height: 0
+  overflow-y: auto
+
+.ah-cc-launch-parts
+  display: flex
+  flex-direction: column
+  gap: 0.5rem
+  padding: 0.5rem AH_CC_PAD
+
+// Every line of the tab has its own pitch, so GPUI and the terminal lay it
+// out to the same heights: a section label 1.5rem, a title 1.25rem, a
+// caption line 1rem.
+.ah-cc-section-label
+  padding-top: 0.25rem
+  line-height: 1.5rem
+
+.ah-cc-input
+  font-family: inherit
+  font-size: ah-rem(type-ui-size-body-md)
+  outline: none
+
+  &::placeholder
+    color: colors-ui-text-primary-caption
+
+  &:focus
+    border-color: colors-ui-border-action
+
+.ah-cc-form:empty,
+.ah-cc-send:empty,
+.ah-cc-notice:empty
+  display: none
+
+// The send line: the composer's, without the sheet's rule above it.
+.ah-cc-send .ah-composer-send
+  padding: 0
+  border-top: 0
+
+.ah-cc-notice-line
+  font-size: ah-rem(type-ui-size-caption-md)
+  line-height: 1rem
+  color: colors-ui-text-primary-body
+
+  &.ah-role-caption
+    color: colors-ui-text-primary-caption
+
+  &.ah-role-error
+    color: colors-ui-text-error-primary
+
+.ah-cc-recent
+  display: flex
+  flex-direction: column
+  gap: 0.125rem
+  margin-top: 0.5rem
+
+.ah-cc-recent-row
+  display: flex
+  flex-direction: column
+  min-width: 0
+  padding: 0.25rem 0
+
+.ah-cc-recent-text,
+.ah-cc-recent-line,
+.ah-cc-waiting-title,
+.ah-cc-waiting-where
+  min-width: 0
+  overflow: hidden
+  white-space: nowrap
+
+.ah-cc-recent-text
+  line-height: 1.25rem
+
+.ah-cc-recent-line
+  font-size: ah-rem(type-ui-size-caption-md)
+  line-height: 1rem
+  color: colors-ui-text-primary-caption
+
+.ah-cc-recent-failed .ah-cc-recent-line
+  color: colors-ui-text-error-primary
+
+.ah-cc-none,
+.ah-cc-empty-line
+  font-size: ah-rem(type-ui-size-caption-md)
+  line-height: 1rem
+  color: colors-ui-text-primary-caption
+
+.ah-cc-none
+  padding: 0.25rem 0
+
+.ah-cc-overview
+  display: flex
+  flex-direction: column
+  gap: AH_CC_GAP
+  min-width: 0
+  min-height: 0
+  overflow: hidden
+
+.ah-cc-initiatives
+  flex: 1 1 0
+  min-height: 0
+
+.ah-cc-empty:empty
+  display: none
+
+// An empty fleet's line fills the panel's place, under the panel's head
+// band.
+.ah-cc-empty
+  flex: 1 1 auto
+  background: colors-ui-surface-base-panel
+
+.ah-cc-empty-line
+  padding: 0.75rem AH_CC_PAD
+
+.ah-cc-waiting
+  flex: 0 0 auto
+  max-height: 45%
+  display: flex
+  flex-direction: column
+  min-height: 0
+  overflow: hidden
+  background: colors-ui-surface-base-panel
+
+  &:empty
+    display: none
+
+.ah-cc-waiting-rows
+  display: flex
+  flex-direction: column
+  min-height: 0
+  padding: 0.25rem AH_CC_PAD
+  overflow-y: auto
+
+.ah-cc-waiting-row
+  display: flex
+  flex-direction: column
+  gap: 0.0625rem
+  min-width: 0
+  padding: 0.375rem 0.5rem
+  margin: 0 -0.5rem
+  border-radius: ah-rem(border-border-radius-control)
+
+  &:hover
+    background: colors-ui-surface-primary-secondary-hover
+
+// The row the keys are on: a bar, never a fill (the composer's rule).
+.ah-cc-waiting-focused
+  box-shadow: inset 0.125rem 0 0 colors-ui-border-action
+
+.ah-cc-waiting-title
+  line-height: 1.25rem
+
+.ah-cc-waiting-meta
+  display: flex
+  gap: 0.5rem
+  min-width: 0
+  font-size: ah-rem(type-ui-size-caption-md)
+  line-height: 1rem
+  color: colors-ui-text-primary-caption
+
+.ah-cc-waiting-state
+  flex: 0 0 auto
+
+  // Needs input: the warning role every sessions view gives it; Light's
+  // warning text step is pale at caption size, its hover step is the
+  // readable one (the composer's rule).
+  &.ah-role-warning
+    color: by-mode(colors-ui-text-warning-primary, colors-ui-text-warning-primary-hover)
+
+// Why it waits: the agent's question, wrapped (it is what the operator
+// answers), at most two lines.
+.ah-cc-waiting-why
+  display: -webkit-box
+  -webkit-line-clamp: 2
+  -webkit-box-orient: vertical
+  overflow: hidden
+  overflow-wrap: anywhere
+  font-size: ah-rem(type-ui-size-caption-md)
+  line-height: 1rem
+  color: colors-ui-text-primary-body
+
+// The story hosts: the control center as a tab that fills the window (its
+// view stories), or the session area (L7); the gaze stories' window, an
+// empty working area over the status line.
+.ah-control-center-story
+  height: 100vh
+
+  &.ah-story-above-playback
+    height: calc(100vh - 1.75rem)
+
+.ah-control-center-tab
+  flex: 1 1 0
+  min-width: 0
+  min-height: 0

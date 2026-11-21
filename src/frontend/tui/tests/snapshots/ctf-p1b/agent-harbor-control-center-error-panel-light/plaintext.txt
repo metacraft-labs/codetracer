@@ -1,0 +1,40 @@
+ LAUNCH                                     INITIATIVES  unreachable server
+  New task   New initiative
+                                                                                               
+ For
+  No initiative
+                                                                                               
+ Instruction
+  What the task should do
+                                                                                               
+ Repository
+  noir-space-ship
+                                                                                               
+ Branch
+  default branch
+                                                                                               
+ Agents
+  ✓ Claude   Codex   Grok   Opencode
+  Antigravity
+                                                      Could not load the initiatives
+ Runs on                                        GET /api/v1/initiatives failed: connection
+  This machine   Executor                       refused (the server is not running, or its
+  The server's choice                                       address is wrong)
+                                                                  Retry
+ Session name
+  named by the server
+                                                                                               
+ Opens in
+  New tab   Split   Beside
+                                                                                               
+ ▸ Schedule  Runs once, now
+                                                                                               
+ Type the instruction to launch   Launch
+                                                                                               
+ RECENT LAUNCHES
+ Nothing launched from here yet.
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               

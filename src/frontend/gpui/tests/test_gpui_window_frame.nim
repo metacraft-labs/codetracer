@@ -98,7 +98,10 @@ import ../replay_ops
 # RE-COUNTED 2026-11-21: 993 → 1002, by the second route above -- CTF-P2c
 # step 3 added one non-test file under `src/frontend/gpui/agent_harbor/`
 # (`ah_suggested_actions.nim`), 1 x 9 assertions in the registry scan.
-const ExpectedAssertions = 1002
+# RE-COUNTED 2026-11-21: 1002 → 1020, by the same route -- CTF-P2c step 4
+# added two non-test files under `src/frontend/gpui/agent_harbor/`
+# (`ah_control_center.nim`, `ah_gaze_mark.nim`), 2 x 9 assertions.
+const ExpectedAssertions = 1020
   ## 2026-11-20 (the merge of the two entries below): 984 -> 993. Both
   ## added one scanned source file, so the merged tree scans both, at
   ## 1 + 8 = 9 per file.

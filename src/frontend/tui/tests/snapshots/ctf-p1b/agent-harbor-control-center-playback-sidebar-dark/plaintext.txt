@@ -1,0 +1,56 @@
+ LAUNCH
+  New task   New initiative
+                                             
+ For
+  No initiative
+  Route cache on the new storage layer
+                                             
+ Instruction
+  What the task should do
+                                             
+ noir-space-ship · Claude · The server's ch…
+                                             
+    Type the instruction to launch   Launch
+                                             
+ RECENT LAUNCHES
+ Nothing launched from here yet.
+                                             
+                                             
+ WAITING FOR YOU                   1 session
+ Answer the question about the config format
+ needs input  No initiative · 1m
+ Asked a single-choice question
+                                             
+ INITIATIVES
+ playback: sessions from several front-ends,
+ and their initiative's milestones
+                 1 initiative · 2 sessions ·
+                          2 in no initiative
+ ▾ ● Route cache on the new stor…  1/4 · 25%
+     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀       ● 1  ● 1  ● 2
+     CURRENT RC-M1: Data model
+     orbit-labs/route-cache
+      ● Migrate cached routes with…  running
+      ● Port the route cache to th…  running
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+ ▶ › « » ↺  first frame  +0:00

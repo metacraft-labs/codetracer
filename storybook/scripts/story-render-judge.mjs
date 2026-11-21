@@ -129,8 +129,12 @@ export const JUDGE_RULES = [
 export const MISSING_TEXT = "No structure story registered";
 export const MISSING_CLASS = "ct-storybook-missing";
 // Elements whose text is chrome rather than content: controls, tabs and the
-// golden-layout header the harness draws around a panel.
-export const CHROME = "button,[role=button],input,select,textarea,label,[role=tab],[role=toolbar],.lm_header";
+// golden-layout header the harness draws around a panel. A drawn read-only
+// field (`role=textbox` with `aria-readonly=true`, the composer's form
+// values) is an input like any other: its placeholder is the field's, not an
+// empty state of the story. Only read-only ones: an editable text box is an
+// editor surface whose content the check must still see.
+export const CHROME = "button,[role=button],input,select,textarea,[role=textbox][aria-readonly=true],label,[role=tab],[role=toolbar],.lm_header";
 // The stylesheet `setCodeTracerTheme` swaps (`frontend/styles/<name>_theme_electron.css`).
 export const THEME_STYLESHEET = /\/[a-z_]+_theme_electron\.css$/;
 // StoryBook's preview announces the end of a render (after the play check)

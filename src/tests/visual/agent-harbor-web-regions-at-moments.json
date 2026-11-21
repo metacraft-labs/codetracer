@@ -9,6 +9,3422 @@
   ],
   "schemaVersion": 1,
   "captures": {
+    "agent-harbor-control-center-playback-at-bench-asks-laptop-dark": {
+      "moment": "bench-asks",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 30
+        },
+        "rows": {
+          "x": 644,
+          "y": 293,
+          "w": 796,
+          "h": 579
+        },
+        "initiative-row-first": {
+          "x": 644,
+          "y": 293,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "initiative-row-last": {
+          "x": 644,
+          "y": 293,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 672,
+          "y": 396,
+          "w": 760,
+          "h": 18,
+          "index": 0
+        },
+        "session-line-last": {
+          "x": 672,
+          "y": 434,
+          "w": 760,
+          "h": 18,
+          "index": 2
+        },
+        "milestone-bar": {
+          "x": 652,
+          "y": 334,
+          "w": 624,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 1288,
+          "y": 330,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 68,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 563.453125,
+          "y": 470,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 872
+        },
+        "cc-overview": {
+          "x": 644,
+          "y": 0,
+          "w": 796,
+          "h": 872
+        },
+        "cc-waiting-row-first": {
+          "x": 644,
+          "y": 34,
+          "w": 796,
+          "h": 66,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-control-center-playback-at-bench-asks-laptop-light": {
+      "moment": "bench-asks",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 30
+        },
+        "rows": {
+          "x": 644,
+          "y": 293,
+          "w": 796,
+          "h": 579
+        },
+        "initiative-row-first": {
+          "x": 644,
+          "y": 293,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "initiative-row-last": {
+          "x": 644,
+          "y": 293,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 672,
+          "y": 396,
+          "w": 760,
+          "h": 18,
+          "index": 0
+        },
+        "session-line-last": {
+          "x": 672,
+          "y": 434,
+          "w": 760,
+          "h": 18,
+          "index": 2
+        },
+        "milestone-bar": {
+          "x": 652,
+          "y": 334,
+          "w": 624,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 1288,
+          "y": 330,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 68,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 563.453125,
+          "y": 470,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 872
+        },
+        "cc-overview": {
+          "x": 644,
+          "y": 0,
+          "w": 796,
+          "h": 872
+        },
+        "cc-waiting-row-first": {
+          "x": 644,
+          "y": 34,
+          "w": 796,
+          "h": 66,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-control-center-playback-at-bench-asks-sidebar-dark": {
+      "moment": "bench-asks",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 30
+        },
+        "rows": {
+          "x": 0,
+          "y": 973,
+          "w": 360,
+          "h": 169
+        },
+        "initiative-row-first": {
+          "x": 0,
+          "y": 973,
+          "w": 360,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 28,
+          "y": 1076,
+          "w": 324,
+          "h": 18,
+          "index": 0
+        },
+        "milestone-bar": {
+          "x": 8,
+          "y": 1014,
+          "w": 188,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 208,
+          "y": 1010,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 68,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 283.453125,
+          "y": 551,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 653
+        },
+        "cc-overview": {
+          "x": 0,
+          "y": 657,
+          "w": 360,
+          "h": 485
+        },
+        "cc-waiting-row-first": {
+          "x": 0,
+          "y": 691,
+          "w": 360,
+          "h": 66,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-control-center-playback-at-bench-asks-sidebar-light": {
+      "moment": "bench-asks",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 30
+        },
+        "rows": {
+          "x": 0,
+          "y": 973,
+          "w": 360,
+          "h": 169
+        },
+        "initiative-row-first": {
+          "x": 0,
+          "y": 973,
+          "w": 360,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 28,
+          "y": 1076,
+          "w": 324,
+          "h": 18,
+          "index": 0
+        },
+        "milestone-bar": {
+          "x": 8,
+          "y": 1014,
+          "w": 188,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 208,
+          "y": 1010,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 68,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 283.453125,
+          "y": 551,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 653
+        },
+        "cc-overview": {
+          "x": 0,
+          "y": 657,
+          "w": 360,
+          "h": 485
+        },
+        "cc-waiting-row-first": {
+          "x": 0,
+          "y": 691,
+          "w": 360,
+          "h": 66,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-control-center-playback-at-config-answered-laptop-dark": {
+      "moment": "config-answered",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 30
+        },
+        "rows": {
+          "x": 644,
+          "y": 96,
+          "w": 796,
+          "h": 776
+        },
+        "initiative-row-first": {
+          "x": 644,
+          "y": 96,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "initiative-row-last": {
+          "x": 644,
+          "y": 96,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 672,
+          "y": 199,
+          "w": 760,
+          "h": 18,
+          "index": 0
+        },
+        "session-line-last": {
+          "x": 672,
+          "y": 237,
+          "w": 760,
+          "h": 18,
+          "index": 2
+        },
+        "milestone-bar": {
+          "x": 652,
+          "y": 137,
+          "w": 624,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 1288,
+          "y": 133,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 99.171875,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 563.453125,
+          "y": 470,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 872
+        },
+        "cc-overview": {
+          "x": 644,
+          "y": 0,
+          "w": 796,
+          "h": 872
+        }
+      }
+    },
+    "agent-harbor-control-center-playback-at-config-answered-laptop-light": {
+      "moment": "config-answered",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 30
+        },
+        "rows": {
+          "x": 644,
+          "y": 96,
+          "w": 796,
+          "h": 776
+        },
+        "initiative-row-first": {
+          "x": 644,
+          "y": 96,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "initiative-row-last": {
+          "x": 644,
+          "y": 96,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 672,
+          "y": 199,
+          "w": 760,
+          "h": 18,
+          "index": 0
+        },
+        "session-line-last": {
+          "x": 672,
+          "y": 237,
+          "w": 760,
+          "h": 18,
+          "index": 2
+        },
+        "milestone-bar": {
+          "x": 652,
+          "y": 137,
+          "w": 624,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 1288,
+          "y": 133,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 99.171875,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 563.453125,
+          "y": 470,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 872
+        },
+        "cc-overview": {
+          "x": 644,
+          "y": 0,
+          "w": 796,
+          "h": 872
+        }
+      }
+    },
+    "agent-harbor-control-center-playback-at-config-answered-sidebar-dark": {
+      "moment": "config-answered",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 30
+        },
+        "rows": {
+          "x": 0,
+          "y": 799,
+          "w": 360,
+          "h": 169
+        },
+        "initiative-row-first": {
+          "x": 0,
+          "y": 799,
+          "w": 360,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 28,
+          "y": 902,
+          "w": 324,
+          "h": 18,
+          "index": 0
+        },
+        "milestone-bar": {
+          "x": 8,
+          "y": 840,
+          "w": 188,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 208,
+          "y": 836,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 99.171875,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 283.453125,
+          "y": 551,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 653
+        },
+        "cc-overview": {
+          "x": 0,
+          "y": 657,
+          "w": 360,
+          "h": 311
+        }
+      }
+    },
+    "agent-harbor-control-center-playback-at-config-answered-sidebar-light": {
+      "moment": "config-answered",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 30
+        },
+        "rows": {
+          "x": 0,
+          "y": 799,
+          "w": 360,
+          "h": 169
+        },
+        "initiative-row-first": {
+          "x": 0,
+          "y": 799,
+          "w": 360,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 28,
+          "y": 902,
+          "w": 324,
+          "h": 18,
+          "index": 0
+        },
+        "milestone-bar": {
+          "x": 8,
+          "y": 840,
+          "w": 188,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 208,
+          "y": 836,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 99.171875,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 283.453125,
+          "y": 551,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 653
+        },
+        "cc-overview": {
+          "x": 0,
+          "y": 657,
+          "w": 360,
+          "h": 311
+        }
+      }
+    },
+    "agent-harbor-control-center-playback-at-importer-removed-laptop-dark": {
+      "moment": "importer-removed",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 30
+        },
+        "rows": {
+          "x": 644,
+          "y": 96,
+          "w": 796,
+          "h": 776
+        },
+        "initiative-row-first": {
+          "x": 644,
+          "y": 96,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "initiative-row-last": {
+          "x": 644,
+          "y": 96,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 672,
+          "y": 199,
+          "w": 760,
+          "h": 18,
+          "index": 0
+        },
+        "session-line-last": {
+          "x": 672,
+          "y": 237,
+          "w": 760,
+          "h": 18,
+          "index": 2
+        },
+        "milestone-bar": {
+          "x": 652,
+          "y": 137,
+          "w": 624,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 1288,
+          "y": 133,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 105.015625,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 563.453125,
+          "y": 470,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 872
+        },
+        "cc-overview": {
+          "x": 644,
+          "y": 0,
+          "w": 796,
+          "h": 872
+        }
+      }
+    },
+    "agent-harbor-control-center-playback-at-importer-removed-laptop-light": {
+      "moment": "importer-removed",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 30
+        },
+        "rows": {
+          "x": 644,
+          "y": 96,
+          "w": 796,
+          "h": 776
+        },
+        "initiative-row-first": {
+          "x": 644,
+          "y": 96,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "initiative-row-last": {
+          "x": 644,
+          "y": 96,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 672,
+          "y": 199,
+          "w": 760,
+          "h": 18,
+          "index": 0
+        },
+        "session-line-last": {
+          "x": 672,
+          "y": 237,
+          "w": 760,
+          "h": 18,
+          "index": 2
+        },
+        "milestone-bar": {
+          "x": 652,
+          "y": 137,
+          "w": 624,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 1288,
+          "y": 133,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 105.015625,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 563.453125,
+          "y": 470,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 872
+        },
+        "cc-overview": {
+          "x": 644,
+          "y": 0,
+          "w": 796,
+          "h": 872
+        }
+      }
+    },
+    "agent-harbor-control-center-playback-at-importer-removed-sidebar-dark": {
+      "moment": "importer-removed",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 30
+        },
+        "rows": {
+          "x": 0,
+          "y": 799,
+          "w": 360,
+          "h": 169
+        },
+        "initiative-row-first": {
+          "x": 0,
+          "y": 799,
+          "w": 360,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 28,
+          "y": 902,
+          "w": 324,
+          "h": 18,
+          "index": 0
+        },
+        "milestone-bar": {
+          "x": 8,
+          "y": 840,
+          "w": 188,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 208,
+          "y": 836,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 105.015625,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 283.453125,
+          "y": 551,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 653
+        },
+        "cc-overview": {
+          "x": 0,
+          "y": 657,
+          "w": 360,
+          "h": 311
+        }
+      }
+    },
+    "agent-harbor-control-center-playback-at-importer-removed-sidebar-light": {
+      "moment": "importer-removed",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 30
+        },
+        "rows": {
+          "x": 0,
+          "y": 799,
+          "w": 360,
+          "h": 169
+        },
+        "initiative-row-first": {
+          "x": 0,
+          "y": 799,
+          "w": 360,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 28,
+          "y": 902,
+          "w": 324,
+          "h": 18,
+          "index": 0
+        },
+        "milestone-bar": {
+          "x": 8,
+          "y": 840,
+          "w": 188,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 208,
+          "y": 836,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 105.015625,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 283.453125,
+          "y": 551,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 653
+        },
+        "cc-overview": {
+          "x": 0,
+          "y": 657,
+          "w": 360,
+          "h": 311
+        }
+      }
+    },
+    "agent-harbor-control-center-playback-at-migration-fails-laptop-dark": {
+      "moment": "migration-fails",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 30
+        },
+        "rows": {
+          "x": 644,
+          "y": 138,
+          "w": 796,
+          "h": 734
+        },
+        "initiative-row-first": {
+          "x": 644,
+          "y": 138,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "initiative-row-last": {
+          "x": 644,
+          "y": 138,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 672,
+          "y": 241,
+          "w": 760,
+          "h": 18,
+          "index": 0
+        },
+        "session-line-last": {
+          "x": 672,
+          "y": 279,
+          "w": 760,
+          "h": 18,
+          "index": 2
+        },
+        "milestone-bar": {
+          "x": 652,
+          "y": 179,
+          "w": 624,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 1288,
+          "y": 175,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 84.4375,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 563.453125,
+          "y": 470,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 872
+        },
+        "cc-overview": {
+          "x": 644,
+          "y": 0,
+          "w": 796,
+          "h": 872
+        },
+        "cc-waiting-row-first": {
+          "x": 644,
+          "y": 34,
+          "w": 796,
+          "h": 66,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-control-center-playback-at-migration-fails-laptop-light": {
+      "moment": "migration-fails",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 30
+        },
+        "rows": {
+          "x": 644,
+          "y": 138,
+          "w": 796,
+          "h": 734
+        },
+        "initiative-row-first": {
+          "x": 644,
+          "y": 138,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "initiative-row-last": {
+          "x": 644,
+          "y": 138,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 672,
+          "y": 241,
+          "w": 760,
+          "h": 18,
+          "index": 0
+        },
+        "session-line-last": {
+          "x": 672,
+          "y": 279,
+          "w": 760,
+          "h": 18,
+          "index": 2
+        },
+        "milestone-bar": {
+          "x": 652,
+          "y": 179,
+          "w": 624,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 1288,
+          "y": 175,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 84.4375,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 563.453125,
+          "y": 470,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 872
+        },
+        "cc-overview": {
+          "x": 644,
+          "y": 0,
+          "w": 796,
+          "h": 872
+        },
+        "cc-waiting-row-first": {
+          "x": 644,
+          "y": 34,
+          "w": 796,
+          "h": 66,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-control-center-playback-at-migration-fails-sidebar-dark": {
+      "moment": "migration-fails",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 30
+        },
+        "rows": {
+          "x": 0,
+          "y": 841,
+          "w": 360,
+          "h": 169
+        },
+        "initiative-row-first": {
+          "x": 0,
+          "y": 841,
+          "w": 360,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 28,
+          "y": 944,
+          "w": 324,
+          "h": 18,
+          "index": 0
+        },
+        "milestone-bar": {
+          "x": 8,
+          "y": 882,
+          "w": 188,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 208,
+          "y": 878,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 84.4375,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 283.453125,
+          "y": 551,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 653
+        },
+        "cc-overview": {
+          "x": 0,
+          "y": 657,
+          "w": 360,
+          "h": 353
+        },
+        "cc-waiting-row-first": {
+          "x": 0,
+          "y": 691,
+          "w": 360,
+          "h": 66,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-control-center-playback-at-migration-fails-sidebar-light": {
+      "moment": "migration-fails",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 30
+        },
+        "rows": {
+          "x": 0,
+          "y": 841,
+          "w": 360,
+          "h": 169
+        },
+        "initiative-row-first": {
+          "x": 0,
+          "y": 841,
+          "w": 360,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 28,
+          "y": 944,
+          "w": 324,
+          "h": 18,
+          "index": 0
+        },
+        "milestone-bar": {
+          "x": 8,
+          "y": 882,
+          "w": 188,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 208,
+          "y": 878,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 84.4375,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 283.453125,
+          "y": 551,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 653
+        },
+        "cc-overview": {
+          "x": 0,
+          "y": 657,
+          "w": 360,
+          "h": 353
+        },
+        "cc-waiting-row-first": {
+          "x": 0,
+          "y": 691,
+          "w": 360,
+          "h": 66,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-control-center-playback-at-milestone-done-laptop-dark": {
+      "moment": "milestone-done",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 30
+        },
+        "rows": {
+          "x": 644,
+          "y": 96,
+          "w": 796,
+          "h": 776
+        },
+        "initiative-row-first": {
+          "x": 644,
+          "y": 96,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "initiative-row-last": {
+          "x": 644,
+          "y": 96,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 672,
+          "y": 199,
+          "w": 760,
+          "h": 18,
+          "index": 0
+        },
+        "session-line-last": {
+          "x": 672,
+          "y": 237,
+          "w": 760,
+          "h": 18,
+          "index": 2
+        },
+        "milestone-bar": {
+          "x": 652,
+          "y": 137,
+          "w": 624,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 1288,
+          "y": 133,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 91.765625,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 563.453125,
+          "y": 470,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 872
+        },
+        "cc-overview": {
+          "x": 644,
+          "y": 0,
+          "w": 796,
+          "h": 872
+        }
+      }
+    },
+    "agent-harbor-control-center-playback-at-milestone-done-laptop-light": {
+      "moment": "milestone-done",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 30
+        },
+        "rows": {
+          "x": 644,
+          "y": 96,
+          "w": 796,
+          "h": 776
+        },
+        "initiative-row-first": {
+          "x": 644,
+          "y": 96,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "initiative-row-last": {
+          "x": 644,
+          "y": 96,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 672,
+          "y": 199,
+          "w": 760,
+          "h": 18,
+          "index": 0
+        },
+        "session-line-last": {
+          "x": 672,
+          "y": 237,
+          "w": 760,
+          "h": 18,
+          "index": 2
+        },
+        "milestone-bar": {
+          "x": 652,
+          "y": 137,
+          "w": 624,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 1288,
+          "y": 133,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 91.765625,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 563.453125,
+          "y": 470,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 872
+        },
+        "cc-overview": {
+          "x": 644,
+          "y": 0,
+          "w": 796,
+          "h": 872
+        }
+      }
+    },
+    "agent-harbor-control-center-playback-at-milestone-done-sidebar-dark": {
+      "moment": "milestone-done",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 30
+        },
+        "rows": {
+          "x": 0,
+          "y": 799,
+          "w": 360,
+          "h": 169
+        },
+        "initiative-row-first": {
+          "x": 0,
+          "y": 799,
+          "w": 360,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 28,
+          "y": 902,
+          "w": 324,
+          "h": 18,
+          "index": 0
+        },
+        "milestone-bar": {
+          "x": 8,
+          "y": 840,
+          "w": 188,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 208,
+          "y": 836,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 91.765625,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 283.453125,
+          "y": 551,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 653
+        },
+        "cc-overview": {
+          "x": 0,
+          "y": 657,
+          "w": 360,
+          "h": 311
+        }
+      }
+    },
+    "agent-harbor-control-center-playback-at-milestone-done-sidebar-light": {
+      "moment": "milestone-done",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 30
+        },
+        "rows": {
+          "x": 0,
+          "y": 799,
+          "w": 360,
+          "h": 169
+        },
+        "initiative-row-first": {
+          "x": 0,
+          "y": 799,
+          "w": 360,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 28,
+          "y": 902,
+          "w": 324,
+          "h": 18,
+          "index": 0
+        },
+        "milestone-bar": {
+          "x": 8,
+          "y": 840,
+          "w": 188,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 208,
+          "y": 836,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 91.765625,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 283.453125,
+          "y": 551,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 653
+        },
+        "cc-overview": {
+          "x": 0,
+          "y": 657,
+          "w": 360,
+          "h": 311
+        }
+      }
+    },
+    "agent-harbor-control-center-playback-at-new-session-laptop-dark": {
+      "moment": "new-session",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 30
+        },
+        "rows": {
+          "x": 644,
+          "y": 138,
+          "w": 796,
+          "h": 734
+        },
+        "initiative-row-first": {
+          "x": 644,
+          "y": 138,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "initiative-row-last": {
+          "x": 644,
+          "y": 138,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 672,
+          "y": 241,
+          "w": 760,
+          "h": 18,
+          "index": 0
+        },
+        "session-line-last": {
+          "x": 672,
+          "y": 279,
+          "w": 760,
+          "h": 18,
+          "index": 2
+        },
+        "milestone-bar": {
+          "x": 652,
+          "y": 179,
+          "w": 624,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 1288,
+          "y": 175,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 73.09375,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 563.453125,
+          "y": 470,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 872
+        },
+        "cc-overview": {
+          "x": 644,
+          "y": 0,
+          "w": 796,
+          "h": 872
+        },
+        "cc-waiting-row-first": {
+          "x": 644,
+          "y": 34,
+          "w": 796,
+          "h": 66,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-control-center-playback-at-new-session-laptop-light": {
+      "moment": "new-session",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 30
+        },
+        "rows": {
+          "x": 644,
+          "y": 138,
+          "w": 796,
+          "h": 734
+        },
+        "initiative-row-first": {
+          "x": 644,
+          "y": 138,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "initiative-row-last": {
+          "x": 644,
+          "y": 138,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 672,
+          "y": 241,
+          "w": 760,
+          "h": 18,
+          "index": 0
+        },
+        "session-line-last": {
+          "x": 672,
+          "y": 279,
+          "w": 760,
+          "h": 18,
+          "index": 2
+        },
+        "milestone-bar": {
+          "x": 652,
+          "y": 179,
+          "w": 624,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 1288,
+          "y": 175,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 73.09375,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 563.453125,
+          "y": 470,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 872
+        },
+        "cc-overview": {
+          "x": 644,
+          "y": 0,
+          "w": 796,
+          "h": 872
+        },
+        "cc-waiting-row-first": {
+          "x": 644,
+          "y": 34,
+          "w": 796,
+          "h": 66,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-control-center-playback-at-new-session-sidebar-dark": {
+      "moment": "new-session",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 30
+        },
+        "rows": {
+          "x": 0,
+          "y": 841,
+          "w": 360,
+          "h": 169
+        },
+        "initiative-row-first": {
+          "x": 0,
+          "y": 841,
+          "w": 360,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 28,
+          "y": 944,
+          "w": 324,
+          "h": 18,
+          "index": 0
+        },
+        "milestone-bar": {
+          "x": 8,
+          "y": 882,
+          "w": 188,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 208,
+          "y": 878,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 73.09375,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 283.453125,
+          "y": 551,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 653
+        },
+        "cc-overview": {
+          "x": 0,
+          "y": 657,
+          "w": 360,
+          "h": 353
+        },
+        "cc-waiting-row-first": {
+          "x": 0,
+          "y": 691,
+          "w": 360,
+          "h": 66,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-control-center-playback-at-new-session-sidebar-light": {
+      "moment": "new-session",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 30
+        },
+        "rows": {
+          "x": 0,
+          "y": 841,
+          "w": 360,
+          "h": 169
+        },
+        "initiative-row-first": {
+          "x": 0,
+          "y": 841,
+          "w": 360,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 28,
+          "y": 944,
+          "w": 324,
+          "h": 18,
+          "index": 0
+        },
+        "milestone-bar": {
+          "x": 8,
+          "y": 882,
+          "w": 188,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 208,
+          "y": 878,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 73.09375,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 283.453125,
+          "y": 551,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 653
+        },
+        "cc-overview": {
+          "x": 0,
+          "y": 657,
+          "w": 360,
+          "h": 353
+        },
+        "cc-waiting-row-first": {
+          "x": 0,
+          "y": 691,
+          "w": 360,
+          "h": 66,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-control-center-playback-at-port-answered-laptop-dark": {
+      "moment": "port-answered",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 30
+        },
+        "rows": {
+          "x": 644,
+          "y": 227,
+          "w": 796,
+          "h": 645
+        },
+        "initiative-row-first": {
+          "x": 644,
+          "y": 227,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "initiative-row-last": {
+          "x": 644,
+          "y": 227,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 672,
+          "y": 330,
+          "w": 760,
+          "h": 18,
+          "index": 0
+        },
+        "session-line-last": {
+          "x": 672,
+          "y": 368,
+          "w": 760,
+          "h": 18,
+          "index": 2
+        },
+        "milestone-bar": {
+          "x": 652,
+          "y": 268,
+          "w": 624,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 1288,
+          "y": 264,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 86.703125,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 563.453125,
+          "y": 470,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 872
+        },
+        "cc-overview": {
+          "x": 644,
+          "y": 0,
+          "w": 796,
+          "h": 872
+        },
+        "cc-waiting-row-first": {
+          "x": 644,
+          "y": 34,
+          "w": 796,
+          "h": 66,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-control-center-playback-at-port-answered-laptop-light": {
+      "moment": "port-answered",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 30
+        },
+        "rows": {
+          "x": 644,
+          "y": 227,
+          "w": 796,
+          "h": 645
+        },
+        "initiative-row-first": {
+          "x": 644,
+          "y": 227,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "initiative-row-last": {
+          "x": 644,
+          "y": 227,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 672,
+          "y": 330,
+          "w": 760,
+          "h": 18,
+          "index": 0
+        },
+        "session-line-last": {
+          "x": 672,
+          "y": 368,
+          "w": 760,
+          "h": 18,
+          "index": 2
+        },
+        "milestone-bar": {
+          "x": 652,
+          "y": 268,
+          "w": 624,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 1288,
+          "y": 264,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 86.703125,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 563.453125,
+          "y": 470,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 872
+        },
+        "cc-overview": {
+          "x": 644,
+          "y": 0,
+          "w": 796,
+          "h": 872
+        },
+        "cc-waiting-row-first": {
+          "x": 644,
+          "y": 34,
+          "w": 796,
+          "h": 66,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-control-center-playback-at-port-answered-sidebar-dark": {
+      "moment": "port-answered",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 30
+        },
+        "rows": {
+          "x": 0,
+          "y": 907,
+          "w": 360,
+          "h": 169
+        },
+        "initiative-row-first": {
+          "x": 0,
+          "y": 907,
+          "w": 360,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 28,
+          "y": 1010,
+          "w": 324,
+          "h": 18,
+          "index": 0
+        },
+        "milestone-bar": {
+          "x": 8,
+          "y": 948,
+          "w": 188,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 208,
+          "y": 944,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 86.703125,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 283.453125,
+          "y": 551,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 653
+        },
+        "cc-overview": {
+          "x": 0,
+          "y": 657,
+          "w": 360,
+          "h": 419
+        },
+        "cc-waiting-row-first": {
+          "x": 0,
+          "y": 691,
+          "w": 360,
+          "h": 66,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-control-center-playback-at-port-answered-sidebar-light": {
+      "moment": "port-answered",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 30
+        },
+        "rows": {
+          "x": 0,
+          "y": 907,
+          "w": 360,
+          "h": 169
+        },
+        "initiative-row-first": {
+          "x": 0,
+          "y": 907,
+          "w": 360,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 28,
+          "y": 1010,
+          "w": 324,
+          "h": 18,
+          "index": 0
+        },
+        "milestone-bar": {
+          "x": 8,
+          "y": 948,
+          "w": 188,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 208,
+          "y": 944,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 86.703125,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 283.453125,
+          "y": 551,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 653
+        },
+        "cc-overview": {
+          "x": 0,
+          "y": 657,
+          "w": 360,
+          "h": 419
+        },
+        "cc-waiting-row-first": {
+          "x": 0,
+          "y": 691,
+          "w": 360,
+          "h": 66,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-control-center-playback-at-port-asks-laptop-dark": {
+      "moment": "port-asks",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 30
+        },
+        "rows": {
+          "x": 644,
+          "y": 227,
+          "w": 796,
+          "h": 645
+        },
+        "initiative-row-first": {
+          "x": 644,
+          "y": 227,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "initiative-row-last": {
+          "x": 644,
+          "y": 227,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 672,
+          "y": 330,
+          "w": 760,
+          "h": 18,
+          "index": 0
+        },
+        "session-line-last": {
+          "x": 672,
+          "y": 368,
+          "w": 760,
+          "h": 18,
+          "index": 2
+        },
+        "milestone-bar": {
+          "x": 652,
+          "y": 268,
+          "w": 624,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 1288,
+          "y": 264,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 56.25,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 563.453125,
+          "y": 470,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 872
+        },
+        "cc-overview": {
+          "x": 644,
+          "y": 0,
+          "w": 796,
+          "h": 872
+        },
+        "cc-waiting-row-first": {
+          "x": 644,
+          "y": 34,
+          "w": 796,
+          "h": 66,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-control-center-playback-at-port-asks-laptop-light": {
+      "moment": "port-asks",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 30
+        },
+        "rows": {
+          "x": 644,
+          "y": 227,
+          "w": 796,
+          "h": 645
+        },
+        "initiative-row-first": {
+          "x": 644,
+          "y": 227,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "initiative-row-last": {
+          "x": 644,
+          "y": 227,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 672,
+          "y": 330,
+          "w": 760,
+          "h": 18,
+          "index": 0
+        },
+        "session-line-last": {
+          "x": 672,
+          "y": 368,
+          "w": 760,
+          "h": 18,
+          "index": 2
+        },
+        "milestone-bar": {
+          "x": 652,
+          "y": 268,
+          "w": 624,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 1288,
+          "y": 264,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 56.25,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 563.453125,
+          "y": 470,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 872
+        },
+        "cc-overview": {
+          "x": 644,
+          "y": 0,
+          "w": 796,
+          "h": 872
+        },
+        "cc-waiting-row-first": {
+          "x": 644,
+          "y": 34,
+          "w": 796,
+          "h": 66,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-control-center-playback-at-port-asks-sidebar-dark": {
+      "moment": "port-asks",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 30
+        },
+        "rows": {
+          "x": 0,
+          "y": 907,
+          "w": 360,
+          "h": 169
+        },
+        "initiative-row-first": {
+          "x": 0,
+          "y": 907,
+          "w": 360,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 28,
+          "y": 1010,
+          "w": 324,
+          "h": 18,
+          "index": 0
+        },
+        "milestone-bar": {
+          "x": 8,
+          "y": 948,
+          "w": 188,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 208,
+          "y": 944,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 56.25,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 283.453125,
+          "y": 551,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 653
+        },
+        "cc-overview": {
+          "x": 0,
+          "y": 657,
+          "w": 360,
+          "h": 419
+        },
+        "cc-waiting-row-first": {
+          "x": 0,
+          "y": 691,
+          "w": 360,
+          "h": 66,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-control-center-playback-at-port-asks-sidebar-light": {
+      "moment": "port-asks",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 30
+        },
+        "rows": {
+          "x": 0,
+          "y": 907,
+          "w": 360,
+          "h": 169
+        },
+        "initiative-row-first": {
+          "x": 0,
+          "y": 907,
+          "w": 360,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 28,
+          "y": 1010,
+          "w": 324,
+          "h": 18,
+          "index": 0
+        },
+        "milestone-bar": {
+          "x": 8,
+          "y": 948,
+          "w": 188,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 208,
+          "y": 944,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 56.25,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 283.453125,
+          "y": 551,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 653
+        },
+        "cc-overview": {
+          "x": 0,
+          "y": 657,
+          "w": 360,
+          "h": 419
+        },
+        "cc-waiting-row-first": {
+          "x": 0,
+          "y": 691,
+          "w": 360,
+          "h": 66,
+          "index": 0
+        }
+      }
+    },
+    "agent-harbor-control-center-playback-at-port-completes-laptop-dark": {
+      "moment": "port-completes",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 30
+        },
+        "rows": {
+          "x": 644,
+          "y": 96,
+          "w": 796,
+          "h": 776
+        },
+        "initiative-row-first": {
+          "x": 644,
+          "y": 96,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "initiative-row-last": {
+          "x": 644,
+          "y": 96,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 672,
+          "y": 199,
+          "w": 760,
+          "h": 18,
+          "index": 0
+        },
+        "session-line-last": {
+          "x": 672,
+          "y": 237,
+          "w": 760,
+          "h": 18,
+          "index": 2
+        },
+        "milestone-bar": {
+          "x": 652,
+          "y": 137,
+          "w": 624,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 1288,
+          "y": 133,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 91.6875,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 563.453125,
+          "y": 470,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 872
+        },
+        "cc-overview": {
+          "x": 644,
+          "y": 0,
+          "w": 796,
+          "h": 872
+        }
+      }
+    },
+    "agent-harbor-control-center-playback-at-port-completes-laptop-light": {
+      "moment": "port-completes",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 30
+        },
+        "rows": {
+          "x": 644,
+          "y": 96,
+          "w": 796,
+          "h": 776
+        },
+        "initiative-row-first": {
+          "x": 644,
+          "y": 96,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "initiative-row-last": {
+          "x": 644,
+          "y": 96,
+          "w": 796,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 672,
+          "y": 199,
+          "w": 760,
+          "h": 18,
+          "index": 0
+        },
+        "session-line-last": {
+          "x": 672,
+          "y": 237,
+          "w": 760,
+          "h": 18,
+          "index": 2
+        },
+        "milestone-bar": {
+          "x": 652,
+          "y": 137,
+          "w": 624,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 1288,
+          "y": 133,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 332.515625,
+          "y": 877.5,
+          "w": 1099.484375,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 340.515625,
+          "y": 877.5,
+          "w": 91.6875,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 563.453125,
+          "y": 470,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 640,
+          "h": 872
+        },
+        "cc-overview": {
+          "x": 644,
+          "y": 0,
+          "w": 796,
+          "h": 872
+        }
+      }
+    },
+    "agent-harbor-control-center-playback-at-port-completes-sidebar-dark": {
+      "moment": "port-completes",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 30
+        },
+        "rows": {
+          "x": 0,
+          "y": 799,
+          "w": 360,
+          "h": 169
+        },
+        "initiative-row-first": {
+          "x": 0,
+          "y": 799,
+          "w": 360,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 28,
+          "y": 902,
+          "w": 324,
+          "h": 18,
+          "index": 0
+        },
+        "milestone-bar": {
+          "x": 8,
+          "y": 840,
+          "w": 188,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 208,
+          "y": 836,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 91.6875,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 283.453125,
+          "y": 551,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 653
+        },
+        "cc-overview": {
+          "x": 0,
+          "y": 657,
+          "w": 360,
+          "h": 311
+        }
+      }
+    },
+    "agent-harbor-control-center-playback-at-port-completes-sidebar-light": {
+      "moment": "port-completes",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 872
+        },
+        "head": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 30
+        },
+        "rows": {
+          "x": 0,
+          "y": 799,
+          "w": 360,
+          "h": 169
+        },
+        "initiative-row-first": {
+          "x": 0,
+          "y": 799,
+          "w": 360,
+          "h": 169,
+          "index": 0
+        },
+        "session-line-first": {
+          "x": 28,
+          "y": 902,
+          "w": 324,
+          "h": 18,
+          "index": 0
+        },
+        "milestone-bar": {
+          "x": 8,
+          "y": 840,
+          "w": 188,
+          "h": 6
+        },
+        "milestone-legend": {
+          "x": 208,
+          "y": 836,
+          "w": 144,
+          "h": 14
+        },
+        "playback-readout": {
+          "x": 140.671875,
+          "y": 877.5,
+          "w": 211.328125,
+          "h": 18
+        },
+        "playback-moment": {
+          "x": 148.671875,
+          "y": 877.5,
+          "w": 91.6875,
+          "h": 18,
+          "cut": false
+        },
+        "composer-send": {
+          "x": 283.453125,
+          "y": 551,
+          "w": 68.546875,
+          "h": 24
+        },
+        "cc-launch": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 653
+        },
+        "cc-overview": {
+          "x": 0,
+          "y": 657,
+          "w": 360,
+          "h": 311
+        }
+      }
+    },
     "agent-harbor-fleet-playback-at-bench-asks-laptop-dark": {
       "moment": "bench-asks",
       "viewport": {

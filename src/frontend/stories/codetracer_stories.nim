@@ -185,6 +185,59 @@ func suggestedActionsStories(): seq[CodeTracerStory] =
                 "Ran 1 UI action with a quiet auto-approved, its outcome under it"),
   ]
 
+func controlCenterStories(): seq[CodeTracerStory] =
+  ## The control center (`agent-harbor-control-center`, CTF-P2c step 4): the
+  ## tab that fills the window to launch tasks and initiatives and to show
+  ## every initiative with the sessions waiting for the operator
+  ## (`stories/agent_harbor_control_center_stories.nim`, over the CTF-P2L
+  ## project). Its narrow state is `ControlCenter` at the sidebar size. Every
+  ## story runs its play check, which holds the control center's facts.
+  const surface = "agent-harbor-control-center"
+  func center(exportName, name, fixture, description: string;
+              state = "data"): CodeTracerStory =
+    story(exportName, name, "view", surface, fixture,
+          "agent-harbor-control-center-" & fixture, description, state)
+  @[
+    center("ControlCenter", "Control Center", "populated",
+           "Launch on the left (New task, For, the form, recent launches); every " &
+             "initiative and the sessions waiting for you on the right; one column, " &
+             "launch first, at the sidebar size"),
+    center("ControlCenterEmpty", "Control Center: Empty Fleet", "empty",
+           "No initiative and no session: the launch form and No initiatives yet.",
+           state = "empty"),
+    center("ControlCenterLaunching", "Control Center: Launching", "launching",
+           "A task launched for Shield model hardening: Agent Harbor's notice under " &
+             "the form, the new session queued under its initiative"),
+    center("ControlCenterLoading", "Control Center: Loading", "loading",
+           "The initiatives not answered yet; the launch form ready", state = "loading"),
+    center("ControlCenterError", "Control Center: Error", "error",
+           "The server cannot be reached: the error where the overview goes; the " &
+             "launch form ready", state = "error"),
+    story("ControlCenterPlayback", "Control Center: Playback", "view", surface,
+          "playback-front-ends", "agent-harbor-playback",
+          "The front-ends scenario: sessions start, wait for you and end, the " &
+            "initiatives and the waiting list following them"),
+  ]
+
+func gazeStories(): seq[CodeTracerStory] =
+  ## The status line's gaze mark (`agent-harbor-status-gaze`, CTF-P2c step
+  ## 4): the window's status line with the mark at its end
+  ## (`stories/agent_harbor_gaze_stories.nim`). Off is the control: no mark.
+  const surface = "agent-harbor-status-gaze"
+  func gaze(exportName, name, fixture, description: string): CodeTracerStory =
+    story(exportName, name, "view", surface, fixture,
+          "agent-harbor-status-gaze-" & fixture, description)
+  @[
+    gaze("StatusGazeOff", "Status Line: Gaze Off", "off",
+         "Gaze tracking off: no mark in the status line"),
+    gaze("StatusGazeTracking", "Status Line: Gaze Tracking", "tracking",
+         "Gaze tracked: the eye and Gaze in the quiet role; its tooltip names the " &
+           "key that pauses it"),
+    gaze("StatusGazePaused", "Status Line: Gaze Paused", "paused",
+         "Gaze paused: the eye struck through and Gaze paused; its tooltip names " &
+           "the key that resumes it"),
+  ]
+
 func agentHarborSection(): CodeTracerStorySection =
   ## CodeTracer as an Agent Harbor front-end: the prototypes of the panels
   ## that show an Agent Harbor fleet, over the viewmodels of
@@ -196,7 +249,9 @@ func agentHarborSection(): CodeTracerStorySection =
   ## progress); INV-C-20 to INV-C-24, INV-C-40, INV-P2-30 to INV-P2-34,
   ## INV-P2-42, INV-P2-61 (the omnibox composer, CTF-P2c); INV-C-25 to
   ## INV-C-31, INV-P2-38 (its result commands and search);
-  ## INV-C-38 (an agent's suggested UI actions, CTF-P2c step 3).
+  ## INV-C-38 (an agent's suggested UI actions, CTF-P2c step 3);
+  ## INV-C-37 (the control center) and INV-C-40 (the gaze mark), CTF-P2c
+  ## step 4.
   CodeTracerStorySection(
     title: "CodeTracer/Agent Harbor",
     group: "Agent Harbor",
@@ -538,6 +593,10 @@ func agentHarborSection(): CodeTracerStorySection =
       story("ComposerGazePaused", "Composer: Gaze Paused", "view", "agent-harbor-composer", "gaze-paused",
             "agent-harbor-composer-gaze-paused",
             "Eye tracking paused: a note among the chips, never cited"),
+      story("ComposerGazeNothing", "Composer: Gaze On Nothing", "view", "agent-harbor-composer",
+            "gaze-nothing", "agent-harbor-composer-gaze-nothing",
+            "Eye tracking on, the gaze on nothing the window can attach: a quiet note, " &
+              "never cited"),
       story("ComposerLongNames", "Composer: Long Names", "view", "agent-harbor-composer", "long-names",
             "agent-harbor-composer-long-names",
             "A long instruction, session and initiative: cut by the one rule, prose wrapped"),
@@ -721,7 +780,8 @@ func agentHarborSection(): CodeTracerStorySection =
             "Answer sent; the page stays"),
       panel("InboxAnswerFailed", "Inbox: Answer Failed", "agent-harbor-inbox-item", "answer-failed", "agent-harbor-inbox-item",
             "The scripted source refused the answer"),
-    ] & sessionActivityStories() & suggestedActionsStories())
+    ] & sessionActivityStories() & suggestedActionsStories() & controlCenterStories() &
+      gazeStories())
 
 func panelsSection(): CodeTracerStorySection =
   CodeTracerStorySection(
@@ -851,7 +911,10 @@ func agenticWindows(): seq[CodeTracerStory] =
     # L3 shows the suggested-actions block at the end of the session's
     # timeline (CTF-P2c step 3), in place of the permission card that stood
     # in for it: its check holds both the editor's revision and the block.
+    # L7 is the control center itself (CTF-P2c step 4): its check holds the
+    # control center's facts in the window.
     let check = if moment == "needs-input": "layout-l3-suggested-actions"
+                elif moment == "control-center": "layout-l7-control-center"
                 elif moment in replayMoments: "layout-editor-before-clamp"
                 else: ""
     story(exportName, name, "layout", "agentic-window", moment, check = check,
@@ -885,8 +948,9 @@ func agenticWindows(): seq[CodeTracerStory] =
            "Four initiatives as tabs, the progress popup over Shield model " &
              "hardening and the sessions-started-elsewhere menu open"),
     window("L7ControlCenter", "L7 Control Center Tab", "control-center",
-           "The control center as a full-window tab: every initiative and its " &
-             "state, the selected one's progress, the sessions by initiative"),
+           "The control center as a full-window tab: launch on the left with the " &
+             "recent launches; every initiative and the sessions waiting for you " &
+             "on the right"),
     window("L8AgentDeliversADeepReview", "L8 Agent Delivers A Deep Review",
            "agent-delivers-review",
            "The agent's session ends with its result, which opened Deep Review on " &
