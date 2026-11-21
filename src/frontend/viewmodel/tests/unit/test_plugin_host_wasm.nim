@@ -28,10 +28,20 @@
 ##    neighbour is not restarted again.
 ## 4. A module importing anything the host does not offer is refused at
 ##    activation, naming the import.
+## 5. The terminal's grant screen for a WASM package says what it is — a
+##    module in CodeTracer's host reaching only its grants — not the native
+##    package's "full authority" (the terminal's real `openSessionPlugins`
+##    over a real component directory; the session is the mock backend's,
+##    as `test_ct_lens_plugins` uses it: the replay is not the subject).
 
 import std/[json, os, posix, sequtils, strutils, tables, unittest]
 
+import isonim/core/owner
+import codetracer_embed
+import backend/mock_backend
 import ../../../../common/plugin_model
+import ../../../../ct/launch/component_roots
+import ../../../tui/host/plugin_processes
 import plugin_host/supervisor
 import wasm_host_fixture
 
@@ -312,3 +322,29 @@ suite "ct-plugin-host: many packages in one process, each plugin in its own inst
     check "env" in f.detail and "system" in f.detail
     check not sup.slot("wasm-escape.shell").active
     sup.shutdown()
+
+  test "the grant screen describes a WASM package as what it is":
+    let root = newRoot()
+    let comps = root / "components"
+    createDir(comps)
+    discard installWasmPackage(comps, "wasm-reader", wasmPackage("wasm-reader", @[
+      wasmPlugin("wasm-reader.files", ["files.read"], [], ["fs:read"], [root])]),
+      testModule("wasm-reader"))
+    let prior = getEnv(componentsRootEnvVar, "")
+    putEnv(componentsRootEnvVar, comps)
+    defer:
+      if prior.len > 0: putEnv(componentsRootEnvVar, prior)
+      else: delEnv(componentsRootEnvVar)
+    let mock = newMockBackendService(autoRespond = true)
+    var session: SessionViewModel
+    createRoot proc(dispose: proc()) =
+      session = createSessionVM(mock.toBackendService())
+    let plugins = openSessionPlugins(session, "s1", true, startDir = root,
+                                     launcherRoot = root / "launcher")
+    let screen = plugins.grantScreen("wasm-reader.files")
+    checkpoint screen
+    check "WebAssembly module (plugin.wasm)" in screen
+    check "native program" notin screen
+    check "full authority" notin screen
+    check "wasm-reader.files" in screen
+    check "fs:read" in screen

@@ -798,7 +798,7 @@ src/frontend/viewmodel/tests/unit/plat18-marshalling-mutation-control.sha256	src
 # 2026-11-21, the GPUI plugin harness (gpui-plugins, 10/10 KILLED at 467102fb217 plus the
 # footer fix) was graded before plugin_processes.nim and leaves.nim moved on agents; it
 # owes a re-grade.
-src/frontend/gpui/tests/gpui-plugins-mutation-control.sha256	src/frontend/tui/host/plugin_processes.nim	bdde0ab70f86f9e4479f68422e98de3e46fa3cc99095722b8dccc431f8dd6677	3f505f4fd9e29f06ec5c734bd8a4f4a4a93cff2fdfce0519484a551b46af12f1
+src/frontend/gpui/tests/gpui-plugins-mutation-control.sha256	src/frontend/tui/host/plugin_processes.nim	bdde0ab70f86f9e4479f68422e98de3e46fa3cc99095722b8dccc431f8dd6677	eba230dcd5d16e42f2ec2bd0ecca5767724499b991de4bebe998aeb43ccce97e
 src/frontend/gpui/tests/gpui-plugins-mutation-control.sha256	src/frontend/gpui/app/leaves.nim	efe5e20ddafa3f7518b3aa5050f7a00b17a70339f2d89ec98e56a0c5507ec8f9	b4caea18c44ccc3c4d1a634b1f1ff12123374e1aebecba0c30b5a725880bb61b
 
 # 2026-11-21, the terminal binding's Variables reader reads the column layout
