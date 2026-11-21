@@ -50,11 +50,15 @@ proc pointerRows(img: GrayImage): seq[int] =
     if pointerInked(img, Pane, row * RowPx, (row + 1) * RowPx): result.add row
 
 suite "PLAT-42 window reader: the execution pointer's lane":
-  test "the lane is the shared map's pointer band, right of the glyph lane":
-    let lane = pointerLane(Pane)
+  test "the lane is read from the pixels: right of the glyph lane, left of the numbers":
+    # The reader reads the lane from the frame; this test is the one place it
+    # is compared with the application's band map.
+    let lane = pointerLane(gutterFrame(arrowRow = 2, discRow = 1), Pane, RowPx)
     let glyph = gbGlyph.widthPx(CodeFontPx)
-    check lane.x0 == Pane.x + glyph - PointerLaneSlackPx
-    check lane.x1 == Pane.x + glyph + gbPointer.widthPx(CodeFontPx)
+    check lane.x0 == Pane.x + RowPx - PointerLaneSlackPx
+    check lane.x0 <= Pane.x + glyph
+    check lane.x1 >= Pane.x + glyph + gbPointer.widthPx(CodeFontPx)
+    check lane.x1 == Pane.x + 64   # the number column's left
 
   test "the arrow's row is the one pointer row":
     check pointerRows(gutterFrame(arrowRow = 2, discRow = -1)) == @[2]
