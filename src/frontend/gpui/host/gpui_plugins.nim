@@ -172,13 +172,16 @@ proc layerLabel*(p: SessionPlugins): string =
 proc windowFooterNote*(p: SessionPlugins; statusNote: string): string =
   ## The footer's note with plugins: the top plugin layer and its plugin
   ## first — who holds the keyboard is never hidden by a note — then the
-  ## window's own note, or when it has none the plugins' status items and a
-  ## plugin waiting for consent.
+  ## window's own note, then the plugins' status items and a plugin waiting
+  ## for consent. The items are drawn BESIDE a note, not instead of it: the
+  ## window's note stays until the next one, so items shown only without a
+  ## note were gone after the session's first command (the terminal's same
+  ## defect, fixed there in 62bebf8ead1).
   var parts: seq[string]
   let layer = p.layerLabel
   if layer.len > 0: parts.add layer
   if statusNote.len > 0: parts.add statusNote
-  elif not p.isNil:
+  if not p.isNil:
     let items = p.statusText
     if items.len > 0: parts.add items
   parts.join("  ·  ")

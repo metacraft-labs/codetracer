@@ -255,6 +255,8 @@ suite "GPUI: the window's plugins (host/gpui_plugins)":
     # The footer names who holds the keyboard, whatever note is shown.
     ck p.windowFooterNote("a note").startsWith("FLAME MODE (acme-tools.flame)")
     ck "a note" in p.windowFooterNote("a note")
+    # A plugin's status item stays on the footer beside a note.
+    ck "metrics ok" in p.windowFooterNote("a note")
     # Only Escape counts towards the chord.
     for _ in 0 ..< 3: ck not p.observeWindowEscape("j")
     # The layer binds Escape: the first two go to it; the third recovers.
@@ -288,5 +290,5 @@ suite "GPUI: the window's plugins (host/gpui_plugins)":
     p.close()
 
   test "assertion count":
-    ck CHECKS == 63
+    ck CHECKS == 64
     echo "CHECKS: ", CHECKS

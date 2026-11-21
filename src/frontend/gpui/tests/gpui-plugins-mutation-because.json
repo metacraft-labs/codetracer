@@ -1,0 +1,12 @@
+{
+  "G1": "pluginKeyName(\"Esc\") == \"escape\"",
+  "G10": "\"metrics ok\" in p.windowFooterNote(\"a note\")",
+  "G2": "not p.routePluginKey(\"Ctrl+Alt+M\", userBound = true)",
+  "G3": "queue[] == @[\"next\"]",
+  "G4": "not p.observeWindowEscape(\"j\")",
+  "G5": "p.waitFor(\"the metrics view\", proc (): bool =",
+  "G6": "\"acme-tools.metrics/overview\" in loaded",
+  "G7": "p.windowFooterNote(\"a note\").startsWith(\"FLAME MODE (acme-tools.flame)\")",
+  "G8": "\"Plugins: Grant acme-tools.metrics\" in before",
+  "G9": "extensionsOffFor(false)"
+}

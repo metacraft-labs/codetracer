@@ -1,0 +1,8 @@
+# Control digests for run-gpui-plugins-mutations.py — the
+# subjects AND the suites the arms are graded by.
+# Refreshed with --record-control-hashes, gated by the
+# needle scan.
+f39815e6d6f9a5f84db10f5ea766ff65c912aaf4d6df03e9d23a9eeda203fb2d  src/frontend/gpui/host/gpui_plugins.nim
+bdde0ab70f86f9e4479f68422e98de3e46fa3cc99095722b8dccc431f8dd6677  src/frontend/tui/host/plugin_processes.nim
+efe5e20ddafa3f7518b3aa5050f7a00b17a70339f2d89ec98e56a0c5507ec8f9  src/frontend/gpui/app/leaves.nim
+60be21bf153211a7e8b3c25e9ede4b8e8fbc068a58eef44d6b44ed284ca8751e  src/frontend/gpui/tests/test_gpui_plugins_host.nim
