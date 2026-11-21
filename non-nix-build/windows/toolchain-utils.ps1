@@ -110,6 +110,22 @@ function Assert-NonInteractiveDebugger {
 
   Set-PSDebug -Off
 
+  # The breaks above are not the only way in. The Windows runner cancels a
+  # step with Ctrl+C, and about 8 s later Ctrl+Break, and the pwsh host
+  # answers Ctrl+Break, or Wait-Debugger, by entering its debugger whatever the
+  # preferences say. That is what origin-DAP Windows job 136956922171 did at its
+  # 75-minute timeout in run 44940608244: "[DBG]" at 20:55:28, 8 s after the
+  # bound, then blocked until the runner killed it. With the runspace's
+  # debug mode at None, nothing can enter the debugger, so the step ends
+  # instead of waiting on a prompt nothing answers
+  # (ci/test/windows-debugger-guard-test.sh).
+  try {
+    $Host.Runspace.Debugger.SetDebugMode([System.Management.Automation.DebugModes]::None)
+    $applied += "debug mode set to None (Ctrl+Break and Wait-Debugger cannot open a prompt)"
+  } catch {
+    $applied += "could not set the debug mode to None: $($_.Exception.Message)"
+  }
+
   return $applied
 }
 
