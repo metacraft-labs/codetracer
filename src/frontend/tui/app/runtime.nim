@@ -9083,14 +9083,22 @@ proc changeFind(rt: TuiRuntime; op: string; outcome: var RuntimeOutcome) =
   if buf.isNil or not rt.app.find.open:
     rt.note("find: open the find field first")
     return
+  let scopedBefore = rt.app.find.hasScope
   let reveal = case op
                of "find.toggle-case": rt.app.find.toggleCase(buf.doc)
                of "find.toggle-whole-word": rt.app.find.toggleWholeWord(buf.doc)
+               of "find.toggle-regex": rt.app.find.toggleRegex(buf.doc)
+               of "find.toggle-in-selection":
+                 rt.app.find.toggleInSelection(buf.doc)
                else: rt.app.find.yankWord(buf.doc)
   if op == "find.yank-word":
     rt.fillFindField()
   rt.revealFind(buf, reveal, outcome)
   rt.showFindStatus(buf)
+  # VS Code's `Alt+L` with nothing selected does nothing; here it says so.
+  if op == "find.toggle-in-selection" and not scopedBefore and
+     not rt.app.find.hasScope and rt.findPromptOpen:
+    rt.prompt.message = NoSelectionScopeText
 
 proc findFieldEdited(rt: TuiRuntime; outcome: var RuntimeOutcome) =
   ## The field's text changed (typed, deleted, pasted): §3.3 — the store
@@ -9929,7 +9937,9 @@ proc buildOperationTables(rt: TuiRuntime) =
   session.onEach(["find.next-selection-match", "find.previous-selection-match"],
                  act(rt.findSelectionMatch(c.name == "find.previous-selection-match",
                                            c.nowMs, outcome)))
-  session.onEach(["find.toggle-case", "find.toggle-whole-word", "find.yank-word"],
+  session.onEach(["find.toggle-case", "find.toggle-whole-word",
+                  "find.toggle-regex", "find.toggle-in-selection",
+                  "find.yank-word"],
                  act(rt.changeFind(c.name, outcome)))
   session.bindOp("editor.toggle-read-only", act do:
       let buf = rt.editorBuffer()

@@ -1,7 +1,8 @@
 ## How CodeTracer's Monaco editors look: the code face and the two colour
 ## themes, `codetracerDark` and `codetracerWhite`.
 ##
-## A leaf module (it imports nothing of the app) so that every Monaco host can
+## A leaf module (it imports nothing of the app but the generated design
+## tokens, a table of constants) so that every Monaco host can
 ## reach the one definition: the app's editors through `renderer.nim`
 ## (`ensureMonacoThemesDefined`, `monacoThemeName`) and `utils.nim`
 ## (`CODE_FONT_FAMILY`), and the StoryBook bundle
@@ -12,10 +13,23 @@
 ## The theme documents are the checked-in Monaco theme JSONs under
 ## `src/public/third_party/monaco-themes/themes/customThemes/json/`, read at
 ## Nim compile time and emitted as object literals, so no runtime fetch (and
-## no ordering against the asset pipeline) is involved. Monaco's theme API:
+## no ordering against the asset pipeline) is involved.
+##
+## ONE THING IS WRITTEN INTO THEM HERE: the find highlights. Monaco reads a
+## colour only as a literal under its own id, and the documents' own
+## `colors` held `findMatch` / `findMatchHighlight` — not Monaco ids — so
+## Monaco drew its `vs-dark` defaults (Find-And-Incremental-Search.md
+## OQ-F6). The documents' `codetracer` block names the design system's
+## `colors/editor/surface/find-match` tokens instead, which
+## `scripts/tokens-to-styl.sh` resolves to `editor-theme/findMatch` /
+## `findMatchHighlight` — the tokens the terminal and GPUI paint — and
+## `withFindColours` puts those hexes under `editor.findMatchBackground` /
+## `editor.findMatchHighlightBackground` at compile time. Monaco's theme API:
 ## https://microsoft.github.io/monaco-editor/docs.html#functions/editor.defineTheme.html
 
 import std/[json, strutils]
+
+import ../styles/generated/design_tokens
 
 const
   CodeFontFamily* = "SpaceMono, monospace"
@@ -25,10 +39,26 @@ const
     ## The editors' font size until the user changes it (`data.ui.fontSize`).
   CodeTracerWhiteTheme* = "codetracerWhite"
   CodeTracerDarkTheme* = "codetracerDark"
-  whiteThemeDef =
+  whiteThemeDoc =
     staticRead("../../public/third_party/monaco-themes/themes/customThemes/json/codetracerWhite.json")
-  darkThemeDef =
+  darkThemeDoc =
     staticRead("../../public/third_party/monaco-themes/themes/customThemes/json/codetracerDark.json")
+
+proc withFindColours(def: string; mode: DesignMode): string {.compileTime.} =
+  ## The theme document with the find highlights under Monaco's colour ids,
+  ## from the generated `editor-theme/*` tokens of `mode`.
+  var doc = parseJson(def)
+  doc["colors"]["editor.findMatchBackground"] =
+    %DesignTokenHex[dtEditorThemeFindMatch][mode]
+  doc["colors"]["editor.findMatchHighlightBackground"] =
+    %DesignTokenHex[dtEditorThemeFindMatchHighlight][mode]
+  $doc
+
+const
+  whiteThemeDef* = withFindColours(whiteThemeDoc, dmLight)
+  darkThemeDef* = withFindColours(darkThemeDoc, dmDark)
+    ## The two documents as Monaco is given them (exported for the suite that
+    ## holds the find colours to the tokens).
 
 proc themeCssVariables(def, prefix: string): string {.compileTime.} =
   ## The theme's colours under `prefix` as the CSS variables Monaco's theme

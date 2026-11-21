@@ -18,6 +18,8 @@ type
     dtColorsEditorActionPrimary = "colors/editor/action/primary"
     dtColorsEditorActionSecondary = "colors/editor/action/secondary"
     dtColorsEditorActionTertiary = "colors/editor/action/tertiary"
+    dtColorsEditorSurfaceFindMatch = "colors/editor/surface/find-match"
+    dtColorsEditorSurfaceFindMatchHighlight = "colors/editor/surface/find-match-highlight"
     dtColorsEditorSurfacePrimary = "colors/editor/surface/primary"
     dtColorsEditorSurfaceSecondary = "colors/editor/surface/secondary"
     dtColorsEditorSurfaceSelect = "colors/editor/surface/select"
@@ -160,6 +162,8 @@ type
     dtEditorThemeExecutionLine = "editor-theme/executionLine"
     dtEditorThemeExecutionPointer = "editor-theme/executionPointer"
     dtEditorThemeSelection = "editor-theme/selection"
+    dtEditorThemeFindMatch = "editor-theme/findMatch"
+    dtEditorThemeFindMatchHighlight = "editor-theme/findMatchHighlight"
     dtEditorThemeRuleDefault = "editor-theme/rule/"
     dtEditorThemeRuleAttributeName = "editor-theme/rule/attribute.name"
     dtEditorThemeRuleAttributeValue = "editor-theme/rule/attribute.value"
@@ -205,13 +209,15 @@ type
     dtEditorThemeRuleVariableReadonly = "editor-theme/rule/variable.readOnly"
 
 const
-  DesignTokenCount* = 137
+  DesignTokenCount* = 139
     ## The design system's own `mapped` colour tokens; the editor-theme
     ## members follow them in the enum.
   DesignTokenHex*: array[DesignToken, array[DesignMode, string]] = [
     dtColorsEditorActionPrimary: ["#818cf8", "#818cf8"],
     dtColorsEditorActionSecondary: ["#facc15", "#facc15"],
     dtColorsEditorActionTertiary: ["#f3f3f3", "#f8f6f2"],
+    dtColorsEditorSurfaceFindMatch: ["#1e3a8a", "#93c5fd"],
+    dtColorsEditorSurfaceFindMatchHighlight: ["#c2410c", "#fdba74"],
     dtColorsEditorSurfacePrimary: ["#1b1b1b", "#7a756a"],
     dtColorsEditorSurfaceSecondary: ["#282828", "#aca494"],
     dtColorsEditorSurfaceSelect: ["#3e3e3b", "#f1efeb"],
@@ -352,6 +358,8 @@ const
     dtEditorThemeExecutionLine: ["#404040", "#e2e0bc"],
     dtEditorThemeExecutionPointer: ["#facc15", "#353430"],
     dtEditorThemeSelection: ["#353535", "#4f5b66"],
+    dtEditorThemeFindMatch: ["#1e3a8a", "#93c5fd"],
+    dtEditorThemeFindMatchHighlight: ["#c2410c", "#fdba74"],
     dtEditorThemeRuleDefault: ["#f3f3f3", "#464646"],
     dtEditorThemeRuleAttributeName: ["#8fcbee", "#0060a6"],
     dtEditorThemeRuleAttributeValue: ["#d7a690", "#464646"],

@@ -150,10 +150,13 @@ proc setPointEnabled*(arm: GpuiEditArm; line: int) =
     if p.line == line and p.kind == epkBreakpoint:
       p.enabled = not p.enabled
 
-proc surfaceOf*(arm: GpuiEditArm; viewportHeight: int): EditorSurface =
+proc surfaceOf*(arm: GpuiEditArm; viewportHeight: int;
+                find: var FindVM): EditorSurface =
   ## The editor surface for the CURRENT document — writable, so no read-only
   ## notice — with the caret shown, scrolled to keep it visible. `status`,
-  ## when set, is the notice.
+  ## when set, is the notice. `find` is the window's find session: its
+  ## highlights while it is open over this document (OQ-F7, the folder
+  ## window's `/`), the closed session's otherwise.
   arm.viewportRows = viewportHeight
   arm.viewportTop = followedViewportTop(arm.viewportTop, caretLine(arm.doc),
                                         viewportHeight)
@@ -169,6 +172,10 @@ proc surfaceOf*(arm: GpuiEditArm; viewportHeight: int): EditorSurface =
   # session's highlights, from the shared session.
   result.selection = arm.doc.selectionCells
   result.extraCarets = arm.doc.secondaryCarets
-  var closed: FindVM
-  for m in closed.marksInWindow(arm.doc, arm.viewportTop, viewportHeight):
+  for m in find.marksInWindow(arm.doc, arm.viewportTop, viewportHeight):
     result.findMarks.add (m.line, m.fromColumn, m.toColumn, m.current)
+
+proc surfaceOf*(arm: GpuiEditArm; viewportHeight: int): EditorSurface =
+  ## `surfaceOf` with no session open: the closed session's highlights.
+  var closed: FindVM
+  arm.surfaceOf(viewportHeight, closed)

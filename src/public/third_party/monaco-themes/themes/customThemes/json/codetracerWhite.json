@@ -193,12 +193,14 @@
     "editorLineNumber.foreground": "#666055"
   },
   "codetracer": {
-    "$comment": "The editor palette shared by the desktop and native front-ends. scripts/tokens-to-styl.sh generates editor-theme.styl for the desktop gutter, execution band and pointer, and design_tokens.nim for the native editor, from this block. Monaco supplies syntax and selection colours. The editor ground is the mode's panel because Monaco is transparent; resting line numbers paint at full opacity. The execution band and Monaco cursor-line highlight use the same opaque colour so composition cannot lower text contrast. Fresh real Electron captures (src/tests/visual/answers/plat47-desktop-parity-light.electron.json, just plat47-capture-electron) verify the effective colours. Monaco ignores this key.",
+    "$comment": "The editor palette shared by the desktop and native front-ends. scripts/tokens-to-styl.sh generates editor-theme.styl for the desktop gutter, execution band and pointer, and design_tokens.nim for the native editor, from this block. Monaco supplies syntax and selection colours. The editor ground is the mode's panel because Monaco is transparent; resting line numbers paint at full opacity. The execution band and Monaco cursor-line highlight use the same opaque colour so composition cannot lower text contrast. Fresh real Electron captures (src/tests/visual/answers/plat47-desktop-parity-light.electron.json, just plat47-capture-electron) verify the effective colours. The find highlights (findMatch, the current match; findMatchHighlight, every other one) are the design system's colors/editor/surface/find-match tokens, and lib/monaco_appearance.nim writes them into this document's colors as editor.findMatchBackground and editor.findMatchHighlightBackground when it registers the theme. Monaco ignores this key.",
     "ground": "{colors.ui.surface.base.panel}",
     "lineNumber": "#666055",
     "activeLineNumber": "{colors.ui.text.primary.label}",
     "executionLine": "#e2e0bc",
     "selection": "#4f5b66",
-    "executionPointer": "{colors.ui.text.primary.label}"
+    "executionPointer": "{colors.ui.text.primary.label}",
+    "findMatch": "{colors.editor.surface.find-match}",
+    "findMatchHighlight": "{colors.editor.surface.find-match-highlight}"
   }
 }

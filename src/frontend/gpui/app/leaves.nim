@@ -223,13 +223,14 @@ const
     ## The editor's default foreground (PLAT-51: the omnibox's text in every
     ## state — Commands-And-Omnibox.md, "Omnibox colours on every front-end").
   EditorSelectionColour* = DesignTokenHex[dtEditorThemeSelection][dmDark]
-  FindMatchColour* = DesignTokenHex[dtColorsUiSurfaceAlertWarning][dmDark]
+  FindMatchColour* = DesignTokenHex[dtEditorThemeFindMatchHighlight][dmDark]
     ## PLAT-70 Part C: every find match — the terminal's
-    ## `srSurfaceFindMatch` token (`theme/roles.nim` records why: the design
-    ## system has no find-match token).
-  FindMatchCurrentColour* =
-    DesignTokenHex[dtColorsUiSurfaceAlertInformation][dmDark]
-    ## The current match — the terminal's `srSurfaceFindMatchCurrent`.
+    ## `srSurfaceFindMatch`, Monaco's `editor.findMatchHighlightBackground`:
+    ## the design system's `colors/editor/surface/find-match-highlight`
+    ## through the editor theme (OQ-F6).
+  FindMatchCurrentColour* = DesignTokenHex[dtEditorThemeFindMatch][dmDark]
+    ## The current match — the terminal's `srSurfaceFindMatchCurrent`,
+    ## Monaco's `editor.findMatchBackground`.
     ## The editor's selection ground (the omnibox's selected result).
   EditorActiveLineNumberColour* =
     DesignTokenHex[dtEditorThemeActiveLineNumber][dmDark]

@@ -85,6 +85,7 @@ cd "${root}" || exit 1
 ADMISSION_REL="src/common/editor_core_admission.nim"
 FFI_REL="src/common/plugin_model/source_admission.nim"
 ALLOW_CONST="EditorCoreAllowedStdlibModules"
+LIBRARY_CONST="EditorCoreAdmittedLibraries"
 DENIED_CONST="EditorCoreDeniedNames"
 FFI_CONST="PluginDeniedFfiPragmas"
 
@@ -107,6 +108,17 @@ SIBLING_PACKAGES=(
 )
 SIBLING_ROOTS=()
 SIBLING_MISSING=()
+
+# THE ADMITTED LIBRARIES' CHECKOUTS AND THEIR REVIEWED REVISIONS. The table of
+# names and reasons is Nim's (`EditorCoreAdmittedLibraries`, read below); this
+# is only where each one lives and the revision its row was reviewed at
+# (Find-And-Incremental-Search.md OQ-F5). Each entry is
+# `<name>|<submodule path>|<entry module>|<reviewed gitlink>`. An admitted
+# library resolves to `@lib:<name>`, a leaf the walk does not descend into
+# (`editor_core_admission.nim` says why); check 8 holds the pin.
+ADMITTED_LIBRARIES=(
+	"regex|libs/nim-regex|src/regex.nim|a0f1df6a6512340df9ababe59f55140c94a2200f"
+)
 
 while [ $# -gt 0 ]; do
 	case "$1" in
@@ -222,7 +234,7 @@ resolve_sibling_roots
 # roots to a sibling's file is not a nuance, it is a wrong answer — the
 # sdk-facade gate records the worked example.
 resolve_module() {
-	local spec="$1" importer="$2" dir candidate r
+	local spec="$1" importer="$2" dir candidate r lib
 	dir="$(dirname "${importer}")"
 	candidate="$(normpath "${dir}/${spec}.nim")"
 	if [ -n "${candidate}" ] && [ -f "${candidate}" ]; then
@@ -233,6 +245,13 @@ resolve_module() {
 	case "${spec}" in
 	./* | ../*) return 0 ;;
 	esac
+	# An ADMITTED library, by its module name (or `pkg/<name>`): a leaf.
+	for lib in "${admitted_libraries[@]}"; do
+		if [ "${spec}" = "${lib}" ] || [ "${spec}" = "pkg/${lib}" ]; then
+			printf '@lib:%s' "${lib}"
+			return 0
+		fi
+	done
 	if [ "${importer#/}" = "${importer}" ]; then
 		for r in "${SEARCH_ROOTS[@]}"; do
 			candidate="$(normpath "${r}/${spec}.nim")"
@@ -279,6 +298,8 @@ editor_closure() {
 			[ -n "${spec}" ] || continue
 			resolved="$(resolve_module "${spec}" "${cur}")"
 			[ -n "${resolved}" ] || continue
+			# An admitted library is a reviewed leaf (check 8), not walked.
+			case "${resolved}" in @lib:*) continue ;; esac
 			if [ -z "${seen[${resolved}]+x}" ]; then
 				seen["${resolved}"]=1
 				queue+=("${resolved}")
@@ -331,6 +352,8 @@ pragma_spans() {
 # walking it (and the report goes to /dev/null with the rest of `find`'s
 # stderr, so a cycle costs a skipped directory, never a hang).
 # ---------------------------------------------------------------------------
+mapfile -t admitted_libraries < <(table_names "${ADMISSION_REL}" "${LIBRARY_CONST}")
+
 roots=()
 while IFS= read -r f; do
 	[ -n "${f}" ] && roots+=("${f}")
@@ -404,7 +427,7 @@ for f in "${closure[@]}"; do
 	done < <(nim_imports "${f}")
 done
 if [ "${#unreadable[@]}" -eq 0 ]; then
-	check_ok "closure-is-readable: every non-stdlib import in the closure resolves to a file"
+	check_ok "closure-is-readable: every non-stdlib import in the closure resolves to a file or an admitted library"
 else
 	check_failed "closure-is-readable: ${#unreadable[@]} spec(s) could not be resolved"
 	printf '              %s\n' "${unreadable[@]}"
@@ -571,6 +594,43 @@ else
 	detail "the keymap imports the editor, and the editor knows nothing about"
 	detail "keys. A module of the keymap package reached from the core means a"
 	detail "key type is now in the editing model's closure."
+fi
+
+# ---------------------------------------------------------------------------
+# Check 8 — AN ADMITTED LIBRARY IS THE REVISION THAT WAS REVIEWED.
+#
+# Find-And-Incremental-Search.md OQ-F5 (the user, 2026-11-20) admitted
+# nim-regex into the editor core. The walk does not descend into an admitted
+# library (`editor_core_admission.nim` says why), so what holds it is its
+# review, and a review is of one revision: every row of
+# `EditorCoreAdmittedLibraries` must name a checkout here whose gitlink is the
+# reviewed one. A submodule bump fails this until the row is reviewed again.
+# ---------------------------------------------------------------------------
+library_findings=()
+for lib in "${admitted_libraries[@]}"; do
+	entry=""
+	for e in "${ADMITTED_LIBRARIES[@]}"; do
+		[ "${e%%|*}" = "${lib}" ] && entry="${e}" && break
+	done
+	if [ -z "${entry}" ]; then
+		library_findings+=("${lib}: admitted in ${ADMISSION_REL} but no checkout and reviewed revision is recorded here")
+		continue
+	fi
+	IFS='|' read -r _name lib_path lib_entry lib_reviewed <<<"${entry}"
+	if [ ! -f "${lib_path}/${lib_entry}" ]; then
+		library_findings+=("${lib}: ${lib_path}/${lib_entry} is not checked out")
+	fi
+	pinned="$(git ls-tree HEAD -- "${lib_path}" 2>/dev/null | awk '{print $3}')"
+	if [ "${pinned}" != "${lib_reviewed}" ]; then
+		library_findings+=("${lib}: ${lib_path} is pinned at '${pinned}', reviewed at ${lib_reviewed}")
+	fi
+done
+if [ "${#library_findings[@]}" -eq 0 ]; then
+	check_ok "admitted-libraries-at-reviewed-revision: ${#admitted_libraries[@]} admitted library(ies), each at the revision reviewed"
+else
+	check_failed "admitted-libraries-at-reviewed-revision: ${#library_findings[@]} finding(s)"
+	printf '              %s\n' "${library_findings[@]}"
+	detail "An admitted library is a reviewed leaf: a new revision is a new review."
 fi
 
 echo "editor-import-closure: ${checks} check(s), ${failures} failing"

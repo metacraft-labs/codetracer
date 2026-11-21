@@ -548,18 +548,16 @@ const
                          dtColorsUiSurfaceInputDefault, mono = {raUnderline}),
     srSurfaceSelection: bgOnly(dgSurface, dtEditorThemeSelection,
                                mono = {raReverse}),
-    # PLAT-70 Part C: THE FIND HIGHLIGHTS. The design system publishes no
-    # find-match token (its editor theme names `findMatch` /
-    # `findMatchHighlight`, which are not Monaco colour ids, so the desktop
-    # draws Monaco's vs-dark defaults: a translucent orange for every match
-    # and a slate for the current one). The nearest published tokens carry
-    # the same two distinctions: the warning surface for every match, the
-    # information surface for the current one. Monochrome underlines a match
-    # and reverses the current one, as the selection is reversed.
-    srSurfaceFindMatch: bgOnly(dgSurface, dtColorsUiSurfaceAlertWarning,
+    # PLAT-70 Part C: THE FIND HIGHLIGHTS — since OQ-F6 (the user,
+    # 2026-11-20) the design system's own find tokens, through the editor
+    # theme: every match on `editor-theme/findMatchHighlight` (Monaco's
+    # `editor.findMatchHighlightBackground`), the current one on
+    # `editor-theme/findMatch` (`editor.findMatchBackground`) — the hexes the
+    # desktop now hands Monaco too, and GPUI paints. Monochrome underlines a
+    # match and reverses the current one, as the selection is reversed.
+    srSurfaceFindMatch: bgOnly(dgSurface, dtEditorThemeFindMatchHighlight,
                                mono = {raUnderline}),
-    srSurfaceFindMatchCurrent: bgOnly(dgSurface,
-                                      dtColorsUiSurfaceAlertInformation,
+    srSurfaceFindMatchCurrent: bgOnly(dgSurface, dtEditorThemeFindMatch,
                                       mono = {raReverse, raBold}),
     srSurfaceCurrentLine: bgOnly(dgSurface, dtEditorThemeExecutionLine,
                                  mono = {raReverse}),

@@ -568,6 +568,10 @@ EDITOR_GROUND_ROLES = [
     ("executionLine", "ExecutionLine"),
     ("executionPointer", "ExecutionPointer"),
     ("selection", "Selection"),
+    # Find-And-Incremental-Search.md OQ-F6: the in-document find's current
+    # match and every other match, on all three front-ends.
+    ("findMatch", "FindMatch"),
+    ("findMatchHighlight", "FindMatchHighlight"),
 ]
 
 def monaco_hex(value, where):
