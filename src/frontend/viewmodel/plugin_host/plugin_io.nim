@@ -585,7 +585,11 @@ func pathIsRecorded*(io: PluginIoContext; path: string): bool =
     if pathIsUnder(path, root): return true
   false
 
-when defined(js):
+when defined(js) or defined(wasm32):
+  # A WebAssembly plugin (wasm32) reaches these primitives only through
+  # `ct-plugin-host`'s imports (`plugin_sdk/wasm_io.nim`): the types and the
+  # decision above are what it shares with this module.
+  #
   # The facade compiles on the JS backend, and a browser has no child
   # processes and no Unix sockets. The codec helpers, the outcome types and
   # the capability decision above are all pure and are present on both arms;
