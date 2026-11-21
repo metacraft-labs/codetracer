@@ -46,6 +46,32 @@ rc=$?
 set -e
 check "a missing archive exits 3" "a missing archive exited ${rc}" test "$rc" = 3
 
+# A binary whose ELF interpreter is a store path absent here gets that path
+# realised (run 44612896066: ct named glibc-2.40-66, missing on every GPUI
+# shard, and `ct record` exited 127). A fake nix-store records what it is asked.
+missing=/nix/store/00000000000000000000000000000000-glibc-test-only
+mkdir -p "$work/isrc/codetracer/src/build-debug-repro/bin" "$work/idl" "$work/idest" "$work/idest2" "$work/fakebin"
+{
+	head -c 4096 /dev/urandom
+	printf '%s/lib/ld-linux-x86-64.so.2\0' "$missing"
+	head -c 4096 /dev/urandom
+} >"$work/isrc/codetracer/src/build-debug-repro/bin/ct"
+tar -czf "$work/idl/ct-build-products.tar.gz" -C "$work/isrc" codetracer
+# shellcheck disable=SC2016 # the fake's own script, expanded when it runs
+printf '#!/usr/bin/env bash\necho "$*" >>"%s/realised"\nexit "${FAKE_NIX_STORE_RC:-0}"\n' "$work" >"$work/fakebin/nix-store"
+chmod +x "$work/fakebin/nix-store"
+# shellcheck disable=SC2016 # bash -c expands its own positional parameters
+check "an archive whose binary names a missing interpreter unpacks" "it did not unpack: $(cat "$work/out")" \
+	env PATH="$work/fakebin:$PATH" CT_BUILD_PRODUCTS_DEST="$work/idest" \
+	bash -c 'bash ci/unpack-ct-build-products.sh "$1" >"$2" 2>&1' _ "$work/idl" "$work/out"
+check "and the interpreter's store path is realised" "nix-store was asked: $(cat "$work/realised" 2>/dev/null)" \
+	grep -qx -- "--realise ${missing}" "$work/realised"
+check "and says so" "no 'realised' message: $(cat "$work/out")" grep -q "realised the ELF interpreter's store path ${missing}" "$work/out"
+# shellcheck disable=SC2016 # bash -c expands its own positional parameters
+check "an interpreter that cannot be realised is named, and the unpack still succeeds" "it failed or said nothing: $(cat "$work/out")" \
+	env PATH="$work/fakebin:$PATH" CT_BUILD_PRODUCTS_DEST="$work/idest2" FAKE_NIX_STORE_RC=1 \
+	bash -c 'bash ci/unpack-ct-build-products.sh "$1" >"$2" 2>&1 && grep -q "${3}, the ELF interpreter" "$2"' _ "$work/idl" "$work/out" "$missing"
+
 # shellcheck disable=SC2016 # the workflow lines, literally
 for f in .github/workflows/gpui-window-captures.yml .github/workflows/tui-tests.yml; do
 	check "$f unpacks through the script, and may fail into a retry" "$f: no checked unpack step" \

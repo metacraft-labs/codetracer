@@ -27,3 +27,25 @@ if ! gzip -t "$archive" 2>"$err"; then
 fi
 tar -xzf "$archive" -C "$dest"
 echo "unpacked ${archive} ($(stat -c %s "$archive") bytes)"
+
+# The binaries name their ELF interpreter by store path, and since tup left,
+# build-once links them through repro's own Nix tool provisioning, whose glibc
+# is not the dev shell's: in run 44612896066 every GPUI shard's `ct record`
+# failed with exit 127 ("No such file or directory") because ct's
+# /nix/store/...-glibc-2.40-66/lib/ld-linux-x86-64.so.2 existed on the
+# ct-build runner and not on the shard. Each interpreter the unpacked bin/
+# files name is realised here if it is missing (it is substitutable); one
+# that cannot be is reported by name, since a later step will fail on it.
+interps="$(tar -tzf "$archive" | { grep -E '/bin/[^/]+$' || true; } | while IFS= read -r member; do
+	f="$dest/$member"
+	[ -f "$f" ] || continue
+	grep -aoEm1 '/nix/store/[a-z0-9]{32}-[^/[:space:]]+/lib/ld-linux[-A-Za-z0-9_.]*\.so\.[0-9]+' "$f" 2>/dev/null || true
+done | sed -E 's|^(/nix/store/[^/]+)/.*|\1|' | sort -u)"
+for root in $interps; do
+	[ -e "$root" ] && continue
+	if command -v nix-store >/dev/null 2>&1 && nix-store --realise "$root" >/dev/null 2>&1; then
+		echo "unpack-ct-build-products: realised the ELF interpreter's store path ${root}"
+	else
+		echo "unpack-ct-build-products: ${root}, the ELF interpreter the unpacked binaries name, is not in this store and could not be realised; they will not run" >&2
+	fi
+done
