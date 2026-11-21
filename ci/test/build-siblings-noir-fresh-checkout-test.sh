@@ -100,13 +100,17 @@ else
 		# .cargo/config.toml, so it would hand the build script sources from
 		# elsewhere and hide whether build-siblings provides them. A fresh
 		# clone's build has no such variable, and neither does this one.
-		out="$(env -u CODETRACER_TRACE_FORMAT_NIM_DIR bash "$SCRIPT" --force --only noir 2>&1)"
+		# Not `out`: a Nix dev shell exports `out`, so assigning the build's
+		# log to it puts the log in every later command's environment, and
+		# past 128 KiB each one fails with "Argument list too long" -- which is
+		# how a run inside `nix develop` lost this very message.
+		build_out="$(env -u CODETRACER_TRACE_FORMAT_NIM_DIR bash "$SCRIPT" --force --only noir 2>&1)"
 		rc=$?
-		if grep -qE 'PASS +noir +built target/release/nargo' <<<"$out"; then
+		if grep -qE 'PASS +noir +built target/release/nargo' <<<"$build_out"; then
 			pass "build-siblings reports noir built from a checkout with no .codetracer-deps/"
 		else
 			fail "build-siblings did not report a PASS for noir (exit $rc):"
-			echo "$out" | tail -30 | sed 's/^/         /'
+			echo "$build_out" | tail -30 | sed 's/^/         /'
 		fi
 	fi
 
