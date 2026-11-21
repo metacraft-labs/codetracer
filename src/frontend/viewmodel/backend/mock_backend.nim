@@ -180,16 +180,16 @@ proc pendingDeferredCount*(mock: MockBackendService): int =
   ## How many `send` calls are still waiting for an answer.
   mock.deferred.len
 
-proc settleDeferred*(mock: MockBackendService; response: JsonNode) =
-  ## Answer the oldest outstanding deferred `send` with `response`, then let
-  ## the platform run whatever callbacks that unblocked.
-  ##
-  ## Deliberately one at a time: a handshake that fails on its second
-  ## command must be distinguishable from one that fails on its third.
-  if mock.deferred.len == 0:
+proc settleDeferredAt*(mock: MockBackendService; index: int;
+                       response: JsonNode) =
+  ## Answer the `index`-th outstanding deferred `send` (0 is the oldest)
+  ## with `response`, then let the platform run whatever callbacks that
+  ## unblocked: answers arriving in another order than their requests left,
+  ## as a real engine's can.
+  if index < 0 or index >= mock.deferred.len:
     return
-  let entry = mock.deferred[0]
-  mock.deferred.delete(0)
+  let entry = mock.deferred[index]
+  mock.deferred.delete(index)
   when defined(js):
     let thenable = entry.thenable
     let payload = response
@@ -203,6 +203,14 @@ proc settleDeferred*(mock: MockBackendService; response: JsonNode) =
   else:
     entry.future.complete(response)
   drainPlatformCallbacks()
+
+proc settleDeferred*(mock: MockBackendService; response: JsonNode) =
+  ## Answer the oldest outstanding deferred `send` with `response`, then let
+  ## the platform run whatever callbacks that unblocked.
+  ##
+  ## Deliberately one at a time: a handshake that fails on its second
+  ## command must be distinguishable from one that fails on its third.
+  mock.settleDeferredAt(0, response)
 
 proc settleAllDeferred*(mock: MockBackendService; response: JsonNode) =
   ## Answer every outstanding deferred `send` with the same `response`.
