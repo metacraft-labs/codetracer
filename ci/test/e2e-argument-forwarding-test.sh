@@ -3,7 +3,8 @@
 # npx are recording doubles: installing dependencies and launching Electron
 # cannot add evidence about argv received at those external process boundaries.
 # Capture recipes use a recording bash only at the capture-script boundary;
-# their recording/build prerequisites are unrelated to argument forwarding.
+# their recording/build prerequisites are unrelated to argument forwarding, so
+# the calc fixture recorder is a no-op double.
 # A recording uname selects the native-display branch of inline captures so
 # their Xvfb setup does not require a display server for an argv assertion.
 set -euo pipefail
@@ -34,6 +35,7 @@ case "$1" in
   scripts/plat*-capture-electron.sh)
     printf '%s\0' "$@" > "$ARGV_LOG"
     ;;
+  scripts/record-calc-fixture.sh) exit 0 ;;
   *) exec "$real_bash" "$@" ;;
 esac
 EOF
