@@ -280,6 +280,13 @@ jobs:
           # runner's ~/.nimble hides its absence; an ephemeral one has none
           # (run 44827340359: "cannot open file: results").
           CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
+          # The paths above hold the trace writer's Nim packages, so its build
+          # script need not reach the network for them.
+          CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL: "1"
+        # Run 44884214467 (attempt 2) spent 107 minutes here until the job's
+        # budget cancelled it, and a cancelled job keeps no log. A step bound
+        # fails the step instead, and the job keeps its log.
+        timeout-minutes: 60
         run: nix develop . --command bash -c 'cd src/db-backend && cargo build --bin replay-server'
 
       - name: The zgui lane
