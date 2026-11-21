@@ -146,6 +146,10 @@ suite "ct-plugin-host: many packages in one process, each plugin in its own inst
     inc asked
     check sup.waitUntil("spin faulted", proc(): bool =
       sup.faultOf("wasm-faults.spin").len > 0)
+    # What it pushed went with its instance, in the turn that saw the fault
+    # (it is pushed again when the plugin is activated anew, below).
+    check sup.slot("wasm-faults.spin").status.len == 0
+    check not sup.slot("wasm-faults.spin").active
     var duringAnswer: JsonNode
     check sup.waitUntil("echo's answer from during spin", proc(): bool =
       sup.answerOf(during, duringAnswer))
@@ -156,6 +160,8 @@ suite "ct-plugin-host: many packages in one process, each plugin in its own inst
     check sup.invoke("wasm-faults.hog", "hog.run").len > 0
     check sup.waitUntil("hog faulted", proc(): bool =
       sup.faultOf("wasm-faults.hog").len > 0)
+    check sup.slot("wasm-faults.hog").status.len == 0
+    check not sup.slot("wasm-faults.hog").active
     echoOnce()
 
     let spinFault = sup.faultOf("wasm-faults.spin")[0]
@@ -169,9 +175,7 @@ suite "ct-plugin-host: many packages in one process, each plugin in its own inst
     check "Plugin 'wasm-faults.spin' was stopped" in texts
     check "Plugin 'wasm-faults.hog' was stopped" in texts
     check "the other plugins kept running" in texts
-    # What they pushed is gone; echo's is not.
-    check sup.slot("wasm-faults.spin").status.len == 0
-    check sup.slot("wasm-faults.hog").status.len == 0
+    # Echo's pushed state was never touched.
     check sup.slot("wasm-steady.echo").status.len == 1
     # No fault was charged to echo, and the host never restarted.
     check sup.faultOf("wasm-steady.echo").len == 0

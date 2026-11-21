@@ -450,11 +450,6 @@ proc deliverState(sdk: PluginSdk; msg: JsonNode) =
       if sid.len > 0 and p.mirror.following != sid:
         p.mirror.channel.deliver(%*{"type": "activate", "session": sid})
       p.mirror.channel.deliver(msg)
-      when defined(ctPluginSdkTrace):
-        p.log("sdk: applied " & msg{"type"}.getStr("") &
-          " rev " & $msg{"revision"}.getInt(-1) & " following " & p.mirror.following &
-          " valueChangesKnown " & (if p.session.isNil or p.session.stateVM.isNil: "nil"
-                                   else: $p.session.stateVM.valueChanges.val.currentKnown))
       if not p.onSignals.isNil:
         p.onSignals(p)
 
@@ -466,10 +461,6 @@ proc requestOf(msg: JsonNode): Request =
 
 proc handle(sdk: PluginSdk; msg: JsonNode) =
   let t = msg{"type"}.getStr("")
-  when defined(ctPluginSdkTrace):
-    stderr.writeLine "sdk: handle " & t & " plugins " & $sdk.plugins.len
-    for q in sdk.plugins.values:
-      stderr.writeLine "sdk:   " & q.id & " active " & $q.active & " mirror " & $(not q.mirror.isNil)
   let p = sdk.plugins.getOrDefault(msg{"plugin"}.getStr(""), nil)
   case t
   of "hello":
