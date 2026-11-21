@@ -285,7 +285,11 @@ const materializedFixtures: MaterializedFlowFixture[] = [
     serviceName: "python-flow-materialized",
     operationName: "POST /python/flow",
     traceDir: pythonFlowTraceFixture,
-    traceFileName: "trace.bin",
+    // codetracer-example-recordings re-recorded python/flow_test as one CTFS
+    // container (trace.ct, f2a1d4a); the pre-CTFS trace.bin is gone. With the
+    // old name no uploaded file was the trace payload, and the codetracer-ci
+    // platform-link harness refused the artifact before it printed ready.
+    traceFileName: "trace.ct",
     sourceFileName: "python_flow_test.py",
     requiredSourceSnippets: ["calculate_sum", "sum_with_while"],
     calltraceFunction: "calculate_sum",
