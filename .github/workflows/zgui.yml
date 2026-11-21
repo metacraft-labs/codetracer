@@ -126,6 +126,10 @@ jobs:
         env:
           CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
           CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
+          # The trace writer's Nim build finds `results` only here. A warm
+          # runner's ~/.nimble hides its absence; an ephemeral one has none
+          # (run 44827340359: "cannot open file: results").
+          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
           CODETRACER_REPROBUILD_TARGET: ".#replay-server"
         run: nix develop . --command just build-once
 
@@ -237,6 +241,10 @@ jobs:
         env:
           CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
           CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
+          # The trace writer's Nim build finds `results` only here. A warm
+          # runner's ~/.nimble hides its absence; an ephemeral one has none
+          # (run 44827340359: "cannot open file: results").
+          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
         run: nix develop . --command bash -c 'cd src/db-backend && cargo build --bin replay-server'
 
       - name: The zgui lane
