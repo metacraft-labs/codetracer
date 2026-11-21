@@ -2,12 +2,12 @@
 # subjects AND the suites the arms are graded by.
 # Refreshed with --record-control-hashes, gated by the
 # needle scan.
-8c1c38708bbfe0e278fe1bbdd56d9c362d56e2f7804220cb42bc2958ab52cc3b  src/frontend/viewmodel/plugin_host/supervisor.nim
-627f6f9b42b7d0376bc5c5690bc57649e3bf51a6c32b2ef8618db605bb748932  src/frontend/viewmodel/plugin_host/process_link.nim
+9c5739a3e43b891145fb03985c8d59531341c4bc0fd40d5f612789cdf476b6e0  src/frontend/viewmodel/plugin_host/supervisor.nim
+92855333df47ca9e0a3bdb7b026ff27a9620efda405af90a379c7fce665fd526  src/frontend/viewmodel/plugin_host/process_link.nim
 a0c27d2992078e2221c721cd86f40c68f545b6014df880843d59676df9b9ea50  src/plugin_sdk/codetracer_plugin_sdk.nim
 45537e6ad4b07bf40f4a92f9cef0e77a67f0dbab044276cc5d5bf9e60aa129a3  src/common/plugin_model/package.nim
-53320025781afb2fe860cce22059b942cbec3679f513c1b66a06f6ac1fc61570  src/frontend/tui/app/runtime.nim
-a6df52229d524e9d7d6de7ce3b1a8eaee5d3d4a703fb3663000f7630daddb8c0  src/frontend/tui/host/plugin_service.nim
+82b115fdd074aa9019a32993aad694c5d64c13676f7c0e3adeb9e0b34afc9710  src/frontend/tui/app/runtime.nim
+fb22daa37972e25772347ced09b19bbc5b00c832386053d98e5d7f0ff804cd3c  src/frontend/tui/host/plugin_service.nim
 634de7f0b7b8a822b4bc8b07b3c1106143ffeedf6dde1f2d77e2e24d7607d507  src/frontend/tui/main.nim
 22f2d01676fd1fc37defd8244c0c97352f008deaa9435f9dfd1c029d2b7435df  src/frontend/viewmodel/plugin_host/plugin_io.nim
 aee0c26cee470352996eae6932447d6d5a75fe3637ddf262df03ad1ceaca24cb  src/ct/plugins_cli.nim

@@ -682,8 +682,6 @@ src/frontend/tui/tests/plat58-requests-mutation-control.sha256	src/frontend/tui/
 src/frontend/tui/tests/plat58-requests-mutation-control.sha256	src/frontend/tui/app/layout/profile.nim	960d848298d44d3da77422a1a3690a0c4478d38639c8989a287fe9d91d4b2841	b55df548d58fe1ec320046870e7c4046e8b416f1a3e577c359d8363814b6c056
 src/frontend/tui/tests/plat61-shell-mutation-control.sha256	src/frontend/tui/app/layout/profile.nim	960d848298d44d3da77422a1a3690a0c4478d38639c8989a287fe9d91d4b2841	b55df548d58fe1ec320046870e7c4046e8b416f1a3e577c359d8363814b6c056
 src/frontend/tui/tests/plat62-constraints-mutation-control.sha256	src/frontend/tui/app/layout/profile.nim	960d848298d44d3da77422a1a3690a0c4478d38639c8989a287fe9d91d4b2841	b55df548d58fe1ec320046870e7c4046e8b416f1a3e577c359d8363814b6c056
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/tui/app/runtime.nim	53320025781afb2fe860cce22059b942cbec3679f513c1b66a06f6ac1fc61570	82b115fdd074aa9019a32993aad694c5d64c13676f7c0e3adeb9e0b34afc9710
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/tui/host/plugin_service.nim	a6df52229d524e9d7d6de7ce3b1a8eaee5d3d4a703fb3663000f7630daddb8c0	fb22daa37972e25772347ced09b19bbc5b00c832386053d98e5d7f0ff804cd3c
 src/frontend/viewmodel/tests/unit/plat5-interaction-mutation-control.sha256	src/frontend/tui/app/layout/binding.nim	888258b08925921faf187bd8e0114b2770355693ae7908fbf1d28c72951c41e0	8c3fb489dcb8c3afbdf3a6e8ff802b07e6635ce6362e5f8b48f1eb66c9867599
 src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/frontend/tui/app/input/motions.nim	50b66980bfd02b011a2807444d52bc13cfe3a3c78bc4c8466b2153b36b3fcb32	ec9838cd753b1003a07fb119deede04226e2bdfb5887906885087843df28c0b4
 
@@ -699,8 +697,6 @@ src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/headle
 # process_link gains a child_process arm and supervisor its JavaScript spellings
 # (the C path unchanged); grant_store, plugin_components and the lane file import
 # common/node_os on JS. plat81 is re-graded by its owner over these bytes.
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/supervisor.nim	8c1c38708bbfe0e278fe1bbdd56d9c362d56e2f7804220cb42bc2958ab52cc3b	9c5739a3e43b891145fb03985c8d59531341c4bc0fd40d5f612789cdf476b6e0
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/process_link.nim	627f6f9b42b7d0376bc5c5690bc57649e3bf51a6c32b2ef8618db605bb748932	92855333df47ca9e0a3bdb7b026ff27a9620efda405af90a379c7fce665fd526
 
 # 2026-11-21, the WebAssembly ViewModel core: the views import IsoNim's frame
 # renderer under -d:ctWasmCore (the event log view newly), and the justfile
