@@ -7438,7 +7438,7 @@
       "flake": false,
       "locked": {
         "lastModified": 1795125846,
-        "narHash": "sha256-+WsvZwqsaxEFW5kPG8Pr72oT/4OISYLb/0dJYWuyXrs=",
+        "narHash": "sha256-A3VXqZS1ImcgheXdNhjRGHlvE+LtPSJpIGMRXOolt50=",
         "owner": "metacraft-labs",
         "repo": "isonim",
         "rev": "b56bd098474244ce3eae401312b8a567cf74c30f",
