@@ -124,7 +124,7 @@ BUILD_SIBLINGS="${SUITE_ROOT}/scripts/build-siblings.sh"
 # Every contract this suite claims to check. A suite that silently runs fewer
 # assertions than it advertises is a suite that stops protecting anything, so
 # the count is asserted at the end and has to be changed deliberately.
-EXPECTED_ASSERTIONS=156
+EXPECTED_ASSERTIONS=161
 
 ASSERTIONS=0
 FAILURES=0
@@ -2261,6 +2261,56 @@ else
 	bad "build-dist.sh refuses to bundle an engine that is not this tree's" \
 		"it publishes to ide.codetracer.com"
 fi
+# build-dist.sh --out-dir: a consumer that serves the bundle from outside this
+# tree (a test harness that mounts it) names a directory of its own, and the script
+# REPLACES it. So it refuses, before the forty-minute build, any directory that
+# is not empty and holds no marker of a bundle it wrote; the refused directory
+# is left as it was. Only `repro`, the build's first step, is stubbed: it
+# records its call and fails, so a run that gets past the refusal is seen
+# reaching the build and stopping there.
+# shellcheck disable=SC2016
+printf '#!/usr/bin/env bash\nprintf "repro\\t%%s\\n" "$*" >>"${TRACE}"\nexit 7\n' >"${BIN}/repro"
+chmod +x "${BIN}/repro"
+run_build_dist() {
+	: >"${TRACE}"
+	PATH="${BIN}:${PATH}" CT_WASM_BUILD_LOG="${TEST_ROOT}/build-dist-wasm.log" \
+		bash "${BUILD_DIST}" "$@" 2>&1
+}
+DIST_RC=0
+DIST_OUT="$(run_build_dist --frobnicate)" || DIST_RC=$?
+if [[ ${DIST_RC} -eq 2 ]] && [[ ! -s ${TRACE} ]]; then
+	ok "build-dist.sh refuses an unknown argument before building"
+else
+	bad "build-dist.sh refuses an unknown argument before building" "exit ${DIST_RC}: ${DIST_OUT}"
+fi
+FOREIGN_DIR="${TEST_ROOT}/foreign-dist"
+mkdir -p "${FOREIGN_DIR}"
+printf 'keep me\n' >"${FOREIGN_DIR}/unrelated.txt"
+DIST_RC=0
+DIST_OUT="$(run_build_dist --out-dir "${FOREIGN_DIR}")" || DIST_RC=$?
+if [[ ${DIST_RC} -eq 2 ]] && [[ ! -s ${TRACE} ]] && [[ -f "${FOREIGN_DIR}/unrelated.txt" ]]; then
+	ok "build-dist.sh --out-dir refuses a non-empty directory it did not write, and leaves it alone"
+else
+	bad "build-dist.sh --out-dir refuses a non-empty directory it did not write, and leaves it alone" \
+		"exit ${DIST_RC}, build calls: $(cat "${TRACE}"): ${DIST_OUT}"
+fi
+assert_contains "${DIST_OUT}" "refusing to replace ${FOREIGN_DIR}" \
+	"...and the refusal names the directory"
+OWN_DIR="${TEST_ROOT}/own-dist"
+mkdir -p "${OWN_DIR}"
+: >"${OWN_DIR}/.browser-replay-dist"
+printf 'old bundle\n' >"${OWN_DIR}/index.html"
+DIST_RC=0
+DIST_OUT="$(run_build_dist --out-dir "${OWN_DIR}")" || DIST_RC=$?
+if [[ ${DIST_RC} -eq 7 ]] && grep -q $'^repro\texec ' "${TRACE}"; then
+	ok "build-dist.sh --out-dir accepts a directory holding its own earlier bundle and builds"
+else
+	bad "build-dist.sh --out-dir accepts a directory holding its own earlier bundle and builds" \
+		"exit ${DIST_RC}, build calls: $(cat "${TRACE}"): ${DIST_OUT}"
+fi
+assert_contains "${DIST_OUT}" "output: ${OWN_DIR}" \
+	"...and reports where the bundle goes"
+rm -f "${BIN}/repro"
 if grep -q 'wasm_engine_assert_dir_fresh' "${TEST_DIST}"; then
 	ok "test_dist.sh checks the bundled engine's provenance, not just its size"
 else

@@ -1,13 +1,56 @@
 #!/usr/bin/env bash
 # Build the complete browser-replay distribution.
 # Produces browser-replay/dist/ containing everything needed for static deployment.
+#
+# Usage: build-dist.sh [--out-dir DIR]
+#
+# DIR (default browser-replay/dist) receives the bundle. A consumer that
+# serves the bundle from outside this checkout (a test harness that mounts it
+# as its browser-replay app, say) passes a directory of its own, so the bundle
+# lands in that consumer's state and not in this tree.
+# The directory is replaced, so this script refuses a DIR that holds anything
+# other than a bundle it wrote earlier (its `.browser-replay-dist` marker):
+# `rm -rf` on a mistyped path is not a risk worth a convenience.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 DIST_DIR="$SCRIPT_DIR/dist"
+DIST_MARKER=".browser-replay-dist"
+
+while [ "$#" -gt 0 ]; do
+	case "$1" in
+	--out-dir)
+		[ "$#" -ge 2 ] && [ -n "$2" ] || {
+			echo "build-dist.sh: --out-dir needs a directory" >&2
+			exit 2
+		}
+		DIST_DIR="$2"
+		shift 2
+		;;
+	*)
+		echo "build-dist.sh: unknown argument: $1 (usage: build-dist.sh [--out-dir DIR])" >&2
+		exit 2
+		;;
+	esac
+done
+# Absolute, so the `cd`s below do not change what it names.
+case "$DIST_DIR" in
+/*) ;;
+*) DIST_DIR="$(pwd)/$DIST_DIR" ;;
+esac
+# Checked BEFORE the build, so a refused directory costs nothing. The default
+# directory is this script's own (gitignored) and predates the marker.
+if [ "$DIST_DIR" != "$SCRIPT_DIR/dist" ] && [ -e "$DIST_DIR" ] && [ ! -f "$DIST_DIR/$DIST_MARKER" ] &&
+	[ -n "$(find "$DIST_DIR" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
+	echo "build-dist.sh: refusing to replace $DIST_DIR: it is not empty and holds no" >&2
+	echo "  $DIST_MARKER marker, so it is not a bundle this script wrote. Name an" >&2
+	echo "  empty or absent directory." >&2
+	exit 2
+fi
 
 echo "=== Building Browser Replay Distribution ==="
+echo "  output: $DIST_DIR"
 
 # Step 1: Build WASM module
 #
@@ -85,6 +128,7 @@ wasm_engine_assert_fresh "$REPO_ROOT" || {
 echo ">>> Creating dist directory..."
 rm -rf "$DIST_DIR"
 mkdir -p "$DIST_DIR/pkg"
+: >"$DIST_DIR/$DIST_MARKER"
 
 # Step 3: Copy app files
 cp "$SCRIPT_DIR/app/index.html" "$DIST_DIR/"

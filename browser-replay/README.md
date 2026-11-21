@@ -156,7 +156,18 @@ cd -
 cp -r src/db-backend/wasm-testing/pkg/* browser-replay/app/pkg/
 ```
 
-`build-dist.sh` automates this for distribution-ready bundles.
+`build-dist.sh` automates this for distribution-ready bundles: it builds the
+engine (`build_wasm.sh`, inside the repository's environment through
+`repro exec`), refuses an engine that was not built from this tree, and
+assembles the app files and `pkg/` into `browser-replay/dist/`. A consumer
+that serves the bundle from outside this checkout names its own directory:
+
+```bash
+bash browser-replay/build-dist.sh --out-dir /path/to/bundle
+```
+
+The directory is replaced, so it must be absent, empty, or a bundle the
+script wrote earlier (it leaves a `.browser-replay-dist` marker).
 
 ## Known limitations
 
