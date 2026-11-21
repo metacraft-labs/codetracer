@@ -2,8 +2,8 @@
 # ci/test/scenario-slice-uses-stage-test.sh — a scenario that needs the visual
 # replay player always lands on a shard that builds it.
 #
-# tui-tests.yml builds ct_gfx_player only on the shard whose terminal-lane
-# slice uses the `visual-recording` stage, decided at run time by
+# tui-tests.yml and gpui-window-captures.yml build ct_gfx_player only on the
+# shard whose lane slice uses the `visual-recording` stage, decided at run time by
 # ci/test/scenario-slice-uses-stage.sh. This holds, for every shard count the
 # lane might be split into, that each scenario using the stage sits in a shard
 # the helper flags, that the helper flags no shard without one, and that the
@@ -18,62 +18,68 @@ fail() {
 ok() { echo "  ok   $*"; }
 
 lanes=src/tests/scenarios/lanes
-lane=terminal
 stage=visual-recording
-users="$(sed -n '/^applicable:/,/^[^ ]/{s/^ *- //p}' "${lanes}/${lane}.lane.yaml" |
-	while read -r e; do
-		if grep -Eq "^[[:space:]]*-[[:space:]]*use:[[:space:]]*${stage}[[:space:]]*\$" "${lanes}/${e}"; then echo "${e}"; fi
-	done | sort)"
-[ -n "${users}" ] || fail "no ${lane} scenario uses ${stage}: the check would prove nothing"
+# Each sharded lane, and the workflow that runs it. gpui-window-captures.yml
+# used to restore the tools on shard 1 alone, and gpui/visual-replay-video-player
+# moved to shard 5 when entries were added (run 44874859112: MISSING-PREREQ).
+for pair in terminal:.github/workflows/tui-tests.yml gpui:.github/workflows/gpui-window-captures.yml; do
+	lane="${pair%%:*}"
+	wf="${pair#*:}"
+	users="$(sed -n '/^applicable:/,/^[^ ]/{s/^ *- //p}' "${lanes}/${lane}.lane.yaml" |
+		while read -r e; do
+			if grep -Eq "^[[:space:]]*-[[:space:]]*use:[[:space:]]*${stage}[[:space:]]*\$" "${lanes}/${e}"; then echo "${e}"; fi
+		done | sort)"
+	[ -n "${users}" ] || fail "no ${lane} scenario uses ${stage}: the check would prove nothing"
 
-for n in 2 4 8 10 20; do
-	covered=""
-	for i in $(seq 1 "${n}"); do
-		part="$(python3 ci/test/scenario-lane-shard.py "${lanes}/${lane}.lane.yaml" "${i}/${n}" --list | sort)"
-		want=false
-		if [ -n "$(comm -12 <(echo "${part}") <(echo "${users}"))" ]; then want=true; fi
-		got="$(bash ci/test/scenario-slice-uses-stage.sh "${lane}" "${i}/${n}" "${stage}")"
-		[ "${got}" = "needed=${want}" ] || fail "${lane} ${i}/${n}: the helper says '${got}', the slice says needed=${want}"
-		if [ "${want}" = true ]; then
-			covered="$(printf '%s\n%s' "${covered}" "$(comm -12 <(echo "${part}") <(echo "${users}"))")"
+	for n in 2 4 8 10 20; do
+		covered=""
+		for i in $(seq 1 "${n}"); do
+			part="$(python3 ci/test/scenario-lane-shard.py "${lanes}/${lane}.lane.yaml" "${i}/${n}" --list | sort)"
+			want=false
+			if [ -n "$(comm -12 <(echo "${part}") <(echo "${users}"))" ]; then want=true; fi
+			got="$(bash ci/test/scenario-slice-uses-stage.sh "${lane}" "${i}/${n}" "${stage}")"
+			[ "${got}" = "needed=${want}" ] || fail "${lane} ${i}/${n}: the helper says '${got}', the slice says needed=${want}"
+			if [ "${want}" = true ]; then
+				covered="$(printf '%s\n%s' "${covered}" "$(comm -12 <(echo "${part}") <(echo "${users}"))")"
+			fi
+		done
+		if [ "$(echo "${covered}" | sed '/^$/d' | sort)" = "${users}" ]; then
+			ok "${lane} in ${n} shards: every ${stage} scenario is on a shard that builds the player"
+		else
+			fail "${lane} in ${n} shards: a ${stage} scenario is on no flagged shard"
 		fi
 	done
-	if [ "$(echo "${covered}" | sed '/^$/d' | sort)" = "${users}" ]; then
-		ok "${lane} in ${n} shards: every ${stage} scenario is on a shard that builds the player"
+
+	count="$(sed -n 's/^ *shard: \[\(.*\)\]$/\1/p' "${wf}" | tr ',' '\n' | grep -c .)"
+	if grep -qF "scenario-slice-uses-stage.sh ${lane} \"\${{ matrix.shard }}/${count}\" ${stage}" "${wf}"; then
+		ok "${wf} asks the helper for its own shard of ${count}"
 	else
-		fail "${lane} in ${n} shards: a ${stage} scenario is on no flagged shard"
+		fail "${wf} does not ask scenario-slice-uses-stage.sh for its shard (${lane}, \${{ matrix.shard }}/${count}, ${stage})"
+	fi
+	if grep -qF "steps.player.outputs.needed == 'true'" "${wf}"; then
+		ok "${wf} builds the player only where the helper says it is needed"
+	else
+		fail "${wf} does not gate the player's build on steps.player.outputs.needed"
+	fi
+
+	if grep -qF "nix develop .#devShells.x86_64-linux.default --command bash ci/test/scenario-slice-uses-stage.sh" "${wf}"; then
+		ok "${wf} runs the helper in the dev shell, which has its python3"
+	else
+		fail "${wf} runs the helper on the runner's bare PATH, which may have no python3"
+	fi
+
+	# The decision runs whenever the lane does. With the default `success()` it was
+	# skipped after an earlier step's failure while the lane (`!cancelled()`) went
+	# on without the player (TUI shard 6, run 44384977215).
+	player_if="$(awk '/^      - name: /{last_if=""} /^        id: player$/{print last_if} /^        if: /{last_if=$0}' "${wf}")"
+	if grep -qF '!cancelled()' <<<"${player_if}"; then
+		ok "${wf} decides on the player whenever the lane runs (!cancelled())"
+	else
+		fail "${wf}'s player decision does not run under !cancelled(): '${player_if}'"
 	fi
 done
 
-wf=.github/workflows/tui-tests.yml
-count="$(sed -n 's/^ *shard: \[\(.*\)\]$/\1/p' "${wf}" | tr ',' '\n' | grep -c .)"
-if grep -qF "scenario-slice-uses-stage.sh ${lane} \"\${{ matrix.shard }}/${count}\" ${stage}" "${wf}"; then
-	ok "${wf} asks the helper for its own shard of ${count}"
-else
-	fail "${wf} does not ask scenario-slice-uses-stage.sh for its shard (${lane}, \${{ matrix.shard }}/${count}, ${stage})"
-fi
-if grep -qF "steps.player.outputs.needed == 'true'" "${wf}"; then
-	ok "${wf} builds the player only where the helper says it is needed"
-else
-	fail "${wf} does not gate the player's build on steps.player.outputs.needed"
-fi
-
-if grep -qF "nix develop .#devShells.x86_64-linux.default --command bash ci/test/scenario-slice-uses-stage.sh" "${wf}"; then
-	ok "${wf} runs the helper in the dev shell, which has its python3"
-else
-	fail "${wf} runs the helper on the runner's bare PATH, which may have no python3"
-fi
-
-# The decision runs whenever the lane does. With the default `success()` it was
-# skipped after an earlier step's failure while the lane (`!cancelled()`) went
-# on without the player (TUI shard 6, run 44384977215).
-player_if="$(awk '/^      - name: /{last_if=""} /^        id: player$/{print last_if} /^        if: /{last_if=$0}' "${wf}")"
-if grep -qF '!cancelled()' <<<"${player_if}"; then
-	ok "${wf} decides on the player whenever the lane runs (!cancelled())"
-else
-	fail "${wf}'s player decision does not run under !cancelled(): '${player_if}'"
-fi
-
+lane=terminal
 # Without python3 the helper must FAIL, not answer needed=false: from a process
 # substitution the missing interpreter used to read as an empty slice, and TUI
 # shard 6 of run 44269676398 skipped the player its scenario needed.

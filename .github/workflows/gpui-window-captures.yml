@@ -236,6 +236,21 @@ jobs:
         if: ${{ steps.unpack.outcome == 'failure' }}
         run: bash ci/unpack-ct-build-products.sh "${RUNNER_TEMP}/ct-build-retry"
 
+      - name: Does this shard's scenario slice need the visual replay player?
+        # Decided from the slice, as tui-tests does, not from the shard number:
+        # the lane's entries are dealt to shards by position, so adding entries
+        # moved gpui/visual-replay-video-player from shard 1 to shard 5, which
+        # restored no tools, and it failed "MISSING-PREREQ SKIP: the visual
+        # replay player (ct_gfx_player) is not installed" (run 44874859112).
+        # Shard 1 still takes the tools for its window captures.
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        id: player
+        run: |
+          result="$(nix develop .#devShells.x86_64-linux.default --command bash ci/test/scenario-slice-uses-stage.sh gpui "${{ matrix.shard }}/20" visual-recording | tail -n 1)"
+          [[ $result =~ ^needed=(true|false)$ ]] || { echo "scenario-slice-uses-stage printed '${result}', not needed=true|false" >&2; exit 1; }
+          echo "$result" | tee -a "$GITHUB_OUTPUT"
+          if [ "${{ matrix.shard }}" = 1 ]; then echo "tools=true"; else echo "tools=${result#needed=}"; fi | tee -a "$GITHUB_OUTPUT"
+
       - name: Wait for the visual replay tools
         # The tools job runs beside ct-build and is not a `needs` of this
         # job, so that the shards that do not use its tools start when
@@ -243,7 +258,7 @@ jobs:
         # provisioning, which normally outlasts the tools job; when the job
         # failed, or the bound passes, it does not wait and the restore below
         # is skipped, so ci/test/visual-replay-tools.sh builds the tools here.
-        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.shard == 1 }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && steps.player.outputs.tools == 'true' }}
         id: vr_wait
         continue-on-error: true
         env:
@@ -256,7 +271,7 @@ jobs:
         # job (about 22 minutes for ct-mcr alone in GPUI shard 1 of run
         # 44269676398). Best effort: when the artifact is missing or short,
         # ci/test/visual-replay-tools.sh builds them here as before.
-        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.shard == 1 && steps.vr_wait.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && steps.player.outputs.tools == 'true' && steps.vr_wait.outcome == 'success' }}
         id: vr_tools
         continue-on-error: true
         uses: actions/download-artifact@v4
@@ -265,7 +280,7 @@ jobs:
           path: ${{ runner.temp }}/visual-replay-tools
 
       - name: Unpack the visual replay tools
-        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.shard == 1 && steps.vr_tools.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && steps.player.outputs.tools == 'true' && steps.vr_tools.outcome == 'success' }}
         continue-on-error: true
         run: |
           bash ci/unpack-ct-build-products.sh "${RUNNER_TEMP}/visual-replay-tools" visual-replay-tools.tar.gz
@@ -274,6 +289,16 @@ jobs:
           if [ -e ../isonim-gpui/rust/target/debug/libgpui_nim_shim.so ]; then
             echo "CT_GPUI_FEATURELESS_SHIM_PREBUILT=1" >>"$GITHUB_ENV"
           fi
+
+      - name: Build the visual replay player for this shard's visual-recording scenarios
+        # The stage reads CODETRACER_CT_GFX_PLAYER_CMD and the test licence
+        # helper from this env file; with the tools restored above it reuses
+        # them, else it builds them.
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && steps.player.outputs.needed == 'true' }}
+        run: |
+          nix develop .#devShells.x86_64-linux.default --command bash ci/test/visual-replay-tools.sh "$RUNNER_TEMP/visual-replay.env"
+          # shellcheck disable=SC1091
+          ( . "$RUNNER_TEMP/visual-replay.env"; env | grep -E '^(CODETRACER_|CT_)' ) >> "$GITHUB_ENV"
 
       - name: Build the windowed GPUI front-end the scenario lane opens
         # Linked here, against the restored shim, because the front-end pins
