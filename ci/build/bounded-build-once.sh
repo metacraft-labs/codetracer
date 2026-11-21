@@ -30,23 +30,48 @@ second="${3:?usage: bounded-build-once.sh DIAG_DIR FIRST_MINUTES SECOND_MINUTES}
 mkdir -p "$diag"
 
 attempt() { # attempt LABEL MINUTES [ENV=VALUE...]
+	# The build runs in a process group of its own, and at the bound its state
+	# is dumped WHILE IT IS STILL ALIVE, then the group is terminated. (With
+	# `timeout`, the dump ran after the kill and showed none of the stalled
+	# build: run 44648381899's dump held the host's processes and not one of
+	# build-once's.)
 	local label="$1" minutes="$2"
 	shift 2
-	local start rc
+	local start deadline pid rc
 	start=$(date +%s)
+	deadline=$((start + $(awk -v m="$minutes" 'BEGIN { printf "%d", m * 60 }')))
 	echo "bounded-build-once: ${label}: start ($*; bound ${minutes}m)"
-	# --kill-after: a build that ignores TERM still ends.
-	env "$@" timeout --kill-after=60 "${minutes}m" just build-once
+	setsid env "$@" just build-once &
+	pid=$!
+	while kill -0 "$pid" 2>/dev/null; do
+		if [ "$(date +%s)" -ge "$deadline" ]; then
+			dump "${label}-stall" "$pid"
+			kill -TERM -- "-$pid" 2>/dev/null
+			local grace=$(($(date +%s) + 60))
+			while kill -0 "$pid" 2>/dev/null && [ "$(date +%s)" -lt "$grace" ]; do sleep 1; done
+			kill -KILL -- "-$pid" 2>/dev/null
+			wait "$pid" 2>/dev/null
+			echo "bounded-build-once: ${label}: exit 124 after $((($(date +%s) - start) / 60))m (bound reached)"
+			return 124
+		fi
+		sleep 2
+	done
+	wait "$pid"
 	rc=$?
 	echo "bounded-build-once: ${label}: exit ${rc} after $((($(date +%s) - start) / 60))m"
 	return "$rc"
 }
 
-dump() { # dump LABEL
-	local out="$diag/$1"
+dump() { # dump LABEL [BUILD_PID]
+	local out="$diag/$1" build="${2:-}"
 	mkdir -p "$out"
 	echo "bounded-build-once: dumping the stall's state into $out"
 	ps -ef --forest >"$out/ps-forest.txt" 2>&1
+	# The stalled build's own subtree, so the evidence is not lost in a shared
+	# host's process table.
+	if [ -n "$build" ]; then
+		ps -o pid,ppid,stat,etimes,pcpu,cmd -g "$build" >"$out/build-tree.txt" 2>&1
+	fi
 	ps -eo pid,ppid,stat,etimes,cmd | awk 'NR == 1 || $3 ~ /Z/' >"$out/zombies.txt" 2>&1
 	{
 		repro daemon status
@@ -62,16 +87,11 @@ dump() { # dump LABEL
 if [ "$first" != 0 ]; then
 	attempt daemon "$first"
 	rc=$?
-	if [ "$rc" -ne 124 ] && [ "$rc" -ne 137 ]; then
+	if [ "$rc" -ne 124 ]; then
 		exit "$rc"
 	fi
-	dump daemon-stall
 	# The stalled daemon's sessions must not hold the retry's locks.
 	repro daemon stop >/dev/null 2>&1 || true
 fi
 attempt no-daemon "$second" REPRO_DAEMON=off
-rc=$?
-if [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
-	dump no-daemon-stall
-fi
-exit "$rc"
+exit $?
