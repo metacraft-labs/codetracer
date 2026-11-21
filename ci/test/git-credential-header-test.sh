@@ -48,7 +48,7 @@ mkdir -p "$work/srv/metacraft-labs"
 git init -q --bare "$work/srv/metacraft-labs/private.git"
 git -C "$work/srv/metacraft-labs/private.git" config http.receivepack false
 git init -q "$work/seed"
-git -C "$work/seed" -c user.name=t -c user.email=t@t commit -q --allow-empty -m seed
+git -C "$work/seed" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q --allow-empty -m seed
 git -C "$work/seed" push -q "$work/srv/metacraft-labs/private.git" HEAD:refs/heads/main
 
 python3 ci/test/git-basic-auth-server.py "$work/srv" good-token "$work/port" 2>"$work/server.log" &

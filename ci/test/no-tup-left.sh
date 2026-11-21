@@ -146,7 +146,7 @@ make_repo() {
 		printf '%b' "$content" >"$dir/$path"
 	done
 	git -C "$dir" add -A
-	git -C "$dir" commit -qm fixture
+	git -C "$dir" -c commit.gpgsign=false commit -qm fixture
 }
 
 echo "no_tup_left:"

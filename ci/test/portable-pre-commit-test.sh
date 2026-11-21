@@ -381,7 +381,7 @@ cat >"$e2e/nix/pre-commit.nix" <<'EOF'
 }
 EOF
 git -C "$e2e" add -A
-git -C "$e2e" commit -q -m "fixture: the hook layer itself" # no hook is installed yet
+git -C "$e2e" -c commit.gpgsign=false commit -q -m "fixture: the hook layer itself" # no hook is installed yet
 
 # What git-hooks.nix leaves behind from a main checkout: the RELATIVE
 # core.hooksPath, under which a linked worktree runs no hook at all.
@@ -423,7 +423,7 @@ fi
 commit() { # <expect: pass|refuse> <label> <needle-or-empty>
 	local expect="$1" label="$2" needle="$3" out rc
 	set +e
-	out=$(git -C "$e2e" commit -m "$label" 2>&1)
+	out=$(git -C "$e2e" -c commit.gpgsign=false commit -m "$label" 2>&1)
 	rc=$?
 	set -e
 	if [ "$expect" = pass ] && [ "$rc" -eq 0 ]; then
@@ -450,7 +450,7 @@ if (cd "$e2e" && "$PY" -c 'import pre_commit' 2>/dev/null); then
 	# The property the hooksPath repair exists for, observed through git itself.
 	printf '<<<<<<< ours\n' >"$linked/linked-conflict.txt" && git -C "$linked" add linked-conflict.txt
 	set +e
-	linked_out=$(git -C "$linked" commit -m "a merge marker, in a linked worktree" 2>&1)
+	linked_out=$(git -C "$linked" -c commit.gpgsign=false commit -m "a merge marker, in a linked worktree" 2>&1)
 	linked_rc=$?
 	set -e
 	if [ "$linked_rc" -ne 0 ] && grep -q "Merge conflict markers in linked-conflict.txt" <<<"$linked_out"; then

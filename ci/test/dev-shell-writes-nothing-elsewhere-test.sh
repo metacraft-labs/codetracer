@@ -81,7 +81,7 @@ grep -q 'src/parser.c is up to date' "$TS_SCRATCH/stderr" ||
 	fail "control: the tree-sitter-nim helper did not report an up-to-date parser on stderr: $(cat "$TS_SCRATCH/stderr")"
 
 git -C "$SCRATCH" init -q
-git -C "$SCRATCH" -c user.name=t -c user.email=t@t commit -q --allow-empty -m init
+git -C "$SCRATCH" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -q --allow-empty -m init
 mkdir -p "$SCRATCH/sub"
 hooks_before="$(ls "$SCRATCH/.git/hooks")"
 

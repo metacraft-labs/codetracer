@@ -359,7 +359,7 @@ ctdr_git_init() {
 ctdr_git_commit() {
 	local repo="$1" message="$2"
 	git -C "${repo}" add -A
-	git -C "${repo}" commit -qm "${message}"
+	git -C "${repo}" -c commit.gpgsign=false commit -qm "${message}"
 }
 
 # ctdr_record <repo-dir> <output-dir> <log-file>
