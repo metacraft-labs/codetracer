@@ -274,3 +274,187 @@ suite "plugin panes docked in the terminal's layout":
     for d in savedLayouts(home): after.add $d
     check Metrics in after
     removeDir(home)
+
+proc drag(sess: var TuiTestSession; fromRow, fromCol, toRow, toCol: int) =
+  ## An SGR-1006 left-button drag: press, motion reports along the way
+  ## (button 32 = motion with the left button held), release.
+  sess.send("\e[<0;" & $(fromCol + 1) & ";" & $(fromRow + 1) & "M")
+  sleep(120)
+  let steps = 6
+  for i in 1 .. steps:
+    let r = fromRow + (toRow - fromRow) * i div steps
+    let c = fromCol + (toCol - fromCol) * i div steps
+    sess.send("\e[<32;" & $(c + 1) & ";" & $(r + 1) & "M")
+    sleep(80)
+  sess.send("\e[<0;" & $(toCol + 1) & ";" & $(toRow + 1) & "m")
+  sleep(300)
+
+suite "plugin panes move, open, stay closed and mark like built-in ones":
+
+  test "a plugin tab dragged with the mouse lands where it is dropped, and persists":
+    let home = newHome()
+    var sess = spawnTui(home)
+    settleOnDebugger(sess, Cols, Rows)
+    sess.grantBoth()
+    sess.command("plugins show " & Metrics)
+    check sess.screenHas("line main.py")
+    let tabRow = sess.rowOf(" Metrics ")
+    check tabRow >= 0
+    let srcRow = sess.rowOf("#!/usr/bin/env python3")
+    check srcRow >= 0
+    if tabRow >= 0 and srcRow >= 0:
+      let tabCol = sess.colOf(tabRow, " Metrics ") + 3
+      let codeCol = sess.colOf(srcRow, "#!/usr/bin/env python3") + 10
+      # From the Variables stack's tab strip to the middle of the editor.
+      sess.drag(tabRow, tabCol, srcRow + 10, codeCol)
+    sess.quit()
+    var parent: JsonNode = nil
+    for d in savedLayouts(home):
+      let p = leafParentOf(d{"layout"}, Metrics)
+      if not p.isNil: parent = p
+    check not parent.isNil
+    if not parent.isNil:
+      checkpoint "saved parent of " & Metrics & ": " & $parent
+      var withEditor = false
+      for c in parent{"children"}:
+        if c{"pane"}.getStr("") == "editor": withEditor = true
+      check withEditor
+    removeDir(home)
+
+  test "a click on a docked plugin pane's label docks it open":
+    let home = newHome()
+    var sess = spawnTui(home)
+    settleOnDebugger(sess, Cols, Rows)
+    sess.grantBoth()
+    sess.command("plugins show " & Flame)
+    check sess.screenHas("main 60%")
+    sess.command("dock bottom")
+    var gone = false
+    for _ in 0 ..< 50:
+      if "main 60%" notin sess.screen:
+        gone = true
+        break
+      sleep(200)
+    check gone
+    # The bottom strip is on the status row; its label is the pane's title.
+    let labelRow = Rows - 1
+    let labelCol = sess.colOf(labelRow, "Flame")
+    check labelCol >= 0
+    if labelCol >= 0:
+      sess.click(labelRow, labelCol + 1)
+      check sess.screenHas("main 60%")
+    sess.quit()
+    removeDir(home)
+
+  test "a plugin pane the user closed stays closed in later sessions, and Show pane brings it back":
+    let home = newHome()
+    var sess = spawnTui(home)
+    settleOnDebugger(sess, Cols, Rows)
+    sess.grantBoth()
+    sess.command("plugins show " & Flame)
+    check sess.screenHas("main 60%")
+    sess.command("close-pane")
+    var closed = false
+    for _ in 0 ..< 50:
+      if "main 60%" notin sess.screen:
+        closed = true
+        break
+      sleep(200)
+    check closed
+    sess.quit()
+    # A NEW SESSION: Metrics is placed again, Flame is not.
+    sess = spawnTui(home)
+    settleOnDebugger(sess, Cols, Rows)
+    check sess.screenHas("Metrics", ceilingMs = 90_000)
+    sleep(3_000)
+    let strip = sess.rowOf("Metrics")
+    if strip >= 0:
+      checkpoint "tab strip: " & sess.text(strip)
+      check "Flame" notin sess.text(strip)
+    # Show pane brings it back, and it stays back.
+    sess.command("plugins show " & Flame)
+    check sess.screenHas("main 60%")
+    sess.quit()
+    sess = spawnTui(home)
+    settleOnDebugger(sess, Cols, Rows)
+    check sess.screenHas("Metrics", ceilingMs = 90_000)
+    var back = false
+    for _ in 0 ..< 150:
+      let r = sess.rowOf("Metrics")
+      if r >= 0 and "Flame" in sess.text(r):
+        back = true
+        break
+      sleep(200)
+    check back
+    sess.quit()
+    removeDir(home)
+
+  test "a plugin's declared marker is a glyph in the gutter, on its line":
+    let home = newHome()
+    var sess = spawnTui(home)
+    settleOnDebugger(sess, Cols, Rows)
+    sess.grantBoth()
+    check sess.screenHas("◆ metrics: line ")
+    let r = sess.rowOf("◆ metrics: line ")
+    check r >= 0
+    if r >= 0:
+      var marked = false
+      for _ in 0 ..< 150:
+        let row = sess.text(r)
+        let at = row.find("metrics: line ")
+        let n = row[at + "metrics: line ".len .. ^1].words()[0]
+        # THE GUTTER: `★` before the line number, not the end-of-line text.
+        let gutter = row[0 ..< row.find(" " & n & " ")]
+        if "★" in gutter:
+          marked = true
+          break
+        sleep(200)
+      checkpoint "marked row: " & sess.text(r)
+      check marked
+    sess.quit()
+    removeDir(home)
+
+proc hover(sess: var TuiTestSession; row, col: int) =
+  ## The pointer passing over a cell with no button held (SGR-1006 motion,
+  ## button 35), which the terminal reports under `?1003`.
+  sess.send("\e[<35;" & $(col + 1) & ";" & $(row + 1) & "M")
+  sleep(60)
+
+suite "a docked plugin pane previews on hover":
+
+  test "resting on a docked plugin pane's label previews it, and leaving dismisses it":
+    let home = newHome()
+    var sess = spawnTui(home)
+    settleOnDebugger(sess, Cols, Rows)
+    sess.grantBoth()
+    sess.command("plugins show " & Flame)
+    check sess.screenHas("main 60%")
+    sess.command("dock bottom")
+    var gone = false
+    for _ in 0 ..< 50:
+      if "main 60%" notin sess.screen:
+        gone = true
+        break
+      sleep(200)
+    check gone
+    let labelRow = Rows - 1
+    let labelCol = sess.colOf(labelRow, "Flame")
+    check labelCol >= 0
+    if labelCol >= 0:
+      # REST on the label: the preview opens after the delay, drawn from the
+      # plugin's last view, without a click.
+      sess.hover(labelRow, labelCol + 1)
+      sess.hover(labelRow, labelCol + 2)
+      check sess.screenHas("main 60%", ceilingMs = 10_000)
+      # LEAVE the label and the overlay: the preview closes after its delay.
+      sess.hover(5, 40)
+      sess.hover(6, 41)
+      var dismissed = false
+      for _ in 0 ..< 50:
+        if "main 60%" notin sess.screen:
+          dismissed = true
+          break
+        sleep(200)
+      check dismissed
+    sess.quit()
+    removeDir(home)

@@ -34,16 +34,21 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 33
-    ## Measured. 25 -> 27 (2026-10-26): the library-path rule became its own
+  ExpectedAssertions = 37
+    ## Measured. 33 -> 37 (2026-11-21): a directory without the shim is
+    ## refused, by name (+4). 25 -> 27 (2026-10-26): the library-path rule became its own
     ## `gpuiLibraryPath`, and a case asserts `gpuiChildEnv` uses it (+2, one
     ## per environment shape). A case that stops asserting, or a child whose
     ## output is not the five lines it is asked for, moves it.
   Sentinel = "CT_GPUI_CHILD_ENV_SENTINEL"
   SentinelValue = "inherited value: with spaces, ':' and '='"
-  ShimDir = "/nonexistent/isonim-gpui/rust/target/debug"
   InheritedLibs = "/nix/store/inherited-a/lib:/nix/store/inherited-b/lib"
   RuntimeLibs = "/nix/store/libxcb/lib:/nix/store/libxkbcommon/lib"
+
+let ShimDir = createTempDir("gpui-child-env-shim-", "")
+  ## A shim directory that holds a (stand-in) shim library: gpuiLibraryPath
+  ## refuses one that does not.
+writeFile(ShimDir / GpuiShimLibrary, "")
 
 proc withEnv(vars: openArray[(string, string)]; unset: openArray[string];
              body: proc ()) =
@@ -211,6 +216,24 @@ suite "gpuiRunScript: the hang ceiling every window run has":
     ck gpuiExitText(qrc) == "exited 3"
 
 suite "gpuiChildEnv — assertion tally":
+  test "a shim directory without the shim library is refused, by name":
+    let empty = createTempDir("gpui-child-env-noshim-", "")
+    var message = ""
+    try:
+      discard gpuiLibraryPath(empty)
+    except IOError as e:
+      message = e.msg
+    checkpoint(message)
+    ck message.startsWith("prerequisite missing: ")
+    ck (empty / GpuiShimLibrary) in message
+    ck "just rust-build" in message
+    removeDir(empty)
+
+  test "the shim library looked for is the platform's":
+    ck GpuiShimLibrary == (when defined(windows): "gpui_nim_shim.dll"
+                           elif defined(macosx): "libgpui_nim_shim.dylib"
+                           else: "libgpui_nim_shim.so")
+
   test "CHECKS":
     echo "CHECKS: ", CHECKS
     check CHECKS == ExpectedAssertions

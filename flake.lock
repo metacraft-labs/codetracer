@@ -7437,11 +7437,11 @@
     "isonim": {
       "flake": false,
       "locked": {
-        "lastModified": 1795125846,
-        "narHash": "sha256-A3VXqZS1ImcgheXdNhjRGHlvE+LtPSJpIGMRXOolt50=",
+        "lastModified": 1795253715,
+        "narHash": "sha256-X0/zKvtn0dpWJUUOfMEijeJbY1ymAVwptowfSqi6TF0=",
         "owner": "metacraft-labs",
         "repo": "isonim",
-        "rev": "b56bd098474244ce3eae401312b8a567cf74c30f",
+        "rev": "530cfa8154dc8dea1b87f804082f04f56f31754e",
         "type": "github"
       },
       "original": {
@@ -7454,11 +7454,11 @@
     "isonim-gpui": {
       "flake": false,
       "locked": {
-        "lastModified": 1795178240,
-        "narHash": "sha256-fjHw2Z/YB7Y7Y8QybjWRwBbQiJpIzKQ+LOvCoXc/vx0=",
+        "lastModified": 1795245706,
+        "narHash": "sha256-AUJ/O3Ggx7ClHzHZVpXKErE07HRn3XB/LTXZZ6WYN8E=",
         "owner": "metacraft-labs",
         "repo": "isonim-gpui",
-        "rev": "936f27dce1fa099d1b59138f7b01a5b0324490eb",
+        "rev": "ac92cde67f35b0b3c301f8f6da30041c0eca12a0",
         "type": "github"
       },
       "original": {
@@ -8596,11 +8596,11 @@
     "nim-termctl": {
       "flake": false,
       "locked": {
-        "lastModified": 1795208837,
-        "narHash": "sha256-DVsoMFB1HBOlnYGRJiWp1Y8EN+8YQ58Vo1cVz2MrTAg=",
+        "lastModified": 1795241982,
+        "narHash": "sha256-uv2REA0ardQxnxMSqovPIwd/kqKiSRE6gYexrJgdTMg=",
         "owner": "metacraft-labs",
         "repo": "nim-termctl",
-        "rev": "296b778cc7617bcba35ed6b70f479eea4271f34d",
+        "rev": "72574fda6f238d06f9b09941a5c9441c199c1a78",
         "type": "github"
       },
       "original": {

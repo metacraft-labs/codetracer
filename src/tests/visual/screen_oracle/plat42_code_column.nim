@@ -3,37 +3,12 @@
 ## executing its recording CLI or rewriting committed evidence.
 import gui_assert/image_math
 import ./region_locator
-import ../../../frontend/gpui/chrome
-import ../../../frontend/viewmodel/viewmodels/editor_gutter_lanes
 
 const PointerLaneSlackPx* = 2
     ## The pointer lane's left edge is read 2 px early: the editor's cell is
-    ## located from the gutter's column medians, which may land a column off
-    ## the editor's own left. The glyph lane's breakpoint disc stops 7 px short
-    ## of the lane (see `pointerLane`).
-
-proc pointerLane*(pane: Rect): tuple[x0, x1: int] =
-  ## THE EXECUTION POINTER'S LANE, in frame pixels: the editor gutter's
-  ## `gbPointer` band of the shared band map (`editor_gutter_lanes`), at the
-  ## code font size both front-ends use (`chrome.CodeFontPx`), from the
-  ## editor's left edge.
-  ##
-  ## Until the 2026-10-28 gutter rewrite (`leaves.renderEditorRow` now lays
-  ## its lanes out with `resolveBands`) the pointer was the leftmost ink of
-  ## the gutter and this record read it as "any ink left of the number
-  ## field". The shared map puts the breakpoint and tracepoint marks in
-  ## `gbGlyph`, LEFT of the pointer — Monaco's glyph margin — so that reading
-  ## took the breakpoint's row for a second execution line, and the record
-  ## refused every frame with a breakpoint. At 16 px the glyph lane is 22 px
-  ## and the pointer lane the 12 px after it (`widthPx`); the window draws the
-  ## 7x9 `highlight_line_arrow.svg` at the pointer lane's left and the 9 px
-  ## breakpoint disc centred in the glyph lane (6..15 px), so the two never
-  ## share a column. The lane is read from the map rather than measured off a
-  ## frame: a pointer the window drew outside its own lane is a defect this
-  ## record must not follow.
-  let glyph = gbGlyph.widthPx(CodeFontPx)
-  let pointer = gbPointer.widthPx(CodeFontPx)
-  (pane.x + glyph - PointerLaneSlackPx, pane.x + glyph + pointer)
+    ## located from the frame's separators, which may land a column off the
+    ## editor's own left. The glyph lane's breakpoint disc stops 7 px short of
+    ## the lane.
 
 proc inkCount*(img: GrayImage; x0, x1, y0, y1: int): int =
   ## Pixels more than 40 grey levels from the region's own most common level.
@@ -51,11 +26,35 @@ proc inkCount*(img: GrayImage; x0, x1, y0, y1: int): int =
     for x in xa ..< xb:
       if abs(int(img.pixels[y * img.width + x]) - bg) > 40: inc result
 
+proc pointerLane*(img: GrayImage; pane: Rect; rowPx: int): tuple[x0, x1: int] =
+  ## THE EXECUTION POINTER'S LANE, in frame pixels, FROM THE PIXELS: right of
+  ## the glyph margin and left of the line-number column.
+  ##
+  ## - The glyph margin (breakpoints, tracepoints) is Monaco's, one line
+  ##   height wide (`glyphMarginWidth`), and both front-ends draw it so. A
+  ##   line height is a row's pitch, which the reader measures, so the lane
+  ##   starts `rowPx` right of the pane's left.
+  ## - The line numbers are the first columns, right of that, holding ink on
+  ##   more than one row's worth of scanlines: the pointer is drawn on one
+  ##   row, a number on every row.
+  ##
+  ## This reader once took the lane from the application's own band map
+  ## (`viewmodel/viewmodels/editor_gutter_lanes`), which made "the pointer is
+  ## in its lane" a second reading of the map it was meant to check, and
+  ## broke PLAT-39's LAW-R4 (the oracle imports nothing from `viewmodel/`).
+  ## `test_plat42_window_reader.nim` is where the two are compared.
+  let x0 = pane.x + rowPx - PointerLaneSlackPx
+  let (ya, yb) = (max(0, pane.y), min(img.height, pane.y + pane.h))
+  var x1 = x0
+  let xEnd = min(img.width, pane.x + pane.w div 2)
+  while x1 < xEnd and inkCount(img, x1, x1 + 1, ya, yb) <= rowPx: inc x1
+  (x0, x1)
+
 proc pointerInked*(img: GrayImage; pane: Rect; y0, y1: int): bool =
   ## Whether the row between `y0` and `y1` carries the execution mark: ink in
   ## its `pointerLane`, its edge scanlines left out (a neighbour's
   ## anti-aliasing).
-  let lane = pointerLane(pane)
+  let lane = pointerLane(img, pane, y1 - y0)
   inkCount(img, lane.x0, lane.x1, y0 + 1, y1 - 1) > 0
 
 type CodeColumnRow* = object

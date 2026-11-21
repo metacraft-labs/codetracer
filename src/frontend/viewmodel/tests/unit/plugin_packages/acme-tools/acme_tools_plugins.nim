@@ -12,7 +12,9 @@
 ## status item, enablement and a context key, and answers `values` queries
 ## for a visualiser. It also DECORATES the current line of the source the
 ## debugger is in (`decorations`, a marker reading `metrics: line N`),
-## re-pushed at every stop, so the decoration follows a step.
+## re-pushed at every stop, so the decoration follows a step; and it MARKS
+## the same line through its declared `hotspot` marker surface (a `★` in the
+## gutter's mark column).
 ##
 ## `flame`'s list answers `view-event`: activating a row (Enter, or a click)
 ## re-pushes the list with that row marked `✓` and selected, which is how a
@@ -59,6 +61,18 @@ proc pushLineDecoration(p: Plugin; lastDoc: var string) =
                              "text": "metrics: line " & $d.location.line,
                              "kind": "marker"}])
 
+proc pushHotspot(p: Plugin) =
+  ## The `hotspot` MARKER surface: a gutter mark on the debugger's current
+  ## line, pushed as the marker table a front-end reads (`file`, `line`,
+  ## `glyph`, `text`).
+  let s = p.session
+  if s.isNil or s.store.isNil: return
+  let d = s.store.debugger.val
+  if d.location.file.len == 0 or d.location.line <= 0: return
+  p.pushView("hotspot", viewTable("metrics.hotspot",
+    @["file", "line", "glyph", "text"],
+    @[@[d.location.file, $d.location.line, "★", "hotspot"]]))
+
 proc metricsView(p: Plugin): ViewNode =
   let e = p.epoch
   viewTreeNode("metrics.root", "Metrics", @[
@@ -73,6 +87,7 @@ proc setupMetrics(sdk: PluginSdk) =
   m.onActivate = proc(p: Plugin) =
     p.pushView("overview", metricsView(p))
     p.pushLineDecoration(decorated)
+    p.pushHotspot()
     p.pushStatus("metrics.status", viewText("metrics.status", "metrics ok"))
     p.pushEnablement("metrics.step", true)
     p.pushContext("ready", %true)
@@ -84,6 +99,7 @@ proc setupMetrics(sdk: PluginSdk) =
   m.onSignals = proc(p: Plugin) =
     p.pushView("overview", metricsView(p))
     p.pushLineDecoration(decorated)
+    p.pushHotspot()
   m.onSettingsChanged = proc(p: Plugin) =
     p.pushView("overview", metricsView(p))
   m.onInvoke("metrics.step", proc(p: Plugin; args: JsonNode; req: Request) =

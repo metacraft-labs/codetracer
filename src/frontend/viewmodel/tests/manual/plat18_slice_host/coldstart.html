@@ -90,9 +90,12 @@
         const crossing = api.frameBytes !== null && api.frameBytes !== undefined;
         const rootEl = document.getElementById('ct-p18-root');
         if (crossing) {
-          const nodes = { 0: rootEl };
           api.opManifest();
-          const table = globalThis.ctP18Applier.buildOpTable(api.frameBytes());
+          const applier = globalThis.IsonimFrameApplier.createFrameApplier({
+            manifest: api.frameBytes().slice(),
+            mount: rootEl,
+            dispatch: (id) => { api.dispatch(id); return 0; },
+          });
           api.reset();
           const applyNext = (fn) => {
             api.beginFrame();
@@ -100,8 +103,7 @@
             // Read before applying: a dispatch back into the core during
             // application would zero the counter under the comparison.
             const emitted = api.ops();
-            const applied = globalThis.ctP18Applier.applyFrame(
-              api.frameBytes(), table, nodes, (id) => api.dispatch(id));
+            const applied = applier.apply(api.frameBytes());
             if (emitted !== applied) {
               throw new Error(arm + ': the core put ' + emitted + ' operation(s) in ' +
                               'the frame and the host applied ' + applied);

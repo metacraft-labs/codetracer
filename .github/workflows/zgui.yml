@@ -66,6 +66,15 @@ jobs:
         with:
           env-flavor: nix
           gh-token: ${{ steps.ci_token.outputs.token }}
+          # The same cache settings as `Install Nix` above. This action
+          # installs and configures Nix again, and without them the
+          # configuration it writes names no Attic cache: on an ephemeral
+          # runner, whose store starts empty, the dev shell the next step
+          # realises is then built from source, which ran past the job's
+          # whole budget.
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
 
       - name: Provision dependency siblings from repro.lock
         uses: ./.github/actions/provision-repro-lock-siblings
@@ -111,17 +120,25 @@ jobs:
         # reads its default config and layout from the built tree, and
         # build-once refuses a `ct` without them, so they are built first (each
         # of those builds is refused for lacking the other, and that is fine).
+        # `ct record` runs `db-backend-record` from the same tree; a persistent
+        # runner can hold one from an earlier job, an ephemeral one has none
+        # (run 44844246394: "Could not find command: …/db-backend-record").
         run: |
           nix develop . --command bash -c '
             for t in config-default-layout-json config-default-config-yaml; do
               CODETRACER_REPROBUILD_TARGET=".#$t" just build-once || true
             done
-            CODETRACER_REPROBUILD_TARGET=".#ct-binary" just build-once'
+            CODETRACER_REPROBUILD_TARGET=".#ct-binary" just build-once
+            CODETRACER_REPROBUILD_TARGET=".#db-backend-record" just build-once'
 
       - name: Build replay-server
         env:
           CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
           CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
+          # The trace writer's Nim build finds `results` only here. A warm
+          # runner's ~/.nimble hides its absence; an ephemeral one has none
+          # (run 44827340359: "cannot open file: results").
+          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
           CODETRACER_REPROBUILD_TARGET: ".#replay-server"
         run: nix develop . --command just build-once
 
@@ -184,6 +201,15 @@ jobs:
         with:
           env-flavor: nix
           gh-token: ${{ steps.ci_token.outputs.token }}
+          # The same cache settings as `Install Nix` above. This action
+          # installs and configures Nix again, and without them the
+          # configuration it writes names no Attic cache: on an ephemeral
+          # runner, whose store starts empty, the dev shell the next step
+          # realises is then built from source, which ran past the job's
+          # whole budget.
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
 
       - name: Provision dependency siblings from repro.lock
         uses: ./.github/actions/provision-repro-lock-siblings
@@ -230,6 +256,10 @@ jobs:
         env:
           CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
           CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
+          # The trace writer's Nim build finds `results` only here. A warm
+          # runner's ~/.nimble hides its absence; an ephemeral one has none
+          # (run 44827340359: "cannot open file: results").
+          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
         run: nix develop . --command bash -c 'cd src/db-backend && cargo build --bin replay-server'
 
       - name: The zgui lane

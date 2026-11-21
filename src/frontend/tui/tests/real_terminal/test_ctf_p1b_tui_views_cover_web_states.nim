@@ -96,6 +96,7 @@ import ../../agent_harbor/ah_tui_initiative_tab_bar
 import ../../agent_harbor/ah_tui_fleet_panel
 import ../../agent_harbor/ah_tui_composer
 import ../../agent_harbor/ah_tui_results
+import ../../agent_harbor/ah_tui_pie
 import ../../agent_harbor/ah_tui_session_activity
 import ../../agent_harbor/ah_tui_suggested_actions
 import ../../agent_harbor/[ah_tui_control_center, ah_tui_gaze_mark]
@@ -976,6 +977,50 @@ proc checkGazeMark(view: AhNode; vm: GazeStatusVM): seq[string] =
   result.expect("mark words", marks[0].attr("accessible-name"), vm.text)
   result.expect("tooltip", marks[0].attr("tooltip"), vm.tooltip)
 
+proc contrastRatio(a, b: string): float
+
+proc checkPieStory(m: AhTuiMount): seq[string] =
+  ## The progress pie's story against its data (`agent_harbor_pie_stories`):
+  ## a band per ground in order, a row per role, a pie per column, each with
+  ## its role, share and words; its cell holds the pie's glyph
+  ## (`pieGlyph`, by quarters) in the wedge's ink for its ground
+  ## (`pieInks`), which holds 3:1 against the cell's own ground, measured
+  ## here with this suite's contrast measure rather than the palette's.
+  let view = m.view
+  let p = ahPalette(m.mode)
+  let bands = pieStoryBands(m.fixture, m.mode)
+  let drawn = view.all("pie-ground").filterIt(it.attr("pie").len == 0)
+  # A short screen holds fewer bands; those it holds come in order.
+  var wantedBands: seq[string]
+  for i, band in bands:
+    if i < drawn.len: wantedBands.add $band.ground
+  result.expect("pie bands", drawn.mapIt(it.attr("pie-ground")), wantedBands)
+  for i, b in drawn:
+    let band = bands[i]
+    let rows = b.all("pie-row")
+    result.expect("rows of " & $band.ground, rows.mapIt(it.attr("pie-row")),
+                  band.rows.mapIt($it.role))
+    for j, row in band.rows:
+      if j >= rows.len: break
+      let pies = rows[j].all("pie")
+      result.expect("pies of " & $band.ground & "/" & $row.role, pies.len, row.pies.len)
+      for k, pie in row.pies:
+        if k >= pies.len: break
+        let e = pies[k]
+        let at = $band.ground & "/" & $row.role & "/" & PieStoryColumns[k]
+        result.expect("role at " & at, e.attr("pie"), $pie.role)
+        result.expect("share at " & at, e.attr("pie-fraction"),
+                      if pie.known: pie.pieStopPercent else: "unknown")
+        result.expect("words at " & at, e.attr("pie-label"), pie.label)
+        result.expect("glyph at " & at, cellsText(m.canvas.grid, e.row, e.col, 1),
+                      pie.pieGlyph)
+        let ground = p.pieGroundColour(band.ground)
+        let look = styleAt(m.canvas.grid, e.row, e.col)
+        result.expect("ink at " & at, look.fg, p.pieInks(pie.role, ground).wedge)
+        result.expect("ground at " & at, look.bg, ground)
+        if contrastRatio(look.fg, ground) < 3.0:
+          result.add "the pie at " & at & " is under 3:1 on its ground"
+
 proc checkStory(m: AhTuiMount): seq[string] =
   let view = m.view
   if view.isNil: return @["no node says which surface was drawn"]
@@ -998,6 +1043,7 @@ proc checkStory(m: AhTuiMount): seq[string] =
     checkControlCenter(view, m.canvas.root.all("surface").filterIt(
       it.attr("surface") == "agent-harbor-initiatives"), m.center)
   of "agent-harbor-status-gaze": checkGazeMark(view, m.gaze)
+  of PieStorySurface: checkPieStory(m)
   of "agent-harbor-session-activity":
     var problems = checkTimeline(view, m.timeline)
     if not m.cards.cards.isNil:

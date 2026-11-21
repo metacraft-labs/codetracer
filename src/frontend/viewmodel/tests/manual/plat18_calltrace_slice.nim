@@ -65,7 +65,7 @@ import ../../viewmodels/calltrace_vm
 import ../../views/isonim_calltrace_view
 
 when defined(ctPlat18Frame):
-  import ./plat18_frame_renderer
+  import isonim/web/frame_renderer
   import isonim/core/boundary_meter
 else:
   import isonim/web/web_renderer
@@ -185,10 +185,7 @@ proc p18OpManifest() {.exportc.} =
   ## The opcode table, published by the side that owns it — see
   ## `plat18_slice.nim`.
   when defined(ctPlat18Frame):
-    wireReset()
-    for op in BoundaryOp:
-      wirePutU8(ord(op))
-      wirePutStr($op)
+    writeOpManifest()
 
 when defined(js) and not defined(nodejs):
   when defined(ctPlat18Frame):
@@ -196,7 +193,7 @@ when defined(js) and not defined(nodejs):
 globalThis.p18Frame = {
   reset: p18Reset, mount: p18Mount, beginFrame: p18BeginFrame,
   expand: p18Expand, step: p18Step, collapse: p18Collapse,
-  rows: p18Rows, frameLen: p18FrameLen, frameBytes: globalThis.ctP18_frame,
+  rows: p18Rows, frameLen: p18FrameLen, frameBytes: globalThis.isonimFrameBytes,
   ops: p18Ops, readCrossings: p18ReadCrossings, dispatch: p18Dispatch,
   opManifest: p18OpManifest
 };

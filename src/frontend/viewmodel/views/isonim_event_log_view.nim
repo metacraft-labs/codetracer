@@ -54,6 +54,13 @@ when defined(js):
   proc stopClick(ev: isonim_dom.Event) {.importcpp: "#.stopPropagation()".}
   proc focusElement(el: isonim_dom.Element) {.importcpp: "#.focus()".}
 
+when defined(ctWasmCore):
+  # The command-frame renderer a WebAssembly core draws through
+  # (`src/frontend/web_core/web_core.nim`). Imported before the generic procs
+  # below for the reason `isonim_calltrace_view.nim` gives: a generic binds a
+  # renderer call at its definition when only one overload is in scope.
+  import isonim/web/frame_renderer
+
 import ../store/types
 import ./row_links
 import ../viewmodels/event_log_vm

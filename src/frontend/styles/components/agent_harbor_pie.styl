@@ -1,0 +1,117 @@
+// The progress pie (isonim_agent_harbor_pie_view.nim): an item's state by
+// its colour, its progress by a wedge of the same colour. A file of its own,
+// as agent_harbor_composer.styl is.
+//
+// One disc, drawn as a two-stop conic gradient (CSS Images Level 4 §3.3,
+// https://www.w3.org/TR/css-images-4/#conic-gradients): the wedge from twelve
+// o'clock clockwise to `--ah-pie-p` (set on the element), hard against the
+// rest of the disc, and a 1px edge in the wedge's ink, inset so the pie keeps
+// its size. Sizes are in rem (px / 16), as UI-Design-Decisions.md's Units
+// asks: the story's 104px words column is 6.5rem, its pie columns' 24, 32,
+// 32, 34, 40 and 60px are 1.5 to 3.75rem. The
+// inks (`--ah-pie-wedge`, `--ah-pie-rest`, `--ah-pie-edge`) are
+// set per ground and role by agent_harbor_pie_inks.styl, which is GENERATED
+// from the palette's `pieInks` (`agent_harbor_palette.pieStylesheet`), so the
+// web draws the inks GPUI and the terminal draw.
+
+@import "agent_harbor_pie_inks"
+
+.ah-pie
+  position: relative
+  display: inline-block
+  flex-shrink: 0
+  box-sizing: border-box
+  border-radius: 50%
+  background: conic-gradient(var(--ah-pie-wedge) 0 var(--ah-pie-p), var(--ah-pie-rest) var(--ah-pie-p) 100%)
+  box-shadow: inset 0 0 0 0.0625rem var(--ah-pie-edge)
+
+// Idle (`ah-pie-hollow`): the gradient painted only inside the content box,
+// 2px (a sixth of 12px) in from the ring, so the ground shows between the
+// ring and the wedge and a whole idle pie is never the solid disc an ended
+// one is.
+.ah-pie-hollow
+  padding: 0.125rem
+  background-clip: content-box
+
+// No known progress (`ah-pie-unknown`): no rest and no wedge, only the ring
+// and a centred dot of the full ink a quarter of the diameter across, well
+// short of a hollow pie's inner disc so the two never read alike.
+.ah-pie-unknown
+  background: none
+
+.ah-pie-dot
+  position: absolute
+  left: 37.5%
+  top: 37.5%
+  width: 25%
+  height: 25%
+  border-radius: 50%
+  background: var(--ah-pie-wedge)
+
+// The story `Pie Indicator: Every State` (agent_harbor_pie_stories.nim
+// states the same pixels for GPUI): a head naming the columns, then a band
+// per ground, each a title and a row per role.
+.ah-pie-story
+  position: fixed
+  top: 0
+  left: 0
+  right: 0
+  bottom: 0
+  overflow: hidden
+  padding: 0.5rem
+  background: colors-ui-surface-primary-default
+  font-family: "SpaceGrotesk", sans-serif
+  font-size: 0.75rem
+  line-height: 1rem
+
+.ah-pie-band
+  margin-top: 0.25rem
+  padding: 0 0.5rem
+
+.ah-pie-head
+  padding: 0 0.5rem
+
+.ah-pie-band-title
+  display: block
+  height: 1rem
+  font-weight: 600
+
+.ah-pie-row
+  display: flex
+  flex-direction: row
+  align-items: center
+  height: 1rem
+
+.ah-pie-label
+  width: 6.5rem
+  flex-shrink: 0
+  white-space: nowrap
+  overflow: hidden
+
+// A pie column centres its pie and, in the head, its words over the pie,
+// each column as wide as `PieStoryColumnsPx` says, so two neighbouring heads
+// stay 8px (0.5rem) apart.
+.ah-pie-col
+  flex-shrink: 0
+  display: flex
+  align-items: center
+  justify-content: center
+  white-space: nowrap
+
+.ah-pie-col-0
+  width: 1.5rem
+
+.ah-pie-col-1
+  width: 2rem
+
+.ah-pie-col-2
+  width: 2rem
+
+.ah-pie-col-3
+  width: 2.125rem
+
+.ah-pie-col-4
+  width: 2.5rem
+
+.ah-pie-col-5
+  width: 3.75rem

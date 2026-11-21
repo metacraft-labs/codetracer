@@ -424,14 +424,14 @@ proc run() =
     dispose()
 
 when defined(ctPlat18Slice):
-  import ./plat18_frame_renderer
+  import isonim/web/frame_renderer
 
   proc crossCheckWireAgainstMeter() =
     ## TWO IMPLEMENTATIONS OF ONE WIRE FORMAT, WITH A MECHANICAL EQUALITY
     ## BETWEEN THEM (Verification-Harness-Traps.md §14).
     ##
-    ## `boundary_meter` COUNTS what an operation would cost; `plat18_frame_
-    ## renderer` WRITES the bytes a host applies. There genuinely have to be
+    ## `boundary_meter` COUNTS what an operation would cost;
+    ## `isonim/web/frame_renderer` WRITES the bytes a host applies. There genuinely have to be
     ## two — one is an instrument on the current build, the other is the
     ## slice's actual boundary — and §14's remedy for the case where there
     ## have to be two is to make each have evidence the other cannot satisfy
@@ -479,7 +479,9 @@ when defined(ctPlat18Slice):
           vm.toggleExpand(WideName)
           drain()
         discard panel
-        wireBytesTotal = wireBytes()
+        # What the renderer WROTE plus what its same-value elision SKIPPED
+        # is what the view ISSUED, which is what the meter counts.
+        wireBytesTotal = wireBytes() + elidedBytes
         dispose()
 
       if meterBytes != int64(wireBytesTotal):

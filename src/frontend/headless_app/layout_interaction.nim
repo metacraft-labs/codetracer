@@ -161,6 +161,9 @@ type
       stackAnchor*: PaneKind
         ## A pane in the destination stack. Named by pane rather than by path
         ## for `lcMoveTab`'s reason: a path is a renderer's way of pointing.
+        ## Meaningful only when `stackAnchorContributed` is empty.
+      stackAnchorContributed*: string
+        ## The anchor is an extension's pane (`anchorOf` reads both).
       index*: int
         ## Which slot of the tab strip. Meaningful when the anchor is already
         ## in a stack; when it is a BARE pane the drop turns it into a two-tab
@@ -168,6 +171,8 @@ type
         ## `1` and `lcMergeIntoStack` — which has no index — is what commits.
     of dtSplitBefore, dtSplitAfter:
       splitTarget*: PaneKind
+      splitTargetContributed*: string
+        ## The split target is an extension's pane (`splitOf` reads both).
       axis*: SplitAxis
     of dtDockEdge, dtSplitRoot:
       edge*: LayoutEdge
@@ -198,6 +203,9 @@ type
     case kind*: InteractionKind
     of ikDraggingTab:
       source*: PaneKind
+        ## Meaningful only when `sourceContributed` is empty: the dragged pane
+        ## may be an extension's (`sourceRef` reads both).
+      sourceContributed*: string
       origin*: DragOrigin
       hover*: Option[DropTarget]
         ## Where it would land right now. `none` while the pointer is over
@@ -222,6 +230,8 @@ type
     of ikRevealingDock:
       edge*: LayoutEdge
       pane*: PaneKind
+        ## Meaningful only when `paneContributed` is empty (`revealRef`).
+      paneContributed*: string
     of ikNone:
       discard
 
@@ -403,6 +413,55 @@ proc panePath*(layout: Layout; r: PaneRef): Option[string] =
 # are variant objects and a test compares whole candidate lists.
 # ---------------------------------------------------------------------------
 
+func anchorOf*(t: DropTarget): PaneRef =
+  ## A join target's anchor, in its own namespace.
+  if t.stackAnchorContributed.len > 0: contributedRef(t.stackAnchorContributed)
+  else: builtinRef(t.stackAnchor)
+
+func splitOf*(t: DropTarget): PaneRef =
+  ## A split target's pane, in its own namespace.
+  if t.splitTargetContributed.len > 0: contributedRef(t.splitTargetContributed)
+  else: builtinRef(t.splitTarget)
+
+func sourceRef*(i: Interaction): PaneRef =
+  ## The dragged pane, in its own namespace. Only for `ikDraggingTab`.
+  if i.sourceContributed.len > 0: contributedRef(i.sourceContributed)
+  else: builtinRef(i.source)
+
+func revealRef*(i: Interaction): PaneRef =
+  ## The revealed docked pane, in its own namespace. Only for
+  ## `ikRevealingDock`.
+  if i.paneContributed.len > 0: contributedRef(i.paneContributed)
+  else: builtinRef(i.pane)
+
+func kindPart(r: PaneRef): PaneKind =
+  if r.isContributed: PaneKind.low else: r.builtin
+
+func idPart(r: PaneRef): string =
+  if r.isContributed: r.id else: ""
+
+proc intoStackTarget(anchor: PaneRef; index: int;
+                     region: DropRegion): DropTarget =
+  DropTarget(kind: dtIntoStack, stackAnchor: kindPart(anchor),
+             stackAnchorContributed: idPart(anchor), index: index,
+             region: region)
+
+proc splitTargetOf(kind: DropTargetKind; target: PaneRef; axis: SplitAxis;
+                   region: DropRegion): DropTarget =
+  if kind == dtSplitBefore:
+    DropTarget(kind: dtSplitBefore, splitTarget: kindPart(target),
+               splitTargetContributed: idPart(target), axis: axis,
+               region: region)
+  else:
+    DropTarget(kind: dtSplitAfter, splitTarget: kindPart(target),
+               splitTargetContributed: idPart(target), axis: axis,
+               region: region)
+
+proc draggingOf(source: PaneRef; origin: DragOrigin;
+                hover: Option[DropTarget]): Interaction =
+  Interaction(kind: ikDraggingTab, source: kindPart(source),
+              sourceContributed: idPart(source), origin: origin, hover: hover)
+
 proc `==`*(a, b: DropRegion): bool =
   if a.kind != b.kind or a.path != b.path:
     return false
@@ -415,9 +474,13 @@ proc `==`*(a, b: DropTarget): bool =
   if a.kind != b.kind or not (a.region == b.region):
     return false
   case a.kind
-  of dtIntoStack: a.stackAnchor == b.stackAnchor and a.index == b.index
+  of dtIntoStack:
+    a.stackAnchor == b.stackAnchor and
+      a.stackAnchorContributed == b.stackAnchorContributed and
+      a.index == b.index
   of dtSplitBefore, dtSplitAfter:
-    a.splitTarget == b.splitTarget and a.axis == b.axis
+    a.splitTarget == b.splitTarget and
+      a.splitTargetContributed == b.splitTargetContributed and a.axis == b.axis
   of dtDockEdge, dtSplitRoot: a.edge == b.edge
 
 proc `$`*(r: DropRegion): string =
@@ -431,9 +494,9 @@ proc `$`*(r: DropRegion): string =
 proc `$`*(t: DropTarget): string =
   case t.kind
   of dtIntoStack:
-    "intoStack(" & $t.stackAnchor & ", " & $t.index & ") @" & $t.region
+    "intoStack(" & $t.anchorOf & ", " & $t.index & ") @" & $t.region
   of dtSplitBefore, dtSplitAfter:
-    $t.kind & "(" & $t.splitTarget & ", " & $t.axis & ") @" & $t.region
+    $t.kind & "(" & $t.splitOf & ", " & $t.axis & ") @" & $t.region
   of dtDockEdge:
     "dockEdge(" & $t.edge & ") @" & $t.region
   of dtSplitRoot:
@@ -449,7 +512,7 @@ proc `$`*(i: Interaction): string =
   case i.kind
   of ikNone: "none"
   of ikDraggingTab:
-    "draggingTab(" & $i.source & " from " & $i.origin & ", hover=" &
+    "draggingTab(" & $i.sourceRef & " from " & $i.origin & ", hover=" &
       (if i.hover.isSome: $i.hover.get else: "-") & ")"
   of ikResizingSplit:
     var parts: seq[string] = @[]
@@ -458,7 +521,7 @@ proc `$`*(i: Interaction): string =
     "resizingSplit('" & i.node & "', [" & parts.join(", ") & "]" &
       (if i.divider.isSome: ", divider " & $i.divider.get else: "") & ")"
   of ikRevealingDock:
-    "revealingDock(" & $i.pane & "@" & $i.edge & ")"
+    "revealingDock(" & $i.revealRef & "@" & $i.edge & ")"
 
 # ---------------------------------------------------------------------------
 # §4.2 — the drop-target model
@@ -494,7 +557,7 @@ func rootSplitOf(edge: LayoutEdge): (SplitAxis, SplitSide) =
   of leTop: (saColumn, ssBefore)
   of leBottom: (saColumn, ssAfter)
 
-proc commandFor*(layout: Layout; source: PaneKind;
+proc commandFor*(layout: Layout; source: PaneRef;
                  target: DropTarget): Option[LayoutCommand] =
   ## The command a drop on `target` would issue. **Pure, and the only place
   ## the target vocabulary meets the command vocabulary** — `commit` is this
@@ -515,13 +578,13 @@ proc commandFor*(layout: Layout; source: PaneKind;
     # the tree (PLAT-5's closing pass, 2026-09-27). Until then a docked source
     # rejoined a stack through `ahRestore`, which places AFTER an anchor — so
     # the first slot and a bare-pane anchor were not reachable at all.
-    let anchorLeaf = layout.tree.find(target.stackAnchor)
+    let anchorLeaf = layout.tree.find(target.anchorOf)
     if anchorLeaf.isNil:
       return none(LayoutCommand)
     let parent = parentOf(layout.tree, anchorLeaf)
     if not parent.isNil and parent.kind == lnStack:
-      return some(cmdMoveTab(source, target.stackAnchor, target.index))
-    some(cmdMergeIntoStack(source, target.stackAnchor))
+      return some(cmdMoveTab(source, target.anchorOf, target.index))
+    some(cmdMergeIntoStack(source, target.anchorOf))
   of dtSplitBefore, dtSplitAfter:
     let side = if target.kind == dtSplitBefore: ssBefore else: ssAfter
     # PLACED OR DOCKED, ONE COMMAND EITHER WAY. `lcSplit`'s `splitMovesPane`
@@ -530,14 +593,19 @@ proc commandFor*(layout: Layout; source: PaneKind;
     # docked source had no spelling here: `lcSplit` refused it
     # (`lpPaneBothPlacedAndDocked`) and restore-then-split would have made
     # this layer sequence two commands, which §4.3 does not allow.
-    some(cmdSplitMove(target.splitTarget, source, target.axis, side))
+    some(cmdSplitMove(target.splitOf, source, target.axis, side))
   of dtDockEdge:
     some(cmdDock(source, target.edge))
   of dtSplitRoot:
     let (axis, side) = rootSplitOf(target.edge)
     some(cmdSplitRootMove(source, axis, side))
 
-proc intoStackCandidates(layout: Layout; source: PaneKind; leaf: LayoutNode;
+proc commandFor*(layout: Layout; source: PaneKind;
+                 target: DropTarget): Option[LayoutCommand] =
+  ## `commandFor` for a built-in source.
+  commandFor(layout, builtinRef(source), target)
+
+proc intoStackCandidates(layout: Layout; source: PaneRef; leaf: LayoutNode;
                          leafPath: string): seq[DropTarget] =
   ## Every "become a tab here" target the node under the pointer offers.
   ##
@@ -548,42 +616,39 @@ proc intoStackCandidates(layout: Layout; source: PaneKind; leaf: LayoutNode;
   result = @[]
   let parent = parentOf(layout.tree, leaf)
   if not parent.isNil and parent.kind == lnStack:
-    let anchor = parent.children[0].pane
+    # `paneRefOf`, never `.pane`: the first tab may be an extension's, whose
+    # `pane` field is the enum's zero value.
+    let anchor = paneRefOf(parent.children[0])
     let stackPath = nodePath(layout.tree, parent)
     if stackPath.isNone:
       return
     # One slot per insertion point. `apply` decides which of them are legal
     # — dragging within the source's own stack has one fewer.
     for slot in 0 .. parent.children.len:
-      result.add(DropTarget(
-        kind: dtIntoStack, stackAnchor: anchor, index: slot,
-        region: DropRegion(kind: drTabSlot, path: stackPath.get,
-                           slot: slot)))
+      result.add(intoStackTarget(anchor, slot,
+        DropRegion(kind: drTabSlot, path: stackPath.get, slot: slot)))
     return
   # A bare pane: dropping onto its body turns it into a two-tab stack.
-  result.add(DropTarget(
-    kind: dtIntoStack, stackAnchor: leaf.pane, index: 1,
-    region: DropRegion(kind: drWholeNode, path: leafPath)))
+  result.add(intoStackTarget(paneRefOf(leaf), 1,
+    DropRegion(kind: drWholeNode, path: leafPath)))
 
 proc splitCandidates(leaf: LayoutNode; leafPath: string): seq[DropTarget] =
   ## The four edge strips of a node's region, as split targets. The mapping
   ## from a side to an (axis, side) pair is stated once, here, because two
   ## front-ends disagreeing about which way "left" splits is precisely the
   ## "a binding never decides layout semantics" failure §5 names.
-  @[DropTarget(kind: dtSplitBefore, splitTarget: leaf.pane, axis: saRow,
-               region: DropRegion(kind: drNodeStrip, path: leafPath,
-                                  side: leLeft)),
-    DropTarget(kind: dtSplitAfter, splitTarget: leaf.pane, axis: saRow,
-               region: DropRegion(kind: drNodeStrip, path: leafPath,
-                                  side: leRight)),
-    DropTarget(kind: dtSplitBefore, splitTarget: leaf.pane, axis: saColumn,
-               region: DropRegion(kind: drNodeStrip, path: leafPath,
-                                  side: leTop)),
-    DropTarget(kind: dtSplitAfter, splitTarget: leaf.pane, axis: saColumn,
-               region: DropRegion(kind: drNodeStrip, path: leafPath,
-                                  side: leBottom))]
+  let r = paneRefOf(leaf)
+  @[splitTargetOf(dtSplitBefore, r, saRow,
+                  DropRegion(kind: drNodeStrip, path: leafPath, side: leLeft)),
+    splitTargetOf(dtSplitAfter, r, saRow,
+                  DropRegion(kind: drNodeStrip, path: leafPath, side: leRight)),
+    splitTargetOf(dtSplitBefore, r, saColumn,
+                  DropRegion(kind: drNodeStrip, path: leafPath, side: leTop)),
+    splitTargetOf(dtSplitAfter, r, saColumn,
+                  DropRegion(kind: drNodeStrip, path: leafPath,
+                             side: leBottom))]
 
-proc isLegal(layout: Layout; source: PaneKind; target: DropTarget): bool =
+proc isLegal(layout: Layout; source: PaneRef; target: DropTarget): bool =
   ## Whether a drop here would be accepted. **Answered by `apply`, never by a
   ## rule restated here**: a candidate list built from its own idea of what is
   ## legal would drift from the algebra the moment either changed.
@@ -592,7 +657,7 @@ proc isLegal(layout: Layout; source: PaneKind; target: DropTarget): bool =
     return false
   apply(layout, cmd.get).kind != loRefused
 
-proc dropTargetsFor*(layout: Layout; source: PaneKind;
+proc dropTargetsFor*(layout: Layout; source: PaneRef;
                      pointer: LayoutPointer): seq[DropTarget] =
   ## Layout-ViewModel §4.2. **A pure function of the committed layout, the
   ## pane being dragged, and a pointer** — returning the candidate targets
@@ -634,6 +699,11 @@ proc dropTargetsFor*(layout: Layout; source: PaneKind;
   for candidate in splitCandidates(node, pointer.path):
     if isLegal(layout, source, candidate):
       result.add(candidate)
+
+proc dropTargetsFor*(layout: Layout; source: PaneKind;
+                     pointer: LayoutPointer): seq[DropTarget] =
+  ## `dropTargetsFor` for a built-in source.
+  dropTargetsFor(layout, builtinRef(source), pointer)
 
 proc regionForZone(layout: Layout; pointer: LayoutPointer): Option[DropRegion] =
   ## Which region of the pointer's node the pointer's zone selects. The
@@ -681,7 +751,7 @@ proc regionForZone(layout: Layout; pointer: LayoutPointer): Option[DropRegion] =
   else:
     none(DropRegion)
 
-proc hoveredTarget*(layout: Layout; source: PaneKind;
+proc hoveredTarget*(layout: Layout; source: PaneRef;
                     pointer: LayoutPointer): Option[DropTarget] =
   ## The ONE candidate the pointer is currently on, or `none`. Always a member
   ## of `dropTargetsFor(layout, source, pointer)` — it is selected from that
@@ -699,13 +769,17 @@ proc hoveredTarget*(layout: Layout; source: PaneKind;
 # §4.1 — the machine
 # ---------------------------------------------------------------------------
 
+proc hoveredTarget*(layout: Layout; source: PaneKind;
+                    pointer: LayoutPointer): Option[DropTarget] =
+  hoveredTarget(layout, builtinRef(source), pointer)
+
 proc noInteraction*(): Interaction =
   ## The resting state. `ikNone` is a value rather than an `Option[Interaction]`
   ## so that a front-end always has an interaction to read and never has to
   ## branch on "is there one" before branching on "which".
   Interaction(kind: ikNone)
 
-proc originOf(layout: Layout; source: PaneKind): Option[DragOrigin] =
+proc originOf(layout: Layout; source: PaneRef): Option[DragOrigin] =
   let at = layout.dockedIndex(source)
   if at >= 0:
     let d = layout.docked[at]
@@ -725,15 +799,18 @@ proc originOf(layout: Layout; source: PaneKind): Option[DragOrigin] =
     return none(DragOrigin)
   some(DragOrigin(kind: doRegion, regionPath: leafPath.get))
 
-proc beginDragTab*(layout: Layout; source: PaneKind): Option[Interaction] =
-  ## Start dragging `source`. `none` when the pane is in neither the tree nor
-  ## `docked` — there is nothing to pick up, and saying so here means every
-  ## later routine can assume the gesture is well formed.
+proc beginDragTab*(layout: Layout; source: PaneRef): Option[Interaction] =
+  ## Start dragging `source` — a built-in pane or an extension's. `none` when
+  ## the pane is in neither the tree nor `docked` — there is nothing to pick
+  ## up, and saying so here means every later routine can assume the gesture
+  ## is well formed.
   let origin = originOf(layout, source)
   if origin.isNone:
     return none(Interaction)
-  some(Interaction(kind: ikDraggingTab, source: source, origin: origin.get,
-                   hover: none(DropTarget)))
+  some(draggingOf(source, origin.get, none(DropTarget)))
+
+proc beginDragTab*(layout: Layout; source: PaneKind): Option[Interaction] =
+  beginDragTab(layout, builtinRef(source))
 
 proc hoverAt*(interaction: Interaction; layout: Layout;
               pointer: LayoutPointer): Interaction =
@@ -742,9 +819,8 @@ proc hoverAt*(interaction: Interaction; layout: Layout;
   ## written as a mutation, so it is the one most worth having as a value.
   if interaction.kind != ikDraggingTab:
     return interaction
-  Interaction(kind: ikDraggingTab, source: interaction.source,
-              origin: interaction.origin,
-              hover: hoveredTarget(layout, interaction.source, pointer))
+  draggingOf(interaction.sourceRef, interaction.origin,
+             hoveredTarget(layout, interaction.sourceRef, pointer))
 
 type
   DropIndicationKind* = enum
@@ -773,7 +849,8 @@ type
     kind*: DropIndicationKind
     source*: PaneKind
       ## What is being dragged — the ghost label follows the pointer with its
-      ## name.
+      ## name. Meaningful only when `sourceContributed` is empty.
+    sourceContributed*: string
     path*: string
     side*: LayoutEdge
     slot*: int
@@ -790,7 +867,8 @@ proc dropIndicationOf*(interaction: Interaction): DropIndication =
   ## value against their own layouts.
   if interaction.kind != ikDraggingTab:
     return DropIndication(kind: diNone)
-  result = DropIndication(kind: diNone, source: interaction.source)
+  result = DropIndication(kind: diNone, source: interaction.source,
+                          sourceContributed: interaction.sourceContributed)
   if interaction.hover.isNone:
     return
   let t = interaction.hover.get
@@ -1015,7 +1093,7 @@ proc proposeShare*(interaction: Interaction; layout: Layout;
   Interaction(kind: ikResizingSplit, node: interaction.node, proposed: weights,
               divider: none(SplitSide))
 
-proc beginReveal*(layout: Layout; pane: PaneKind): Option[Interaction] =
+proc beginReveal*(layout: Layout; pane: PaneRef): Option[Interaction] =
   ## Reveal a docked pane as an overlay. `none` when the pane is not docked.
   ##
   ## **The reveal lives here and nowhere else.** `DockedPane.revealed` exists
@@ -1026,12 +1104,19 @@ proc beginReveal*(layout: Layout; pane: PaneKind): Option[Interaction] =
   if at < 0:
     return none(Interaction)
   some(Interaction(kind: ikRevealingDock, edge: layout.docked[at].edge,
-                   pane: pane))
+                   pane: kindPart(pane), paneContributed: idPart(pane)))
 
-proc isRevealed*(interaction: Interaction; pane: PaneKind): bool =
+proc beginReveal*(layout: Layout; pane: PaneKind): Option[Interaction] =
+  beginReveal(layout, builtinRef(pane))
+
+proc isRevealed*(interaction: Interaction; pane: PaneRef): bool =
   ## Whether a renderer should be drawing `pane`'s overlay. The query that
   ## replaces reading `DockedPane.revealed`.
-  interaction.kind == ikRevealingDock and interaction.pane == pane
+  interaction.kind == ikRevealingDock and
+    sameSlot(interaction.revealRef, pane)
+
+proc isRevealed*(interaction: Interaction; pane: PaneKind): bool =
+  isRevealed(interaction, builtinRef(pane))
 
 # ---------------------------------------------------------------------------
 # §4.3 — commit and cancel
@@ -1099,7 +1184,7 @@ proc pendingCommand*(layout: Layout;
     if interaction.hover.isNone:
       none(LayoutCommand)
     else:
-      commandFor(layout, interaction.source, interaction.hover.get)
+      commandFor(layout, interaction.sourceRef, interaction.hover.get)
   of ikResizingSplit:
     if interaction.divider.isSome:
       return dividerCommand(layout, interaction)
@@ -1115,7 +1200,7 @@ proc pendingCommand*(layout: Layout;
         at = i
     if at < 0:
       return none(LayoutCommand)
-    some(cmdSetWeight(leaf.pane, interaction.proposed[at]))
+    some(cmdSetWeight(paneRefOf(leaf), interaction.proposed[at]))
   of ikRevealingDock:
     # A reveal commits nothing. It is an overlay the user looked at; PINNING
     # the pane back into the tree is `cmdRestoreDocked`, an explicit command
@@ -1180,7 +1265,7 @@ type
       ## The stack (or bare pane) in the DRAG layout.
     index*: int
 
-proc dragLayoutFor*(layout: Layout; source: PaneKind): Layout =
+proc dragLayoutFor*(layout: Layout; source: PaneRef): Layout =
   ## The arrangement while `source` is dragged: GoldenLayout's `DragProxy`
   ## removes the dragged item from its parent BEFORE `calculateItemAreas`,
   ## so the stack it left closes up (or, when it was the stack's only tab,
@@ -1189,8 +1274,13 @@ proc dragLayoutFor*(layout: Layout; source: PaneKind): Layout =
   ## then the committed layout is the answer.
   if layout.placement(source) != plPlaced:
     return layout
-  let o = apply(layout, cmdRemovePane(source))
+  let cmd = if source.isContributed: cmdRemoveContributedPane(source.id)
+            else: cmdRemovePane(source.builtin)
+  let o = apply(layout, cmd)
   if o.kind == loApplied: o.layout else: layout
+
+proc dragLayoutFor*(layout: Layout; source: PaneKind): Layout =
+  dragLayoutFor(layout, builtinRef(source))
 
 func splitOfEdge(edge: LayoutEdge): (SplitAxis, DropTargetKind) =
   case edge
@@ -1199,7 +1289,7 @@ func splitOfEdge(edge: LayoutEdge): (SplitAxis, DropTargetKind) =
   of leTop: (saColumn, dtSplitBefore)
   of leBottom: (saColumn, dtSplitAfter)
 
-proc targetOfGolden*(layout, dragLayout: Layout; source: PaneKind;
+proc targetOfGolden*(layout, dragLayout: Layout; source: PaneRef;
                      drop: GoldenDrop): Option[DropTarget] =
   ## The drop target GoldenLayout's decision names, or `none` when it names
   ## nothing or `apply` would refuse it (a highlighted target is always one
@@ -1236,25 +1326,22 @@ proc targetOfGolden*(layout, dragLayout: Layout; source: PaneKind;
         else: drop.stackPath
       let region = DropRegion(kind: drNodeStrip, path: panePathHere,
                               side: drop.edge)
-      target =
-        if kind == dtSplitBefore:
-          DropTarget(kind: dtSplitBefore, splitTarget: active.pane,
-                     axis: axis, region: region)
-        else:
-          DropTarget(kind: dtSplitAfter, splitTarget: active.pane,
-                     axis: axis, region: region)
+      target = splitTargetOf(kind, paneRefOf(active), axis, region)
     else:
       let index = if drop.kind == gdCentre: tabs
                   else: max(0, min(drop.index, tabs))
-      let anchor = if isStack: node.children[0].pane else: node.pane
-      target = DropTarget(kind: dtIntoStack, stackAnchor: anchor,
-                          index: (if isStack: index else: 1),
-                          region: DropRegion(kind: drTabSlot,
-                                             path: drop.stackPath,
-                                             slot: index))
+      let anchor = if isStack: paneRefOf(node.children[0])
+                   else: paneRefOf(node)
+      target = intoStackTarget(anchor, (if isStack: index else: 1),
+                               DropRegion(kind: drTabSlot,
+                                          path: drop.stackPath, slot: index))
   if not isLegal(layout, source, target):
     return none(DropTarget)
   some(target)
+
+proc targetOfGolden*(layout, dragLayout: Layout; source: PaneKind;
+                     drop: GoldenDrop): Option[DropTarget] =
+  targetOfGolden(layout, dragLayout, builtinRef(source), drop)
 
 proc hoverGolden*(interaction: Interaction; layout, dragLayout: Layout;
                   drop: GoldenDrop): Interaction =
@@ -1262,10 +1349,8 @@ proc hoverGolden*(interaction: Interaction; layout, dragLayout: Layout;
   ## the target it names (or none). Not a drag: unchanged.
   if interaction.kind != ikDraggingTab:
     return interaction
-  Interaction(kind: ikDraggingTab, source: interaction.source,
-              origin: interaction.origin,
-              hover: targetOfGolden(layout, dragLayout, interaction.source,
-                                    drop))
+  draggingOf(interaction.sourceRef, interaction.origin,
+             targetOfGolden(layout, dragLayout, interaction.sourceRef, drop))
 
 proc goldenStackPaths*(layout: Layout): seq[string] =
   ## Every node GoldenLayout would hold as a STACK — a stack, or a pane that

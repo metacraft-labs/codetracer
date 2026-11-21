@@ -1,13 +1,13 @@
 {
  "_comment": "PLAT-38. Written by ci/test/plat38-keystroke.sh from a run. Every arrival is what the RUST-SIDE element store held, read inside the handler the shim called.",
- "takenAt": "2026-09-22T12:30:15",
- "host": "Linux-6.12.85-x86_64-with-glibc2.40",
+ "takenAt": "2026-11-21T11:58:52",
+ "host": "Linux-6.18.55-x86_64-with-glibc2.40",
  "sentinelKey": "escape",
  "scenarios": [
   {
    "name": "entry-shell",
    "index": 0,
-   "elapsedMs": 15831,
+   "elapsedMs": 16207,
    "rc": 0,
    "expectModifier": "",
    "windowFocused": true,
@@ -16,10 +16,10 @@
      "key": "down",
      "modifiers": [],
      "kind": "keydown",
-     "seq": 1
+     "seq": 2
     }
    ],
-   "deliverySeq": 2,
+   "deliverySeq": 3,
    "deliveryCount": 2,
    "endedOnDeadline": false,
    "focusedCount": 1,
@@ -29,7 +29,7 @@
   {
    "name": "stepped-editor",
    "index": 1,
-   "elapsedMs": 15816,
+   "elapsedMs": 18398,
    "rc": 0,
    "expectModifier": "shift",
    "windowFocused": true,
@@ -40,10 +40,10 @@
       "shift"
      ],
      "kind": "keydown",
-     "seq": 1
+     "seq": 3
     }
    ],
-   "deliverySeq": 2,
+   "deliverySeq": 5,
    "deliveryCount": 2,
    "endedOnDeadline": false,
    "focusedCount": 1,
@@ -53,7 +53,7 @@
   {
    "name": "advanced-state",
    "index": 2,
-   "elapsedMs": 15855,
+   "elapsedMs": 28020,
    "rc": 0,
    "expectModifier": "",
    "windowFocused": true,
@@ -62,10 +62,10 @@
      "key": "a",
      "modifiers": [],
      "kind": "keydown",
-     "seq": 1
+     "seq": 3
     }
    ],
-   "deliverySeq": 2,
+   "deliverySeq": 4,
    "deliveryCount": 2,
    "endedOnDeadline": false,
    "focusedCount": 1,
@@ -75,7 +75,7 @@
   {
    "name": "returned-calltrace",
    "index": 3,
-   "elapsedMs": 15846,
+   "elapsedMs": 16710,
    "rc": 0,
    "expectModifier": "control",
    "windowFocused": true,
@@ -86,10 +86,10 @@
       "control"
      ],
      "kind": "keydown",
-     "seq": 1
+     "seq": 5
     }
    ],
-   "deliverySeq": 2,
+   "deliverySeq": 7,
    "deliveryCount": 2,
    "endedOnDeadline": false,
    "focusedCount": 1,
@@ -99,7 +99,7 @@
   {
    "name": "continued-event-log",
    "index": 4,
-   "elapsedMs": 15778,
+   "elapsedMs": 12765,
    "rc": 0,
    "expectModifier": "",
    "windowFocused": true,
@@ -108,10 +108,10 @@
      "key": "home",
      "modifiers": [],
      "kind": "keydown",
-     "seq": 1
+     "seq": 3
     }
    ],
-   "deliverySeq": 2,
+   "deliverySeq": 4,
    "deliveryCount": 2,
    "endedOnDeadline": false,
    "focusedCount": 1,
@@ -121,7 +121,7 @@
   {
    "name": "breakpoint-editor",
    "index": 5,
-   "elapsedMs": 15831,
+   "elapsedMs": 12266,
    "rc": 0,
    "expectModifier": "shift",
    "windowFocused": true,
@@ -132,10 +132,10 @@
       "shift"
      ],
      "kind": "keydown",
-     "seq": 1
+     "seq": 4
     }
    ],
-   "deliverySeq": 2,
+   "deliverySeq": 6,
    "deliveryCount": 2,
    "endedOnDeadline": false,
    "focusedCount": 1,
@@ -157,7 +157,8 @@
   "afterNonBlank": true,
   "beforeVsBlank": 1.0,
   "afterVsBlank": 1.0,
-  "changedFraction": 0.0,
+  "key": "F10",
+  "changedFraction": 0.01904031635802469,
   "blankPresent": true,
   "blankNonBlank": false,
   "blankChangedFraction": 0.0

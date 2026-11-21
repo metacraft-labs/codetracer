@@ -1,0 +1,48 @@
+<!doctype html>
+<!--
+  page.html — the browser front-end's ViewModel core over a real replay
+  engine. `?arm=wasm` loads the wasm32 build of src/frontend/web_core/
+  web_core.nim, `?arm=js` the nim js build; both are hosted by
+  web_core_host.js and draw through IsoNim's frame applier.
+  `&folder=<recording>` names the recording the engine opens. The page
+  talks to the engine over a WebSocket served by relay.mjs.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>web core</title>
+    <style>
+      body { font-family: monospace; font-size: 12px; margin: 0; }
+      .ct-web-core-pane { height: 300px; overflow: auto; border-bottom: 1px solid #888; }
+    </style>
+  </head>
+  <body>
+    <div id="mount"></div>
+    <script src="frame_applier.js"></script>
+    <script src="web_core_host.js"></script>
+    <script src="core_js.js"></script>
+    <script src="core_wasm.js"></script>
+    <script>
+      (async () => {
+        try {
+          const q = new URLSearchParams(location.search);
+          const ws = new WebSocket(`ws://${location.host}/dap`);
+          await new Promise((ok, no) => { ws.onopen = ok; ws.onerror = () => no(new Error('the relay refused the socket')); });
+          const core = q.get('arm') === 'wasm' ? await globalThis.ctwModule() : globalThis.ctwJsCore;
+          const host = globalThis.CtWebCoreHost.startWebCore({
+            core,
+            mount: document.getElementById('mount'),
+            transport: {
+              send: (text) => ws.send(text),
+              onMessage: (cb) => { ws.onmessage = (ev) => cb(String(ev.data)); },
+            },
+          });
+          host.openFolder(q.get('folder'));
+          globalThis.ctwHost = host;
+        } catch (e) {
+          globalThis.ctwError = String(e && e.stack || e);
+        }
+      })();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,101 @@
+name: Screen oracle
+# Called from codetracer.yml (job `screen-oracle`). PLAT-39's unprivileged
+# oracle reads frames of BOTH front-ends, and frames are never committed, so
+# this job takes them in CI: the Electron frames here
+# (`just plat35-capture-electron`, the desktop from ct-build's products), the
+# GPUI windows from gpui-window-captures shard 1's `plat35-gpui-window-frames`
+# artifact, and then runs the oracle's case floor over both. Its own job
+# because the ViewModel job already runs past its bound before its last steps.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  id-token: write
+  # ci/wait-for-run-artifact.sh lists this run's artifacts and jobs.
+  actions: read
+
+jobs:
+  screen-oracle:
+    runs-on: [self-hosted, linux, x64]
+    # Unmeasured until its first green run. ~55m of provisioning on a cold
+    # garm VM (gpui-window-captures' measurement), ~10m of capture, the wait
+    # for the GPUI frames (bounded at 90m, normally overlapping the
+    # provisioning: the frames come from a job that starts with this one) and
+    # ~60m of OCR in the case floor. Tighten from the first green run.
+    timeout-minutes: 210
+    name: Screen oracle (both front-ends' frames)
+    steps:
+      - name: Generate CI token
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Setup db-backend siblings
+        uses: ./.github/actions/setup-db-backend-siblings
+        with:
+          env-flavor: nix
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          attic-cache: ${{ vars.ATTIC_CACHE }}
+
+      - name: Provision dependency siblings from repro.lock
+        uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          # The oracle's pixel readers (GuiAssert) and its case floor
+          # (codetracer-pm), at the test lock's pins.
+          test-siblings: GuiAssert,codetracer-pm
+
+      - name: Restore ct and the desktop bundles from the ct-build job
+        id: ct
+        uses: actions/download-artifact@v4
+        with:
+          name: ct-build-products
+          path: ${{ runner.temp }}/ct-build
+
+      - name: Unpack them beside the siblings
+        run: bash ci/unpack-ct-build-products.sh "${RUNNER_TEMP}/ct-build"
+
+      - name: The Electron frames (PLAT-35's capture)
+        # Its own Xvfb at -dpi 96; records the `calc` fixture when absent.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat35-capture-electron
+
+      - name: Wait for the GPUI window frames
+        id: gpui_frames
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: nix develop .#ci --command bash ci/wait-for-run-artifact.sh plat35-gpui-window-frames "gpui-window-captures / GPUI window captures (headless sway) (1/20)" 5400
+
+      - name: Restore the GPUI window frames
+        uses: actions/download-artifact@v4
+        with:
+          name: plat35-gpui-window-frames
+          path: build/plat35/gpui-window
+
+      - name: The screen oracle reads both front-ends' frames
+        # PLAT-39: the Electron frames against the DOM's own models, and the
+        # GPUI windows against them, from pixels alone.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat39-case-floor
+
+      - name: Upload the frames when the oracle fails
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: screen-oracle-frames
+          path: |
+            src/tests/visual/captures/electron/
+            build/plat35/gpui-window/
+          retention-days: 7

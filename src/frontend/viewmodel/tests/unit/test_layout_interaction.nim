@@ -1425,8 +1425,10 @@ suite "the drop indication — what a front-end draws (PLAT-47)":
 
   test "a DropIndication carries no measurement":
     # PLAT-5's purity law, for the value a renderer reads: its only integer is
-    # an index into the model (the tab slot), and its only string a path.
+    # an index into the model (the tab slot), and its strings a path and the
+    # dragged pane's contributed id (an identity, not a measurement).
     var names: seq[string] = @[]
     for name, _ in DropIndication().fieldPairs:
       names.add name
-    check names == @["kind", "source", "path", "side", "slot", "axis"]
+    check names == @["kind", "source", "sourceContributed", "path", "side",
+                     "slot", "axis"]

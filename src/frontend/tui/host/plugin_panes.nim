@@ -264,3 +264,38 @@ proc decorationsFor*(pp: PluginPanes; document: string): seq[SourceDecoration] =
         if line <= 0: continue
         result.add (line: line, glyph: it{"glyph"}.getStr("◆"),
                     text: it{"text"}.getStr(""), plugin: s.id)
+
+proc markersFor*(pp: PluginPanes; document: string): seq[SourceDecoration] =
+  ## Every running plugin's declared `marker` surfaces for `document`, read
+  ## from the tree the plugin last pushed for that surface. A marker surface
+  ## is a `Table` whose columns are `file`, `line`, `glyph` and `text` (any
+  ## order; `glyph` and `text` optional) — data, never code — one row per
+  ## marked line. A surface the plugin did not declare as a marker is never
+  ## read here (the supervisor refuses a view for an undeclared surface).
+  if pp.isNil or pp.plugins.isNil or pp.plugins.sup.isNil or document.len == 0:
+    return
+  for s in pp.plugins.sup.slots.values:
+    if not s.active or not s.enabled or s.sessionDisabled: continue
+    for c in s.spec.parsed.manifest.contributions:
+      if c.kind != ckMarker: continue
+      let entry = s.views.getOrDefault(c.id)
+      let t = entry.tree
+      if t.isNil or t.kind != pkTable: continue
+      let fileCol = t.columns.find("file")
+      let lineCol = t.columns.find("line")
+      let glyphCol = t.columns.find("glyph")
+      let textCol = t.columns.find("text")
+      if fileCol < 0 or lineCol < 0: continue
+      for r in t.rows:
+        if r.len <= max(fileCol, lineCol): continue
+        if not sameDocument(r[fileCol], document): continue
+        var line = 0
+        try: line = parseInt(r[lineCol])
+        except ValueError: continue
+        if line <= 0: continue
+        result.add (line: line,
+                    glyph: (if glyphCol >= 0 and glyphCol < r.len: r[glyphCol]
+                            else: "▶"),
+                    text: (if textCol >= 0 and textCol < r.len: r[textCol]
+                           else: ""),
+                    plugin: s.id)

@@ -70,12 +70,31 @@ proc gpuiExitText*(rc: int; ceilingS = WindowRunCeilingS): string =
 const RuntimeLibPathEnvVar* = "CODETRACER_GPUI_RUNTIME_LIB_PATH"
   ## The dev shell's GPUI runtime library path (`nix/shells/ci-base.nix`).
 
+const GpuiShimLibrary* =
+  when defined(windows): "gpui_nim_shim.dll"
+  elif defined(macosx): "libgpui_nim_shim.dylib"
+  else: "libgpui_nim_shim.so"
+  ## The file a `codetracer-gpui` child dlopens from its shim directory (the
+  ## names `ci/lib/gpui-refusal-prereqs.sh` stages).
+
 proc gpuiLibraryPath*(shimDir: string): string =
   ## The `LD_LIBRARY_PATH` for a `codetracer-gpui` child whose shim lives in
   ## `shimDir`: `shimDir`, then `$CODETRACER_GPUI_RUNTIME_LIB_PATH`, then this
   ## process's `$LD_LIBRARY_PATH`. For the suites that build the rest of the
   ## child's environment themselves (their state variables differ on
   ## purpose); `gpuiChildEnv` uses it too.
+  ##
+  ## Raises `IOError`, naming the file, when `shimDir` holds no shim. A child
+  ## without one dies when it dlopens it, so every case of the suite failed
+  ## as if the window were wrong: a grading layout whose isonim-gpui target
+  ## had no shim ran `test_plat48_gpui_plan` 0 OK / 14 FAILED, and its
+  ## mutation harness read that as a red baseline (`just build-gpui` only
+  ## warns that the shim is not built).
+  let shim = shimDir / GpuiShimLibrary
+  if not fileExists(shim):
+    raise newException(IOError, "prerequisite missing: " & shim &
+      " (isonim-gpui's Rust shim: build it with `cd ../isonim-gpui && just " &
+      "rust-build`, or point ISONIM_GPUI_SHIM_DIR at a built one)")
   # Each part only when non-empty: an empty element (a leading, doubled or
   # trailing ':') is read by the dynamic loader as the current directory
   # (ld.so(8), "LD_LIBRARY_PATH").

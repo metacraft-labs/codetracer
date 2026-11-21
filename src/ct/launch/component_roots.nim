@@ -24,7 +24,12 @@
 ## isolation switch, and every suite in this repo that routes through the real
 ## launcher relies on it.
 
-import std/[os, strutils]
+import std/strutils
+when defined(js):
+  # Node: `std/os`'s file procedures are not this backend's (common/node_os).
+  import ../../common/node_os
+else:
+  import std/os
 import ../../common/ct_home
 
 const

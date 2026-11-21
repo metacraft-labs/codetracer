@@ -63,15 +63,15 @@ import ../backend/backend_service
 import ../viewmodels/calltrace_vm
 import ../viewport   # `withRows` / `withCols`
 
-when defined(ctPlat18Slice):
-  # The WebAssembly-core evaluation's command-frame renderer
-  # (`tests/manual/plat18_calltrace_slice.nim`). It has to be imported HERE,
-  # before the generic procs below: a generic binds a renderer call such as
-  # `r.insertBefore` at its definition when only one overload is in scope,
-  # so a renderer imported only by the caller is never considered. Set by
-  # `ci/test/plat18-electron-slice.sh` and nothing else; no shipping build
-  # compiles it.
-  import ../tests/manual/plat18_frame_renderer
+when defined(ctPlat18Slice) or defined(ctWasmCore):
+  # The command-frame renderer a WebAssembly core draws through: the browser
+  # front-end's core (`src/frontend/web_core/web_core.nim`, `-d:ctWasmCore`)
+  # and the evaluation slice (`tests/manual/plat18_calltrace_slice.nim`,
+  # `-d:ctPlat18Slice`). It has to be imported HERE, before the generic procs
+  # below: a generic binds a renderer call such as `r.insertBefore` at its
+  # definition when only one overload is in scope, so a renderer imported
+  # only by the caller is never considered.
+  import isonim/web/frame_renderer
 
 # A generic view is instantiated where it is called, and the `ui` macro's
 # expansion names `createRenderEffect` and the control-flow components there:

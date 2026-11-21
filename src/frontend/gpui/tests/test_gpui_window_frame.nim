@@ -101,7 +101,12 @@ import ../replay_ops
 # RE-COUNTED 2026-11-21: 1002 → 1020, by the same route -- CTF-P2c step 4
 # added two non-test files under `src/frontend/gpui/agent_harbor/`
 # (`ah_control_center.nim`, `ah_gaze_mark.nim`), 2 x 9 assertions.
-const ExpectedAssertions = 1020
+const ExpectedAssertions = 1029
+  ## 2026-11-21 (the merge of CTF-P2c step 4 and the progress pie): 1002 ->
+  ## 1029. Step 4 added two scanned source files (1020) and the pie one
+  ## (1011); the merged tree scans all three, at 1 + 8 = 9 per file.
+  ## 2026-11-21 (the progress pie): 1002 -> 1011. One more scanned source
+  ## file, `agent_harbor/ah_pie.nim`, at 1 + 8 = 9 per file.
   ## 2026-11-20 (the merge of the two entries below): 984 -> 993. Both
   ## added one scanned source file, so the merged tree scans both, at
   ## 1 + 8 = 9 per file.

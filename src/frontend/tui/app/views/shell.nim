@@ -328,6 +328,10 @@ type
       ## that is not loaded, and says so (`UnloadedExtensionText`).
     sourceDecorations*: seq[SourceDecorationMark]
       ## The plugins' decorations for the file the source pane shows.
+    sourceMarkers*: seq[SourceDecorationMark]
+      ## The plugins' declared MARKERS for that file: a glyph in the
+      ## gutter's mark column (`paintSourceMarkers`), distinct from the
+      ## end-of-line decoration.
     hasFocus*: bool
     focusHighlightOff*: bool
       ## PLAT-51 (Native-Front-End-Parity.md §2): the focus highlight — the
@@ -960,6 +964,32 @@ proc paintSourceDecorations*(g: var StyledGrid; under: CellArea;
     g.paint(under.row + 1 + i, col, fitCells(label, cells),
             CellStyle(role: srSourceVerified, reverse: true))
 
+proc paintSourceMarkers*(g: var StyledGrid; under: CellArea;
+                         model: ShellModel; screen: SourcePaneScreen) =
+  ## The plugins' `marker` surfaces on the source pane: each marked line in
+  ## view gets the plugin's glyph in the gutter's MARK COLUMN — the pane's
+  ## first column, where a breakpoint's `●` goes (`gutter.GutterMark`). A
+  ## line that carries a breakpoint or tracepoint keeps it: the debugger's
+  ## own mark is not covered by an extension's.
+  if model.sourceMarkers.len == 0 or under.height <= 1 or
+     screen.gutterWidth <= 0:
+    return
+  let bodyRows =
+    if screen.barRow >= 0: screen.barRow - under.row - 1
+    else: under.height - 1
+  for m in model.sourceMarkers:
+    let i = m.line - model.source.viewportTop
+    if i < 0 or i >= bodyRows:
+      continue
+    var taken = false
+    for entry in model.source.marks:
+      if entry[0] == m.line: taken = true
+    if taken:
+      continue
+    let glyph = if m.glyph.len > 0: m.glyph else: "▶"
+    g.paint(under.row + 1 + i, under.col, fitCells(glyph, 1),
+            CellStyle(role: srSourceVerified, bold: true))
+
 proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
                body: CellArea; focusedStrip = false;
                gapAt = -1; gapCells = 0) =
@@ -1110,6 +1140,7 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
     underStrip:
       let screen = paintSourcePane(g, under, model.source, model.highlighting)
       paintSourceDecorations(g, under, model, screen)
+      paintSourceMarkers(g, under, model, screen)
   elif region.pane == paneCalltrace and not model.callTrace.isEmpty:
     underStrip:
       discard paintCallTrace(g, under, model.callTrace)
@@ -1209,9 +1240,19 @@ proc paintDockStrips*(g: var StyledGrid; geometry: LayoutGeometry) =
       # PLAT-49 part B: a label is lit while its pane is PREVIEWED (the hover
       # overlay) or DOCKED OPEN (the click), as the desktop's strip tab is
       # `active` in both states.
-      let shown = (geometry.revealing and geometry.revealPane == slot.pane) or
-                  (not geometry.openDock.isEmptyArea and
-                   geometry.openDockPane == slot.pane)
+      # In each slot's OWN namespace: an extension's label is lit for the
+      # extension's pane, never because a built-in pane shares its zero value.
+      let shown =
+        if slot.contributed.len > 0:
+          (geometry.revealing and geometry.revealContributed == slot.contributed) or
+            (not geometry.openDock.isEmptyArea and
+             geometry.openDockContributed == slot.contributed)
+        else:
+          (geometry.revealing and geometry.revealContributed.len == 0 and
+           geometry.revealPane == slot.pane) or
+            (not geometry.openDock.isEmptyArea and
+             geometry.openDockContributed.len == 0 and
+             geometry.openDockPane == slot.pane)
       let role = if shown: srTabActive else: srTabInactive
       g.fillSurface(s.row, s.col, s.width, s.height, role)
       if strip.edge in {leTop, leBottom}:
@@ -1236,19 +1277,28 @@ proc paintRevealedPane*(g: var StyledGrid; geometry: LayoutGeometry;
   ## the focus ring's colour, so where the overlay ends is visible without a
   ## drawn border.
   let a = geometry.reveal
+  let contributed = geometry.revealContributed
   var title = ""
   for strip in geometry.strips:
     for slot in strip.slots:
-      if slot.pane == geometry.revealPane:
+      if (contributed.len > 0 and slot.contributed == contributed) or
+         (contributed.len == 0 and slot.contributed.len == 0 and
+          slot.pane == geometry.revealPane):
         title = slot.title
-  let region = PaneRegion(pane: geometry.revealPane, title: title, area: a,
-                          tabs: @[], activeTab: -1)
   # AN OVERLAY REPLACES WHAT IS UNDER IT: the cells are cleared first, so no
   # glyph of the panes behind shows through the rows the painter leaves
   # blank. The arrangement behind is not reflowed — it is simply covered.
   for row in a.row ..< a.row + a.height:
     g.paint(row, a.col, spaces(a.width), DefaultCellStyle)
-  paintPane(g, region, model, a)
+  if contributed.len > 0:
+    # An extension's docked pane, from its plugin's pushed tree.
+    paintContributedPane(g, ContributedRegion(id: contributed, title: title,
+                                              area: a, activeTab: -1),
+                         model, a)
+  else:
+    let region = PaneRegion(pane: geometry.revealPane, title: title, area: a,
+                            tabs: @[], activeTab: -1)
+    paintPane(g, region, model, a)
   g.restyle(a.row, a.col, a.width,
             proc(s: CellStyle): CellStyle =
               var r = s
@@ -1421,10 +1471,17 @@ proc shellScreen*(model: ShellModel; width, height: int;
   # (`geometry.openDock`) — a pane of the tiled screen, painted as a placed
   # pane is, with its one-tab strip.
   if not geometry.openDock.isEmptyArea and not model.welcome.shown:
-    let open = PaneRegion(pane: geometry.openDockPane,
-                          title: geometry.openDockTitle,
-                          area: geometry.openDock, tabs: @[], activeTab: -1)
-    paintPane(g, open, model, geometry.openDock)
+    if geometry.openDockContributed.len > 0:
+      # An extension's docked pane shown open, from its plugin's pushed tree.
+      paintContributedPane(g, ContributedRegion(
+        id: geometry.openDockContributed, title: geometry.openDockTitle,
+        area: geometry.openDock, activeTab: -1), model, geometry.openDock,
+        focusedStrip = model.focusedContributed == geometry.openDockContributed)
+    else:
+      let open = PaneRegion(pane: geometry.openDockPane,
+                            title: geometry.openDockTitle,
+                            area: geometry.openDock, tabs: @[], activeTab: -1)
+      paintPane(g, open, model, geometry.openDock)
   # PLAT-48: the dock strips as labels on the tab-strip surface, and a
   # revealed dock as the docked pane itself, over the body. (The bottom
   # strip is on the status row since PLAT-49 part B and is painted with it,

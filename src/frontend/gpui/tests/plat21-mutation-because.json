@@ -13,6 +13,13 @@
   "G7": "Check failed: b.says(\"recent.highlight\") == \"0\"",
   "G8": "Check failed: facts.len == 29",
   "G9": "Check failed: terminalLabel == expected",
+  "K1": "Check failed: paneSection(committed, \"pointList\").len > 0 and",
+  "K2": "Check failed: paneSection(committed, \"calltrace\").len > 0 and",
+  "K3": "Check failed: now == lines(answers[i + 1]) -- pointList after pointList kDown: @[\"browser has pointList.highlight=1\", \"terminal has pointList.highlight=2\"]",
+  "K4": "Check failed: divergences == @PinnedDivergences -- @[\"APG-LISTBOX-DISABLED calltrace step 1 (kDown): terminal=2 apg=1\", \"APG-GRID-END eventLog step 3 (kEnd): terminal=(5, 1) apg=(1, 3)\", \"APG-LISTBOX-DISABLED pointList step 1 (kDown): terminal=2 apg=1\"]",
+  "K5": "Check failed: divergences == @PinnedDivergences -- @[\"APG-TREE state step 1 (kDown): terminal=1 of 18 apg=0 of 1\", \"APG-TREE state step 2 (kDown): terminal=2 of 18 apg=0 of 1\", \"APG-TREE state step 3 (kHome): terminal=0 of 18 apg=0 of 1\", \"APG-TREE state step 4 (kDown): terminal=1 of 18 apg=0 of 1\", \"APG-TREE state step 5 (kRight): terminal=1 of 23 apg=0 of 18\", \"APG-TREE state step 6 (kLeft): terminal=1 of 18 apg=0 of 1\", \"APG-GRID-END eventLog step 3 (kEnd): terminal=(5, 1) apg=(1, 3)\", \"APG-LISTBOX-DISABLED pointList step 1 (kDown): terminal=2 apg=1\", \"APG-LISTBOX-DISABLED pointList step 2 (kUp): terminal=0 apg=1\"]",
+  "K6": "Check failed: ForbiddenInOracle.len == 9",
+  "K7": "Check failed: now == lines(answers[i + 1]) -- state after state.root kDown: @[\"browser has state.root.cursor=0\", \"terminal has state.root.cursor=1\"]",
   "U1": "Check failed: webLabel == gpuiLabel",
   "U2": "Check failed: divergencesAfter(t, \"the state pane as opened\").len == 0",
   "U3": "Check failed: terminalFacts(t).getOrDefault(\"state.root.cursor\", \"<absent>\") == \"3\""

@@ -55,6 +55,11 @@ proc service*(p: SessionPlugins): PluginsService =
     decorations: proc(document: string):
         seq[tuple[line: int; glyph, text, plugin: string]] =
       panes.decorationsFor(document),
+    markers: proc(document: string):
+        seq[tuple[line: int; glyph, text, plugin: string]] =
+      panes.markersFor(document),
+    closedPanes: proc(): seq[string] = p.closedPanes(),
+    setPaneClosed: proc(id: string; closed: bool) = p.setPaneClosed(id, closed),
     control: proc(words: seq[string]): tuple[title, body: string] =
       p.control(words),
     statusText: proc(): string = p.statusText(),

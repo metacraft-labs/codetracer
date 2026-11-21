@@ -31173,6 +31173,158 @@
         }
       }
     },
+    "agent-harbor-pie-indicator-every-state-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "pie-first": {
+          "x": 126,
+          "y": 46,
+          "w": 12,
+          "h": 12
+        },
+        "pie-head-100": {
+          "x": 247.171875,
+          "y": 8,
+          "w": 29.65625,
+          "h": 16
+        },
+        "pie-head-unknown": {
+          "x": 285.609375,
+          "y": 8,
+          "w": 52.765625,
+          "h": 16
+        },
+        "pie-band-menu": {
+          "x": 8,
+          "y": 376,
+          "w": 1424,
+          "h": 112
+        }
+      }
+    },
+    "agent-harbor-pie-indicator-every-state-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "pie-first": {
+          "x": 126,
+          "y": 46,
+          "w": 12,
+          "h": 12
+        },
+        "pie-head-100": {
+          "x": 247.171875,
+          "y": 8,
+          "w": 29.65625,
+          "h": 16
+        },
+        "pie-head-unknown": {
+          "x": 285.609375,
+          "y": 8,
+          "w": 52.765625,
+          "h": 16
+        },
+        "pie-band-menu": {
+          "x": 8,
+          "y": 492,
+          "w": 1424,
+          "h": 112
+        }
+      }
+    },
+    "agent-harbor-pie-indicator-every-state-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "pie-first": {
+          "x": 126,
+          "y": 46,
+          "w": 12,
+          "h": 12
+        },
+        "pie-head-100": {
+          "x": 247.171875,
+          "y": 8,
+          "w": 29.65625,
+          "h": 16
+        },
+        "pie-head-unknown": {
+          "x": 285.609375,
+          "y": 8,
+          "w": 52.765625,
+          "h": 16
+        },
+        "pie-band-menu": {
+          "x": 8,
+          "y": 376,
+          "w": 344,
+          "h": 112
+        }
+      }
+    },
+    "agent-harbor-pie-indicator-every-state-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "pie-first": {
+          "x": 126,
+          "y": 46,
+          "w": 12,
+          "h": 12
+        },
+        "pie-head-100": {
+          "x": 247.171875,
+          "y": 8,
+          "w": 29.65625,
+          "h": 16
+        },
+        "pie-head-unknown": {
+          "x": 285.609375,
+          "y": 8,
+          "w": 52.765625,
+          "h": 16
+        },
+        "pie-band-menu": {
+          "x": 8,
+          "y": 492,
+          "w": 344,
+          "h": 112
+        }
+      }
+    },
     "agent-harbor-result-opened-outside-laptop-dark": {
       "viewport": {
         "width": 1440,

@@ -1,0 +1,10 @@
+{
+  "J1": "the exit is SIGSEGV",
+  "J2": "send refuses once the child is 16777216 bytes behind (accepted 12)",
+  "J3": "a process stuck in a handler is stopped",
+  "J4": "SIGTERM, a stuck plugin, without setpriv (the exit guard): and its plugin process ended with it",
+  "J5": "SIGKILL, a stuck plugin, through setpriv --pdeathsig: and its plugin process ended with it",
+  "J6": "and forgets its group",
+  "J7": "exit status 127 (Node's spawn error): the process exited with status 0",
+  "J8": "every fault is flame's: the crash record on stderr was read before the exit"
+}

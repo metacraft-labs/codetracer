@@ -69,7 +69,7 @@ else
 	OUT="${CTF_P1B_WEB_OUT:-${root}/build/ctf-p1b/web}"
 	RECORD="${root}/src/tests/visual/agent-harbor-web-regions.json"
 	views=(--view agent-harbor-session-tabs --view agent-harbor-fleet --view agent-harbor-session-activity --view agent-harbor-composer
-		--view agent-harbor-results --view agent-harbor-changes --view agent-harbor-inbox --view agent-harbor-suggested-actions
+		--view agent-harbor-results --view agent-harbor-changes --view agent-harbor-inbox --view agent-harbor-suggested-actions --view agent-harbor-pie
 		--view agent-harbor-control-center --view agent-harbor-status-gaze)
 	panelViews=(--view agent-harbor-session-activity --view agent-harbor-suggested-actions
 		--view agent-harbor-control-center)

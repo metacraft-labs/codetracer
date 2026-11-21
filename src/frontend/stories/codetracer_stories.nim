@@ -781,7 +781,15 @@ func agentHarborSection(): CodeTracerStorySection =
       panel("InboxAnswerFailed", "Inbox: Answer Failed", "agent-harbor-inbox-item", "answer-failed", "agent-harbor-inbox-item",
             "The scripted source refused the answer"),
     ] & sessionActivityStories() & suggestedActionsStories() & controlCenterStories() &
-      gazeStories())
+      gazeStories() & @[
+      # The progress pie on its own (agent_harbor_pie_stories.nim): every
+      # role at each share and with no known progress, on every ground it
+      # sits on. No panel, tab or line draws it yet.
+      story("PieIndicatorEveryState", "Pie Indicator: Every State", "component",
+            "agent-harbor-pie", "every-state",
+            description = "Every state's colour at 0, 16, 50, 84 and 100 % and with no " &
+              "known progress, on the window, a panel, the active tab, a selected row and a menu"),
+    ])
 
 func panelsSection(): CodeTracerStorySection =
   CodeTracerStorySection(

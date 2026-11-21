@@ -70,14 +70,19 @@ GAPS = "src/common/view_vocabulary/gpui_gaps.nim"
 MAP = "src/common/view_vocabulary/mappings.nim"
 SURF = "src/common/value_presentation/surfaces.nim"
 TB = "src/frontend/view_vocabulary/terminal_binding.nim"
+KPS = "src/frontend/view_vocabulary/keyboard_pane_scripts.nim"
+APG = "src/frontend/tests/apg_keyboard_oracle.nim"
 
 # --- the suites the arms are graded against (§16c) ---------------------------
 SUITE_GPUI = "src/frontend/gpui/tests/test_gpui_vocabulary_binding.nim"
 SUITE_CROSS = "src/frontend/tui/tests/test_cross_renderer_panes.nim"
 SUITE_VOCAB = "src/common/view_vocabulary_test.nim"
+SUITE_CHROME = "src/frontend/tests/keyboard_panes_chromium_test.nim"
+FIXTURE = "src/frontend/tests/fixtures/keyboard_panes_calc.json"
 
 TOUCHED = [GB, FR, PV, GAPS, MAP, SURF, TB,
-           SUITE_GPUI, SUITE_CROSS, SUITE_VOCAB]
+           KPS, APG, FIXTURE,
+           SUITE_GPUI, SUITE_CROSS, SUITE_VOCAB, SUITE_CHROME]
 
 CONTROL_HASHES = HARNESS_DIR / "plat21-mutation-control.sha256"
 BECAUSE_FILE = HARNESS_DIR / "plat21-mutation-because.json"
@@ -107,6 +112,7 @@ SUITE_CMD = {
     SUITE_GPUI: ["--path:src/frontend/viewmodel"],
     SUITE_VOCAB: ["--path:src/frontend/viewmodel"],
     SUITE_CROSS: None,   # resolved at run time by `tui_flags()`
+    SUITE_CHROME: ["-d:chronicles_enabled=off", "-d:ctRenderer"],
 }
 
 
@@ -412,6 +418,94 @@ ARMS = [
         "variable's path into the signal and requires the cursor to be row 3 "
         "on all three media — the third rather than the first, so a cursor "
         "answering 0 or 1 for any reason is still wrong."),
+    # ------------------------------------------------------------------
+    # The browser's two oracles: the fixture the C suite exports, the web
+    # binding in Chromium, and the W3C reference widgets.
+    # ------------------------------------------------------------------
+    Arm("K1", KPS,
+        "    for o in v.options: opts.add %(o.disabled)",
+        "    for o in v.options: opts.add %false",
+        SUITE_CROSS,
+        "the panes and the terminal's answers equal the committed fixture",
+        "proc encodeView*(v: ViewNode): JsonNode =",
+        "proc encodeView*(v: ViewNode): JsonNode =  # ctl",
+        "THE EXPORT LOSES AN OPTION'S AVAILABILITY. The browser would then "
+        "render a tracepoint list with every point choosable and — because "
+        "the terminal's answers travel in the same file — compare it with "
+        "answers taken over a list that skipped one. The committed fixture is "
+        "what stands between the two, so the C case must see the export "
+        "differ from it."),
+
+    Arm("K2", KPS,
+        '    step("calltrace", kDown), step("calltrace", kEnd),',
+        '    step("calltrace", kDown), step("calltrace", kUp),',
+        SUITE_CROSS,
+        "the panes and the terminal's answers equal the committed fixture",
+        "  PaneScript(pane: \"calltrace\", steps: @[",
+        "  PaneScript(pane: \"calltrace\", steps: @[  # ctl",
+        "THE SCRIPT CHANGES UNDER A FIXTURE RECORDED WITH THE OLD ONE. The "
+        "browser suite reads the scripts from the same module, so it would "
+        "press the new keys against the old answers; the C case is the one "
+        "that notices the answers no longer belong to the keys."),
+
+    Arm("K3", KPS,
+        "                                  disabled: d.getBool)",
+        "                                  disabled: false)",
+        SUITE_CHROME,
+        "the pointList pane in Chromium answers every key as the terminal's widgets did",
+        "proc decodeView*(j: JsonNode): ViewNode =",
+        "proc decodeView*(j: JsonNode): ViewNode =  # ctl",
+        "THE BROWSER'S VIEW LOSES THE DISABLED POINT. The web binding then "
+        "lands on the point the terminal skipped, which is the comparison the "
+        "browser arm exists to make — against isonim-tui's answers, not "
+        "against the vocabulary's."),
+
+    Arm("K4", APG,
+        "    discard lb.widget.focusItem(el)",
+        "    discard el",
+        SUITE_CHROME,
+        "the reference widgets agree on every key but the pinned findings",
+        "proc syncListbox*(lb: ApgListbox; index: int) =",
+        "proc syncListbox*(lb: ApgListbox; index: int) =  # ctl",
+        "THE REFERENCE LISTBOX IS NOT PUT IN THE TERMINAL'S STATE before a "
+        "key, so every transition after the first starts from wherever the "
+        "last one left it — the per-key judgement becomes a whole-script one "
+        "and a divergence on one key leaks into the next."),
+
+    Arm("K5", APG,
+        '              if expanded($getAttr(dom, "data-node")): "true" else: "false")',
+        '              "false")',
+        SUITE_CHROME,
+        "the reference widgets agree on every key but the pinned findings",
+        "proc syncTree*(t: ApgTree; expanded: proc(id: string): bool; cursor: int) =",
+        "proc syncTree*(t: ApgTree; expanded: proc(id: string): bool; cursor: int) =  # ctl",
+        "THE REFERENCE TREE IS NEVER OPENED to the terminal's expansion, so "
+        "Left on an open `__builtins__` is judged on a closed one, where the "
+        "W3C tree moves to the parent instead of closing it."),
+
+    Arm("K6", SUITE_CHROME,
+        '                       "terminal_binding", "sendKey"]',
+        '                       ]',
+        SUITE_CHROME,
+        "the fixture and the independence scan",
+        "  OracleText = staticRead(\"apg_keyboard_oracle.nim\")",
+        "  OracleText = staticRead(\"apg_keyboard_oracle.nim\")  # ctl",
+        "THE INDEPENDENCE SCAN LOSES HALF ITS LIST (§30a). A glue that "
+        "reached for the binding's `sendKey` would agree with the vocabulary "
+        "for the vocabulary's reasons, and the scan would no longer say so; "
+        "the cardinality assertion is what sees the list shrink."),
+
+    Arm("K7", SUITE_CHROME,
+        "    await ctPress(selectorFor(st.target), playwrightKey(st.key))",
+        '    await ctPress("", playwrightKey(st.key))',
+        SUITE_CHROME,
+        "the state pane in Chromium answers every key as the terminal's widgets did",
+        "proc caseWebArm(entry: JsonNode) {.async.} =",
+        "proc caseWebArm(entry: JsonNode) {.async.} =  # ctl",
+        "THE BROWSER'S KEY IS NOT AIMED AT THE PANE. It goes to whatever holds "
+        "focus — the page body — and the pane does not move. The case is "
+        "meant to see a pane that did not answer a key the terminal answered, "
+        "which is the browser input pipeline's half of the claim."),
 ]
 
 
@@ -572,6 +666,21 @@ def run_suite(suite: str) -> tuple[int, str]:
     flags = SUITE_CMD[suite]
     if flags is None:
         flags = tui_flags()
+    if suite == SUITE_CHROME:
+        # The `renderer-chromium` lane's own two steps: `nim js` for the
+        # browser target (no `-d:nodejs`), then the page runner, which
+        # delivers the suite's keys through Chromium's input pipeline.
+        out_js = f"{NIMCACHE}/{stem}.js"
+        c = subprocess.run(["nim", "js", "--hints:off", "--warnings:off",
+                            f"--nimcache:{NIMCACHE}/{stem}", f"-o:{out_js}"]
+                           + flags + [suite], cwd=REPO, capture_output=True,
+                           text=True, timeout=3600)
+        if c.returncode != 0:
+            return c.returncode, c.stdout + c.stderr
+        p = subprocess.run(["node", "src/frontend/tests/chromium-run.mjs",
+                            out_js], cwd=REPO, capture_output=True,
+                           text=True, timeout=3600)
+        return p.returncode, p.stdout + p.stderr
     cmd = ["nim", "c", "-r", "--hints:off", "--warnings:off",
            f"--nimcache:{NIMCACHE}/{stem}",
            f"-o:{NIMCACHE}/{stem}.out"] + flags + [suite]

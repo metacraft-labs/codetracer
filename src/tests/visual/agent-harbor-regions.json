@@ -116,13 +116,22 @@
     "regions above match inside it. Its `surface` is the control center's root.",
     "The status line's gaze mark (`gaze-mark`) is compared in pixels on its",
     "width and height: an eye and two words; its `surface` is the story's window",
-    "(`.ah-gaze-story`)."
+    "(`.ah-gaze-story`).",
+    "",
+    "The progress pie's story (`Pie Indicator: Every State`): its `surface`",
+    "is the story's whole window (`.ah-pie-story`); `pie-first` is the first pie",
+    "drawn (the window band's needs-input row at 0 %) and `pie-band-menu` the last",
+    "band, each compared in pixels too (`px`): a pie a pixel larger, or a row a",
+    "pixel taller, moves every pie below it. `pie-head-100` and `pie-head-unknown`",
+    "are the words of the last two columns' heads, the pair that crowds first:",
+    "each is centred over its column's pies, and their x and width are compared",
+    "in pixels."
   ],
   "schemaVersion": 1,
   "regions": [
     {
       "name": "surface",
-      "web": ".ah-tab-caption, .ah-session-list, .agent-harbor-initiatives, .agent-harbor-progress, .agent-harbor-fleet, .agent-harbor-activity, .ah-composer-story, .agent-harbor-changes, .agent-harbor-inbox, .agent-harbor-inbox-item, .ah-control-center, .ah-gaze-story",
+      "web": ".ah-tab-caption, .ah-session-list, .agent-harbor-initiatives, .agent-harbor-progress, .agent-harbor-fleet, .agent-harbor-activity, .ah-composer-story, .agent-harbor-changes, .agent-harbor-inbox, .agent-harbor-inbox-item, .ah-control-center, .ah-gaze-story, .ah-pie-story",
       "gpui": {
         "data-ah-surface": ""
       }
@@ -875,6 +884,52 @@
       },
       "px": [
         "w",
+        "h"
+      ]
+    },
+    {
+      "name": "pie-first",
+      "web": ".ah-pie",
+      "gpui": {
+        "data-ah-pie": ""
+      },
+      "px": [
+        "x",
+        "y",
+        "w",
+        "h"
+      ]
+    },
+    {
+      "name": "pie-head-100",
+      "web": ".ah-pie-head-word[data-ah-pie-head-word='100%']",
+      "gpui": {
+        "data-ah-pie-head-word": "100%"
+      },
+      "px": [
+        "x",
+        "w"
+      ]
+    },
+    {
+      "name": "pie-head-unknown",
+      "web": ".ah-pie-head-word[data-ah-pie-head-word='unknown']",
+      "gpui": {
+        "data-ah-pie-head-word": "unknown"
+      },
+      "px": [
+        "x",
+        "w"
+      ]
+    },
+    {
+      "name": "pie-band-menu",
+      "web": ".ah-pie-band-menu",
+      "gpui": {
+        "data-ah-pie-ground": "menu"
+      },
+      "px": [
+        "y",
         "h"
       ]
     }

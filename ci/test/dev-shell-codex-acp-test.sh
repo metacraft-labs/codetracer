@@ -51,8 +51,22 @@ run_probe() {
 	local out
 	out="$(cd "$SCRATCH" && nix develop "$REPO${attr:+#$attr}" --no-write-lock-file -c bash -c '
 		command -v codex-acp || { echo "codex-acp is not on PATH"; exit 127; }
-		printf "%s\n" "$1" | timeout 120 codex-acp 2>&1
-		echo "exit=$?"
+		# Stdin stays open until the answer is written (at most 60 s): on
+		# EOF codex-acp shuts down, and an answer still in flight is dropped.
+		# Closing it at once raced that shutdown, and on a loaded garm runner
+		# the answer lost (run 44900586259: exit 0, no result).
+		o="$(mktemp)"
+		{
+			printf "%s\n" "$1"
+			for _ in $(seq 1 120); do
+				grep -q "\"result\"" "$o" 2>/dev/null && break
+				sleep 0.5
+			done
+		} | timeout 120 codex-acp >"$o" 2>&1
+		rc=$?
+		cat "$o"
+		rm -f "$o"
+		echo "exit=$rc"
 	' _ "$request" 2>"$err")" || true
 	printf '%s\n' "$out"
 	if ! grep -q '^exit=' <<<"$out"; then
