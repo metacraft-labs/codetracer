@@ -61,8 +61,10 @@
 # the relay runs in one more user namespace that maps it back to 0. Only those
 # clients: a client on the direct endpoint is refused by the trust check before
 # any Hello, and that refusal is the defect the fixture must keep. The suite
-# shows that the compensation removes nothing but this artefact: unmapped, the
-# relayed client is answered by the daemon itself, with exactly that refusal.
+# once showed that the compensation removed nothing but this artefact:
+# unmapped, the relayed client got exactly that refusal. RunQuota since
+# 6d739bdc serves such a client, excusing its foreign-namespace uid, so the
+# control below now requires it to be served.
 #
 # THE MISSING-TOOL ARMS SHADOW ONE MORE THING. To show that the library does
 # not forward an endpoint it cannot have RunQuota check (no `runquota`) or
@@ -367,20 +369,20 @@ case "$(probe socket)" in
 *) t_fail "stage: the sandboxed command was given the relay's private socket (RUNQUOTA_SOCKET=$(probe socket))" ;;
 esac
 # The compensation's control: unmapped, the relayed client gets as far as the
-# daemon, so the answer is the daemon's own. A daemon before RunQuota's
-# namespace judgement refuses it for the declared uid alone. One with that
-# judgement (the pinned aad94ad: judgeNamespaces in runquota_daemon.nim)
-# excuses the uid of a client that declares a user namespace other than its
-# own, and serves the request, printing its status. Run 44864106832's nixos
-# leg got that answer ("sessions: 0 / leases: 0", rc=0) and this control,
-# which knew only the refusal, failed it. Either answer shows the relay
-# reached the daemon. Anything else -- a refusal of the endpoint by the client,
-# or no connection -- does not.
+# daemon, so the answer is the daemon's own. What the pinned RunQuota
+# (aad94ad) specifies for it is SERVED: 6d739bdc ("serve clients that run in
+# other namespaces") excuses the declared uid of a client that reports a user
+# namespace other than the daemon's, and only that check. Its owner stays the
+# peer credential, and the declared uid is deliberately not recorded or
+# logged, so there is no excuse line to look for. The status it serves is the
+# evidence, together with the absence of the old refusal, "client declared uid
+# 1004 but its peer credentials say uid 0". That refusal is now a regression
+# and fails here, as does a client-side endpoint refusal or no answer. Run
+# 44864106832's nixos leg was served (rc=0, "sessions: 0 / leases: 0").
 unmapped_rc="$(probe unmapped.rc)"
-if { [ -n "$unmapped_rc" ] && [ "$unmapped_rc" != 0 ] &&
-	grep -q "client declared uid 1004 but its peer credentials say uid 0" "${scratch}/tmp/probe/unmapped.err"; } ||
-	{ [ "$unmapped_rc" = 0 ] && grep -q '^sessions: ' "${scratch}/tmp/probe/unmapped.err"; }; then
-	t_pass "stage: unmapped, the relayed client is answered by the daemon itself (the declared-uid refusal, or the status a namespace-judging daemon serves)"
+if [ "$unmapped_rc" = 0 ] && grep -q '^sessions: ' "${scratch}/tmp/probe/unmapped.err" &&
+	! grep -q "client declared uid" "${scratch}/tmp/probe/unmapped.err"; then
+	t_pass "stage: unmapped, the relayed client is served by the daemon itself, its foreign-namespace uid excused"
 else
 	t_fail "stage: unmapped, the relayed client is answered by the daemon itself (rc=$(probe unmapped.rc))"
 	show "${scratch}/tmp/probe/unmapped.err"
