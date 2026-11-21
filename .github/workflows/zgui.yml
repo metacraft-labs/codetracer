@@ -120,12 +120,16 @@ jobs:
         # reads its default config and layout from the built tree, and
         # build-once refuses a `ct` without them, so they are built first (each
         # of those builds is refused for lacking the other, and that is fine).
+        # `ct record` runs `db-backend-record` from the same tree; a persistent
+        # runner can hold one from an earlier job, an ephemeral one has none
+        # (run 44844246394: "Could not find command: …/db-backend-record").
         run: |
           nix develop . --command bash -c '
             for t in config-default-layout-json config-default-config-yaml; do
               CODETRACER_REPROBUILD_TARGET=".#$t" just build-once || true
             done
-            CODETRACER_REPROBUILD_TARGET=".#ct-binary" just build-once'
+            CODETRACER_REPROBUILD_TARGET=".#ct-binary" just build-once
+            CODETRACER_REPROBUILD_TARGET=".#db-backend-record" just build-once'
 
       - name: Build replay-server
         env:
