@@ -1,0 +1,20 @@
+# Control digests for run-plat70-find-decisions-mutations.py — the
+# subjects AND the suites the arms are graded by (§16c).
+# Refreshed with --record-control-hashes, gated by the
+# needle scan (§39a).
+bafa5a0329c8f63e24cbb42453112ba36a3bb2aa4fe6794b2249fab4aa255ae2  src/frontend/viewmodel/editor/find_match.nim
+ae471882f9ac66dc73d0809af6d54ec7afd0ac3ab6430c489692e2bee0510398  src/frontend/viewmodel/editor/operations.nim
+1cad990d3cbab9c394997f9928a226035d43661fe670e4ce46e725ed99d6853b  src/frontend/viewmodel/viewmodels/find_vm.nim
+c0e4c796b19fbc12d3f0fda1eb5d2f4266faa26126e831adb1764d02aa49c5f7  src/common/editor_core_admission.nim
+1b40e213f6ef772b5c2348fb285b6dc5b76f1b39f615adda4b1e0e6c671396c4  ci/test/editor-import-closure.sh
+eb35fded3535074c1dfb1171939b3b3ffbaebc04f6079f6eacc1f0e23072c9b4  src/frontend/tui/app/runtime.nim
+bd4768a43ab21b91aebff34c3ac2de9a5f512c46898cbedeb1f4580a56367dd3  src/frontend/tui/app/theme/roles.nim
+0262f19d18ad626ae0d6d1c69d60248e3e7bd4aceda6492bcbba06c5d21ceb27  src/frontend/lib/monaco_appearance.nim
+74d1b4cb7c6794d7176211fc032aec567fa8d23bc4cc2a44907913bc6f089cbc  src/frontend/gpui/main.nim
+b2bb6fd2d4b6ceba529a0872a39e4326f513cfe31e86b1d4f9a12a38d0e3386d  src/frontend/gpui/app/leaves.nim
+bd79648c35fc18b2d8ae2dc8d8c208419c058fdb755e8075e1a3430141f64773  src/frontend/gpui/app/edit_arm.nim
+0cca447d5af967d351987eac268572f2b196efdb8dde56d0a76821553dd879b1  src/frontend/viewmodel/tests/unit/test_plat70_find_regex.nim
+9959ac3179e9862b0b4c49e748692ae5bab4fc33554ccb2a78506ebdf59e7370  src/frontend/viewmodel/tests/unit/test_editor_async_closure.nim
+333d9693670899b8802810e783e29eb822a50ec0da41861e31ab6802db629d7d  src/frontend/tui/tests/test_plat70_find_colours.nim
+900d33d7d9d11ccfc60deeeaa8766083b6d0b7f0fb4215c0532ef88db6935445  src/frontend/tui/tests/real_terminal/test_plat70_find_regex_pty.nim
+be01efe010e651ffffee96cb3abe942697de05243f18060dda849136272f7496  src/frontend/gpui/tests/test_plat70_find_decisions_gpui_plan.nim

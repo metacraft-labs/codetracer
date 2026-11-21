@@ -1281,6 +1281,16 @@ var
     ## What the pane says while that compile runs (its empty listing's
     ## words, `drawLowLevelPane`).
 
+var
+  gFind: FindVM
+    ## PLAT-70 Part C (Find-And-Incremental-Search.md §3): the editor's
+    ## in-document find session — the shared ViewModel the terminal drives
+    ## too — over the shown file's Debug-mode document (`gDebugDocs`), or the
+    ## folder window's open file (its edit arm, OQ-F7). Its widget is drawn
+    ## over the editor's top right (`drawFindWidget`), its highlights in the
+    ## editor's rows. Declared here, before the edit arm's `redrawEditor`
+    ## reads it.
+
 proc nimCCompileRunning(): bool =
   not gNimCCompile.isNil and gNimCCompile.running
 
@@ -1306,7 +1316,11 @@ proc redrawEditor() =
                 isHeading(nthChild(editPane, 0)): 1 else: 0
   while childCount(editPane) > keep:
     r.removeChild(editPane, nthChild(editPane, childCount(editPane) - 1))
-  gEditorSurface = openArm.surfaceOf(editViewportRows)
+  # OQ-F7: the window's find session, when it is open over this document.
+  if gFind.open and gFind.owner == "editor:" & openArm.path:
+    gEditorSurface = openArm.surfaceOf(editViewportRows, gFind)
+  else:
+    gEditorSurface = openArm.surfaceOf(editViewportRows)
   for row in gEditorSurface.rows.mitems:
     row.hinted = row.line == gEditorPointer.hintLine and row.mark == emNone
   # HSF-E11: the generated-C listing's cross-reference, both ways, as a
@@ -1364,6 +1378,9 @@ proc editKey(key: string; mods: seq[string]) =
   # Find in Files, which Edit mode docks and which searches the project: its
   # keys (`Ctrl+Shift+F`, the next / previous result) and the omnibox's
   # `:grep` line they open are the window router's, as in a replay window.
+  # OQ-F7: so are the in-document find's — `/` and `?` under Vim and
+  # Kakoune, `Ctrl+F` under CUA, every key while the widget is open, and a
+  # committed search's browsing.
   if editWindowRoutesKey(key, mods):
     return
   # A key that runs an operation only in a replay (`F12`, step out) is inert
@@ -1568,12 +1585,6 @@ var
   gCalltraceLoads = 0
     ## How many call-trace sections the window has read (the first, at open,
     ## included) — reported for the paging test.
-  gFind: FindVM
-    ## PLAT-70 Part C (Find-And-Incremental-Search.md §3): the editor's
-    ## in-document find session — the shared ViewModel the terminal drives
-    ## too — over the shown file's Debug-mode document (`gDebugDocs`). Its
-    ## widget is drawn over the editor's top right (`drawFindWidget`), its
-    ## highlights in the editor's rows.
   gFindBrowsing = false
     ## PLAT-70 Part C: a search committed under Vim or Kakoune is
     ## CodeTracer-TUI.md §4.2's SEARCH mode, browsing — `n` / `N` walk the
@@ -2903,9 +2914,12 @@ proc drawEditorBody(r: GpuiRenderer; pane: GpuiElement;
                        gEditorSurface, gEditorViewportPx, gEditorView.leftCol,
                        gEditorView.contentCols, editorCaretMark(),
                        gLayoutSettings.overflowMarkers, sticky)
-  if gFind.open and gFind.owner == "editor:" & gEditorSurface.path and
-     gDebugDocs.hasKey(gEditorSurface.path):
-    drawFindWidget(r, pane, gDebugDocs[gEditorSurface.path])
+  if gFind.open and gFind.owner == "editor:" & gEditorSurface.path:
+    # OQ-F7: the folder window's widget over its arm's document.
+    if not openArm.isNil and gEditorSurface.productMode == pmEdit:
+      drawFindWidget(r, pane, openArm.doc)
+    elif gDebugDocs.hasKey(gEditorSurface.path):
+      drawFindWidget(r, pane, gDebugDocs[gEditorSurface.path])
   # The editor is redrawn on its own (the hover that shows its scrollbars, a
   # scroll), without the arrangement's redraw that writes the geometry: write
   # it here too, so the scrubber it reports is the one just drawn.
@@ -12514,6 +12528,15 @@ proc windowScopePath(): ScopePath =
     return
   let path = editorPath()
   if result[^1].kind == ekPane and result[^1].paneKind == $paneEditor and
+     not openArm.isNil:
+    # OQ-F7: the folder window's editor is a scope element too, so its keys
+    # resolve through the editor's tables and the navigation table, as the
+    # terminal's Edit pane and the replay window's editor do.
+    result.add element(ekEditor, "editor:" & openArm.path)
+    if gFind.open:
+      result.add element(ekOverlay, "find")
+      result.add element(ekInput, "find-query")
+  elif result[^1].kind == ekPane and result[^1].paneKind == $paneEditor and
      gDebugDocs.hasKey(path):
     result.add element(ekEditor, "editor:" & path)
     # PLAT-70 Part C: an open find widget's field holds the focus inside the
@@ -13666,15 +13689,27 @@ proc editWindowRoutesKey(key: string; mods: seq[string]): bool =
   if not gOmnibar.isNil and gOmnibar.isOpen:
     routeWindowKey(r, key, mods)
     return true
+  # OQ-F7: the open find widget's field takes every key (typing, its
+  # toggles, `Enter`, `Escape`), as in a replay window.
+  if gFind.open and gFind.owner == "editor:" & openArm.path:
+    routeWindowKey(r, key, mods)
+    return true
   let name = canonicalKeyOfGpui(key, mods)
   if name.len == 0:
     return false
+  syncOverlayLayers()
   var probe = gRouter
-  let res = probe.route(windowSessionFacts(), windowScopePath(), nmNormal,
+  let mode = if gFindBrowsing: nmSearch else: nmNormal
+  let res = probe.route(windowSessionFacts(), windowScopePath(), mode,
                         name, int64(epochTime() * 1000))
-  if res.kind == erOperation and res.operation in EditWindowRoutedOperations:
+  if res.kind == erOperation and (res.operation in EditWindowRoutedOperations or
+     res.operation.startsWith("find.") or
+     (gFindBrowsing and res.operation == "modal.return-to-normal")):
     routeWindowKey(r, key, mods)
     return true
+  # A committed search's browsing ends at the first key that is not one of
+  # its own (the terminal's SEARCH mode leaves on any other key too).
+  gFindBrowsing = false
   false
 
 proc editKeyInert(name: string): bool =
