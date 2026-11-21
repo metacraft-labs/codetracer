@@ -16,10 +16,12 @@
 # Refreshed with --record-control-hashes, which the needle scan GATES (§16):
 # re-recording from a tree whose arms have stopped matching certifies the arms
 # along with the bytes.
-3946d6a0010c0503729a7a5abe1fa0ef65e9659ad79ccf0a07e26e9811ecdec9  src/common/view_vocabulary/editor_rows.nim
+3880fd8d31aeab431bebc14261d823900f5316054b3718f0bf405ac65db6e3ac  src/common/view_vocabulary/editor_rows.nim
 e881d10d747b09c8b519b09ac75629f0987ec8ce87bb8dbf1d54603ed090e46a  src/frontend/view_vocabulary/editor_surface.nim
-4d6f23582e69908a7dfc350d3ae6e3223887410703a23389aebe5396c6020c49  src/frontend/gpui/app/leaves.nim
+26c522e1dd1d66a42732a2d48c5876100b19bc4712341e352de571cfb29fcfe9  src/frontend/gpui/app/leaves.nim
 094f79d7ce65bca148eb8b54882e85c46e558e8bcfa99e8d55d5e0c06c383096  src/frontend/headless_app/headless_app.nim
 ff398d15c8fab2de97cacf4d917b9d20bdf5c36b967ab0dfa036b1c79010f900  src/ct/ui_selection.nim
+defe4373db15c39b6c5f69f28ebbd9bcea9eb821afdd4130680c8503bb83ac4a  src/frontend/tui/app/source_binding.nim
 0da53053c176750f89b027ae190d8e180bf095818ae8b58efaedb6b025d1bd70  src/frontend/gpui/tests/test_gpui_editing_surface.nim
 dc77ce09f5c1098da6d3fa7b8283b3f9b3b2de5458151a97b9cb5493fb718b2b  src/ct/ui_selection_test.nim
+036c3dc663a8fbd94affce56106c3525751b0082b748c48ccc785b6a088e459d  src/frontend/tui/tests/test_editor_mark_agreement.nim

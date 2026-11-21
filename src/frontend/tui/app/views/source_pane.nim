@@ -374,10 +374,9 @@ proc heldTextAt*(model: SourcePaneModel; line: int): string =
 proc markFor*(model: SourcePaneModel; line: int): GutterMark =
   ## The gutter mark on `line`.
   ##
-  ## Last declaration wins, because a line may legitimately carry both a
-  ## breakpoint and a tracepoint and the gutter has one cell. The ORDER is the
-  ## binding's — it adds breakpoints after tracepoints — so a line with both
-  ## shows `●`, which is the one that stops.
+  ## Last declaration wins. The binding (`source_binding.marksForFile`) emits
+  ## one mark per line, already ranked by `editor_rows.markFor`, so there is
+  ## nothing left for the order to decide.
   result = gmNone
   for (line2, mark) in model.marks:
     if line2 == line:

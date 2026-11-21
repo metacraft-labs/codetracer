@@ -118,8 +118,10 @@ import ./views/point_list
 # `marksForFile`, `annotationsFrom`, `views/source_pane.markFor` and
 # `inline_annotations.mentionsWord`. Those five are graded only by the `tui`
 # lane, and moving code whose graders cannot be run is the trade this campaign
-# refuses. `editor_rows.markFor`'s header records the one mark combination on
-# which the two spellings already DISAGREE.
+# refuses. `marksForFile` no longer carries a rule of its own, though: since
+# 2026-11-21 each line's mark is `editor_rows.markFor`'s, the ranking the GPUI
+# editor draws from (the two had disagreed on a tracepoint beside a disabled
+# breakpoint).
 #
 # AND ONE COPY THIS IMPORT CREATED, COLLAPSED BY PLAT-23 ON 2026-09-16:
 # `degradedMessageFor` was declared HERE as well as in `editor_surface.nim` —
@@ -214,32 +216,48 @@ proc revisionLabel*(vm: SourceVM): string =
   if rev.sourceDigest.len > 0:
     result.add "#" & rev.sourceDigest
 
+func editorPointsOf*(points: openArray[SourcePoint]): seq[EditorPoint] =
+  ## The pane's points as the shared editor rules' points.
+  for p in points:
+    result.add EditorPoint(path: p.path, line: p.line,
+      kind: (if p.kind == sptTracepoint: epkTracepoint else: epkBreakpoint),
+      enabled: p.enabled)
+
+func gutterMarkOf*(m: EditorMark): GutterMark =
+  ## The terminal's glyph for the shared mark. Exhaustive, so a sixth mark
+  ## cannot reach the gutter undrawn.
+  case m
+  of emNone: gmNone
+  of emBreakpoint: gmBreakpoint
+  of emBreakpointDisabled: gmBreakpointDisabled
+  of emTracepoint: gmTracepoint
+  of emBreakpointTracepoint: gmBreakpointTracepoint
+
 proc marksForFile*(points: openArray[SourcePoint];
                    path: string): seq[(int, GutterMark)] =
-  ## The gutter marks on `path`, in the order the pane's `markFor` reads them.
+  ## The gutter marks on `path`: ONE per line, in line order, each the shared
+  ## ranking's answer (`editor_rows.markFor`) — the same function the GPUI
+  ## editor draws from, so the two front-ends cannot disagree on a line.
   ##
-  ## TRACEPOINTS FIRST, BREAKPOINTS SECOND, because `markFor` lets the last
-  ## declaration win: a line carrying an armed line breakpoint and a tracepoint
-  ## shows their one combined mark, and with a disabled breakpoint its `○`.
-  ## A column breakpoint is a mark of the glyph column too, and is also drawn at
-  ## its column in the text (`columnMarksForFile`).
+  ## Until 2026-11-21 this emitted tracepoints first and then breakpoints of
+  ## either kind, and `views/source_pane.markFor` took the LAST: a line with a
+  ## tracepoint and a DISABLED breakpoint drew `○` here and `◆` in the GPUI
+  ## window. The shared ranking is armed breakpoint > tracepoint > disabled
+  ## breakpoint, so that line draws `◆` on both — a tracepoint records, a
+  ## disabled breakpoint does nothing.
+  ##
+  ## A column breakpoint counts as a mark of its line, as it did before.
   result = @[]
+  let shared = editorPointsOf(points)
+  var lines: seq[int] = @[]
   for p in points:
-    if p.path != path or p.line <= 0:
-      continue
-    if p.kind == sptTracepoint:
-      result.add (p.line, gmTracepoint)
-  for p in points:
-    if p.path != path or p.line <= 0:
-      continue
-    if p.kind == sptBreakpoint:
-      var both = false
-      for t in points:
-        if t.path == path and t.line == p.line and t.kind == sptTracepoint:
-          both = true
-      result.add (p.line, (if not p.enabled: gmBreakpointDisabled
-                           elif both: gmBreakpointTracepoint
-                           else: gmBreakpoint))
+    if p.path == path and p.line > 0 and p.line notin lines:
+      lines.add p.line
+  lines.sort()
+  for line in lines:
+    let mark = gutterMarkOf(markFor(shared, path, line))
+    if mark != gmNone:
+      result.add (line, mark)
 
 proc columnMarksForFile*(points: openArray[SourcePoint];
                          path: string): seq[(int, int)] =
