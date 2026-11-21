@@ -209,7 +209,5 @@ LOCK_NOIR=f09f459714b839a5952b59e09ce0546a936c797e
 # jobs built.
 PRIVATE_SIBLING_CODETRACER_LAUNCHER=7aafc5efe2bde5d8c81bc849116c4df589a8ef6b
 PRIVATE_SIBLING_CODETRACER_SNAPSHOT_CODECS=3e503da83b73e805f30096d4baa45c18d138f6d3
-# isonim-zgui, which only the zgui lane (.github/workflows/zgui.yml) clones:
-# the revision that workflow pinned in its own env when it was added
-# (67d4140e2a2).
-PRIVATE_SIBLING_ISONIM_ZGUI=a432efd1eb79787996ed96e5724c6e37f076fafa
+# isonim-zgui, which only the zgui lane (.github/workflows/zgui.yml) clones.
+PRIVATE_SIBLING_ISONIM_ZGUI=328155b7086fa6a2921287c1aec8ff5d305aa645
