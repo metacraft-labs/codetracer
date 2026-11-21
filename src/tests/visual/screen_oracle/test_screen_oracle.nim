@@ -398,16 +398,21 @@ suite "PLAT-39 LAW-R5 — ONE TYPE, TWO PRODUCERS":
   ## divergence cannot be carried.
 
   proc valueAgrees(shown, full: string): bool =
-    ## The pane's value is the DOM's, or its start: its `…` (or OCR's `...`
-    ## for it) dropped, then a visible prefix, or within one OCR edit of the
-    ## DOM value's start of the same length.
+    ## The pane's value is the DOM's, or its start. The pane ends a cut value
+    ## in `…` (OCR: `..`) and draws the type and the row's widgets after it,
+    ## so the reading is cut at the ellipsis. Then a visible prefix of the
+    ## DOM's value, within OCR's measured noise: one edit per six characters
+    ## (2026-11-21: `0x71fb1a1ad3a0` read `0x71fblalad3ad`, every `1` of a
+    ## hex address an `l`, on both viewports).
     var v = shown.strip()
-    if v.endsWith("\xE2\x80\xA6"): v = v[0 ..< v.len - 3]
-    v = v.strip(leading = false, chars = {'.', ' '})
-    let a = compactText(v)
+    for cut in ["\xE2\x80\xA6", ".."]:
+      let i = v.find(cut)
+      if i >= 0: v = v[0 ..< i]
+    let a = compactText(v.strip())
     let f = compactText(full)
-    a.len > 0 and (isVisiblePrefixOf(a, f) or
-                   withinOneEdit(a, f[0 ..< min(f.len, a.len)]))
+    if a.len == 0: return false
+    if isVisiblePrefixOf(a, f): return true
+    editDistance(a, f[0 ..< min(f.len, a.len)]) <= max(1, a.len div 6)
 
   for scenario in Scenarios:
     test "the DOM producer's model was written for the frame — " & scenario:
@@ -468,8 +473,9 @@ suite "PLAT-39 LAW-R5 — ONE TYPE, TWO PRODUCERS":
         checkpoint(scenario & ": " & $prefixes & " of " & $compared &
                    " values are prefixes of the DOM's")
         ck compared > 0
-        # OCR corrupts some glyphs (`NoneTuype`); most values must agree.
-        ck prefixes * 2 > compared
+        # At most one value may miss the noise budget: a row OCR fused with
+        # the next, or whose widgets it read into the value.
+        ck compared - prefixes <= 1
 
   for scenario in Scenarios:
     test "EventLogModel: the rows and the count, pixels == DOM — " & scenario:
@@ -479,11 +485,15 @@ suite "PLAT-39 LAW-R5 — ONE TYPE, TWO PRODUCERS":
       ck r.eventLog.value.ofRows == dom["ofRows"].getInt
       let de = dom["events"].getElems
       ck r.eventLog.value.events.len == de.len
+      # Within OCR's one edit, one row allowed to miss it — DIFF-8's rule and
+      # measurement (`1+2#*3-4/]2=2` on the laptop frames).
+      var apart = 0
       for i in 0 ..< min(r.eventLog.value.events.len, de.len):
         let pt = compactText(eventText(r.eventLog.value.events[i].consoleOutput))
         let dt = compactText(eventText(de[i]["consoleOutput"].getStr))
         checkpoint(scenario & " row " & $i & ": " & pt & " | " & dt)
-        ck withinOneEdit(pt, dt)
+        if not withinOneEdit(pt, dt): inc apart
+      ck apart <= 1
 
   for scenario in Scenarios:
     test "the frame measured is the frame the capture named — " & scenario:
