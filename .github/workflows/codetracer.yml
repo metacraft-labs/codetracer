@@ -5622,7 +5622,25 @@ jobs:
       # find through ``test_harness::find_beam_recorder()`` (built per leg
       # below), are members of this repo's develop set, so the
       # "Provision dependency siblings from repro.lock" step above clones
-      # them, on both legs, at the revisions repro.lock pins.
+      # them, on both legs, at the revisions repro.lock pins -- all but the
+      # two private ones. bbf7dbed4a6 took codetracer-native-recorder and
+      # codetracer-native-backend out of the public repro.lock, so since then
+      # db-backend's build.rs panicked ("db-backend requires the sibling
+      # `codetracer-native-recorder` checkout") and the c_mcr tests reported
+      # MISSING PREREQUISITE for native-backend (run 44864106832). They are
+      # cloned below at flake.lock's revisions, read in the dev shell because a
+      # raw step on the nix-darwin leg has no jq.
+
+      - name: Read the private siblings' pins
+        id: private_pins
+        run: |
+          nix develop . --command bash -euo pipefail -c '
+            flake_rev() { jq -er --arg r "$1" "[.nodes[] | .locked? | select(.owner? == \"metacraft-labs\" and .repo? == \$r) | .rev] | unique | if length == 1 then .[0] else error(\"\(\$r): \(length) revisions in flake.lock\") end" flake.lock; }
+            {
+              echo "native_recorder=$(flake_rev codetracer-native-recorder)"
+              echo "native_backend=$(flake_rev codetracer-native-backend)"
+            } | tee -a "$GITHUB_OUTPUT"
+          '
 
       - name: Mint a token for the clones below
         # An installation token lives an hour, and the clones below come after
@@ -5634,6 +5652,24 @@ jobs:
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      - name: Clone codetracer-native-recorder
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-native-recorder
+          ref: ${{ steps.private_pins.outputs.native_recorder }}
+          path: ${{ github.workspace }}/../codetracer-native-recorder
+          gh-token: ${{ steps.late_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Clone codetracer-native-backend
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-native-backend
+          ref: ${{ steps.private_pins.outputs.native_backend }}
+          path: ${{ github.workspace }}/../codetracer-native-backend
+          gh-token: ${{ steps.late_token.outputs.token }}
+          submodules: 'true'
 
       - name: Clone python-recorder (macOS)
         if: matrix.platform == 'macos'
