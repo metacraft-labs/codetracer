@@ -138,8 +138,11 @@
 ##               the same question.
 ##
 ##   `Image`     Raster or vector media, by MIME type, WITH a text equivalent.
-##               State: `mediaType`, `mediaBytes`, `alt`. Behaviour: none.
-##               `alt` is required — see the terminal-first note above.
+##               State: `mediaType`, `mediaBytes`, `alt`, and the `picture`
+##               itself as PNG bytes. Behaviour: none. `alt` is required — see
+##               the terminal-first note above. `picture` may be empty (a
+##               value that names media it does not carry); a medium that can
+##               draw then has nothing to draw and shows `alt`.
 ##
 ##   `Markdown`  A document in a portable markup, rendered rather than shown
 ##               as source. State: `text` (the source). Behaviour: none in the
@@ -252,6 +255,15 @@ type
       ## `<image/png, 2048 bytes>` and PLAT-2 already specifies that string.
     alt*: string
       ## `Image` — the text equivalent. REQUIRED; see the header.
+    picture*: string
+      ## `Image` — the picture, as PNG bytes; "" when the node carries none.
+      ##
+      ## PNG whatever `mediaType` says, so every medium that draws decodes ONE
+      ## format: GPUI hands the decoded pixels to its `Img` element, and a
+      ## terminal graphics protocol and a browser take PNG as it is.
+      ## `mediaType` keeps naming the media the value IS (a `image/jpeg`
+      ## screenshot transcoded for display is still a JPEG to its reader).
+      ## `checkPortable` refuses a picture that is not PNG.
     activation*: set[Activation]
       ## Interactive entries only. `{}` on a non-interactive entry.
     nativeMedium*: string
@@ -416,9 +428,20 @@ func viewProgress*(id: string; progress: int): ViewNode =
   ViewNode(kind: pkProgressIndicator, id: id, progress: progress,
            selected: -1, highlight: -1)
 
-func viewImage*(id, mediaType, alt: string; mediaBytes = 0): ViewNode =
+func viewImage*(id, mediaType, alt: string; mediaBytes = 0;
+                picture = ""): ViewNode =
+  ## `mediaBytes` defaults to the picture's size when a picture is given.
   ViewNode(kind: pkImage, id: id, mediaType: mediaType, alt: alt,
-           mediaBytes: mediaBytes, selected: -1, highlight: -1)
+           mediaBytes: (if mediaBytes == 0: picture.len else: mediaBytes),
+           picture: picture, selected: -1, highlight: -1)
+
+const PngSignature* = "\x89PNG\r\n\x1A\n"
+  ## The eight bytes every PNG starts with (RFC 2083 §3.1).
+
+func pictureIsPng*(v: ViewNode): bool =
+  ## Whether an `Image`'s picture is PNG by its signature. True of an empty
+  ## picture, which is a node carrying none rather than a wrong one.
+  v.picture.len == 0 or v.picture.startsWith(PngSignature)
 
 func viewMarkdown*(id, source: string): ViewNode =
   ViewNode(kind: pkMarkdown, id: id, text: source, selected: -1,

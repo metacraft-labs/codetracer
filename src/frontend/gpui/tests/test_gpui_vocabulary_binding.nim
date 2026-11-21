@@ -44,6 +44,7 @@ import isonim_gpui/bindings
 
 import ../../../common/view_vocabulary
 import ../../../common/value_presentation
+import ../../../common/png
 import ../../view_vocabulary/gpui_binding as gbind
 import ../../view_vocabulary/web_binding as wbind
 
@@ -108,14 +109,21 @@ proc says(b: GpuiBinding; key: string): string =
   let t = factTable(b)
   if key in t: t[key] else: "<absent>"
 
-proc planKinds(): Table[string, string] =
-  ## Every tag this binding can emit, and the element KIND isonim-gpui's own
-  ## render-plan builder classifies it as — read off the plan the Rust side
-  ## produced, not off `tagMap`.
+proc kindsOf(tags: openArray[string]): Table[string, string] =
+  ## The element KIND isonim-gpui's own render-plan builder classifies each
+  ## tag as — read off the plan the Rust side produced, not off `tagMap`.
   gpui_reset_tree()
   resetCallbacks()
   let r = GpuiRenderer()
   let root = r.createElement("div")
+  for t in tags:
+    r.appendChild(root, r.createElement(t))
+  let plan = parseJson(r.renderPlanJson(root))
+  for i, t in tags:
+    result[t] = plan["children"][i]["kind"].getStr
+
+proc planKinds(): Table[string, string] =
+  ## Every tag this binding can emit, and its render-plan kind.
   var tags: seq[string] = @[]
   for k in ViewKind:
     let t = gpuiTagFor(k)
@@ -124,11 +132,7 @@ proc planKinds(): Table[string, string] =
     if c notin tags: tags.add c
   for extra in ["tr", "td", "th"]:
     if extra notin tags: tags.add extra
-  for t in tags:
-    r.appendChild(root, r.createElement(t))
-  let plan = parseJson(r.renderPlanJson(root))
-  for i, t in tags:
-    result[t] = plan["children"][i]["kind"].getStr
+  kindsOf(tags)
 
 # ---------------------------------------------------------------------------
 
@@ -220,6 +224,36 @@ suite "PLAT-21: PLAT-3's msAbsent premise, RE-TAKEN against the render plan":
     ck b.says("dlg.open") == "true"
     ck b.says("load.progress") == "40"
     expectCount(18)
+
+  test "the pass-through tags are exactly the ones the plan gives a kind of their own":
+    # `mappings.GpuiPassThroughTags` says which tags keep their identity
+    # instead of collapsing to `div`. That is a claim about the RENDERER, so
+    # it is read against the plan the Rust side builds, over every tag in
+    # `GpuiTagMap` and the unmapped tags a binding can still emit. Until
+    # 2026-11-21 the list carried `small` (the plan says `Div`) and lacked
+    # `a` (the plan says `TextContainer`), and nothing compared the two.
+    resetCount()
+    var tags = GpuiTagMap
+    for extra in ["a", "table", "tr", "td", "th", "dialog", "progress",
+                  "option", "nav"]:
+      if extra notin tags: tags.add extra
+    let kinds = kindsOf(tags)
+    # THE POSITIVE CONTROL: every tag came back with a kind, and both answers
+    # occur, so "every tag is Div" cannot pass the equivalence below.
+    ck kinds.len == tags.len
+    var ownKind = 0
+    for t in tags:
+      let k = kinds.getOrDefault(t, "<missing>")
+      ck k != "<missing>"
+      ck gpuiPassesThrough(t) == (k != "Div")
+      if k != "Div": inc ownKind
+    ck ownKind == GpuiPassThroughTags.len
+    # The two entries the list had wrong, by name.
+    ck kinds["small"] == "Div"
+    ck not gpuiPassesThrough("small")
+    ck kinds["a"] == "TextContainer"
+    ck gpuiPassesThrough("a")
+    expectCount(6 + 2 * tags.len)
 
 suite "PLAT-21: the two renderer defects this milestone measured — REPAIRED BY PLAT-38":
 
@@ -508,38 +542,44 @@ suite "PLAT-21: THE VERIFICATION GATE":
                  taken.mapIt(vocabularyName(it)).join(", "))
       checkpoint("entries named by FiledGpuiGaps: " &
                  filed.mapIt(vocabularyName(it)).join(", "))
-    ck taken.len > 0            # the §4 floor: a binding that recorded nothing
     ck taken == filed
-    # **THIRTEEN UNTIL 2026-09-22, ONE NOW.** PLAT-38 retired three of the
-    # four filed gaps, and the register shrank because the BINDING STOPPED
-    # ESCAPING — which is the direction the risk mitigation asks for. A gap
-    # cannot retire here because the renderer grew a capability; it retires
-    # because this run reports one fewer escape.
-    ck taken.len == 1
-    ck taken == @[pkImage]
-    # Every escape kind the binding can take is filed, by enumeration over the
-    # enum rather than over the ones somebody thought of.
-    for k in GpuiEscapeKind:
-      ck gapById(gpuiEscapeGapId(k)).id == gpuiEscapeGapId(k)
-    # And the one that remains was actually taken on this view, so the row is
-    # not a row nothing exercises.
-    ck b.escapeKinds() == {gekImageWithoutPayload}
-    expectCount(6)
+    # **THIRTEEN UNTIL 2026-09-22, ONE UNTIL 2026-11-21, NONE NOW.** PLAT-38
+    # retired three of the four filed gaps and `Image`'s `picture` the fourth,
+    # and the register shrank because the BINDING STOPPED ESCAPING — which is
+    # the direction the risk mitigation asks for. A gap cannot retire here
+    # because somebody edited the register; it retires because this run
+    # reports one fewer escape.
+    ck taken.len == 0
+    ck b.escapeGapIds().len == 0
+    # THE §4 FLOOR, now that the answer is EMPTY: an empty census is what a
+    # binding that never reports anything produces too. So the census is
+    # shown to be LIVE on the same binding — an escape recorded through the
+    # binding's one door is counted, by entry and by gap, and a re-render
+    # (which starts the census afresh) forgets it again.
+    ck b.readGpuiFacts().len == 29     # the view really rendered
+    b.recordEscape("PLAT21-PROBE", viewImage("probe", "image/png", "probe"),
+                   "the census's positive control")
+    ck b.escapedEntries() == @[pkImage]
+    ck b.escapeGapIds() == @["PLAT21-PROBE"]
+    ck gapById("PLAT21-PROBE").id == ""   # …and it is NOT a filed gap
+    b.rerender()
+    ck b.escapedEntries().len == 0
+    expectCount(8)
 
   test "the entries that needed NO escape are named, and it is measured":
     # The gate's interesting half. Sixteen entries, and PLAT-21 measured
     # THREE that the binding rendered with nothing GPUI-specific at all:
-    # `Text`, `ProgressIndicator` and `Markdown`. **It is FIFTEEN now** —
-    # everything except `Image`, whose gap is against the VOCABULARY and which
-    # no change to isonim-gpui could ever have closed. Asserted as an identity
-    # so a future escape in any of them reddens here rather than growing the
+    # `Text`, `ProgressIndicator` and `Markdown`. **It is all SIXTEEN now**:
+    # fifteen since PLAT-38, and `Image` since its gap against the VOCABULARY
+    # was closed by giving the entry a picture. Asserted as an identity so a
+    # future escape in any of them reddens here rather than growing the
     # register quietly.
     resetCount()
     var clean: seq[ViewKind] = @[]
     for k in ViewKind:
       if gapsFor(k).len == 0: clean.add k
-    ck clean.len == 15
-    ck pkImage notin clean
+    ck clean.len == 16
+    ck pkImage in clean
     for k in [pkText, pkProgressIndicator, pkMarkdown, pkModal, pkButton,
               pkTable]:
       ck k in clean
@@ -556,50 +596,90 @@ suite "PLAT-21: THE VERIFICATION GATE":
     # A gap whose fields may be blank is a gap that satisfies the gate for
     # free (Verification-Harness-Traps §4).
     resetCount()
-    ck FiledGpuiGaps.len == 1
-    var ids: seq[string] = @[]
-    for g in FiledGpuiGaps:
-      ck g.id.startsWith("PLAT21-VG")
-      ck g.id notin ids
-      ids.add g.id
-      ck g.entries.len > 0
-      ck g.what.len > 40
-      ck g.measured.len > 40
-      ck g.remedy.len > 40
-    # The one that remains is filed against the VOCABULARY, which is why it is
-    # the one that remains: conflating the two subjects is how a renderer bug
-    # sends the next reader to edit the vocabulary.
-    var byRenderer = 0
-    var byVocabulary = 0
-    for g in FiledGpuiGaps:
-      case g.subject
-      of gsRenderer: inc byRenderer
-      of gsVocabulary: inc byVocabulary
-    ck byRenderer == 0
-    ck byVocabulary == 1
-    ck gapById("PLAT21-VG4").subject == gsVocabulary
-    ck gapById("PLAT21-VG4").entries == @[pkImage]
-    ck describeGaps().contains("PLAT21-VG4")
-    # **THE SHRINK, AS AN IDENTITY.** PLAT-21 filed four; three are retired.
-    # `filed ∪ retired` must still be those four — a gap that vanished from
-    # both registers is a claim that stopped being recorded, and an id in both
-    # is a retirement nobody finished.
+    ck FiledGpuiGaps.len == 0
+    ck filedGapIds().len == 0
+    ck describeGaps() == ""        # the report of an empty register is empty
+    # **THE SHRINK, AS AN IDENTITY.** PLAT-21 filed four; all four are
+    # retired. `filed ∪ retired` must still be those four — a gap that
+    # vanished from both registers is a claim that stopped being recorded,
+    # and an id in both is a retirement nobody finished.
     var ever = everFiledGapIds()
     ever.sort()
     ck ever == @["PLAT21-VG1", "PLAT21-VG2", "PLAT21-VG3", "PLAT21-VG4"]
-    ck RetiredGpuiGaps.len == 3
+    ck RetiredGpuiGaps.len == 4
+    var byRenderer = 0
+    var byVocabulary = 0
     for g in RetiredGpuiGaps:
-      ck g.subject == gsRenderer     # all three were the renderer's
+      case g.subject
+      of gsRenderer: inc byRenderer
+      of gsVocabulary: inc byVocabulary
       ck isRetired(g.id)
       ck g.id notin filedGapIds()
       ck g.entries.len > 0
       ck g.repairedIn.len > 40
       ck g.evidence.len > 40
-    ck not isRetired("PLAT21-VG4")   # the negative twin on the one predicate
+    # Three were the renderer's and one the vocabulary's, and the subject a
+    # gap was filed under survives its retirement.
+    ck byRenderer == 3
+    ck byVocabulary == 1
+    ck retiredGapById("PLAT21-VG4").subject == gsVocabulary
+    ck not isRetired("PLAT21-VG5")   # the negative twin on the one predicate
     ck retiredGapById("PLAT21-VG1").entries.len == 12
     ck retiredGapById("PLAT21-VG2").entries.len == 12
     ck retiredGapById("PLAT21-VG3").entries == @[pkModal]
-    expectCount(36)
+    ck retiredGapById("PLAT21-VG4").entries == @[pkImage]
+    expectCount(33)
+
+suite "PLAT-21: an Image's picture reaches GPUI's Img element":
+
+  test "the picture is drawn as pixels, at the picture's own size":
+    # `PLAT21-VG4`'s RETIREMENT EVIDENCE, taken on the real shim. The shim
+    # records a picture it was handed as `data-gpui-image=<w>x<h>` on the
+    # element; that attribute is written by the Rust side when, and only
+    # when, `gpui_set_image_rgba` accepted the pixels.
+    resetCount()
+    gpui_reset_tree()
+    resetCallbacks()
+    proc solid(w, h: int; r, g, b: uint8): string =
+      var px = newSeq[uint8](w * h * 4)
+      for i in 0 ..< w * h:
+        px[4*i] = r; px[4*i + 1] = g; px[4*i + 2] = b; px[4*i + 3] = 255
+      encodePng(w, h, px)
+    let view = viewCollapsible("pics", "pictures", @[
+      viewImage("wide", "image/png", "a wide picture",
+                picture = solid(3, 2, 200, 10, 10)),
+      viewImage("tall", "image/png", "a tall picture",
+                picture = solid(1, 4, 10, 200, 10)),
+      viewImage("none", "image/png", "no picture", 2048),
+      viewImage("bad", "image/png", "a broken picture",
+                picture = PngSignature & "not a png body")], expanded = true)
+    ck isPortable(view)
+    let b = renderGpui(GpuiRenderer(), view)
+    ck b.escapedEntries().len == 0
+    # Two pictures, two sizes: the attribute is each picture's OWN, so a
+    # binding that drew one picture everywhere cannot pass.
+    ck renderer.getAttribute(b.nodes["wide"], "data-gpui-image") == "3x2"
+    ck renderer.getAttribute(b.nodes["tall"], "data-gpui-image") == "1x4"
+    # The negative twins: no picture, nothing drawn; a picture that does not
+    # decode, nothing drawn and the reason on the element.
+    ck renderer.getAttribute(b.nodes["none"], "data-gpui-image") == ""
+    ck renderer.getAttribute(b.nodes["bad"], "data-gpui-image") == ""
+    ck renderer.getAttribute(b.nodes["bad"], PictureErrorAttribute).len > 0
+    ck renderer.getAttribute(b.nodes["wide"], PictureErrorAttribute) == ""
+    # The alt text is still each element's text — the text equivalent, and
+    # the placeholder for the two that draw none.
+    ck b.ownTextOf("wide") == "a wide picture"
+    ck b.ownTextOf("none") == "no picture"
+    # And the plan the Rust side builds classifies all four as `Img`.
+    let plan = parseJson(b.planJson())
+    var imgs = 0
+    proc walkPlan(n: JsonNode) =
+      if n.kind != JObject: return
+      if n{"kind"}.getStr == "Img": inc imgs
+      for c in n{"children"}.getElems: walkPlan(c)
+    walkPlan(plan)
+    ck imgs == 4
+    expectCount(11)
 
 suite "PLAT-21: the GPUI surface declares its own budget":
 
@@ -631,7 +711,7 @@ suite "PLAT-21: the GPUI surface declares its own budget":
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 217
+const ExpectedAssertions = 319
 
 suite "PLAT-21: the assertion count":
   test "every case in this file ran":

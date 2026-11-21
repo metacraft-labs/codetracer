@@ -189,51 +189,50 @@ const
       evidence: "A `Modal` held a focus trap on the real shim: focus moved " &
                 "inside it when it opened, an element outside it was " &
                 "refused, motion cycled within it, and at most one element " &
-                "held focus at every point — counted over the whole tree.")]
-    ## **THE RETIRED GAPS.** Three, all against the RENDERER, all closed by
-    ## PLAT-38. `view_vocabulary_test.nim` asserts that none of these ids is
-    ## still in `FiledGpuiGaps`, that each one's evidence arrived, and that
-    ## the union of the two registers is the four ids PLAT-21 filed.
-
-  FiledGpuiGaps*: seq[GpuiGap] = @[
-    GpuiGap(
+                "held focus at every point — counted over the whole tree."),
+    RetiredGpuiGap(
       id: "PLAT21-VG4",
       entries: @[pkImage],
       subject: gsVocabulary,
-      what: "`Image` CARRIES NO PAYLOAD, SO NO RENDERER CAN DRAW IT — and " &
-            "GPUI is the first front-end for which that is the whole of the " &
-            "entry. `ViewNode` has `mediaType`, `mediaBytes` and `alt` and no " &
-            "bytes; the terminal's binding renders `alt` and says so, the " &
-            "web's emits `<img alt=…>` with no `src`, and isonim-gpui has a " &
-            "real `Img` element kind (one of exactly two tags that reach a " &
-            "dedicated kind) which the binding therefore has nothing to put " &
-            "in. This is filed against the VOCABULARY rather than the " &
-            "renderer: the entry is specified so that the two media that " &
-            "could not draw it are satisfied, and the medium that can is not.",
-      measured: "2026-09-15: `img` is one of two tags whose render-plan kind " &
-                "is not `Div` — `img -> kind=Img`, `svg -> kind=Svg`, " &
-                "everything else is `Div` or `TextContainer`. " &
-                "`vocabulary.ViewNode` has no field a binding could read " &
-                "bytes out of; `viewImage(id, mediaType, alt, mediaBytes)` " &
-                "takes a SIZE.",
-      remedy: "PLAT-14 widened the terminal's media capability without " &
-              "widening the entry, and `Budget.media` already carries what a " &
-              "SURFACE can draw. The entry needs the payload (or a handle to " &
-              "one) beside the type, and the decision belongs with whichever " &
-              "milestone gives a front-end real pixels to hand over.")]
+      what: "`Image` CARRIED NO PAYLOAD, SO NO RENDERER COULD DRAW IT — and " &
+            "GPUI was the first front-end for which that was the whole of " &
+            "the entry. `ViewNode` had `mediaType`, `mediaBytes` and `alt` " &
+            "and no bytes, and isonim-gpui has a real `Img` element kind " &
+            "(one of exactly two tags that reach a dedicated kind) which the " &
+            "binding therefore had nothing to put in. Filed against the " &
+            "VOCABULARY: the entry was specified so that the two media that " &
+            "could not draw it were satisfied, and the medium that can was " &
+            "not.",
+      repairedIn: "codetracer, 2026-11-21. `ViewNode.picture` carries the " &
+                  "picture as PNG bytes (`viewImage(…, picture = …)`), " &
+                  "`checkPortable` refuses a picture that is not PNG, and " &
+                  "`gpui_binding` decodes it (`common/png.decodePng`) and " &
+                  "hands the pixels to the `img` element through " &
+                  "`GpuiRenderer.setImageRgba`.",
+      evidence: "An `Image` built around a PNG `encodePng` wrote rendered on " &
+                "the real shim with `data-gpui-image` reading the picture's " &
+                "own `<width>x<height>` on the render plan, while a second " &
+                "`Image` with no picture carried no such attribute.")]
+    ## **THE RETIRED GAPS.** All four PLAT-21 filed: the three against the
+    ## RENDERER, closed by PLAT-38, and the one against the VOCABULARY,
+    ## closed when `Image` gained its `picture`. `view_vocabulary_test.nim`
+    ## asserts that none of these ids is still in `FiledGpuiGaps`, that each
+    ## one's evidence arrived, and that the union of the two registers is the
+    ## four ids PLAT-21 filed.
+
+  FiledGpuiGaps*: seq[GpuiGap] = @[]
     ## **THE FILED GAPS, AND THE COUNT IS PART OF THE CONTRACT.**
     ##
-    ## **ONE, since PLAT-38.** It was four; three were against the RENDERER and
-    ## all three are in `RetiredGpuiGaps` above. The one that remains is the
-    ## one filed against the VOCABULARY — and that split is why the shrink is
-    ## the shape it is: no change to isonim-gpui could ever have closed
-    ## `PLAT21-VG4`, because the entry has nothing to give the renderer.
+    ## **NONE, since 2026-11-21.** PLAT-21 filed four; PLAT-38 retired the
+    ## three against the RENDERER and `Image`'s `picture` retired the one
+    ## against the VOCABULARY. All four are in `RetiredGpuiGaps` above.
     ##
-    ## `view_vocabulary_test.nim` asserts the length, asserts every field
-    ## non-empty, asserts every `entries` list non-empty and every id unique,
-    ## and — the assertion that makes this a gate rather than a document —
-    ## asserts that the set of entries the GPUI binding REPORTED taking an
-    ## escape for, on a run, is exactly the set named here.
+    ## An empty register is still a gate: the census is taken from a RUN over
+    ## a view carrying all sixteen entries, and the suite asserts the set of
+    ## entries the GPUI binding REPORTED taking an escape for is exactly the
+    ## set named here — so an escape taken without a filing fails it. The
+    ## shape of a row is kept (`GpuiGap`, and the field checks in
+    ## `view_vocabulary_test.nim`) for the next gap a third medium finds.
 
 func gapsFor*(k: ViewKind): seq[GpuiGap] =
   ## Every filed gap naming this entry. **The one predicate**: the census in

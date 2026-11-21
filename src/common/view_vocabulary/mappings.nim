@@ -160,8 +160,13 @@ const
 
   GpuiPassThroughTags*: seq[string] = @[
     "span", "p", "h1", "h2", "h3", "h4", "h5", "h6", "label", "strong", "em",
-    "small", "code", "pre", "img", "svg"]
-    ## The subset that keeps its identity instead of collapsing to `div`.
+    "a", "code", "pre", "img", "svg"]
+    ## The tags isonim-gpui's render-plan builder gives an element kind of its
+    ## own (`TextContainer`, `Img`, `Svg`) instead of `Div`. A claim about the
+    ## RENDERER, so it is checked against the plan the Rust side builds
+    ## (`test_gpui_vocabulary_binding.nim`), not against `GpuiTagMap`: `small`
+    ## is in the map and classifies `Div`, and `a` is not in the map and
+    ## classifies `TextContainer`.
 
 func gpuiKnowsTag*(tag: string): bool = tag in GpuiTagMap
 

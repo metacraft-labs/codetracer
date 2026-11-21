@@ -47,8 +47,8 @@ template ck(condition: untyped) =
   check condition
 
 const
-  ExpectedAssertionsWithGpui = 790
-  ExpectedAssertionsWithoutGpui = 719
+  ExpectedAssertionsWithGpui = 801
+  ExpectedAssertionsWithoutGpui = 730
     ## Both written from a run. See the final case.
     ##
     ## **RE-TAKEN ON 2026-09-26** (762 -> 790, 691 -> 719): the new
@@ -409,6 +409,24 @@ suite "PLAT-3: the vocabulary's own check rejects medium-specific escapes":
     i.alt = "a flame graph"
     ck isPortable(i)
 
+  test "an Image's picture is PNG bytes, and anything else is refused":
+    # The vocabulary's picture is PNG on every medium, so a medium that
+    # draws decodes one format. A JPEG's bytes under the PNG field would be
+    # drawn by nobody, and the check says so by name rather than leaving it
+    # to a renderer's decoder.
+    let png = viewImage("p", "image/jpeg", "a screenshot",
+                        picture = PngSignature & "rest")
+    ck isPortable(png)
+    ck png.mediaBytes == PngSignature.len + 4
+    let jpeg = viewImage("j", "image/jpeg", "a screenshot",
+                         picture = "\xFF\xD8\xFF\xE0rest")
+    let r = checkPortable(jpeg)
+    ck r.violations.len == 1
+    ck r.violations[0].kind == pvStructural
+    ck r.violations[0].detail.contains("not PNG")
+    # No picture is a node carrying none, not a wrong one.
+    ck isPortable(viewImage("n", "image/png", "nothing yet", 2048))
+
   test "terminal control bytes and HTML in text are both refused":
     let ansi = viewText("t", "\e[31mred\e[0m")
     let ra = checkPortable(ansi)
@@ -615,6 +633,8 @@ suite "PLAT-3: the three front-end mappings":
     ck gpuiPassesThrough("img")
     ck not gpuiPassesThrough("button")
     ck not gpuiPassesThrough("li")
+    ck gpuiPassesThrough("a")
+    ck not gpuiPassesThrough("small")
     ck GpuiTagMap.len == 35
     ck GpuiPassThroughTags.len == 16
     # THE IMPLICATION, DENIED: three tags outside the map, three different
@@ -683,7 +703,7 @@ suite "PLAT-21: the register of GPUI gaps is well formed":
     # needs the renderer. What is checkable HERE, in a lane that links no
     # renderer, is that the register a gate reads cannot be satisfied by empty
     # rows (Verification-Harness-Traps §4).
-    ck FiledGpuiGaps.len == 1
+    ck FiledGpuiGaps.len == 0
     var ids: seq[string] = @[]
     for g in FiledGpuiGaps:
       ck g.id.startsWith("PLAT21-VG")
@@ -693,20 +713,20 @@ suite "PLAT-21: the register of GPUI gaps is well formed":
       ck g.what.len > 40
       ck g.measured.len > 40
       ck g.remedy.len > 40
-    # **THIRTEEN ENTRIES UNTIL 2026-09-22, ONE NOW.** PLAT-38 repaired the
-    # three gaps filed against the RENDERER and they are in `RetiredGpuiGaps`.
-    # An entry list nobody asserts is one that can shrink silently, so both
-    # halves are asserted: which entries still need an escape, and which do
-    # not.
-    ck entriesWithFiledGap() == @[pkImage]
+    # **THIRTEEN ENTRIES UNTIL 2026-09-22, ONE UNTIL 2026-11-21, NONE NOW.**
+    # PLAT-38 repaired the three gaps filed against the RENDERER, and
+    # `Image`'s `picture` the one filed against the VOCABULARY; all four are
+    # in `RetiredGpuiGaps`. An entry list nobody asserts is one that can
+    # shrink silently, so both halves are asserted: no entry still needs an
+    # escape, and every one of the sixteen is clean.
+    ck entriesWithFiledGap().len == 0
     var clean: seq[ViewKind] = @[]
     for k in ViewKind:
       if gapsFor(k).len == 0: clean.add k
-    ck clean.len == 15
-    ck pkImage notin clean
+    ck clean.len == 16
+    ck pkImage in clean
     ck pkModal in clean
-    ck gapById("PLAT21-VG4").subject == gsVocabulary
-    ck gapById("PLAT21-VG4").entries == @[pkImage]
+    ck gapById("PLAT21-VG4").id == ""
     ck gapById("no-such-gap").id == ""
 
   test "the retired gaps are a register too, and the shrink is an identity":
@@ -721,20 +741,22 @@ suite "PLAT-21: the register of GPUI gaps is well formed":
     # the row and is asserted non-empty here; that it ARRIVED is asserted by
     # the suite that can render, because `PLAT35-VG7` was retired against a
     # run in which nothing happened and two empty answers compared equal.
-    ck RetiredGpuiGaps.len == 3
+    ck RetiredGpuiGaps.len == 4
     var rids: seq[string] = @[]
     for g in RetiredGpuiGaps:
       ck g.id.startsWith("PLAT21-VG")
       ck g.id notin rids
       rids.add g.id
-      ck g.subject == gsRenderer
+      # The three PLAT-38 closed were against the renderer; the fourth, the
+      # one against the vocabulary, keeps its subject when it is retired.
+      ck g.subject == (if g.id == "PLAT21-VG4": gsVocabulary else: gsRenderer)
       ck g.entries.len > 0
       ck g.what.len > 40
       ck g.repairedIn.len > 40
       ck g.evidence.len > 40
       ck isRetired(g.id)
       ck g.id notin filedGapIds()
-    ck not isRetired("PLAT21-VG4")
+    ck not isRetired("PLAT21-VG5")   # the negative twin on the one predicate
     ck retiredGapById("no-such-gap").id == ""
     var ever = everFiledGapIds()
     ever.sort()
@@ -742,6 +764,7 @@ suite "PLAT-21: the register of GPUI gaps is well formed":
     ck retiredGapById("PLAT21-VG1").entries.len == 12
     ck retiredGapById("PLAT21-VG2").entries.len == 12
     ck retiredGapById("PLAT21-VG3").entries == @[pkModal]
+    ck retiredGapById("PLAT21-VG4").entries == @[pkImage]
 
 suite "PLAT-3: the GPUI tag table this repository copied":
 
