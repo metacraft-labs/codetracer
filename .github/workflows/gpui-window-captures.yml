@@ -293,6 +293,31 @@ jobs:
         # compositor tools); the recipe enters it itself.
         run: nix develop .#devShells.x86_64-linux.default --command just gpui-window-captures
 
+      - name: PLAT-35's GPUI arm as a real window, one per parity scenario
+        # Linux has no headless GPUI renderer, so PLAT-35's GPUI frames on
+        # Linux are a real window on GuiAssert's headless sway -- this job's
+        # compositor, windowed shim and GuiAssert checkout. One window per
+        # scenario in `src/tests/visual/scenarios.json`; a scenario with no
+        # settled frame at its declared size fails by name. Runs after the
+        # window captures, which build the same windowed shim and record the
+        # `calc` trace it opens, and BEFORE the scenario lane, so the frames
+        # reach the ViewModel job's screen oracle early; `!cancelled()` so a
+        # red capture above does not hide whether this one works.
+        id: plat35_gpui
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.shard == 1 }}
+        run: nix develop .#devShells.x86_64-linux.default --command just plat35-capture-gpui-window
+
+      - name: Upload PLAT-35's GPUI window frames for the screen oracle
+        # Read by the ViewModel job's screen oracle (PLAT-39) beside its own
+        # Electron frames; frames are never committed.
+        if: ${{ !cancelled() && steps.plat35_gpui.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: plat35-gpui-window-frames
+          path: build/plat35/gpui-window/*.png
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Scenarios — the GPUI lane
         # The windowed `build/bin/codetracer-gpui-window` and its shim, built by
         # the step above, on DemoVideoScript-GuiAssert's private Xvfb: read by
@@ -317,18 +342,6 @@ jobs:
         with:
           build-dir: build
           name: scenario-runs-gpui-${{ matrix.shard }}
-
-      - name: PLAT-35's GPUI arm as a real window, one per parity scenario
-        # Linux has no headless GPUI renderer, so PLAT-35's GPUI frames on
-        # Linux are a real window on GuiAssert's headless sway -- this job's
-        # compositor, windowed shim and GuiAssert checkout. One window per
-        # scenario in `src/tests/visual/scenarios.json`; a scenario with no
-        # settled frame at its declared size fails by name. Runs after the
-        # step above, which builds the same windowed shim and records the
-        # `calc` trace it opens; `!cancelled()` so a red capture above does
-        # not hide whether this one works.
-        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.shard == 1 }}
-        run: nix develop .#devShells.x86_64-linux.default --command just plat35-capture-gpui-window
 
       - name: CTF-P1b's Agent Harbor stories as real windows, against the web layout
         # One `codetracer-gpui-story` window per story, theme and size on
