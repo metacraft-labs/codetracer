@@ -2453,12 +2453,7 @@ jobs:
     # with 16 real steps skipped, so the 24.3m worst failure covers under half
     # the body and is a LOWER bound. 75m is ~3x that; the unmeasured half
     # includes the recorder-gated tests and a `ct` build.
-    # +90: the wait for gpui-window-captures' frames, bounded at 90 minutes.
-    timeout-minutes: 165
-    permissions:
-      contents: read
-      id-token: write
-      actions: read  # ci/wait-for-run-artifact.sh
+    timeout-minutes: 75
     name: ViewModel headless tests (native + JS)
     steps:
       - name: Generate CI token
@@ -2509,7 +2504,7 @@ jobs:
       # `Generate CI token` above is this job's ONLY mint -- `ci/test/
       # sibling-provisioning-test.sh` asserts that "no job mints more than one
       # installation token", so refreshing it mid-job is not available here --
-      # and this job runs past an hour. Every authenticated git
+      # and this job's `timeout-minutes` is 75. Every authenticated git
       # operation must therefore happen near the TOP of the job.
       #
       # `codetracer-js-recorder` and `runquota` used to be cloned next to the
@@ -2588,8 +2583,6 @@ jobs:
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-          # The screen oracle's pixel readers and its case floor (test lock).
-          test-siblings: GuiAssert,codetracer-pm
 
       - name: Assert the JS ViewModel lane can observe its own failures (full suite)
         # The same contract suite `ci-verdict` runs, but here it runs INSIDE the
@@ -3729,32 +3722,6 @@ jobs:
           PLAT68_SPEC: tests/keymaps/plat64-desktop-pointer-rows.spec.ts
         run: nix develop .#devShells.x86_64-linux.default --command just plat68-desktop-keys
 
-      - name: The screen oracle's Electron frames (PLAT-35's capture)
-        id: plat35_electron
-        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
-        # Captured here, never committed; read below with the GPUI frames.
-        run: nix develop .#devShells.x86_64-linux.default --command just plat35-capture-electron
-
-      - name: Wait for the GPUI window frames
-        id: gpui_frames
-        if: ${{ !cancelled() && steps.ct.outcome == 'success' && steps.plat35_electron.outcome == 'success' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: nix develop .#ci --command bash ci/wait-for-run-artifact.sh plat35-gpui-window-frames "gpui-window-captures / GPUI window captures (headless sway) (1/20)" 5400
-
-      - name: Restore the GPUI window frames
-        if: ${{ !cancelled() && steps.ct.outcome == 'success' && steps.gpui_frames.outcome == 'success' }}
-        uses: actions/download-artifact@v4
-        with:
-          name: plat35-gpui-window-frames
-          path: build/plat35/gpui-window
-
-      - name: The screen oracle reads both front-ends' frames
-        if: ${{ !cancelled() && steps.ct.outcome == 'success' && steps.gpui_frames.outcome == 'success' }}
-        # PLAT-39: the six Electron frames against the DOM's own models, and
-        # the GPUI window's frames against them, from pixels alone.
-        run: nix develop .#devShells.x86_64-linux.default --command just plat39-case-floor
-
       - name: Upload test logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -3922,6 +3889,17 @@ jobs:
           path: build/isonim-editor-codetracer-layouts/layouts/
           retention-days: 14
           if-no-files-found: ignore
+
+  screen-oracle:
+    # In screen-oracle.yml: PLAT-39's oracle over both front-ends' frames.
+    needs: [ct-build]
+    if: ${{ !cancelled() && needs.ct-build.result == 'success' }}
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+    uses: ./.github/workflows/screen-oracle.yml
+    secrets: inherit
 
   gpui-window-captures:
     # The job is in gpui-window-captures.yml; it takes ct from ct-build. The shards that
