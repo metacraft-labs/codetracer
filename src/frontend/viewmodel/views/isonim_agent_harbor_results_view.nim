@@ -246,6 +246,7 @@ proc renderRow[R, N](r: R; vm: ResultCommandsVM; g: ShownGroup; index: int;
   let tag = vm.rowTagText(row)
   let html = vm.showsHtml(row)
   let at = g.first + index
+  let (matchStart, matchEnd) = matchedSpan(row, query)
   let node = ui(r):
     tdiv(class = "ah-results-row" & (if selected: " ah-results-row-selected" else: "") &
                  (if html: " ah-results-row-rich" else: ""),
@@ -253,12 +254,16 @@ proc renderRow[R, N](r: R; vm: ResultCommandsVM; g: ShownGroup; index: int;
          `data-ah-row` = row.id, `data-ah-kind` = $row.kind,
          `data-ct-operation` = ResultsOpenOperation, `data-ah-target` = $at):
       tdiv(ref = line, class = "ah-results-row-line"):
-        # A line of the program's text wraps at every width, so the match
-        # that put it in the list is always in view; any other title is
-        # one line, cut by the one rule.
+        # A line of the program's text is one line, cut around the match
+        # that put it in the list, which stays whole (P2c study D62); its
+        # whole text is the tooltip. Any other title is one line, cut by
+        # the one rule.
         if row.kind == rkLine:
-          span(ref = title, class = "ah-results-title ah-results-title-code",
-               `data-ah-title` = row.title)
+          span(ref = title, `data-ah-cut` = CutMatchValue,
+               `data-ah-match-start` = $matchStart, `data-ah-match-end` = $matchEnd,
+               `data-ah-match` = row.title[matchStart ..< matchEnd],
+               class = "ah-results-title ah-results-title-code",
+               `data-ah-title` = row.title, title = row.title)
         else:
           span(ref = title, `data-ah-cut` = "line", class = "ah-results-title",
                `data-ah-title` = row.title)
@@ -401,6 +406,14 @@ proc renderAgentHarborResults*[R, N](r: R; vm: ResultCommandsVM): N =
                `data-ct-operation` = ResultsMoreOperation, `data-ah-target` = g.group.id):
             text more
         r.appendRendered(rows, m)
+    # The providers that answered with nothing: one quiet line after the
+    # groups, in place of a group each (P2c study D60).
+    let empty = emptyProvidersLine(vm)
+    if empty.len > 0:
+      let e = ui(r):
+        tdiv(class = "ah-results-empty", `data-ah-empty-providers` = empty):
+          text empty
+      r.appendRendered(sheet, e)
   when defined(js):
     when N is isonim_dom.Element:
       followMoreBelow(isonim_dom.Node(sheet))

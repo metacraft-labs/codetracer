@@ -662,6 +662,40 @@ const groupsOf = (el) => [...el.querySelectorAll(".ah-results-group")].map((g) =
 const groupById = (el, id) => groupsOf(el).find((g) => g.id === id);
 const resultsNotice = (el) => el.querySelector(".ah-results-notice-text")?.textContent ?? "";
 const searchGroups = ["files", "symbols", "program-text", "agent-harbor-search"];
+// The providers that answered with nothing: one quiet line after the groups
+// (P2c D60), no group of their own.
+const emptyProviders = (el) => el.querySelector(".ah-results-empty")?.textContent ?? "";
+function expectEmptyLineLast(el) {
+  const line = el.querySelector(".ah-results-empty");
+  expect(line).toBeTruthy();
+  // After every group, in the caption role, not the error role.
+  const groups = [...el.querySelectorAll(".ah-results-group")];
+  if (groups.length > 0) {
+    expect(groups[groups.length - 1].compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  }
+  expect(line.classList.contains("ah-role-error")).toBe(false);
+}
+// A line of the program's text is one line, cut around its match, which
+// stays whole (P2c D62): its drawn text (the cut, or the whole line when it
+// fits) holds the query, at most one "…" on each side, on one line box.
+function expectMatchedLinesWhole(el, query) {
+  const codes = [...el.querySelectorAll(".ah-results-title-code")];
+  expect(codes.length).toBeGreaterThan(0);
+  for (const c of codes) {
+    expect(c.getAttribute("data-ah-cut")).toBe("match");
+    expect(c.getAttribute("title")).toBe(c.dataset.ahTitle);
+    const drawn = c.getAttribute("data-ah-shown") ?? c.dataset.ahTitle;
+    expect(drawn.toLowerCase()).toContain(query);
+    // The match stays bold, cut or not.
+    const bold = c.hasAttribute("data-ah-shown") ?
+      c.querySelector(":scope > .ah-cut-overlay b")?.textContent :
+      c.querySelector(".ah-results-match")?.textContent;
+    expect((bold ?? "").toLowerCase()).toBe(query);
+    expect((drawn.match(/…/g) ?? []).length).toBeLessThanOrEqual(2);
+    const lineHeight = parseFloat(getComputedStyle(c).lineHeight) || 20;
+    expect(c.getBoundingClientRect().height).toBeLessThan(lineHeight * 1.5);
+  }
+}
 
 const resultsChecks = {
   "agent-harbor-results-search-partial": resultsCheck(async (el) => {
@@ -678,6 +712,7 @@ const resultsChecks = {
     expect(groupById(el, "program-text").rows.length).toBe(8);
     expect(groupById(el, "program-text").more).toBe("+34 more");
     expect(resultsHeader(el)).toBe("60 results from 4 providers · Enter opens");
+    expectMatchedLinesWhole(el, "shield");
     // The query's match is drawn in bold, in the title's own role.
     expect(el.querySelector(".ah-results-row .ah-results-match")?.textContent.toLowerCase()).toBe("shield");
     expect(el.querySelectorAll(".ah-results-row-selected").length).toBe(1);
@@ -687,13 +722,20 @@ const resultsChecks = {
     expect(harbor.state).toBe("failed");
     expect(harbor.word).toBe("failed: Agent Harbor is not reachable");
     expect(el.querySelector('.ah-results-group[data-ah-group="agent-harbor-search"] .ah-results-state-error')).toBeTruthy();
-    // Named in the header too, in the error role, whatever the body scrolled past.
+    // Named in the header too, whatever the body scrolled past, but the
+    // summary stays neutral: only the failed group is in the error role (D61).
     expect(resultsHeader(el)).toBe("3 results from 3 of 4 providers · Agent Harbor sessions failed · Enter opens");
-    expect(el.querySelector(".ah-results .ah-composer-header.ah-role-error")).toBeTruthy();
+    expect(el.querySelector(".ah-results .ah-composer-header.ah-role-error")).toBeNull();
     expect(groupById(el, "symbols").rows).toEqual(["calculate_damage"]);
+    // Files answered with nothing: named on the quiet line, not a group.
+    expect(groupById(el, "files")).toBeUndefined();
+    expect(emptyProviders(el)).toBe("No matches in Files");
+    expectEmptyLineLast(el);
   }),
   "agent-harbor-results-search-no-symbols": resultsCheck(async (el) => {
-    expect(groupById(el, "symbols").word).toBe("no results");
+    expect(groupById(el, "symbols")).toBeUndefined();
+    expect(emptyProviders(el)).toBe("No matches in Symbols");
+    expectEmptyLineLast(el);
     expect(groupById(el, "files").rows).toEqual(["fixtures/positive_field.toml", "fixtures/negative_field.toml"]);
     expect(groupById(el, "agent-harbor-search").rows.length).toBe(6);
     // A session matched by what it last said quotes it, so the match shows.
@@ -719,12 +761,18 @@ const resultsChecks = {
     expect(el.querySelector(".ah-results-back")?.textContent).toBe("← All providers");
     expect(resultsHeader(el)).toBe("Program text · 20 results · Enter opens");
     expect(el.querySelector(".ah-results-row-selected .ah-results-title").dataset.ahTitle).toBe("remaining_shield -= damage;");
+    expectMatchedLinesWhole(el, "remaining");
+    // The selection is the editor's selection ground, with the inset bar (D63).
+    const sel = el.querySelector(".ah-results-row-selected");
+    expect(getComputedStyle(sel).boxShadow).toContain("inset");
+    expect(emptyProviders(el)).toBe("");
   }),
   "agent-harbor-results-search-superseded": resultsCheck(async (el) => {
     expect(resultsField(el)).toBe("/s shield_pct");
     expect(groupById(el, "program-text").word).toBe("searching…");
     // No row of the older `/s shield` stands under the newer query.
-    expect(groupById(el, "files").word).toBe("no results");
+    expect(groupById(el, "files")).toBeUndefined();
+    expect(emptyProviders(el)).toContain("Files");
     for (const g of groupsOf(el)) for (const t of g.rows) expect(t.toLowerCase()).toContain("shield_pct");
   }),
   "agent-harbor-results-ah-commands": resultsCheck(async (el) => {

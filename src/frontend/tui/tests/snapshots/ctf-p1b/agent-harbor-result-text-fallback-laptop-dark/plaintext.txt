@@ -4,12 +4,6 @@
                                           4 results from 5 providers · Enter opens · Rich results shown as text
                                                                                                                                                                                     
                                                                                                                                                                                     
-                                          FILES                                                                                 no results
-                                                                                                                                                                                    
-                                          SYMBOLS                                                                               no results
-                                                                                                                                                                                    
-                                          PROGRAM TEXT                                                                          no results
-                                                                                                                                                                                    
                                           AGENT HARBOR SESSIONS                                                                          3
                                          ▎Clamp the shield at zero after a hit  Shield model hardening · Claude · running
                                          ▎“Clamped the damage to remaining_shield at src/shield.nr:34; re-running shield_never_negative.”
@@ -25,6 +19,12 @@
                                           Why the clamp is in calculate_damage  design note                                   Design notes
                                           “The damage is clamped where it is computed, so every caller sees a damage the shield
                                           can absorb.”
+                                                                                                                                                                                    
+                                          No matches in Files, Symbols, Program text
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     

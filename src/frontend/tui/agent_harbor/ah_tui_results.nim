@@ -42,6 +42,7 @@ import std/strutils
 from std/unicode import runes, `$`
 import nim_agents_isonim_viewmodels/agent_harbor/result_commands_vm
 import ../../viewmodel/views/agent_harbor_results_words
+from ../../viewmodel/views/cut_text_rules import cutAroundMatch
 import ./ah_tui_canvas
 import ./ah_tui_composer
 
@@ -82,24 +83,39 @@ proc pressable(c: var AhCanvas; n: AhNode; press: ResultsPress; operation, targe
 proc spacer(): Line =
   Line(rows: 1, spacer: true, draw: proc(c: var AhCanvas; row: int) = discard)
 
+proc shownTitle*(row0: ResultRow; query: string; cells: int): string =
+  ## The title as drawn in `cells`: cut at its end by the one rule; a line
+  ## of the program's text cut around its match, which stays whole
+  ## (`cutAroundMatch`, P2c study D62).
+  if row0.kind == rkLine:
+    let (ms, me) = matchedSpan(row0, query)
+    cutAroundMatch(row0.title, ms, me, cells, proc(t: string): int = widthOf(t),
+                   widthOf(Ellipsis))
+  else: elide(row0.title, cells)
+
 proc drawTitle(c: var AhCanvas; row, col, cells: int; row0: ResultRow; query, fg, bg: string): int =
   ## The title, cut by the one rule, its query's matches in bold. Returns
   ## the cells drawn.
-  let shown = elide(row0.title, cells)
+  let shown = shownTitle(row0, query, cells)
   let cut = shown != row0.title
   var at = col
   # The parts as drawn: the cut text keeps its start, so the spans before
   # the cut keep their place; the "…" is plain.
-  let spans = matchSpans(row0.title, query)
+  var spans = matchSpans(row0.title, query)
+  if cut:
+    # A cut title is one string: its match is no longer bold (P2c study
+    # D41), except a matched line of the program's text, cut around its
+    # match, which keeps every match in view bold (D62).
+    spans = @[]
+    if row0.kind == rkLine:
+      let (ms, me) = matchedSpan(row0, query)
+      if me > ms: spans = spansIn(shown, row0.title[ms ..< me])
   var byte = 0
   for r in shown.runes:
     let s = $r
-    # A cut title is one string (the cut rule draws it so): its match is
-    # no longer bold (P2c study D41), as on the web.
     var bold = false
-    if not cut:
-      for (start, length) in spans:
-        if byte >= start and byte < start + length: bold = true
+    for (start, length) in spans:
+      if byte >= start and byte < start + length: bold = true
     c.grid.paint(row, at, s, CellStyle(fg: fg, bg: (if bg.len > 0: bg else: c.bgAt(row, at)),
                                         bold: bold))
     at += max(1, cellsOfRune(r, awNarrow))
@@ -199,35 +215,6 @@ proc partLines(text: string; width: int): seq[string] =
       line = line[w[0].len .. ^1].strip(trailing = false)
   if line.len > 0: result.add line
 
-proc codeLines(code: string; width: int): seq[string] =
-  ## A line of code in lines of `width` cells, each filled before it breaks
-  ## (a keyword is never left alone on a line): it breaks after a space, a
-  ## `(` or a `,` in the line's last third where there is one, else at the
-  ## width, inside a name (the web's `overflow-wrap: anywhere`).
-  var rest = code
-  while widthOf(rest) > width:
-    let take = cellSlice(rest, 0, width)
-    var cut = take.len
-    var k = take.len - 1
-    while k >= take.len * 2 div 3:
-      if take[k] in {' ', '(', ','}:
-        cut = k + 1
-        break
-      dec k
-    if cut == take.len and take.len > 0 and take[^1] notin {' ', '(', ','}:
-      # No break in the last third: the last allowed one anywhere on the
-      # line, so a name is split only when the line has none (a line never
-      # starts inside `name:`).
-      var j = take.len - 2
-      while j > 0:
-        if take[j] in {' ', '(', ','}:
-          cut = j + 1
-          break
-        dec j
-    result.add rest[0 ..< cut].strip(leading = false)
-    rest = rest[cut .. ^1].strip(trailing = false)
-  if rest.len > 0: result.add rest
-
 proc wideTitleRoom(row: ResultRow; tag: string; width: int): int =
   ## At laptop width, the cells a line of the program's text wraps in:
   ## the line less where it is and its tag at the right (at most half).
@@ -236,12 +223,9 @@ proc wideTitleRoom(row: ResultRow; tag: string; width: int): int =
   else: width
 
 proc titleLines(row: ResultRow; width: int; narrow: bool): seq[string] =
-  ## The title's lines: one, cut, except a line of the program's text,
-  ## which wraps whole at every width so the match that put it in the list
-  ## is in view (the web wraps it too).
-  if row.kind == rkLine and widthOf(row.title) > width:
-    codeLines(row.title, width)
-  else: @[row.title]
+  ## The title's lines: one, cut (a line of the program's text around its
+  ## match, D62).
+  @[row.title]
 
 proc drawTitleLines(c: var AhCanvas; row, col: int; lines: seq[string]; r: ResultRow;
                     query, fg, bg: string) =
@@ -465,19 +449,19 @@ proc drawResults*(c: var AhCanvas; vm: ResultCommandsVM; row, col, width, height
   discard c.node(host, row, sheetCol, sheetW, 1, [("field", input)])
   let narrow = vm.isNarrow(width * CellPx)
   let pad = 1
-  # The selected row lifts off the sheet, as the web's chosen row does.
-  # Light: the web's chosen `tertiary`, a grey step off the sheet. Dark,
-  # whose sheet is already the lightest grey surface step: the selection's
-  # own tint (the action role at the palette's selected alpha, the fleet's
-  # selected row) over the sheet, lighter than it, never a darker grey that
-  # reads as a hole. Either way the inset bar in the action role down its
-  # first cell (CodeTracer-TUI §3.4's mark of a selected row), so it never
-  # reads as a head.
-  let selected = if c.p.mode == dmDark: blendOver(c.p.selectedTint, ink.sheet)
-                 else: firstOff(ink.sheet, [c.p.tertiary,
-                                            tokenHexOf(dtColorsUiSurfaceBaseCard, c.p.mode),
-                                            c.p.activeTab, c.p.menu],
-                                avoid = [ink.band])
+  # The selected row is on the editor's own selection ground
+  # (`colors-editor-surface-select`, the web's and the Calltrace's, P2c
+  # study D63), a quiet step in both themes, with the inset bar in the
+  # action role down its first cell (CodeTracer-TUI §3.4's mark of a
+  # selected row), which carries the selection where the ground is close
+  # to the sheet's.
+  # Dark's sheet is the lightest grey surface step (tertiary-hover, about
+  # #414141), so the editor's selection (#3e3e3b) would vanish into it:
+  # there the row takes the panel's ground, a plain grey step under the
+  # sheet, with the same bar.
+  let editorSelect = tokenHexOf(dtColorsEditorSurfaceSelect, c.p.mode)
+  let selected = if c.p.mode == dmDark: firstOff(ink.sheet, [editorSelect, c.p.panel])
+                 else: editorSelect
   let lay = Layout(left: sheetCol + pad + 1, width: sheetW - 2 * pad - 2, narrow: narrow,
                    ink: ink, selected: selected, press: press)
   let header = vm.headerText
@@ -550,6 +534,15 @@ proc drawResults*(c: var AhCanvas; vm: ResultCommandsVM; row, col, width, height
     if gi > 0 or lines.len == 0: add(spacer(), 1)
     for l in groupLines(vm, host, lay, g, query):
       add(l, l.rows)
+  # The providers that answered with nothing: one quiet line after the
+  # groups, in place of a group each (P2c study D60).
+  let empty = emptyProvidersLine(vm)
+  if empty.len > 0:
+    add(spacer(), 1)
+    let emptyRows = wrapCells(empty, lay.width).len
+    add(Line(rows: emptyRows, draw: proc(c: var AhCanvas; r: int) =
+      let n = c.node(host, r, lay.left, lay.width, emptyRows, [("empty-providers", empty)])
+      discard c.para(n, r, lay.left, lay.width, empty, lay.ink.caption)), emptyRows)
   # Which lines are drawn: from the start, whole lines, ending in "More
   # below" when the window has no room for the rest.
   let top = row + SheetTop

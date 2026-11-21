@@ -51,7 +51,8 @@ suite "CTF-P2c: the terminal results' presses are routed":
     check m.view.values("group") == @["program-text"]
     check m.click(m.carrying(ResultsAllOperation)[0])
     check m.results.alone.val == ""
-    check m.view.values("group").len == 4
+    check m.view.values("group").len == m.results.groups.len
+    check m.results.groups.len > 1
     m.dispose()
 
   test "a click on a row opens it, and the header says what was opened":
@@ -107,3 +108,31 @@ suite "CTF-P2c: the field has the sheet's edges and its end in view (D36)":
     check drawn.startsWith("/ai")
     check drawn.endsWith("with @")
     m.dispose()
+
+suite "CTF-P2c: manager note 132's follow-ups in the terminal (D60-D63)":
+  test "the empty providers are one line after the groups, and no group":
+    let m = mount("search-failed")
+    check m.view.values("empty-providers") == @["No matches in Files"]
+    check "files" notin m.view.values("group")
+    m.dispose()
+
+  test "a matched line is one row, the match whole, at both widths":
+    for cols in [180, 45]:
+      let m = mount("search-group", cols)
+      let rows = m.view.all("kind").filterIt(it.attr("kind") == "line")
+      check rows.len > 0
+      for n in m.view.all("title"):
+        let drawn = m.canvas.grid.cellsText(n.row, n.col, n.width)
+        check n.height == 1
+        check "remaining" in drawn.toLowerAscii
+      m.dispose()
+
+  test "the selected row is on the editor's selection ground where it shows":
+    for mode in [dmDark, dmLight]:
+      let m = mountAgentHarborStoryTui("agent-harbor-results", "search-final", 180, 56, mode)
+      let sel = m.view.all("selected").filterIt(it.attr("selected") == "true")
+      check sel.len == 1
+      let ground = m.canvas.bgAt(sel[0].row, sel[0].col + 2)
+      let sheet = m.canvas.bgAt(m.view.first("sheet").row + 1, m.view.first("sheet").col)
+      check ground != sheet
+      m.dispose()

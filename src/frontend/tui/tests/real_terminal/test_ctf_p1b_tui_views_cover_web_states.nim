@@ -144,12 +144,26 @@ const DrawnTextFacts = [
   ## The facts that name a text the node draws on its one row.
 
 proc elidedMatch*(drawn, value: string): bool =
-  ## The cells show `value`, or its start cut to the cells and ended "…".
+  ## The cells show `value`, or its start cut to the cells and ended "…",
+  ## or a cut of it with "…" in place of what was left out at its start,
+  ## its end or both (a matched line of the program's text, P2c D62): the
+  ## kept pieces in order, the first its start unless it begins with "…",
+  ## the last its end unless it ends with one.
   if drawn == value: return true
-  if drawn.endsWith(Ellipsis):
+  if drawn.endsWith(Ellipsis) and drawn.count(Ellipsis) == 1:
     let kept = drawn[0 ..< drawn.len - Ellipsis.len]
     return value.startsWith(kept) and widthOf(drawn) < widthOf(value)
-  false
+  if Ellipsis notin drawn or widthOf(drawn) >= widthOf(value): return false
+  let pieces = drawn.split(Ellipsis)
+  var at = 0
+  for i, piece in pieces:
+    if piece.len == 0: continue
+    let found = value.find(piece, at)
+    if found < 0: return false
+    if i == 0 and found != 0: return false
+    at = found + piece.len
+  if pieces[^1].len > 0 and not value.endsWith(pieces[^1]): return false
+  true
 
 proc drawnLines(m: AhTuiMount; n: AhNode): seq[string] =
   ## The rows of a wrapped text, each line's ends trimmed.

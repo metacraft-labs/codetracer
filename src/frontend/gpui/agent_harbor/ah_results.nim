@@ -13,8 +13,8 @@
 ## in place of the rows, and each group -- its title and state, its rows
 ## (the title with the query's match in bold, what it is, where it is and a
 ## quiet tag at the right; a command's description under it), `+N more`. A
-## hairline between groups. The selected row is on the palette's chosen
-## ground (`surface/primary/tertiary`).
+## hairline between groups. The selected row is on the editor's selection
+## ground (`colors-editor-surface-select`) with an inset bar (D63).
 ##
 ## A rich row draws its text form (OMNI-AREQ4, D45): GPUI cannot render
 ## HTML. GPUI's layout does not scroll a box, so the body is laid out here
@@ -30,6 +30,7 @@
 import std/strutils
 import nim_agents_isonim_viewmodels/agent_harbor/result_commands_vm
 import ../../viewmodel/views/agent_harbor_results_words
+from ../../viewmodel/views/cut_text_rules import cutAroundMatch
 import ./ah_theme
 import ./ah_composer
 from ./ah_session_activity import wrappedRows
@@ -45,9 +46,6 @@ type
 const
   RowPx = 26           ## a row: 5px, a 16px line, 5px
   SecondLinePx = 16
-  CodeLinePx = 20      ## a wrapped program-text title's line (the composer's
-                       ## own lines moved to its 24px pitch; this view keeps
-                       ## its 20px line until it is measured against the web)
   GroupHeadPx = 4 + CaptionLinePx + 4
   GroupGapPx = 8 + 1   ## the gap and the hairline between groups
   MoreLinePx = 4 + CaptionLinePx + 4 + 1
@@ -108,20 +106,24 @@ proc rowBlock(r: GpuiRenderer; p: AhPalette; vm: ResultCommandsVM; g: ShownGroup
   let tag = vm.rowTagText(row)
   let underTitle = narrow and (detail.len > 0 or row.location.len > 0 or tag.len > 0)
   let secondLines = if second.len > 0: max(1, wrappedRows(second, CaptionPx, widthPx)) else: 0
-  # A line of the program's text wraps at every width (the web's), so the
-  # match that put it in the list is always in view.
+  # A line of the program's text is one line, cut around the match that
+  # put it in the list, which stays whole (`cutAroundMatch`, P2c study D62).
   let code = row.kind == rkLine
   let rightPx0 = if narrow: 0
                  else: min((if row.location.len > 0: textPx(row.location, CaptionPx) + 8 else: 0) +
                            (if tag.len > 0: textPx(tag, CaptionPx) + 8 else: 0), widthPx * 45 div 100)
-  let titleLines = if code: max(1, wrappedRows(row.title, BodyPx, widthPx - rightPx0)) else: 1
-  let h = RowPx + CodeLinePx * (titleLines - 1) + (if underTitle: SecondLinePx else: 0) +
-          SecondLinePx * secondLines
+  let h = RowPx + (if underTitle: SecondLinePx else: 0) + SecondLinePx * secondLines
   let el = r.box(column = true, pairs = [("justify", "center"), ("margin-left", "1px"),
                                          ("margin-right", "1px")])
-  # The palette's chosen ground; Light's caption is about 2:1 on it, so a
-  # selected row's quieter words take the label role there.
-  if selected: r.setStyle(el, "background", p.tertiary)
+  # The editor's selection ground (`colors-editor-surface-select`, the
+  # Calltrace's and the editor's lists'), with the inset bar in the action
+  # border role down its left edge (P2c study D63); its quieter words take
+  # the label role in Light (the caption is about 4:1 on it).
+  if selected:
+    r.styles(el, [("background", DesignTokenHex[dtColorsEditorSurfaceSelect][p.mode]),
+                  ("position", "relative")])
+    r.appendChild(el, r.insetBar(p.borderAction, 2))
+    r.tag(el, "selected-ground", DesignTokenHex[dtColorsEditorSurfaceSelect][p.mode])
   let quiet = if selected and p.mode == dmLight: p.textLabel else: p.textCaption
   r.tag(el, "row", row.title)
   r.tag(el, "selected", $selected)
@@ -129,10 +131,28 @@ proc rowBlock(r: GpuiRenderer; p: AhPalette; vm: ResultCommandsVM; g: ShownGroup
   r.pressable(el, ResultsOpenOperation, $(g.first + index), press)
   let line = r.box(pairs = [("items", "baseline"), ("gap", "8px"), ("min-width", "0px")])
   if code:
-    let t = r.text(row.title, BodyPx, p.textBody, shrink = false,
-                   pairs = [("white-space", "pre-wrap"), ("line-height", $CodeLinePx & "px"),
-                            ("min-width", "0px"), ("flex-shrink", "1"), ("flex-grow", "1")])
-    r.tag(t, "title", row.title)
+    let (ms, me) = matchedSpan(row, query)
+    let measure = proc(text: string): int = textPx(text, BodyPx)
+    let shown = cutAroundMatch(row.title, ms, me, max(1, widthPx - rightPx0 - 8), measure,
+                               measure(Ellipsis))
+    # The match bold where the cut drew it (D62), the rest in the body role.
+    let t = r.box(pairs = [("min-width", "0px"), ("flex-grow", "1"), ("items", "baseline")])
+    # Every match in view bold (D62), the rest in the body role.
+    let mt = if me > ms: row.title[ms ..< me] else: ""
+    var from0 = 0
+    for (s0, n0) in spansIn(shown, mt):
+      if s0 > from0:
+        r.appendChild(t, r.text(shown[from0 ..< s0], BodyPx, p.textBody, shrink = false))
+      let m = r.text(shown[s0 ..< s0 + n0], BodyPx, p.textBody, bold = true, shrink = false)
+      r.tag(m, "match", shown[s0 ..< s0 + n0])
+      r.appendChild(t, m)
+      from0 = s0 + n0
+    if from0 < shown.len:
+      r.appendChild(t, r.text(shown[from0 .. ^1], BodyPx, p.textBody, shrink = false))
+    # The title as drawn (the cover suite holds it to the drawing), and
+    # the same as `title-shown` for the follow-up suite.
+    r.tag(t, "title", shown)
+    r.tag(t, "title-shown", shown)
     r.appendChild(line, t)
     if not narrow: r.rightParts(p, line, row, tag, quiet)
   elif not narrow:
@@ -239,6 +259,23 @@ proc bodyBlocks(r: GpuiRenderer; p: AhPalette; vm: ResultCommandsVM; widthPx: in
       r.tag(m, "more", more)
       r.pressable(m, ResultsMoreOperation, g.group.id, press)
       result.add r.padded(m, 4 + CaptionLinePx + 4)
+  # The providers that answered with nothing: one quiet line after the
+  # groups, in place of a group each (P2c study D60).
+  let empty = emptyProvidersLine(vm)
+  if empty.len > 0:
+    # Set apart from the last group as a group is: the gap and its hairline.
+    let gap = r.box(column = true, pairs = [("height", $GroupGapPx & "px"),
+                                            ("flex-shrink", "0"), ("justify", "center")])
+    r.appendChild(gap, r.box(pairs = [("height", "1px"), ("background", p.borderSecondary)]))
+    result.add Block(heightPx: GroupGapPx, el: gap)
+    let b = r.box(column = true, pairs = [("padding-top", "6px")])
+    let lines = max(1, wrappedRows(empty, CaptionPx, widthPx))
+    r.appendChild(b, r.text(empty, CaptionPx, p.textCaption, shrink = false,
+                            pairs = [("white-space", "pre-wrap"),
+                                     ("line-height", $CaptionLinePx & "px"),
+                                     ("min-width", "0px"), ("flex-shrink", "1")]))
+    r.tag(b, "empty-providers", empty)
+    result.add r.padded(b, 6 + CaptionLinePx * lines + 4)
 
 proc drawResults*(r: GpuiRenderer; host: GpuiElement; vm: ResultCommandsVM;
                   p: AhPalette; widthPx, heightPx: int; press: ResultsPress = nil) =

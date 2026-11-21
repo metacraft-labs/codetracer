@@ -175,6 +175,68 @@ proc cutInputValue*(value: string; room: int; widthOf: proc(text: string): int;
   let tail = if tailStart < value.len: value[tailStart .. ^1] else: ""
   trimBeforeEllipsis(head) & CutEllipsis & trimAfterEllipsis(tail)
 
+proc cutAroundMatch*(text: string; matchStart, matchEnd: int; room: int;
+                     widthOf: proc(text: string): int; ellipsisWidth: int): string =
+  ## **THE MATCHED-LINE RULE** (P2c study D62): a line of the program's text
+  ## that a search matched, in at most `room` units of the host (terminal
+  ## cells, GPUI pixels, the web's 1/64 px; `widthOf` measures a text in
+  ## them, `ellipsisWidth` is the "…"'s), on ONE line with the match
+  ## (`text[matchStart ..< matchEnd]`, byte offsets) always whole. Whole when
+  ## it fits. Else the text around the match gives way: first after it (the
+  ## line's start kept, its end cut with "…"), then before it (its end kept,
+  ## its start cut), and when neither fits, on both sides, the match in the
+  ## middle with as much of what is around it as fits on each side, the room
+  ## shared evenly. A match wider than the room keeps its start. Each side
+  ## of a "…" follows the one trim rule (`trimBeforeEllipsis`,
+  ## `trimAfterEllipsis`); a cut never splits a rune. The web
+  ## (`ah_cut_text`'s `data-ah-cut="match"`), GPUI and the terminal draw a
+  ## matched line through this, each in its own unit.
+  if room <= 0: return ""
+  if widthOf(text) <= room: return text
+  let ms = clamp(matchStart, 0, text.len)
+  let me = clamp(matchEnd, ms, text.len)
+  let starts = runeStarts(text)
+  let left = text[0 ..< ms]
+  let mid = text[ms ..< me]
+  let right = text[me .. ^1]
+  let midW = widthOf(mid)
+  proc prefixWithin(s: string; budget: int): string =
+    ## The longest prefix of whole runes of `s` at most `budget` wide.
+    let rs = runeStarts(s)
+    var keep = 0
+    for k in 1 ..< rs.len:
+      if widthOf(s[0 ..< rs[k]]) > budget: break
+      keep = rs[k]
+    s[0 ..< keep]
+  proc suffixWithin(s: string; budget: int): string =
+    ## The longest suffix of whole runes of `s` at most `budget` wide.
+    let rs = runeStarts(s)
+    var keep = s.len
+    for k in countdown(rs.len - 2, 0):
+      if widthOf(s[rs[k] .. ^1]) > budget: break
+      keep = rs[k]
+    s[keep .. ^1]
+  discard starts
+  # The match alone is too wide: its start, cut at its end.
+  let lead = if ms > 0: ellipsisWidth else: 0
+  if midW + lead > room or (me < text.len and midW + lead + ellipsisWidth > room):
+    let kept = prefixWithin(text[ms .. ^1], max(0, room - lead - ellipsisWidth))
+    return (if ms > 0: CutEllipsis else: "") &
+           trimBeforeEllipsis(trimAfterEllipsis(kept)) & CutEllipsis
+  # The start kept, the end cut.
+  if widthOf(left & mid) + ellipsisWidth <= room:
+    let after = prefixWithin(right, room - ellipsisWidth - widthOf(left & mid))
+    return trimBeforeEllipsis(left & mid & after) & CutEllipsis
+  # The end kept, the start cut.
+  if ellipsisWidth + midW + widthOf(right) <= room:
+    let before = suffixWithin(left, room - ellipsisWidth - midW - widthOf(right))
+    return CutEllipsis & trimAfterEllipsis(before & mid & right)
+  # Both sides cut, the room around the match shared evenly.
+  let budget = room - 2 * ellipsisWidth - midW
+  let before = suffixWithin(left, budget div 2)
+  let after = prefixWithin(right, budget - widthOf(before))
+  CutEllipsis & trimBeforeEllipsis(trimAfterEllipsis(before & mid & after)) & CutEllipsis
+
 const InputCutStartRunes* = 8
   ## The most a one-line input's middle cut keeps of its start, in a host
   ## that measures in a face's units rather than cells: its first 8

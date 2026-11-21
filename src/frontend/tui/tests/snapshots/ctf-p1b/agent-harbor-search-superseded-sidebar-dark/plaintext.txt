@@ -4,8 +4,6 @@
    Searching… 3 of 4 providers answered
                                              
                                              
-   FILES                        no results
-                                             
    SYMBOLS                               4
   ▎shield_pct
   ▎variable               src/shield.nr:26
@@ -21,7 +19,9 @@
                                              
    PROGRAM TEXT                 searching…
                                              
-   AGENT HARBOR SESSIONS        no results
+   No matches in Files, Agent
+   Harbor sessions
+                                             
                                              
                                              
                                              

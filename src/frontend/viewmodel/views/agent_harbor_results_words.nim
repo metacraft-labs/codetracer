@@ -102,6 +102,32 @@ proc moreLabel*(g: ShownGroup): string =
 
 proc groupTitle*(g: ShownGroup): string = g.group.title
 
+proc emptyProvidersLine*(vm: ResultCommandsVM): string =
+  ## The one quiet line after the groups that names every `/search`
+  ## provider that answered with nothing (`No matches in Files, Symbols,
+  ## Program text`, P2c study D60); "" when none did.
+  let names = vm.emptyProviders
+  if names.len == 0: "" else: "No matches in " & names.join(", ")
+
+proc spansIn*(shown, needle: string): seq[(int, int)] =
+  ## Every place `needle` stands in `shown` (ASCII case ignored, as the
+  ## query matches), as `(start, length)` byte spans: what a cut matched line
+  ## draws bold (every match in view, P2c study D62).
+  if needle.len == 0: return
+  let hay = shown.toLowerAscii
+  let n = needle.toLowerAscii
+  var at = hay.find(n)
+  while at >= 0:
+    result.add (at, needle.len)
+    at = hay.find(n, at + needle.len)
+
+proc matchedSpan*(row: ResultRow; query: string): (int, int) =
+  ## Where the query matched a row's title first, as byte offsets
+  ## `(start, end)`; `(0, 0)` when it did not. A line of the program's text
+  ## is cut around it (`cut_text_rules.cutAroundMatch`, P2c study D62).
+  let spans = matchSpans(row.title, query)
+  if spans.len == 0: (0, 0) else: (spans[0][0], spans[0][0] + spans[0][1])
+
 proc titleParts*(row: ResultRow; query: string): seq[tuple[text: string; matched: bool]] =
   ## The row's title in parts, the query's matches marked (drawn in bold).
   let spans = matchSpans(row.title, query)

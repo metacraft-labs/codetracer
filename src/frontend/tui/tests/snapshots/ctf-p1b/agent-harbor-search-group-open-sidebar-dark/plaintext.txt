@@ -6,13 +6,10 @@
    ← All providers
                                              
    PROGRAM TEXT                         20
-   let mut remaining_shield =
-   initial_shield;
+   let mut remaining_shield = initial_shi…
                            src/shield.nr:2
                                              
-   let damage = calculate_damage(
-   initial_shield, remaining_shield,
-   mass);
+   …itial_shield, remaining_shield, mass);
                            src/shield.nr:6
                                              
   ▎remaining_shield -= damage;
@@ -21,36 +18,39 @@
    if (remaining_shield as u32 > 0){
                           src/shield.nr:10
                                              
-   regeneration =
-   calculate_shield_regeneration(
-   initial_shield ,remaining_shield,
-   shield_regen_percentage);
+   …itial_shield ,remaining_shield, shiel…
                           src/shield.nr:11
                                              
    remaining_shield += regeneration;
                           src/shield.nr:12
                                              
-   status_report(i,initial_shield,
-   remaining_shield, damage,
-   regeneration);
+   …itial_shield, remaining_shield, damag…
                           src/shield.nr:14
                                              
-   let result = remaining_shield as u32 >
-   0;
+   let result = remaining_shield as u32 >…
                           src/shield.nr:18
                                              
-   fn calculate_damage(initial_shield:
-   Field, remaining_shield: Field, mass:
-   Field) -> Field {
+   …hield: Field, remaining_shield: Field…
                           src/shield.nr:22
                                              
-   let shield_pct =
-   calculate_remaining_shield_pct(
-   initial_shield, remaining_shield);
+   let shield_pct = calculate_remaining_s…
                           src/shield.nr:26
+                                             
+   …shield:Field, remaining_shield:Field,…
+                          src/shield.nr:37
+                                             
+   if((remaining_shield + regen) as u32 >…
+                          src/shield.nr:40
+                                             
+   regen = initial_shield - remaining_shi…
+                          src/shield.nr:41
+                                             
+   fn calculate_remaining_shield_pct(init…
+                          src/shield.nr:45
+                                             
+   let result = (remaining_shield * 100)…
+                          src/shield.nr:46
                               More below ↓
-                                             
-                                             
                                              
                                              
                                              

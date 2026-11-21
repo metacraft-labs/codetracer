@@ -15,7 +15,7 @@
 ## window) and the results stories' own viewmodels over their scripted
 ## providers and Agent Harbor source.
 
-import std/[sequtils, unittest]
+import std/[sequtils, strutils, unittest]
 
 import isonim_gpui/renderer
 from isonim_gpui/bindings import gpui_reset_tree
@@ -63,7 +63,8 @@ suite "CTF-P2c: the GPUI results' presses are routed":
     check m.view.facts("group") == @["program-text"]
     fireEvent(m.view.carrying(ResultsAllOperation)[0], "mousedown")
     check m.results.alone.val == ""
-    check m.view.facts("group").len == 4
+    check m.view.facts("group").len == m.results.groups.len
+    check m.results.groups.len > 1
     m.dispose()
 
   test "a press on a row opens it":
@@ -99,4 +100,30 @@ suite "CTF-P2c: the field has the sheet's edges (D36)":
       check fields.len == 1 and sheets.len == 1
       check getAttribute(fields[0], "data-ah-field") == m.results.input
       check m.results.sheetWidthFor(width) == min(640, width - 16)
+      m.dispose()
+
+suite "CTF-P2c: manager note 132's follow-ups in GPUI (D60-D63)":
+  test "the empty providers are one line after the groups, and no group":
+    let m = mount("search-failed")
+    check m.view.facts("empty-providers") == @["No matches in Files"]
+    check "files" notin m.view.facts("group")
+    m.dispose()
+
+  test "a matched line is one line, the match whole":
+    for width in [1440, 360]:
+      let m = mount("search-group", width)
+      var titles: seq[GpuiElement]
+      collect(m.view, "data-ah-title-shown", titles)
+      check titles.len > 0
+      for t in titles:
+        check "remaining" in getAttribute(t, "data-ah-title-shown").toLowerAscii
+        check getAttribute(t, "data-ah-title-shown").count("\xE2\x80\xA6") <= 2
+      m.dispose()
+
+  test "the selected row is on the editor's selection ground":
+    for mode in [dmDark, dmLight]:
+      gpui_reset_tree()
+      let m = r.mountAgentHarborStoryGpui("agent-harbor-results", "search-final", 1440, 900, mode)
+      check m.view.facts("selected-ground") ==
+            @[DesignTokenHex[dtColorsEditorSurfaceSelect][mode]]
       m.dispose()

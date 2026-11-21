@@ -39,18 +39,18 @@
    mod shield;
                              src/main.nr:1
                                              
-   // We need to have at least 1 unit of
-   shields left in order to survive the
-   cosmic radiation.
+   …east 1 unit of shields left in order…
                              src/main.nr:7
                                              
-   // We can not reveal how much shields
-   we have will have in the end so that
-   the space pirates won't know if it is
-   safe to atack us
+   // We can not reveal how much shields…
                              src/main.nr:9
-                              More below ↓
                                              
+   …course but our shield technology rema…
+                            src/main.nr:10
+                                             
+   fn main(initial_shield: Field, shield_…
+                            src/main.nr:12
+                              More below ↓
                                              
                                              
                                              

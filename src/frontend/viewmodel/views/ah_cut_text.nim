@@ -69,6 +69,14 @@
 ## terminal (cells). The terminal (`elideMiddle`) and GPUI
 ## (`ah_composer.inputValueShown`) cut a form field the same way.
 ##
+## A marked element whose value is `match` (`data-ah-cut="match"`,
+## `CutMatchValue`) holds a line of the program's text that a search
+## matched; `data-ah-match-start` and `data-ah-match-end` name the match
+## (byte offsets of the text). It is cut around the match, which stays whole
+## (`cut_text_rules.cutAroundMatch`, the P2c study's D62), measured in the
+## element's face in layout units as an input is. The terminal and GPUI cut
+## a matched line the same way.
+##
 ## Every element marked must hold its text in one colour: the drawn cut is
 ## one string. A line made of spans in different colours keeps CSS's
 ## ellipsis (`agent_harbor.styl` says which, and why).
@@ -95,6 +103,9 @@ const
   CutInputValue* = "input"
     ## `CutTextAttribute`'s value on a one-line input's value: cut in its
     ## middle by the one-line input rule (D35).
+  CutMatchValue* = "match"
+    ## `CutTextAttribute`'s value on a matched line of the program's text:
+    ## cut around its match (D62).
   LayoutUnitsPerPx = 64
     ## The browser's layout unit, 1/64 px: the unit the input rule is run in
     ## on the page, fine enough that rounding never moves a cut by a glyph.
@@ -129,16 +140,31 @@ when defined(js):
       if units - float(whole) > 0.001: whole + 1 else: whole
     cstring(cutInputValueInFace($value, room, widthOf))
 
+  proc ahCutTextMatchCut(value: cstring; matchStart, matchEnd: int; roomPx: float;
+                         measure: proc(text: cstring): float): cstring {.exportc.} =
+    ## The matched-line rule, for the observer below, in layout units as
+    ## `ahCutTextInputCut` runs the input rule.
+    let room = int(roomPx * float(LayoutUnitsPerPx))
+    let widthOf = proc(text: string): int =
+      let units = measure(cstring(text)) * float(LayoutUnitsPerPx)
+      let whole = int(units)
+      if units - float(whole) > 0.001: whole + 1 else: whole
+    cstring(cutAroundMatch($value, matchStart, matchEnd, room, widthOf,
+                           widthOf(CutEllipsis)))
+
   proc installCutText(trim: proc(kept: cstring): cstring;
                       dangles: proc(shown: cstring): bool;
                       pathCuts: proc(path: cstring): cstring;
                       inputCut: proc(value: cstring; roomPx: float;
+                                     measure: proc(text: cstring): float): cstring;
+                      matchCut: proc(value: cstring; matchStart, matchEnd: int; roomPx: float;
                                      measure: proc(text: cstring): float): cstring) {.importjs: """
-    (function (trim, dangles, pathCuts, inputCut) {
+    (function (trim, dangles, pathCuts, inputCut, matchCut) {
       // Every rule must reach the page: a rule the call drops would fail
       // only at the first element that needs it.
       if (typeof trim !== 'function' || typeof dangles !== 'function' ||
-          typeof pathCuts !== 'function' || typeof inputCut !== 'function')
+          typeof pathCuts !== 'function' || typeof inputCut !== 'function' ||
+          typeof matchCut !== 'function')
         throw new TypeError('ah_cut_text: a shared cut rule did not reach the page');
       if (typeof document === 'undefined' || typeof ResizeObserver === 'undefined' ||
           globalThis.__ahCutText) return;
@@ -186,9 +212,16 @@ when defined(js):
         return Math.abs(both - textWidth(noKern, pair[0]) - textWidth(noKern, pair[1])) > 0.1;
       }
 
+      // The element's own text: never the overlay a matched line's cut is
+      // drawn in.
       function textNodes(el) {
         var out = [];
-        var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+        var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+          acceptNode: function (n) {
+            return n.parentElement && n.parentElement.closest('.ah-cut-overlay') ?
+              NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+          }
+        });
         for (var n = walker.nextNode(); n; n = walker.nextNode()) out.push(n);
         return out;
       }
@@ -253,6 +286,7 @@ when defined(js):
         var contentLeft = box.left + px(cs.borderLeftWidth) + px(cs.paddingLeft);
         var isPath = el.getAttribute(ATTR) === 'path';
         var isInput = el.getAttribute(ATTR) === 'input';
+        var isMatch = el.getAttribute(ATTR) === 'match';
         var contentRight = box.right - px(cs.borderRightWidth) - px(cs.paddingRight);
         var all = document.createRange();
         all.setStart(nodes[0], 0);
@@ -287,6 +321,48 @@ when defined(js):
           var middle = String(inputCut(full, contentRight - text.left + 0.01, measure));
           el.style.setProperty('--ah-cut-indent', Math.max(0, text.left - contentLeft) + 'px');
           if (el.getAttribute(SHOWN) !== middle) el.setAttribute(SHOWN, middle);
+          return;
+        }
+        // A matched line: cut around its match, which stays whole.
+        if (isMatch) {
+          var mwidths = new Map();
+          var mmeasure = function (t) {
+            t = String(t);
+            if (!mwidths.has(t)) mwidths.set(t, textWidth(cs, t));
+            return mwidths.get(t);
+          };
+          var around = String(matchCut(full, parseInt(el.getAttribute('data-ah-match-start'), 10) || 0,
+                                       parseInt(el.getAttribute('data-ah-match-end'), 10) || 0,
+                                       contentRight - text.left + 0.01, mmeasure));
+          el.style.setProperty('--ah-cut-indent', Math.max(0, text.left - contentLeft) + 'px');
+          // The overlay the cut is drawn in, its match bold (written only
+          // when the cut changes, so the observer's own record settles).
+          var ov = el.querySelector(':scope > .ah-cut-overlay');
+          if (!ov) {
+            ov = document.createElement('span');
+            ov.className = 'ah-cut-overlay';
+            ov.setAttribute('aria-hidden', 'true');
+            el.appendChild(ov);
+          }
+          if (ov.getAttribute('data-text') !== around) {
+            ov.setAttribute('data-text', around);
+            ov.textContent = '';
+            // Every match in view bold (ASCII case ignored, as the query
+            // matches; the uncut line bolds them all too).
+            var matchText = (el.getAttribute('data-ah-match') || '').toLowerCase();
+            var hay = around.toLowerCase(), from = 0;
+            var at = matchText ? hay.indexOf(matchText) : -1;
+            while (at >= 0) {
+              if (at > from) ov.appendChild(document.createTextNode(around.slice(from, at)));
+              var b = document.createElement('b');
+              b.textContent = around.slice(at, at + matchText.length);
+              ov.appendChild(b);
+              from = at + matchText.length;
+              at = hay.indexOf(matchText, from);
+            }
+            if (from < around.length) ov.appendChild(document.createTextNode(around.slice(from)));
+          }
+          if (el.getAttribute(SHOWN) !== around) el.setAttribute(SHOWN, around);
           return;
         }
         // CSS's cut: the most text whose last glyph, and the ellipsis after
@@ -357,7 +433,7 @@ when defined(js):
         document.fonts.addEventListener('loadingdone', again);
         document.fonts.ready.then(again);
       }
-    })(#, #, #, #)""".}
+    })(#, #, #, #, #)""".}
 
   installCutText(ahCutTextTrim, ahCutTextDangles, ahCutTextPathCandidates,
-                 ahCutTextInputCut)
+                 ahCutTextInputCut, ahCutTextMatchCut)

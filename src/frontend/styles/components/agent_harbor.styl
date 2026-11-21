@@ -60,6 +60,33 @@ AH_ROW_DOT = 0.5rem
     pointer-events: none
     -webkit-text-fill-color: currentColor
 
+// A matched line cut around its match (`data-ah-cut="match"`, P2c D62):
+// the cut is drawn by an overlay the cut module keeps in the element
+// (`.ah-cut-overlay`, hidden from the accessibility tree), so its match can
+// stay bold, in place of the `::after` above.
+[data-ah-cut="match"][data-ah-shown]::after
+  content: none
+
+[data-ah-cut="match"] > .ah-cut-overlay
+  display: none
+
+[data-ah-cut="match"][data-ah-shown] > .ah-cut-overlay
+  display: block
+  position: absolute
+  top: 0
+  right: 0
+  bottom: 0
+  left: 0
+  padding: inherit
+  text-indent: var(--ah-cut-indent, 0)
+  white-space: nowrap
+  overflow: hidden
+  pointer-events: none
+  -webkit-text-fill-color: currentColor
+
+  b
+    font-weight: 600
+
 // The session tab strip's label shares `.session-tab-label` with the
 // desktop's strip (session_tabs.styl), which keeps CSS's ellipsis; the
 // Agent Harbor views' label is cut in code.

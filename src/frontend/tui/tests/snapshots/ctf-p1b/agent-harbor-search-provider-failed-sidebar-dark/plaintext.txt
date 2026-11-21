@@ -6,25 +6,25 @@
    Enter opens
                                              
                                              
-   FILES                        no results
-                                             
    SYMBOLS                               1
   ▎calculate_damage
   ▎function               src/shield.nr:22
                                              
    PROGRAM TEXT                          2
-   let damage = calculate_damage(
-   initial_shield, remaining_shield,
-   mass);
+   let damage = calculate_damage(initial_…
                            src/shield.nr:6
                                              
-   fn calculate_damage(initial_shield:
-   Field, remaining_shield: Field, mass:
-   Field) -> Field {
+   fn calculate_damage(initial_shield: Fi…
                           src/shield.nr:22
                                              
    AGENT HARBOR SESSIONS
    failed: Agent Harbor is not reachable
+                                             
+   No matches in Files
+                                             
+                                             
+                                             
+                                             
                                              
                                              
                                              

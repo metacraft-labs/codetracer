@@ -5,8 +5,6 @@
    Enter opens
                                              
                                              
-   FILES                        no results
-                                             
    SYMBOLS                               5
   ▎remaining_shield
   ▎variable                src/shield.nr:2
@@ -24,13 +22,10 @@
    variable               src/shield.nr:62
                                              
    PROGRAM TEXT                         20
-   let mut remaining_shield =
-   initial_shield;
+   let mut remaining_shield = initial_shi…
                            src/shield.nr:2
                                              
-   let damage = calculate_damage(
-   initial_shield, remaining_shield,
-   mass);
+   …itial_shield, remaining_shield, mass);
                            src/shield.nr:6
                                              
    remaining_shield -= damage;
@@ -39,14 +34,19 @@
    if (remaining_shield as u32 > 0){
                           src/shield.nr:10
                                              
-   regeneration =
-   calculate_shield_regeneration(
-   initial_shield ,remaining_shield,
-   shield_regen_percentage);
+   …itial_shield ,remaining_shield, shiel…
                           src/shield.nr:11
                                              
    remaining_shield += regeneration;
                           src/shield.nr:12
+                                             
+   …itial_shield, remaining_shield, damag…
+                          src/shield.nr:14
+                                             
+   let result = remaining_shield as u32 >…
+                          src/shield.nr:18
+                                             
+   +12 more
                               More below ↓
                                              
                                              

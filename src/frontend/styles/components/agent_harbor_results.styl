@@ -7,8 +7,8 @@
 // the field, the sheet, its header and its scrolling body are the composer's
 // rules; this file adds the groups and their rows. A row is the omnibox's
 // result row: no line between rows, a hover ground, and the selected row on
-// the palette's chosen ground (`surface/primary/tertiary`,
-// `.ct-menu-item--chosen`, which the omnibox's own selected result takes).
+// the editor's selection ground (`colors-editor-surface-select`, P2c D63)
+// with an inset bar.
 // Every colour is a design-system role; type sizes are the design system's
 // type roles (`ah-rem`, agent_harbor.styl). The pointer's shape over a row is
 // the one shared rule's (`pointer.styl`, from each row's routed operation),
@@ -122,11 +122,17 @@ AH_RESULTS_PAD = 0.75rem
   &:hover
     background: by-mode(colors-ui-surface-primary-secondary-hover, colors-ui-surface-primary-secondary)
 
-  // The palette's chosen ground. On Light's tertiary step the caption role
-  // is about 2:1, so a selected row's quieter words take the label role
-  // there (5.4:1).
+  // The selection: the editor's own selection ground,
+  // `colors-editor-surface-select`, the one the Calltrace and the editor's
+  // lists draw a selected row on, in both themes (P2c study D63; Light's
+  // `surface/primary/tertiary`, which the palette's chosen row takes, read
+  // as a heavy block). It is a quiet step in Light, so the row also carries
+  // the inset bar in the action border role down its left edge, as the
+  // terminal's selected row does (TUI §3.4). Its quieter words take the
+  // label role in Light (the caption is about 4:1 on it).
   &.ah-results-row-selected
-    background: colors-ui-surface-primary-tertiary
+    background: colors-editor-surface-select
+    box-shadow: inset 0.125rem 0 0 colors-ui-border-action
 
     .ah-results-detail,
     .ah-results-location,
@@ -141,10 +147,13 @@ AH_RESULTS_PAD = 0.75rem
     background: transparent
     padding-top: 0
 
+    box-shadow: none
+
     > .ah-results-row-line
       margin: 0 (- AH_RESULTS_PAD)
       padding: 0.3125rem AH_RESULTS_PAD
-      background: colors-ui-surface-primary-tertiary
+      background: colors-editor-surface-select
+      box-shadow: inset 0.125rem 0 0 colors-ui-border-action
 
 // The row's line: its title, what it is, then where it is and its tag at
 // the right. Each part a one-line text cut by the views' rule (ah_cut_text).
@@ -169,16 +178,13 @@ AH_RESULTS_PAD = 0.75rem
   font-weight: 600
 
 // A line of the program's text is set in the code face, as the editor and
-// the Changes panel set code, and wraps at every width (inside a name where
-// it must) rather than being cut, so the match that put it in the list is
-// always in view.
+// the Changes panel set code, on one line, cut around the match that put it
+// in the list so the match is always in view (`data-ah-cut="match"`,
+// ah_cut_text; P2c study D62). It takes the line's room before where it is.
 .ah-results-title.ah-results-title-code
   flex: 1 1 auto
-  white-space: normal
-  overflow-wrap: anywhere
+  white-space: nowrap
   font-family: "SpaceMono", monospace
-  // A wider gap before where it is, so a wrapped line never reads on into
-  // the path.
   margin-right: 0.5rem
 
 // What a row is keeps its words (a session's state, `needs input`): only
@@ -222,6 +228,9 @@ AH_RESULTS_PAD = 0.75rem
 .ah-results-second
   margin-top: 0.125rem
   font-size: ah-rem(type-ui-size-caption-md)
+  // The caption role's own leading: a wrapped quote's lines sit as the
+  // box's caption lines do, not on the row's line height.
+  line-height: ah-rem(type-ui-lineheight-caption-md)
   color: colors-ui-text-primary-caption
   overflow-wrap: anywhere
 
@@ -284,7 +293,8 @@ AH_RESULTS_PAD = 0.75rem
   // The title takes its line; what the row is and where it is follow on the
   // next together, what at the left and where at the right (where alone
   // starts at the left).
-  .ah-results-title
+  .ah-results-title,
+  .ah-results-title.ah-results-title-code
     flex: 1 0 100%
     max-width: 100%
 
@@ -299,3 +309,20 @@ AH_RESULTS_PAD = 0.75rem
 
   .ah-results-location + .ah-results-tag
     margin-left: 0.5rem
+
+// The providers that answered with nothing: one quiet line after the groups
+// (`No matches in Files, Symbols, Program text`; P2c study D60), where each
+// took a group of its own.
+.ah-results-empty
+  margin-top: 0.5rem
+  padding: 0.5rem AH_RESULTS_PAD 0.25rem
+  border-top: 0.0625rem solid colors-ui-border-secondary
+  font-size: ah-rem(type-ui-size-caption-md)
+  color: colors-ui-text-primary-caption
+  overflow-wrap: anywhere
+
+// The results' header in the caption role's own leading: wrapped at sidebar
+// width, its lines sit as caption lines do (the composer's header keeps its
+// own rule).
+.ah-results .ah-composer-header
+  line-height: ah-rem(type-ui-lineheight-caption-md)

@@ -6,12 +6,6 @@
    Rich results shown as text
                                              
                                              
-   FILES                        no results
-                                             
-   SYMBOLS                      no results
-                                             
-   PROGRAM TEXT                 no results
-                                             
    AGENT HARBOR SESSIONS                 3
   ▎Clamp the shield at zero after a hit
   ▎Shield model hardening
@@ -39,6 +33,12 @@
    “The damage is clamped where it is
    computed, so every caller sees a damage
    the shield can absorb.”
+                                             
+   No matches in Files, Symbols,
+   Program text
+                                             
+                                             
+                                             
                                              
                                              
                                              
