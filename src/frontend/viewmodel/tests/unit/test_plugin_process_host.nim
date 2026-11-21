@@ -197,6 +197,23 @@ suite "§11.2: one native process hosts a package's plugins":
       r.sup.renderSurface("acme-tools.metrics/overview").allText.contains("label fast"))
     r.sup.shutdown()
 
+  test "a settings change made while the plugin is activating still reaches it":
+    # `activate` carries the settings of the moment it is sent. A change made
+    # before `activated` comes back is the change the user made last, and the
+    # plugin must end up with it. The wait stops in that window: the poll that
+    # sends `activate` cannot also read its answer, because the write is
+    # flushed at the end of that poll.
+    var r = newRig()
+    r.sup.configure("acme-tools.metrics", true, %*{"label": "speed"})
+    r.both()
+    check r.sup.waitUntil("activating", proc(): bool =
+      r.sup.slot("acme-tools.metrics").activating)
+    check not r.active("acme-tools.metrics")
+    r.sup.settingsChanged("acme-tools.metrics", %*{"label": "fast"})
+    check r.sup.waitUntil("new label", proc(): bool =
+      r.sup.renderSurface("acme-tools.metrics/overview").allText.contains("label fast"))
+    r.sup.shutdown()
+
 suite "PLAT-12's plugin tier: a plugin that publishes visualisers":
 
   test "a published `visualisers` ViewModel becomes ptPlugin-tier visualisers":

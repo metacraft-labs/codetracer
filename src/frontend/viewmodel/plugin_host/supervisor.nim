@@ -166,7 +166,8 @@ type
     wanted*: bool
       ## Activation was asked for (§4.2's plan reached it).
     active*: bool
-    activating: bool
+    activating*: bool
+      ## `activate` was sent and its `activated` has not come back yet.
     instance: Instance
     breaker*: BreakerState
     strikes*: seq[int64]
@@ -719,7 +720,11 @@ proc settingsChanged*(sup: Supervisor; id: string; settings: JsonNode) =
   if s.isNil: return
   s.settingProblems = @[]
   s.settings = validateSettings(s.spec, settings, s.settingProblems)
-  if s.active:
+  # An activating plugin was sent `activate` with the settings of that moment.
+  # The pipe is ordered, so a change sent now reaches it after its activation;
+  # dropping it would leave the plugin on stale settings until it is next
+  # activated, although the host already reports the new ones.
+  if s.active or s.activating:
     s.instance.sendTo(%*{"type": "settings-changed", "plugin": s.id,
                          "settings": s.settings})
 
