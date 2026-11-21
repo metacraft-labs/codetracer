@@ -164,14 +164,155 @@ proc childIndexPath*(id: string; prefix: string): seq[int] =
     try: result.add parseInt(part)
     except ValueError: return @[]
 
+func contextOfViewId(id: string): string =
+  ## The pane a row belongs to, when `id` is the view id of a pane's root.
+  case id
+  of "eventLog": "eventLog"
+  of "state.root": "state"
+  of "fileTree": "fileTree"
+  of "pointList": "pointList"
+  of "scratchpad": "scratchpad"
+  of "vcs.workingTree.files": "vcsFiles"
+  of "vcs.commits.list": "vcsCommits"
+  else: ""
+
+template classifyClick(at: int; ctx: string; attrAt, up: untyped): GPaneClick =
+  ## The click a press on node `at` reports, read off the tree through
+  ## `attrAt(node, name)` and `up(node)` (its parent, -1 above the top):
+  ## a snapshot's when the window wires the row, the live element's when
+  ## the press arrives (`wireOne`). `ctx` is the pane the node is in.
+  block:
+    let id = attrAt(at, ViewIdAttribute)
+    let kind = attrAt(at, ViewKindAttribute)
+    var c = GPaneClick(part: gcpNone)
+    if kind == "Tree" and ctx == "fileTree" and id.startsWith("fileTree"):
+      c = GPaneClick(part: gcpFileNode, key: id)
+    elif kind == "Tree" and ctx == "state" and id != "state.root" and
+         id.len > 0:
+      c = GPaneClick(part: gcpVariable, key: id)
+    elif ctx == "eventLog" and attrAt(at, "data-row-index").len > 0:
+      try:
+        c = GPaneClick(part: gcpEventRow,
+                       index: parseInt(attrAt(at, "data-row-index")))
+      except ValueError: discard
+    elif ctx == "eventLog" and attrAt(at, "data-column-index").len > 0 and
+         attrAt(up(at), "data-row-index").len == 0:
+      # A header cell (a cell of the row with no row index): its column.
+      try:
+        c = GPaneClick(part: gcpEventHeader,
+                       index: parseInt(attrAt(at, "data-column-index")))
+      except ValueError: discard
+    elif ctx == "scratchpad" and
+         attrAt(at, "data-column-index") == "0" and
+         attrAt(up(at), "data-row-index").len > 0:
+      # The FIRST cell of a row is its close button.
+      try:
+        c = GPaneClick(part: gcpScratchClose,
+                       index: parseInt(attrAt(up(at), "data-row-index")))
+      except ValueError: discard
+    elif ctx in ["pointList", "vcsFiles", "vcsCommits"] and
+         attrAt(at, "data-option-index").len > 0:
+      let option = attrAt(at, "data-option-id")
+      try:
+        let i = parseInt(attrAt(at, "data-option-index"))
+        c = case ctx
+            of "pointList": GPaneClick(part: gcpPoint, index: i)
+            of "vcsFiles": GPaneClick(part: gcpVcsFile, key: option)
+            else:
+              if option.startsWith("commitfile-"):
+                GPaneClick(part: gcpVcsFile, key: option)
+              else: GPaneClick(part: gcpVcsCommit, index: i, key: option)
+      except ValueError: discard
+    elif attrAt(at, CallArgAttribute).len > 0:
+      let row = up(at)
+      if row >= 0 and attrAt(row, CallRowAttribute).len > 0:
+        try:
+          c = GPaneClick(part: gcpCallArg,
+                         index: parseBiggestInt(attrAt(row, CallRowAttribute)),
+                         line: parseInt(attrAt(at, CallArgAttribute)))
+        except ValueError: discard
+    elif attrAt(at, TextRoleAttribute) == $trValueText:
+      let line = attrAt(up(up(at)), EditorRowAttribute)
+      if line.len > 0:
+        try: c = GPaneClick(part: gcpValue, line: parseInt(line))
+        except ValueError: discard
+    elif attrAt(at, FooterPositionAttribute).len > 0:
+      c = GPaneClick(part: gcpPosition,
+                     key: attrAt(at, FooterPositionAttribute))
+    elif attrAt(at, CallRowAttribute).len > 0:
+      try:
+        c = GPaneClick(part: gcpCallRow,
+                       index: parseBiggestInt(attrAt(at, CallRowAttribute)))
+      except ValueError: discard
+    elif attrAt(at, StateControlAttribute).len > 0:
+      c = GPaneClick(part: gcpStateControl,
+                     key: attrAt(at, StateControlAttribute))
+    elif attrAt(at, StateHistoryEntryAttribute).len > 0:
+      c = GPaneClick(part: gcpHistoryEntry,
+                     key: attrAt(at, StateHistoryEntryAttribute))
+    elif attrAt(at, StateOriginHopAttribute).len > 0:
+      c = GPaneClick(part: gcpOriginHop,
+                     key: attrAt(at, StateOriginHopAttribute) & "#" &
+                          attrAt(at, StateOriginPathAttribute))
+    elif attrAt(at, StateAddWatchAttribute).len > 0:
+      c = GPaneClick(part: gcpAddWatch, key: "watch")
+    elif attrAt(at, CallSearchAttribute).len > 0:
+      c = GPaneClick(part: gcpCallSearch, key: "calls")
+    elif attrAt(at, TabPaneAttribute).len > 0:
+      c = GPaneClick(part: gcpTab, key: attrAt(at, TabPaneAttribute))
+    elif attrAt(at, TextRoleAttribute) == $trGutterLineNumber or
+         attrAt(at, EditorCodeColumnAttribute).len > 0:
+      let line = attrAt(up(at), EditorRowAttribute)
+      if line.len > 0:
+        try:
+          c = GPaneClick(
+            part: (if attrAt(at, EditorCodeColumnAttribute).len > 0:
+                     gcpCode else: gcpGutter),
+            line: parseInt(line))
+        except ValueError: discard
+
+    c
+
+proc liveClickOf(r: GpuiRenderer; el: GpuiElement): GPaneClick =
+  ## The click a press on `el` reports, read off the element as it is NOW:
+  ## its attributes and its ancestors'. A row the window kept across a
+  ## redraw (`element_reuse`) may have been rewired by its attributes since
+  ## it was first wired, so its listener asks the tree rather than
+  ## remembering what the row said then.
+  var chain = @[el]
+  proc nodeAt(at: int): GpuiElement =
+    while chain.len <= at and not chain[^1].isNil:
+      chain.add r.parentNode(chain[^1])
+    if at < chain.len: chain[at] else: nil
+  proc attrAt(at: int; name: string): string =
+    let e = if at < 0: nil else: nodeAt(at)
+    if e.isNil: "" else: getAttribute(e, name)
+  proc up(at: int): int =
+    if at < 0 or nodeAt(at + 1).isNil: -1 else: at + 1
+  var ctx = ""
+  var k = 0
+  while ctx.len == 0 and not nodeAt(k).isNil:
+    ctx = contextOfViewId(getAttribute(nodeAt(k), ViewIdAttribute))
+    inc k
+  classifyClick(0, ctx, attrAt, up)
+
 proc wireOne(r: GpuiRenderer; el: GpuiElement; c: GPaneClick;
              dedupe: ptr PressDedupe; onClick: proc(c: GPaneClick)) =
+  ## `el`'s listeners. The click they report is read off the element when
+  ## the press arrives (`liveClickOf`), not captured from `c`: a row the
+  ## window keeps across redraws keeps its listeners, and they must report
+  ## what the row says now.
   r.setAttribute(el, WiredAttribute, $c.part)
-  let base = c
+  let id = nodeId(el)
   proc handler(ev: GpuiEvent) =
     if not dedupe[].admit(ev):
       return
-    var click = base
+    let live = elementOf(id)
+    if live.isNil:
+      return
+    var click = liveClickOf(r, live)
+    if click.part == gcpNone:
+      return
     click.button = buttonOf(ev)
     click.ctrl = gmControl in ev.modifiers
     click.alt = gmAlt in ev.modifiers
@@ -211,104 +352,12 @@ proc wireWindowClicks*(r: GpuiRenderer; nodes: var seq[SnapshotNode];
     template n: untyped = nodes[i]
     # A row's pane is named by its nearest enclosing pane root.
     var ctx = if n.parent >= 0: contexts[n.parent] else: ""
-    let id = n.attr(ViewIdAttribute)
-    let kind = n.attr(ViewKindAttribute)
-    if id == "eventLog": ctx = "eventLog"
-    elif id == "state.root": ctx = "state"
-    elif id == "fileTree": ctx = "fileTree"
-    elif id == "pointList": ctx = "pointList"
-    elif id == "scratchpad": ctx = "scratchpad"
-    elif id == "vcs.workingTree.files": ctx = "vcsFiles"
-    elif id == "vcs.commits.list": ctx = "vcsCommits"
+    let own = contextOfViewId(n.attr(ViewIdAttribute))
+    if own.len > 0: ctx = own
     contexts[i] = ctx
     let wired = n.attr(WiredAttribute).len > 0
     if not wired:
-      var c = GPaneClick(part: gcpNone)
-      if kind == "Tree" and ctx == "fileTree" and id.startsWith("fileTree"):
-        c = GPaneClick(part: gcpFileNode, key: id)
-      elif kind == "Tree" and ctx == "state" and id != "state.root" and
-           id.len > 0:
-        c = GPaneClick(part: gcpVariable, key: id)
-      elif ctx == "eventLog" and n.attr("data-row-index").len > 0:
-        try:
-          c = GPaneClick(part: gcpEventRow,
-                         index: parseInt(n.attr("data-row-index")))
-        except ValueError: discard
-      elif ctx == "eventLog" and n.attr("data-column-index").len > 0 and
-           attrAt(n.parent, "data-row-index").len == 0:
-        # A header cell (a cell of the row with no row index): its column.
-        try:
-          c = GPaneClick(part: gcpEventHeader,
-                         index: parseInt(n.attr("data-column-index")))
-        except ValueError: discard
-      elif ctx == "scratchpad" and
-           n.attr("data-column-index") == "0" and
-           attrAt(n.parent, "data-row-index").len > 0:
-        # The FIRST cell of a row is its close button.
-        try:
-          c = GPaneClick(part: gcpScratchClose,
-                         index: parseInt(attrAt(n.parent, "data-row-index")))
-        except ValueError: discard
-      elif ctx in ["pointList", "vcsFiles", "vcsCommits"] and
-           n.attr("data-option-index").len > 0:
-        let option = n.attr("data-option-id")
-        try:
-          let i = parseInt(n.attr("data-option-index"))
-          c = case ctx
-              of "pointList": GPaneClick(part: gcpPoint, index: i)
-              of "vcsFiles": GPaneClick(part: gcpVcsFile, key: option)
-              else:
-                if option.startsWith("commitfile-"):
-                  GPaneClick(part: gcpVcsFile, key: option)
-                else: GPaneClick(part: gcpVcsCommit, index: i, key: option)
-        except ValueError: discard
-      elif n.attr(CallArgAttribute).len > 0:
-        let row = n.parent
-        if row >= 0 and attrAt(row, CallRowAttribute).len > 0:
-          try:
-            c = GPaneClick(part: gcpCallArg,
-                           index: parseBiggestInt(attrAt(row, CallRowAttribute)),
-                           line: parseInt(n.attr(CallArgAttribute)))
-          except ValueError: discard
-      elif n.attr(TextRoleAttribute) == $trValueText:
-        let line = attrAt(up(n.parent), EditorRowAttribute)
-        if line.len > 0:
-          try: c = GPaneClick(part: gcpValue, line: parseInt(line))
-          except ValueError: discard
-      elif n.attr(FooterPositionAttribute).len > 0:
-        c = GPaneClick(part: gcpPosition,
-                       key: n.attr(FooterPositionAttribute))
-      elif n.attr(CallRowAttribute).len > 0:
-        try:
-          c = GPaneClick(part: gcpCallRow,
-                         index: parseBiggestInt(n.attr(CallRowAttribute)))
-        except ValueError: discard
-      elif n.attr(StateControlAttribute).len > 0:
-        c = GPaneClick(part: gcpStateControl,
-                       key: n.attr(StateControlAttribute))
-      elif n.attr(StateHistoryEntryAttribute).len > 0:
-        c = GPaneClick(part: gcpHistoryEntry,
-                       key: n.attr(StateHistoryEntryAttribute))
-      elif n.attr(StateOriginHopAttribute).len > 0:
-        c = GPaneClick(part: gcpOriginHop,
-                       key: n.attr(StateOriginHopAttribute) & "#" &
-                            n.attr(StateOriginPathAttribute))
-      elif n.attr(StateAddWatchAttribute).len > 0:
-        c = GPaneClick(part: gcpAddWatch, key: "watch")
-      elif n.attr(CallSearchAttribute).len > 0:
-        c = GPaneClick(part: gcpCallSearch, key: "calls")
-      elif n.attr(TabPaneAttribute).len > 0:
-        c = GPaneClick(part: gcpTab, key: n.attr(TabPaneAttribute))
-      elif n.attr(TextRoleAttribute) == $trGutterLineNumber or
-           n.attr(EditorCodeColumnAttribute).len > 0:
-        let line = attrAt(n.parent, EditorRowAttribute)
-        if line.len > 0:
-          try:
-            c = GPaneClick(
-              part: (if n.attr(EditorCodeColumnAttribute).len > 0:
-                       gcpCode else: gcpGutter),
-              line: parseInt(line))
-          except ValueError: discard
+      let c = classifyClick(i, ctx, attrAt, up)
       if c.part != gcpNone:
         let el = elementOf(n.id)
         if not el.isNil:
