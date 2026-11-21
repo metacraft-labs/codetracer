@@ -4208,6 +4208,17 @@ jobs:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
+      - name: Mint a token for the clone below
+        # An installation token lives an hour, and the clone below comes after
+        # 'Provision dependency siblings from repro.lock', which can take most of
+        # one on a cold runner: hand it a token minted here, not the job's first
+        # (ci/test/late-clone-token-test.py).
+        id: late_token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
       - name: Clone runquota sibling
         # The build (`just build-once`) compiles `ct`, and src/ct/codetracer.nim
         # -> ../ct_test/ct_test -> src/ct_test/process_exec.nim opens with
@@ -4222,7 +4233,7 @@ jobs:
           repo: metacraft-labs/runquota
           ref: dev
           path: ${{ github.workspace }}/../runquota
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.late_token.outputs.token }}
           submodules: 'false'
 
       - name: Allow direnv in cloned codetracer-native-recorder
