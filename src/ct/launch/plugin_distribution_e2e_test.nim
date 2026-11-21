@@ -57,7 +57,7 @@ import std/[algorithm, os, osproc, streams, strtabs, strutils, times,
 import ./plugin_components
 import ../../common/plugin_model
 
-const ExpectedAssertions = 108
+const ExpectedAssertions = 116
   ## Written from a run, and asserted against the tally at the end of the file.
 
 var countedAssertions = 0
@@ -149,12 +149,13 @@ proc sh(workDir: string; command: string): Run =
 # Building a mirror the launcher's own downloader can read
 # ---------------------------------------------------------------------------
 
-proc publish(mirror, stage, name, version: string) =
+proc publish(mirror, stage, name, version: string; platform = PlatformToken) =
   ## Tar up `<stage>/<name>@<version>` and its checksum, where `install_one`
-  ## looks for them: `$M/$C/$V/$C-$V-$PLAT.tar.gz{,.sha256}`.
+  ## looks for them: `$M/$C/$V/$C-$V-$PLAT.tar.gz{,.sha256}`. `platform`
+  ## `any` publishes the one archive every platform shares (a WASM package).
   let dest = mirror / name / version
   createDir(dest)
-  let archive = name & "-" & version & "-" & PlatformToken & ".tar.gz"
+  let archive = name & "-" & version & "-" & platform & ".tar.gz"
   let made = sh(stage, "tar czf " & quoteShell(dest / archive) & " " &
                        quoteShell(name & "@" & version))
   doAssert made.rc == 0, "tar failed: " & made.output
@@ -592,6 +593,50 @@ suite "PLAT-10: a plugin component cannot be invoked as `ct <word>`":
     ck d.problems[0].detail.contains(CapabilityFile)
 
 # ---------------------------------------------------------------------------
+
+suite "a WASM plugin package: one archive for every platform":
+
+  test "`ct install` installs it from the `-any` archive, and CodeTracer reads it as a WASM package":
+    let tmp = getTempDir() / ("ct-wasm-pkg-" & $getCurrentProcessId() & "-" &
+                              $epochTime().int64)
+    let userRoot = tmp / "user"
+    let mirror = tmp / "mirror"
+    let stage = tmp / "stage"
+    createDir(userRoot)
+    let dir = stage / "wasm-demo@1.0.0"
+    createDir(dir)
+    # The smallest valid module: what the package carries is not the subject.
+    writeFile(dir / "plugin.wasm", "\x00asm\x01\x00\x00\x00")
+    writeFile(dir / PluginManifestFile, """{
+  "package": "wasm-demo",
+  "host": {"kind": "wasm", "module": "plugin.wasm"},
+  "plugins": [{"id": "wasm-demo.hello", "version": "1.0.0",
+               "requires": {"core": ">=1.0.0 <2.0.0"},
+               "activation": [{"event": "trace-opened"}],
+               "contributes": {"command": [{"id": "hello", "title": "Hello"}]}}]
+}
+""")
+    publish(mirror, stage, "wasm-demo", "1.0.0", platform = "any")
+    writeRegistry(mirror, [(name: "wasm-demo", latest: "1.0.0")])
+    # No archive for this platform exists on the mirror, only the shared one.
+    ck not fileExists(mirror / "wasm-demo" / "1.0.0" /
+                      ("wasm-demo-1.0.0-" & PlatformToken & ".tar.gz"))
+    let r = runLauncher(userRoot, mirror, tmp, ["install", "wasm-demo"])
+    checkpoint(r.output)
+    ckEq r.rc, 0
+    ckEq installedDirs(userRoot), @["wasm-demo@1.0.0"]
+    let load = loadPluginPackages(discoverIn(userRoot, @[]))
+    checkpoint($load.problems.len)
+    ckEq load.problems.len, 0
+    ckEq load.packages.len, 1
+    if load.packages.len == 1:
+      let lp = load.packages[0]
+      ck lp.package.hostKind == phkWasm
+      ck fileExists(lp.installed.dir / lp.package.executable)
+      ckEq lp.package.pluginIds, @["wasm-demo.hello"]
+    else:
+      countedAssertions += 3
+    removeDir(tmp)
 
 suite "PLAT-10: the counted-assertion tally":
 

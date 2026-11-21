@@ -206,8 +206,9 @@ LOCK_NOIR=f09f459714b839a5952b59e09ce0546a936c797e
 #
 # The revisions codetracer's repro.lock last pinned before bbf7dbed4a6 dropped
 # them (3b0524226ed), with which run 44384977215's TUI and visual-replay-tools
-# jobs built.
-PRIVATE_SIBLING_CODETRACER_LAUNCHER=7aafc5efe2bde5d8c81bc849116c4df589a8ef6b
+# jobs built. The launcher moved to 88e7667 for the `-any` archive a WASM
+# plugin package is published as (plugin_distribution_e2e_test.nim).
+PRIVATE_SIBLING_CODETRACER_LAUNCHER=88e7667f1ab2a9248ad63f445d1e6ad74d632411
 PRIVATE_SIBLING_CODETRACER_SNAPSHOT_CODECS=3e503da83b73e805f30096d4baa45c18d138f6d3
 # isonim-zgui, which only the zgui lane (.github/workflows/zgui.yml) clones.
 PRIVATE_SIBLING_ISONIM_ZGUI=328155b7086fa6a2921287c1aec8ff5d305aa645

@@ -30,6 +30,16 @@
 ## signal disposition the SDK touches, and it changes nothing about how the
 ## process ends.
 ##
+## ## WEBASSEMBLY (`--cpu:wasm32`, Extensibility-Model.md §11.9)
+##
+## The same source builds a plugin for `ct-plugin-host`. There the instance has
+## no stdin, no threads and no signals: a frame arrives through the exported
+## `ct_plugin_frame`, every frame the plugin sends leaves through the host's
+## `ct.send` import (`writeFrame`), `ping` is answered by the host's own
+## watchdog, and a trap or an overrun ends the instance rather than the
+## process. `run` registers the SDK and returns; the host drives it. The
+## authoring model — `addPlugin`, handlers, the mirror, `run` — is the same.
+##
 ## ## THREADS
 ##
 ## Two: the main thread, which owns the reactive graph and every plugin's
@@ -37,7 +47,9 @@
 ## hands every other frame to the main thread through a channel. Writes to
 ## stdout from either thread are whole frames under one lock.
 
-import std/[json, locks, monotimes, os, posix, strutils, tables, times]
+import std/[json, monotimes, strutils, tables, times]
+when not defined(wasm32):
+  import std/[locks, os, posix]
 
 import isonim/core/[computation, owner, signals]
 
@@ -102,107 +114,145 @@ type
 # The shared state the watchdog reads
 # ---------------------------------------------------------------------------
 
-var
-  writeLock: Lock
-  busyName: array[256, char]
-  busyLen {.volatile.}: int
-  busySinceNs {.volatile.}: int64
-  inbox: Channel[string]
-  readerThread: Thread[void]
+when defined(wasm32):
+  proc ctSend(p: pointer; n: int32) {.importc: "ct_send",
+    codegenDecl: "__attribute__((import_module(\"ct\"), import_name(\"send\"))) $# $#$#".}
 
-proc nowNs(): int64 = getMonoTime().ticks
+  proc writeFrame(payload: string) =
+    ## One message to `ct-plugin-host`: the JSON itself, unframed; the host
+    ## frames what it passes on.
+    if payload.len > 0:
+      ctSend(payload[0].unsafeAddr, payload.len.int32)
 
-proc setBusy(id: string) =
-  let n = min(id.len, busyName.len - 1)
-  for i in 0 ..< n:
-    busyName[i] = id[i]
-  busySinceNs = nowNs()
-  busyLen = n
+  proc sendRaw(msg: JsonNode) =
+    writeFrame($msg)
 
-proc clearBusy() =
-  busyLen = 0
+  proc ctIo(p: pointer; n: int32): int32 {.importc: "ct_io",
+    codegenDecl: "__attribute__((import_module(\"ct\"), import_name(\"io\"))) $# $#$#".}
 
-proc busyNow(): string =
-  let n = busyLen
-  result = newString(n)
-  for i in 0 ..< n:
-    result[i] = busyName[i]
+  var
+    ioWaiting: Table[int, proc(r: JsonNode) {.closure.}]
+    nextIo: int
 
-proc writeAll(fd: cint; data: string) =
-  var off = 0
-  while off < data.len:
-    let n = posix.write(fd, data[off].unsafeAddr, data.len - off)
-    if n > 0:
-      off += n
-    elif n < 0 and errno == EINTR:
-      continue
-    else:
+  proc ioRequest*(req: JsonNode; onDone: proc(r: JsonNode) {.closure.}) =
+    ## One I/O request to the host (`plugin_io.nim`'s primitives, `decide`
+    ## first). `onDone` runs with the `io-result` when it arrives, in a later
+    ## call: there is no synchronous I/O, here as natively.
+    inc nextIo
+    let id = nextIo
+    var r = req.copy
+    r["id"] = %id
+    ioWaiting[id] = onDone
+    let text = $r
+    if ctIo(text[0].unsafeAddr, text.len.int32) != 0:
+      ioWaiting.del(id)
+      onDone(%*{"status": "ioFailed", "message": "the host did not accept the request"})
+
+  proc setBusy(id: string) = discard
+  proc clearBusy() = discard
+  proc crashLine(id: string) = discard
+else:
+  var
+    writeLock: Lock
+    busyName: array[256, char]
+    busyLen {.volatile.}: int
+    busySinceNs {.volatile.}: int64
+    inbox: Channel[string]
+    readerThread: Thread[void]
+
+  proc nowNs(): int64 = getMonoTime().ticks
+
+  proc setBusy(id: string) =
+    let n = min(id.len, busyName.len - 1)
+    for i in 0 ..< n:
+      busyName[i] = id[i]
+    busySinceNs = nowNs()
+    busyLen = n
+
+  proc clearBusy() =
+    busyLen = 0
+
+  proc busyNow(): string =
+    let n = busyLen
+    result = newString(n)
+    for i in 0 ..< n:
+      result[i] = busyName[i]
+
+  proc writeAll(fd: cint; data: string) =
+    var off = 0
+    while off < data.len:
+      let n = posix.write(fd, data[off].unsafeAddr, data.len - off)
+      if n > 0:
+        off += n
+      elif n < 0 and errno == EINTR:
+        continue
+      else:
+        return
+
+  proc sendRaw(msg: JsonNode) =
+    let frame = encodeMessage(msg)
+    if frame.len == 0:
       return
+    withLock writeLock:
+      writeAll(1, frame)
 
-proc sendRaw(msg: JsonNode) =
-  let frame = encodeMessage(msg)
-  if frame.len == 0:
-    return
-  withLock writeLock:
-    writeAll(1, frame)
+  proc crashLine(id: string) =
+    writeAll(2, "\nct-plugin-crash: " & id & "\n")
 
-proc crashLine(id: string) =
-  writeAll(2, "\nct-plugin-crash: " & id & "\n")
+  proc onFatalSignal(sig: cint) {.noconv.} =
+    # Async-signal-safe: `write` of a static buffer, `signal`, `raise`.
+    const prefix = "\nct-plugin-crash: "
+    discard posix.write(2, prefix.cstring, prefix.len)
+    if busyLen > 0:
+      discard posix.write(2, busyName[0].addr, busyLen)
+    discard posix.write(2, "\n".cstring, 1)
+    discard signal(sig, SIG_DFL)
+    discard posix.raise(sig)
 
-proc onFatalSignal(sig: cint) {.noconv.} =
-  # Async-signal-safe: `write` of a static buffer, `signal`, `raise`.
-  const prefix = "\nct-plugin-crash: "
-  discard posix.write(2, prefix.cstring, prefix.len)
-  if busyLen > 0:
-    discard posix.write(2, busyName[0].addr, busyLen)
-  discard posix.write(2, "\n".cstring, 1)
-  discard signal(sig, SIG_DFL)
-  discard posix.raise(sig)
+  proc installCrashRecord() =
+    for sig in [SIGSEGV, SIGBUS, SIGFPE, SIGILL, SIGABRT]:
+      var sa: Sigaction
+      sa.sa_handler = onFatalSignal
+      discard sigemptyset(sa.sa_mask)
+      sa.sa_flags = SA_RESETHAND
+      discard sigaction(sig, sa, nil)
 
-proc installCrashRecord() =
-  for sig in [SIGSEGV, SIGBUS, SIGFPE, SIGILL, SIGABRT]:
-    var sa: Sigaction
-    sa.sa_handler = onFatalSignal
-    discard sigemptyset(sa.sa_mask)
-    sa.sa_flags = SA_RESETHAND
-    discard sigaction(sig, sa, nil)
-
-proc readerLoop() {.thread.} =
-  ## The watchdog. Owns stdin; answers `ping` here, so a stuck main thread
-  ## still produces a `pong` naming the plugin it is stuck in.
-  var reader: FrameReader
-  var buf: array[65536, char]
-  while true:
-    let n = posix.read(0, buf[0].addr, buf.len)
-    if n == 0:
-      break
-    if n < 0:
-      if errno == EINTR: continue
-      break
-    var s = newString(n)
-    copyMem(s[0].addr, buf[0].addr, n)
-    reader.feed(s)
-    var frame: string
+  proc readerLoop() {.thread.} =
+    ## The watchdog. Owns stdin; answers `ping` here, so a stuck main thread
+    ## still produces a `pong` naming the plugin it is stuck in.
+    var reader: FrameReader
+    var buf: array[65536, char]
     while true:
-      let st = reader.next(frame)
-      if st != fsFrame:
-        if st == fsOversize:
-          inbox.send("")
-          return
+      let n = posix.read(0, buf[0].addr, buf.len)
+      if n == 0:
         break
-      if frame.contains("\"ping\""):
-        var parsed: JsonNode
-        try: parsed = parseJson(frame)
-        except CatchableError: parsed = nil
-        if not parsed.isNil and parsed{"type"}.getStr("") == "ping":
-          let busy = busyNow()
-          let ms = if busy.len > 0: (nowNs() - busySinceNs) div 1_000_000 else: 0
-          sendRaw(%*{"type": "pong", "seq": parsed{"seq"},
-                     "busy": (if busy.len > 0: %busy else: newJNull()),
-                     "busyMs": ms})
-          continue
-      inbox.send(frame)
-  inbox.send("")
+      if n < 0:
+        if errno == EINTR: continue
+        break
+      var s = newString(n)
+      copyMem(s[0].addr, buf[0].addr, n)
+      reader.feed(s)
+      var frame: string
+      while true:
+        let st = reader.next(frame)
+        if st != fsFrame:
+          if st == fsOversize:
+            inbox.send("")
+            return
+          break
+        if frame.contains("\"ping\""):
+          var parsed: JsonNode
+          try: parsed = parseJson(frame)
+          except CatchableError: parsed = nil
+          if not parsed.isNil and parsed{"type"}.getStr("") == "ping":
+            let busy = busyNow()
+            let ms = if busy.len > 0: (nowNs() - busySinceNs) div 1_000_000 else: 0
+            sendRaw(%*{"type": "pong", "seq": parsed{"seq"},
+                       "busy": (if busy.len > 0: %busy else: newJNull()),
+                       "busyMs": ms})
+            continue
+        inbox.send(frame)
+    inbox.send("")
 
 # ---------------------------------------------------------------------------
 # Construction
@@ -470,6 +520,15 @@ proc handle(sdk: PluginSdk; msg: JsonNode) =
     if not p.isNil and p.active and not p.onLayerPopped.isNil:
       p.attributed(""):
         p.onLayerPopped(p, msg{"token"}.getStr(""), msg{"reason"}.getStr(""))
+  of "io-result":
+    when defined(wasm32):
+      let id = msg{"id"}.getInt(0)
+      if ioWaiting.hasKey(id):
+        var cb: proc(r: JsonNode) {.closure.}
+        discard ioWaiting.pop(id, cb)
+        if not p.isNil:
+          p.attributed(""):
+            cb(msg)
   of "cancel":
     discard
   of "shutdown":
@@ -479,28 +538,98 @@ proc handle(sdk: PluginSdk; msg: JsonNode) =
   else:
     discard
 
-proc run*(sdk: PluginSdk) =
-  ## The protocol loop. Returns after `shutdown`, or when the host closes
-  ## stdin; the process should then exit.
-  initLock(writeLock)
-  inbox.open()
-  installCrashRecord()
-  createThread(readerThread, readerLoop)
-  sdk.running = true
-  while sdk.running:
-    let (got, frame) = inbox.tryRecv()
-    if not got:
-      for f in sdk.idle:
-        f()
-      sleep(2)
-      continue
-    if frame.len == 0:
-      break
-    var msg: JsonNode
+proc handleFrame*(sdk: PluginSdk; frame: string) =
+  ## One frame from the host: parse it and dispatch it. Both transports end
+  ## here.
+  var msg: JsonNode
+  try:
+    msg = parseJson(frame)
+  except CatchableError:
+    return
+  sdk.handle(msg)
+
+when defined(wasm32):
+  var guestSdk: PluginSdk
+    ## The SDK `run` registered. The host's calls below reach it.
+
+  proc NimMain() {.importc.}
+
+  template guarded(what: string; body: untyped) =
+    ## Nothing may escape into the host: under Nim's C exceptions an
+    ## exception left unhandled at an export would leave the module running
+    ## in error mode, ignoring every later frame. A handler's
+    ## `CatchableError` is already its plugin's `error`; what reaches here is
+    ## a `Defect`, which ends the instance (§11.5's rule, the instance being
+    ## this plugin's process), with the defect on the plugin log.
     try:
-      msg = parseJson(frame)
-    except CatchableError:
-      continue
-    sdk.handle(msg)
-  for p in sdk.plugins.values:
-    p.deactivate()
+      body
+    except CatchableError as e:
+      stderr.writeLine "ct-plugin: " & what & ": " & $e.name & ": " & e.msg
+    except Defect as e:
+      stderr.writeLine "ct-plugin-crash: " & what & ": " & $e.name & ": " & e.msg
+      stderr.writeLine e.getStackTrace()
+      quit(70)
+
+  proc run*(sdk: PluginSdk) =
+    ## Under `ct-plugin-host` there is no loop to run: the host calls
+    ## `ct_plugin_frame` with each frame. `run` registers the SDK and returns.
+    guestSdk = sdk
+    sdk.running = true
+
+  proc ct_plugin_init() {.exportc,
+      codegenDecl: "__attribute__((export_name(\"ct_plugin_init\"))) $# $#$#".} =
+    ## The module's own initialisation: the plugin's top level, which builds
+    ## its SDK, adds its plugins and calls `run`.
+    guarded("init"):
+      NimMain()
+
+  proc ct_plugin_alloc(n: int32): pointer {.exportc,
+      codegenDecl: "__attribute__((export_name(\"ct_plugin_alloc\"))) $# $#$#".} =
+    ## A buffer the host writes one frame into; `ct_plugin_frame` frees it.
+    allocShared(max(n, 1))
+
+  proc ct_plugin_frame(p: pointer; n: int32): int32 {.exportc,
+      codegenDecl: "__attribute__((export_name(\"ct_plugin_frame\"))) $# $#$#".} =
+    ## One frame from the host. Returns 1 when the plugin has idle work, so
+    ## the host calls `ct_plugin_idle` again soon.
+    var frame = newString(n)
+    if n > 0:
+      copyMem(frame[0].addr, p, n)
+    deallocShared(p)
+    if not guestSdk.isNil:
+      guarded("frame"):
+        guestSdk.handleFrame(frame)
+        if not guestSdk.running:
+          for q in guestSdk.plugins.values:
+            q.deactivate()
+    int32(not guestSdk.isNil and guestSdk.idle.len > 0)
+
+  proc ct_plugin_idle(): int32 {.exportc,
+      codegenDecl: "__attribute__((export_name(\"ct_plugin_idle\"))) $# $#$#".} =
+    if guestSdk.isNil: return 0
+    guarded("idle"):
+      for f in guestSdk.idle:
+        f()
+    int32(guestSdk.idle.len > 0)
+
+else:
+  proc run*(sdk: PluginSdk) =
+    ## The protocol loop. Returns after `shutdown`, or when the host closes
+    ## stdin; the process should then exit.
+    initLock(writeLock)
+    inbox.open()
+    installCrashRecord()
+    createThread(readerThread, readerLoop)
+    sdk.running = true
+    while sdk.running:
+      let (got, frame) = inbox.tryRecv()
+      if not got:
+        for f in sdk.idle:
+          f()
+        sleep(2)
+        continue
+      if frame.len == 0:
+        break
+      sdk.handleFrame(frame)
+    for p in sdk.plugins.values:
+      p.deactivate()

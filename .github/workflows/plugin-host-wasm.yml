@@ -1,0 +1,208 @@
+name: WASM plugin host
+
+# The WebAssembly `ct-plugin-host` (Extensibility-Model.md §11.9) on
+# x86_64-linux and aarch64-darwin:
+#
+# * the engine measurement behind §11.9's engine choice
+#   (src/plugin-host/engine/measure-engines.sh: wasmtime against wasmi), also
+#   on a real SDK-built plugin module;
+# * the host's real-stack suite (`test_plugin_host_wasm.nim`).
+#
+# Triggered by hand, or by a push to `ci/plugin-host-wasm`, so a measurement
+# can be taken without touching the main pipeline.
+on:
+  workflow_dispatch:
+  push:
+    branches: [ci/plugin-host-wasm]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: WASM plugin host (x86_64-linux)
+    runs-on: [self-hosted, linux, x64]
+    # The darwin dev shell alone took 55 minutes on its first realisation
+    # (plugin-transport-darwin.yml).
+    timeout-minutes: 240
+    steps:
+      - name: Mint installation token for cross-repo sibling access
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Evict stale git credentials from this runner's persistent home
+        uses: metacraft-labs/metacraft-github-actions/evict-stale-git-credentials@2c12f82a56d5000bd47c42ad8c25a3596820057c
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Provision dependency siblings from repro.lock
+        uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      - name: Measure the engines
+        run: |
+          mkdir -p test-logs
+          nix develop . --command bash -c '
+            set -euo pipefail
+            CT_ENGINE_TARGET="$RUNNER_TEMP/ct-engine-target" \
+              src/plugin-host/engine/measure-engines.sh \
+              | tee test-logs/plugin-host-wasm-engines-x86_64-linux.log'
+
+      - name: Build ct-plugin-host and the WebAssembly plugins
+        run: |
+          nix develop . --command bash -c '
+            set -euo pipefail
+            export CT_ENGINE_TARGET="$RUNNER_TEMP/ct-engine-target"
+            src/plugin-host/build.sh --engine wasmi --out "$RUNNER_TEMP/bin" \
+              2>&1 | tee test-logs/plugin-host-wasm-build-x86_64-linux.log
+            src/plugin_sdk/build-wasm-plugin.sh \
+              src/frontend/viewmodel/tests/unit/wasm_plugins/wasm_test_plugins.nim \
+              "$RUNNER_TEMP/modules/wasm-steady.wasm" -d:ctWasmTestPackage=wasm-steady \
+              2>&1 | tee -a test-logs/plugin-host-wasm-build-x86_64-linux.log
+            ls -l "$RUNNER_TEMP/bin/ct-plugin-host" "$RUNNER_TEMP/modules/wasm-steady.wasm"
+            shasum -a 256 "$RUNNER_TEMP/modules/wasm-steady.wasm" \
+              | tee -a test-logs/plugin-host-wasm-build-x86_64-linux.log'
+
+      - name: Measure the engines on a real plugin module
+        run: |
+          nix develop . --command bash -c '
+            set -euo pipefail
+            "$RUNNER_TEMP/ct-engine-target/both/release/ct-wasm-engine-bench" \
+              --module "$RUNNER_TEMP/modules/wasm-steady.wasm" \
+              | tee test-logs/plugin-host-wasm-engines-module-x86_64-linux.log'
+
+      - name: The WASM host suite
+        run: |
+          nix develop . --command bash -c '
+            set -euo pipefail
+            export CT_PLUGIN_HOST_BIN="$RUNNER_TEMP/bin/ct-plugin-host"
+            export CT_PLUGIN_TEST_SCRATCH="$RUNNER_TEMP/plugin-tests"
+            nim c -r --hints:off --warnings:off --mm:orc \
+              --path:src/frontend/viewmodel --nimcache:"$RUNNER_TEMP/nc-wasm-host" \
+              -o:"$RUNNER_TEMP/test_plugin_host_wasm" \
+              src/frontend/viewmodel/tests/unit/test_plugin_host_wasm.nim \
+              | tee test-logs/plugin-host-wasm-suite-x86_64-linux.log'
+
+      - name: Keep the logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-host-wasm-x86_64-linux
+          path: |
+            test-logs/plugin-host-wasm-*.log
+            ${{ runner.temp }}/modules/wasm-steady.wasm
+
+  darwin:
+    name: WASM plugin host (aarch64-darwin)
+    runs-on: aarch64-darwin  # CIP-5: nix macOS job -> self-hosted m3 (aarch64-darwin)
+    # The darwin dev shell alone took 55 minutes on its first realisation
+    # (plugin-transport-darwin.yml).
+    timeout-minutes: 240
+    steps:
+      - name: Mint installation token for cross-repo sibling access
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Evict stale git credentials from this runner's persistent home
+        uses: metacraft-labs/metacraft-github-actions/evict-stale-git-credentials@2c12f82a56d5000bd47c42ad8c25a3596820057c
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Provision dependency siblings from repro.lock
+        uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      - name: Measure the engines
+        run: |
+          mkdir -p test-logs
+          nix develop . --command bash -c '
+            set -euo pipefail
+            CT_ENGINE_TARGET="$RUNNER_TEMP/ct-engine-target" \
+              src/plugin-host/engine/measure-engines.sh \
+              | tee test-logs/plugin-host-wasm-engines-aarch64-darwin.log'
+
+      - name: Build ct-plugin-host and the WebAssembly plugins
+        run: |
+          nix develop . --command bash -c '
+            set -euo pipefail
+            export CT_ENGINE_TARGET="$RUNNER_TEMP/ct-engine-target"
+            src/plugin-host/build.sh --engine wasmi --out "$RUNNER_TEMP/bin" \
+              2>&1 | tee test-logs/plugin-host-wasm-build-aarch64-darwin.log
+            src/plugin_sdk/build-wasm-plugin.sh \
+              src/frontend/viewmodel/tests/unit/wasm_plugins/wasm_test_plugins.nim \
+              "$RUNNER_TEMP/modules/wasm-steady.wasm" -d:ctWasmTestPackage=wasm-steady \
+              2>&1 | tee -a test-logs/plugin-host-wasm-build-aarch64-darwin.log
+            ls -l "$RUNNER_TEMP/bin/ct-plugin-host" "$RUNNER_TEMP/modules/wasm-steady.wasm"
+            shasum -a 256 "$RUNNER_TEMP/modules/wasm-steady.wasm" \
+              | tee -a test-logs/plugin-host-wasm-build-aarch64-darwin.log'
+
+      - name: Measure the engines on a real plugin module
+        run: |
+          nix develop . --command bash -c '
+            set -euo pipefail
+            "$RUNNER_TEMP/ct-engine-target/both/release/ct-wasm-engine-bench" \
+              --module "$RUNNER_TEMP/modules/wasm-steady.wasm" \
+              | tee test-logs/plugin-host-wasm-engines-module-aarch64-darwin.log'
+
+      - name: The WASM host suite
+        run: |
+          nix develop . --command bash -c '
+            set -euo pipefail
+            export CT_PLUGIN_HOST_BIN="$RUNNER_TEMP/bin/ct-plugin-host"
+            export CT_PLUGIN_TEST_SCRATCH="$RUNNER_TEMP/plugin-tests"
+            nim c -r --hints:off --warnings:off --mm:orc \
+              --path:src/frontend/viewmodel --nimcache:"$RUNNER_TEMP/nc-wasm-host" \
+              -o:"$RUNNER_TEMP/test_plugin_host_wasm" \
+              src/frontend/viewmodel/tests/unit/test_plugin_host_wasm.nim \
+              | tee test-logs/plugin-host-wasm-suite-aarch64-darwin.log'
+
+      - name: Keep the logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-host-wasm-aarch64-darwin
+          path: |
+            test-logs/plugin-host-wasm-*.log
+            ${{ runner.temp }}/modules/wasm-steady.wasm

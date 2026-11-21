@@ -16,6 +16,11 @@
 ## * **Identity** (§11.2.2). `package` is the component name it was installed
 ##   as, and each plugin id is either that name (a one-plugin package) or
 ##   `<package>.<local-name>`.
+## * **WASM packages** (§11.9). `{"kind": "wasm", "module": "plugin.wasm"}`:
+##   one module for every platform, loaded by CodeTracer's own
+##   `ct-plugin-host`, each plugin in its own instance. A WASM plugin declares
+##   only the grants it uses, possibly none: its reach is the imports the host
+##   gives its instance, not the user's authority.
 ## * **Native means `process`** (§11.3). Every plugin of a native package must
 ##   DECLARE `process`; the host does not infer it. The package's executable is
 ##   added to each plugin's declared `executables`, because running it is
@@ -36,6 +41,7 @@ import ./manifest
 type
   PackageHostKind* = enum
     phkNative = "native"
+    phkWasm = "wasm"
 
   SettingSpec* = object
     name*: string
@@ -55,7 +61,7 @@ type
     name*: string
     hostKind*: PackageHostKind
     executable*: string
-      ## Relative to the component directory.
+      ## Relative to the component directory. For a WASM package, the module.
     plugins*: seq[PackagedPlugin]
     errors*: seq[PluginError]
 
@@ -127,27 +133,38 @@ proc parsePluginPackage*(text, source, component: string): PluginPackage =
       source & ": 'host' is required: {\"kind\": \"native\", \"executable\": …}")
   else:
     let kind = host{"kind"}.getStr("")
-    if kind != "native":
+    let field = if kind == "wasm": "module" else: "executable"
+    case kind
+    of "native": result.hostKind = phkNative
+    of "wasm": result.hostKind = phkWasm
+    else:
       result.errors.add pluginError(pkgName, pecBadPackage,
-        source & ": host kind '" & kind & "' is not supported; this " &
-        "CodeTracer runs 'native' plugin processes (WASM plugins are not " &
-        "available yet)")
-    result.hostKind = phkNative
-    result.executable = host{"executable"}.getStr("")
+        source & ": host kind '" & kind & "' is not supported; a package is " &
+        "hosted by a 'native' plugin process or by CodeTracer's 'wasm' host")
+    result.executable = host{field}.getStr("")
     if result.executable.len == 0:
       result.errors.add pluginError(pkgName, pecBadPackage,
-        source & ": 'host.executable' is required")
+        source & ": 'host." & field & "' is required")
     elif result.executable.isAbsolute or ".." in result.executable.split({'/', '\\'}):
       result.errors.add pluginError(pkgName, pecBadPackage,
-        source & ": 'host.executable' must be a path inside the component, " &
+        source & ": 'host." & field & "' must be a path inside the component, " &
         "not '" & result.executable & "'")
+    elif result.hostKind == phkWasm and
+         not result.executable.toLowerAscii.endsWith(".wasm"):
+      result.errors.add pluginError(pkgName, pecBadPackage,
+        source & ": 'host.module' names a WebAssembly module (a '.wasm' " &
+        "file), not '" & result.executable & "'")
 
   let plugins = root{"plugins"}
   if plugins.kind != JArray or plugins.len == 0:
     result.errors.add pluginError(pkgName, pecBadPackage,
       source & ": 'plugins' must be a non-empty array")
     return
-  let exeName = result.executable.extractFilename
+  # A WASM module is not an executable: nothing runs it but the host, and
+  # declaring it would hand the plugin a `process` declaration it never asked
+  # for.
+  let exeName = if result.hostKind == phkNative: result.executable.extractFilename
+                else: ""
   var seen: seq[string]
   for i, entry in plugins.getElems:
     var e = entry

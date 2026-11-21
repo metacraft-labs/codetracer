@@ -2673,6 +2673,14 @@ jobs:
           export OPENSSL_BIN="$(nix build --no-link --print-out-paths --inputs-from . nixpkgs#openssl.bin)/bin/openssl"
           nix develop .#devShells.x86_64-linux.default --command just test-plugin-tls
 
+      - name: WebAssembly plugins in one ct-plugin-host
+        # Extensibility-Model.md §11.9 (`test_plugin_host_wasm.nim`): plugins
+        # from several packages in one real host process, faulted one instance
+        # at a time, the read import refused and granted, the host killed
+        # mid-call. The macOS leg and the engine measurement are
+        # plugin-host-wasm.yml's.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-plugin-host-wasm
+
       - name: Enforce the platform facade's host-free build (NS1)
         # Noir-Studio.milestones.org NS1: "A build configuration that **does
         # not link the host modules**, so a direct call fails to compile" and

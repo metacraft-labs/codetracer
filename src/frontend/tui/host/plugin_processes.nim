@@ -131,6 +131,13 @@ proc openSessionPlugins*(session: SessionViewModel; sessionId: string;
   result = SessionPlugins()
   let p = result
   p.sup = newSupervisor(frontEnd, "1.0.0", extensionsEnabled)
+  # §11.9: the WASM packages' host, shipped beside this binary.
+  when defined(js):
+    p.sup.wasmHost = getEnv("CODETRACER_PLUGIN_HOST", "")
+  else:
+    p.sup.wasmHost = getEnv("CODETRACER_PLUGIN_HOST",
+      if fileExists(getAppDir() / "ct-plugin-host"): getAppDir() / "ct-plugin-host"
+      else: "")
   p.host = newPluginHost(semver(1, 0, 0), frontEnd = surfaces,
                          extensionsEnabled = extensionsEnabled)
   p.launcherRoot = launcherRoot

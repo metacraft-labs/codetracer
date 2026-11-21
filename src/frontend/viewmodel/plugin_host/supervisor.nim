@@ -33,6 +33,21 @@
 ## each of its plugins then runs in its own instance of the executable, so the
 ## next fault is attributed by construction.
 ##
+## ## THE WASM HOST (§11.9)
+##
+## Every package whose `host.kind` is `wasm` is served by ONE process, the
+## CodeTracer-supplied `ct-plugin-host` (`wasmHost`), started with every such
+## package (`--package <dir>`). Its record is `wasmGroup`: one more entry of
+## `packages`, named `ct-plugin-host`, whose plugins are the WASM plugins of
+## every package. Inside it each plugin has an instance of its own, so a trap,
+## an overrun or a memory-limit hit faults that plugin alone: the host reports
+## it as a `fault` message (the `instance-faults` feature), the plugin takes a
+## strike and loses what it pushed, and the process and its other plugins go
+## on. A crash of the host process itself is a process fault, charged to the
+## plugin that was executing; a plugin charged with two of them runs in a
+## `ct-plugin-host` of its own for the rest of the session, so its neighbours
+## are not restarted for it again.
+##
 ## ## INPUT DEFENCES (§11.7)
 ##
 ## A key routed to a plugin starts a timer. An `ack` within `ackBudgetMs` is on
@@ -213,6 +228,13 @@ type
     droppedMessages*: int
     refusals*: seq[string]
       ## Pushes the host refused, newest last (layers, context keys, trees).
+    hostCrashes*: int
+      ## Crashes of a shared `ct-plugin-host` charged to this plugin. At
+      ## `quarantineAfter` it gets a host process of its own (§11.9).
+    instanceFaults*: int
+      ## Its WASM instance trapped, overran or hit its limit (§11.9).
+    reactivateAtMs: int64
+      ## When a WASM plugin whose instance faulted is activated again.
     actionsApplied*: int
 
   InstanceState* = enum
@@ -248,6 +270,8 @@ type
     stopPhase: int
     pendingFault: tuple[set: bool, kind: FaultKind, plugin, detail: string]
     starts*: int
+    features*: seq[string]
+      ## What the process announced in its `hello` (§11.4.3).
 
   PackageRecord* = ref object
     name*: string
@@ -259,6 +283,10 @@ type
     unattributedFaults*: int
     loadErrors*: seq[string]
     instances*: seq[Instance]
+    wasm*: bool
+      ## A WASM package: its plugins run in `ct-plugin-host` (`wasmGroup`).
+    args*: seq[string]
+      ## Arguments the process is started with (`ct-plugin-host`'s packages).
 
   Supervisor* = ref object
     now*: proc(): int64
@@ -329,8 +357,19 @@ type
     termGraceMs*: int
     events*: seq[string]
       ## A trace of what the supervisor did, for the plugin log and tests.
+    wasmHost*: string
+      ## The `ct-plugin-host` executable that hosts every WASM package.
+    wasmHostArgs*: seq[string]
+      ## Extra arguments for it (`--memory-mb`, `--call-deadline-ms`, …).
+    wasmGroup*: PackageRecord
+      ## The record of the one process that hosts every WASM package (nil
+      ## until a WASM package is added).
 
 const
+  WasmHostPackage* = "ct-plugin-host"
+    ## The package name `ct-plugin-host` gives in its `hello`.
+  InstanceFaultsFeature* = "instance-faults"
+    ## Announced by a host whose plugins can fault one at a time (§11.9).
   FloodQuietMs* = 1_000
     ## A breach of the message bucket ends after this long without a drop.
   RecoveryChordCount* = 3
@@ -417,6 +456,20 @@ proc addPackage*(sup: Supervisor; dir: string; pkg: PluginPackage):
                                floodSinceMs: -1, tokens: sup.messageBurst,
                                lastRefillMs: sup.now())
   sup.packages[pkg.name] = result
+  if pkg.hostKind == phkWasm:
+    # One process for every WASM package (§11.9): the group's record holds
+    # its instances, and lists every WASM plugin, so its `hello` is checked
+    # against all of them.
+    result.wasm = true
+    result.executable = dir / pkg.executable
+    if sup.wasmGroup.isNil:
+      sup.wasmGroup = PackageRecord(name: WasmHostPackage,
+                                    executable: sup.wasmHost)
+      sup.packages[WasmHostPackage] = sup.wasmGroup
+    for id in result.plugins:
+      if id notin sup.wasmGroup.plugins:
+        sup.wasmGroup.plugins.add id
+    sup.wasmGroup.args.add @["--package", dir]
 
 proc setRateLimit*(sup: Supervisor; perSecond, burst: float) =
   ## §11.4.7's bucket, for every plugin, each bucket refilled to `burst` now.
@@ -428,6 +481,10 @@ proc setRateLimit*(sup: Supervisor; perSecond, burst: float) =
 
 proc slot*(sup: Supervisor; id: string): PluginSlot =
   sup.slots.getOrDefault(id, nil)
+
+proc hostInstance*(s: PluginSlot): Instance =
+  ## The process instance that hosts the plugin now (nil when none).
+  if s.isNil: nil else: s.instance
 
 proc configure*(sup: Supervisor; id: string; enabled: bool;
                 settings: JsonNode = nil) =
@@ -574,17 +631,28 @@ proc recordFault(sup: Supervisor; pkg: PackageRecord; plugin: string;
 # Process lifecycle
 # ---------------------------------------------------------------------------
 
+proc hostRecordOf(sup: Supervisor; s: PluginSlot): PackageRecord
+
 proc eligible(sup: Supervisor; s: PluginSlot): bool =
   sup.extensionsEnabled and not sup.allDisabledForSession and s.enabled and
     not s.sessionDisabled and s.wanted and s.breaker != bsOpen and
-    sup.packages[s.package].loadErrors.len == 0
+    sup.packages[s.package].loadErrors.len == 0 and
+    sup.hostRecordOf(s).loadErrors.len == 0
+
+proc hostRecordOf(sup: Supervisor; s: PluginSlot): PackageRecord =
+  ## The record whose process hosts `s`: its package's, or the WASM group's.
+  let pkg = sup.packages[s.package]
+  if pkg.wasm and not sup.wasmGroup.isNil: sup.wasmGroup else: pkg
 
 proc instanceKeyFor(sup: Supervisor; s: PluginSlot): string =
-  let pkg = sup.packages[s.package]
-  if pkg.quarantined or s.spec.capturesWindowInput: s.id else: ""
+  let pkg = sup.hostRecordOf(s)
+  if pkg.quarantined or s.spec.capturesWindowInput or
+     (pkg == sup.wasmGroup and s.hostCrashes >= sup.quarantineAfter):
+    s.id
+  else: ""
 
 proc instanceFor(sup: Supervisor; s: PluginSlot): Instance =
-  let pkg = sup.packages[s.package]
+  let pkg = sup.hostRecordOf(s)
   let key = sup.instanceKeyFor(s)
   for inst in pkg.instances:
     if inst.dedicated == key and inst.state != isDead:
@@ -603,8 +671,20 @@ proc startInstance(sup: Supervisor; inst: Instance) =
   inst.pingOutstanding = false
   inst.pendingFault.set = false
   inst.stopPhase = 0
+  if pkg == sup.wasmGroup:
+    pkg.executable = sup.wasmHost
+    if pkg.executable.len == 0:
+      inst.state = isDead
+      pkg.loadErrors.add "the WASM packages cannot run: this front-end has " &
+        "no " & WasmHostPackage & " (Supervisor.wasmHost)"
+      sup.note(pkg.loadErrors[^1])
+      return
   try:
-    inst.link = spawnPluginProcess(pkg.executable, env = sup.env,
+    inst.link = spawnPluginProcess(pkg.executable,
+                                   args = pkg.args & (if pkg == sup.wasmGroup:
+                                                        sup.wasmHostArgs
+                                                      else: @[]),
+                                   env = sup.env,
                                    workingDir = pkg.dir)
   except CatchableError as e:
     inst.state = isDead
@@ -769,8 +849,19 @@ proc processFault(sup: Supervisor; inst: Instance; kind: FaultKind;
     s.active = false
     s.activating = false
   var action = ""
+  var moved: seq[PluginSlot]
   if guilty.len > 0 and sup.slots.hasKey(guilty):
-    sup.strike(sup.slots[guilty], kind, detail, heldInput)
+    let g = sup.slots[guilty]
+    sup.strike(g, kind, detail, heldInput)
+    if pkg == sup.wasmGroup and kind in {fkCrash, fkHang} and
+       inst.dedicated.len == 0:
+      # §11.9: a crash of the shared WASM host, charged to the plugin that was
+      # executing. Twice, and that plugin runs in a host of its own.
+      inc g.hostCrashes
+      if g.hostCrashes >= sup.quarantineAfter:
+        moved.add g
+        sup.note("quarantine " & g.id & ": it runs in a " & WasmHostPackage &
+                 " of its own")
   else:
     inc pkg.unattributedFaults
     for s in members:
@@ -789,6 +880,16 @@ proc processFault(sup: Supervisor; inst: Instance; kind: FaultKind;
   var anyToRun = false
   for s in members:
     if sup.eligible(s): anyToRun = true
+  for m in moved:
+    if sup.eligible(m):
+      m.instance = nil
+      let ni = sup.instanceFor(m)
+      m.instance = ni
+      if ni.state == isStopped:
+        ni.state = isBackoff
+        ni.nextStartMs = t + sup.restartDelay(ni)
+  if moved.len > 0:
+    action = "It now runs in a " & WasmHostPackage & " of its own. "
   if pkg.quarantined and inst.dedicated.len == 0:
     # The shared instance is retired; each plugin gets its own on restart.
     inst.state = isDead
@@ -819,8 +920,8 @@ proc processFault(sup: Supervisor; inst: Instance; kind: FaultKind;
     inst.state = isBackoff
     inst.nextStartMs = t + sup.restartDelay(inst)
     inc inst.attempt
-    action = (if members.len > 1: "Its siblings were restarted."
-              else: "It was restarted.")
+    action.add(if members.len > 1: "Its siblings were restarted."
+               else: "It was restarted.")
   sup.recordFault(pkg, guilty, kind, detail, action)
 
 proc killForFault(sup: Supervisor; inst: Instance; kind: FaultKind;
@@ -916,6 +1017,45 @@ proc onAck(sup: Supervisor; s: PluginSlot; id: string) =
     sup.note(s.id & " answered again; its layers and bindings are back")
     sup.changed()
 
+proc instanceFault(sup: Supervisor; inst: Instance; msg: JsonNode) =
+  ## §11.9: one plugin's WASM instance trapped, overran its deadline or hit
+  ## its memory limit, and the host discarded it. The plugin takes a strike
+  ## and loses what it pushed; the process and its other plugins go on.
+  let id = msg{"plugin"}.getStr("")
+  let kind = msg{"kind"}.getStr("")
+  let detail = msg{"detail"}.getStr("")
+  if not sup.slots.hasKey(id) or id notin inst.registered:
+    sup.killForFault(inst, fkProtocol, "",
+      "a fault report for plugin '" & id & "', which it does not host")
+    return
+  let s = sup.slots[id]
+  let pkg = sup.packages[s.package]
+  if kind == "protocol":
+    sup.strike(s, fkProtocol, detail, false)
+    sup.recordFault(pkg, id, fkProtocol, detail, "The message was ignored.")
+    return
+  let fk = case kind
+           of "deadline": fkHang
+           else: fkCrash
+  let what = case kind
+             of "deadline": "its call ran past its deadline"
+             of "memory-limit": "it reached its memory limit"
+             of "exited": "it ended its instance"
+             else: "its instance trapped"
+  let heldInput = s.layers.len > 0
+  sup.removePushed(s, "instance-fault", tellPlugin = false)
+  s.active = false
+  s.activating = false
+  inc s.instanceFaults
+  sup.strike(s, fk, what & ": " & detail, heldInput)
+  var action = "Its instance was discarded; the other plugins kept running"
+  if sup.eligible(s):
+    s.reactivateAtMs = sup.now() + max(1, sup.restartDelay(inst))
+    action.add ", and it will be started again."
+  else:
+    action.add "."
+  sup.recordFault(pkg, id, fk, what & " (" & detail & ")", action)
+
 proc handleMessage(sup: Supervisor; inst: Instance; msg: JsonNode) =
   let t = msg{"type"}.getStr("")
   if not inst.helloSeen:
@@ -929,6 +1069,7 @@ proc handleMessage(sup: Supervisor; inst: Instance; msg: JsonNode) =
       return
     inst.helloSeen = true
     inst.registered = check.pluginIds
+    inst.features = check.features
     inst.state = isRunning
     sup.note("hello from " & inst.label)
     for s in inst.slotsOf(sup):
@@ -963,6 +1104,9 @@ proc handleMessage(sup: Supervisor; inst: Instance; msg: JsonNode) =
           cleared = true
       if cleared:
         sup.changed()
+    return
+  if t == "fault" and InstanceFaultsFeature in inst.features:
+    sup.instanceFault(inst, msg)
     return
   let why = violation(msg, inst.registered)
   if why.len > 0:
@@ -1361,6 +1505,11 @@ proc poll*(sup: Supervisor) =
         if any: sup.startInstance(inst)
         else: inst.state = isStopped
       sup.pollInstance(inst)
+  for s in sup.slots.values:
+    if s.reactivateAtMs > 0 and t >= s.reactivateAtMs:
+      s.reactivateAtMs = 0
+      if not s.active and not s.activating:
+        sup.ensureRunning(s)
   sup.pollDeadlines()
   sup.pollBreakers()
 
