@@ -101,15 +101,11 @@ TRACE="${CODETRACER_PLAT38_TRACE:-${root}/test-logs/tui-fixtures/calc-2f0db4f451
 FRAME_W=1440
 FRAME_H=900
 
-# The window has to be MAPPED and FOCUSED before a key means anything: a key
-# sent earlier goes to whatever sway currently considers focused, which is
-# nothing. Measured under headless sway with `WLR_RENDERER=pixman`: the
-# `codetracer-gpui` window reaches its first frame in roughly 8 s on this box
-# (PLAT-37's `stepped-editor` painted on phase-2 tick 33 of 100, i.e. 8.3 s),
-# so the typist waits well past that. It is a SETTLE and not a retry: a key
-# sent too early is lost and the row is `timedout`, which is the honest answer.
-SETTLE_S=14
-KEY_GAP_MS=250
+# The window has to be MAPPED, FOCUSED and past its startup work before a key
+# means anything: a key sent earlier is lost. The typist waits on that state
+# (`ci/test/plat38-wait.sh`), never on a fixed settle: the 14 s settle this
+# replaced was measured at ~8 s of first paint and lost keys at load 100+.
+KEY_GAP_MS=1000
 QUIT_AFTER_MS=40000
 
 # THE VISION THRESHOLD, and it is a §36b parameter: the winner is gated and
@@ -215,8 +211,12 @@ for s in d["scenarios"]:
     if s["id"] == sys.argv[2]:
         ops = s.get("operations", [])
         print(",".join(
-            (o["kind"] + "@" + str(o["row"])) if o["kind"] == "setBreakpoint"
-            else (o["kind"] + "=" + str(o.get("count", 1)))
+            # `scenarios.json` spells these `line` and `times` (it said `row`
+            # and `count` once); reading the old names alone turned every
+            # `stepIn x5` into one step and broke on the breakpoint.
+            (o["kind"] + "@" + str(o.get("line", o.get("row"))))
+            if o["kind"] == "setBreakpoint"
+            else (o["kind"] + "=" + str(o.get("times", o.get("count", 1))))
             for o in ops))
         break
 PY
@@ -295,7 +295,14 @@ capture_one() {
 	# window still focused, which is why it came back `delivered`. A twin that
 	# cannot take focus away is a twin that asserts nothing.
 	local script="export SWAYSOCK=\$(ls ${XDG_RUNTIME_DIR:-/tmp}/sway-ipc.*.sock 2>/dev/null | head -1); "
-	script+="sleep ${SETTLE_S}; "
+	# THE KEY IS SENT WHEN THE WINDOW IS READY, NOT AFTER A SLEEP. A window
+	# still busy with its startup work drops a virtual keyboard's keys
+	# (`ci/test/wtype-keys.sh`'s third measurement), and a fixed `SETTLE_S`
+	# that held at load 30 lost the key — or the sentinel after it — on five
+	# of six rows at load 100-130 (2026-11-21). Ready is: the window has
+	# written its geometry (its first arrangement is drawn) and the screen
+	# holds still across three grabs.
+	script+="source '${root}/ci/test/plat38-wait.sh'; plat38_wait_ready '${dir}/${id}.geometry.json' '${dir}/${id}.ready.ppm' '' || echo NOT-READY; "
 	if [ "${focused}" = "0" ]; then
 		script+="swaymsg workspace 9 || echo SWAYMSG-FAILED; sleep 1; "
 	fi
@@ -307,15 +314,27 @@ capture_one() {
 	# table; the symptom here was every scenario coming back `timedout`
 	# because the SENTINEL never arrived while the scenario's own key did.
 	# shellcheck disable=SC2086  # the key spec must word-split
-	script+="WTYPE_PRIME=0 WTYPE_LEAD_MS=${KEY_GAP_MS} bash '${root}/ci/test/wtype-keys.sh' ${keyspec}; sleep 1; "
-	script+="WTYPE_PRIME=0 WTYPE_LEAD_MS=${KEY_GAP_MS} bash '${root}/ci/test/wtype-keys.sh' -k Escape"
+	#
+	# PRIMED, as every other lane is (`ci/test/wtype-keys.sh`): a Shift press
+	# and release on the new virtual keyboard, then the wait. Unprimed, the
+	# first scenario's key and the sentinel after a back-tab were lost at
+	# load 110 (2026-11-21) with the window ready and focused. The prime is a
+	# modifier change, which the probe's `keydown` listener does not record,
+	# so the arrivals are still exactly the keys sent.
+	# ONE virtual keyboard for the key AND the sentinel: every `wtype` process
+	# is a new keyboard whose keymap the client has to take first, and a
+	# second process for the sentinel was a second chance to lose a key
+	# (measured: the back-tab arrived and its `Escape` did not).
+	script+="WTYPE_LEAD_MS=${KEY_GAP_MS} bash '${root}/ci/test/wtype-keys.sh' ${keyspec} -s ${KEY_GAP_MS} -k Escape"
 
 	bash -c "${script}" >"${dir}/${id}.typist.log" 2>&1 &
 	local typist=$!
 
 	local started ended elapsed rc
 	started=$(date +%s%3N)
+	rm -f "${dir}/${id}.geometry.json"
 	CODETRACER_GPUI_PROBE_SENTINEL="escape" \
+		CODETRACER_GPUI_GEOMETRY_OUT="${dir}/${id}.geometry.json" \
 		LD_LIBRARY_PATH="$(runtime_lib_path)" \
 		"${argv[@]}" >"${log}" 2>&1
 	rc=$?
@@ -376,6 +395,8 @@ print('  %-22s %-9s arrivals=%d seq=%d count=%d %dms' % (
 # ---------------------------------------------------------------------------
 # The vision witness: one frame before the key, one after, and the blank
 # ---------------------------------------------------------------------------
+VISION_DEADLINE_MS=180000
+
 capture_vision() {
 	local dir="${OUT}"
 	mkdir -p "${dir}"
@@ -392,25 +413,35 @@ capture_vision() {
       Every vision assertion in the gate is a comparison against it, so a run
       without one is refused rather than reported with an asterisk."
 
-	local probe="${dir}/vision.probe.json"
-	local argv=("${BIN}" "--quit-after-ms=${QUIT_AFTER_MS}"
-		"--width=${FRAME_W}" "--height=${FRAME_H}"
-		"--input-probe=${probe}" "${TRACE}")
-
-	# The typist waits for the settle, the shooter takes `before`, the typist
-	# sends a key that MOVES something (`Down`), the shooter takes `after`,
-	# then the sentinel closes the loop.
-	bash -c "sleep ${SETTLE_S}; grim -t ppm '${after}.pre' >/dev/null 2>&1; \
-             cp -f '${after}.pre' '${before}'; \
-             WTYPE_PRIME=0 WTYPE_LEAD_MS=${KEY_GAP_MS} bash '${root}/ci/test/wtype-keys.sh' -k Down; sleep 2; \
-             grim -t ppm '${after}' >/dev/null 2>&1; \
-             sleep 0.5; WTYPE_PRIME=0 WTYPE_LEAD_MS=${KEY_GAP_MS} bash '${root}/ci/test/wtype-keys.sh' -k Escape" \
-		>"${dir}/vision.typist.log" 2>&1 &
-	local typist=$!
-	CODETRACER_GPUI_PROBE_SENTINEL="escape" \
+	# THE PRODUCT'S OWN WINDOW, NOT THE PROBE. The probe arms only its
+	# recorder (`main.nim` skips `armPaneKeys` while it is on, because its
+	# claim is that a key reached the element IT focused), so under it no key
+	# is routed to an operation and the screen cannot change. Here the panes
+	# route keys through the keymap (PLAT-64), and the window closes when the
+	# shooter is done.
+	local geometry="${dir}/vision.geometry.json"
+	rm -f "${geometry}"
+	local argv=("${BIN}" "--quit-after-ms=${VISION_DEADLINE_MS}"
+		"--width=${FRAME_W}" "--height=${FRAME_H}" "${TRACE}")
+	CODETRACER_GPUI_GEOMETRY_OUT="${geometry}" CODETRACER_GPUI_GESTURE_TRACE=1 \
 		LD_LIBRARY_PATH="$(runtime_lib_path)" \
-		"${argv[@]}" >"${dir}/vision.run.log" 2>&1
-	wait "${typist}" 2>/dev/null || true
+		"${argv[@]}" >"${dir}/vision.run.log" 2>&1 &
+	local window=$!
+
+	# EVERY WAIT IS ON STATE. `before` is the window ready (its geometry
+	# written, the screen still across three grabs); the key is `F10`, Step
+	# Over in the default keymap; the window's own trace says it handled the
+	# key (`gesture window key f10`); `after` is the screen still again and
+	# different from `before`.
+	{
+		source "${root}/ci/test/plat38-wait.sh"
+		plat38_wait_ready "${geometry}" "${before}" "" &&
+			bash "${root}/ci/test/wtype-keys.sh" -k F10 &&
+			plat38_wait_trace "${dir}/vision.run.log" "window key f10" &&
+			plat38_wait_ready "${geometry}" "${after}" "${before}"
+	} >"${dir}/vision.typist.log" 2>&1
+	kill "${window}" 2>/dev/null || true
+	wait "${window}" 2>/dev/null || true
 	swaymsg workspace 1 >/dev/null 2>&1 || true
 
 	python3 - "${before}" "${after}" "${blank}" "${CHANGE_THRESHOLD}" \
@@ -435,13 +466,10 @@ out = {"attempted": True, "threshold": threshold,
        # of delivery, on BOTH sides of the key.
        "beforeVsBlank": changed_fraction(z[2], b[2]) if b and z else 0.0,
        "afterVsBlank": changed_fraction(z[2], a[2]) if a and z else 0.0,
-       # AND WHAT THE KEY ITSELF DID TO THE SCREEN, recorded whatever it is.
-       # It is 0.0 on this product today and that is not a capture defect:
-       # `codetracer-gpui` has no BINDING from a key to a replay operation
-       # (PLAT-23's `--ui=gui` contract), so a delivered key changes the
-       # element store and not the picture. Recorded rather than asserted, and
-       # PLAT-38's status says the deliverable worded as *"a key changed the
-       # screen"* is NOT met for that reason.
+       # AND WHAT THE KEY ITSELF DID TO THE SCREEN: `F10` is Step Over, the
+       # window routes it (PLAT-64), and the execution line moves. The gate
+       # asserts this is above the threshold.
+       "key": "F10",
        "changedFraction": changed_fraction(b[2], a[2]) if b and a else 0.0,
        "blankPresent": bool(z),
        "blankNonBlank": bool(z) and nonblank_fraction(z[2]) > 0.05,

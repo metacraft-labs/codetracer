@@ -39,10 +39,9 @@
 ##    5  the escape census retaken in both directions
 ##    6  a real keystroke through `wl_seat`, per pinned scenario
 ##    1  the unfocused negative twin
-##    2  the vision witness (see the suite at the bottom: the claim it makes
-##       is PLAT-37's — there is a window and its pixels are not a blank
-##       screen — because the key changes no PIXELS on this product yet),
-##       and its blank control
+##    2  the vision witness — there is a window, its pixels are not a blank
+##       screen, and a key bound to Step Over changed them — and its blank
+##       control
 ##
 ## The two 12s are the SAME twelve entries asserted about two different things,
 ## admitted under `Editor-Model-Conformance-Suite.md` §10.4 rule 2: a key
@@ -82,7 +81,7 @@ import ../../view_vocabulary/gpui_binding as gbind
 import ../../view_vocabulary/fact_reader
 import ./plat38_keys
 
-const ExpectedAssertions = 471
+const ExpectedAssertions = 472
   ## Written from a run, and asserted against the tally in the final case.
   ## Printed as `CHECKS:` for the lane, which is preferred over the constant
   ## because a static one cannot see a case that returned early.
@@ -695,7 +694,7 @@ suite "PLAT-38: a real keystroke through the compositor's own wl_seat":
     ck record.negativeTwin.key == record.scenarios[0].arrivals[^1].key
     ck record.negativeTwin.key.len > 0
 
-suite "PLAT-38: the vision witness, and what it can and cannot say":
+suite "PLAT-38: the vision witness — a window, and a key that changed it":
 
   test "the key entered a window whose pixels are not a blank screen":
     # **VISION CARRIES ONE CLAIM INTROSPECTION CANNOT MAKE** — that there is a
@@ -704,17 +703,13 @@ suite "PLAT-38: the vision witness, and what it can and cannot say":
     # PLAT-37's instrument contract, at the moment of delivery and on BOTH
     # sides of the key.
     #
-    # **WHAT THIS CASE IS NOT, AND THE DELIVERABLE IT DOES NOT MEET.**
-    # PLAT-38's counted target names *"the vision witness that a key CHANGED
-    # the screen"*. It did not, and the capture records the figure:
-    # `changedFraction` is 0.0. That is not a capture defect and not a
-    # delivery defect — the key reaches the focused element's store, which
-    # every case above reads — it is that `codetracer-gpui` has no BINDING
-    # from a key to a replay operation. That binding is PLAT-23's `--ui=gui`
-    # contract, which is why `--replay-ops` still exists. Asserting a change
-    # here would have meant asserting something no shipped route produces
-    # (§7c); the figure is PRINTED so the absence is visible rather than
-    # implied.
+    # **AND A KEY CHANGED THE SCREEN.** PLAT-38's counted target names *"the
+    # vision witness that a key CHANGED the screen"*. Until PLAT-64 it could
+    # not: the window bound no key to an operation, and `changedFraction` was
+    # 0.0. Now the capture opens the product's own window (the probe arms no
+    # router), waits for it to be ready, sends `F10` (Step Over), waits for the
+    # window's trace to say it handled the key, and takes `after` when the
+    # screen is still again.
     let v = record.vision
     ck v.attempted
     ck v.beforeNonBlank
@@ -724,10 +719,11 @@ suite "PLAT-38: the vision witness, and what it can and cannot say":
     # A window that never opened, or opened and painted nothing, fails here.
     ck v.beforeVsBlank > v.threshold
     ck v.afterVsBlank > v.threshold
+    # The key's own effect: the frames either side of it differ.
+    ck v.changedFraction > v.threshold
     echo "PLAT38 VISION beforeVsBlank=", v.beforeVsBlank,
          " afterVsBlank=", v.afterVsBlank,
-         " changedByTheKey=", v.changedFraction,
-         " (0.0 is expected: no key->operation binding yet, PLAT-23)"
+         " changedByTheKey=", v.changedFraction
 
   test "THE BLANK CONTROL — a control that has never failed is not a control":
     # §7b. The capture retains the blank frame it waited for, and its ABSENCE
