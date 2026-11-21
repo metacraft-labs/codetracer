@@ -2276,6 +2276,12 @@ var
     ## Pointer and key events handled, for the geometry report: a capture
     ## waits until the window has handled its input, not for the screen to
     ## look still.
+  gGeometryKeys = 0
+    ## Key events alone. A capture that sends a key needs to know whether
+    ## THAT key arrived: `gGeometryInputs` also moves for a pointer event
+    ## the compositor delivers late, and under load one did, so the plat47
+    ## capture read a lost Esc as handled and never sent it again (the drag
+    ## it should have ended stayed active).
   gGeometryPointer = (x: -1, y: -1)
   ## A window lane's instrument: where the window drew every pane, tab and
   ## divider, rewritten after every redraw — so a lane can AIM a pointer
@@ -2380,6 +2386,7 @@ proc writeGeometry() =
                                 # this: a capture waits on these, since a
                                 # still screen can be one not yet redrawn.
                                 "input": %*{"handled": gGeometryInputs,
+                                            "keys": gGeometryKeys,
                                             "pointer": [gGeometryPointer.x,
                                                         gGeometryPointer.y]},
                                 "gesture": %*{"active": gGestures.active,
@@ -4872,6 +4879,7 @@ proc windowKey(key: string; mods: seq[string]) =
   defer:
     if geometryOut.len > 0:
       inc gGeometryInputs
+      inc gGeometryKeys
       writeGeometry()
   traceGesture("window key " & key & (if mods.len > 0: " " & $mods else: ""))
   # Any key between Alt's press and release makes it a chord, not a tap.
