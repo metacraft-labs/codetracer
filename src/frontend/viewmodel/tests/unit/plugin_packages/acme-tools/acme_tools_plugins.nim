@@ -27,7 +27,7 @@
 ##   exit            exits with status 3 on `flame.refresh`
 ##   protocol        writes a frame of garbage on `flame.refresh`
 
-import std/[monotimes, os, posix, strutils, times]
+import std/[monotimes, os, posix, strutils, times, volatile]
 
 import codetracer_plugin_sdk
 
@@ -102,8 +102,13 @@ proc setupFlame(sdk: PluginSdk) =
     let mode = p.settings{"mode"}.getStr("normal")
     case mode
     of "segfault":
-      var q: ptr int = nil
-      q[] = 1
+      # A REAL invalid access, and one no optimiser may remove: the address is
+      # known only at run time and the store is volatile. A plain
+      # `q[] = 1` through a nil `ptr` is undefined behaviour that clang
+      # deleted in a release build on aarch64-darwin (measured 2026-11-21: the
+      # plugin activated instead of crashing).
+      let address = parseInt(getEnv("ACME_TOOLS_FAULT_ADDRESS", "0"))
+      volatileStore(cast[ptr int](address), 1)
     of "hang-activate":
       p.spin()
     of "flood":

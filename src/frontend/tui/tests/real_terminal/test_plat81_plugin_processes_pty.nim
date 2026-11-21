@@ -69,8 +69,11 @@ proc escapeKey(sess: var TuiTestSession) =
   sess.send("\e")
   sleep(200)
 
-proc pluginPids(): seq[int] =
-  let (o, _) = execCmdEx("pgrep -f acme-tools@1.0.0/bin/acme-tools-plugins")
+proc pluginPids(home: string): seq[int] =
+  ## The plugin processes of THIS test's install, by their executable's path
+  ## under `home`: other suites on the same machine run the same package.
+  let (o, _) = execCmdEx("pgrep -f " & quoteShell(home / "components" /
+                         "acme-tools@1.0.0/bin/acme-tools-plugins"))
   for l in o.splitLines:
     if l.strip.len > 0: result.add parseInt(l.strip)
 
@@ -104,14 +107,14 @@ suite "Extensibility-Model §11 on a real terminal":
     settleOnDebugger(sess, Cols, Rows)
     sess.command("plugins")
     check sess.screenHas("Waiting for your consent: acme-tools.metrics")
-    check pluginPids().len == 0
+    check pluginPids(home).len == 0
     sess.command("plugins review acme-tools.metrics")
     check sess.screenHas("runs the native program")
     sess.command("plugins grant acme-tools.metrics")
     sess.command("plugins grant acme-tools.flame")
     check sess.commandShows("plugins", "acme-tools.metrics  running")
     check sess.commandShows("plugins", "acme-tools.flame  running")
-    check pluginPids().len == 1
+    check pluginPids(home).len == 1
     # The pane, from the mirrored debugger state.
     check sess.commandShows("plugins show acme-tools.metrics/overview",
                             "line main.py")
@@ -122,11 +125,11 @@ suite "Extensibility-Model §11 on a real terminal":
                             "position 2")
     check before != sess.screen
     # SIGKILL: restarted, both plugins back, the debugger never stopped.
-    let pid = pluginPids()[0]
+    let pid = pluginPids(home)[0]
     discard kill(Pid(pid), SIGKILL)
     var restarted = false
     for _ in 0 ..< 300:
-      let now = pluginPids()
+      let now = pluginPids(home)
       if now.len == 1 and now[0] != pid:
         restarted = true
         break
@@ -138,7 +141,7 @@ suite "Extensibility-Model §11 on a real terminal":
     sess.send(":quit\r")
     discard sess.waitExit(initDuration(seconds = 30))
     sess.close()
-    check pluginPids().len == 0
+    check pluginPids(home).len == 0
     removeDir(home)
 
   test "--no-extensions starts no plugin process":
@@ -147,7 +150,7 @@ suite "Extensibility-Model §11 on a real terminal":
     settleOnDebugger(sess, Cols, Rows)
     sess.command("plugins")
     check sess.screenHas("--no-extensions")
-    check pluginPids().len == 0
+    check pluginPids(home).len == 0
     sess.send(":quit\r")
     discard sess.waitExit(initDuration(seconds = 30))
     sess.close()
