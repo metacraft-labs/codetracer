@@ -545,7 +545,7 @@
     # 2026-09-30) and have never been promoted to `dev`, whose tip has not
     # moved since 2026-09-29.
     reprobuild-packages = {
-      url = "github:metacraft-labs/reprobuild-packages/56ffd673bc0f43ab266de53fd5e2e7f656e37431";
+      url = "github:metacraft-labs/reprobuild-packages/92100803eb827ff21d0cc48b7474fb0a65057cbd";
       flake = false;
     };
 
