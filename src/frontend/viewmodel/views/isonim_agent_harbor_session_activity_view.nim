@@ -22,7 +22,13 @@
 ##   views' one rule (`data-ah-cut`), and a file path in it is cut in its
 ##   middle (`data-ah-cut="path"`). A level-2 detail carries a Copy action;
 ## - the `N new · Jump to latest` chip at the bottom edge, while the reader
-##   does not follow and items arrived.
+##   does not follow and items arrived;
+## - when the host gives a suggested-actions block (`tail`,
+##   `isonim_agent_harbor_suggested_actions_view`): while it waits, the block
+##   beneath the list, pinned, so it never scrolls out of view; once
+##   decided, its record lines after the timeline's lines, drawn as the
+##   timeline's own lines (P2c study D23, D55). The timeline's own lines are
+##   not changed by it.
 ##
 ## Every line carries its facts (`lineFacts`, `data-ah-*`), so the host
 ## tests read the same facts in every host.
@@ -56,9 +62,10 @@ when defined(js):
 
 import nim_agents_isonim_viewmodels/agent_harbor/session_timeline_vm
 import ./agent_harbor_activity_words
+import ./isonim_agent_harbor_suggested_actions_view
 
 export signals, computation, components, session_timeline_vm,
-  agent_harbor_activity_words
+  agent_harbor_activity_words, isonim_agent_harbor_suggested_actions_view
 
 static:
   # The DSL spells the attributes literally; they are the ones the page's
@@ -282,18 +289,20 @@ when defined(js):
       };
     })(#, #, #, #, #, #)""".}
 
-proc renderAgentHarborSessionActivity*[R, N](r: R; vm: SessionTimelineVM): N =
-  ## The timeline, for every renderer. The body is rebuilt whenever what it
-  ## shows moves.
+proc renderAgentHarborSessionActivity*[R, N](r: R; vm: SessionTimelineVM;
+                                            tail: SuggestedActionsVM = nil): N =
+  ## The timeline, for every renderer, and the suggested-actions block
+  ## `tail` gives, if any. The body is rebuilt whenever what it shows moves.
   mixin clearChildren, setAttribute
   var body: N
   let panel = ui(r):
     tdiv(class = AgentHarborActivityClass,
-         `data-ah-surface` = "agent-harbor-session-activity",
+         `data-ah-surface` = timelineSurfaceOf(tail),
          `data-ct-pane` = SessionActivityScope):
       tdiv(ref = body, class = "ah-activity-body")
 
   createRenderEffect proc() =
+    if tail != nil: discard tail.revision.val
     r.clearChildren(body)
     r.tagFacts(panel, [("state", (case vm.state.val
                                   of asIdle, asLoading: "loading"
@@ -325,7 +334,7 @@ proc renderAgentHarborSessionActivity*[R, N](r: R; vm: SessionTimelineVM): N =
     if vm.isEmpty:
       r.appendRendered(body, renderNotice(r, EmptyNotice, "empty"))
       return
-    let lines = vm.lines
+    let lines = timelineLinesWith(vm.lines, tail)
     let runningId = runningLineId(lines, vm.runningLine)
     let stripText = runningStripText(vm)
     var strip: N
@@ -352,6 +361,8 @@ proc renderAgentHarborSessionActivity*[R, N](r: R; vm: SessionTimelineVM): N =
                  `data-ct-operation` = ActivityJumpOperation):
             text unseenChipText(vm.unseen.val)
       r.appendRendered(body, chip)
+    if showsBlock(tail):
+      r.appendRendered(body, renderAgentHarborSuggestedActions[R, N](r, tail))
     when defined(js):
       when typeof(list) is isonim_dom.Element:
         let target = vm
@@ -371,7 +382,10 @@ when defined(js):
   import isonim/web/web_renderer
 
   proc mountAgentHarborSessionActivityPanel*(container: isonim_dom.Element;
-                                             vm: SessionTimelineVM) =
-    ## The timeline in `container`, for the browser.
+                                             vm: SessionTimelineVM;
+                                             tail: SuggestedActionsVM = nil) =
+    ## The timeline in `container`, for the browser, with the
+    ## suggested-actions block `tail` gives, if any.
     discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
-      renderAgentHarborSessionActivity[WebRenderer, isonim_dom.Element](WebRenderer(), vm)))
+      renderAgentHarborSessionActivity[WebRenderer, isonim_dom.Element](WebRenderer(), vm,
+                                                                         tail)))

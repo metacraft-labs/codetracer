@@ -121,6 +121,8 @@ import stories/agent_harbor_composer_stories
 import viewmodel/views/isonim_agent_harbor_composer_view
 import stories/dom_results_presses
 import stories/agent_harbor_results_stories
+import stories/dom_suggested_actions_presses
+import stories/agent_harbor_suggested_actions_stories
 import viewmodel/views/isonim_agent_harbor_results_view
 import viewmodel/views/isonim_agent_harbor_session_activity_view
 import viewmodel/agent_harbor_activity_cards
@@ -2020,12 +2022,22 @@ var shownTimeline: SessionTimelineVM
   ## The session activity timeline on the page (StoryBook shows one story at
   ## a time); nil when none is. Its presses and keys act on it.
 
-proc mountTimelineIn(host: isonim_dom.Element; vm: SessionTimelineVM) =
-  ## The timeline's view in `host`, its presses and keys routed to the
-  ## timeline on the page (`stories/dom_activity_presses`).
+var shownSuggestion: SuggestedActionsVM
+  ## The suggested-actions block on the page (nil when none is). Its presses
+  ## act on it.
+
+proc mountTimelineIn(host: isonim_dom.Element; vm: SessionTimelineVM;
+                     tail: SuggestedActionsVM = nil) =
+  ## The timeline's view in `host`, with the suggested-actions block `tail`
+  ## gives, if any; its presses and keys routed to the timeline and the
+  ## block on the page (`stories/dom_activity_presses`,
+  ## `stories/dom_suggested_actions_presses`).
   shownTimeline = vm
   routeActivityPresses(proc(): SessionTimelineVM = shownTimeline)
-  mountAgentHarborSessionActivityPanel(host, vm)
+  if tail != nil:
+    shownSuggestion = tail
+    routeSuggestedActionsPresses(proc(): SuggestedActionsVM = shownSuggestion)
+  mountAgentHarborSessionActivityPanel(host, vm, tail)
   routeActivityKeys(toJs(host), proc(): SessionTimelineVM = shownTimeline)
 
 proc heldEvents(source: AgentHarborDataSource; sessionId: string): int =
@@ -2095,6 +2107,25 @@ proc mountAgentHarborSessionActivity(container: isonim_dom.Element;
   return proc() =
     shownTimeline = nil
     dispose()
+
+proc mountAgentHarborSuggestedActions(container: isonim_dom.Element;
+                                      fixture: string): DisposeProc =
+  ## The drained-field session's timeline with the suggested-actions block
+  ## at its end (`stories/agent_harbor_suggested_actions_stories.nim`): the
+  ## block beneath the list while it waits, its record lines after the
+  ## timeline's lines once decided.
+  var rootDisposer: proc()
+  var story: SuggestedActionsStory
+  createRoot proc(dispose: proc()) =
+    rootDisposer = dispose
+    story = createSuggestedActionsStory(fixture)
+    mountTimelineIn(container, story.timeline, story.suggestion)
+  return proc() =
+    if shownTimeline == story.timeline: shownTimeline = nil
+    if shownSuggestion == story.suggestion: shownSuggestion = nil
+    story.dispose()
+    if rootDisposer != nil: rootDisposer()
+    container.innerHTML = ""
 
 proc mountAgentHarborChanges(container: isonim_dom.Element;
                              fixture: string; options = ""): DisposeProc =
@@ -2601,13 +2632,16 @@ proc mountLayoutActivity(container: isonim_dom.Element; moment: string): Dispose
     vm.setMessages(conversation.messages)
     vm.setBranchState(conversation.branch, ["main", conversation.branch])
     vm.setSelectedModel(conversation.model)
-    if conversation.permission.len > 0:
-      vm.setPromptFlags(false, true)
-      vm.setPermissionInfo(conversation.permission)
     discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
       renderAgentActivityPanel[WebRenderer, isonim_dom.Element](WebRenderer(), vm, 101,
         "storybook-agent-input")))
     return proc() = vm.dispose())
+
+proc mountLayoutSuggestedActions(container: isonim_dom.Element): DisposeProc =
+  ## L3's Agent Activity: the drained-field session's timeline with the
+  ## agent's suggested UI action in the block at its end, the story of
+  ## `SuggestedActionsOne` (`stories/agent_harbor_suggested_actions_stories`).
+  mountAgentHarborSuggestedActions(container, "one")
 
 proc mountLayoutTests(container: isonim_dom.Element; moment: string): DisposeProc =
   ## Test Results over the moment's run, folded through the pane's own
@@ -2763,7 +2797,13 @@ proc mountAgenticWindow(container: isonim_dom.Element; moment: string): DisposeP
     let side = column(row, "0 0 30%")
     disposers.add mountLayoutTests(stack(side, "Test Results", "1 1 0"), moment)
     disposers.add mountCalltrace(stack(side, "CALLTRACE", "1 1 0"), "populated")
-  of "needs-input", "inbox-next":
+  of "needs-input":
+    # The drained-field session as its timeline, the agent's suggested UI
+    # action waiting in the block at its end (CTF-P2c step 3), where the
+    # Agent Activity pane's permission card stood in for it.
+    mountDebugPanels(row, disposers, VariablesSideFlex)
+    disposers.add mountLayoutSuggestedActions(stack(row, "Agent Activity", "0 0 30%"))
+  of "inbox-next":
     mountDebugPanels(row, disposers, VariablesSideFlex)
     disposers.add mountLayoutActivity(stack(row, "Agent Activity", "0 0 30%"), moment)
   of "harbor-arrangement":
@@ -2921,6 +2961,7 @@ proc mountCodeTracerStory*(container: isonim_dom.Element;
     of "agent-harbor-initiatives": mountAgentHarborInitiatives(container, f, o)
     of "agent-harbor-initiative-progress": mountAgentHarborProgress(container, f, o)
     of "agent-harbor-session-activity": mountAgentHarborSessionActivity(container, f, o)
+    of "agent-harbor-suggested-actions": mountAgentHarborSuggestedActions(container, f)
     of "agent-harbor-changes": mountAgentHarborChanges(container, f, o)
     of "agent-harbor-inbox": mountAgentHarborInbox(container, f, o)
     of "agent-harbor-inbox-item": mountAgentHarborInboxItem(container, f, o)

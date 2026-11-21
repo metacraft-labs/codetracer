@@ -70,6 +70,9 @@ const
     # The omnibox result commands' presses (`agent_harbor_results_words`):
     # `+N more` and the way back, in the story hosts' results, as above.
     "results.all", "results.more",
+    # The suggested-actions block's presses (`agent_harbor_suggested_actions_words`,
+    # P2c study D59): presses only in this step, in the story hosts' timeline.
+    "suggested-actions.approve", "suggested-actions.dismiss", "suggested-actions.toggle",
   ]
 
 proc bound(): HashSet[string] =

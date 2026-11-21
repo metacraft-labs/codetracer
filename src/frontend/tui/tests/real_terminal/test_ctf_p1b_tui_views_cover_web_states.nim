@@ -97,6 +97,7 @@ import ../../agent_harbor/ah_tui_fleet_panel
 import ../../agent_harbor/ah_tui_composer
 import ../../agent_harbor/ah_tui_results
 import ../../agent_harbor/ah_tui_session_activity
+import ../../agent_harbor/ah_tui_suggested_actions
 import ../../../viewmodel/agent_harbor_activity_cards
 import nim_agents/agent_harbor/fleet_records
 import nim_agents_isonim_viewmodels/agent_harbor/[fleet_vm, session_tabs_vm,
@@ -848,7 +849,8 @@ proc factsOf(line: TimelineLine): seq[(string, string)] =
   if line.path.len > 0: result.add ("path", line.path)
   if line.copyText.len > 0: result.add ("copy", line.copyText)
 
-proc checkTimeline(view: AhNode; vm: SessionTimelineVM): seq[string] =
+proc checkTimeline(view: AhNode; vm: SessionTimelineVM;
+                   tail: SuggestedActionsVM = nil): seq[string] =
   ## The timeline's drawn lines against the viewmodel's: a run of its lines
   ## with no gap (the window the view shows), each with the viewmodel's
   ## facts; the chrome (status, badge, filter, the unseen chip, the running
@@ -876,7 +878,8 @@ proc checkTimeline(view: AhNode; vm: SessionTimelineVM): seq[string] =
   if vm.isEmpty:
     result.expect("empty notice", view.values("notice"), @["empty"])
     return
-  let lines = vm.lines
+  # A suggested-actions block's record lines follow the timeline's own.
+  let lines = timelineLinesWith(vm.lines, tail)
   let drawn = view.all("line")
   if drawn.len == 0:
     result.add "no line is drawn of the " & $lines.len & " the viewmodel has"
@@ -911,6 +914,26 @@ proc checkTimeline(view: AhNode; vm: SessionTimelineVM): seq[string] =
   result.expect("unseen chip", view.values("unseen"),
                 if showsUnseenChip(vm): @[$vm.unseen.val] else: @[])
 
+proc checkSuggestion(view: AhNode; vm: SuggestedActionsVM): seq[string] =
+  ## The suggested-actions block against its viewmodel (CTF-P2c step 3):
+  ## drawn while the suggestion waits, with its phase, its label, its rows in
+  ## order (checked and disabled as the viewmodel says), and both buttons;
+  ## none once decided.
+  let blocks = view.all("suggestion-phase")
+  if not vm.shown:
+    result.expect("block", blocks.len, 0)
+    return
+  if blocks.len != 1:
+    result.add "the block is drawn " & $blocks.len & " times"
+    return
+  let b = blocks[0]
+  result.expect("phase", b.attr("suggestion-phase"), $vm.phase)
+  result.expect("approve label", b.attr("approve-label"), vm.approveLabel)
+  result.expect("rows", b.values("suggested-action"), vm.rows.mapIt(it.id))
+  result.expect("checked", b.values("action-checked"), vm.rows.mapIt($it.checked))
+  result.expect("disabled", b.values("action-disabled"), vm.rows.mapIt($it.disabled))
+  result.expect("buttons", b.values("suggested-button"), @["approve", "dismiss"])
+
 proc checkStory(m: AhTuiMount): seq[string] =
   let view = m.view
   if view.isNil: return @["no node says which surface was drawn"]
@@ -925,6 +948,8 @@ proc checkStory(m: AhTuiMount): seq[string] =
   of "agent-harbor-fleet": checkFleet(view, m.fleet)
   of "agent-harbor-composer": checkComposer(view, m.composer)
   of "agent-harbor-results": checkResults(view, m.results)
+  of "agent-harbor-suggested-actions":
+    checkTimeline(view, m.timeline, m.suggestion) & checkSuggestion(view, m.suggestion)
   of "agent-harbor-session-activity":
     var problems = checkTimeline(view, m.timeline)
     if not m.cards.cards.isNil:
@@ -1272,7 +1297,7 @@ proc styleProblems(m: AhTuiMount; look: LookOf): seq[string] =
                          " against the row's " & rowBg & ", under " &
                          formatFloat(ControlGroundMinContrast, ffDecimal, 2) & ":1"
     result.add fleetInkProblems(view, look, rows, p, vm)
-  of "agent-harbor-session-activity":
+  of "agent-harbor-session-activity", "agent-harbor-suggested-actions":
     # Cardless: every cell of a drawn line on the panel's ground (only the
     # focus bar `▎` differs, and in its ink, not its ground); each line's
     # text in its role's ink (`timelineInk`), at least `TextMinContrast`

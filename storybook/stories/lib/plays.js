@@ -1001,6 +1001,73 @@ const changesPanel = ".agent-harbor-changes";
 const inboxPanel = ".agent-harbor-inbox";
 const inboxItemPanel = ".agent-harbor-inbox-item";
 
+
+// The suggested-actions block at a session timeline's end (CTF-P2c step 3,
+// src/frontend/stories/agent_harbor_suggested_actions_stories.nim): the
+// timeline's own checks, then the block's facts. `suggestedRows` reads each
+// action's facts; the block is null once the suggestion is decided.
+const suggestedBlock = (panel) => panel.querySelector('.ah-suggested[data-ah-suggested="block"]');
+const suggestedRows = (panel) => [...panel.querySelectorAll(".ah-suggested-row")].map((r) => ({
+  id: r.getAttribute("data-ah-suggested-action"),
+  text: r.querySelector(".ah-suggested-words")?.textContent ?? "",
+  checked: r.getAttribute("data-ah-action-checked") === "true",
+  disabled: r.getAttribute("data-ah-action-disabled") === "true",
+  dimmed: r.getAttribute("data-ah-action-dimmed") === "true",
+  reason: r.querySelector(".ah-suggested-why")?.textContent ?? "",
+  operation: r.getAttribute("data-ct-operation"),
+  target: r.getAttribute("data-ah-target"),
+}));
+const recordLines = (panel) => [...panel.querySelectorAll('[data-ah-item-kind="ui-action"], [data-ah-item-kind="ui-action-outcome"]')].map((l) => ({
+  text: l.getAttribute("data-ah-text"),
+  level: Number(l.getAttribute("data-ah-level")),
+  role: l.getAttribute("data-ah-role"),
+}));
+function suggestedCheck(assert) {
+  return async ({ canvasElement }) => {
+    const panel = await activityChecks(canvasElement);
+    expect(panel.getAttribute("data-ah-state")).toBe("ready");
+    // The drained-field session's timeline, the agent's question last.
+    expect(panel.querySelector('[data-ah-item-kind="question"]')?.getAttribute("data-ah-text"))
+      .toContain("drained_field_fails expect the shield at exactly 0");
+    const block = suggestedBlock(panel);
+    if (block) {
+      // On the raised ground the Running strip uses, pinned under the list:
+      // the list scrolls, the block does not.
+      const list = panel.querySelector(".ah-activity-lines");
+      expect(list.contains(block)).toBe(false);
+      expect(block.parentElement).toBe(list.parentElement);
+      expect(getComputedStyle(block).backgroundColor).not.toBe(getComputedStyle(panel).backgroundColor);
+      expect(block.querySelector(".ah-suggested-label")?.textContent).toBe("SUGGESTED UI ACTIONS");
+      expect(block.querySelector(".ah-suggested-reason")?.textContent)
+        .toBe("Look at the drained-field test's recording at pass 5 before deciding what it should expect.");
+      for (const row of suggestedRows(panel)) {
+        if (row.disabled) {
+          expect(row.checked).toBe(false);
+          expect(row.operation).toBeNull();
+          expect(row.reason.length).toBeGreaterThan(0);
+        } else {
+          expect(row.operation).toBe("suggested-actions.toggle");
+          expect(row.target).toBe(row.id);
+        }
+      }
+      // An action's words wrap; they are never cut.
+      expect(block.querySelector(".ah-suggested-words[data-ah-cut]")).toBeNull();
+    }
+    await assert(panel, block);
+  };
+}
+// A press on a row toggles it through the router, and the label follows;
+// a second press puts it back, so the story is left as it stood.
+async function toggleRoundTrip(panel, id, labelAfter) {
+  const before = suggestedBlock(panel).getAttribute("data-ah-approve-label");
+  panel.querySelector(`.ah-suggested-row[data-ah-target="${id}"]`).click();
+  await waitUntil(() => suggestedBlock(panel)?.getAttribute("data-ah-approve-label") === labelAfter,
+    `the label ${labelAfter} after unchecking ${id}`);
+  panel.querySelector(`.ah-suggested-row[data-ah-target="${id}"]`).click();
+  await waitUntil(() => suggestedBlock(panel)?.getAttribute("data-ah-approve-label") === before,
+    `the label ${before} again`);
+}
+
 export const plays = {
   ...composerChecks,
   ...resultsChecks,
@@ -1298,6 +1365,68 @@ export const plays = {
   // host's playback bar under it, at the first frame, whose controls move
   // the playback and the story with it. The bar lives on the document's
   // body (fixed along the canvas's bottom), not inside the story's root.
+  // The suggested-actions block (CTF-P2c step 3): every story of it.
+  "agent-harbor-suggested-actions-one": suggestedCheck(async (panel, block) => {
+    expect(suggestedRows(panel).map((r) => [r.text, r.checked])).toEqual([
+      ["Open the recording of drained_field_fails in a new tab, at pass 5", true]]);
+    const approve = block.querySelector('[data-ah-suggested-button="approve"]');
+    expect(approve.textContent).toBe("Approve");
+    expect(approve.disabled).toBe(false);
+    expect(approve.getAttribute("data-ct-operation")).toBe("suggested-actions.approve");
+    expect(block.querySelector('[data-ah-suggested-button="dismiss"]')?.getAttribute("data-ct-operation"))
+      .toBe("suggested-actions.dismiss");
+    // Unchecking the only action disables Approve and says why.
+    panel.querySelector('.ah-suggested-row[data-ah-target="open-recording"]').click();
+    await waitUntil(() => suggestedBlock(panel)?.getAttribute("data-ah-approve-disabled") === "Choose an action to approve",
+      "Approve disabled with its reason");
+    expect(suggestedBlock(panel).querySelector('[data-ah-suggested-button="approve"]').disabled).toBe(true);
+    panel.querySelector('.ah-suggested-row[data-ah-target="open-recording"]').click();
+    await waitUntil(() => suggestedBlock(panel)?.getAttribute("data-ah-approve-disabled") === "", "Approve again");
+    expect(recordLines(panel)).toEqual([]);
+  }),
+  "agent-harbor-suggested-actions-several": suggestedCheck(async (panel, block) => {
+    expect(suggestedRows(panel).map((r) => r.checked)).toEqual([true, true, true]);
+    expect(block.getAttribute("data-ah-approve-label")).toBe("Approve");
+    await toggleRoundTrip(panel, "show-calltrace", "Approve 2 of 3");
+  }),
+  "agent-harbor-suggested-actions-partial": suggestedCheck(async (panel, block) => {
+    const rows = suggestedRows(panel);
+    expect(rows.map((r) => [r.checked, r.dimmed])).toEqual([[true, false], [false, true], [true, false]]);
+    expect(block.getAttribute("data-ah-approve-label")).toBe("Approve 2 of 3");
+    // The unchecked row's words are dimmer than a checked row's.
+    const ink = (id) => getComputedStyle(panel.querySelector(`.ah-suggested-row[data-ah-target="${id}"] .ah-suggested-words`)).color;
+    expect(ink("show-calltrace")).not.toBe(ink("open-recording"));
+  }),
+  "agent-harbor-suggested-actions-unsupported": suggestedCheck(async (panel, block) => {
+    const rows = suggestedRows(panel);
+    expect(rows.map((r) => [r.checked, r.disabled])).toEqual([[true, false], [true, false], [false, true]]);
+    expect(rows[2].reason).toBe("No recording of drained_field_fails on macos-arm64 has been uploaded");
+    expect(block.getAttribute("data-ah-approve-label")).toBe("Approve");
+    // A press on the disabled row changes nothing: it carries no operation.
+    panel.querySelector('.ah-suggested-row[data-ah-suggested-action="open-mac-recording"]').click();
+    expect(suggestedRows(panel)[2].checked).toBe(false);
+  }),
+  "agent-harbor-suggested-actions-approved": suggestedCheck(async (panel, block) => {
+    expect(block).toBeNull();
+    expect(recordLines(panel)).toEqual([
+      { text: "Approved 2 UI actions", level: 0, role: "body" },
+      { text: "Opened the recording of drained_field_fails in a new tab, at pass 5", level: 1, role: "body" },
+      { text: "Showed the call trace beside the editor", level: 1, role: "body" },
+    ]);
+  }),
+  "agent-harbor-suggested-actions-dismissed": suggestedCheck(async (panel, block) => {
+    expect(block).toBeNull();
+    expect(recordLines(panel)).toEqual([{ text: "Dismissed 2 suggested UI actions", level: 0, role: "quiet" }]);
+  }),
+  "agent-harbor-suggested-actions-auto-approved": suggestedCheck(async (panel, block) => {
+    expect(block).toBeNull();
+    expect(recordLines(panel)).toEqual([
+      { text: "Ran 1 UI action auto-approved", level: 0, role: "body" },
+      { text: "Showed the Variables panel", level: 1, role: "body" },
+    ]);
+    const tag = [...panel.querySelectorAll('[data-ah-item-kind="ui-action"] .ah-activity-role-quiet')].map((e) => e.textContent);
+    expect(tag).toEqual(["auto-approved"]);
+  }),
   // The session activity timeline (CTF-P2b): every story of it.
   "agent-harbor-session-activity": async ({ canvasElement }) => {
     const panel = await activityChecks(canvasElement);
@@ -1557,6 +1686,19 @@ export const plays = {
   // `damage` at line 34, no clamp anywhere), never the reviewed one the Deep
   // Review shows. Read from the editor's own model, so a layout wired to the
   // program's current source fails here.
+  // L3 (CTF-P2c step 3): the drained-field session as its timeline, the
+  // agent's suggestion in the block at its end, and no permission card.
+  "layout-l3-suggested-actions": async (context) => {
+    await plays["layout-editor-before-clamp"](context);
+    const { canvasElement } = context;
+    const block = await waitFor(canvasElement, '.ah-suggested[data-ah-suggested="block"]', 30000);
+    expect(block.getAttribute("data-ah-suggestion-phase")).toBe("pending");
+    expect([...block.querySelectorAll(".ah-suggested-words")].map((w) => w.textContent))
+      .toEqual(["Open the recording of drained_field_fails in a new tab, at pass 5"]);
+    expect(block.closest(".agent-harbor-activity")).toBeTruthy();
+    // The stand-in, the Agent Activity pane's permission prompt, is gone.
+    expect(canvasElement.querySelector(".permission-prompt")).toBeNull();
+  },
   "layout-editor-before-clamp": async ({ canvasElement }) => {
     await waitFor(canvasElement, ".monaco-editor .view-line", 60000);
     const host = canvasElement.querySelector(".monaco-editor").parentElement;

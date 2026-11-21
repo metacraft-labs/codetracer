@@ -633,6 +633,12 @@ const
     op("session-activity.jump-to-latest", SessionActivityTable,
        "Activity: Jump to Latest"),
     op("session-activity.retry", SessionActivityTable, "Activity: Retry"),
+    # The suggested-actions block at a session timeline's end
+    # (`agent_harbor_suggested_actions_words`): presses only.
+    op("suggested-actions.toggle", SessionActivityTable,
+       "Suggested Actions: Check or Uncheck", oaTarget),
+    op("suggested-actions.approve", SessionActivityTable, "Suggested Actions: Approve"),
+    op("suggested-actions.dismiss", SessionActivityTable, "Suggested Actions: Dismiss"),
     # The omnibox composer (`agent_harbor_composer_words`): send, move the
     # destination, and what a press on its chips, rows and Recent does.
     op("composer.send", ComposerTable, "Composer: Send"),

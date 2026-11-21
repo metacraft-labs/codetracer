@@ -29,6 +29,8 @@ import ../../stories/agent_harbor_composer_stories
 import ./ah_results
 import ../../stories/agent_harbor_results_stories
 import ./ah_session_activity
+import ./ah_suggested_actions
+import ../../stories/agent_harbor_suggested_actions_stories
 import ../agent_activity_leaf
 import ../window_geometry
 import ../../viewmodel/agent_harbor_activity_cards
@@ -55,6 +57,7 @@ const
     "agent-harbor-composer",
     "agent-harbor-results",
     "agent-harbor-session-activity",
+    "agent-harbor-suggested-actions",
     "agent-harbor-changes",
     "agent-harbor-inbox",
     "agent-harbor-inbox-item",
@@ -81,6 +84,8 @@ type
     composer*: OmniboxComposerVM
     results*: ResultCommandsVM
     timeline*: SessionTimelineVM
+    suggestion*: SuggestedActionsVM
+      ## The suggested-actions block at the timeline's end (its stories only).
     cards*: ActivityAgainstCards
       ## The comparison story's cards (`agent_harbor_activity_cards`): its
       ## store, the events both halves were fed, and today's Agent Activity
@@ -202,6 +207,19 @@ proc activityPresses*(keymap: UserKeymap; vm: SessionTimelineVM;
     let outcome = resolveElementPress(resolve, ActivityScopePath, ButtonElementKind,
                                       operation, {}, "Click")
     discard vm.runActivityPress(outcome.operation, target, copy)
+
+proc suggestedActivityPresses*(keymap: UserKeymap; vm: SessionTimelineVM;
+                               suggestion: SuggestedActionsVM;
+                               copy: proc(text: string)): ActivityPress =
+  ## `activityPresses` for a timeline with a suggested-actions block at its
+  ## end: a press the router resolves to one of the block's operations runs
+  ## on the block (`runSuggestedActionsPress`), any other on the timeline.
+  let resolve = routerResolver(activityRouter(keymap), SessionFacts())
+  result = proc(operation, target: string) =
+    let outcome = resolveElementPress(resolve, ActivityScopePath, ButtonElementKind,
+                                      operation, {}, "Click")
+    if not suggestion.runSuggestedActionsPress(outcome.operation, target):
+      discard vm.runActivityPress(outcome.operation, target, copy)
 
 proc activityKey*(m: AhStoryMount; keymap: UserKeymap; key: string): bool =
   ## A key while a timeline story is shown, ROUTED: resolved by the window's
@@ -427,6 +445,15 @@ proc mountAgentHarborStoryGpui*(r: GpuiRenderer; surface, fixture: string;
         m.timeline = createSessionActivityStoryVM(fixture, pb)
         r.mountSessionActivity(host, m.timeline, p, bodyW, bodyH,
                                activityPresses(keymap, m.timeline, copy))
+    of SuggestedActionsSurface:
+      let bodyH = if frameTitle.len > 0: heightPx - FrameTitlePx - 8 else: heightPx
+      let copy = proc(text: string) = writeClipboard(text)
+      let story = createSuggestedActionsStory(fixture)
+      m.timeline = story.timeline
+      m.suggestion = story.suggestion
+      let press = suggestedActivityPresses(keymap, m.timeline, m.suggestion, copy)
+      r.mountSessionActivity(host, m.timeline, p, bodyW, bodyH, press,
+                             r.suggestionTail(p, m.suggestion, press))
     of "agent-harbor-changes", "agent-harbor-inbox", "agent-harbor-inbox-item":
       m.changesInbox = r.mountChangesInboxStory(host, surface, fixture, pb, p, bodyW)
     else:
@@ -448,6 +475,7 @@ proc mountAgentHarborStoryGpui*(r: GpuiRenderer; surface, fixture: string;
   let composer = m.composer
   let results = m.results
   let timeline = m.timeline
+  let suggestion = m.suggestion
   let cards = m.cards
   let changesInbox = m.changesInbox
   let playback = m.playback
@@ -460,6 +488,7 @@ proc mountAgentHarborStoryGpui*(r: GpuiRenderer; surface, fixture: string;
     if progress != nil: progress.dispose()
     if composer != nil: composer.dispose()
     if results != nil: results.dispose()
+    if suggestion != nil: suggestion.dispose()
     if timeline != nil: timeline.dispose()
     if cards.cards != nil:
       cards.cards.dispose()

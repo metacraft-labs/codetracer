@@ -151,6 +151,40 @@ func sessionActivityStories(): seq[CodeTracerStory] =
              state = "empty", check = "agent-harbor-session-activity-playback"),
   ]
 
+func suggestedActionsStories(): seq[CodeTracerStory] =
+  ## The suggested UI actions (`agent-harbor-suggested-actions`, CTF-P2c step
+  ## 3): the drained-field session's timeline, framed as the Agent Activity
+  ## panel, with an agent's suggested actions in a block at its end, and the
+  ## line the timeline keeps once they are decided
+  ## (`stories/agent_harbor_suggested_actions_stories.nim`, over the CTF-P2L
+  ## project). Every story runs its play check, which holds the block's facts.
+  const surface = "agent-harbor-suggested-actions"
+  func suggested(exportName, name, fixture, description: string): CodeTracerStory =
+    panel(exportName, name, surface, fixture, "agent-harbor-suggested-actions-" & fixture,
+          description)
+  @[
+    suggested("SuggestedActionsOne", "Suggested Actions: One", "one",
+              "The agent suggests one UI action: its reason, the action checked, " &
+                "Approve and Dismiss"),
+    suggested("SuggestedActions", "Suggested Actions: Several", "several",
+              "Three suggested actions, each with its check box, all checked"),
+    suggested("SuggestedActionsPartial", "Suggested Actions: One Unchecked", "partial",
+              "The operator unchecked the second action: it is dimmed and the " &
+                "button reads Approve 2 of 3"),
+    suggested("SuggestedActionsUnsupported", "Suggested Actions: One CodeTracer Cannot Perform",
+              "unsupported",
+              "An action CodeTracer cannot perform: unchecked, disabled, with its reason"),
+    suggested("SuggestedActionsApproved", "Suggested Actions: Approved", "approved",
+              "Two actions approved: the timeline's line Approved 2 UI actions, each " &
+                "outcome under it"),
+    suggested("SuggestedActionsDismissed", "Suggested Actions: Dismissed", "dismissed",
+              "The suggestion dismissed: the quiet line Dismissed 2 suggested UI actions"),
+    suggested("SuggestedActionsAutoApproved", "Suggested Actions: Auto-Approved",
+              "auto-approved",
+              "An action the operator's configuration auto-approves: no block, the line " &
+                "Ran 1 UI action with a quiet auto-approved, its outcome under it"),
+  ]
+
 func agentHarborSection(): CodeTracerStorySection =
   ## CodeTracer as an Agent Harbor front-end: the prototypes of the panels
   ## that show an Agent Harbor fleet, over the viewmodels of
@@ -161,7 +195,8 @@ func agentHarborSection(): CodeTracerStorySection =
   ## INV-D-04, INV-P2-26 (initiatives); INV-D-05, INV-P2-44 (initiative
   ## progress); INV-C-20 to INV-C-24, INV-C-40, INV-P2-30 to INV-P2-34,
   ## INV-P2-42, INV-P2-61 (the omnibox composer, CTF-P2c); INV-C-25 to
-  ## INV-C-31, INV-P2-38 (its result commands and search).
+  ## INV-C-31, INV-P2-38 (its result commands and search);
+  ## INV-C-38 (an agent's suggested UI actions, CTF-P2c step 3).
   CodeTracerStorySection(
     title: "CodeTracer/Agent Harbor",
     group: "Agent Harbor",
@@ -686,7 +721,7 @@ func agentHarborSection(): CodeTracerStorySection =
             "Answer sent; the page stays"),
       panel("InboxAnswerFailed", "Inbox: Answer Failed", "agent-harbor-inbox-item", "answer-failed", "agent-harbor-inbox-item",
             "The scripted source refused the answer"),
-    ] & sessionActivityStories())
+    ] & sessionActivityStories() & suggestedActionsStories())
 
 func panelsSection(): CodeTracerStorySection =
   CodeTracerStorySection(
@@ -813,8 +848,13 @@ func agenticWindows(): seq[CodeTracerStory] =
                            "remote-test-triage", "initiatives-popup",
                            "session-sidebar", "top-bar-one-row", "top-bar-rows",
                            "omnibox-routing"]
-    story(exportName, name, "layout", "agentic-window", moment,
-          check = (if moment in replayMoments: "layout-editor-before-clamp" else: ""),
+    # L3 shows the suggested-actions block at the end of the session's
+    # timeline (CTF-P2c step 3), in place of the permission card that stood
+    # in for it: its check holds both the editor's revision and the block.
+    let check = if moment == "needs-input": "layout-l3-suggested-actions"
+                elif moment in replayMoments: "layout-editor-before-clamp"
+                else: ""
+    story(exportName, name, "layout", "agentic-window", moment, check = check,
           description = description)
   @[
     window("L1FailingTestAgentAtWork", "L1 Failing Test, Agent At Work",
@@ -829,7 +869,8 @@ func agenticWindows(): seq[CodeTracerStory] =
              "recording, opened from its session tab"),
     window("L3AgentNeedsInput", "L3 Agent Needs Input Mid-Debugging", "needs-input",
            "Next took the view to the drained-field test's question; its agent " &
-             "asks to open a recording in a new tab, waiting for one-click approval"),
+             "suggests opening the recording in a new tab, waiting in the suggested " &
+             "actions block at the end of its timeline"),
     window("L4AgentHarborArrangement", "L4 Agent Harbor Arrangement",
            "harbor-arrangement",
            "The Initiatives panel docked left, each initiative over its sessions, the " &
@@ -930,6 +971,7 @@ const agentHarborPanelNames = [
   ("agent-harbor-initiatives", "Initiatives"),
   ("agent-harbor-initiative-progress", "Initiative Progress"),
   ("agent-harbor-session-activity", "Agent Activity"),
+  ("agent-harbor-suggested-actions", "Agent Activity"),
   ("agent-harbor-changes", "Changes"),
   ("agent-harbor-inbox", "Inbox"),
   ("agent-harbor-inbox-item", "Inbox"),

@@ -37,6 +37,7 @@ import ../../stories/agent_harbor_composer_stories
 import ./ah_tui_results
 import ../../stories/agent_harbor_results_stories
 import ./ah_tui_session_activity
+import ../../stories/agent_harbor_suggested_actions_stories
 import ../app/views/agent_activity_pane
 import ../app/layout/cells
 import ../../viewmodel/agent_harbor_activity_cards
@@ -64,6 +65,7 @@ const
     "agent-harbor-composer",
     "agent-harbor-results",
     "agent-harbor-session-activity",
+    "agent-harbor-suggested-actions",
   ]
     ## Every surface of the Agent Harbor section this module draws.
   AgentHarborSectionTitle* = "CodeTracer/Agent Harbor"
@@ -79,7 +81,8 @@ proc sizesOf*(surface: string): seq[(string, int, int)] =
   ## The named sizes a story of `surface` is captured at: laptop and sidebar,
   ## and panel for the session activity timeline.
   result = @TuiSizes
-  if surface == "agent-harbor-session-activity": result.add TuiPanelSize
+  if surface in ["agent-harbor-session-activity", "agent-harbor-suggested-actions"]:
+    result.add TuiPanelSize
 
 type
   AhTuiMount* = ref object
@@ -96,6 +99,9 @@ type
     composer*: OmniboxComposerVM
     results*: ResultCommandsVM
     timeline*: SessionTimelineVM
+    suggestion*: SuggestedActionsVM
+      ## The suggested-actions block at the timeline's end (its stories
+      ## only).
     cards*: ActivityAgainstCards
       ## The comparison story's cards (`agent_harbor_activity_cards`); unset
       ## for any other story.
@@ -267,6 +273,7 @@ proc pressActivity*(m: AhTuiMount; operation, target: string): bool {.discardabl
                                     ActivityScopePath,
                                     ButtonElementKind, operation, {}, "Click")
   m.lastOperation = outcome.operation
+  if m.suggestion.runSuggestedActionsPress(outcome.operation, target): return true
   let mount = m
   m.timeline.runActivityPress(outcome.operation, target,
                               proc(text: string) = mount.copyText(text))
@@ -316,6 +323,11 @@ proc draw*(m: AhTuiMount) =
   of "agent-harbor-results":
     c.drawResults(m.results, top, 0, m.cols, h, (proc(operation, target: string) =
       discard m.pressResults(operation, target)))
+  of "agent-harbor-suggested-actions":
+    let mount = m
+    let press: ActivityPress = proc(operation, target: string) =
+      discard mount.pressActivity(operation, target)
+    c.drawSessionActivity(m.timeline, top, 0, m.cols, h, press, m.suggestion)
   of "agent-harbor-session-activity":
     let mount = m
     let press: ActivityPress = proc(operation, target: string) =
@@ -415,6 +427,10 @@ proc mountAgentHarborStoryTui*(surface, fixture: string; cols, rows: int;
       result.timeline.connection.val = connectionOf(fixture)
     else:
       result.timeline = createSessionActivityStoryVM(fixture, pb)
+  of "agent-harbor-suggested-actions":
+    let story = createSuggestedActionsStory(fixture)
+    result.timeline = story.timeline
+    result.suggestion = story.suggestion
   else: discard
   if not pb.isNil: pb.openAtMoment(moment)
   result.draw()
@@ -488,6 +504,7 @@ proc dispose*(m: AhTuiMount) =
   if m.progress != nil: m.progress.dispose()
   if m.composer != nil: m.composer.dispose()
   if m.results != nil: m.results.dispose()
+  if m.suggestion != nil: m.suggestion.dispose()
 
 proc rowsOf*(m: AhTuiMount): seq[StyledRow] =
   ## The screen as styled rows, for `styledRowsTree`.

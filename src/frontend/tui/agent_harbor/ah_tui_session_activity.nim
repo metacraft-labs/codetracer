@@ -47,14 +47,21 @@
 ## panel; `lineFacts` on every line (`line`, `line-kind`, `level`, `text`,
 ## `role`, `expanded`, `focused`, a group's `count`, `failed`, `running`,
 ## `path`, `copy`); `running-strip`, `unseen` and `filter` on the chrome.
+##
+## A suggested-actions block (`tail`, `ah_tui_suggested_actions`): while it
+## waits, it takes the panel's last rows, beneath the list, so it never
+## scrolls out of view; once decided, its record lines follow the
+## timeline's own lines, drawn as they are (P2c study D23, D55).
 
 import std/strutils
 import nim_agents_isonim_viewmodels/agent_harbor/session_timeline_vm
 import ../../viewmodel/views/agent_harbor_activity_words
 
 import ./ah_tui_canvas
+import ./ah_tui_suggested_actions
 
-export session_timeline_vm, agent_harbor_activity_words, ah_tui_canvas
+export session_timeline_vm, agent_harbor_activity_words, ah_tui_canvas,
+  ah_tui_suggested_actions
 
 const
   IndentCells* = 2
@@ -212,16 +219,21 @@ proc drawLine(c: var AhCanvas; vm: SessionTimelineVM; parent: AhNode;
 
 proc drawSessionActivity*(c: var AhCanvas; vm: SessionTimelineVM;
                           row, col, width, height: int;
-                          press: ActivityPress = nil) =
+                          press: ActivityPress = nil;
+                          tail: SuggestedActionsVM = nil) =
   ## The timeline at (`row`, `col`), `width` × `height` cells, on the panel's
-  ## ground. A press goes to `press`; with none, it runs the carried
-  ## operation on the viewmodel (`runActivityPress`, no clipboard).
+  ## ground, with the suggested-actions block `tail` gives, if any. A press
+  ## goes to `press`; with none, it runs the carried operation on the
+  ## viewmodel (`runActivityPress`, no clipboard) or the block
+  ## (`runSuggestedActionsPress`).
   let viewModel = vm
+  let held = tail
   let route: ActivityPress = if press != nil: press
               else: (proc(operation, target: string) =
-                       discard viewModel.runActivityPress(operation, target))
+                       if not held.runSuggestedActionsPress(operation, target):
+                         discard viewModel.runActivityPress(operation, target))
   let host = c.node(nil, row, col, width, height,
-                    [("surface", "agent-harbor-session-activity"),
+                    [("surface", timelineSurfaceOf(tail)),
                      ("state", stateName(vm.state.val)),
                      ("session-status", vm.statusLabel),
                      ("connection", vm.connection.val)])
@@ -262,10 +274,16 @@ proc drawSessionActivity*(c: var AhCanvas; vm: SessionTimelineVM;
   if vm.isEmpty:
     c.notice(host, top, col, width, bodyH, EmptyNotice, "empty")
     return
-  let lines = vm.lines
+  let lines = timelineLinesWith(vm.lines, tail)
   let rows = layoutLines(lines, width)
-  # The strip and the chip take a row each when shown; decide on the rows
-  # left for lines, then whether the running line is among those drawn.
+  # The block takes its rows off the panel's (leaving the list three at
+  # least), and is drawn under the timeline's last line, or at the panel's
+  # foot once the lines fill the rest (D55); the strip and the chip take a
+  # row each when shown; decide on the rows left for lines, then whether
+  # the running line is among those drawn.
+  let blockH = if showsBlock(tail): min(tail.blockRows(width), max(0, bodyH - 3)) else: 0
+  let blockFoot = top + bodyH
+  bodyH -= blockH
   let chip = vm.showsUnseenChip
   let listH = bodyH - (if chip: 1 else: 0)
   let first = firstShown(rows, vm, listH)
@@ -292,6 +310,10 @@ proc drawSessionActivity*(c: var AhCanvas; vm: SessionTimelineVM;
     if rows[i].line.kind == tlkTurn and i > first: inc r
     if top + listH - r <= 0: break
     r += c.drawLine(vm, list, rows[i].line, r, col, width, top + listH - r, route)
+  if blockH > 0:
+    let blockTop = min(r, blockFoot - blockH)
+    list.height = max(1, blockTop - list.row)
+    c.drawSuggestedActions(host, tail, blockTop, col, width, blockH, route)
   if chip:
     let label = " " & unseenChipText(vm.unseen.val) & " "
     let cr = top + bodyH - 1

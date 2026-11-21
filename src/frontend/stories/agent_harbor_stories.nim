@@ -42,14 +42,17 @@ const playbackFixtures* = [
   ("agent-harbor-inbox", "playback-inbox-run")]
   ## Every playback story's surface and fixture.
 
-const surfacesWithoutPlayback* = ["agent-harbor-composer", "agent-harbor-results"]
+const surfacesWithoutPlayback* = ["agent-harbor-composer", "agent-harbor-results",
+                                  "agent-harbor-suggested-actions"]
   ## The surfaces the story hosts draw that have no playback story, each
   ## with its reason. A playback replays what a server feeds a surface over
   ## time; the omnibox composer changes only with what the operator types
   ## and presses, so its stories are moments reached by driving its
   ## viewmodel (`agent_harbor_composer_stories.nim`), not a scenario; so do
   ## its result commands (`agent_harbor_results_stories.nim`), whose rows
-  ## answer what the operator typed. Every
+  ## answer what the operator typed; so does the suggested-actions block
+  ## (`agent_harbor_suggested_actions_stories.nim`), whose states after the
+  ## one the agent's request opens are each the operator's press. Every
   ## other surface a host draws must have a playback story
   ## (`test_ctf_p1c_playback_stories_agree_at_each_moment`).
 

@@ -41,6 +41,12 @@
 ## which resolves it through its router and runs it (`runActivityPress`).
 ## Nothing here decides what a press does. With no `press`, nothing listens.
 ##
+## A tail (`ActivityTail`, built by `ah_suggested_actions.suggestionTail`)
+## adds what a suggested-actions block brings: while it waits, the block
+## beneath the list, pinned, so it never scrolls out of view; once decided,
+## its record lines after the timeline's lines, drawn as the timeline's own
+## (P2c study D23, D55). The timeline's own lines are not changed by it.
+##
 ## Facts (`data-ah-*`): `surface`, `state`, `session-status`, `connection`, and each
 ## line's `lineFacts`; `running-strip`, `unseen`, `filter`, `badge`,
 ## `copy-action` and `path-shown`; on each drawn part of a line, its role
@@ -66,6 +72,20 @@ const
   StripPx* = 24               ## the running strip, the filter row, the chip
   FocusBarPx* = 2             ## the inset bar of the focused line
   RunningGlyph* = "\xE2\x97\x8F"  ## ●
+
+type
+  ActivityTail* = object
+    ## What a host adds at the timeline's end (a suggested-actions block):
+    ## lines after the timeline's own, and a block pinned beneath the list.
+    lines*: seq[TimelineLine]
+    blockPx*: int                    ## the block's height; 0: no block
+    drawBlock*: proc(): GpuiElement  ## the block, `blockPx` tall
+    surface*: string
+      ## What the timeline's view says it is (`data-ah-surface`); "": the
+      ## session activity timeline.
+  ActivityTailOf* = proc(widthPx: int): ActivityTail
+    ## The tail at a width, read while the timeline draws (so a viewmodel it
+    ## reads is tracked by the draw).
 
 const CaptionLines = {tlkDetail, tlkTrace, tlkTraceLine}
   ## The lines set as captions (`.ah-activity-detail`, `-trace`,
@@ -238,14 +258,17 @@ proc drawLine(r: GpuiRenderer; p: AhPalette; vm: SessionTimelineVM;
 
 proc drawSessionActivity*(r: GpuiRenderer; host: GpuiElement; vm: SessionTimelineVM;
                           p: AhPalette; widthPx, heightPx: int;
-                          press: ActivityPress = nil) =
-  ## The timeline in `host`, `widthPx` × `heightPx`, on the panel's ground;
-  ## a press is reported to `press`.
+                          press: ActivityPress = nil; tailOf: ActivityTailOf = nil) =
+  ## The timeline in `host`, `widthPx` × `heightPx`, on the panel's ground,
+  ## with what `tailOf` adds at its end, if anything; a press is reported to
+  ## `press`.
   r.clearChildren(host)
   r.styles(host, [("display", "flex"), ("flex-direction", "column"),
                   ("width", $widthPx & "px"), ("height", $heightPx & "px"),
                   ("background", p.panel), ("overflow", "hidden")])
-  r.tag(host, "surface", "agent-harbor-session-activity")
+  let tail = if tailOf.isNil: ActivityTail() else: tailOf(widthPx)
+  r.tag(host, "surface", if tail.surface.len > 0: tail.surface
+                         else: "agent-harbor-session-activity")
   r.tag(host, "state", stateName(vm.state.val))
   r.tag(host, "session-status", vm.statusLabel)
   r.tag(host, "connection", vm.connection.val)
@@ -302,7 +325,14 @@ proc drawSessionActivity*(r: GpuiRenderer; host: GpuiElement; vm: SessionTimelin
   if vm.isEmpty:
     r.appendChild(host, r.notice(p, EmptyNotice, "empty"))
     return
-  let lines = vm.lines
+  var lines = vm.lines
+  lines.add tail.lines
+  # The block takes the panel's foot (leaving the list three lines at
+  # least), beneath the list and the chip.
+  let blockPx = if tail.blockPx > 0 and tail.drawBlock != nil:
+                  min(tail.blockPx, max(0, bodyH - 3 * LinePx))
+                else: 0
+  bodyH -= blockPx
   let chip = vm.showsUnseenChip
   let listH = bodyH - (if chip: StripPx else: 0)
   let first = firstShown(lines, vm, widthPx, listH)
@@ -348,6 +378,13 @@ proc drawSessionActivity*(r: GpuiRenderer; host: GpuiElement; vm: SessionTimelin
       topMargin = gap - (total - listBoxH)
   let list = r.box(column = true, pairs = [("flex-grow", "1"), ("min-height", "0px"),
                                            ("overflow", "hidden")])
+  if blockPx > 0:
+    # The block follows the timeline's last line, or sits at the panel's
+    # foot once the lines fill the rest (D55): the list takes only its lines.
+    var content = (if shifted: topMargin else: 0)
+    for i in start ..< lines.len: content += heightOf(lines[i], widthPx, i == start)
+    r.styles(list, [("flex-grow", "0"), ("height", $min(content, listBoxH) & "px"),
+                    ("flex-shrink", "0")])
   r.tag(list, "lines", $lines.len)
   # The region declaration names the list by this fact (`lines` is the
   # session strip's too).
@@ -366,10 +403,14 @@ proc drawSessionActivity*(r: GpuiRenderer; host: GpuiElement; vm: SessionTimelin
     r.carries(button, ActivityJumpOperation, "", press)
     r.appendChild(row, button)
     r.appendChild(host, row)
+  if blockPx > 0:
+    let blk = tail.drawBlock()
+    r.styles(blk, [("height", $blockPx & "px"), ("flex-shrink", "0")])
+    r.appendChild(host, blk)
 
 proc mountSessionActivity*(r: GpuiRenderer; host: GpuiElement; vm: SessionTimelineVM;
                            p: AhPalette; widthPx, heightPx: int;
-                           press: ActivityPress = nil) =
-  ## Draws the timeline, and again whenever what it shows moves.
+                           press: ActivityPress = nil; tailOf: ActivityTailOf = nil) =
+  ## Draws the timeline, and again whenever what it or its tail shows moves.
   createRenderEffect proc() =
-    drawSessionActivity(r, host, vm, p, widthPx, heightPx, press)
+    drawSessionActivity(r, host, vm, p, widthPx, heightPx, press, tailOf)

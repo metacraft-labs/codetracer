@@ -424,7 +424,7 @@ src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/ui/p
 # The Agent Harbor session timeline's story hosts (`feat(agent-harbor): the session activity timeline in every story host`)
 # moved test_plat64_reachability.nim: the timeline's four press operations count as offered.
 # Re-grade the plat64 arms whose needles sit in it.
-src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend/tui/tests/test_plat64_reachability.nim	4f02887d12927916f4cee1cd7f7cfe50a263a0c0a5fbe2f75af70b2c0d0fc7ad	f24eaf9e36e4edd633e0f80a80a516f3202fc5dae2c382b20ccebe3641618b88
+src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend/tui/tests/test_plat64_reachability.nim	4f02887d12927916f4cee1cd7f7cfe50a263a0c0a5fbe2f75af70b2c0d0fc7ad	252da91f0667323cd8c78987db645b8b25ba174d92b9aa079251e095e84f8ef0
 ci/test/plat70c-find-mutation-control.sha256	src/frontend/gpui/app/leaves.nim	d478d57a3af30afc7a7572076336d3dec9fa84e1ea56a60c39d8871f599be9ab	4d6f23582e69908a7dfc350d3ae6e3223887410703a23389aebe5396c6020c49
 ci/test/plat70i-fit-mutation-control.sha256	src/frontend/gpui/app/leaves.nim	d478d57a3af30afc7a7572076336d3dec9fa84e1ea56a60c39d8871f599be9ab	4d6f23582e69908a7dfc350d3ae6e3223887410703a23389aebe5396c6020c49
 src/frontend/gpui/tests/plat35-visual-mutation-control.sha256	src/frontend/gpui/app/leaves.nim	d478d57a3af30afc7a7572076336d3dec9fa84e1ea56a60c39d8871f599be9ab	4d6f23582e69908a7dfc350d3ae6e3223887410703a23389aebe5396c6020c49
@@ -453,7 +453,7 @@ src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/gpui/t
 # above, test_plat64_reachability.nim (its press-only operations); it re-counted
 # test_gpui_window_frame.nim (one more scanned GPUI source). Re-grade those arms.
 src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend/viewmodel/keymap/overlay_rows.nim	29d13621166a061d890ce4e32b6f11947812f0926f5f1929385f4b3209618834	02d1e69873fd133c75c358cfcf5565020f6cdb7db78a91e0339ed7ceefa045fd
-src/frontend/gpui/tests/plat37-window-mutation-control.sha256	src/frontend/gpui/tests/test_gpui_window_frame.nim	40f5de09b1e97db5d711bbbc47ea609c1b675e2f73e2a80c8adb382d3f709677	45a7c953e36d9cc301714e9831392904bd7d41b7d500aeec5e257668dee83c06
+src/frontend/gpui/tests/plat37-window-mutation-control.sha256	src/frontend/gpui/tests/test_gpui_window_frame.nim	40f5de09b1e97db5d711bbbc47ea609c1b675e2f73e2a80c8adb382d3f709677	68b9f3dc7e6bebae53388af6d8e521ce1dfcc9f275fb5e91fab14f28597dc972
 # The status line keeps a message a late answer did not write (`fix(tui): a terminal's late answer
 # no longer replaces a message on the status line`) moved src/frontend/tui/main.nim.
 # Re-grade the arms whose needles sit in it.

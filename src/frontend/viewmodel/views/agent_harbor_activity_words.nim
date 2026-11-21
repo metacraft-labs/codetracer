@@ -74,8 +74,10 @@ const
   CopyLabel* = "Copy"
     ## A level-2 detail's copy action.
   ProseKinds = ["operator", "agent", "question", "failure", "completed",
-                "cancelled"]
-    ## Item kinds whose line is the operator's or the agent's own words.
+                "cancelled", "ui-action-outcome"]
+    ## Item kinds whose line is the operator's or the agent's own words, or
+    ## an approved suggested UI action's outcome (`SuggestedActionsVM`'s
+    ## level-1 record lines, which wrap rather than lose their words).
 
 proc runActivityOperation*(vm: SessionTimelineVM; operation: string): bool =
   ## Runs one of the timeline's operations on `vm` (its keys resolve to

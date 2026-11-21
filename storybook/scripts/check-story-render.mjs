@@ -395,9 +395,11 @@ const PLANTS = {
   },
   "agent-reply-small": {
     // The agent's final reply at 14px, as it was drawn while every other
-    // message of the conversation was at the body size.
+    // message of the conversation was at the body size. (On L8, where the
+    // agent's turn has ended with its reply: L3 now shows its session as the
+    // cardless timeline with a suggested-actions block, CTF-P2c step 3.)
     expect: "type-size",
-    story: "codetracer-layouts--l-3-agent-needs-input",
+    story: "codetracer-layouts--l-8-agent-delivers-a-deep-review",
     code: plantStyle(".agent-final-message { font-size: 0.875rem !important; }"),
   },
   "variable-name-cut": {

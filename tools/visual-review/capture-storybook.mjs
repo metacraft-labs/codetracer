@@ -318,6 +318,22 @@ for (const name of [...sessionActivityExports, ...sessionActivityPlaybackExports
   agentHarborViews[`agent-harbor-${kebab(name)}`] = `codetracer-agent-harbor--${kebab(name)}`;
 }
 const playbackViews = new Set(sessionActivityPlaybackExports.map((name) => `agent-harbor-${kebab(name)}`));
+// The suggested UI actions (CTF-P2c step 3): the drained-field session's
+// timeline with the block at its end, in the family
+// `agent-harbor-suggested-actions`. Captured at `panel` too, as the
+// timeline it ends is a panel.
+const suggestedActionsExports = [
+  "SuggestedActionsOne",
+  "SuggestedActions",
+  "SuggestedActionsPartial",
+  "SuggestedActionsUnsupported",
+  "SuggestedActionsApproved",
+  "SuggestedActionsDismissed",
+  "SuggestedActionsAutoApproved",
+];
+for (const name of suggestedActionsExports) {
+  agentHarborViews[`agent-harbor-${kebab(name)}`] = `codetracer-agent-harbor--${kebab(name)}`;
+}
 for (const [name, storyId] of Object.entries(agentHarborViews)) {
   views[name] = { storyId, brief: agentHarborBrief, sizes: agentHarborSizes, themes: agentHarborThemes };
 }
@@ -354,6 +370,7 @@ const viewFamilies = {
   "agent-harbor-session-tabs": sessionTabsExports.map((name) => `agent-harbor-${kebab(name)}`),
   "agent-harbor-composer": composerExports.map((name) => `agent-harbor-${kebab(name)}`),
   "agent-harbor-results": resultsExports.map((name) => `agent-harbor-${kebab(name)}`),
+  "agent-harbor-suggested-actions": suggestedActionsExports.map((name) => `agent-harbor-${kebab(name)}`),
   // CTF-P3: the Changes panel's stories, and the Inbox's (the panel and an
   // item's page; `--moments` with `agent-harbor-playback` for its playback).
   "agent-harbor-changes": changesInboxExports.filter((name) => name.startsWith("Changes")).map((name) => `agent-harbor-${kebab(name)}`),

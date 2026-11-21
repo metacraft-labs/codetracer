@@ -455,7 +455,6 @@ type
     branch*: string
     model*: string
     messages*: seq[AgentActivityMessageEntry]
-    permission*: string     ## a suggested action awaiting approval ("" none)
 
 const
   ClampOriginal = "    damage"
@@ -478,9 +477,7 @@ proc projectConversation*(moment: string): AgentConversation =
           "The test fails as expected before the clamp. Should it expect the " &
             "shield at exactly 0 after pass 5, or anything below 1? I can open " &
             "its recording in a new tab at pass 5 so you can look first.",
-          0.0, 94.0)],
-      permission: "Open the recording of drained_field_fails in a new tab, " &
-        "at pass 5 of iterate_asteroids")
+          0.0, 94.0)])
   of "inbox-next":
     AgentConversation(sessionId: MacTimeoutSession, branch: "fix/macos-test-timeout",
       model: "Grok 4", messages: @[

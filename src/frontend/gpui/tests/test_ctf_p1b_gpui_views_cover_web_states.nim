@@ -47,6 +47,7 @@ from isonim_gpui/bindings import gpui_reset_tree
 import ../../stories/codetracer_stories
 import ../../../../tools/stories/emit_storybook_stories
 import ../agent_harbor/ah_stories
+import ../agent_harbor/ah_suggested_actions
 import ../agent_harbor/ah_session_views
 import ../agent_harbor/ah_fleet_panel
 import ../agent_harbor/ah_composer
@@ -459,7 +460,8 @@ proc factsOf(line: TimelineLine): seq[(string, string)] =
   if line.path.len > 0: result.add ("path", line.path)
   if line.copyText.len > 0: result.add ("copy", line.copyText)
 
-proc checkTimeline(view: GpuiElement; vm: SessionTimelineVM): seq[string] =
+proc checkTimeline(view: GpuiElement; vm: SessionTimelineVM;
+                   tail: SuggestedActionsVM = nil): seq[string] =
   ## The timeline's drawn lines against the viewmodel's: a run of its lines
   ## with no gap (the window the view shows), each with the viewmodel's
   ## facts; a group holding a running command names it on its line (never
@@ -490,7 +492,8 @@ proc checkTimeline(view: GpuiElement; vm: SessionTimelineVM): seq[string] =
   if vm.isEmpty:
     result.expect("empty notice", view.values("notice"), @["empty"])
     return
-  let lines = vm.lines
+  # A suggested-actions block's record lines follow the timeline's own.
+  let lines = timelineLinesWith(vm.lines, tail)
   let drawn = view.all("line")
   if drawn.len == 0:
     result.add "no line is drawn of the " & $lines.len & " the viewmodel has"
@@ -558,7 +561,7 @@ proc inkProblems(m: AhStoryMount; mode: DesignMode): seq[string] =
   case m.surface
   of "agent-harbor-fleet":
     if m.fleet.state.val == asReady: result = fleetInkProblems(m.view, m.fleet, p)
-  of "agent-harbor-session-activity":
+  of "agent-harbor-session-activity", "agent-harbor-suggested-actions":
     result = timelineInkProblems(m.view, p)
   of "agent-harbor-inbox":
     result = inboxInkProblems(m.view, p)
@@ -693,6 +696,26 @@ proc checkResults(view: GpuiElement; vm: ResultCommandsVM): seq[string] =
   prefix("selected rows", view.values("selected"), selected)
   prefix("more", view.values("more"), more)
 
+proc checkSuggestion(view: GpuiElement; vm: SuggestedActionsVM): seq[string] =
+  ## The suggested-actions block against its viewmodel (CTF-P2c step 3):
+  ## drawn while the suggestion waits, with its phase, its label, its rows in
+  ## order (checked and disabled as the viewmodel says), and both buttons;
+  ## none once decided.
+  let blocks = view.all("suggestion-phase")
+  if not vm.shown:
+    result.expect("block", blocks.len, 0)
+    return
+  if blocks.len != 1:
+    result.add "the block is drawn " & $blocks.len & " times"
+    return
+  let b = blocks[0]
+  result.expect("phase", b.attr("suggestion-phase"), $vm.phase)
+  result.expect("approve label", b.attr("approve-label"), vm.approveLabel)
+  result.expect("rows", b.values("suggested-action"), vm.rows.mapIt(it.id))
+  result.expect("checked", b.values("action-checked"), vm.rows.mapIt($it.checked))
+  result.expect("disabled", b.values("action-disabled"), vm.rows.mapIt($it.disabled))
+  result.expect("buttons", b.values("suggested-button"), @["approve", "dismiss"])
+
 proc checkStory(m: AhStoryMount): seq[string] =
   ## The drawn tree against the viewmodel the story built; empty when they
   ## agree.
@@ -708,6 +731,8 @@ proc checkStory(m: AhStoryMount): seq[string] =
   of "agent-harbor-fleet": checkFleet(view, m.fleet)
   of "agent-harbor-composer": checkComposer(view, m.composer)
   of "agent-harbor-results": checkResults(view, m.results)
+  of "agent-harbor-suggested-actions":
+    checkTimeline(view, m.timeline, m.suggestion) & checkSuggestion(view, m.suggestion)
   of "agent-harbor-session-activity":
     if m.cardsFeed.isNil: checkTimeline(view, m.timeline)
     else:
