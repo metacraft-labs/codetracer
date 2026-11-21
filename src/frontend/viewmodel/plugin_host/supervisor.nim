@@ -264,6 +264,12 @@ type
       ## Persist `plugins.<id>.enabled` (the user's *Disable*).
     onChange*: proc()
       ## Something a front-end shows changed.
+    actionHook*: proc(msg: JsonNode): bool
+      ## A front-end's own route for a relayed action, tried before the
+      ## session's `applyAction`; true when it took the action. A front-end
+      ## whose loop drives the debugger's moves itself (the terminal pumps each
+      ## move to its stop) takes the debugger's moves here, so a plugin's step
+      ## is a step like a key's.
     rng: Rand
     # thresholds (§11.4.7, §11.6.2, §11.7.4, §11.7.5, §11.8)
     helloDeadlineMs*: int
@@ -928,7 +934,9 @@ proc handleMessage(sup: Supervisor; inst: Instance; msg: JsonNode) =
     if vm in ["collab", "viewport"]:
       sup.refuse(s, "a plugin cannot relay '" & vm & "' actions")
       return
-    if not sup.session.isNil and sup.session.applyAction(msg):
+    if not sup.actionHook.isNil and sup.actionHook(msg):
+      inc s.actionsApplied
+    elif not sup.session.isNil and sup.session.applyAction(msg):
       inc s.actionsApplied
   of "publish-batch":
     s.published[msg{"viewModel"}.getStr("")] =

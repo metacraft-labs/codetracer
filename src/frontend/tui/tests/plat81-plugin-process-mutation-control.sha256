@@ -1,0 +1,9 @@
+# Control digests for run-plat81-plugin-process-mutations.py — the
+# subjects AND the suites the arms are graded by.
+# Refreshed with --record-control-hashes, gated by the
+# needle scan.
+aea37eea736d34bdae5c205caa6abc4741add1cb2d27afdfdf8be9981d2afebc  src/frontend/viewmodel/plugin_host/supervisor.nim
+627f6f9b42b7d0376bc5c5690bc57649e3bf51a6c32b2ef8618db605bb748932  src/frontend/viewmodel/plugin_host/process_link.nim
+a0c27d2992078e2221c721cd86f40c68f545b6014df880843d59676df9b9ea50  src/plugin_sdk/codetracer_plugin_sdk.nim
+45537e6ad4b07bf40f4a92f9cef0e77a67f0dbab044276cc5d5bf9e60aa129a3  src/common/plugin_model/package.nim
+25a46e3c835516db9e2260705fe51667c06efe3317a7afec196b152333b3071e  src/frontend/viewmodel/tests/unit/test_plugin_process_host.nim

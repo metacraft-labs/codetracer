@@ -495,6 +495,10 @@ type
     sessionCloser*: proc(index: int): bool {.closure.}
       ## PLAT-49 part B: the host closes the session behind tab `index`
       ## (its engine too); nil means the shell's own `closeTab` does.
+    pluginEntries*: seq[OmnibarEntry]
+      ## Extensibility-Model.md §11: the plugins' palette entries — each
+      ## contributed command and pane, and the plugin entries no plugin can
+      ## shadow (§11.7.6) — as `CommandLineTargetPrefix` command lines.
     recordings*: seq[OmnibarEntry]
       ## PLAT-49 part B: the recordings the host can see (`omRecording`
       ## entries), what the "+"'s `:open ` lists.
@@ -585,12 +589,15 @@ proc controlsEnabledOf*(app: TuiApp): seq[bool] =
   for c in TransportControls:
     result.add app.controls.transportAvailable(c.id)
 
+const CommandLineTargetPrefix* = "commandLine:"
+  ## An omnibar entry whose target runs a command line as typed.
+
 proc refreshOmnibarIndex*(app: TuiApp) =
   ## Rebuild what the omnibar can find from the session's ViewModels.
   if app.isNil or app.omnibar.isNil:
     return
   app.omnibar.setIndex(omnibarIndexOf(app.filesVM, app.store, app.menu) &
-                       app.recordings &
+                       app.recordings & app.pluginEntries &
                        # PLAT-71: the terminal's own report (§10.1).
                        @[OmnibarEntry(kind: OmnibarMode.omCommand,
                                       label: TerminalInfoLabel,

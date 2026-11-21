@@ -130,7 +130,7 @@ const
     ## painted screen cannot satisfy "at least one".
 
   MeasurementDate = "2026-11-09"
-  MeasuredBinaryBytes = 24_428_208
+  MeasuredBinaryBytes = 28_308_216
     ## `build/bin/codetracer-tui` as `just build-tui` produces it — `--mm:orc
     ## -d:release`, NOT stripped, ten tree-sitter grammars statically archived
     ## in, the runtime dynamic. `wc -c` on a Linux x86-64 host on
@@ -296,7 +296,20 @@ const
     ## `tui_session`. No data table is linked in. The ceiling keeps 8.02% over
     ## the anchor.
 
-  BinaryCeilingBytes = 26_387_350
+  BinaryCeilingBytes = 30_578_535
+    ## 2026-11-21: re-anchored from 24_428_208 / 26_387_350 to 28_308_216 /
+    ## 30_578_535. The terminal runs installed plugins in processes of their own
+    ## (Extensibility-Model §11): +2_636_856 bytes (+10.3%) over the same
+    ## `just build-tui` at `5c28e4a0a40` without that wiring (25_671_360,
+    ## itself under the old ceiling). ATTRIBUTED by `nm -S` over the symbols the
+    ## wired build adds: the session mirror's per-signal JSON codecs
+    ## (`sync/synced_signals`, 793 KB) and the action relay (91 KB), linked into
+    ## the terminal for the first time because a plugin is a mirror of the
+    ## session; the supervisor (163 KB) and the protocol (38 KB); the plugin
+    ## model's manifest, package, resolution, capabilities and grant ledger
+    ## (~230 KB); and growth in `runtime` (452 KB), `tui_session` (130 KB) and
+    ## `main` (98 KB), mostly generic instantiations. No data table is linked
+    ## in. The ceiling keeps 8.02% over the anchor.
     ## 2026-11-09: re-anchored from 22_026_040 / 23_792_600 to 24_428_208 /
     ## 26_387_350 (+2_402_168 bytes, +10.9%). The band had been tripped by the
     ## growth of the panes and features that landed from 2026-10-27 to
