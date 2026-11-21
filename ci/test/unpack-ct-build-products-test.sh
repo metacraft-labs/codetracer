@@ -83,8 +83,12 @@ if command -v readelf >/dev/null 2>&1 && command -v nix-store >/dev/null 2>&1 &&
 else
 	echo "  skip the recorder checks: readelf or nix-store is not on PATH"
 fi
-check "ct-build records the runtime closure into what it packs" "ct-build.yml does not record it" \
-	grep -qF 'bash ci/build/record-runtime-closure.sh' .github/workflows/ct-build.yml
+for f in .github/workflows/ct-build.yml .github/workflows/visual-replay-tools.yml; do
+	check "$f records the runtime closure into what it packs" "$f does not record it" \
+		grep -qF 'bash ci/build/record-runtime-closure.sh' "$f"
+done
+check "visual-replay-tools packs its closure list" "visual-replay-tools.yml does not pack it" \
+	grep -qF 'files+=(codetracer-visual-replay/nix-runtime-closure.txt)' .github/workflows/visual-replay-tools.yml
 
 # shellcheck disable=SC2016 # the workflow lines, literally
 for f in .github/workflows/gpui-window-captures.yml .github/workflows/tui-tests.yml; do

@@ -155,6 +155,11 @@ jobs:
             isonim-gpui/rust/target/debug/libgpui_nim_shim.so
           )
           [ ! -e codetracer-visual-replay/ct-native-replay ] || files+=(codetracer-visual-replay/ct-native-replay)
+          # The store paths these run against (glibc-2.40-224, lldb,
+          # vulkan-loader, ...), which a shard realises after unpacking.
+          (cd codetracer && nix develop .#devShells.x86_64-linux.default --command bash ci/build/record-runtime-closure.sh \
+            ../codetracer-visual-replay/nix-runtime-closure.txt "${files[@]/#/../}")
+          files+=(codetracer-visual-replay/nix-runtime-closure.txt)
           tar -czf "${RUNNER_TEMP}/visual-replay-tools.tar.gz" "${files[@]}"
           ls -la "${RUNNER_TEMP}/visual-replay-tools.tar.gz"
 
