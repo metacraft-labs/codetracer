@@ -290,7 +290,10 @@ done
 # lane) and plugin-transport-darwin.yml's `plugin-transport-darwin`
 # (d959a95c0a5). Each installs Nix through ./.github/actions/setup-nix before
 # its first `nix`.
-readonly EXPECTED_NIX_JOBS=48
+#
+# 48 -> 49: screen-oracle.yml's `screen-oracle` (e2a37617f76), the PLAT-39
+# screen oracle moved out of viewmodel-tests into a job of its own.
+readonly EXPECTED_NIX_JOBS=49
 
 if [ "${#nix_jobs[@]}" -eq "$EXPECTED_NIX_JOBS" ]; then
 	ok "the scanner still classifies the nix-using jobs (${#nix_jobs[@]})"

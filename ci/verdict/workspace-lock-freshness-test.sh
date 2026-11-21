@@ -810,9 +810,13 @@ OUT="$(timeout "${HARD_CAP_SECONDS}" bash "$CHECK" --list-declared 2>&1)"
 RC=$?
 expect_rc 0 "derivation/defaults"
 
-# Declared ONLY in .github/sibling-repos — the name the old hard-coded probe
-# could never have covered, and the reason its justifying comment was false.
-expect_contains "codetracer-launcher" "derivation/defaults"
+# Declared ONLY in .github/sibling-repos — the kind of name the old hard-coded
+# probe could never have covered. This was codetracer-launcher until
+# 58d020d5dc6 took the private corners off the list (the public lock cannot
+# pin them); codetracer-python-recorder is on it, and in no workflow bare.
+expect_contains "codetracer-python-recorder" "derivation/defaults"
+# ...and the private corners are NOT declared: the public lock cannot pin them.
+expect_not_contains "codetracer-launcher" "derivation/defaults"
 # Declared ONLY as a bare entry in a workflow (launcher-recorder-e2e.yml).
 expect_contains "nim-everywhere" "derivation/defaults"
 ok "the default set spans BOTH declaration sites, from the real files"
@@ -839,7 +843,9 @@ ok "the default set spans BOTH declaration sites, from the real files"
 # this suite on every run from then on. The name chosen for the `=ref`-only
 # role must be one that no declaration site names bare — check with
 # `--list-declared` before replacing it.
-expect_contains "codetracer-native-backend" "derivation/defaults"
+# 58d020d5dc6 then took it off the list again (private: the public lock
+# cannot pin it), so it is excluded, like the launcher above.
+expect_not_contains "codetracer-native-backend" "derivation/defaults"
 expect_not_contains "codetracer-native-test-programs" "derivation/defaults"
 expect_not_contains "codetracer-example-recordings" "derivation/defaults"
 expect_contains "isonim-tui" "derivation/defaults"
