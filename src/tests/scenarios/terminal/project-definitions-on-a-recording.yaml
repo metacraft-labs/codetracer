@@ -1,0 +1,122 @@
+scenario: 1
+name: terminal/project-definitions-on-a-recording
+pack: codetracer
+summary: >-
+  A recording made in a checkout whose `.codetracer/` declares a point
+  collection, a visualiser rule and an executable visualiser: `:project` lists
+  what the checkout declared (the collection, the rule, and the module that was
+  not run), `:project review` discloses the module with its digest and
+  `:project grant` grants it. `:continue` stops on the collection's armed
+  breakpoint in `scale`, where Variables draws `m` through the program's own
+  visualiser; a `:break` on the `print` line and a second `:continue` stop
+  where `n`, a pair the program never rendered, is drawn by the declared shape.
+
+stage:
+  - use: write-project
+    with:
+      files:
+        main.py: |
+          # A program whose repository teaches CodeTracer about itself.
+          #
+          # The suites that read it copy this file into a scratch checkout, write a
+          # `.codetracer/` beside it, and record it there; see
+          # src/frontend/tui/tests/test_project_definitions_session.nim.
+          #
+          # The values are tuples and integers because the Python recorder records
+          # those structurally (an instance of a class is recorded as its `str()`).
+
+
+          def codetracer_visualise(m):
+              # The program's own visualiser (Project-Definitions §5.1, mechanism 1).
+              return "a " + str(m[0]) + " by " + str(m[1]) + " matrix"
+
+
+          def scale(m, k):
+              total = m[0] * k
+              return total
+
+
+          def drift():
+              x = 1000
+              for i in range(3):
+                  x = x + 1
+              return x
+
+
+          def main():
+              m = (3, 4)
+              label = codetracer_visualise(m)
+              t = scale(m, 2)
+              n = (2, 2)
+              d = drift()
+              print(label, t, n[0], d)
+
+
+          main()
+        .codetracer/points.toml: |
+          schema = "codetracer.points.v1"
+
+          [[collection]]
+          name = "hot path"
+          enabled = true
+
+          [[collection.point]]
+          kind = "breakpoint"
+          path = "main.py"
+          anchor = "total = m[0] * k"
+
+          [[collection.point]]
+          kind = "tracepoint"
+          path = "main.py"
+          anchor = "this line is not in the program"
+          expression = "x"
+        .codetracer/visualisers.toml: |
+          schema = "codetracer.visualisers.v1"
+
+          [[visualiser]]
+          matchKind = "shape"
+          match = "#2"
+          summary = "a pair"
+        .codetracer/visualisers.wasm: { fixture: echo-length-wasm }
+  - use: record-program
+    with: { program: $project/main.py }
+  - use: open-recording
+    with: { width: 180, height: 56 }
+
+steps:
+  - wait: { until: replay-idle, timeout: 180s }
+  # what the checkout declared, on the screen
+  - type: ":project"
+  - key: Enter
+  - wait: { until: { at: popup, assert: 'shows("PROJECT DEFINITIONS")' }, timeout: 60s }
+  - expect: { at: popup, assert: 'shows("collection ''hot path''")' }
+  - expect: { at: popup, assert: 'shows("1 visualiser rule(s)")' }
+  - expect: { at: popup, assert: 'shows("not run: .codetracer/visualisers.wasm")' }
+  - key: Esc
+  - wait: { until: { at: popup, present: false }, timeout: 30s }
+  # the disclosure, derived from the grant
+  - type: ":project review"
+  - key: Enter
+  - wait: { until: { at: popup, assert: 'shows("You are being asked to trust")' }, timeout: 60s }
+  - expect: { at: popup, assert: 'shows("visualisers.wasm")' }
+  - expect: { at: popup, assert: 'shows("sha256:")' }
+  - key: Esc
+  - wait: { until: { at: popup, present: false }, timeout: 30s }
+  # granted, and the status line says so
+  - type: ":project grant"
+  - key: Enter
+  - wait: { until: { at: status-line, assert: 'says("granted .codetracer/visualisers.wasm")' }, timeout: 60s }
+  # the collection's breakpoint is armed: `m` drawn by the program's visualiser
+  - type: ":continue"
+  - key: Enter
+  # the Variables column cuts the value at its width ("a 3 by 4 m…"); the
+  # visualiser's words are what the row shows instead of `(3, 4)`
+  - wait: { until: { at: variables, assert: 'value-of("m", "a 3 by 4")' }, timeout: 120s }
+  - expect: { at: 'editor[file="main.py"]', assert: 'shows-text("total = m[0] * k")' }
+  # a breakpoint on the `print` line: `n` drawn by the declared shape
+  - type: ":break 34"
+  - key: Enter
+  - wait: { until: { at: status-line, assert: 'says("breakpoint at")' }, timeout: 60s }
+  - type: ":continue"
+  - key: Enter
+  - wait: { until: { at: variables, assert: 'value-of("n", "a pair")' }, timeout: 120s }

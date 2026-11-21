@@ -20,6 +20,7 @@ applicable:
   - ../tracing/trace-macro-rebound.yaml
   # --- terminal --- (the real-terminal suites' scenarios, passed fast and realistic)
   - ../terminal/edit-find-in-files.yaml
+  - ../terminal/project-definitions-on-a-recording.yaml
   - ../terminal/files-menu-create.yaml
   - ../terminal/files-menu-rename-from-keyboard.yaml
   - ../terminal/files-menu-delete-asks-first.yaml
