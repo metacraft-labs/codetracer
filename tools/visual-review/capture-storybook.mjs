@@ -220,6 +220,12 @@ const resultsExports = [
 for (const name of resultsExports) {
   agentHarborViews[`agent-harbor-${kebab(name)}`] = `codetracer-agent-harbor--${kebab(name)}`;
 }
+// The progress pie on its own (CTF-P1d): every role at each share and with no
+// known progress, on every ground; the family `agent-harbor-pie`.
+const pieExports = ["PieIndicatorEveryState"];
+for (const name of pieExports) {
+  agentHarborViews[`agent-harbor-${kebab(name)}`] = `codetracer-agent-harbor--${kebab(name)}`;
+}
 // The Changes panel and the Inbox (CTF-P3): one view per story, each captured
 // at its first frame (`InboxPlayback` at its moments with `--moments`); the
 // families `agent-harbor-changes` and `agent-harbor-inbox` below select them.
@@ -371,6 +377,7 @@ const viewFamilies = {
   "agent-harbor-composer": composerExports.map((name) => `agent-harbor-${kebab(name)}`),
   "agent-harbor-results": resultsExports.map((name) => `agent-harbor-${kebab(name)}`),
   "agent-harbor-suggested-actions": suggestedActionsExports.map((name) => `agent-harbor-${kebab(name)}`),
+  "agent-harbor-pie": pieExports.map((name) => `agent-harbor-${kebab(name)}`),
   // CTF-P3: the Changes panel's stories, and the Inbox's (the panel and an
   // item's page; `--moments` with `agent-harbor-playback` for its playback).
   "agent-harbor-changes": changesInboxExports.filter((name) => name.startsWith("Changes")).map((name) => `agent-harbor-${kebab(name)}`),

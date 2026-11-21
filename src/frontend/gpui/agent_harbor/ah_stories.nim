@@ -25,6 +25,7 @@ import ./ah_initiative_panels
 import ./ah_fleet_panel
 import ./ah_playback_bar
 import ./ah_composer
+import ./ah_pie
 import ../../stories/agent_harbor_composer_stories
 import ./ah_results
 import ../../stories/agent_harbor_results_stories
@@ -44,7 +45,7 @@ import ../../viewmodel/keymap/[base_keymaps, context_keys, editing_keymap,
 import ../../../common/key_names
 
 export agent_harbor_stories, ah_theme, ah_playback_bar, user_keymap, ah_composer,
-  ah_results, ah_changes_inbox_stories
+  ah_results, ah_changes_inbox_stories, ah_pie
 
 const
   GpuiAgentHarborSurfaces* = [
@@ -61,9 +62,11 @@ const
     "agent-harbor-changes",
     "agent-harbor-inbox",
     "agent-harbor-inbox-item",
+    "agent-harbor-pie",
   ]
     ## Every surface of the Agent Harbor section this module draws (the
-    ## Changes panel's and the Inbox's through `ah_changes_inbox_stories`).
+    ## Changes panel's and the Inbox's through `ah_changes_inbox_stories`,
+    ## the progress pie's through `ah_pie`).
   FrameTitlePx = 32          ## `.lm_header`
   FrameInsetPx = 4           ## the golden-layout root's side inset
 
@@ -456,6 +459,9 @@ proc mountAgentHarborStoryGpui*(r: GpuiRenderer; surface, fixture: string;
                              r.suggestionTail(p, m.suggestion, press))
     of "agent-harbor-changes", "agent-harbor-inbox", "agent-harbor-inbox-item":
       m.changesInbox = r.mountChangesInboxStory(host, surface, fixture, pb, p, bodyW)
+    of PieStorySurface:
+      # Static data, no viewmodel (`agent_harbor_pie_stories`).
+      r.drawPieStory(host, fixture, p, bodyW, heightPx)
     else:
       raise newException(ValueError, "no GPUI rendering for the Agent Harbor surface " &
                          surface)

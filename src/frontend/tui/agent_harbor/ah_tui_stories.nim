@@ -33,6 +33,7 @@ import ./ah_tui_initiative_panels
 import ./ah_tui_fleet_panel
 import ./ah_tui_playback_bar
 import ./ah_tui_composer
+import ./ah_tui_pie
 import ../../stories/agent_harbor_composer_stories
 import ./ah_tui_results
 import ../../stories/agent_harbor_results_stories
@@ -66,6 +67,7 @@ const
     "agent-harbor-results",
     "agent-harbor-session-activity",
     "agent-harbor-suggested-actions",
+    "agent-harbor-pie",
   ]
     ## Every surface of the Agent Harbor section this module draws.
   AgentHarborSectionTitle* = "CodeTracer/Agent Harbor"
@@ -328,6 +330,7 @@ proc draw*(m: AhTuiMount) =
     let press: ActivityPress = proc(operation, target: string) =
       discard mount.pressActivity(operation, target)
     c.drawSessionActivity(m.timeline, top, 0, m.cols, h, press, m.suggestion)
+  of PieStorySurface: c.drawPieStory(m.fixture, top, 0, m.cols, h)
   of "agent-harbor-session-activity":
     let mount = m
     let press: ActivityPress = proc(operation, target: string) =

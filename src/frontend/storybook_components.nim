@@ -124,6 +124,7 @@ import stories/agent_harbor_results_stories
 import stories/dom_suggested_actions_presses
 import stories/agent_harbor_suggested_actions_stories
 import viewmodel/views/isonim_agent_harbor_results_view
+import viewmodel/views/isonim_agent_harbor_pie_view
 import viewmodel/views/isonim_agent_harbor_session_activity_view
 import viewmodel/agent_harbor_activity_cards
 import stories/dom_activity_presses
@@ -2018,6 +2019,12 @@ proc mountAgentHarborResultsStory(container: isonim_dom.Element;
     for dispose in disposers: dispose()
     container.innerHTML = ""
 
+proc mountAgentHarborPie(container: isonim_dom.Element; fixture: string): DisposeProc =
+  ## The progress pie's story (`isonim_agent_harbor_pie_view`): static data,
+  ## no viewmodel.
+  mountAgentHarborPieStory(container, fixture)
+  return proc() = container.innerHTML = ""
+
 var shownTimeline: SessionTimelineVM
   ## The session activity timeline on the page (StoryBook shows one story at
   ## a time); nil when none is. Its presses and keys act on it.
@@ -2949,6 +2956,7 @@ proc mountCodeTracerStory*(container: isonim_dom.Element;
     of "agent-harbor-session-list": mountAgentHarborSessionList(container, f, o)
     of "agent-harbor-composer": mountAgentHarborComposerStory(container, f)
     of "agent-harbor-results": mountAgentHarborResultsStory(container, f)
+    of "agent-harbor-pie": mountAgentHarborPie(container, f)
     of "debug-shell": mountDebugShell(container, f)
     of "debug-controls": mountDebugControls(container, f)
     else: mountStructure(container, n, f)

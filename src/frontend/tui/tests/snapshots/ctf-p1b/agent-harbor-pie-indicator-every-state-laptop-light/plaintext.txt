@@ -1,0 +1,56 @@
+                0% 16% 50% 84%  100%  unknown
+                                                                                                                                                                                    
+ Window
+ needs input     ○  ◔   ◑   ◕     ●      ◌
+ running/working ○  ◔   ◑   ◕     ●      ◌
+ queued          ○  ◔   ◑   ◕     ●      ◌
+ failed/blocked  ○  ◔   ◑   ◕     ●      ◌
+ idle            ○  ◔   ◑   ◕     ●      ◌
+ ended/done      ○  ◔   ◑   ◕     ●      ◌
+                                                                                                                                                                                    
+ Panel
+ needs input     ○  ◔   ◑   ◕     ●      ◌
+ running/working ○  ◔   ◑   ◕     ●      ◌
+ queued          ○  ◔   ◑   ◕     ●      ◌
+ failed/blocked  ○  ◔   ◑   ◕     ●      ◌
+ idle            ○  ◔   ◑   ◕     ●      ◌
+ ended/done      ○  ◔   ◑   ◕     ●      ◌
+                                                                                                                                                                                    
+ Active tab
+ needs input     ○  ◔   ◑   ◕     ●      ◌
+ running/working ○  ◔   ◑   ◕     ●      ◌
+ queued          ○  ◔   ◑   ◕     ●      ◌
+ failed/blocked  ○  ◔   ◑   ◕     ●      ◌
+ idle            ○  ◔   ◑   ◕     ●      ◌
+ ended/done      ○  ◔   ◑   ◕     ●      ◌
+                                                                                                                                                                                    
+ Selected row
+ needs input     ○  ◔   ◑   ◕     ●      ◌
+ running/working ○  ◔   ◑   ◕     ●      ◌
+ queued          ○  ◔   ◑   ◕     ●      ◌
+ failed/blocked  ○  ◔   ◑   ◕     ●      ◌
+ idle            ○  ◔   ◑   ◕     ●      ◌
+ ended/done      ○  ◔   ◑   ◕     ●      ◌
+                                                                                                                                                                                    
+ Menu
+ needs input     ○  ◔   ◑   ◕     ●      ◌
+ running/working ○  ◔   ◑   ◕     ●      ◌
+ queued          ○  ◔   ◑   ◕     ●      ◌
+ failed/blocked  ○  ◔   ◑   ◕     ●      ◌
+ idle            ○  ◔   ◑   ◕     ●      ◌
+ ended/done      ○  ◔   ◑   ◕     ●      ◌
+                                                                                                                                                                                    
+ Glyph tiers, running/working
+ extended        ○  ◔   ◑   ◕     ●      ◌
+ basic           ○  ●   ●   ●     ●      ○
+ ascii           o  *   *   *     *      o
+                                                                                                                                                                                    
+ reader: running, 8 of 50 steps, 16%
+ reader: running, progress unknown
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
