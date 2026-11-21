@@ -48,13 +48,31 @@
 ##             `globalDispatcher` — and then calls `applyKey`. The state is read
 ##             back out of the shim's element store across the same boundary.
 ##
-## So the keyboard claim has ONE independent oracle and two arms that agree with
-## the vocabulary's own machine. The GPUI arm's independence is in the
-## TRANSPORT and the STORAGE, not in the decision: what it can catch is a key
-## that reached the wrong listener, an attribute the renderer mangled, a node
-## the renderer dropped — and it caught two of those three (`gpui_gaps`
-## `PLAT21-VG2`, and the closure defect `gpui_binding.keyHandler`'s header
-## records).
+## So in THIS process the keyboard claim has one independent oracle and two
+## arms that agree with the vocabulary's own machine. The GPUI arm's
+## independence is in the TRANSPORT and the STORAGE, not in the decision: what
+## it can catch is a key that reached the wrong listener, an attribute the
+## renderer mangled, a node the renderer dropped — and it caught two of those
+## three (`gpui_gaps` `PLAT21-VG2`, and the closure defect
+## `gpui_binding.keyHandler`'s header records).
+##
+## ## THE WEB ARM IN A BROWSER, AND A SECOND INDEPENDENT ORACLE (2026-11-21)
+##
+## The web arm here is `MockRenderer`, because this lane compiles C and
+## `WebRenderer` needs a live document. The browser is in
+## `src/frontend/tests/keyboard_panes_chromium_test.nim` (`renderer-chromium`
+## lane), and the recording reaches it through this file: the case "the panes
+## and the terminal's answers equal the committed fixture" exports the four
+## keyboard panes' structure and isonim-tui's facts after every key of
+## `keyboard_pane_scripts.PaneScripts`, and requires the export to equal
+## `src/frontend/tests/fixtures/keyboard_panes_calc.json`. In Chromium the
+## web binding at `[WebRenderer, Element]` is held to those answers key by
+## key, and so are the W3C ARIA Authoring Practices' reference listbox, tree
+## and grid (`vendor/aria-practices/`) — a SECOND independent keyboard oracle,
+## sharing no author and no code with isonim-tui or the vocabulary. It agrees
+## on every key but two pinned, specified differences: the reference listbox
+## lands on a disabled option, and the reference grid's End goes to the last
+## cell of the row.
 ##
 ## ## §14: THE SHARED CODE PATH, AND THE PROOF THAT THE COMPARISON CAN GO RED
 ##
@@ -117,6 +135,7 @@ import ../../view_vocabulary/pane_views
 import ../../view_vocabulary/terminal_binding as tbind
 import ../../view_vocabulary/web_binding as wbind
 import ../../view_vocabulary/gpui_binding as gbind
+import ../../view_vocabulary/keyboard_pane_scripts
 import ./fixtures/fixture_provider
 
 var asserted = 0
@@ -1085,6 +1104,73 @@ suite "PLAT-21: the three-way comparison CAN go red":
     ck webFacts(t).getOrDefault("calltrace.highlight", "") == $initial
     expectCount(6)
 
+proc paneSection(doc, pane: string): string =
+  ## One pane's entry of a keyboard-pane document, or "" when the document
+  ## does not parse or does not carry it.
+  try:
+    for p in parseJson(doc)["panes"]:
+      if p["pane"].getStr == pane: return pretty(p)
+  except CatchableError:
+    discard
+  ""
+
+template paneMatches(committed, text: string; pane: string) =
+  ck paneSection(committed, pane).len > 0 and
+     paneSection(committed, pane) == paneSection(text, pane)
+
+suite "the four keyboard panes, exported for the browser's two oracles":
+
+  liveTest "the panes and the terminal's answers equal the committed fixture":
+    # A browser cannot open a recording, so this case carries the four
+    # keyboard panes across: each pane's STRUCTURE (`keyboard_pane_scripts.
+    # encodeView`, values dropped) and the terminal widgets' facts before and
+    # after every key of the ONE copy of the scripts. The Chromium suite
+    # (`src/frontend/tests/keyboard_panes_chromium_test.nim`) drives the web
+    # binding and the W3C reference widgets from that file. A recording that
+    # moved makes the file stale, and this case says so by name; set
+    # `CT_WRITE_KEYBOARD_PANES=1` to write it again and review the diff.
+    var doc = newJObject()
+    var panes = newJArray()
+    for script in PaneScripts:
+      if script.pane == $panePointList:
+        publishTracepoints()
+      var pane: PaneKind
+      for k in PaneKind:
+        if $k == script.pane: pane = k
+      let view = paneView(pane, vmFor(pane), GpuiPanelBudget, "terminal").root
+      let h = newTerminalTestHarness(220, 80)
+      let term = tbind.bindView(h, paneView(pane, vmFor(pane), GpuiPanelBudget,
+                                            "terminal").root)
+      var answers = newJArray()
+      answers.add %factLines(tbind.readTerminalFacts(term))
+      ck answers[0].len > 0
+      for st in script.steps:
+        ck tbind.sendKey(term, st.target, st.key)
+        answers.add %factLines(tbind.readTerminalFacts(term))
+      panes.add %*{"pane": script.pane, "view": encodeView(view),
+                   "terminal": answers}
+    doc["panes"] = panes
+    let text = pretty(doc) & "\n"
+    # Nothing host-specific crosses: the recording's own paths are dropped.
+    ck live.sourcePath.len > 0 and live.sourcePath notin text
+    let fixture = currentSourcePath().parentDir.parentDir.parentDir /
+                  "tests" / "fixtures" / "keyboard_panes_calc.json"
+    if getEnv("CT_WRITE_KEYBOARD_PANES") == "1":
+      writeFile(fixture, text)
+    let committed = if fileExists(fixture): readFile(fixture) else: ""
+    if committed != text:
+      checkpoint "STALE: " & fixture & " is not what this recording " &
+        "exports; run this suite with CT_WRITE_KEYBOARD_PANES=1 and review " &
+        "the diff"
+    # PANE BY PANE, each named in its own assertion, so a failure says WHICH
+    # pane moved (and two mutations of two panes cannot read alike).
+    paneMatches(committed, text, "state")
+    paneMatches(committed, text, "calltrace")
+    paneMatches(committed, text, "eventLog")
+    paneMatches(committed, text, "pointList")
+    ck committed == text
+    expectCount(27)
+
 suite "PLAT-21: the session is closed":
   test "the replay-server child is released":
     if liveSkip.len > 0:
@@ -1112,7 +1198,9 @@ suite "PLAT-21: the session is closed":
 # every other.
 # PLAT-63 +3: the Verification pane is a vocabulary pane, three more.
 # Editor-Hosted-Front-Ends §E15 +3: the Macro Expansion pane, three more.
-const ExpectedAssertions = 281
+# +27: the four keyboard panes exported for the browser (four floors, one
+# per key of the seventeen, the path check, each pane and the whole fixture).
+const ExpectedAssertions = 308
 
 suite "PLAT-21: the assertion count":
   test "every case in this file ran":

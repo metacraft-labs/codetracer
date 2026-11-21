@@ -5,3 +5,4 @@
 # Listed by name rather than by a pattern: a bare-name glob would also
 # swallow future source files.
 cross_process_origin_vm_test
+!vendor/aria-practices/*.js

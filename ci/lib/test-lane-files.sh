@@ -1273,6 +1273,11 @@ test_lane_files() {
 		# measuring what the browser's own elements do on their own (the
 		# evidence behind `mappings.webMapping`'s grades).
 		echo src/frontend/tests/view_vocabulary_chromium_test.nim
+		# The debugger's four keyboard panes, carried from a real recording by
+		# `test_cross_renderer_panes.nim`'s fixture: the web binding in a real
+		# page, and the W3C ARIA Authoring Practices' reference widgets as a
+		# second keyboard oracle beside isonim-tui's.
+		echo src/frontend/tests/keyboard_panes_chromium_test.nim
 		# The call trace's guide lines against the rows they connect, read
 		# off a real layout before and after a zoom (#849). Geometry needs a
 		# browser that lays out; jsdom answers 0 for every rect.
