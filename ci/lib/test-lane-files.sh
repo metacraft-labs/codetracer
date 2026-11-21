@@ -1665,6 +1665,10 @@ test_lane_files() {
 		#   `test_hosted_primary_over_socket` — a server-owned session
 		#       (`sync/hosted_primary`) and its mirrors over a real socket.io
 		#       WebSocket, server and client in one Node process.
+		#   `test_plugin_process_host_node` — the plugin supervisor on Node,
+		#       starting REAL plugin processes through `process_link`'s
+		#       `child_process` arm (the desktop's main process and `ct host`
+		#       run it so); the native twin is `test_plugin_process_host`.
 		# `ci/test/vm-unit-js-only-suites-test.sh` asserts that no suite in this
 		# lane imports a JS-only module, and proves the discovery on synthetic
 		# suites nobody listed.

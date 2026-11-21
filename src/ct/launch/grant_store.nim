@@ -75,7 +75,14 @@
 ##
 ## And the read is total: it reports unusable lines rather than raising.
 
-import std/[os, strutils]
+import std/strutils
+when defined(js):
+  # Node: `std/os`'s file procedures are not this backend's (common/node_os).
+  import ../../common/node_os
+  proc readFile(path: string): string = readFileBytes(path)
+  proc writeFile(path, content: string) = writeFileBytes(path, content)
+else:
+  import std/os
 import ../../common/ct_home
 
 when defined(posix):

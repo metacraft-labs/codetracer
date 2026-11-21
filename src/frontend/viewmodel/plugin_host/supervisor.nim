@@ -54,7 +54,12 @@
 ## that is not ABOUT a threshold can widen it on a machine whose load is above
 ## 100 and still wait on state rather than on time.
 
-import std/[algorithm, json, math, os, posix, random, strutils, tables, monotimes, times]
+import std/[algorithm, json, math, random, strutils, tables, monotimes]
+when defined(js):
+  import std/jsffi
+  import ../../../common/node_os
+else:
+  import std/[os, posix, times]
 
 import isonim/core/[computation, owner, signals]
 
@@ -339,13 +344,21 @@ proc changed(sup: Supervisor) =
 proc note(sup: Supervisor; line: string) =
   sup.events.add line
   if sup.logDir.len > 0:
-    try:
-      createDir(sup.logDir)
-      let f = open(sup.logDir / "plugins.log", fmAppend)
-      f.writeLine("[" & $sup.now() & "] " & line)
-      f.close()
-    except CatchableError:
-      discard
+    when defined(js):
+      try:
+        createDir(sup.logDir)
+        appendFileBytes(sup.logDir / "plugins.log",
+                        "[" & $sup.now() & "] " & line & "\n")
+      except CatchableError:
+        discard
+    else:
+      try:
+        createDir(sup.logDir)
+        let f = open(sup.logDir / "plugins.log", fmAppend)
+        f.writeLine("[" & $sup.now() & "] " & line)
+        f.close()
+      except CatchableError:
+        discard
 
 proc slotsOf(inst: Instance; sup: Supervisor): seq[PluginSlot] =
   for id in inst.package.plugins:
@@ -562,12 +575,18 @@ proc startInstance(sup: Supervisor; inst: Instance) =
   let label = inst.label
   inst.link.stderrSink = proc(data: string) =
     if logDir.len > 0:
-      try:
-        createDir(logDir)
-        let f = open(logDir / (label & ".stderr.log"), fmAppend)
-        f.write(data)
-        f.close()
-      except CatchableError: discard
+      when defined(js):
+        try:
+          createDir(logDir)
+          appendFileBytes(logDir / (label & ".stderr.log"), data)
+        except CatchableError: discard
+      else:
+        try:
+          createDir(logDir)
+          let f = open(logDir / (label & ".stderr.log"), fmAppend)
+          f.write(data)
+          f.close()
+        except CatchableError: discard
   inst.state = isStarting
   inst.startedMs = sup.now()
   inst.lastPingMs = inst.startedMs
@@ -1735,17 +1754,9 @@ proc pidOf*(sup: Supervisor; plugin: string): int =
   if s.instance.state notin {isRunning, isStarting}: return 0
   int(s.instance.link.pid)
 
-proc shutdown*(sup: Supervisor; waitMs = 3_000) =
-  ## Stop every process: the graceful sequence, polled until each is reaped
-  ## or `waitMs` passes, then SIGKILL for whatever remains.
-  for pkg in sup.packages.values:
-    for inst in pkg.instances:
-      sup.stopInstance(inst)
-  let start = monotonicMs()
-  while monotonicMs() - start < waitMs:
-    sup.poll()
-    if sup.processIds.len == 0: break
-    os.sleep(5)
+proc finishShutdown(sup: Supervisor) =
+  ## What `shutdown` does once the graceful wait is over: SIGKILL for
+  ## whatever remains, and the mirror disposed.
   for pkg in sup.packages.values:
     for inst in pkg.instances:
       if not inst.link.isNil and inst.link.exit == esRunning:
@@ -1756,3 +1767,58 @@ proc shutdown*(sup: Supervisor; waitMs = 3_000) =
   if not sup.disposeRoot.isNil:
     sup.disposeRoot()
     sup.disposeRoot = nil
+
+when defined(js):
+  const ReapAfterKillMs = 2_000
+    ## How long `shutdown` waits for Node to report the exits of what it
+    ## SIGKILLed.
+  proc jsSetInterval(cb: proc(); ms: int): JsObject {.importjs: "setInterval(#, #)".}
+  proc jsClearInterval(t: JsObject) {.importjs: "clearInterval(#)".}
+
+proc shutdown*(sup: Supervisor; waitMs = 3_000; onDone: proc() = nil) =
+  ## Stop every process: the graceful sequence, polled until each is reaped
+  ## or `waitMs` passes, then SIGKILL for whatever remains. `onDone` runs
+  ## after that.
+  ##
+  ## On the C backend this returns when it is over. On the JavaScript
+  ## backend the bytes and exits it waits for arrive in Node's event loop,
+  ## which a loop here would block: it polls once now, and if a process is
+  ## still running, again every 5 ms on a timer; it returns at once and
+  ## `onDone` says when it is over.
+  for pkg in sup.packages.values:
+    for inst in pkg.instances:
+      sup.stopInstance(inst)
+  when defined(js):
+    let start = monotonicMs()
+    sup.poll()
+    if sup.processIds.len == 0:
+      sup.finishShutdown()
+      if not onDone.isNil: onDone()
+      return
+    var timer: JsObject
+    timer = jsSetInterval(proc() =
+      sup.poll()
+      if sup.processIds.len == 0 or monotonicMs() - start >= waitMs:
+        jsClearInterval(timer)
+        sup.finishShutdown()
+        # What was SIGKILLed is reaped by Node later: read its exit before
+        # saying the shutdown is over, so `processIds` is true afterwards.
+        let reapStart = monotonicMs()
+        var reaper: JsObject
+        reaper = jsSetInterval(proc() =
+          var running = false
+          for pkg in sup.packages.values:
+            for inst in pkg.instances:
+              if not inst.link.isNil and not inst.link.pollExit():
+                running = true
+          if not running or monotonicMs() - reapStart >= ReapAfterKillMs:
+            jsClearInterval(reaper)
+            if not onDone.isNil: onDone(), 5), 5)
+  else:
+    let start = monotonicMs()
+    while monotonicMs() - start < waitMs:
+      sup.poll()
+      if sup.processIds.len == 0: break
+      os.sleep(5)
+    sup.finishShutdown()
+    if not onDone.isNil: onDone()

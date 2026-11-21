@@ -44,7 +44,14 @@
 ## component that STOPPED being a plugin at 2.0.0 go on loading its 1.0.0
 ## manifest for ever, silently, which is the shape §4.1 exists to refuse.
 
-import std/[json, os, strutils]
+import std/[json, strutils]
+when defined(js):
+  # Node: `std/os`'s file procedures are not this backend's (common/node_os).
+  import ../../common/node_os
+  proc readFile(path: string): string = readFileBytes(path)
+  proc writeFile(path, content: string) = writeFileBytes(path, content)
+else:
+  import std/os
 
 import ./component_roots
 import ../../common/plugin_model

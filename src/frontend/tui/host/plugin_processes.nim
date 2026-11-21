@@ -26,7 +26,15 @@
 ## 5. Every other enabled plugin is activated on `trace-opened`, lazily: its
 ##    package's process starts when the first of its plugins is activated.
 
-import std/[json, os, sequtils, strutils, tables, times]
+import std/[json, sequtils, strutils, tables, times]
+when defined(js):
+  # Node (the desktop's main process, `ct host`): `std/os`'s file procedures
+  # are not this backend's (common/node_os).
+  import ../../../common/node_os
+  proc readFile(path: string): string = readFileBytes(path)
+  proc writeFile(path, content: string) = writeFileBytes(path, content)
+else:
+  import std/os
 
 import ../../../common/plugin_model
 import ../../../ct/launch/[grant_store, plugin_components]
