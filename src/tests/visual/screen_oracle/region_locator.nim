@@ -8,47 +8,44 @@
 ## share a source measures nothing.
 ##
 ## ===========================================================================
-## HOW THE GRID IS FOUND, AND WHY THIS METHOD RATHER THAN `detectWindowRects`
+## HOW THE PANES ARE FOUND: GuiAssert's window detector, on a full-bleed window
 ## ===========================================================================
 ##
-## Measured 2026-09-22 over the pinned corpus. The CodeTracer layout draws
-## inter-pane gutters in a darker tone than pane interiors, and the separation
-## is not marginal — taking the MEDIAN of each column down the frame yields
-## essentially two values:
+## The CodeTracer layout draws inter-pane separators (gutters and splitters)
+## in a darker tone than the pane interiors. Both front-ends fill the screen
+## with ONE window subdivided into panes, which is the case GuiAssert's
+## `detectWindowRects` used to throw away as background (a component covering
+## more than 98% of the frame). It now subdivides such a component along its
+## interior separators (`subdivideRect`) and returns the panes, so this module
+## is a thin layer over it:
 ##
-##     column-median histogram, stepped-editor (1920x1080):
-##         40 -> 1895 columns     (pane interior)
-##         27 ->   24 columns     (gutter)
-##         53 ->    1 column
+##   1. `separatorTones` takes the frame's ground (its histogram's mode) and the
+##      most frequent darker tone (the separators), and the threshold between
+##      them. Measured palettes: Electron ground 40 / gutter 27, GPUI ground 33
+##      / gutter 21 — the two front-ends do not share one, which is why the
+##      threshold is taken per frame and never baked in. Otsu would split the
+##      text from the ground instead, and leave every pane and gutter in one
+##      class.
+##   2. `detectWindowRects` with that threshold finds the window and its panes;
+##      the status bar and tool bars are thinner than `maxAspect` allows and
+##      drop out by shape.
 ##
-## So a gutter is found by thresholding the column median, and the pane grid is
-## the complement. The MEDIAN is what makes this work: a gutter column still
-## passes through pane content at some rows, so a mean or a variance test is
-## pulled off the gutter value by that content, while a median is not. An
-## earlier attempt using low column VARIANCE found only three of the six
-## gutters for exactly that reason.
+## The separator rules the detector applies — a separator is dark along 95%
+## of the rect being split, at least three lines thick, measured inside that
+## rect only (the layout is not a grid: the editor column is full height while
+## the columns to its right are split), a horizontal one connects both sides,
+## and a run darker than the separator tone is a shadow — are the ones this
+## module measured on the pinned corpus and used to implement itself. They
+## moved into GuiAssert with the rest of the method.
 ##
-## The method holds across both declared viewports, which is the property that
-## matters, since `scenarios.json` declares `expectedViewports: 2` and three of
-## the six frames are 1440x900 rather than 1920x1080:
-##
-##     1920x1080: vertical gutters at 0, 290, 769, 1163, 1556, 1916
-##     1440x900 : vertical gutters at 0, 218, 577,  872, 1166, 1436
-##
-## Same structure — five pane columns, two pane rows — at different
-## coordinates. **No coordinate in this module is a constant.**
-##
-## `vision_windows.detectWindowRects` is NOT used here, and the reason is its
-## own documented limit rather than a preference: its header warns that it
-## assumes light-on-dark chrome and *"may treat a full-bleed single window as
-## background"*, which is precisely this frame — one window filling the screen,
-## subdivided. `ocr.detectElements` is not used either, and that reason is
-## measured rather than assumed: its only non-trivial backend, `ebOmniParser`,
-## ALWAYS raises `OcrBackendUnavailable` because no weights are bundled. The
-## reader says so by name rather than returning empty.
+## `ocr.detectElements` is not used, and that reason is measured rather than
+## assumed: its only non-trivial backend, `ebOmniParser`, ALWAYS raises
+## `OcrBackendUnavailable` because no weights are bundled. The reader says so by
+## name rather than returning empty.
 
-import std/[algorithm, sequtils, strutils, tables]
+import std/algorithm
 import gui_assert/image_math
+import gui_assert/core/vision_windows
 import ./screen_reading
 
 type
@@ -59,75 +56,29 @@ type
     first*, last*: int
 
   PaneGrid* = object
-    ## The located grid. `cells` is row-major over (rowBands x colBands).
-    colBands*: seq[GutterRun]   ## the pane columns (between vertical gutters)
-    rowBands*: seq[GutterRun]   ## the pane rows (between horizontal gutters)
+    ## The located panes, in reading order (top-to-bottom, then
+    ## left-to-right).
     cells*: seq[Rect]
 
 const
-  GutterMedianThreshold* = 33
-    ## **Derived, with its rejected values visible (§36b).**
-    ##
-    ## Measured gutter median is 27 and pane-interior median is 40, in both
-    ## viewports, on every frame of the pinned corpus. The midpoint is 33.5.
-    ##
-    ## | candidate | result on the corpus | why not chosen |
-    ## |---|---|---|
-    ## | 28 | finds all gutters | only 1 above the gutter value; a slightly lighter gutter tone merges the whole frame into one cell |
-    ## | **33** | **all 6 gutters in both viewports, 6 of margin either way** | **chosen — the midpoint, rounded down** |
-    ## | 39 | finds all gutters | only 1 below the pane value; any pane drawn marginally darker becomes a gutter and the grid shatters |
-    ## | 45 | **wrong** | pane interiors classify as gutters |
-    ##
-    ## Lowerable with a measurement; not raisable twice — the ratchet rule.
+  FallbackSeparatorThreshold* = 33
+    ## The threshold used when a frame has no darker population than its
+    ## ground (`separatorTones` answers -1). Measured on the pinned corpus:
+    ## gutter 27, pane 40, midpoint rounded down. A frame like that has no
+    ## separators to find, so this only decides how it is refused.
 
-  MinGutterWidth* = 3
-    ## A gutter is at least this many pixels wide. Measured: every gutter in the
-    ## corpus is 4 px. Set to 3 rather than 4 so a one-pixel rendering
-    ## difference does not lose a gutter, and not to 1 because a single dark
-    ## column occurs inside content (a box border) and would split a pane.
-
-  MinPaneExtent* = 24
-    ## A band narrower than this is not a pane. Guards against a pair of
-    ## adjacent gutters producing a sliver band.
-
-  TitleStripHeight* = 30
-    ## The top strip of a pane cell that carries its title/tab row. OCR'd on
-    ## its own to identify the cell, because OCRing the whole cell returns the
-    ## pane's CONTENT as well and the first line is not reliably the title.
-
-  MinInteriorRowGutter* = 3
-    ## Horizontal splitter width in point-extent frames. Width is only the
-    ## first test: `splitRect` also requires the run to reach both sides.
+  MinSeparatorLines* = 3
+    ## The thinnest separator, in lines, in either axis.
     ##
-    ## This constant exists because the grid is NOT a clean 2-D grid and a
-    ## naive one is wrong: the editor column runs the full height of the frame
-    ## while the three columns to its right are each split in two. A GLOBAL row
-    ## scan sees the right-hand split and cuts the editor in half with it, so
-    ## the rows are segmented PER COLUMN BAND instead.
-    ##
-    ## Historical measurement over all six pinned frames, interior runs only
-    ## (frame chrome and status bar excluded):
-    ##
-    ## | scenario | interior run widths |
-    ## |---|---|
-    ## | stepped-editor | 1, 1, 3, 4, **8, 8, 8** |
-    ## | advanced-state | 2, 3, 3, 4, **8, 8, 8** |
-    ## | entry-shell | 1, 1, 4, **8, 8, 8** |
-    ## | breakpoint-editor | 2, 3, 3, 4, **8, 8, 8** |
-    ## | returned-calltrace | 2, 3, 3, 4, **8, 8, 8** |
-    ## | continued-event-log | 1, 1, 2, 3, 3, 4, **8, 8, 8** |
-    ##
-    ## Those real splits included a transparent 4px header strip. The desktop
-    ## deliberately removed it: current nominal splits are 4px, matching the
-    ## vertical splitters. Re-measured 2026-11-03 at 977b82e43 on the six
-    ## settled Electron page rasters, reduced to points with the capture lane's
-    ## Lanczos filter: wide frames have 4 gutter-dark rows (539..542), laptop
-    ## frames have 3 (450..452). All connect both sides of their column. The
-    ## laptop editor's inset furniture has a 3-row run at y=112 with zero rows
-    ## dark at both sides. Allow the same one-pixel margin as MinGutterWidth.
-    ## Furniture still reaches 4px, so width no longer separates the
-    ## populations. A real splitter connects both sides of the current rect;
-    ## an inset search-box border can pass the 95% bulk test without doing so.
+    ## Historical measurement over all six pinned frames, interior runs only:
+    ## real splits were 8 px (with a transparent header strip), furniture 1-4.
+    ## Re-measured 2026-11-03 at 977b82e43 on the six settled Electron page
+    ## rasters, reduced to points with the capture lane's Lanczos filter: wide
+    ## frames have 4 gutter-dark rows (539..542), laptop frames have 3
+    ## (450..452), and all connect both sides of their column; the laptop
+    ## editor's inset furniture has a 3-row run at y=112 that reaches neither
+    ## side. So width no longer separates the populations and the side rule
+    ## does.
     ##
     ## | candidate | consequence | decision |
     ## |---|---|---|
@@ -135,276 +86,154 @@ const
     ## | 3, with side continuity | accepts both viewports and historical splitters, rejects inset furniture | chosen |
     ## | 4, with side continuity | accepts wide frames but merges every laptop right column | rejected |
     ## | 6 | merges the current right column into one cell | rejected |
-    ## | 9 | also loses the historical 8px splits | rejected |
 
-  GutterDarkFraction* = 0.95
-    ## A line counts as a gutter when at least this fraction of it, inside the
-    ## rect being split, is gutter-dark. See `darkFractionIn` for the measured
-    ## defect that rules out a median.
-    ##
-    ## | candidate | effect on the corpus | why not chosen |
-    ## |---|---|---|
-    ## | 0.50 (a median) | **wrong** | splits the event log at x=1163 on a nine-row margin; rows truncate mid-text |
-    ## | 0.80 | wrong | a gutter interrupted by one pane's content for a fifth of its length still passes |
-    ## | **0.95** | **all real gutters found, no false ones** | **chosen** |
-    ## | 1.00 | brittle | a single antialiased pixel anywhere along a true gutter rejects it |
+  MinPaneExtent* = 24
+    ## A band narrower than this is not a pane: a pair of adjacent separators
+    ## would otherwise leave a sliver cell.
 
   SplitterDarkerSlack* = 3
     ## Grey levels a horizontal splitter's darkest row may sit BELOW the
-    ## frame's gutter tone (`deriveGutterTones`) and still be a splitter.
+    ## frame's separator tone and still be a splitter.
     ##
-    ## A splitter is painted in the gutter's colour, and the only thing a
-    ## rasteriser or a downscale does to it is blend it toward the LIGHTER pane
-    ## ground beside it. Nothing in a splitter is darker than the gutter. A
-    ## SHADOW is: it is black composited over the ground. Since the editor
-    ## learned Monaco's sticky scroll (2026-10-17), a scrolled GPUI editor draws
-    ## the sticky widget's shadow across the WHOLE pane under its headers —
-    ## `leaves.nim`, alphas 0.225/0.475/0.225/0.075 of black when a header is
-    ## pushed up, 0.95/0.7/0.325/0.075/0.025 under whole headers. Over the
-    ## `#282828` ground (40) that is rows of 31, 21, 31, 37 (measured on the
-    ## `stepped-editor` window frame at codetracer `b7e12b7450b`): three rows
-    ## under the gutter threshold, reaching both sides of the editor's cell —
-    ## so the split rule took it for a splitter and cut the editor into its
-    ## 37 px title strip and an untitled body, and the PLAT-42 window record
-    ## found no editor rows on four of the eight frames. The splitters in the
-    ## same frame are eight rows of exactly 27, the gutter tone.
+    ## A splitter is painted in the separator's colour, and a rasteriser or a
+    ## downscale only blends it toward the LIGHTER ground beside it. A SHADOW
+    ## is darker: since the editor learned Monaco's sticky scroll (2026-10-17),
+    ## a scrolled GPUI editor draws the sticky widget's shadow across the whole
+    ## pane under its headers (rows of 31, 21, 31, 37 over the 40 ground,
+    ## measured on the `stepped-editor` window frame at codetracer
+    ## `b7e12b7450b`), three rows under the threshold, reaching both sides.
     ##
     ## | candidate | consequence | decision |
     ## |---|---|---|
     ## | no check | the sticky shadow splits the editor | rejected (the defect) |
     ## | 0 | a one-level rounding difference drops a real splitter | rejected |
-    ## | **3** | **splitters (27 at gutter 27) kept; the shadows' 21 and 2 rejected** | **chosen** |
+    ## | **3** | **splitters (27 at gutter 27) kept; the shadows' 21 rejected** | **chosen** |
     ## | 6 | the pushed-up shadow's 21 sits exactly 6 under 27 and splits again | rejected |
-  EdgeChromeMargin* = 60
-    ## Runs closer than this to the top or bottom of the frame are the window
-    ## chrome and the status bar, not pane splits. They are excluded before the
-    ## width rule is applied — otherwise the 32-px status bar would be the
-    ## widest "split" in every frame and would win every comparison.
 
-func medianOf(values: var seq[uint8]): int =
-  if values.len == 0: return 0
-  values.sort()
-  int(values[values.len div 2])
+  MinPaneAreaPermille* = 15
+    ## A located cell smaller than this share of the frame (per mille) is not
+    ## a pane: `detectWindowRects`' own default floor (1.5%), applied after
+    ## the shadow merge rather than before it.
 
-proc deriveGutterTones*(img: GrayImage): tuple[threshold, gutterTone: int] =
-  ## **THE THRESHOLD IS DERIVED FROM THE FRAME, NOT BAKED IN — because the two
-  ## front-ends do not share a palette.**
-  ##
-  ## Measured 2026-09-22, column-median histograms of the same scenario:
-  ##
-  ##     Electron : pane 40 (1895 columns), gutter 27 (24 columns)
-  ##     GPUI     : pane 33 (1380 columns), gutter 21 (540 columns)
-  ##
-  ## A fixed threshold of 33 — the midpoint of the ELECTRON pair — classifies
-  ## the GPUI frame correctly only by luck: GPUI's pane median is *exactly* 33,
-  ## so the margin is ZERO and a pane drawn one shade darker would be read as a
-  ## gutter and shatter the layout. That is precisely the stated risk that a
-  ## constant tuned on one fixture generalises to nothing, and a cross-renderer
-  ## oracle whose geometry only works on one renderer would be worth very
-  ## little.
-  ##
-  ## So the two populations are found in each frame and the threshold is placed
-  ## between them. The histogram is strongly bimodal in both renderers, which
-  ## is what makes this reliable rather than clever: the darkest common median
-  ## is the gutter tone, the most common is the pane tone.
-  ##
-  ## `GutterMedianThreshold` remains as the FALLBACK for a frame with no
-  ## discernible second population — and for a blank frame that is the right
-  ## answer, because `isDegenerate` will reject it first anyway.
-  var hist = initCountTable[int]()
-  let yStart = min(90, img.height div 8)
-  let yEnd = max(yStart + 1, img.height - max(70, img.height div 12))
-  for x in 0 ..< img.width:
-    var vals: seq[uint8] = @[]
-    var y = yStart
-    while y < yEnd:
-      vals.add uint8(img.pixels[y * img.width + x])
-      y += 3
-    hist.inc medianOf(vals)
-  if hist.len < 2: return (GutterMedianThreshold, -1)
-  # The pane tone is the most common median. The gutter tone is the most common
-  # median BELOW it — "below" because a gutter is darker than a pane in both
-  # renderers, and taking simply the second-most-common would pick up a
-  # highlight band instead.
-  let paneTone = hist.largest.key
-  var gutterTone = -1
-  var gutterCount = 0
-  for tone, count in hist:
-    if tone < paneTone and count > gutterCount:
-      gutterTone = tone
-      gutterCount = count
-  if gutterTone < 0: return (GutterMedianThreshold, -1)
-  ((paneTone + gutterTone) div 2, gutterTone)
+  TitleStripHeight* = 30
+    ## The top strip of a pane cell that carries its title/tab row. OCR'd on
+    ## its own to identify the cell, because OCRing the whole cell returns the
+    ## pane's CONTENT as well and the first line is not reliably the title.
 
-proc deriveGutterThreshold*(img: GrayImage): int =
-  ## The threshold alone; see `deriveGutterTones`.
-  deriveGutterTones(img).threshold
+  BlankShare* = 0.999
+    ## A frame is blank when one grey level holds at least this share of its
+    ## pixels. Real frames of either front-end hold their ground at well under
+    ## 0.9 (text, chrome and separators are the rest); a uniform frame holds
+    ## exactly 1.0.
 
-proc darkFractionIn*(img: GrayImage, r: Rect, vertical: bool,
-                     index: int,
-                     threshold = GutterMedianThreshold): float =
-  ## The FRACTION of one line (column if `vertical`, else row) that is gutter-
-  ## dark, measured inside `r` only.
+func toArr(r: Rect): array[4, int] = [r.x, r.y, r.w, r.h]
+func toRect(a: array[4, int]): Rect = Rect(x: a[0], y: a[1], w: a[2], h: a[3])
+
+proc isDegenerate*(img: GrayImage): bool =
+  ## **The blank-frame test, and it is NOT "no rectangles were found".**
   ##
-  ## **A FRACTION AND NOT A MEDIAN, AND THE DIFFERENCE IS NOT COSMETIC.** A
-  ## median asks "is this line dark more often than not", which is the wrong
-  ## question for a line that is a gutter in part of the frame and pane
-  ## elsewhere. Measured 2026-09-22 on `stepped-editor`: x=1163 is gutter-dark
-  ## (27) for y in 38..546 and pane-light (40) for y in 547..1047 — 509 rows
-  ## against 501. The median of the whole column is therefore 27 and the column
-  ## is declared a full-height gutter on a nine-row margin, splitting the event
-  ## log pane in half. The event log's own rows span x 785..1569, straight
-  ## across that supposed gutter, so every row was truncated mid-text and the
-  ## grammar correctly reported a mismatch on content that was really there.
-  ##
-  ## The fraction asks the right question: **is this line dark along
-  ## essentially all of its extent.** At x=1163 over the full content rect it
-  ## is ~0.50 and rejects; over the top half alone it is ~1.0 and accepts,
-  ## which is exactly the structure the recursion needs.
-  var dark = 0
-  var total = 0
-  if vertical:
-    var y = r.y
-    while y < r.y + r.h:
-      if int(uint8(img.pixels[y * img.width + index])) < threshold:
-        inc dark
-      inc total
-      y += 2
-  else:
-    var x = r.x
-    while x < r.x + r.w:
-      if int(uint8(img.pixels[index * img.width + x])) < threshold:
-        inc dark
-      inc total
-      x += 2
-  if total == 0: 0.0 else: dark / total
+  ## A uniform image has no between-class variance — the documented
+  ## degeneracy of Otsu on a unimodal histogram. Both arms matter: an all-dark
+  ## frame and an all-light frame are equally blank, and a test that checked
+  ## only one would call the other one a pane. This is what makes `LAW-R3`
+  ## hold: a blank frame is `urFrameBlank`, never `srEmpty`.
+  let n = img.width * img.height
+  if n <= 0 or img.pixels.len < n: return true
+  var hist: array[256, int]
+  for i in 0 ..< n: inc hist[ord(img.pixels[i])]
+  var top = 0
+  for c in hist: top = max(top, c)
+  float(top) >= BlankShare * float(n)
 
-proc rowMedianIn(img: GrayImage, r: Rect, row: int): int =
-  var vals: seq[uint8] = @[]
-  var x = r.x
-  while x < r.x + r.w:
-    vals.add uint8(img.pixels[row * img.width + x])
-    x += 2
-  medianOf(vals)
+proc locatorThresholds*(img: GrayImage): tuple[threshold, separatorTone: int] =
+  ## The frame's separator threshold and tone (`separatorTones`), with the
+  ## fallback when the frame has no darker population.
+  let t = separatorTones(img)
+  if t.threshold < 0: (FallbackSeparatorThreshold, -1) else: t
 
-proc splitRect*(img: GrayImage, r: Rect, vertical: bool,
-                minGutter: int,
-                threshold = GutterMedianThreshold,
-                gutterTone = -1): seq[GutterRun] =
-  ## Gutters inside `r`, measured inside `r` only. `minGutter` is the
-  ## thickness floor; horizontal runs additionally need a core of that many
-  ## consecutive rows connecting both sides, so an inset border cannot split
-  ## the pane even when it covers `GutterDarkFraction` of each row. With the
-  ## frame's `gutterTone` known, a horizontal run with a row darker than it
-  ## (beyond `SplitterDarkerSlack`) is a shadow, not a splitter.
-  let n = if vertical: r.w else: r.h
-  let origin = if vertical: r.x else: r.y
-  var frac = newSeq[float](n)
-  for i in 0 ..< n:
-    frac[i] = darkFractionIn(img, r, vertical, origin + i, threshold)
-  var i = 0
-  while i < n:
-    if frac[i] >= GutterDarkFraction:
-      var j = i
-      while j < n and frac[j] >= GutterDarkFraction: inc j
-      # Edge-touching runs are the rect's own border, not an interior split.
-      if j - i >= minGutter and i > 0 and j < n:
-        # A thin inset border can occupy >=95% of a wide pane. Unlike a
-        # splitter it does not connect the rectangle's sides. Count a
-        # continuous core, rather than requiring every row: rounded corners
-        # can extend a dark run above/below its full-width part.
-        var sideRun = 0
-        var connectsSides = vertical
-        if not vertical:
-          for row in origin + i ..< origin + j:
-            if int(uint8(img.pixels[row * img.width + r.x])) < threshold and
-               int(uint8(img.pixels[row * img.width + r.x + r.w - 1])) < threshold:
-              inc sideRun
-              if sideRun >= minGutter: connectsSides = true
-            else:
-              sideRun = 0
-        if connectsSides and not vertical and gutterTone >= 0:
-          for row in origin + i ..< origin + j:
-            if rowMedianIn(img, r, row) < gutterTone - SplitterDarkerSlack:
-              connectsSides = false
-              break
-        if connectsSides:
-          result.add GutterRun(first: origin + i, last: origin + j - 1)
-      i = j
-    else:
-      inc i
+proc paneCells*(img: GrayImage, r: Rect,
+                threshold = FallbackSeparatorThreshold,
+                separatorTone = -1): seq[Rect] =
+  ## `r` split into its panes along its interior separators — GuiAssert's
+  ## `subdivideRect` with this layout's measured rules.
+  let floor = if separatorTone >= 0: separatorTone - SplitterDarkerSlack else: -1
+  for c in subdivideRect(img, r.toArr, threshold,
+                         minSeparator = MinSeparatorLines,
+                         minCell = MinPaneExtent, separatorFloor = floor):
+    result.add c.toRect
 
-proc partition*(img: GrayImage, r: Rect, depth = 0,
-                threshold = GutterMedianThreshold,
-                gutterTone = -1): seq[Rect] =
-  ## **RECURSIVE BINARY PARTITION, BECAUSE THE LAYOUT IS NOT A GRID.**
-  ##
-  ## Measured 2026-09-22, and this is why a grid is wrong: in the 1920x1080
-  ## frames a vertical gutter exists at x=1163 in the TOP half of the frame,
-  ## separating the state pane from the calltrace pane — and does NOT exist in
-  ## the bottom half, where `EVENT LOG`, `TIMELINE` and `TERMINAL OUTPUT` are
-  ## TABS OF ONE PANE spanning x 773..1555. A global column scan applies the
-  ## top half's gutter to the bottom half and cuts the event log in two, which
-  ## truncates every row mid-text: `stdout: checksum = 73` was read as
-  ## `stdout:` and the grammar then correctly reported a mismatch.
-  ##
-  ## The same asymmetry holds in the other axis — the editor column is full
-  ## height while the columns right of it are split — so neither axis can be
-  ## treated as global. Splitting recursively, measuring only inside the rect
-  ## being split, is the shape that handles both.
-  if depth > 6 or r.w < MinPaneExtent or r.h < MinPaneExtent:
-    return @[r]
-  # Try vertical first, then horizontal. Order does not matter for the result
-  # because a rect with no split in one axis simply recurses on the other.
-  let vg = splitRect(img, r, vertical = true, minGutter = MinGutterWidth,
-                     threshold = threshold)
-  if vg.len > 0:
-    var cursor = r.x
-    for g in vg:
-      if g.first - cursor >= MinPaneExtent:
-        result.add partition(img, Rect(x: cursor, y: r.y,
-                                       w: g.first - cursor, h: r.h), depth + 1, threshold, gutterTone)
-      cursor = g.last + 1
-    if r.x + r.w - cursor >= MinPaneExtent:
-      result.add partition(img, Rect(x: cursor, y: r.y,
-                                     w: r.x + r.w - cursor, h: r.h), depth + 1, threshold, gutterTone)
-    return
-  let hg = splitRect(img, r, vertical = false,
-                     minGutter = MinInteriorRowGutter, threshold = threshold,
-                     gutterTone = gutterTone)
-  if hg.len > 0:
-    var cursor = r.y
-    for g in hg:
-      if g.first - cursor >= MinPaneExtent:
-        result.add partition(img, Rect(x: r.x, y: cursor,
-                                       w: r.w, h: g.first - cursor), depth + 1, threshold, gutterTone)
-      cursor = g.last + 1
-    if r.y + r.h - cursor >= MinPaneExtent:
-      result.add partition(img, Rect(x: r.x, y: cursor,
-                                     w: r.w, h: r.y + r.h - cursor), depth + 1, threshold, gutterTone)
-    return
-  @[r]
+proc rowSplits*(img: GrayImage, r: Rect,
+                threshold = FallbackSeparatorThreshold,
+                separatorTone = -1): seq[GutterRun] =
+  ## The horizontal separators `paneCells` would split `r` at.
+  let floor = if separatorTone >= 0: separatorTone - SplitterDarkerSlack else: -1
+  for s in separatorsIn(img, r.toArr, vertical = false, threshold,
+                        MinSeparatorLines, floor):
+    result.add GutterRun(first: s.first, last: s.last)
 
-proc columnMedians*(img: GrayImage): seq[int] =
-  ## Median of each column, sampled down the frame. Sampling rather than every
-  ## row because the median is stable under it and the cost is linear in the
-  ## sample count; the stride is chosen so that even the shortest frame
-  ## contributes hundreds of samples.
-  result = newSeq[int](img.width)
-  let yStart = min(90, img.height div 8)
-  let yEnd = max(yStart + 1, img.height - max(70, img.height div 12))
-  for x in 0 ..< img.width:
-    var vals: seq[uint8] = @[]
-    var y = yStart
-    while y < yEnd:
-      vals.add uint8(img.pixels[y * img.width + x])
-      y += 3
-    result[x] = medianOf(vals)
+proc locateGrid*(img: GrayImage): ScreenReading[PaneGrid] =
+  ## Locate the panes, or say why not.
+  if img.width == 0 or img.height == 0:
+    return unreadable[PaneGrid](urFrameBlank, "image has a zero dimension")
+  if isDegenerate(img):
+    return unreadable[PaneGrid](urFrameBlank,
+      "one grey level fills the frame: it carries no layout")
+  let (threshold, tone) = locatorThresholds(img)
+  # `minAreaFrac` low: a pane's title strip that a shadow parted from its
+  # body is a small component, and it must survive to be merged back (below);
+  # what is still too small after the merge is dropped there.
+  let rects = detectWindowRects(img, threshold = threshold,
+    minAreaFrac = 0.001, minSeparator = MinSeparatorLines,
+    separatorFloor = (if tone >= 0: tone - SplitterDarkerSlack else: -1))
+  if rects.len == 0:
+    return unreadable[PaneGrid](urRegionNotLocated,
+      "no window or pane rectangle survived detection (threshold " &
+      $threshold & ")")
+  var cells: seq[Rect] = @[]
+  for r in rects: cells.add r.toRect
+  # A COMPONENT BOUNDARY IS NOT ALWAYS A SEPARATOR. Where two located cells
+  # share one column and are parted by a few dark rows, those rows may be a
+  # SHADOW (GPUI's sticky-scroll shadow under the editor's headers: rows of
+  # 2, 12, 27 over the 40 ground, measured on the `calltrace` window frame
+  # 2026-11-21), which parts the foreground into two components although it
+  # is no splitter. The two are merged unless the separator rules — the same
+  # ones `paneCells` applies, shadow floor included — find a split in the gap.
+  var merged = true
+  while merged:
+    merged = false
+    block scan:
+      for i in 0 ..< cells.len:
+        for j in 0 ..< cells.len:
+          let a = cells[i]
+          let b = cells[j]
+          if i == j or a.x != b.x or a.w != b.w: continue
+          let gap = b.y - (a.y + a.h)
+          if gap < 0 or gap > 8: continue
+          let u = Rect(x: a.x, y: a.y, w: a.w, h: b.y + b.h - a.y)
+          var split = false
+          for g in rowSplits(img, u, threshold, tone):
+            if g.first <= b.y - 1 and g.last >= a.y + a.h: split = true
+          if not split:
+            cells[i] = u
+            cells.delete j
+            merged = true
+            break scan
+  let frameArea = img.width * img.height
+  var grid = PaneGrid()
+  for c in cells:
+    if c.w >= MinPaneExtent and c.h >= MinPaneExtent and
+       c.w * c.h * 1000 >= MinPaneAreaPermille * frameArea:
+      grid.cells.add c
+  if grid.cells.len == 0:
+    return unreadable[PaneGrid](urRegionNotLocated,
+      "no located rectangle is large enough to be a pane")
+  read(grid)
 
 proc rowMedians*(img: GrayImage, xFrom = -1, xTo = -1): seq[int] =
-  ## Median of each row. When `xFrom`/`xTo` are given the median is taken over
-  ## that column band ONLY, which is what makes per-band row segmentation
-  ## possible — see `MinInteriorRowGutter` for why a global row scan is wrong.
+  ## Median grey level of each row over the column band `xFrom..xTo` (the
+  ## whole width, less a margin, when not given). Not a locator: the editor
+  ## readers use it for a row's own background, against which the execution
+  ## band and the ink of a text row stand out.
   result = newSeq[int](img.height)
   let lo = if xFrom >= 0: max(0, xFrom) else: min(10, img.width div 16)
   let hi = if xTo >= 0: min(img.width, xTo + 1)
@@ -415,114 +244,9 @@ proc rowMedians*(img: GrayImage, xFrom = -1, xTo = -1): seq[int] =
     while x < hi:
       vals.add uint8(img.pixels[y * img.width + x])
       x += 3
-    result[y] = medianOf(vals)
-
-func interiorGutters*(gutters: openArray[GutterRun], height: int,
-                      margin = EdgeChromeMargin,
-                      minWidth = MinInteriorRowGutter): seq[GutterRun] =
-  ## Interior runs wide enough to be a pane split. Chrome and status bar are
-  ## dropped BEFORE the width rule, because the status bar is wider than any
-  ## real split and would otherwise dominate.
-  for g in gutters:
-    if g.first > margin and g.last < height - margin and
-       g.last - g.first + 1 >= minWidth:
-      result.add g
-
-func gutterRuns*(medians: openArray[int],
-                 threshold = GutterMedianThreshold,
-                 minWidth = MinGutterWidth): seq[GutterRun] =
-  ## Contiguous runs whose median is below the threshold.
-  var i = 0
-  while i < medians.len:
-    if medians[i] < threshold:
-      var j = i
-      while j < medians.len and medians[j] < threshold: inc j
-      if j - i >= minWidth:
-        result.add GutterRun(first: i, last: j - 1)
-      i = j
-    else:
-      inc i
-
-func bandsBetween*(gutters: openArray[GutterRun], extent: int): seq[GutterRun] =
-  ## The complement of the gutters: the bands a pane can occupy.
-  var cursor = 0
-  for g in gutters:
-    if g.first - cursor >= MinPaneExtent:
-      result.add GutterRun(first: cursor, last: g.first - 1)
-    cursor = g.last + 1
-  if extent - cursor >= MinPaneExtent:
-    result.add GutterRun(first: cursor, last: extent - 1)
-
-func isDegenerate*(medians: openArray[int],
-                   threshold = GutterMedianThreshold): bool =
-  ## **The blank-frame test, and it is NOT "no rectangles were found".**
-  ##
-  ## A uniform image has no between-class variance, which is the documented
-  ## degeneracy of Otsu on a unimodal histogram. Here the equivalent statement
-  ## is that every column median is the SAME value — whether that value is
-  ## above or below the threshold. Both arms matter: an all-dark frame makes
-  ## the whole width one "gutter" and an all-light frame makes it one band, and
-  ## a test that only checked one of those would call the other one a pane.
-  ##
-  ## This is what makes `LAW-R3` hold: a blank frame is `urFrameBlank`, never
-  ## `srEmpty`.
-  if medians.len == 0: return true
-  let first = medians[0]
-  medians.allIt(it == first)
-
-proc locateGrid*(img: GrayImage): ScreenReading[PaneGrid] =
-  ## Locate the pane grid, or say why not.
-  if img.width == 0 or img.height == 0:
-    return unreadable[PaneGrid](urFrameBlank, "image has a zero dimension")
-  let (threshold, gutterTone) = deriveGutterTones(img)
-  let cm = columnMedians(img)
-  let rm = rowMedians(img)
-  if isDegenerate(cm) or isDegenerate(rm):
-    return unreadable[PaneGrid](urFrameBlank,
-      "every column or row median is identical: the frame carries no layout")
-  let colGutters = gutterRuns(cm, threshold)
-  let colBands = bandsBetween(colGutters, img.width)
-  # The frame's own top/bottom chrome, taken once from the full-width scan, so
-  # every band starts below the toolbar and ends above the status bar.
-  let frameRowGutters = gutterRuns(rm, threshold)
-  var contentTop = 0
-  var contentBottom = img.height - 1
-  # **THE CHROME IS FOUND BY ZONE, NOT BY TOUCHING THE FRAME EDGE.**
-  #
-  # An earlier version took the run whose `last` equalled `height - 1`. That is
-  # right on 1920x1080, where the status bar is one run reaching the last row,
-  # and WRONG on 1440x900, where the bottom chrome is two runs — (868,881) and
-  # (889,899) — separated by a lighter band. Only the second touches the edge,
-  # so the content area was left ending at 888 and carried 20 rows of status
-  # bar into the bottom panes. The event log's footer line then OCR'd fused
-  # with `... certificates /home/...` from the status bar and stopped matching
-  # its own grammar. Taking the FIRST run that begins inside the bottom zone
-  # handles both layouts.
-  let topZone = img.height div 6
-  let bottomZone = img.height - img.height div 6
-  for g in frameRowGutters:
-    if g.first <= topZone and g.last + 1 > contentTop:
-      contentTop = g.last + 1
-  for g in frameRowGutters:
-    if g.first >= bottomZone:
-      contentBottom = g.first - 1
-      break
-  if colBands.len == 0 or contentBottom <= contentTop:
-    return unreadable[PaneGrid](urFrameBlank,
-      "thresholding produced no pane bands (cols=" & $colBands.len & ")")
-
-  var grid = PaneGrid(colBands: colBands,
-                      rowBands: @[GutterRun(first: contentTop,
-                                            last: contentBottom)])
-  # The content area, with the window chrome and status bar removed, is
-  # partitioned RECURSIVELY — see `partition` for the measurement that rules
-  # out a grid.
-  grid.cells = partition(img, Rect(x: 0, y: contentTop, w: img.width,
-                                   h: contentBottom - contentTop + 1),
-                         0, threshold, gutterTone)
-  if grid.cells.len == 0:
-    return unreadable[PaneGrid](urFrameBlank, "no pane cells survived segmentation")
-  read(grid)
+    if vals.len > 0:
+      vals.sort()
+      result[y] = int(vals[vals.len div 2])
 
 func titleStrip*(cell: Rect): Rect =
   ## The top strip of a cell, where its title/tab row is drawn.
