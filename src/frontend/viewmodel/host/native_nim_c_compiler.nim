@@ -20,6 +20,12 @@
 ## lives under the native state root (`nim-c-listings/`), one folder per
 ## source, reused by the next compile of the same file so Nim's own cache
 ## makes it faster; nothing is written into the project.
+##
+## Under WebAssembly (`--cpu:wasm32`, Emscripten) there is no process to
+## spawn from the module itself: the compile runs through the Node host that
+## loaded it (`child_process.spawnSync`, the way the desktop's main process
+## runs it), synchronously, and settles on the first poll. A host without
+## Node — a browser — answers "could not start", as a missing `nim` does.
 
 import std/[algorithm, os, osproc, streams, strutils, times]
 
@@ -51,6 +57,9 @@ type
       ## The generated C files the compile left in the nimcache, sorted.
     timeoutMs*: int
     process: Process
+    hostCode: int
+      ## Under WebAssembly: the exit status the host's synchronous run
+      ## returned, read by the next poll.
     output: string
     cache: string
     startedAt: float
@@ -58,11 +67,6 @@ type
 proc newNimCCompile*(): NimCCompile =
   NimCCompile(phase: nccIdle, timeoutMs: DefaultTimeoutMs)
 
-proc findNim(): string =
-  let fromEnv = getEnv(NimEnvVar).strip
-  if fromEnv.len > 0:
-    return (if fileExists(fromEnv): fromEnv else: "")
-  findExe("nim")
 
 proc cacheOf*(source: string): string =
   ## The scratch nimcache of `source`: one per file, named so a person can
@@ -75,6 +79,56 @@ proc fail(c: NimCCompile; message: string) =
   c.phase = nccFailed
   c.message = message
   c.process = nil
+
+when defined(wasm32):
+  import std/json
+
+  proc evaluateScript(script: cstring): cstring {.importc: "emscripten_run_script_string",
+    header: "<emscripten.h>".}
+
+  proc runThroughHost(nim, dir: string; args: seq[string]; timeoutMs: int):
+      tuple[output: string; code: int; error: string] =
+    ## `nim <args>` in `dir`, through the Node host: its output (stdout,
+    ## then stderr — `errorLineOf` reads either), its exit status, and why
+    ## it could not run, "" when it did. JSON carries everything across the
+    ## boundary, so nothing is quoted twice; a JS exception never crosses it.
+    let script = "JSON.stringify((function() { try {" &
+      "const r = require('child_process').spawnSync(" & $(%nim) & ", " &
+      $(%args) & ", {cwd: " & $(%dir) & ", encoding: 'utf8'," &
+      " maxBuffer: 64*1024*1024" &
+      (if timeoutMs > 0: ", timeout: " & $timeoutMs else: "") & "});" &
+      "if (r.error) return {error: String(r.error.message || r.error)};" &
+      "if (r.status === null) return {error: " &
+      $(%("nim did not finish within " & $(timeoutMs div 1000) & " s")) & "};" &
+      "return {code: r.status, output: (r.stdout || '') + (r.stderr || '')};" &
+      "} catch (e) { return {error: String(e && e.message || e)}; } })())"
+    let r = parseJson($evaluateScript(cstring(script)))
+    (r{"output"}.getStr, r{"code"}.getInt(-1), r{"error"}.getStr)
+
+proc findNim(): string =
+  when defined(wasm32):
+    # Emscripten's environment is its own (`PATH=/`), not the process's:
+    # the host answers, from its `process.env`, the same two questions.
+    let script = "JSON.stringify((function() { try {" &
+      "const fs = require('fs'), path = require('path');" &
+      "const fromEnv = (process.env." & NimEnvVar & " || '').trim();" &
+      "if (fromEnv.length > 0) return fs.existsSync(fromEnv) ? fromEnv : '';" &
+      "for (const d of (process.env.PATH || '').split(path.delimiter)) {" &
+      "  if (d.length === 0) continue;" &
+      "  const p = path.join(d, 'nim');" &
+      "  try { fs.accessSync(p, fs.constants.X_OK); if (fs.statSync(p).isFile()) return p; } catch (e) {}" &
+      "} return ''; } catch (e) { return ''; } })())"
+    parseJson($evaluateScript(cstring(script))).getStr
+  else:
+    let fromEnv = getEnv(NimEnvVar).strip
+    if fromEnv.len > 0:
+      return (if fileExists(fromEnv): fromEnv else: "")
+    findExe("nim")
+
+proc nimCCompilerAvailable*(): bool =
+  ## Whether a compile could start: `CODETRACER_NIM` names a file, or `nim`
+  ## is on the PATH (the host's, under WebAssembly).
+  findNim().len > 0
 
 proc startNimCCompile*(c: NimCCompile; source: string): bool =
   ## Start compiling `source` to C. False — `message` saying why — when
@@ -97,6 +151,22 @@ proc startNimCCompile*(c: NimCCompile; source: string): bool =
     c.fail("no `nim` to compile " & c.source.extractFilename &
            " with (set " & NimEnvVar & ", or put `nim` on the PATH)")
     return false
+  when defined(wasm32):
+    try:
+      createDir(c.cache)
+    except CatchableError as e:
+      c.fail("could not start " & nim & ": " & e.msg)
+      return false
+    let (output, code, error) = runThroughHost(nim, c.source.parentDir,
+      compileArgumentsOf(c.source, c.cache), c.timeoutMs)
+    if error.len > 0:
+      c.fail(if error.startsWith("nim did not finish"): error
+             else: "could not start " & nim & ": " & error)
+      return false
+    c.output = output
+    c.hostCode = code
+    c.phase = nccRunning
+    return true
   try:
     createDir(c.cache)
     c.process = startProcess(nim, workingDir = c.source.parentDir,
@@ -108,7 +178,7 @@ proc startNimCCompile*(c: NimCCompile; source: string): bool =
   c.phase = nccRunning
   true
 
-when not defined(windows):
+when not defined(windows) and not defined(wasm32):
   import std/posix
 
   proc readable(fd: FileHandle): bool =
@@ -117,7 +187,9 @@ when not defined(windows):
 
 proc drain(c: NimCCompile) =
   ## What the compiler printed so far, without blocking.
-  when defined(windows):
+  when defined(wasm32):
+    discard  # the host's run returned everything at once
+  elif defined(windows):
     try:
       let outp = c.process.outputStream
       while c.process.hasData:
@@ -154,6 +226,11 @@ proc settle(c: NimCCompile; code: int) =
 proc pollNimCCompile*(c: NimCCompile): bool =
   ## Advance the compile; true on the poll it settled (`phase` is then
   ## `nccDone` or `nccFailed`).
+  when defined(wasm32):
+    if c.isNil or not c.running:
+      return false
+    c.settle(c.hostCode)
+    return true
   if c.isNil or not c.running or c.process.isNil:
     return false
   c.drain()
