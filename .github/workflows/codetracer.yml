@@ -2758,6 +2758,16 @@ jobs:
         # dependencies as the step above: the dev shell's `stylus`.
         run: nix develop .#devShells.x86_64-linux.default --command just test-css-light-theme-grounds
 
+      - name: Plugins' TLS connections against a real TLS server
+        # PLAT-8's TLS row with evidence (`test_plugin_tls.nim`): a plugin's
+        # `connectTcp(tls = true)` against a python TLS server whose
+        # certificates are minted per run; the chain and the name are checked.
+        # `openssl` (to mint them) comes from this flake's own nixpkgs: the
+        # dev shell carries OpenSSL's libraries, not its command.
+        run: |
+          export OPENSSL_BIN="$(nix build --no-link --print-out-paths --inputs-from . nixpkgs#openssl.bin)/bin/openssl"
+          nix develop .#devShells.x86_64-linux.default --command just test-plugin-tls
+
       - name: Enforce the platform facade's host-free build (NS1)
         # Noir-Studio.milestones.org NS1: "A build configuration that **does
         # not link the host modules**, so a direct call fails to compile" and

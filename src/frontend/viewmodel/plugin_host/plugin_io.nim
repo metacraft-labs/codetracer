@@ -167,7 +167,11 @@
 ##      built with an SSL backend. Without it the call completes with
 ##      `ioUnsupported` naming the define. The capability decision is taken
 ##      identically in both builds, so a TLS connection is never MORE permitted
-##      than a plaintext one to the same host.
+##      than a plaintext one to the same host. The peer's certificate must
+##      chain to a trusted CA (the system store, or `SSL_CERT_FILE` /
+##      `SSL_CERT_DIR`) AND name the host connected to — the second is this
+##      module's, because `std/asyncnet` checks only the first
+##      (`test_plugin_tls.nim` opens real TLS connections to prove both).
 ##   3. **`trace` has no reader of its own**, because PLAT-7's `PluginContext`
 ##      deliberately carries no CodeTracer state and PLAT-9 owns the surfaces
 ##      that would hand a plugin recorded data. What `trace` gates HERE is
@@ -599,6 +603,33 @@ else:
     import std/posix
   when defined(ssl):
     import std/net as std_net
+    import std/openssl as std_openssl
+
+    # NAME CHECKING, WHICH `std/asyncnet` DOES NOT DO. Its `connect` sets SNI and
+    # runs the handshake with the context's verify mode, so the CHAIN is
+    # checked — and the certificate's NAME never is: a certificate any trusted
+    # CA issued for any host completed the handshake to every other host
+    # (measured 2026-11-21 by `test_plugin_tls`, the wrong-name case). OpenSSL
+    # checks the name during verification once the expected one is set on the
+    # connection, before the handshake: a DNS name with `SSL_set1_host`, an
+    # address literal with the verify parameters' IP.
+    type X509VerifyParamPtr = pointer
+    proc SSL_set1_host(ssl: SslPtr; hostname: cstring): cint
+      {.cdecl, dynlib: DLLSSLName, importc.}
+    proc SSL_get0_param(ssl: SslPtr): X509VerifyParamPtr
+      {.cdecl, dynlib: DLLSSLName, importc.}
+    proc X509_VERIFY_PARAM_set1_ip_asc(param: X509VerifyParamPtr;
+                                       ipasc: cstring): cint
+      {.cdecl, dynlib: DLLUtilName, importc.}
+
+    proc expectPeerName(sock: AsyncSocket; host: string): bool =
+      ## Bind the name the peer's certificate must carry. False when OpenSSL
+      ## refused it, which the caller reports rather than connecting unchecked.
+      if std_net.isIpAddress(host):
+        X509_VERIFY_PARAM_set1_ip_asc(SSL_get0_param(sock.sslHandle),
+                                      host.cstring) == 1
+      else:
+        SSL_set1_host(sock.sslHandle, host.cstring) == 1
 
   # THE ASYNC VOCABULARY REACHES A PLUGIN, MINUS THE FOUR THAT BLOCK.
   #
@@ -1210,8 +1241,16 @@ else:
       sock = newAsyncSocket(buffered = false)
       when defined(ssl):
         if tls:
-          let sslCtx = std_net.newContext(verifyMode = std_net.CVerifyPeer)
+          # `CVerifyPeerUseEnvVars`: the system's CA store, and also
+          # `SSL_CERT_FILE` / `SSL_CERT_DIR` when they are set — how a user
+          # behind a corporate CA (or a suite with its own CA) says whom to
+          # trust. Verification is never off.
+          let sslCtx = std_net.newContext(
+            verifyMode = std_net.CVerifyPeerUseEnvVars)
           sslCtx.wrapSocket(sock)
+          if not sock.expectPeerName(host):
+            raise newException(IOError, "could not bind the expected " &
+              "certificate name '" & host & "' to the TLS connection")
       await sock.connect(host, Port(port))
     except CatchableError as e:
       if not sock.isNil:

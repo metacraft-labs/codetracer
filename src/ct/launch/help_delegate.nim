@@ -249,6 +249,9 @@ func augmentSelfCommand(cmd: var RuntimeCommand) =
   of "doctor":
     if cmd.description.len == 0:
       cmd.description = "Check recorder readiness (per-language probes)"
+  of "plugins":
+    if cmd.description.len == 0:
+      cmd.description = "Show installed plugins, their grants and faults"
   else:
     discard
 
