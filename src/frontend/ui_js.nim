@@ -315,6 +315,8 @@ from viewmodel/platform/deployment_descriptor import SessionPlacement,
   spServer, decodePlacement, DescriptorError
 import viewmodel/backend/[backend_service, real_backend]
 import dap_backend
+when defined(ctWasmPanes):
+  import web_core/renderer_transport
 import viewmodel/collab/[front_end_adapter, invite_bootstrap, join_session,
   reducer, session_core, types]
 import viewmodel/app/isonim_app
@@ -2849,6 +2851,12 @@ proc configureSessionMiddleware(session: ReplaySession; withDebugger = true;
   setupMiddlewareApis(dapRef, viewsApi)
 
   dapRef.ipc = data.ipc
+
+  when defined(ctWasmPanes):
+    # The WebAssembly panes share the first tab's connection to the engine
+    # (`web_core/renderer_transport.nim`).
+    if firstSession:
+      installWasmPaneTransport(dapRef)
 
   dapRef.on(DapCapabilities, proc(kind: CtEventKind, body: JsObject) =
     # The replay engine is selected at launch, after initialize. Remember

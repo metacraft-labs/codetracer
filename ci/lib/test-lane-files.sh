@@ -1157,6 +1157,11 @@ test_lane_files() {
 		echo src/frontend/tests/debug_toolbar_follows_active_tab_test.nim
 		echo src/frontend/tests/agent_editor_selection_dom_test.nim
 		echo src/frontend/tests/origin_chain_wiring_test.nim
+		# `wasm_pane_transport_test.nim` holds the WebAssembly panes' transport
+		# (`web_core/renderer_transport.nim`, -d:ctWasmPanes) to sharing this
+		# DapApi: a core request reaches the wire, its answer reaches that
+		# request, and a move event moves a session attached over it.
+		echo src/frontend/tests/wasm_pane_transport_test.nim
 		# `value_provenance_dom_test.nim` holds the desktop to READING a
 		# checkout's `.codetracer/visualisers.toml` when a trace opens and to
 		# naming the visualiser that drew a value in the value span's `title`

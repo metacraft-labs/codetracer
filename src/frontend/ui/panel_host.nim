@@ -154,6 +154,12 @@ proc unrender(m: PanelMount) =
     m.disposeRoot()
     m.disposeRoot = nil
 
+when defined(ctWasmPanes):
+  proc ctwMountPanel(pane: cstring; host: dom_api.Element)
+      {.importjs: "globalThis.ctwPanels.mount(#, #)".}
+    ## `-d:ctWasmPanes`: every pane this host mounts is the WebAssembly
+    ## core's (`web_core/web_core_panels.js`), placed here.
+
 proc render(m: PanelMount; session: SessionViewModel) =
   ## Render `m`'s pane into its host over `session`, in a root of its own,
   ## replacing whatever it rendered before.
@@ -171,66 +177,117 @@ proc render(m: PanelMount; session: SessionViewModel) =
     let r = WebRenderer()
     case mount.kind
     of Content.Calltrace:
-      let panel = renderCalltracePanel[WebRenderer, dom_api.Element](
-        r, session.calltraceVM)
-      dom_api.appendChild(node, dom_api.Node(panel))
+      when defined(ctWasmPanes):
+        # The WebAssembly core draws this pane (`web_core/web_core_panels.js`)
+        # over this tab's own connection to the engine.
+        ctwMountPanel(cstring"calltrace", host)
+      else:
+        let panel = renderCalltracePanel[WebRenderer, dom_api.Element](
+          r, session.calltraceVM)
+        dom_api.appendChild(node, dom_api.Node(panel))
     of Content.State:
-      let panel = renderStatePanel[WebRenderer, dom_api.Element](
-        r, session.stateVM)
-      dom_api.appendChild(node, dom_api.Node(panel))
+      when defined(ctWasmPanes):
+        # The WebAssembly core draws this pane (`web_core/web_core_panels.js`)
+        # over this tab's own connection to the engine.
+        ctwMountPanel(cstring"state", host)
+      else:
+        let panel = renderStatePanel[WebRenderer, dom_api.Element](
+          r, session.stateVM)
+        dom_api.appendChild(node, dom_api.Node(panel))
     of Content.LowLevelCode:
-      let panel = renderLowLevelCodePanel[WebRenderer, dom_api.Element](
-        r, session.lowLevelCodeVM)
-      dom_api.appendChild(node, dom_api.Node(panel))
+      when defined(ctWasmPanes):
+        ctwMountPanel(cstring"low-level-code", host)
+      else:
+        let panel = renderLowLevelCodePanel[WebRenderer, dom_api.Element](
+          r, session.lowLevelCodeVM)
+        dom_api.appendChild(node, dom_api.Node(panel))
     of Content.PointList:
-      let panel = renderPointListPanel[WebRenderer, dom_api.Element](
-        r, session.pointListVM)
-      dom_api.appendChild(node, dom_api.Node(panel))
+      when defined(ctWasmPanes):
+        ctwMountPanel(cstring"point-list", host)
+      else:
+        let panel = renderPointListPanel[WebRenderer, dom_api.Element](
+          r, session.pointListVM)
+        dom_api.appendChild(node, dom_api.Node(panel))
     of Content.StepList:
-      let panel = renderStepListPanel[WebRenderer, dom_api.Element](
-        r, session.stepListVM)
-      dom_api.appendChild(node, dom_api.Node(panel))
+      when defined(ctWasmPanes):
+        ctwMountPanel(cstring"step-list", host)
+      else:
+        let panel = renderStepListPanel[WebRenderer, dom_api.Element](
+          r, session.stepListVM)
+        dom_api.appendChild(node, dom_api.Node(panel))
     of Content.Build:
-      let panel = renderBuildPanel[WebRenderer, dom_api.Element](
-        r, session.buildVM)
-      dom_api.appendChild(node, dom_api.Node(panel))
+      when defined(ctWasmPanes):
+        ctwMountPanel(cstring"build", host)
+      else:
+        let panel = renderBuildPanel[WebRenderer, dom_api.Element](
+          r, session.buildVM)
+        dom_api.appendChild(node, dom_api.Node(panel))
     of Content.BuildErrors:
-      let panel = renderErrorsPanel[WebRenderer, dom_api.Element](
-        r, session.errorsVM)
-      dom_api.appendChild(node, dom_api.Node(panel))
+      when defined(ctWasmPanes):
+        ctwMountPanel(cstring"errors", host)
+      else:
+        let panel = renderErrorsPanel[WebRenderer, dom_api.Element](
+          r, session.errorsVM)
+        dom_api.appendChild(node, dom_api.Node(panel))
     of Content.SearchResults:
-      let panel = renderSearchResultsPanel[WebRenderer, dom_api.Element](
-        r, session.searchResultsVM)
-      dom_api.appendChild(node, dom_api.Node(panel))
+      when defined(ctWasmPanes):
+        ctwMountPanel(cstring"search-results", host)
+      else:
+        let panel = renderSearchResultsPanel[WebRenderer, dom_api.Element](
+          r, session.searchResultsVM)
+        dom_api.appendChild(node, dom_api.Node(panel))
     of Content.TraceLog:
-      let panel = renderTraceLogPanel[WebRenderer, dom_api.Element](
-        r, session.traceLogVM)
-      dom_api.appendChild(node, dom_api.Node(panel))
+      when defined(ctWasmPanes):
+        ctwMountPanel(cstring"trace-log", host)
+      else:
+        let panel = renderTraceLogPanel[WebRenderer, dom_api.Element](
+          r, session.traceLogVM)
+        dom_api.appendChild(node, dom_api.Node(panel))
     of Content.TerminalOutput:
-      let panel = renderTerminalOutputPanel[WebRenderer, dom_api.Element](
-        r, session.terminalOutputVM)
-      dom_api.appendChild(node, dom_api.Node(panel))
-      decorateTerminalOutput(panel, session.terminalOutputVM)
+      when defined(ctWasmPanes):
+        ctwMountPanel(cstring"terminal-output", host)
+      else:
+        let panel = renderTerminalOutputPanel[WebRenderer, dom_api.Element](
+          r, session.terminalOutputVM)
+        dom_api.appendChild(node, dom_api.Node(panel))
+        decorateTerminalOutput(panel, session.terminalOutputVM)
     of Content.EventLog:
-      let panel = renderEventLogPanel[WebRenderer, dom_api.Element](
-        r, session.eventLogVM)
-      dom_api.appendChild(node, dom_api.Node(panel))
+      when defined(ctWasmPanes):
+        # The WebAssembly core draws this pane (`web_core/web_core_panels.js`)
+        # over this tab's own connection to the engine.
+        ctwMountPanel(cstring"event-log", host)
+      else:
+        let panel = renderEventLogPanel[WebRenderer, dom_api.Element](
+          r, session.eventLogVM)
+        dom_api.appendChild(node, dom_api.Node(panel))
     of Content.Scratchpad:
-      let panel = renderScratchpadPanel[WebRenderer, dom_api.Element](
-        r, session.scratchpadVM)
-      dom_api.appendChild(node, dom_api.Node(panel))
+      when defined(ctWasmPanes):
+        ctwMountPanel(cstring"scratchpad", host)
+      else:
+        let panel = renderScratchpadPanel[WebRenderer, dom_api.Element](
+          r, session.scratchpadVM)
+        dom_api.appendChild(node, dom_api.Node(panel))
     of Content.Repl:
-      let panel = renderReplPanel[WebRenderer, dom_api.Element](
-        r, session.replVM)
-      dom_api.appendChild(node, dom_api.Node(panel))
+      when defined(ctWasmPanes):
+        ctwMountPanel(cstring"repl", host)
+      else:
+        let panel = renderReplPanel[WebRenderer, dom_api.Element](
+          r, session.replVM)
+        dom_api.appendChild(node, dom_api.Node(panel))
     of Content.Filesystem:
-      let panel = renderFilesystemPanel[WebRenderer, dom_api.Element](
-        r, session.fileTreeVM)
-      dom_api.appendChild(node, dom_api.Node(panel))
+      when defined(ctWasmPanes):
+        ctwMountPanel(cstring"filesystem", host)
+      else:
+        let panel = renderFilesystemPanel[WebRenderer, dom_api.Element](
+          r, session.fileTreeVM)
+        dom_api.appendChild(node, dom_api.Node(panel))
     of Content.CommandPalette:
-      let panel = renderCommandPalettePanel[WebRenderer, dom_api.Element](
-        r, session.commandPaletteVM)
-      dom_api.appendChild(node, dom_api.Node(panel))
+      when defined(ctWasmPanes):
+        ctwMountPanel(cstring"command-palette", host)
+      else:
+        let panel = renderCommandPalettePanel[WebRenderer, dom_api.Element](
+          r, session.commandPaletteVM)
+        dom_api.appendChild(node, dom_api.Node(panel))
     else:
       let renderPane = renderers[mount.kind]
       if not renderPane.isNil:

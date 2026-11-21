@@ -4131,6 +4131,22 @@ test-frame-applier-browser:
 test-web-core-browser:
   bash ci/test/web-core-browser.sh
 
+# The renderer with the WebAssembly panes (-d:ctWasmPanes): ui.js, and the
+# core and its host files in wasm-panes/ beside it. The variables pane, Call
+# Trace and the event log are then the wasm core's.
+build-wasm-panes output_dir:
+  bash ci/lib/web-core-build.sh "{{output_dir}}/wasm-panes"
+
+build-ui-js-wasm-panes output:
+  nim \
+    -d:chronicles_enabled=off \
+    -d:ctRenderer \
+    -d:ctWasmPanes \
+    --debugInfo:on \
+    --lineDir:on \
+    --out:{{output}} \
+    js src/frontend/ui_js.nim
+
 # The wasm32 developer profile builds the same program as `emcc`: every object
 # and the linked module byte-identical, the object cache used and never stale
 # after a header change. `ci/lib/wasm-cc.sh` is the wasm lanes' C compiler.
