@@ -413,3 +413,48 @@ suite "plugin panes move, open, stay closed and mark like built-in ones":
       check marked
     sess.quit()
     removeDir(home)
+
+proc hover(sess: var TuiTestSession; row, col: int) =
+  ## The pointer passing over a cell with no button held (SGR-1006 motion,
+  ## button 35), which the terminal reports under `?1003`.
+  sess.send("\e[<35;" & $(col + 1) & ";" & $(row + 1) & "M")
+  sleep(60)
+
+suite "a docked plugin pane previews on hover":
+
+  test "resting on a docked plugin pane's label previews it, and leaving dismisses it":
+    let home = newHome()
+    var sess = spawnTui(home)
+    settleOnDebugger(sess, Cols, Rows)
+    sess.grantBoth()
+    sess.command("plugins show " & Flame)
+    check sess.screenHas("main 60%")
+    sess.command("dock bottom")
+    var gone = false
+    for _ in 0 ..< 50:
+      if "main 60%" notin sess.screen:
+        gone = true
+        break
+      sleep(200)
+    check gone
+    let labelRow = Rows - 1
+    let labelCol = sess.colOf(labelRow, "Flame")
+    check labelCol >= 0
+    if labelCol >= 0:
+      # REST on the label: the preview opens after the delay, drawn from the
+      # plugin's last view, without a click.
+      sess.hover(labelRow, labelCol + 1)
+      sess.hover(labelRow, labelCol + 2)
+      check sess.screenHas("main 60%", ceilingMs = 10_000)
+      # LEAVE the label and the overlay: the preview closes after its delay.
+      sess.hover(5, 40)
+      sess.hover(6, 41)
+      var dismissed = false
+      for _ in 0 ..< 50:
+        if "main 60%" notin sess.screen:
+          dismissed = true
+          break
+        sleep(200)
+      check dismissed
+    sess.quit()
+    removeDir(home)

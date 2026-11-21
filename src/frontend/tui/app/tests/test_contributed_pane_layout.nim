@@ -12,6 +12,7 @@
 
 import std/[options, strutils, tables, unicode, unittest]
 
+import headless_app/auto_hide_hover
 import headless_app/layout_interaction
 import headless_app/layout_model
 
@@ -358,3 +359,46 @@ suite "a plugin pane moves, reveals and marks like a built-in one":
     for i, r in screen.rows:
       if i != marked and i > editor.row and i < editor.row + editor.height:
         ck r.runeAtPos(editor.col) != "★".runeAt(0)
+
+suite "a docked plugin pane previews on hover like a built-in one":
+
+  test "rest on its label previews it, leaving dismisses it, and the preview is painted":
+    var h = initAutoHideHover()
+    let label = some(contributedRef(Flame))
+    ck h.pointerAt(label, false, false, 1000).cue == ahcNone
+    ck h.tick(1000 + HoverPreviewDelayMs - 1).cue == ahcNone
+    let shown = h.tick(1000 + HoverPreviewDelayMs)
+    ck shown.cue == ahcPreview
+    ck shown.paneRef.sameSlot(contributedRef(Flame))
+    # The cue's built-in half is NOT the editor's slot read as a match: a
+    # caller that reveals by reference reveals the extension's pane.
+    let b = newLayoutBinding(arrangement(), lpStandard)
+    b.focusOn(contributedRef(Flame))
+    var geom = b.geometry(bodyArea(160, 40))
+    ck b.runLayoutCommand(geom, ":dock bottom").status == lasApplied
+    ck b.beginRevealDock(shown.paneRef).status == lasPending
+    geom = b.geometry(bodyArea(160, 40))
+    ck geom.revealContributed == Flame
+    var model = newShellModel(160, 40)
+    model.layout = b.layout.tree
+    model.docked = b.layout.docked
+    model.interaction = b.interaction
+    model.contributedViews[Flame] = ContributedPaneView(
+      lines: @["  main 60%", "  work 40%"], cursor: -1)
+    let screen = shellScreen(model, 160, 40)
+    var inOverlay = false
+    for i in geom.reveal.row ..< geom.reveal.row + geom.reveal.height:
+      if "work 40%" in screen.rows[i]: inOverlay = true
+    ck inOverlay
+    # Leaving the label and the overlay dismisses it after the delay.
+    ck h.pointerAt(none(PaneRef), false, false, 2000).cue == ahcNone
+    ck h.tick(2000 + LeaveDismissDelayMs - 1).cue == ahcNone
+    let gone = h.tick(2000 + LeaveDismissDelayMs)
+    ck gone.cue == ahcDismiss
+    ck gone.paneRef.sameSlot(contributedRef(Flame))
+    # A built-in label still answers as before.
+    var k = initAutoHideHover()
+    discard k.pointerAt(some(paneBuildOutput), false, false, 0)
+    let built = k.tick(HoverPreviewDelayMs)
+    ck built.pane == paneBuildOutput
+    ck built.paneRef.sameSlot(builtinRef(paneBuildOutput))

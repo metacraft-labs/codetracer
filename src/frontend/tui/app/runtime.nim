@@ -8225,10 +8225,10 @@ proc applyAutoHideReply(rt: TuiRuntime; reply: AutoHideReply): bool =
   of ahcPreview:
     if b.interaction.kind in {ikDraggingTab, ikResizingSplit}:
       return false
-    b.beginRevealDock(reply.pane).status == lasPending
+    b.beginRevealDock(reply.paneRef).status == lasPending
   of ahcDismiss:
     if b.interaction.kind == ikRevealingDock and
-       b.interaction.pane == reply.pane:
+       sameSlot(b.interaction.revealRef, reply.paneRef):
       b.interaction = b.interaction.cancel()
       return true
     false
@@ -8241,13 +8241,17 @@ proc autoHidePointer(rt: TuiRuntime; event: MouseEvent; nowMs: int64;
   ## the preview a moment later (`auto_hide_hover`).
   let b = rt.app.layoutBinding
   let geom = rt.layoutGeometry()
-  var label = none(PaneKind)
+  var label = none(PaneRef)
   var open = false
   let strip = geom.stripIndexAt(event.row, event.col)
   if strip >= 0:
     let slot = geom.strips[strip].slotAt(event.row, event.col)
     if slot >= 0:
-      let pane = geom.strips[strip].slots[slot].pane
+      # The label's pane in its own namespace: an extension's docked pane is
+      # previewed by the same rest-and-leave rule as a built-in one.
+      let s = geom.strips[strip].slots[slot]
+      let pane = if s.contributed.len > 0: contributedRef(s.contributed)
+                 else: builtinRef(s.pane)
       label = some(pane)
       let at = b.layout.dockedIndex(pane)
       open = at >= 0 and b.layout.docked[at].open

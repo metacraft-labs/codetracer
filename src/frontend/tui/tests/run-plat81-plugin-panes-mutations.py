@@ -20,7 +20,8 @@ absence:
   * a drop target anchored on the zero value of an extension's first tab;
   * a docked plugin pane shown open but not painted;
   * a closed plugin pane not remembered across sessions;
-  * a declared marker not drawn in the gutter.
+  * a declared marker not drawn in the gutter;
+  * a docked plugin pane's label not previewed on hover.
 
 The engine — committed control digests over subjects AND suites, the needle
 scan gating a re-record, `because` derived from a run and then required, rc
@@ -63,6 +64,7 @@ ANCHOR = "*::a drop beside a plugin pane names the plugin pane, never the editor
 OPEN = "*::a click on a docked plugin pane's label docks it open, and paints it"
 CLOSED = "*::a plugin pane the user closed stays closed in later sessions, and Show pane brings it back"
 MARKER = "*::a plugin's marker is a glyph in the gutter's mark column"
+HOVER = "*::resting on a docked plugin pane's label previews it, and leaving dismisses it"
 
 ARMS = [
     ("P1", [(PROJECT, "      if n.isContributed:\n"
@@ -111,6 +113,10 @@ ARMS = [
               "      discard model")],
      [(LAYOUT, MARKER)],
      "a declared marker is not drawn in the gutter"),
+    ("P12", [(RUNTIME, "      let pane = if s.contributed.len > 0: contributedRef(s.contributed)",
+              "      let pane = if false: contributedRef(s.contributed)")],
+     [(PTY, HOVER)],
+     "hovering a docked plugin pane's label previews nothing (read as a built-in pane)"),
 ]
 
 
