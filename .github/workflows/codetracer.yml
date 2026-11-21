@@ -2033,6 +2033,59 @@ jobs:
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
 
+      - name: Read the HCR tests' sibling pins
+        # The HCR MCR DAP test builds ct-mcr from ../codetracer-native-recorder,
+        # whose ct_interpose imports nim-stackable-hooks from
+        # ../nim-stackable-hooks, and ct-native-replay from
+        # ../codetracer-native-backend. This job used to clone none of them, so
+        # it built whatever an earlier job had left in this reused runner
+        # workspace. Run 44864106832 stopped at "cannot open file:
+        # stackable_hooks/reentrancy", because the leftover native-recorder was
+        # newer than any nim-stackable-hooks there. The two private repos take
+        # flake.lock's revisions (the public repro.lock cannot pin them);
+        # nim-stackable-hooks takes repro.lock's. They are read in the dev
+        # shell, since a raw step on these nix-darwin runners has no jq, grep
+        # or sed.
+        id: hcr_pins
+        run: |
+          nix develop . --command bash -euo pipefail -c '
+            flake_rev() { jq -er --arg r "$1" "[.nodes[] | .locked? | select(.owner? == \"metacraft-labs\" and .repo? == \$r) | .rev] | unique | if length == 1 then .[0] else error(\"\(\$r): \(length) revisions in flake.lock\") end" flake.lock; }
+            stackable="$(grep -oE "\{ name = \"nim-stackable-hooks\"[^}]*" repro.lock | grep -oE "revision = \"[0-9a-f]{40}\"" | grep -oE "[0-9a-f]{40}")"
+            [ -n "$stackable" ] || { echo "::error::repro.lock pins no nim-stackable-hooks revision"; exit 1; }
+            {
+              echo "native_recorder=$(flake_rev codetracer-native-recorder)"
+              echo "native_backend=$(flake_rev codetracer-native-backend)"
+              echo "stackable_hooks=${stackable}"
+            } | tee -a "$GITHUB_OUTPUT"
+          '
+
+      - name: Clone codetracer-native-recorder
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-native-recorder
+          ref: ${{ steps.hcr_pins.outputs.native_recorder }}
+          path: ${{ github.workspace }}/../codetracer-native-recorder
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Clone codetracer-native-backend
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-native-backend
+          ref: ${{ steps.hcr_pins.outputs.native_backend }}
+          path: ${{ github.workspace }}/../codetracer-native-backend
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'true'
+
+      - name: Clone nim-stackable-hooks
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/nim-stackable-hooks
+          ref: ${{ steps.hcr_pins.outputs.stackable_hooks }}
+          path: ${{ github.workspace }}/../nim-stackable-hooks
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
       - name: Run Reprobuild macOS smoke
         run: nix develop . --command just test-reprobuild-macos-smoke
 
