@@ -7790,11 +7790,11 @@
     "nim-acp": {
       "flake": false,
       "locked": {
-        "lastModified": 1794513076,
-        "narHash": "sha256-hz7zgRUccqLRQZRijnUIbM0v8gUY8Z65M87RdUApxSw=",
+        "lastModified": 1795298307,
+        "narHash": "sha256-PW+ICQTwKc9bovfAkdyTuZ9sYvUjZz6KXLst5BY4p5w=",
         "owner": "metacraft-labs",
         "repo": "nim-acp",
-        "rev": "0bf10b4c35064a08d8c96eb912190521322017e2",
+        "rev": "592dd505eaea250276d30a6ffb1723c3384c1608",
         "type": "github"
       },
       "original": {
