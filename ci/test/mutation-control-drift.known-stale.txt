@@ -462,8 +462,8 @@ src/frontend/tui/tests/plat72-screen-reader-mutation-control.sha256	src/frontend
 # memory manager: ci/lib/run-nim-test-lane.sh's native arm and the parity gate's
 # native build pass --mm:orc, and vm-unit-wasm-lane-test.sh asserts both. Every
 # harness that digests those bytes owes a re-grade.
-src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	ci/lib/run-nim-test-lane.sh	d1a2a215a9f74c50d465925aaa14ad2fbc674db88c4dfa5e4a2e24ea222ef97e	0543e7a3bdfc614797e0698275a3da9cc0dd08efd20cfb77bfae4c863c9ab138
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/run-nim-test-lane.sh	d1a2a215a9f74c50d465925aaa14ad2fbc674db88c4dfa5e4a2e24ea222ef97e	0543e7a3bdfc614797e0698275a3da9cc0dd08efd20cfb77bfae4c863c9ab138
+src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	ci/lib/run-nim-test-lane.sh	d1a2a215a9f74c50d465925aaa14ad2fbc674db88c4dfa5e4a2e24ea222ef97e	3faa671c35896f38d4e764ee8cdf379953e6adeec265a186ab966956f4f79811
+src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/run-nim-test-lane.sh	d1a2a215a9f74c50d465925aaa14ad2fbc674db88c4dfa5e4a2e24ea222ef97e	3faa671c35896f38d4e764ee8cdf379953e6adeec265a186ab966956f4f79811
 src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/test/vm-unit-wasm-parity.sh	cc903e83e819a7bf7c0236f21e3be33faa10e476151795eed22bc0d5f95424dc	0d513a0222f93bb9ebd4ba839d2e6f83766ccd7c996ad386228719573c5eb3df
 src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/test/vm-unit-wasm-lane-test.sh	25e02f5edd71b89864b5f771a585bff1f1c6f26e8053d728c5722d1dda5442ee	9c28c6234fae228dd052c5d1cd7d37a941aedd5e684b4a53dbf5b72cf16c851b
 src/frontend/viewmodel/tests/unit/plat13-executable-mutation-control.sha256	src/ct/launch/project_trust_store.nim	7a863b35c9d16470de986c400f643c9159ed1bb8633b92cd3e00bf6eeed3bf12	b9f98f83abf0d8b9260be6ae23dce79f0b6a1aa90b50eb0a52b04cfa31ccddcc
@@ -620,7 +620,7 @@ src/frontend/tui/tests/plat59-visual-replay-mutation-control.sha256	src/frontend
 # loader and the plugin settings path (plat10), the in-process view budget in
 # renderSurface (plat9), and the two lane lists that keep the C-only supervisor
 # suite off the JS and WASM lanes (plat17, plat33, plat34).
-src/frontend/viewmodel/tests/unit/plat10-distribution-mutation-control.sha256	src/ct/launch/plugin_components.nim	2448cca0305e39e7c9c00b717561d5ccbbe8b392394b5e193774c9c166b9f570	df3c2f32549637cb9c1609019daec2f6d18ce0509417edaae098715089a12461
+src/frontend/viewmodel/tests/unit/plat10-distribution-mutation-control.sha256	src/ct/launch/plugin_components.nim	2448cca0305e39e7c9c00b717561d5ccbbe8b392394b5e193774c9c166b9f570	414f4e84334da4b68fdd3cae118783ef92244708338559440bbea4ea40810529
 src/frontend/viewmodel/tests/unit/plat10-distribution-mutation-control.sha256	src/ct/launch/grant_store.nim	855ffe542a0a6508269696da474d5b1da309d2464d70a628cfb84e6d9c6f703a	c267edaddf85dac06b467214c0d3adc9e2e959a12e58e6d2fdbfb9d95abb49f6
 src/frontend/viewmodel/tests/unit/plat9-surface-mutation-control.sha256	src/frontend/viewmodel/plugin_host/surface_host.nim	ce85f5f1bcaa85a0abbf6fbeae95f639cc7abedd39f2817b5a04726f4134625a	b9739471421fd0bd62b026910ca72297affe6a9b83eba235cd4a05f01a753dcb
 
