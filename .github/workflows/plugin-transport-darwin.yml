@@ -1,0 +1,101 @@
+name: Plugin transport on aarch64-darwin
+
+# Extensibility-Model.md §11.11: the plugin protocol's one-hop costs measured
+# on macOS, beside the x86_64-linux figures. It runs the transport case of
+# `test_plugin_process_host.nim` (a real plugin process over real pipes:
+# 200 invoke/ack round trips and 50 pushes of a 1,000-node view tree), built
+# `-d:release`, and the whole suite after it so the figure comes from a build
+# that is otherwise green on this platform.
+#
+# Triggered by hand, or by a push to `ci/plugin-transport-darwin`, so a
+# measurement can be taken without touching the main pipeline.
+on:
+  workflow_dispatch:
+  push:
+    branches: [ci/plugin-transport-darwin]
+
+permissions:
+  contents: read
+
+jobs:
+  plugin-transport-darwin:
+    runs-on: aarch64-darwin  # CIP-5: nix macOS job -> self-hosted m3 (aarch64-darwin)
+    timeout-minutes: 60
+    steps:
+      - name: Mint installation token for cross-repo sibling access
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Evict stale git credentials from this runner's persistent home
+        # The same step as `origin-dap-macos` (codetracer.yml), for the same
+        # reason: a stale extraHeader in the reused ~/.gitconfig outranks the
+        # fresh one actions/checkout installs. Pure bash: grep and sed are not
+        # on PATH in a raw `run:` step on these runners.
+        run: |
+          set -uo pipefail
+          cfg="$HOME/.gitconfig"
+          [ -f "$cfg" ] || exit 0
+          while IFS= read -r key; do
+            [ -n "$key" ] || continue
+            case "$key" in
+              http.*.extraheader|http.*.extraHeader) ;;
+              url.*x-access-token*) ;;
+              *) continue ;;
+            esac
+            git config --file "$cfg" --unset-all "$key" 2>/dev/null || true
+            git config --file "$cfg" --remove-section "${key%.*}" 2>/dev/null || true
+          done < <(git config --file "$cfg" --list --name-only 2>/dev/null || true)
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Provision dependency siblings from repro.lock
+        uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      - name: Measure the plugin transport (release build)
+        run: |
+          nix develop . --command bash -c '
+            set -euo pipefail
+            mkdir -p test-logs
+            uname -a
+            sysctl -n machdep.cpu.brand_string || true
+            git rev-parse HEAD
+            nim c -r --hints:off --warnings:off -d:release \
+              --path:src/frontend/viewmodel \
+              --nimcache:"$RUNNER_TEMP/nc-plugin-transport" \
+              -o:"$RUNNER_TEMP/test_plugin_process_host" \
+              src/frontend/viewmodel/tests/unit/test_plugin_process_host.nim \
+              "*::invoke/ack round trip and a 1,000-node view over the pipe" \
+              | tee test-logs/plugin-transport-darwin.log'
+
+      - name: The whole plugin-process suite on this platform
+        run: |
+          nix develop . --command bash -c '
+            set -euo pipefail
+            "$RUNNER_TEMP/test_plugin_process_host" | tee -a test-logs/plugin-transport-darwin.log'
+
+      - name: Keep the log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-transport-darwin
+          path: test-logs/plugin-transport-darwin.log
