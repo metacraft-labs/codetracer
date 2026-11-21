@@ -716,7 +716,55 @@ proc checkSuggestion(view: GpuiElement; vm: SuggestedActionsVM): seq[string] =
   result.expect("disabled", b.values("action-disabled"), vm.rows.mapIt($it.disabled))
   result.expect("buttons", b.values("suggested-button"), @["approve", "dismiss"])
 
-proc checkStory(m: AhStoryMount): seq[string] =
+proc checkPieStory(view: GpuiElement; fixture: string; mode: DesignMode): seq[string] =
+  ## The progress pie's story against its data (`agent_harbor_pie_stories`):
+  ## one band per ground in order, one row per role, one pie per column,
+  ## each with its role, its share (`unknown` with no known progress) and
+  ## its words; each drawn in the palette's inks for its ground, which hold
+  ## the pie's floors, measured here with GPUI's own contrast measure
+  ## (`chrome.contrastRatio`) rather than the palette's.
+  let p = ahPalette(mode)
+  let bands = pieStoryBands(fixture, mode)
+  let drawnBands = view.all("pie-ground").filterIt(it.attr("pie") == "")
+  result.expect("pie bands", drawnBands.mapIt(it.attr("pie-ground")),
+                bands.mapIt($it.ground))
+  for i, band in bands:
+    if i >= drawnBands.len: break
+    let b = drawnBands[i]
+    let rows = b.all("pie-row")
+    result.expect("rows of " & $band.ground, rows.mapIt(it.attr("pie-row")),
+                  band.rows.mapIt($it.role))
+    for j, row in band.rows:
+      if j >= rows.len: break
+      let pies = rows[j].all("pie")
+      result.expect("pies of " & $band.ground & "/" & $row.role, pies.len, row.pies.len)
+      for k, pie in row.pies:
+        if k >= pies.len: break
+        let e = pies[k]
+        let at = $band.ground & "/" & $row.role & "/" & PieStoryColumns[k]
+        result.expect("role at " & at, e.attr("pie"), $pie.role)
+        result.expect("share at " & at, e.attr("pie-fraction"),
+                      if pie.known: pie.pieStopPercent else: "unknown")
+        result.expect("words at " & at, e.attr("pie-label"), pie.label)
+        result.expect("accessible name at " & at, getAttribute(e, "aria-label"), pie.label)
+        result.expect("shape at " & at, e.attr("pie-shape"), $pie.pieShapeOf)
+        # No known progress: the ring and a dot, never the 0 % disc.
+        var dots: seq[GpuiElement]
+        collect(e, "data-ah-pie-dot", dots)
+        result.expect("dot at " & at, dots.len, if pie.known: 0 else: 1)
+        let inks = p.pieInks(pie.role, band.ground)
+        result.expect("inks at " & at, (e.attr("pie-wedge"), e.attr("pie-rest"),
+                      e.attr("pie-edge"), e.attr("pie-ground")),
+                      (inks.wedge, inks.rest, inks.edge, p.pieGroundColour(band.ground)))
+        let ground = e.attr("pie-ground")
+        if contrastRatio(e.attr("pie-wedge"), ground) < PieInkFloor:
+          result.add "the wedge at " & at & " is under " & $PieInkFloor & ":1 on its ground"
+        if pie.role != prIdle:
+          let wr = contrastRatio(e.attr("pie-wedge"), e.attr("pie-rest"))
+          if wr < PieWedgeFloor or wr > PieWedgeCeiling:
+            result.add "the wedge at " & at & " is " & $wr & ":1 against the rest"
+
+proc checkStory(m: AhStoryMount; mode = dmDark): seq[string] =
   ## The drawn tree against the viewmodel the story built; empty when they
   ## agree.
   let view = m.view
@@ -733,6 +781,7 @@ proc checkStory(m: AhStoryMount): seq[string] =
   of "agent-harbor-results": checkResults(view, m.results)
   of "agent-harbor-suggested-actions":
     checkTimeline(view, m.timeline, m.suggestion) & checkSuggestion(view, m.suggestion)
+  of PieStorySurface: checkPieStory(view, m.fixture, mode)
   of "agent-harbor-session-activity":
     if m.cardsFeed.isNil: checkTimeline(view, m.timeline)
     else:
@@ -776,7 +825,7 @@ proc renderStory(story: CodeTracerStory; w, h: int; mode: DesignMode;
     let m = r.mountAgentHarborStoryGpui(story.surface, story.fixture, w, h, mode,
                                         frameTitle)
     result.mount = m
-    result.problems = checkStory(m) & drawnTextProblems(m.root) & inkProblems(m, mode) &
+    result.problems = checkStory(m, mode) & drawnTextProblems(m.root) & inkProblems(m, mode) &
                       p3DrawnTextProblems(m.root)
     if not r.verifyRenderPlan(m.root):
       result.problems.add "the shadow tree builds no valid render plan"
