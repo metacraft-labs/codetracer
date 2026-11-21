@@ -1,6 +1,11 @@
 {
   "M1": "r.sup.waitUntil(\"stale dropped\", proc (): bool =",
   "M10": "r.sup.faults.allIt(it.plugin == \"acme-tools.flame\")",
+  "M11": "sess.screenHas(\"RECOVER INPUT\")",
+  "M12": "sess.commandShows(\"plugins show acme-tools.metrics/overview\", \"position 2\")",
+  "M13": "sess.screenHas(\"--no-extensions\")",
+  "M14": "c.status == ioFailed",
+  "M15": "\"acme-tools.metrics 1.0.0  waiting for consent (process)\" in r",
   "M2": "r.sup.waitUntil(\"hang fault\", proc (): bool =",
   "M3": "errs.anyIt(it.code == pecNativeWithoutProcess and",
   "M4": "not r.press(\"k\").found",

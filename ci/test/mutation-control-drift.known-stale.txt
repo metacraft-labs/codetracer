@@ -640,7 +640,7 @@ src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	scripts/plat49-capt
 # `--no-extensions` flag (capabilities, cli), the plugins' palette entries
 # (tui_app), the `:plugins` verbs, status label and key hooks (runtime), the
 # session's plugins and their moves (main, tui_session), and the front-end hook
-# for relayed actions in the supervisor (plat81, graded 10/10 at 5c28e4a0a40).
+# for relayed actions in the supervisor (plat81: re-graded 15/15 at 80b315b0fa6).
 src/frontend/tui/tests/plat46-design-mutation-control.sha256	src/frontend/tui/app/theme/capabilities.nim	4a709e46e1c01539fda428f6784b3535f3a42183eb307651eea4fa86b87714f0	a1a223ba76a4b30733d0b71c46886747b42d7b9ca0a7b0e8d5e9221a77c0889f
 src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/tui/app/theme/capabilities.nim	4a709e46e1c01539fda428f6784b3535f3a42183eb307651eea4fa86b87714f0	a1a223ba76a4b30733d0b71c46886747b42d7b9ca0a7b0e8d5e9221a77c0889f
 src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/tui/app/tui_app.nim	678d2f83045a5a30e92bbe49be1e05183e4b6e151ba0614b4235ba32a043d287	8347f6dd5e98fae5b047d60a282bfbd85d0f6bb70c34ba82a2149356942971f3
@@ -649,7 +649,6 @@ src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/tui/
 src/frontend/tui/tests/plat71b-profile-mutation-control.sha256	src/frontend/tui/app/theme/capabilities.nim	4a709e46e1c01539fda428f6784b3535f3a42183eb307651eea4fa86b87714f0	a1a223ba76a4b30733d0b71c46886747b42d7b9ca0a7b0e8d5e9221a77c0889f
 src/frontend/tui/tests/plat71d-mux-mutation-control.sha256	src/frontend/tui/app/theme/capabilities.nim	4a709e46e1c01539fda428f6784b3535f3a42183eb307651eea4fa86b87714f0	a1a223ba76a4b30733d0b71c46886747b42d7b9ca0a7b0e8d5e9221a77c0889f
 src/frontend/tui/tests/plat72-screen-reader-mutation-control.sha256	src/frontend/tui/app/theme/capabilities.nim	4a709e46e1c01539fda428f6784b3535f3a42183eb307651eea4fa86b87714f0	a1a223ba76a4b30733d0b71c46886747b42d7b9ca0a7b0e8d5e9221a77c0889f
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/supervisor.nim	aea37eea736d34bdae5c205caa6abc4741add1cb2d27afdfdf8be9981d2afebc	8c1c38708bbfe0e278fe1bbdd56d9c362d56e2f7804220cb42bc2958ab52cc3b
 src/frontend/viewmodel/tests/unit/plat4-layout-mutation-control.sha256	src/frontend/tui/app/tui_app.nim	678d2f83045a5a30e92bbe49be1e05183e4b6e151ba0614b4235ba32a043d287	8347f6dd5e98fae5b047d60a282bfbd85d0f6bb70c34ba82a2149356942971f3
 src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/frontend/tui/app/theme/capabilities.nim	4a709e46e1c01539fda428f6784b3535f3a42183eb307651eea4fa86b87714f0	a1a223ba76a4b30733d0b71c46886747b42d7b9ca0a7b0e8d5e9221a77c0889f
 

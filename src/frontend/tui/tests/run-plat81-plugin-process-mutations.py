@@ -13,7 +13,15 @@ then required, rc 124 a hang, per-arm restore verification — is
 
 A subject compiled into the PLUGIN EXECUTABLE (the SDK, the protocol) is
 rebuilt by the suite itself: `plugin_process_fixture.buildPackageExecutable`
-rebuilds whenever a source is newer than the binary, which a mutation is.
+rebuilds whenever a source is newer than the binary, which a mutation is. A
+subject compiled into the TERMINAL (`IN_BINARY`) makes the engine rebuild
+`codetracer-tui` before the real-PTY suite grades the arm.
+
+TWO SUITES NEED THEIR LANE'S FLAGS, which the engine does not know: the TLS
+suite (`-d:ssl`, OpenSSL on the loader's path at run time) and `ct`'s
+(`ct-cli-units`). `suite_flags` is extended for them below, from the lanes
+themselves, and `LD_LIBRARY_PATH` gets `CT_LD_LIBRARY_PATH` (the dev shell's
+OpenSSL) for the run.
 
 Usage:
     run-plat81-plugin-process-mutations.py [--only ID,ID] [--derive]
@@ -23,19 +31,53 @@ Usage:
 import sys
 from pathlib import Path
 
+import os  # noqa: E402
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import plat71_mutation_engine as engine  # noqa: E402
 from plat71_mutation_engine import Harness  # noqa: E402
+
+_engine_flags = engine.suite_flags
+
+
+def _suite_flags(suite):
+    if suite.endswith("/test_plugin_tls.nim"):
+        return engine.lane_flags("plugin-tls")
+    if suite.startswith("src/ct/"):
+        return engine.lane_flags("ct-cli-units")
+    return _engine_flags(suite)
+
+
+engine.suite_flags = _suite_flags
+if os.environ.get("CT_LD_LIBRARY_PATH"):
+    os.environ["LD_LIBRARY_PATH"] = os.environ["CT_LD_LIBRARY_PATH"] + \
+        (":" + os.environ["LD_LIBRARY_PATH"]
+         if os.environ.get("LD_LIBRARY_PATH") else "")
 
 SUP = "src/frontend/viewmodel/plugin_host/supervisor.nim"
 LINK = "src/frontend/viewmodel/plugin_host/process_link.nim"
 SDK = "src/plugin_sdk/codetracer_plugin_sdk.nim"
 PKG = "src/common/plugin_model/package.nim"
+RUNTIME = "src/frontend/tui/app/runtime.nim"
+SERVICE = "src/frontend/tui/host/plugin_service.nim"
+MAIN = "src/frontend/tui/main.nim"
+IO = "src/frontend/viewmodel/plugin_host/plugin_io.nim"
+CLI = "src/ct/plugins_cli.nim"
 
 HOST = "src/frontend/viewmodel/tests/unit/test_plugin_process_host.nim"
+PTY = "src/frontend/tui/tests/real_terminal/test_plat81_plugin_processes_pty.nim"
+TLS = "src/frontend/viewmodel/tests/unit/test_plugin_tls.nim"
+CLITEST = "src/ct/plugins_cli_test.nim"
 
-SUBJECTS = [SUP, LINK, SDK, PKG]
-SUITES = [HOST]
-IN_BINARY = set()
+SUBJECTS = [SUP, LINK, SDK, PKG, RUNTIME, SERVICE, MAIN, IO, CLI]
+SUITES = [HOST, PTY, TLS, CLITEST]
+IN_BINARY = {RUNTIME, SERVICE, MAIN}
+
+P_GRANT = "*::installing is not accepting; granted, one process runs both plugins and draws their panes"
+P_SAFE = "*::--no-extensions starts no plugin process"
+P_SWALLOW = "*::a plugin that swallows keys loses the keyboard; three Escapes recover"
+T_NAME = "*::a trusted certificate for ANOTHER name is refused"
+C_WAIT = "*::an undecided capability: waiting for consent, naming the command"
 
 STALE = "*::an answer computed at the old position is never shown"
 HANG = "*::a handler that loops forever is attributed by the watchdog"
@@ -90,6 +132,26 @@ ARMS = [
               "  const Marker = \"ct-plugin-crash-never: \"")],
      [(HOST, SEGV)],
      "§11.6.1: the SDK's crash record is not read; a segfault is unattributed"),
+    ("M11", [(RUNTIME, "      recovery = rt.plugins.observeEscape()",
+              "      recovery = false")],
+     [(PTY, P_SWALLOW)],
+     "§11.7.6: the terminal's router no longer observes Escape for the recovery chord"),
+    ("M12", [(SERVICE, "        queue[].add line",
+              "        discard line")],
+     [(PTY, P_GRANT)],
+     "a plugin's relayed step is swallowed instead of run as the terminal's own move"),
+    ("M13", [(MAIN, "  let extensionsOff = command.flags.noExtensions or",
+              "  let extensionsOff = false and")],
+     [(PTY, P_SAFE)],
+     "§7: --no-extensions is parsed and no longer read by the binary"),
+    ("M14", [(IO, "          if not sock.expectPeerName(host):",
+              "          if false and not sock.expectPeerName(host):")],
+     [(TLS, T_NAME)],
+     "§8.1: TLS accepts a trusted certificate issued for another name"),
+    ("M15", [(CLI, "        of gsUndecided: undecided.add $cap",
+              "        of gsUndecided: discard")],
+     [(CLITEST, C_WAIT)],
+     "§11.6.5: ct plugins status reports a plugin waiting for consent as enabled"),
 ]
 
 
