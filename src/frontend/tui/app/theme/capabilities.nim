@@ -228,6 +228,10 @@ type
       ## `--ascii-borders`
     noMouse*: bool
       ## `--no-mouse`
+    noExtensions*: bool
+      ## `--no-extensions` (Extensibility-Model.md §7, §11.7.6): no plugin
+      ## process is started this session. `CODETRACER_NO_EXTENSIONS=1` says
+      ## the same from the environment.
     theme*: UiTheme
       ## `-t, --theme=<name>` — CTUI-14. `utDark` when the flag is absent, which
       ## is also what §6.2 publishes as the default.

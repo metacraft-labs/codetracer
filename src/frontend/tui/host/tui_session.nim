@@ -197,6 +197,9 @@ type
       ## pinned — so a row re-renders through the checkout's visualisers (the
       ## authoring loop) and two samples can be compared the way the project
       ## says (`project_definitions_host.compare`).
+    pluginVisualisers*: proc(): seq[Visualiser] {.closure.}
+      ## The running plugins' per-type visualisers (PLAT-12's plugin tier),
+      ## installed by the host loop when it starts the session's plugins.
     shell*: NativeShell
       ## PLAT-61: the Shell pane's process side (`wireShell`): the session's
       ## `ShellVM` with its shell on a pty, nil until wired.
@@ -703,9 +706,14 @@ proc onScreenValues(s: TuiSession): seq[PValue] =
     if samples.len > 0: result.add samples[^1]
 
 proc visualisersOnScreen(s: TuiSession): seq[Visualiser] =
-  ## The checkout's visualiser tier for the values on screen now.
-  if s.definitions.isNil: @[]
-  else: s.definitions.visualisersFor(s.onScreenValues())
+  ## The checkout's visualiser tier for the values on screen now, and the
+  ## running plugins' (`ptPlugin`, Extensibility-Model.md §11): the presenter
+  ## orders the tiers (§5.4), so a plugin's rule never outranks the
+  ## project's.
+  result = if s.definitions.isNil: @[]
+           else: s.definitions.visualisersFor(s.onScreenValues())
+  if not s.pluginVisualisers.isNil:
+    result.add s.pluginVisualisers()
 
 proc refreshScratchpad(s: TuiSession; rt: TuiRuntime) =
   rt.app.scratchpad = scratchpadModelOf(s.session.session.scratchpadVM)

@@ -485,6 +485,34 @@ type
     reload*: proc(): string {.closure.}
       ## `:project reload` — read the definitions again now.
 
+  PluginRoute* = tuple[consumed: bool, note: string]
+
+  PluginsService* = ref object
+    ## Extensibility-Model.md §11: what only the host can do about plugins —
+    ## it owns their processes (`host/plugin_processes`). Every closure
+    ## answers from data the plugins pushed earlier; none waits for one.
+    control*: proc(words: seq[string]): tuple[title, body: string] {.closure.}
+      ## `:plugins …`: a title and body for the content overlay, or an empty
+      ## title and a one-line note.
+    statusText*: proc(): string {.closure.}
+      ## The plugins' status items and the top plugin layer's label.
+    takeNote*: proc(): string {.closure.}
+      ## A sentence for the status line the host has not shown yet (a key a
+      ## plugin dropped, a refusal, a fault), or "".
+    observeEscape*: proc(): bool {.closure.}
+      ## §11.7.6: called for EVERY `Escape` before resolution; true on the
+      ## third within a second (the recovery chord).
+    routeLayerKey*: proc(key: string): PluginRoute {.closure.}
+      ## §11.7.3: the plugin layers' answer, top first.
+    routeStaticKey*: proc(key: string): PluginRoute {.closure.}
+      ## §11.7.2: the plugin pass, between the user's bindings and the base.
+    layerLabel*: proc(): string {.closure.}
+      ## §11.7.3: `FLAME MODE (acme-tools.flame)` while a plugin layer is the
+      ## top layer, so a user can always see who holds the keyboard.
+    busy*: proc(): bool {.closure.}
+      ## Something is in flight (a key's deadline, a process starting): the
+      ## loop polls on `PluginPollMs` instead of its idle interval.
+
   TerminalService* = ref object
     ## PLAT-71 (Terminal-Adaptation §5, §10): what only the host can do
     ## about the terminal — it holds the start-up negotiation.
@@ -674,6 +702,9 @@ type
     projectDefinitions*: ProjectDefinitionsService
       ## The HOST's half of `:project` (see the type). Nil until a session
       ## opened a checkout.
+    plugins*: PluginsService
+      ## The HOST's half of `:plugins` (Extensibility-Model.md §11). Nil in a
+      ## host that runs no plugins.
     terminalService*: TerminalService
       ## PLAT-71: the HOST's half of the terminal settings and the report —
       ## re-resolving the capability profile when `:set` changes one (rank 1
@@ -1838,6 +1869,27 @@ proc runCommandLine(rt: TuiRuntime; line: string; outcome: var RuntimeOutcome;
         rt.note(sl.message)
       else:
         rt.note(rt.applyLayoutSetting(sl.setting, sl.value))
+      outcome.detail = rt.app.notification
+      return
+
+  # `:plugins` — the session's plugins (Extensibility-Model.md §11): their
+  # state, their panes, their commands, the grant screen, and the user's
+  # actions on a plugin that misbehaves.
+  block:
+    var text = line.strip()
+    if text.startsWith(":"):
+      text = text[1 .. ^1].strip()
+    let words = text.splitWhitespace()
+    if words.len > 0 and words[0] == "plugins":
+      outcome.repaint = true
+      if rt.plugins.isNil:
+        rt.note("this session runs no plugins")
+      else:
+        let (title, body) = rt.plugins.control(words[1 .. ^1])
+        if title.len > 0:
+          rt.showContent(title, body, false, outcome)
+        else:
+          rt.note(body)
       outcome.detail = rt.app.notification
       return
 
@@ -7794,6 +7846,12 @@ proc runPointMenuItem(rt: TuiRuntime; op: PointMenuOp; action: string;
 proc runMenuAction*(rt: TuiRuntime; action: string;
                     outcome: var RuntimeOutcome) =
   ## A chosen menu item (or omnibar command), in the terminal's terms.
+  # Extensibility-Model.md §11: a plugin's palette entry is a command line
+  # (`:plugins run …`, `:plugins show …`), run as typed.
+  if action.startsWith(CommandLineTargetPrefix):
+    discard rt.runCommandLine(action[CommandLineTargetPrefix.len .. ^1], outcome)
+    outcome.repaint = true
+    return
   # PLAT-71: **Terminal: Show Capabilities** (`:terminal-info`).
   if action == TerminalInfoCommandTarget:
     rt.openTerminalInfo()
@@ -10308,10 +10366,41 @@ proc handleTokenUnwatched(rt: TuiRuntime; token: string;
     result.repaint = true
     return
 
+  # EXTENSIBILITY-MODEL §11.7: PLUGINS, DECIDED FROM WHAT THEY PUSHED. The
+  # recovery chord is observed before any layer is resolved, so no binding
+  # can take it; each `Escape` is still delivered as usual. Host modal
+  # layers — the prompt, the omnibar, an overlay — rank above every plugin
+  # layer, so a plugin sees no key while one is open. A key routed to a
+  # plugin is consumed here, in this turn; the plugin answers it later.
+  var recovery = false
+  if not rt.plugins.isNil and name.len > 0:
+    let lower = name.toLowerAscii
+    if lower in ["escape", "esc"]:
+      recovery = rt.plugins.observeEscape()
+    if not recovery and not rt.prompt.open and not rt.app.omnibar.isOpen and
+       not rt.app.content.open:
+      var route = rt.plugins.routeLayerKey(lower)
+      if not route.consumed:
+        var userBound = false
+        for b in rt.router.user.bindings:
+          if b.chords.len == 1 and b.chords[0].toLowerAscii == lower:
+            userBound = true
+        if not userBound:
+          route = rt.plugins.routeStaticKey(lower)
+      if route.consumed:
+        if route.note.len > 0: rt.note(route.note)
+        result.repaint = true
+        return
   # EVERY OTHER KEY GOES THROUGH THE ROUTER (Base-Keymaps §6.1): the
   # canonical name, this terminal's scope path and facts, the shared
   # resolver; the answer is dispatched by `runResolution`.
   rt.runResolution(rt.routeKey(name, nowMs), nowMs, result)
+  if recovery:
+    # §11.7.6: the third `Escape` within a second popped every plugin layer;
+    # the recovery dialog says which plugins held the keyboard.
+    let (title, body) = rt.plugins.control(@["recovery-dialog"])
+    rt.showContent(title, body, false, result)
+    result.repaint = true
 
 proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
   ## ONE input token, end to end (`handleTokenUnwatched`), noting whether it
@@ -10447,6 +10536,12 @@ proc shellScreenOf*(rt: TuiRuntime): ShellScreen =
   # pushed mode, the modal mode under Vim / Kakoune, else the base).
   rt.syncOverlayLayers()
   model.status.label = rt.router.statusLabel(rt.scopePath, rt.navMode)
+  # Extensibility-Model.md §11.7.3: a plugin layer above the base names its
+  # plugin in the indicator (host modal layers rank above it and keep theirs).
+  if not rt.plugins.isNil and not rt.prompt.open and
+     not rt.app.omnibar.isOpen and not rt.app.content.open:
+    let layer = rt.plugins.layerLabel()
+    if layer.len > 0: model.status.label = layer
   # PLAT-68: the Debug-mode editor's document — painted as the Edit pane
   # once writable, and its selection over the recording's source while not;
   # PLAT-70: its horizontal view, the caret followed.
@@ -10458,6 +10553,10 @@ proc shellScreenOf*(rt: TuiRuntime): ShellScreen =
     model.layout = rt.shownMaximize.layoutFor(model.profile)
   if rt.app.notification.len > 0:
     model.status.notification = rt.app.notification
+  elif not rt.plugins.isNil:
+    # §11.7.3: the top plugin layer names its plugin; and the plugins'
+    # status items.
+    model.status.notification = rt.plugins.statusText()
   # Test-Results-Pane.md §9.6: the hovered control's title, over the
   # notification while the pointer is on the control (the notification is
   # kept, and is what the line says again when it leaves).

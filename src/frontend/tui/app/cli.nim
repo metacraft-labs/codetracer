@@ -347,6 +347,7 @@ options:
   --no-color         monochrome: weight, underline and glyph carry every state
   --ascii-borders    draw + - | instead of the Unicode box-drawing glyphs
   --no-mouse         do not ask the terminal for mouse reporting
+  --no-extensions    start no plugin process this session (safe mode)
   --capabilities     negotiate with this terminal as a session would, print
                      what was decided (colours, mouse, key protocol) and exit
   --keymap=NAME      the base keymap for this session only: cua (default),
@@ -543,6 +544,8 @@ proc parseTuiCommand*(args: openArray[string]): TuiCommand =
       flags.asciiBorders = true
     of "--no-mouse":
       flags.noMouse = true
+    of "--no-extensions":
+      flags.noExtensions = true
     of "--capabilities":
       capabilitiesRequested = true
     of "--capabilities=json":

@@ -105,6 +105,10 @@ from ../viewmodel/viewmodels/test_results_vm import TraceOpenPolicy,
   TestTabPlacement, TestTabPlacementKind, placeTestRecording, testTabOf,
   noteTestTab, forgetTestTab   # Test-Results-Pane.md §9
 import ./host/build_output_source   # PLAT-56
+import ./host/plugin_processes      # Extensibility-Model.md §11: plugins
+import ./host/plugin_service
+import ../viewmodel/plugin_host/supervisor as plugin_supervisor
+import ../../common/value_presentation/presenter as value_presenter
 from ../viewmodel/host/native_requests_host import wireRequests   # PLAT-58
 import ../viewmodel/host/native_nim_tracer   # Nim's compile-time tracing
 import ./app/views/requests_pane   # PLAT-58: `RequestsAct`
@@ -139,6 +143,8 @@ from codetracer_embed import withColumnWidths, ColumnWidthEntry
 
 const
   IdlePollMs = 200
+  PluginPollMs = 5
+    ## While a plugin request is in flight (`PluginsService.busy`).
     ## How long the loop blocks when nothing is happening.
     ##
     ## A CEILING ON LATENCY FOR NOTHING, and it is not a poll interval: input
@@ -158,6 +164,11 @@ proc idleWaitMs(rt: TuiRuntime): int =
   ## a search streams (PLAT-57), or while a scrollbar fades (PLAT-70 Part H).
   if nativeFindInFiles.running:
     return SearchPollMs
+  # Extensibility-Model.md §11.7.4: a key routed to a plugin has a 50 ms
+  # acknowledgement budget and a 500 ms deadline, which a 200 ms idle wait
+  # would measure in fifths of a second.
+  if not rt.plugins.isNil and rt.plugins.busy():
+    return PluginPollMs
   # PLAT-59: the Visual Replay panes' clock (playback, a held scrubber, a
   # frame on its way).
   if rt.visualBusy:
@@ -1003,6 +1014,26 @@ proc interactive(command: TuiCommand): int =
     adopt = session.session.sdk)
   sessions[int(firstSlot.id)] = session
   var shownId = firstSlot.id
+
+  # EXTENSIBILITY-MODEL §11: THE SESSION'S PLUGINS, each package's native
+  # process beside this session. `--no-extensions` (or the environment's
+  # `CODETRACER_NO_EXTENSIONS`) is read here, before any is discovered, so the
+  # flag starts no process at all; the service still answers `:plugins`.
+  let extensionsOff = command.flags.noExtensions or
+    getEnv("CODETRACER_NO_EXTENSIONS").strip.toLowerAscii in
+      ["1", "true", "yes", "on"]
+  let plugins = openSessionPlugins(session.session.session, "tui-" & $getCurrentProcessId(),
+                               extensionsEnabled = not extensionsOff,
+                               startDir = folder)
+  defer: plugins.close()
+  plugins.attach(session.session.session, "tui-" & $getCurrentProcessId())
+  rt.plugins = plugins.service()
+  var pluginMoves = new(seq[string])
+  plugins.routeMoves(pluginMoves)
+  session.pluginVisualisers = proc(): seq[Visualiser] =
+    plugins.sup.pluginVisualisers()
+  app.pluginEntries = plugins.paletteEntries()
+  app.refreshOmnibarIndex()
   app.recordings = recordingsBeside(folder)
 
   var agentWiring: proc(s: TuiSession) = nil
@@ -1644,11 +1675,28 @@ proc interactive(command: TuiCommand): int =
       let keysChanged = rt.pollKeybindings(keybindings)
       # The checkout's project definitions, when the author saved one.
       let definitionsChanged = session.pumpDefinitions(rt, nowMs())
+      # Extensibility-Model.md §11: the plugin processes — what they pushed,
+      # their liveness, their deadlines and breakers. Never blocks.
+      var pluginsChanged = plugins.pump()
+      # A plugin's step or continue, run as the terminal's own command so the
+      # loop pumps it to its stop as it does a key's.
+      while pluginMoves[].len > 0:
+        let line = pluginMoves[][0]
+        pluginMoves[].delete(0)
+        var moved = RuntimeOutcome()
+        rt.runMenuAction(CommandLineTargetPrefix & line, moved)
+        session.applyOutcome(rt, moved)
+        pluginsChanged = true
+      block:
+        let pluginNote = rt.plugins.takeNote()
+        if pluginNote.len > 0:
+          app.notification = pluginNote
+          pluginsChanged = true
       if drainHighlights(rt, highlights, files) or built or vcsChanged or
          hoverChanged or frameOwed or recorded or keysChanged or searched or
          barsChanged or testsChanged or agentChanged or problemsChanged or
          requestsChanged or verified or constraintsChanged or shellChanged or visualChanged or
-         definitionsChanged:
+         definitionsChanged or pluginsChanged:
         paint(driver, rt)
         frameOwed = false
     of dekResize:
