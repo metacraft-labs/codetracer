@@ -730,3 +730,13 @@ src/frontend/tui/tests/plat48-topbar-mutation-control.sha256	src/frontend/gpui/a
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/gpui/app/shell.nim	a9552e68369b3bcf30263e986c7563b2770d0dd974bc196c8280d80fc29cf2bb	b632fc2203960410939c43373a48c225e54816129f2d61d746b77593b76222b0
 src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/tui/host/plugin_service.nim	fb22daa37972e25772347ced09b19bbc5b00c832386053d98e5d7f0ff804cd3c	50c1fc6213361f0c1b75c4d5fe6eeb96f4cb4fcd65100136eee60df839a29517
 src/frontend/viewmodel/tests/unit/plat4-layout-mutation-control.sha256	src/frontend/gpui/app/shell.nim	a9552e68369b3bcf30263e986c7563b2770d0dd974bc196c8280d80fc29cf2bb	b632fc2203960410939c43373a48c225e54816129f2d61d746b77593b76222b0
+
+# 2026-11-21, a healthy plugin gets its bindings back after the recovery chord
+# (codetracer-pm issue 2026-11-21-after-the-recovery-chord-a-healthy-plugin-stays-
+# not-responding-for-the-session): the supervisor, the host suite and the real-terminal
+# suite moved under plat81's record, and the supervisor under its Node twin's
+# (plat81-node-plugin-host). Both owe a re-grade for these bytes.
+src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/supervisor.nim	9c5739a3e43b891145fb03985c8d59531341c4bc0fd40d5f612789cdf476b6e0	dd6a4100086d1e33aff2a44cb0d1270fc35b98d1317d5aa97964039656a50aa3
+src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_plugin_process_host.nim	25a46e3c835516db9e2260705fe51667c06efe3317a7afec196b152333b3071e	180faeab5203588459418a9c3a8aa9c85ff265cb7b7df8b9120a60fb3b626ec3
+src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/tui/tests/real_terminal/test_plat81_plugin_processes_pty.nim	656dd8f478424c872f60f3a72b0d8fc37bf2f7d67b509bbbbcf8e6a41984831a	e11cf030c0ee3bd29888a5eb9d55f8b69dd08654a679476a3db493a8343d5d64
+src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/viewmodel/plugin_host/supervisor.nim	9c5739a3e43b891145fb03985c8d59531341c4bc0fd40d5f612789cdf476b6e0	dd6a4100086d1e33aff2a44cb0d1270fc35b98d1317d5aa97964039656a50aa3

@@ -414,8 +414,8 @@ proc control*(p: SessionPlugins; words: seq[string]): tuple[title, body: string]
     ("RECOVER INPUT", "The plugins that held the keyboard: " &
       (if p.sup.recoveryPlugins.len == 0: "none"
        else: p.sup.recoveryPlugins.join(", ")) &
-      "\n\n:plugins disable-session <id>   :plugins disable <id>   " &
-      ":plugins disable-all")
+      "\n\n:plugins re-enable <id>   :plugins disable-session <id>   " &
+      ":plugins disable <id>   :plugins disable-all")
   of "bisect":
     if arg in ["yes", "no"]:
       if p.bisect.isNil: return ("", "no bisect is running: :plugins bisect")

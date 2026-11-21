@@ -45,7 +45,12 @@
 ## removes everything the plugin pushed, which is what makes "a plugin that
 ## fails cannot make CodeTracer unusable" hold. Three `Escape`s within a second
 ## (`observeEscape`, called by a front-end's router BEFORE resolution) pop every
-## plugin layer and open the recovery dialog.
+## plugin layer and open the recovery dialog. The plugins that held a layer
+## become suspect too, but the chord is no evidence about them, so the host
+## pings each of their processes at once; the pong to a ping sent after the
+## chord, whose watchdog names no busy handler, gives a plugin its bindings
+## and enablement back. A plugin that was already suspect from a missed input
+## deadline stays suspect until its `ack`: a pong does not launder evidence.
 ##
 ## ## TIME
 ##
@@ -171,6 +176,24 @@ type
     reopenAtMs: int64
     halfOpenSinceMs: int64
     suspect*: bool
+      ## Its layers and bindings are transparent and its enablement reads
+      ## "plugin not responding" (§11.7.4). `suspectByChord` says why.
+    suspectByChord*: bool
+      ## True when the ONLY reason for `suspect` is the recovery chord
+      ## (§11.7.6), which is the user's gesture and no evidence about the
+      ## plugin. Such a plugin is probed at once, and the pong to a ping sent
+      ## after the chord (`suspectAfterPing`) that names no busy handler
+      ## clears it.
+      ## False when a missed input deadline made it suspect: that is evidence
+      ## the plugin is not answering input, and only its next `ack` (or a
+      ## fresh activation, or *Re-enable*) clears it.
+    suspectAfterPing*: int
+      ## Its process's `pingSeq` when the chord made it suspect (meaningful
+      ## with `suspectByChord`). Only the pong to a ping numbered above it
+      ## clears the suspicion. A sequence number rather than a time: the
+      ## clock may be the caller's and need not advance between a ping sent
+      ## just before the chord and the chord itself, and that ping's pong
+      ## says nothing about the process after the chord.
     lastFault*: string
     views*: Table[string, ViewEntry]
     status*: OrderedTable[string, ViewNode]
@@ -212,6 +235,9 @@ type
     lastPingMs: int64
     pingOutstanding: bool
     pingSeq: int
+    pongs*: int
+      ## Pongs received over this instance's life, for the report and the
+      ## suites (a test that asserts something survives pongs counts them).
     busy*: string
     busyMs*: int
     restartTimes: seq[int64]
@@ -360,6 +386,12 @@ proc note(sup: Supervisor; line: string) =
       except CatchableError:
         discard
 
+proc clearSuspect(s: PluginSlot) =
+  ## Every place that ends a suspicion ends both its halves, so a later
+  ## suspicion never inherits a stale reason.
+  s.suspect = false
+  s.suspectByChord = false
+
 proc slotsOf(inst: Instance; sup: Supervisor): seq[PluginSlot] =
   for id in inst.package.plugins:
     let s = sup.slots[id]
@@ -421,6 +453,14 @@ proc sendTo(inst: Instance; msg: JsonNode) =
   if not inst.link.isNil and inst.state in {isStarting, isRunning, isStopping}:
     if not inst.link.send(msg):
       inc sendFailures
+
+proc sendPing(inst: Instance; t: int64) =
+  ## §11.6.2's liveness ping. One is outstanding at a time, so the pong that
+  ## answers it is the next pong, and `lastPingMs` is when it was sent.
+  inc inst.pingSeq
+  inst.pingOutstanding = true
+  inst.lastPingMs = t
+  inst.sendTo(%*{"type": "ping", "seq": inst.pingSeq})
 
 proc broadcastState(sup: Supervisor; msg: JsonNode) =
   var m = msg
@@ -603,7 +643,7 @@ proc sendActivate(sup: Supervisor; s: PluginSlot) =
   s.activating = true
   # A fresh activation answers for itself: what it pushes while activating
   # (its layers among them) is not refused for an earlier silence.
-  s.suspect = false
+  s.clearSuspect()
   inst.sendTo(%*{"type": "activate", "plugin": s.id, "grants": grants,
                  "settings": s.settings, "epoch": sup.epoch.toJson})
   if not sup.publisher.isNil:
@@ -867,7 +907,7 @@ proc onAck(sup: Supervisor; s: PluginSlot; id: string) =
   if ms > sup.ackBudgetMs:
     inc s.slowAcks
   if s.suspect:
-    s.suspect = false
+    s.clearSuspect()
     sup.note(s.id & " answered again; its layers and bindings are back")
     sup.changed()
 
@@ -891,12 +931,33 @@ proc handleMessage(sup: Supervisor; inst: Instance; msg: JsonNode) =
         sup.sendActivate(s)
     return
   if t == "pong":
+    inc inst.pongs
+    # Only the answer to the ping that is outstanding is a probe's answer; an
+    # unsolicited pong proves nothing about when the process last answered.
+    let answeredPing = inst.pingOutstanding
     inst.pingOutstanding = false
     inst.busy = msg{"busy"}.getStr("")
     inst.busyMs = msg{"busyMs"}.getInt(0)
     if inst.busy.len > 0 and inst.busyMs > sup.busyHangMs:
       sup.killForFault(inst, fkHang, inst.busy,
         "busy for " & $inst.busyMs & " ms")
+      return
+    # §11.7.6: a plugin the recovery chord alone made suspect is cleared by
+    # the answer to a ping sent after the chord, when the watchdog names
+    # no running handler: the process is reading its input and idle, which is
+    # what "not responding" denied. A pong naming a busy handler clears
+    # nothing, and a plugin suspect from a missed deadline is not touched.
+    if inst.busy.len == 0 and answeredPing:
+      var cleared = false
+      for s in inst.slotsOf(sup):
+        if s.suspect and s.suspectByChord and
+           inst.pingSeq > s.suspectAfterPing:
+          s.clearSuspect()
+          sup.note(s.id & " is answering again; its layers and bindings " &
+                   "are back")
+          cleared = true
+      if cleared:
+        sup.changed()
     return
   let why = violation(msg, inst.registered)
   if why.len > 0:
@@ -934,7 +995,7 @@ proc handleMessage(sup: Supervisor; inst: Instance; msg: JsonNode) =
       inst.sendTo(%*{"type": "deactivate", "plugin": s.id})
       return
     s.active = true
-    s.suspect = false       # a fresh activation answers for itself
+    s.clearSuspect()        # a fresh activation answers for itself
     if s.breaker == bsHalfOpen:
       s.halfOpenSinceMs = sup.now()
     sup.note("activated " & s.id & " in " & inst.label & " pid " &
@@ -1200,18 +1261,24 @@ proc pollInstance(sup: Supervisor; inst: Instance) =
       if not p.finished and not p.cancelled and
          sup.slots[p.plugin].instance == inst:
         waiting = true
-    let interval = if waiting or inst.busy.len > 0: sup.pingBusyMs
-                   else: sup.pingIdleMs
+    # A plugin the recovery chord made suspect is waiting for a pong to
+    # clear it. When the chord found a ping already outstanding (sent before
+    # it, so its pong cannot clear it), the next one goes out at the busy
+    # interval rather than the idle one.
+    var chordSuspect = false
+    for s in inst.slotsOf(sup):
+      if s.suspect and s.suspectByChord:
+        chordSuspect = true
+    let interval =
+      if waiting or inst.busy.len > 0 or chordSuspect: sup.pingBusyMs
+      else: sup.pingIdleMs
     if inst.pingOutstanding:
       if t - inst.lastPingMs > sup.pongDeadlineMs:
         sup.killForFault(inst, fkHang, "", "its watchdog did not answer a " &
                          "ping within " & $sup.pongDeadlineMs & " ms")
         return
     elif t - inst.lastPingMs >= interval:
-      inc inst.pingSeq
-      inst.pingOutstanding = true
-      inst.lastPingMs = t
-      inst.sendTo(%*{"type": "ping", "seq": inst.pingSeq})
+      inst.sendPing(t)
   inst.link.flushWrites()
 
 proc pollDeadlines(sup: Supervisor) =
@@ -1228,7 +1295,10 @@ proc pollDeadlines(sup: Supervisor) =
       p.expired = true
       let s = sup.slot(p.plugin)
       if not s.isNil:
+        # Evidence: only an `ack` clears this, never a pong (a plugin that
+        # takes keys and never answers them still answers pings).
         s.suspect = true
+        s.suspectByChord = false
         sup.statusLine = "`" & p.key & "` went to " & p.plugin &
           ", which did not answer"
         sup.strike(s, fkMissedInput, "no acknowledgement of `" & p.key &
@@ -1561,6 +1631,16 @@ proc observeEscape*(sup: Supervisor): bool {.discardable.} =
   ## resolved. The third within a second pops every plugin layer, marks the
   ## plugins that held one suspect, and opens the recovery dialog. True when
   ## it did.
+  ##
+  ## The chord is the user's gesture, not evidence about a plugin: it is
+  ## pressed as readily over a healthy plugin as over a stuck one. A plugin
+  ## that was not suspect already becomes suspect BY THE CHORD
+  ## (`suspectByChord`), and its process is probed at once with a ping; the
+  ## pong, if the watchdog names no busy handler, gives its bindings and
+  ## enablement back (`handleMessage`). Without the probe it could never
+  ## recover: a suspect plugin receives no key and no command, so the `ack`
+  ## that clears a missed deadline never comes. A plugin already suspect from
+  ## a missed input deadline stays so, and still needs an `ack`.
   let t = sup.now()
   sup.escapeTimes.add t
   var kept: seq[int64]
@@ -1579,7 +1659,20 @@ proc observeEscape*(sup: Supervisor): bool {.discardable.} =
           s.instance.sendTo(%*{"type": "layer-popped", "plugin": s.id,
                                "token": l.token, "reason": "recovery"})
       s.layers = @[]
-      s.suspect = true
+      if not s.suspect:
+        s.suspect = true
+        s.suspectByChord = true
+        s.suspectAfterPing =
+          if s.instance.isNil: 0 else: s.instance.pingSeq
+  # Probe each affected process now. One whose ping is already outstanding
+  # was pinged before the chord; the liveness loop sends the next at the busy
+  # interval while any of its plugins is suspect by the chord.
+  for s in sup.slots.values:
+    let inst = s.instance
+    if s.suspect and s.suspectByChord and s.id in sup.recoveryPlugins and
+       not inst.isNil and inst.state == isRunning and
+       not inst.pingOutstanding:
+      inst.sendPing(t)
   sup.recoveryOpen = true
   sup.note("recovery chord: popped the layers of " &
            (if sup.recoveryPlugins.len == 0: "no plugin"
@@ -1615,7 +1708,7 @@ proc reEnable*(sup: Supervisor; id: string) =
   if s.isNil: return
   s.sessionDisabled = false
   s.latched = false
-  s.suspect = false
+  s.clearSuspect()
   if s.breaker == bsOpen:
     s.breaker = bsHalfOpen
     s.halfOpenSinceMs = sup.now()

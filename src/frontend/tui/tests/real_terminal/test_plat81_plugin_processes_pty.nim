@@ -175,6 +175,8 @@ suite "Extensibility-Model §11 on a real terminal":
     sess.escapeKey()
     check sess.screenHas("RECOVER INPUT")
     check sess.screenHas("acme-tools.flame")
+    # The dialog offers the way back, not only the ways to turn a plugin off.
+    check sess.screenHas(":plugins re-enable <id>")
     sess.send(":quit\r")
     discard sess.waitExit(initDuration(seconds = 30))
     sess.close()
