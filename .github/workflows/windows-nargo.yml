@@ -1,0 +1,151 @@
+# windows-nargo: build nargo the way env.ps1 does on a Windows developer's
+# machine, and smoke-test it.
+#
+# No other Windows CI job runs nargo: the origin-DAP jobs record no Noir and
+# skip env.ps1's NARGO step (WINDOWS_DIY_SKIP_NARGO). So without this job,
+# nothing in CI exercises ensure-nargo.ps1. It covers its fixes: noir's
+# trace-writer sources fetched before cargo (b09e065804f), the bootstrapped Nim
+# on PATH for the trace writer's build script (9f58aafabcf), and a PowerShell
+# host that cannot stop at a [DBG] prompt (3c9e5bebf23).
+#
+# Nightly and on demand only, so it adds no load per push.
+name: Windows nargo
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  windows-nargo:
+    name: nargo builds and compiles a program (Windows)
+    runs-on: [self-hosted, windows, x64]
+    # A cold build compiles nargo from source after env.ps1's other steps.
+    # That alone ran past 75 minutes in codetracer run 44940608244. A warm
+    # cache restores nargo and takes minutes.
+    timeout-minutes: 180
+    steps:
+      - name: Ensure Git and Git Bash are on PATH
+        shell: powershell
+        env:
+          CODETRACER_GIT_BOOTSTRAP_REVISION: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $revision = $env:CODETRACER_GIT_BOOTSTRAP_REVISION
+          if ($revision -cnotmatch '^[0-9a-f]{40}$') {
+            throw "The workflow did not supply an immutable bootstrap revision."
+          }
+          $bootstrapUrl =
+            "https://raw.githubusercontent.com/metacraft-labs/codetracer/" +
+            "$revision/ci/ensure-git-for-checkout.ps1"
+          $bootstrapScript = Join-Path $env:RUNNER_TEMP `
+            "codetracer-ensure-git-$revision-$([Guid]::NewGuid().ToString('N')).ps1"
+          [Net.ServicePointManager]::SecurityProtocol =
+            [Net.ServicePointManager]::SecurityProtocol -bor
+            [Net.SecurityProtocolType]::Tls12
+          try {
+            Invoke-WebRequest -Uri $bootstrapUrl -OutFile $bootstrapScript -UseBasicParsing
+            & $bootstrapScript
+          }
+          finally {
+            Remove-Item -LiteralPath $bootstrapScript -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Generate CI token
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+          persist-credentials: false
+
+      - name: Locate nargo's cache, keyed by Noir revision and toolchain
+        # The same root env.ps1 picks (Get-DefaultInstallRoot: D:\ when
+        # writable, else LOCALAPPDATA). The key is flake.lock's noir revision
+        # plus the hash of the toolchain pins and the nargo bootstrap itself.
+        id: nargo_key
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $root = if ($env:WINDOWS_DIY_INSTALL_ROOT) { $env:WINDOWS_DIY_INSTALL_ROOT } else {
+            $probe = Join-Path "D:\" (".nargo-probe-" + [Guid]::NewGuid().ToString('N'))
+            try { New-Item -ItemType File -Path $probe -ErrorAction Stop | Out-Null; Remove-Item $probe; "D:\metacraft-dev-deps" }
+            catch { Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) "codetracer\windows-diy" }
+          }
+          $lock = Get-Content flake.lock -Raw | ConvertFrom-Json
+          $noirRev = $lock.nodes.noir.locked.rev
+          if ($noirRev -notmatch '^[0-9a-f]{40}$') { throw "flake.lock has no 40-hex noir revision" }
+          $hash = (Get-FileHash -Algorithm SHA256 -InputStream ([IO.MemoryStream]::new([Text.Encoding]::UTF8.GetBytes(
+            (Get-Content non-nix-build/windows/toolchain-versions.env -Raw) + (Get-Content non-nix-build/windows/ensure-nargo.ps1 -Raw))))).Hash.Substring(0, 16).ToLowerInvariant()
+          "root=$root" >> $env:GITHUB_OUTPUT
+          "noir_rev=$noirRev" >> $env:GITHUB_OUTPUT
+          "key=windows-nargo-$noirRev-$hash" >> $env:GITHUB_OUTPUT
+          Write-Host "nargo cache root $root, key windows-nargo-$noirRev-$hash"
+
+      - name: Restore nargo
+        id: nargo_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ${{ steps.nargo_key.outputs.root }}/nargo/cache/source/${{ steps.nargo_key.outputs.noir_rev }}/install
+            ${{ steps.nargo_key.outputs.root }}/nargo/nargo.install.meta
+          key: ${{ steps.nargo_key.outputs.key }}
+
+      - name: Build nargo through env.ps1, and compile a program with it
+        # One step: env.ps1's environment lives in this PowerShell process.
+        # A restored nargo is a "nargo source cache hit" in ensure-nargo.ps1.
+        # nargo is run through the shim env.ps1 writes when it exists, else
+        # from NARGO_DIR.
+        id: nargo
+        shell: pwsh
+        env:
+          WINDOWS_DIY_ENSURE_TTD: "false"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $started = Get-Date
+          . ./env.ps1
+          $elapsed = [int]((Get-Date) - $started).TotalMinutes
+          Write-Host "env.ps1 (nargo cache hit: ${{ steps.nargo_cache.outputs.cache-hit == 'true' }}) took $elapsed min"
+          $nargo = (Get-Command nargo -ErrorAction SilentlyContinue).Source
+          if (-not $nargo -and $env:NARGO_DIR) { $nargo = Join-Path $env:NARGO_DIR "nargo.exe" }
+          if (-not $nargo -or -not (Test-Path -LiteralPath $nargo)) { throw "env.ps1 produced no nargo (NARGO_DIR='$env:NARGO_DIR')" }
+          Write-Host "nargo: $nargo"
+          & $nargo --version
+          if ($LASTEXITCODE -ne 0) { throw "nargo --version exited $LASTEXITCODE" }
+          $proj = Join-Path $env:RUNNER_TEMP ("nargo-smoke-" + [Guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Force -Path (Join-Path $proj "src") | Out-Null
+          Set-Content -LiteralPath (Join-Path $proj "Nargo.toml") -Encoding ASCII -Value @(
+            '[package]', 'name = "smoke"', 'type = "bin"', 'authors = [""]', '', '[dependencies]')
+          Set-Content -LiteralPath (Join-Path $proj "src/main.nr") -Encoding ASCII -Value @(
+            'fn main(x: Field, y: pub Field) {', '    assert(x != y);', '}')
+          Push-Location -LiteralPath $proj
+          try {
+            & $nargo compile
+            if ($LASTEXITCODE -ne 0) { throw "nargo compile exited $LASTEXITCODE" }
+          } finally { Pop-Location }
+          if (-not (Test-Path -LiteralPath (Join-Path $proj "target/smoke.json"))) { throw "nargo compile wrote no target/smoke.json" }
+          Write-Host "nargo compiled the smoke program: $(Join-Path $proj 'target/smoke.json')"
+          Remove-Item -Recurse -Force -LiteralPath $proj -ErrorAction SilentlyContinue
+
+      - name: Save nargo
+        if: ${{ steps.nargo.outcome == 'success' && steps.nargo_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ steps.nargo_key.outputs.root }}/nargo/cache/source/${{ steps.nargo_key.outputs.noir_rev }}/install
+            ${{ steps.nargo_key.outputs.root }}/nargo/nargo.install.meta
+          key: ${{ steps.nargo_key.outputs.key }}
