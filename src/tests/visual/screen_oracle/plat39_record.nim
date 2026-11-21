@@ -50,7 +50,9 @@ const Scenarios* = ["entry-shell", "stepped-editor", "advanced-state",
                     "returned-calltrace", "continued-event-log",
                     "breakpoint-editor"]
 
-const GpuiScenarios* = ["stepped-editor", "advanced-state"]
+const GpuiScenarios* = Scenarios
+  ## Every scenario: `just plat35-capture-gpui-window` opens one GPUI window per
+  ## scenario at its declared size.
 
 proc kindName(k: ScreenReadingKind): string =
   case k
@@ -101,7 +103,7 @@ proc buildRecord*(repoRoot, scratch: string): JsonNode =
 
   var gpui = newJObject()
   for s in GpuiScenarios:
-    let path = gpuiDir / (s & ".png")
+    let path = gpuiFramePath(repoRoot, s)
     gpui[s] = readingToJson(readFrame(path, scratch))
     digests["gpui/" & s] = %digestOf(path)
 

@@ -79,6 +79,8 @@ import {
   type DebugToolbarButton,
 } from "../../page-objects/debug-toolbar-ids";
 import { extractLayoutAnswers } from "../../tools/layout-answers";
+import { LayoutPage as ModelLayoutPage } from "../../page-objects/layout_page";
+import { extractLayoutPageModel } from "../../page-objects/layout_extractors";
 import {
   type ProgramState,
   type SettledEntry,
@@ -999,6 +1001,16 @@ for (const scenario of definition.scenarios) {
       // removing that from the frame is the repair, not a side effect.
       await waitForEditorFrameSettled(ctPage);
       const answers = await extractLayoutAnswers(ctPage, scenario.id);
+      // THE DOM PRODUCER'S DOMAIN MODELS, OFF THE SAME SETTLED FRAME: the
+      // `LayoutPageModel` `layout_extractors.ts` builds out of the DOM, written
+      // beside the PNG for PLAT-39's `LAW-R5`, which compares the pixel
+      // reader's models against these. Beside the frame (gitignored), not in
+      // `answers/`: it describes this run's frame and nothing else.
+      const pageModel = await extractLayoutPageModel(new ModelLayoutPage(ctPage));
+      fs.writeFileSync(
+        path.join(capturesDir, `${scenario.id}.layout-model.json`),
+        `${JSON.stringify(pageModel, null, 2)}\n`,
+      );
       // NO GRADIENT BACKGROUND UNDER A ROUNDED CORNER. A gradient is drawn by a
       // dithering shader, and the software rasteriser's dither over a rounded
       // clip flipped between two states a few seconds apart (one grey level on

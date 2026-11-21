@@ -21,7 +21,7 @@
 ## equally happy whether or not anything reaches a display. A model parsed from
 ## pixels comes back `srUnreadable`.
 
-import std/[algorithm, os, osproc, sequtils, strutils, tables]
+import std/[algorithm, json, os, osproc, sequtils, strutils, tables]
 import gui_assert/image_math
 import gui_assert/ocr
 import ../../../common/png
@@ -89,13 +89,27 @@ const
     ## spelling would report `urRegionNotLocated` on the other renderer, and
     ## `DIFF-8` would then be comparing a reading against a failure to read.
 
-  GpuiCaptureDir* = "src/tests/visual/captures/gpui"
-    ## Frames from the GPUI front-end, captured by PLAT-37's windowed lane on a
-    ## real Wayland compositor (`just plat37-capture`, which exports each
-    ## captured scenario's frame here). Gitignored, like the Electron frames
-    ## `just plat35-capture-electron` writes beside it: neither is committed,
-    ## because a committed frame would pin whichever run produced it.
-    ## `DIFF-8` reads both directories.
+  GpuiCaptureDir* = "build/plat35/gpui-window"
+    ## Frames from the GPUI front-end: one real window per scenario at its
+    ## DECLARED size on GuiAssert's headless sway, written by
+    ## `just plat35-capture-gpui-window` (`<view>.png`). Not committed, like
+    ## the Electron frames `just plat35-capture-electron` writes: CI captures
+    ## both and the ViewModel job reads them together. `DIFF-8` reads both.
+    ##
+    ## It used to be `src/tests/visual/captures/gpui`, filled from PLAT-37's
+    ## `plat37-capture`, which photographs the 1920x1080 SCREEN, so a laptop
+    ## scenario's GPUI frame was not the size its Electron frame was (DIFF-8's
+    ## filed gap 4).
+
+proc gpuiFramePath*(repoRoot, scenario: string): string =
+  ## The GPUI window frame of `scenario`: the capture names each frame after
+  ## the scenario's VIEW, which `scenarios.json` declares (read, never
+  ## restated). Empty when the scenario is not declared.
+  let sj = parseJson(readFile(repoRoot / "src/tests/visual/scenarios.json"))
+  for s in sj["scenarios"].getElems:
+    if s["id"].getStr == scenario:
+      return repoRoot / GpuiCaptureDir / (s["view"].getStr & ".png")
+  ""
 
 proc cropGray*(img: GrayImage, r: Rect): GrayImage =
   ## In-memory crop. No subprocess: the frame is already decoded, and shelling
@@ -702,6 +716,12 @@ proc readStateTable(img: GrayImage, body: Rect, ruleX: int,
       "state table had " & $considered & " rows and no name cell read as an identifier")
   read(model)
 
+const StateEmptyMessages = ["NO LOCAL VARIABLES ARE PRESENT",
+                            "NO VARIABLES AT THIS POINT OF EXECUTION"]
+  ## The state pane's own "nothing here" sentences, upper-cased: the first
+  ## until the 2026-10-17 redesign, the second since ("No variables at this
+  ## point of execution. Type an expression above to watch it.").
+
 proc readProgramState*(img: GrayImage, cell: Rect,
                        scratch: string): ScreenReading[ProgramStateModel] =
   let words = ocrRegion(img, bodyBelowTitle(cell), scratch)
@@ -715,7 +735,7 @@ proc readProgramState*(img: GrayImage, cell: Rect,
   var matched = 0
   var considered = 0
   let allText = linesOf(words).join(" ").toUpperAscii
-  if allText.contains("NO LOCAL VARIABLES ARE PRESENT"):
+  if StateEmptyMessages.anyIt(allText.contains(it)):
     return empty[ProgramStateModel]()
   let ruleX = stateColumnRule(img, bodyBelowTitle(cell))
   if ruleX >= 0:
@@ -748,7 +768,7 @@ proc readProgramState*(img: GrayImage, cell: Rect,
   # dangerous here: its pane census moved from `locals=0` to `locals=8` on one
   # step, so "no rows parsed" and "genuinely nothing" had been the same answer.
   # Matching the message keeps those two apart at the source.
-  if allText.contains("NO LOCAL VARIABLES ARE PRESENT"):
+  if StateEmptyMessages.anyIt(allText.contains(it)):
     return empty[ProgramStateModel]()
   for line in lines:
     let s = line.strip()
@@ -988,6 +1008,40 @@ proc maskClusters(img: GrayImage; spans: seq[(int, int)]; band: GutterRun;
       for x in max(0, a - 1) .. min(img.width - 1, b + 1):
         result.pixels[y * img.width + x] = char(bg)
 
+proc gutterNumberColumn*(img: GrayImage; cell: Rect): tuple[left, right: int] =
+  ## The x just past the gutter's line-number column, from the editor's own
+  ## column structure: the first column after the number column that holds no
+  ## ink on (nearly) any row of the pane. Line numbers are right-aligned and
+  ## the code starts after them on every row, so that column is a vertical
+  ## gap through the whole body even where no character gap separates a
+  ## number from its code. `(-1, -1)` when the structure is not there.
+  ##
+  ## Added 2026-11-21: since the 2026-10-17 redesign the desktop draws the
+  ## number and the code 3 px apart (`44def`), narrower than
+  ## `MinGutterGapPx`, so the cluster rule took number and code as one.
+  let body = bodyBelowTitle(cell)
+  if body.h <= 0 or body.w <= 0: return (-1, -1)
+  let rm = rowMedians(img, body.x, body.x + body.w - 1)
+  let xEnd = body.x + body.w div 2
+  proc inkRows(x: int): int =
+    for y in body.y ..< body.y + body.h:
+      if int(uint8(img.pixels[y * img.width + x])) > rm[y] + 40: inc result
+  var x = body.x
+  # the number column: the first column inked on a twentieth of the body's
+  # scanlines (the execution pointer's lane holds one row's worth: 7 at
+  # 1920x1080; a number column 160-330)
+  while x < xEnd and inkRows(x) < body.h div 20: inc x
+  if x >= xEnd: return (-1, -1)
+  let left = x
+  # the column ends at the first run of THREE ink-free columns: GPUI's digits
+  # are a 1 px gap apart (`44` at 460-467 | 469-476), the desktop's number
+  # ends 3 px before its code
+  var run = 0
+  while x < xEnd and run < 3:
+    if inkRows(x) == 0: inc run else: run = 0
+    inc x
+  if x >= xEnd: (-1, -1) else: (left, x - 3)
+
 proc readGutterDigits*(img: GrayImage; cell: Rect; band: GutterRun;
                        scratch: string):
     tuple[ok: bool, line: int, text: string, right: int] =
@@ -1018,6 +1072,28 @@ proc readGutterDigits*(img: GrayImage; cell: Rect; band: GutterRun;
   # The order is part of the rule: the proportional margin tried FIRST read
   # Electron's `44` as `4`, and 2x tried first read `» 110` as `p» 110`.
   let pad = 2
+  # THE NUMBER COLUMN ALONE (`gutterNumberColumn`), read once up front: the
+  # column's own left and right edges, so neither the lanes before it (the
+  # pointer, the marks) nor the code after it are in the crop. Taken over a
+  # cluster reading only when it reads MORE digits — the rule the masked crop
+  # below follows, for the same reason: a shorter reading of the same ink is
+  # the misread (GPUI's `44` read `4` through the clusters, 2026-11-21).
+  var column: tuple[ok: bool, line: int, text: string, right: int]
+  block readColumn:
+    let (cl, cr) = gutterNumberColumn(img, cell)
+    if cr <= cl: break readColumn
+    for upscale in [2.0, 1.0]:
+      let crop = Rect(x: max(cell.x, cl - 3), y: band.first - pad,
+                      w: cr - max(cell.x, cl - 3) + 2,
+                      h: band.last - band.first + 1 + 2 * pad)
+      let text = ocrRegion(img, crop, scratch, psm = 7,
+                           upscale = upscale).mapIt(it.text).join(" ")
+      let parsed = parseNumberColumn(text)
+      if parsed.ok:
+        column = (true, parsed.line, text, crop.x + crop.w)
+        break readColumn
+  template better(p: tuple[ok: bool, line: int]): bool =
+    column.ok and (not p.ok or len($column.line) > len($p.line))
   let tall = max(pad, (band.last - band.first + 1) div 3)
   for (margin, upscale) in [(pad, 1.0), (tall, 1.0), (pad, 2.0)]:
     for k in 1 .. min(MaxGutterClusters, clusters.len):
@@ -1047,9 +1123,15 @@ proc readGutterDigits*(img: GrayImage; cell: Rect; band: GutterRun;
         let mParsed = parseGutterDigits(mText)
         if mParsed.ok and
            (not parsed.ok or len($mParsed.line) > len($parsed.line)):
+          if better(mParsed): return column
           return (true, mParsed.line, mText, crop.x + crop.w)
       if parsed.ok:
+        if better(parsed): return column
         return (true, parsed.line, text, crop.x + crop.w)
+  # THE NUMBER COLUMN ALONE, when no cluster prefix parsed: the desktop
+  # draws the number 3 px from its code, so number and code are one cluster.
+  if column.ok:
+    return (true, column.line, column.text, column.right)
   # NO FIXED-WIDTH FALLBACK. It existed until the cluster rule was verified
   # on PLAT-39's own Electron corpus (all six read through clusters, the
   # record unchanged), and it was measured to be dangerous: on a GPUI frame
