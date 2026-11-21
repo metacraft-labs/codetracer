@@ -134,3 +134,18 @@ proc minPaneWidth*(kind: PaneKind): int =
   ## reachable as a tab — rather than being drawn illegibly, and a drawable
   ## pane's strip always spells the tab it is on.
   max(contentMinWidth(kind), terminalPaneName(kind).len + 2)
+
+proc minContributedWidth*(id: string): int =
+  ## The narrowest column a CONTRIBUTED pane can be given. The terminal knows
+  ## nothing about what an extension draws, so the floor is a readable line
+  ## of its pushed view and, as for a built-in pane, never less than its own
+  ## bracketed tab label (the surface's name, `<plugin>/<surface>`).
+  const ContentFloor = 20
+  let surface = surfaceOf(id)
+  let name = if surface.len > 0: surface else: id
+  max(ContentFloor, name.len + 2)
+
+proc minContributedHeight*(id: string): int =
+  ## A tab strip and one row of the extension's view, as for every pane.
+  discard id
+  2

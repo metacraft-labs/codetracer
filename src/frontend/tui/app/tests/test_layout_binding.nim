@@ -69,7 +69,9 @@ import ./plat45_old_profiles
 # spelling as a RUNTIME assertion count, and inside a `const` block the
 # declaration is invisible to it. `+ 3`: PLAT-49 part B's positive controls
 # (a lone pane's header joined; a tab's insert and append halves were seen).
-const ExpectedAssertions = 2685 + 17 + 2 + 3 + 97 + 5 - 21 + 4
+const ExpectedAssertions = 2685 + 17 + 2 + 3 + 97 + 5 - 21 + 4 + 8
+  ## + 8: `:close-pane` — its four checks in the every-verb sweep, and the
+  ## sweeps over `LayoutVerb` (names, parse, exercised) meeting one more verb.
   ## PLAT-51: -21 — the shared default lost a pane (the Timeline, a tab of
   ## the event stack), and the per-pane / per-tab sweeps over it with it.
   ## PLAT-51 part B: +4 — the four dock zones a pointer no longer produces
@@ -1506,6 +1508,17 @@ suite "PLAT-6: the terminal front-end is a BINDING to the layout model":
       ckMessageIsNeverSilent(again, ":unpin state when it is placed")
       ck b.runLayoutCommand(geom, ":pin sideways").status == lasBadArgument
       verbsRun.incl lvUnpin
+      # `:close-pane <pane>` removes a named pane; a word naming no pane is a
+      # bad argument, never silent.
+      ck b.layout.tree.contains(paneEventLog) or b.layout.tree.contains(paneState)
+      let closing = if b.layout.tree.contains(paneEventLog): paneEventLog
+                    else: paneState
+      let closed = b.runLayoutCommand(geom, ":close-pane " & $closing)
+      ck closed.status == lasApplied
+      ck not b.layout.tree.contains(closing)
+      ck b.runLayoutCommand(geom, ":close-pane nowhere").status ==
+        lasBadArgument
+      verbsRun.incl lvClosePane
 
     checkpoint("verbs exercised: " & $verbsRun)
     for v in LayoutVerb:

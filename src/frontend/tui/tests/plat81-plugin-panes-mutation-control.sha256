@@ -1,0 +1,11 @@
+# Control digests for run-plat81-plugin-panes-mutations.py — the
+# subjects AND the suites the arms are graded by.
+# Refreshed with --record-control-hashes, gated by the
+# needle scan.
+332e55202ae3efd3d7b12399cc79765098aa20dd71cdac41296530d83fccb3d6  src/frontend/tui/app/layout/project.nim
+a1083e69d55c7d701ff22aceaf6a37c6fdb6a9a2920db19103313446bde1d55d  src/frontend/headless_app/layout_model.nim
+186659ce51f2e360f11b9132e0655c16f5f88616711cf9ecdd60d43d8cddbe69  src/frontend/tui/host/plugin_panes.nim
+d6dd45dba8076300f2a286c3a648dd352a263e3f126b24a8fe7a6b76e132f1ea  src/frontend/tui/app/views/shell.nim
+6c1f5ae602ced73fb85c55eb80a62fcf65b266ca62607651999ac59403b28ab7  src/frontend/tui/app/tests/test_contributed_pane_layout.nim
+935141d34c4ac8b3952c20e76a1ef5b7eb5837b751e6fb1d0c92d62cab335f70  src/frontend/viewmodel/tests/unit/test_layout_contributed_identity.nim
+32817258e9fc453d8a6216f37f6a77c88d4f42fec6a8751dd9f2b9757038cdf4  src/frontend/tui/tests/real_terminal/test_plat81_plugin_panes_pty.nim

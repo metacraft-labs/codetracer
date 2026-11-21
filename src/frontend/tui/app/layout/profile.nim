@@ -169,21 +169,48 @@ proc regionPanes(tree: LayoutNode; visible: PaneKind): seq[PaneKind] =
   else:
     result.add visible
 
+proc leafMinimum(n: LayoutNode): (int, int) =
+  ## A leaf's minimum in cells, in whichever namespace it is: a contributed
+  ## leaf's `pane` is the enum's zero value, so reading `minPaneWidth(n.pane)`
+  ## off one would hold an extension's pane to the editor's minimum.
+  if n.isContributed:
+    (minContributedWidth(n.contributedPane),
+     minContributedHeight(n.contributedPane))
+  else:
+    (minPaneWidth(n.pane), minPaneHeight(n.pane))
+
+proc regionNeeds(tree: LayoutNode; r: PaneRef): (int, int) =
+  ## The minimum of the region showing `r`: its WIDEST and TALLEST tab, of
+  ## either namespace, when it is a stack (`regionPanes`' rule).
+  let leaf = find(tree, r)
+  if leaf.isNil:
+    return (0, 0)
+  let parent = parentOf(tree, leaf)
+  var kids = @[leaf]
+  if not parent.isNil and parent.kind == lnStack:
+    kids = parent.children
+  for c in kids:
+    if c.kind == lnPane:
+      let (w, h) = leafMinimum(c)
+      result = (max(result[0], w), max(result[1], h))
+
 proc fitProblems*(tree: LayoutNode; width, height: int): seq[string] =
   ## Why `tree` does not fit a `width` x `height` terminal: one entry per
   ## visible region whose rectangle is smaller than its panes' minimum, or the
-  ## projection's own refusal. Empty exactly when it fits.
+  ## projection's own refusal. Empty exactly when it fits. Contributed
+  ## regions are held to their own minimum (`minContributedWidth`).
   let projection = projectLayout(tree, bodyArea(width, height), ppDegrade)
   if projection.status != prOk:
     return @["the projection answered " & $projection.status]
   for r in projection.regions:
-    var needW = 0
-    var needH = 0
-    for p in regionPanes(tree, r.pane):
-      needW = max(needW, minPaneWidth(p))
-      needH = max(needH, minPaneHeight(p))
+    let (needW, needH) = regionNeeds(tree, builtinRef(r.pane))
     if r.area.width < needW or r.area.height < needH:
       result.add $r.pane & " has " & $r.area.width & "x" & $r.area.height &
+                 ", needs " & $needW & "x" & $needH
+  for r in projection.contributed:
+    let (needW, needH) = regionNeeds(tree, contributedRef(r.id))
+    if r.area.width < needW or r.area.height < needH:
+      result.add r.id & " has " & $r.area.width & "x" & $r.area.height &
                  ", needs " & $needW & "x" & $needH
 
 proc fitsAt*(tree: LayoutNode; width, height: int): bool =
@@ -454,7 +481,7 @@ proc minimumWidth*(tree: LayoutNode): int =
       return 0
     case n.kind
     of lnPane:
-      minPaneWidth(n.pane)
+      leafMinimum(n)[0]
     of lnRow:
       var total = 0
       for c in n.children:
@@ -476,7 +503,7 @@ proc minimumHeight*(tree: LayoutNode): int =
       return 0
     case n.kind
     of lnPane:
-      minPaneHeight(n.pane)
+      leafMinimum(n)[1]
     of lnColumn:
       var total = 0
       for c in n.children:

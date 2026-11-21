@@ -35,7 +35,7 @@
 ## an ordinary single-pane layout would be indistinguishable from a deliberate
 ## one, which is the failure the rule is written against.
 
-import std/[options, sets, strutils, unicode, wordwrap]
+import std/[options, sets, strutils, tables, unicode, wordwrap]
 
 import isonim_tui
 
@@ -113,6 +113,23 @@ export terminal_output_pane
 export tooltip
 
 type
+  ContributedPaneView* = object
+    ## What a plugin pane shows this frame: the rows of the tree its plugin
+    ## last pushed (`PluginsService.paneView`) — never plugin code.
+    lines*: seq[string]
+    cursor*: int
+      ## The row the reader's attention is on (a list's highlighted option),
+      ## or -1.
+    stale*: bool
+      ## The tree was computed at an earlier stop (§11.4.5): kept, and marked.
+
+  SourceDecorationMark* = object
+    ## One plugin decoration on the source document (§11.4.4 `decorations`).
+    line*: int
+    glyph*: string
+    text*: string
+    plugin*: string
+
   ShellModel* = object
     ## Everything the screen shows, as a value. Constructed by
     ## `app/tui_app.nim` from a `HeadlessApp`; this module never learns that a
@@ -303,6 +320,14 @@ type
       ## PLAT-16. Edit mode's `paneBuildOutput`, as a value. Its zero verdict is
       ## `bvIdle`, which is what a project nobody has built is in.
     focused*: PaneKind
+    focusedContributed*: string
+      ## The CONTRIBUTED pane that has the focus, or `""` (then `focused`).
+    contributedViews*: Table[string, ContributedPaneView]
+      ## A view for every contributed pane whose extension IS loaded. A
+      ## contributed region with no entry here is a pane from an extension
+      ## that is not loaded, and says so (`UnloadedExtensionText`).
+    sourceDecorations*: seq[SourceDecorationMark]
+      ## The plugins' decorations for the file the source pane shows.
     hasFocus*: bool
     focusHighlightOff*: bool
       ## PLAT-51 (Native-Front-End-Parity.md §2): the focus highlight — the
@@ -848,6 +873,93 @@ proc paintDividers(g: var StyledGrid; regions: seq[PaneRegion];
                  else: groundOf(regions, row, col + 1)
     g.paint(row, col, g.glyphText(grDividerV), CellStyle(role: role, surface: ground))
 
+const
+  UnloadedExtensionText* =
+    "This pane is provided by an extension that is not loaded: "
+    ## A saved contributed pane whose extension is not loaded keeps its slot
+    ## and says this, with the id (Extensibility-Model.md §10 decision 2's
+    ## typed "pane from an extension that is not loaded").
+  StalePaneText* = "(stale: computed at an earlier stop)"
+
+proc paintContributedPane*(g: var StyledGrid; region: ContributedRegion;
+                           model: ShellModel; body: CellArea;
+                           focusedStrip = false) =
+  ## One CONTRIBUTED pane, into its own rectangle: its tab strip (its stack's
+  ## tabs, or its own title) and the rows of the tree its plugin pushed —
+  ## or, for an extension that is not loaded, the sentence naming it.
+  let full = region.area
+  if full.width <= 0 or full.height <= 0:
+    return
+  let frame = paneFrame(full, body)
+  let inner = frame.box.width
+  g.fillSurface(full.row, full.col, full.width, full.height, srSurfacePanel)
+  let stacked = region.activeTab >= 0 and region.tabs.len > 0
+  let lone = if region.title.len > 0: region.title
+             else: contributedTabName(region.id)
+  let tabs = if stacked: region.tabs else: @[lone]
+  let active = if stacked: region.activeTab else: 0
+  var lines: seq[string] = @[]
+  var cursor = -1
+  if model.contributedViews.hasKey(region.id):
+    let v = model.contributedViews[region.id]
+    if v.stale:
+      lines.add StalePaneText
+    let offset = lines.len
+    lines.add v.lines
+    if v.cursor >= 0: cursor = v.cursor + offset
+  else:
+    for piece in wrapWords(UnloadedExtensionText & region.id,
+                           max(1, inner)).splitLines():
+      lines.add piece
+  for i, line in lines:
+    let row = full.row + 1 + i
+    if row >= full.row + full.height:
+      break
+    if i == cursor:
+      g.fillSurface(row, full.col, inner, 1, srTabActive)
+      g.paint(row, full.col, fitCells(line, inner),
+              CellStyle(role: srTabActive, surface: srTabActive))
+    else:
+      g.paint(row, full.col, fitCells(line, inner))
+  paintTabRow(g, full.row, full.col, tabs, active, inner,
+              focused = focusedStrip)
+
+proc dividerStandIns(projection: Projection): seq[PaneRegion] =
+  ## The regions the dividers are settled over: the built-in ones, and a
+  ## PANEL-GROUND stand-in for each contributed one. Used ONLY for the
+  ## divider geometry (`paintDividers` reads areas and whether a pane is the
+  ## editor, for its ground), never to paint, focus or hit-test a pane — a
+  ## contributed region is otherwise only ever read from `contributed`.
+  result = projection.regions
+  for c in projection.contributed:
+    result.add PaneRegion(pane: paneState, title: c.title, area: c.area,
+                          tabs: c.tabs, activeTab: c.activeTab)
+
+proc paintSourceDecorations*(g: var StyledGrid; under: CellArea;
+                             model: ShellModel; screen: SourcePaneScreen) =
+  ## The plugins' decorations on the source pane: on each decorated line in
+  ## view, the plugin's glyph and text drawn at the end of the code column —
+  ## a marker beside the line it is about — so the line and what the plugin
+  ## says of it are read together. The status line carries the text of the
+  ## one on the current line too (`runtime`).
+  if model.sourceDecorations.len == 0 or under.height <= 1:
+    return
+  let bodyRows =
+    if screen.barRow >= 0: screen.barRow - under.row - 1
+    else: under.height - 1
+  let width = screen.gutterWidth + screen.codeWidth
+  for d in model.sourceDecorations:
+    let i = d.line - model.source.viewportTop
+    if i < 0 or i >= bodyRows:
+      continue
+    let label = " " & d.glyph & " " & d.text & " "
+    let cells = min(textCells(label), max(0, width - screen.gutterWidth))
+    if cells <= 0:
+      continue
+    let col = under.col + width - cells
+    g.paint(under.row + 1 + i, col, fitCells(label, cells),
+            CellStyle(role: srSourceVerified, reverse: true))
+
 proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
                body: CellArea; focusedStrip = false;
                gapAt = -1; gapCells = 0) =
@@ -996,7 +1108,8 @@ proc paintPane(g: var StyledGrid; region: PaneRegion; model: ShellModel;
     # CTUI-5's provenance marker stays visible: the gutter carries it on
     # every line (`gutter.initGutterLineSpec`'s `provenance`).
     underStrip:
-      discard paintSourcePane(g, under, model.source, model.highlighting)
+      let screen = paintSourcePane(g, under, model.source, model.highlighting)
+      paintSourceDecorations(g, under, model, screen)
   elif region.pane == paneCalltrace and not model.callTrace.isEmpty:
     underStrip:
       discard paintCallTrace(g, under, model.callTrace)
@@ -1236,6 +1349,8 @@ proc shellScreen*(model: ShellModel; width, height: int;
   # off`, the remembered preference) — focus is then shown by the cursor and
   # where the keys go, not by colour.
   let highlight = model.hasFocus and not model.focusHighlightOff
+  let contributedFocused = model.focusedContributed.len > 0 and
+    not projection.regionForContributed(model.focusedContributed).isEmptyArea
   for region in projection.regions:
     var gapAt = -1
     var gapCells = 0
@@ -1248,14 +1363,23 @@ proc shellScreen*(model: ShellModel; width, height: int;
           gapAt = model.tabPlaceholder.index
           gapCells = model.tabPlaceholder.cells
     paintPane(g, region, model, geometry.inner,
-              focusedStrip = highlight and region.pane == model.focused,
+              focusedStrip = highlight and region.pane == model.focused and
+                             not contributedFocused,
               gapAt = gapAt, gapCells = gapCells)
+  # An extension's panes, from their own list (`project.ContributedRegion`).
+  for region in projection.contributed:
+    paintContributedPane(g, region, model, geometry.inner,
+                         focusedStrip = highlight and
+                                        region.id == model.focusedContributed)
   var focusedArea = CellArea()
   if highlight:
-    for region in projection.regions:
-      if region.pane == model.focused:
-        focusedArea = region.area
-  paintDividers(g, projection.regions, geometry.inner, focusedArea,
+    if contributedFocused:
+      focusedArea = projection.regionForContributed(model.focusedContributed)
+    else:
+      for region in projection.regions:
+        if region.pane == model.focused:
+          focusedArea = region.area
+  paintDividers(g, dividerStandIns(projection), geometry.inner, focusedArea,
                 highlight, model.dividers)
   if projection.status != prOk and body.height > 0:
     g.paint(body.row, body.col, degradedBanner(projection.status, width))

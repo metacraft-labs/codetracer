@@ -363,6 +363,35 @@ proc directionFor*(action: KeyAction): (bool, FocusDirection) =
   of kaFocusRight: (true, fdRight)
   else: (false, fdLeft)
 
+proc areaInDirection*(areas: seq[CellArea]; fromIndex: int;
+                      dir: FocusDirection): int =
+  ## The index of the area one step `dir` of `areas[fromIndex]`, by geometry
+  ## alone, or -1. The rule `paneInDirection` applies, over bare rectangles —
+  ## so a caller holding regions of BOTH pane namespaces (the layout binding,
+  ## with an extension's panes beside the built-in ones) asks the same four
+  ## comparisons rather than a copy of them.
+  if fromIndex < 0 or fromIndex >= areas.len:
+    return -1
+  let cur = areas[fromIndex]
+  var best = -1
+  for i, area in areas:
+    if i == fromIndex or not isBeyond(dir, cur, area):
+      continue
+    if best < 0:
+      best = i
+      continue
+    let a = areas[best]
+    let na = nearness(dir, a)
+    let nb = nearness(dir, area)
+    if nb > na:
+      best = i
+    elif nb == na and
+         crossDistance(dir, cur, area) < crossDistance(dir, cur, a):
+      best = i
+    # A remaining tie keeps `best`, which is the earlier projection index — the
+    # fourth rule in this module's header, and what makes the answer total.
+  best
+
 proc paneInDirection*(regions: seq[PaneRegion]; fromIndex: int;
                       dir: FocusDirection): (bool, PaneKind) =
   ## Which pane lies one step `dir` of `regions[fromIndex]`, by geometry alone.
@@ -375,27 +404,10 @@ proc paneInDirection*(regions: seq[PaneRegion]; fromIndex: int;
   ## these four comparisons would have been a second directional-navigation
   ## rule, and the day they disagreed `Ctrl+w h` and `:move-pane left` would
   ## have named different panes on the same screen.
-  if fromIndex < 0 or fromIndex >= regions.len:
-    return (false, paneEditor)
-  let cur = regions[fromIndex].area
-  var best = -1
-  for i, region in regions:
-    if i == fromIndex or not isBeyond(dir, cur, region.area):
-      continue
-    if best < 0:
-      best = i
-      continue
-    let a = regions[best].area
-    let bArea = region.area
-    let na = nearness(dir, a)
-    let nb = nearness(dir, bArea)
-    if nb > na:
-      best = i
-    elif nb == na and
-         crossDistance(dir, cur, bArea) < crossDistance(dir, cur, a):
-      best = i
-    # A remaining tie keeps `best`, which is the earlier projection index — the
-    # fourth rule in this module's header, and what makes the answer total.
+  var areas: seq[CellArea] = @[]
+  for r in regions:
+    areas.add r.area
+  let best = areaInDirection(areas, fromIndex, dir)
   if best < 0:
     return (false, paneEditor)
   (true, regions[best].pane)

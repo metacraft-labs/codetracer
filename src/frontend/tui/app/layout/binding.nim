@@ -116,6 +116,10 @@ type
   DockStripSlot* = object
     ## One auto-hidden pane's tab within its edge strip.
     pane*: PaneKind
+      ## Meaningful only when `contributed` is empty.
+    contributed*: string
+      ## A docked CONTRIBUTED pane's id, or `""`. Its label is drawn like any
+      ## other; a press on it is not a built-in pane's (`onMouse` skips it).
     title*: string
     order*: int
     area*: CellArea
@@ -152,6 +156,8 @@ type
       ## Every VISIBLE pane and its node path, resolved once. A pane that is
       ## docked or on the hidden side of a stack is absent, exactly as it is
       ## absent from `projection.regions`.
+    contributedPaths*: seq[(string, string)]
+      ## The same for every visible CONTRIBUTED pane (`projection.contributed`).
     openDock*: CellArea
       ## PLAT-49 part B (finding 9): where the docked pane shown OPEN
       ## (`DockedPane.open`, the desktop's clicked strip tab) is painted — a
@@ -255,6 +261,16 @@ type
       ## (`adoptModeArrangement`), so the binding always holds the CURRENT
       ## mode's arrangement — the one drawn and the one hit-tested.
     focus*: PaneKind
+    closedContributed*: seq[string]
+      ## The contributed panes the user closed (`:close-pane`): not placed
+      ## again for the rest of the session (`placeContributedPane`).
+    focusContributed*: string
+      ## The CONTRIBUTED pane that has the focus, or `""` when `focus` (a
+      ## built-in pane) has it. A second field rather than a widened `focus`
+      ## for every reader that knows only `PaneKind`: they keep reading the
+      ## last built-in pane, and the verbs and gestures below read
+      ## `focusRef`, which names whichever pane is really focused. Every
+      ## gesture here that focuses a built-in pane clears it.
     userModified*: bool
       ## Set by the first command that applies. See the module header on the
       ## responsive-profile decision this implements.
@@ -498,11 +514,13 @@ proc geometryOf*(layout: Layout; body: CellArea;
     var strip = DockStrip(edge: edge, area: area, slots: @[])
     var titles: seq[string] = @[]
     for d in docked:
-      titles.add(if d.title.len > 0: d.title else: terminalPaneName(d.pane))
+      titles.add(if d.title.len > 0: d.title
+                 elif d.isContributed: contributedTabName(d.contributedPane)
+                 else: terminalPaneName(d.pane))
     let areas = slotAreas(area, edge, titles)
     for i, d in docked:
       strip.slots.add DockStripSlot(
-        pane: d.pane, title: titles[i],
+        pane: d.pane, contributed: d.contributedPane, title: titles[i],
         order: d.order,
         area: (if i < areas.len: areas[i] else: CellArea()))
     if edge == leBottom:
@@ -522,7 +540,9 @@ proc geometryOf*(layout: Layout; body: CellArea;
   # its edge (a third of that axis, the reveal's share), and the tree is
   # projected into what is left — tiled, never over it.
   let opened = layout.openDocked
-  if opened.isSome:
+  # A docked CONTRIBUTED pane is not shown open in the terminal: the open band
+  # is painted by built-in pane painters (`openDockPane` is a `PaneKind`).
+  if opened.isSome and not opened.get.isContributed:
     let band = openDockAreaFor(result.inner, opened.get.edge)
     if not band.isEmptyArea and
        (if opened.get.edge in {leTop, leBottom}: band.height < result.inner.height
@@ -548,6 +568,10 @@ proc geometryOf*(layout: Layout; body: CellArea;
     let p = panePath(layout, region.pane)
     if p.isSome:
       result.paths.add (region.pane, p.get)
+  for region in result.projection.contributed:
+    let p = panePath(layout, contributedRef(region.id))
+    if p.isSome:
+      result.contributedPaths.add (region.id, p.get)
   if interaction.kind == ikRevealingDock:
     result.revealing = true
     result.revealPane = interaction.pane
@@ -564,11 +588,24 @@ proc regionOfPane*(geom: LayoutGeometry; pane: PaneKind): CellArea =
   geom.projection.regionFor(pane)
 
 proc regionIndexAt*(geom: LayoutGeometry; row, col: int): int =
-  ## Which projected region owns the cell, or -1.
+  ## Which projected BUILT-IN region owns the cell, or -1.
   for i, r in geom.projection.regions:
     if r.area.contains(row, col):
       return i
   -1
+
+proc contributedIndexAt*(geom: LayoutGeometry; row, col: int): int =
+  ## Which projected CONTRIBUTED region owns the cell, or -1.
+  for i, r in geom.projection.contributed:
+    if r.area.contains(row, col):
+      return i
+  -1
+
+proc pathOfContributed*(geom: LayoutGeometry; id: string): Option[string] =
+  for entry in geom.contributedPaths:
+    if entry[0] == id:
+      return some(entry[1])
+  none(string)
 
 proc stripIndexAt*(geom: LayoutGeometry; row, col: int): int =
   for i, s in geom.strips:
@@ -596,11 +633,16 @@ proc boundsOfPath*(geom: LayoutGeometry; path: string): CellArea =
   ## trusting this paragraph.
   var found = false
   var top, leftC, bottomC, rightC: int
+  var all: seq[(string, CellArea)] = @[]
   for i, entry in geom.paths:
-    let p = entry[1]
+    all.add (entry[1], geom.projection.regions[i].area)
+  for entry in geom.contributedPaths:
+    all.add (entry[1], geom.projection.regionForContributed(entry[0]))
+  for entry in all:
+    let p = entry[0]
     if not (path.len == 0 or p == path or p.startsWith(path & "/")):
       continue
-    let a = geom.projection.regions[i].area
+    let a = entry[1]
     if a.isEmptyArea:
       continue
     if not found:
@@ -1266,6 +1308,19 @@ proc layout*(b: LayoutBinding): Layout =
   ## that could disagree with the undo log.
   b.history.value
 
+proc focusRef*(b: LayoutBinding): PaneRef =
+  ## The pane that really has the focus, in its own namespace.
+  if b.focusContributed.len > 0: contributedRef(b.focusContributed)
+  else: builtinRef(b.focus)
+
+proc focusOn*(b: LayoutBinding; r: PaneRef) =
+  ## Give the focus to the pane `r` names.
+  if r.isContributed:
+    b.focusContributed = r.id
+  else:
+    b.focus = r.builtin
+    b.focusContributed = ""
+
 proc newLayoutBinding*(layout: Layout; profile: LayoutProfile;
                        focus = paneEditor;
                        product = pmDebug): LayoutBinding =
@@ -1485,6 +1540,28 @@ proc focusedIndexIn(geom: LayoutGeometry; pane: PaneKind): int =
       return i
   -1
 
+proc visibleRefs(geom: LayoutGeometry): seq[(PaneRef, CellArea)] =
+  ## Every visible pane of both namespaces with its cells, built-in ones
+  ## first (projection order), so directional choices see the whole screen.
+  for r in geom.projection.regions:
+    result.add (builtinRef(r.pane), r.area)
+  for r in geom.projection.contributed:
+    result.add (contributedRef(r.id), r.area)
+
+proc refInDirection*(geom: LayoutGeometry; fromRef: PaneRef;
+                     dir: FocusDirection): (bool, PaneRef) =
+  ## `motions.paneInDirection` over both namespaces: the same geometric rule,
+  ## applied to the built-in AND the contributed regions, so `:focus right`
+  ## and `:move-pane right` reach an extension's pane and leave one.
+  let all = geom.visibleRefs
+  var areas: seq[CellArea] = @[]
+  var at = -1
+  for i, e in all:
+    areas.add e[1]
+    if sameSlot(e[0], fromRef): at = i
+  let found = areaInDirection(areas, at, dir)
+  if found < 0: (false, fromRef) else: (true, all[found][0])
+
 proc moveFocus*(b: LayoutBinding; geom: LayoutGeometry;
                 dir: FocusDirection): LayoutAction =
   ## `Ctrl+w h/j/k/l`, against this projection.
@@ -1492,11 +1569,10 @@ proc moveFocus*(b: LayoutBinding; geom: LayoutGeometry;
   ## Through `motions.paneInDirection` — the SAME geometric rule the focus
   ## chain uses — so the pane `Ctrl+w l` focuses and the pane `:move-pane
   ## right` splits against are the same pane on the same screen.
-  let (found, pane) = paneInDirection(
-    geom.projection.regions, focusedIndexIn(geom, b.focus), dir)
+  let (found, pane) = geom.refInDirection(b.focusRef, dir)
   if not found:
     return action(lasNoGesture, "no pane to the " & $dir)
-  b.focus = pane
+  b.focusOn(pane)
   action(lasPending, "focus " & $pane)
 
 # ---------------------------------------------------------------------------
@@ -1526,9 +1602,59 @@ proc tabAtCell(b: LayoutBinding; geom: LayoutGeometry;
   if stackPath.isNone:
     return none(PaneKind)
   let info = nodeInfoAtPath(b.layout.tree, childPathOf(stackPath.get, at))
-  if info.isNone or info.get.kind != lnPane:
+  if info.isNone or info.get.kind != lnPane or
+     info.get.contributedPane.len > 0:
+    # A CONTRIBUTED tab is not a `PaneKind`: `contributedTabAtCell` answers
+    # for it, and reading `info.pane` here would name `paneEditor`.
     return none(PaneKind)
   some(info.get.pane)
+
+proc stackTabAt(b: LayoutBinding; area: CellArea; tabs: seq[string];
+                activeTab: int; path: Option[string]; row, col: int):
+    Option[PaneRef] =
+  if activeTab < 0 or tabs.len == 0 or row != area.row or path.isNone:
+    return none(PaneRef)
+  let at = tabSpanAt(tabs, activeTab, col - area.col)
+  let stackPath = parentPath(path.get)
+  if at < 0 or stackPath.isNone:
+    return none(PaneRef)
+  let info = nodeInfoAtPath(b.layout.tree, childPathOf(stackPath.get, at))
+  if info.isNone or info.get.kind != lnPane:
+    return none(PaneRef)
+  some(info.get.paneRef)
+
+proc contributedTabAtCell*(b: LayoutBinding; geom: LayoutGeometry;
+                           row, col: int): Option[string] =
+  ## The CONTRIBUTED pane whose tab is under the cell — a tab of a stack
+  ## shown by a built-in or by a contributed region — or `none`.
+  let idx = geom.regionIndexAt(row, col)
+  if idx >= 0:
+    let r = geom.projection.regions[idx]
+    let hit = b.stackTabAt(r.area, r.tabs, r.activeTab, geom.pathOfPane(r.pane),
+                           row, col)
+    if hit.isSome and hit.get.isContributed: return some(hit.get.id)
+    return none(string)
+  let c = geom.contributedIndexAt(row, col)
+  if c < 0:
+    return none(string)
+  let r = geom.projection.contributed[c]
+  let hit = b.stackTabAt(r.area, r.tabs, r.activeTab,
+                         geom.pathOfContributed(r.id), row, col)
+  if hit.isSome and hit.get.isContributed: return some(hit.get.id)
+  none(string)
+
+proc builtinTabInContributedAt(b: LayoutBinding; geom: LayoutGeometry;
+                               row, col: int): Option[PaneKind] =
+  ## A BUILT-IN tab drawn on a contributed region's strip (the stack's
+  ## active tab is an extension's pane).
+  let c = geom.contributedIndexAt(row, col)
+  if c < 0:
+    return none(PaneKind)
+  let r = geom.projection.contributed[c]
+  let hit = b.stackTabAt(r.area, r.tabs, r.activeTab,
+                         geom.pathOfContributed(r.id), row, col)
+  if hit.isSome and not hit.get.isContributed: return some(hit.get.builtin)
+  none(PaneKind)
 
 proc onStripLabel(b: LayoutBinding; geom: LayoutGeometry; idx, col: int): bool =
   ## PLAT-50: whether `col` of a LONE pane's strip row (region `idx`) is on
@@ -1712,7 +1838,7 @@ proc activateClickedTab(b: LayoutBinding; pane: PaneKind): LayoutAction =
   ## Programmatic activation and wheel navigation keep their own focus rules.
   result = b.dispatch(cmdActivateTab(pane))
   if result.status in {lasApplied, lasNoOp}:
-    b.focus = pane
+    b.focusOn(builtinRef(pane))
 
 proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
               event: MouseEvent): LayoutAction =
@@ -1796,7 +1922,7 @@ proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
                               childPathOf(stackPath.get, next))
     if info.isNone or info.get.kind != lnPane:
       return action(lasNoGesture, "no tab there")
-    b.dispatch(cmdActivateTab(info.get.pane))
+    b.dispatch(cmdActivateTab(info.get.paneRef))
   of mbLeft:
     if event.kind == mekMotion:
       # PLAT-47: THE POINTER MOVED WITH THE BUTTON DOWN (`?1002` motion). A
@@ -1852,6 +1978,29 @@ proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
           let hidden = b.interaction.pane
           b.interaction = b.interaction.cancel()
           return action(lasCancelled, "hid " & $hidden)
+      # A CONTRIBUTED PANE'S TAB, OR A PRESS IN ONE'S REGION. Before the
+      # built-in tests below, every one of which reads a `PaneKind` and would
+      # name `paneEditor` for it. A contributed tab is activated and focused
+      # on the press (it is not picked up: dragging an extension's pane is
+      # not a gesture this binding has; the layout verbs move it).
+      let ctab = b.contributedTabAtCell(geom, event.row, event.col)
+      if ctab.isSome:
+        b.pressRow = -1
+        b.pressCol = -1
+        let r = contributedRef(ctab.get)
+        result = b.dispatch(cmdActivateTab(r))
+        if result.status in {lasApplied, lasNoOp}:
+          b.focusOn(r)
+        return
+      let btab = b.builtinTabInContributedAt(geom, event.row, event.col)
+      if btab.isSome:
+        b.pressRow = -1
+        b.pressCol = -1
+        return b.activateClickedTab(btab.get)
+      let cidx = geom.contributedIndexAt(event.row, event.col)
+      if cidx >= 0:
+        b.focusOn(contributedRef(geom.projection.contributed[cidx].id))
+        return action(lasNoGesture, "focus " & b.focusContributed)
       let tab = b.tabAtCell(geom, event.row, event.col)
       if tab.isSome:
         b.pendingPick = tab
@@ -1859,6 +2008,11 @@ proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
       let strip = geom.stripIndexAt(event.row, event.col)
       if strip >= 0:
         let slot = geom.strips[strip].slotAt(event.row, event.col)
+        if slot >= 0 and geom.strips[strip].slots[slot].contributed.len > 0:
+          # A docked extension pane's label: `:unpin <id>` brings it back.
+          return action(lasNoGesture, "the docked " &
+            geom.strips[strip].slots[slot].contributed & " label (:unpin " &
+            geom.strips[strip].slots[slot].contributed & ")")
         if slot >= 0:
           b.pendingPick = some(geom.strips[strip].slots[slot].pane)
           return action(lasNoGesture, "pressed the " &
@@ -1869,7 +2023,7 @@ proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
       if idx < 0:
         return action(lasNoGesture, "press outside the layout")
       let region = geom.projection.regions[idx]
-      b.focus = region.pane
+      b.focusOn(builtinRef(region.pane))
       if region.activeTab < 0 and event.row == region.area.row and
          b.onStripLabel(geom, idx, event.col):
         # A pane not in a stack is marked by its one tab. PLAT-50: on its
@@ -1964,12 +2118,17 @@ type
     lvUnpin = "unpin"
       ## PLAT-48. The desktop's UNPIN: a docked pane goes back into the
       ## layout (`lcRestoreDocked`) — the revealed one, or the one named.
+    lvClosePane = "close-pane"
+      ## The tab menu's CLOSE, typed: the focused pane — or the one named, a
+      ## built-in pane or an extension's — leaves the layout
+      ## (`lcRemovePane` / `lcRemoveContributedPane`). An extension's pane
+      ## closed this way is not placed again when its plugin re-activates.
 
 const
   LayoutVerbNames*: array[LayoutVerb, string] = [
     "move-tab", "move-pane", "merge-pane", "dock", "undock", "reveal",
     "hide", "resize", "focus", "undo-layout", "redo-layout", "reset-layout",
-    "pin", "unpin"]
+    "pin", "unpin", "close-pane"]
     ## Spelled out rather than read from `$verb`, so the published names and
     ## the enum can be compared as two things in the suite instead of one
     ## thing compared with itself.
@@ -2002,7 +2161,17 @@ proc parsePaneWord(word: string): (bool, PaneKind) =
       return (true, p)
   (false, paneEditor)
 
-proc tabPositionOf(b: LayoutBinding; pane: PaneKind):
+proc parsePaneRefWord*(word: string): (bool, PaneRef) =
+  ## A pane named on the command line, in either namespace: a built-in pane's
+  ## spelling (`state`) or a contributed pane's qualified id
+  ## (`acme-tools.flame/flame`). The two cannot collide (`layout_model`'s
+  ## disjointness block).
+  let (ok, kind) = parsePaneWord(word)
+  if ok: return (true, builtinRef(kind))
+  if isContributedPaneId(word): return (true, contributedRef(word))
+  (false, builtinRef(paneEditor))
+
+proc tabPositionOf(b: LayoutBinding; pane: PaneRef):
     (bool, string, int, int) =
   ## `(found, stackPath, index, tabCount)` for a pane that is a tab of a stack.
   let path = panePath(b.layout, pane)
@@ -2025,9 +2194,10 @@ proc tabPositionOf(b: LayoutBinding; pane: PaneKind):
 
 proc moveTabBy(b: LayoutBinding; delta: int; toEnd: bool): LayoutAction =
   ## `:move-tab left|right|first|last` — reorder the focused tab in its stack.
-  let (ok, stackPath, index, count) = b.tabPositionOf(b.focus)
+  let focused = b.focusRef
+  let (ok, stackPath, index, count) = b.tabPositionOf(focused)
   if not ok:
-    return action(lasRefused, $b.focus & " is not a tab of a stack")
+    return action(lasRefused, $focused & " is not a tab of a stack")
   # WITHIN ITS OWN STACK the slot range is `0 .. count - 1`, not `0 .. count`:
   # `lcMoveTab` computes its bound from the stack's length AFTER the move, and
   # a same-stack move does not lengthen it. Getting this wrong is an
@@ -2041,46 +2211,96 @@ proc moveTabBy(b: LayoutBinding; delta: int; toEnd: bool): LayoutAction =
   # The anchor must be a DIFFERENT tab: `lcMoveTab` names the destination by a
   # pane IN it, and naming the moved pane itself would ask the model to place
   # something beside where it no longer is.
-  var anchor = none(PaneKind)
+  var anchor = none(PaneRef)
   for i in 0 ..< count:
     if i == index:
       continue
     let info = nodeInfoAtPath(b.layout.tree, childPathOf(stackPath, i))
     if info.isSome and info.get.kind == lnPane:
-      anchor = some(info.get.pane)
+      anchor = some(info.get.paneRef)
       break
   if anchor.isNone:
     return action(lasNoOp,
-                  $b.focus & " is the only tab of its stack; there is nothing " &
+                  $focused & " is the only tab of its stack; there is nothing " &
                   "to reorder it against")
-  b.dispatch(cmdMoveTab(b.focus, anchor.get, slot))
+  b.dispatch(cmdMoveTab(focused, anchor.get, slot))
 
 proc movePaneTo(b: LayoutBinding; geom: LayoutGeometry;
                 dir: FocusDirection): LayoutAction =
   ## `:move-pane <dir>` — split the neighbour in that direction and land the
   ## focused pane on the near side of it. One `lcSplit` with `splitMovesPane`,
   ## which is exactly the command the mouse's edge-drop produces.
-  let (found, target) = paneInDirection(
-    geom.projection.regions, focusedIndexIn(geom, b.focus), dir)
+  let focused = b.focusRef
+  let (found, target) = geom.refInDirection(focused, dir)
   if not found:
-    return action(lasRefused, "no pane to the " & $dir & " of " & $b.focus)
+    return action(lasRefused, "no pane to the " & $dir & " of " & $focused)
   let axis = if dir in {fdLeft, fdRight}: saRow else: saColumn
   let side = if dir in {fdLeft, fdUp}: ssBefore else: ssAfter
-  b.dispatch(cmdSplitMove(target, b.focus, axis, side))
+  b.dispatch(cmdSplitMove(target, focused, axis, side))
 
 proc resizeFocusTo(b: LayoutBinding; percent: int): LayoutAction =
   ## `:resize <percent>` — the keyboard's divider drag, through exactly the
   ## machine the mouse would use: `beginResize`, `proposeShare`, `commit`.
-  let started = beginResize(b.layout, b.focus)
+  let started = beginResize(b.layout, b.focusRef)
   if started.isNone:
     return action(lasRefused,
-                  $b.focus & " has no divider to move (it is the root, or a " &
+                  $b.focusRef & " has no divider to move (it is the root, or a " &
                   "tab of a stack)")
   let proposed = started.get.proposeShare(b.layout, float(percent) / 100.0)
   let cmd = commit(b.layout, proposed)
   if cmd.isNone:
     return action(lasNoOp, "the resize changed nothing")
   b.dispatch(cmd.get)
+
+const ContributedPaneAnchors* = [paneState, paneCalltrace, paneEventLog,
+                                  paneEditor]
+  ## Where an extension's pane is placed when its plugin first activates and
+  ## the layout does not hold it: a TAB beside the first of these that is
+  ## placed — the Variables stack in the shared default — so it docks beside
+  ## a core pane without reshaping the arrangement.
+
+proc placeContributedPane*(b: LayoutBinding; id, title: string): LayoutAction =
+  ## Put contributed pane `id` into the layout when it holds it nowhere
+  ## (neither placed nor docked) — a plugin's pane on its plugin's first
+  ## activation. Through `apply` like every other change.
+  ##
+  ##   * **The tab beside it stays selected**: a pane that appears is not a
+  ##     pane the user chose to look at, so the anchor's tab is re-activated
+  ##     when it was showing.
+  ##   * **It does not freeze the responsive profile.** An untouched
+  ##     arrangement stays untouched (`userModified` is kept), its history
+  ##     starts at the arrangement with the pane in it, and a re-flow that
+  ##     rebuilds the default is followed by the next placement. A user's
+  ##     arrangement takes it as an undoable command.
+  let r = contributedRef(id)
+  let current = b.layout
+  if current.tree.contains(r) or current.dockedIndex(r) >= 0:
+    return action(lasNoOp, id & " is already in the layout")
+  if id in b.closedContributed:
+    return action(lasNoOp, id & " was closed in this session")
+  var anchor = none(PaneKind)
+  for a in ContributedPaneAnchors:
+    if current.tree.contains(a):
+      anchor = some(a)
+      break
+  let cmd =
+    if anchor.isSome: cmdAddContributedPane(id, title,
+                                            after = some(builtinRef(anchor.get)))
+    else: cmdAddContributedPane(id, title)
+  let reselect = anchor.isSome and current.tree.isVisible(anchor.get)
+  if not b.userModified:
+    let o = current.apply(cmd)
+    if o.kind != loApplied:
+      return action(lasRefused, $cmd & " refused: " & $o.problem.kind,
+                    some(cmd), some(o.problem))
+    var placed = o.layout
+    if reselect:
+      discard placed.tree.activate(anchor.get)
+    b.history = newLayoutHistory(placed)
+    return action(lasApplied, "placed " & id, some(cmd))
+  result = b.dispatch(cmd)
+  if result.status == lasApplied and reselect:
+    discard b.dispatch(cmdActivateTab(anchor.get))
 
 proc resetToProfile*(b: LayoutBinding): LayoutAction =
   ## Throw the user's arrangement away and go back to the profile's default.
@@ -2097,6 +2317,24 @@ proc resetToProfile*(b: LayoutBinding): LayoutAction =
   b.interaction = noInteraction()
   b.userModified = false
   action(lasApplied, "layout reset to the shared default")
+
+proc closePane(b: LayoutBinding; arg: string): LayoutAction =
+  ## `:close-pane [pane]`.
+  var pane = b.focusRef
+  if arg.len > 0:
+    let (ok, named) = parsePaneRefWord(arg)
+    if not ok:
+      return action(lasBadArgument,
+                    ":close-pane needs the name of a pane, not '" & arg & "'")
+    pane = named
+  let cmd = if pane.isContributed: cmdRemoveContributedPane(pane.id)
+            else: cmdRemovePane(pane.builtin)
+  result = b.dispatch(cmd)
+  if result.status == lasApplied and pane.isContributed:
+    if pane.id notin b.closedContributed:
+      b.closedContributed.add pane.id
+    if b.focusContributed == pane.id:
+      b.focusContributed = ""
 
 proc runLayoutCommand*(b: LayoutBinding; geom: LayoutGeometry;
                        line: string): LayoutAction =
@@ -2130,24 +2368,24 @@ proc runLayoutCommand*(b: LayoutBinding; geom: LayoutGeometry;
       return action(lasBadArgument, ":move-pane needs left|right|up|down")
     b.movePaneTo(geom, dir)
   of lvMergePane:
-    let (ok, pane) = parsePaneWord(arg)
+    let (ok, pane) = parsePaneRefWord(arg)
     if not ok:
       return action(lasBadArgument,
                     ":merge-pane needs the name of a pane, not '" & arg & "'")
-    b.dispatch(cmdMergeIntoStack(b.focus, pane))
+    b.dispatch(cmdMergeIntoStack(b.focusRef, pane))
   of lvDock:
     let (ok, edge) = parseEdgeWord(arg)
     if not ok:
       return action(lasBadArgument, ":dock needs left|right|top|bottom")
-    b.dispatch(cmdDock(b.focus, edge))
+    b.dispatch(cmdDock(b.focusRef, edge))
   of lvUndock:
     if arg.len == 0:
-      return b.dispatch(cmdRestoreDocked(b.focus))
-    let (ok, pane) = parsePaneWord(arg)
+      return b.dispatch(cmdRestoreDocked(b.focusRef))
+    let (ok, pane) = parsePaneRefWord(arg)
     if not ok:
       return action(lasBadArgument,
                     ":undock's anchor must be a pane, not '" & arg & "'")
-    b.dispatch(cmdRestoreDocked(b.focus, some(pane)))
+    b.dispatch(cmdRestoreDocked(b.focusRef, some(pane)))
   of lvReveal:
     if arg.len == 0:
       return b.beginRevealDock(b.focus)
@@ -2185,24 +2423,26 @@ proc runLayoutCommand*(b: LayoutBinding; geom: LayoutGeometry;
       return action(lasBadArgument, ":pin needs left|right|top|bottom")
     if b.interaction.kind == ikRevealingDock:
       return action(lasNoOp, $b.interaction.pane & " is already pinned")
-    b.dispatch(cmdDock(b.focus, edge))
+    b.dispatch(cmdDock(b.focusRef, edge))
   of lvUnpin:
-    var pane = b.focus
+    var pane = b.focusRef
     if arg.len > 0:
-      let (ok, named) = parsePaneWord(arg)
+      let (ok, named) = parsePaneRefWord(arg)
       if not ok:
         return action(lasBadArgument,
                       ":unpin needs the name of a docked pane, not '" & arg &
                       "'")
       pane = named
     elif b.interaction.kind == ikRevealingDock:
-      pane = b.interaction.pane
+      pane = builtinRef(b.interaction.pane)
     if b.layout.dockedIndex(pane) < 0:
       return action(lasRefused, $pane & " is not pinned to a strip")
     b.interaction = noInteraction()
     # Back beside the pane it was pinned from, while that pane is placed:
     # the docked entry remembers it (`DockedPane.beside`).
     b.dispatch(cmdRestoreDocked(pane))
+  of lvClosePane:
+    b.closePane(arg)
 
 # ---------------------------------------------------------------------------
 # The responsive-profile decision, and persistence

@@ -9,6 +9,7 @@ import ../../viewmodel/viewmodels/omnibar_vm
 import ../../viewmodel/plugin_host/supervisor
 import ../app/[runtime, tui_app]
 import ./plugin_processes
+import ./plugin_panes
 
 # ---------------------------------------------------------------------------
 # The runtime's door
@@ -42,7 +43,18 @@ proc paletteEntries*(p: SessionPlugins): seq[OmnibarEntry] =
 proc service*(p: SessionPlugins): PluginsService =
   var lastLine = ""
   var shownFaults = 0
+  let panes = newPluginPanes(p)
   PluginsService(
+    panes: proc(): seq[tuple[id, title: string; running: bool]] =
+      panes.contributedPanes(),
+    paneView: proc(id: string): tuple[lines: seq[string]; cursor: int;
+                                      stale: bool] =
+      panes.paneView(id),
+    paneKey: proc(id, key: string): bool = panes.paneKey(id, key),
+    paneClick: proc(id: string; row: int): bool = panes.paneClick(id, row),
+    decorations: proc(document: string):
+        seq[tuple[line: int; glyph, text, plugin: string]] =
+      panes.decorationsFor(document),
     control: proc(words: seq[string]): tuple[title, body: string] =
       p.control(words),
     statusText: proc(): string = p.statusText(),
