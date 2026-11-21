@@ -493,10 +493,13 @@ window.addEventListener("manual-dap-initialize", async () => {
           command,
           {
             threadId: firstThreadId,
-            // `reverse` is what the DAP next/stepIn/stepOut/continue
-            // schemas use for the reverse-execution variant; the
-            // db-backend's `dap_handler.rs::step` reads `arg.reverse`.
-            reverse,
+            // Direction is the command, not an argument: DAP has no
+            // `reverse` argument on next/stepIn/stepOut/continue, and the
+            // reverse motions are their own requests (`stepBack`,
+            // `reverseContinue`; https://microsoft.github.io/debug-adapter-protocol/specification#Requests_StepBack).
+            // db-backend's `dap_command_to_step_action` (dap_server.rs)
+            // takes the direction from the command alone, so a `next`
+            // carrying `reverse: true` steps forward.
             granularity: "line",
             singleThread: true,
           },
@@ -540,9 +543,11 @@ window.addEventListener("manual-dap-initialize", async () => {
         //    Playwright spec inspects the post-continue stackTrace to
         //    distinguish.
         await recordStep("continue", "continue");
-        // 5. reverse step — must surface an error response so the
-        //    DAP client knows reverse is unsupported on MCR.
-        await recordStep("reverse-next", "next", true);
+        // 5. reverse step-over (`stepBack`) — must surface an error
+        //    response so the DAP client knows reverse is unsupported on
+        //    MCR. This used to send `next` with `reverse: true`, which the
+        //    backend runs as a forward step-over.
+        await recordStep("reverse-next", "stepBack", true);
       } catch (stepErr) {
         appendLog(`step-stress: aborted with ${stepErr.message}`);
         stepStress.error = stepErr.message;
