@@ -2034,34 +2034,18 @@ jobs:
           gh-token: ${{ steps.ci_token.outputs.token }}
 
       - name: Read the HCR tests' sibling pins
-        # The HCR MCR DAP test builds ct-mcr from ../codetracer-native-recorder,
-        # whose ct_interpose imports nim-stackable-hooks from
-        # ../nim-stackable-hooks, and ct-native-replay from
-        # ../codetracer-native-backend. This job used to clone none of them, so
-        # it built whatever an earlier job had left in this reused runner
-        # workspace. Run 44864106832 stopped at "cannot open file:
-        # stackable_hooks/reentrancy", because the leftover native-recorder was
-        # newer than any nim-stackable-hooks there. The two private repos take
-        # flake.lock's revisions (the public repro.lock cannot pin them);
-        # nim-stackable-hooks takes repro.lock's. They are read in the dev
-        # shell, since a raw step on these nix-darwin runners has no jq, grep
-        # or sed.
+        # The HCR MCR DAP test builds ../codetracer-native-recorder (whose
+        # ct_interpose imports ../nim-stackable-hooks) and
+        # ../codetracer-native-backend. Unprovisioned, it built whatever an
+        # earlier job left in this reused workspace (run 44864106832).
         id: hcr_pins
-        run: |
-          nix develop . --command bash -euo pipefail -c '
-            flake_rev() { jq -er --arg r "$1" "[.nodes[] | .locked? | select(.owner? == \"metacraft-labs\" and .repo? == \$r) | .rev] | unique | if length == 1 then .[0] else error(\"\(\$r): \(length) revisions in flake.lock\") end" flake.lock; }
-            stackable="$(grep -oE "\{ name = \"nim-stackable-hooks\"[^}]*" repro.lock | grep -oE "revision = \"[0-9a-f]{40}\"" | grep -oE "[0-9a-f]{40}")"
-            [ -n "$stackable" ] || { echo "::error::repro.lock pins no nim-stackable-hooks revision"; exit 1; }
-            {
-              echo "native_recorder=$(flake_rev codetracer-native-recorder)"
-              echo "native_backend=$(flake_rev codetracer-native-backend)"
-              echo "stackable_hooks=${stackable}"
-            } | tee -a "$GITHUB_OUTPUT"
-          '
+        run: >-
+          nix develop . --command bash ci/lib/sibling-pin-outputs.sh
+          native_recorder=flake:codetracer-native-recorder
+          native_backend=flake:codetracer-native-backend
+          stackable_hooks=lock:nim-stackable-hooks
 
       - name: Mint a token for the clones below
-        # The step above enters the dev shell, which can take most of the
-        # first token's hour on a cold runner (ci/test/late-clone-token-test.py).
         id: late_token
         uses: ./.github/actions/refresh-github-token
         with:
@@ -5622,25 +5606,16 @@ jobs:
       # find through ``test_harness::find_beam_recorder()`` (built per leg
       # below), are members of this repo's develop set, so the
       # "Provision dependency siblings from repro.lock" step above clones
-      # them, on both legs, at the revisions repro.lock pins -- all but the
-      # two private ones. bbf7dbed4a6 took codetracer-native-recorder and
-      # codetracer-native-backend out of the public repro.lock, so since then
-      # db-backend's build.rs panicked ("db-backend requires the sibling
-      # `codetracer-native-recorder` checkout") and the c_mcr tests reported
-      # MISSING PREREQUISITE for native-backend (run 44864106832). They are
-      # cloned below at flake.lock's revisions, read in the dev shell because a
-      # raw step on the nix-darwin leg has no jq.
+      # them at repro.lock's revisions -- all but the private two, which the
+      # public lock cannot pin (bbf7dbed4a6); they are cloned below at
+      # flake.lock's (run 44864106832: build.rs panicked without them).
 
       - name: Read the private siblings' pins
         id: private_pins
-        run: |
-          nix develop . --command bash -euo pipefail -c '
-            flake_rev() { jq -er --arg r "$1" "[.nodes[] | .locked? | select(.owner? == \"metacraft-labs\" and .repo? == \$r) | .rev] | unique | if length == 1 then .[0] else error(\"\(\$r): \(length) revisions in flake.lock\") end" flake.lock; }
-            {
-              echo "native_recorder=$(flake_rev codetracer-native-recorder)"
-              echo "native_backend=$(flake_rev codetracer-native-backend)"
-            } | tee -a "$GITHUB_OUTPUT"
-          '
+        run: >-
+          nix develop . --command bash ci/lib/sibling-pin-outputs.sh
+          native_recorder=flake:codetracer-native-recorder
+          native_backend=flake:codetracer-native-backend
 
       - name: Mint a token for the clones below
         # An installation token lives an hour, and the clones below come after
