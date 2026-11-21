@@ -14,6 +14,24 @@ instruments:
   * `ci/test/plat18-fake-timer-builds.sh`
         §5's rejection criterion, in DEBUG and RELEASE
 
+and, since the adoption decision was funded and re-measured, three more:
+
+  * the same slice over a SECOND PANE, Call Trace
+        (`plat18_calltrace_slice.nim`, `CT_P18_PANE=calltrace`), with the
+        driver's parity check holding the arms to the same document
+  * the same slice in a BROWSER over HTTP (`plat18_slice_host/browser.mjs`,
+        `CT_P18_HOST=chromium|firefox|webkit`)
+  * the wasm32 DEVELOPER PROFILE (`ci/lib/wasm-cc.sh`), graded by
+        `ci/test/wasm-dev-profile-test.sh`: objects identical to emcc's, the
+        object cache used, a changed header a miss, the dependency file kept
+
+The lane-scale developer-loop instrument, `ci/test/plat18-dev-lane.sh`, has
+no arm here: one grading run of it is three lanes of two hundred suites,
+repeated. What it rests on — the profile building the same program — is
+what W1-W3 grade, and its own validity checks (the lanes' counts stable
+across repetitions, the edit present in the generated C) refuse a run
+rather than report one.
+
 **A milestone whose deliverable is a measurement has to show the measurement
 can be wrong.** These arms are that: each removes one property the instrument
 depends on and requires the instrument to say so, by name and for the right
@@ -129,12 +147,17 @@ APPLIER = "src/frontend/viewmodel/tests/manual/plat18_slice_host/applier.js"
 VIEW = "src/frontend/viewmodel/views/isonim_state_view.nim"
 FT_SH = "ci/test/plat18-fake-timer-builds.sh"
 DEV_SH = "ci/test/plat18-dev-loop.sh"
+CT_SLICE = "src/frontend/viewmodel/tests/manual/plat18_calltrace_slice.nim"
+BROWSER = "src/frontend/viewmodel/tests/manual/plat18_slice_host/browser.mjs"
+WASM_CC = "ci/lib/wasm-cc.sh"
 
 # -- graded, never mutated (§16c) -------------------------------------------
 SLICE_SH = "ci/test/plat18-electron-slice.sh"
 MOCK_DOM = "../isonim/src/isonim/testing/mock_dom.nim"          # sibling repo
 DRIVER = "src/frontend/viewmodel/tests/manual/plat18_slice_host/driver.js"
 FT_PROBE = "src/frontend/viewmodel/tests/manual/wasm_fake_timer_probe.nim"
+PROFILE_SH = "ci/test/wasm-dev-profile-test.sh"
+CT_VIEW = "src/frontend/viewmodel/views/isonim_calltrace_view.nim"
 
 TOUCHED = [
     # Mutated by at least one arm:
@@ -146,13 +169,18 @@ TOUCHED = [
     VIEW,      # M9
     FT_SH,     # F1 F2 F3           — and the grader for itself
     DEV_SH,    # D1                 — and the grader for itself
+    CT_SLICE,  # C1 C2              (the second pane, Call Trace)
+    BROWSER,   # B1                 (the browser host)
+    WASM_CC,   # W1 W2 W3           (the wasm32 developer profile)
     #
     # Graded against, never mutated. A change to any of these invalidates the
     # arms above exactly as a change to a subject would:
     SLICE_SH,  # grades S1 S2 S3
     MOCK_DOM,  # every meter byte the probe counts comes through these hooks
-    DRIVER,    # the slice's row floor, which S1 and S2 are killed by
+    DRIVER,    # P2 — and the slice's row floor, which S1 and S2 are killed by
     FT_PROBE,  # the chain F1-F3's contracts are taken over
+    PROFILE_SH,  # grades W1 W2 W3
+    CT_VIEW,   # the Call Trace pane C1 and C2 render
 ]
 
 CONTROL_HASHES = HERE / "plat18-marshalling-mutation-control.sha256"
@@ -219,6 +247,19 @@ G_SLICE = Grader("script", SLICE_SH,
 G_DEV = Grader("script", DEV_SH,
                env={"CT_P18_DEV_REPS": "1",
                     "CT_P18_DEV_OUT": str(SCRATCH / "devloop")})
+
+# THE SECOND PANE AND THE BROWSER HOST, through the same script and the same
+# driver as G_SLICE: `CT_P18_PANE` and `CT_P18_HOST` are the only difference.
+G_SLICE_CT = Grader("script", SLICE_SH,
+                    env={"CT_P18_SAMPLES": "1", "CT_P18_PANE": "calltrace",
+                         "CT_P18_OUT": str(SCRATCH / "slice-calltrace")})
+G_SLICE_BROWSER = Grader("script", SLICE_SH,
+                         env={"CT_P18_SAMPLES": "1", "CT_P18_HOST": "chromium",
+                              "CT_P18_OUT": str(SCRATCH / "slice-chromium")})
+
+# THE DEVELOPER PROFILE'S OWN TEST: identity against emcc, the cache used,
+# the suite run, a changed header a miss, the dependency file written.
+G_PROFILE = Grader("script", PROFILE_SH)
 
 G_FT = Grader("script", FT_SH,
               env={"CT_FAKE_TIMER_ITERATIONS": "100000",
@@ -542,6 +583,164 @@ ARMS = [
         control_find='\tlimit="${CT_P18_DEV_MAX:-5.0}"\n',
         control_replace='\tlimit="${CT_P18_DEV_MAX:-5.00}"\n',
     ),
+
+    # -------------------------------------------------------------------
+    # The second pane — Call Trace on the WebAssembly core
+    # -------------------------------------------------------------------
+    Arm(
+        id="C1",
+        path=CT_SLICE,
+        find="    appendChild(theRenderer, NoFrameNode, thePanelRoot)\n",
+        replace="    discard thePanelRoot\n",
+        grader=G_SLICE_CT,
+        killer="(the slice's attachment check, on the Call Trace pane)",
+        expect="script-fails",
+        why="THE SECOND PANE NEVER REACHES THE DOCUMENT. S1 for the Call "
+            "Trace pane: the core still loads its 600-call section and every "
+            "timing is still taken, over a document that stayed empty. The "
+            "floors are the pane's own (its row selector and counts), so this "
+            "is the arm that says they were not inherited from the variables "
+            "pane by accident",
+        control_name="the root handle is bound before it is attached",
+        control_find="    appendChild(theRenderer, NoFrameNode, thePanelRoot)\n",
+        control_replace="    let container = NoFrameNode\n    appendChild(theRenderer, container, thePanelRoot)\n",
+    ),
+    Arm(
+        id="C2",
+        path=CT_SLICE,
+        find="  theStore.calltrace.lines.val.len\n",
+        replace="  WideCallCount\n",
+        grader=G_SLICE_CT,
+        killer="(the slice's row floor, on the Call Trace pane)",
+        expect="script-fails",
+        why="THE CORE REPORTS A ROW COUNT IT DID NOT DRAW. The core-side half "
+            "of the row floor answers 600 whatever the section holds, so only "
+            "the comparison with the DOCUMENT can notice — the reason the "
+            "floor asks both sides rather than trusting the core",
+        control_name="the count is read through a local",
+        control_find="  theStore.calltrace.lines.val.len\n",
+        control_replace="  let held = theStore.calltrace.lines.val\n  held.len\n",
+    ),
+
+    # -------------------------------------------------------------------
+    # Parity — the arms draw the same document, not only the same rows
+    # -------------------------------------------------------------------
+    Arm(
+        id="P1",
+        path=APPLIER,
+        find="  SetStyle: (c) => { const h = c.u32(); const p = c.str(), v = c.str(); c.nodes[h].style.setProperty(p, v); },\n",
+        replace="  SetStyle: (c) => { c.u32(); c.str(); c.str(); },\n",
+        grader=G_SLICE,
+        killer="(the parity check, js-direct against js-crossing)",
+        expect="script-fails",
+        why="THE HOST DROPS EVERY STYLE. Rows, attachment and op counts all "
+            "still agree — a style changes no row count and the op is still "
+            "read — so every floor the slice had before parity passes over a "
+            "document that is not the one the shipping build draws. Both "
+            "crossing arms lose the styles together, so it is the comparison "
+            "with `js-direct` that has to notice",
+        control_name="the property and value are read in separate statements",
+        control_find="  SetStyle: (c) => { const h = c.u32(); const p = c.str(), v = c.str(); c.nodes[h].style.setProperty(p, v); },\n",
+        control_replace="  SetStyle: (c) => { const h = c.u32(); const p = c.str(); const v = c.str(); c.nodes[h].style.setProperty(p, v); },\n",
+    ),
+
+    Arm(
+        id="P2",
+        path=DRIVER,
+        find="    if (snaps['js-crossing'] && snaps['wasm-crossing']) {\n",
+        replace="    if (false) {\n",
+        grader=G_SLICE,
+        killer="(the parity-comparison count)",
+        expect="script-fails",
+        why="THE DRIVER STOPS COMPARING THE TWO CORES. The js and wasm cores "
+            "are the comparison parity exists for — same source, same "
+            "renderer, two compilers — and a driver that skipped it would "
+            "still print a green verdict and the shipping-build comparison. "
+            "The script counts the comparisons rather than trusting the "
+            "verdict, so a check that stopped running is a failure",
+        control_name="the condition is bound to a named constant first",
+        control_find="    if (snaps['js-crossing'] && snaps['wasm-crossing']) {\n",
+        control_replace="    const bothCores = snaps['js-crossing'] && snaps['wasm-crossing'];\n    if (bothCores) {\n",
+    ),
+
+    # -------------------------------------------------------------------
+    # The browser arm — the slice in a browser over HTTP
+    # -------------------------------------------------------------------
+    Arm(
+        id="B1",
+        path=BROWSER,
+        find="    return globalThis.ctP18Run();\n",
+        replace="    return 'ok';\n",
+        grader=G_SLICE_BROWSER,
+        killer="(the three-arm registration check)",
+        expect="script-fails",
+        why="THE BROWSER HOST REPORTS SUCCESS WITHOUT RUNNING THE DRIVER. The "
+            "module still loads and instantiates, the verdict line is still "
+            "`ok`, and every cold-start figure is still printed — a browser "
+            "arm that measured nothing. The script requires the lines only "
+            "the driver prints (the arms it ran, then its parity "
+            "comparisons), which is what tells a run from a report of one",
+        control_name="the driver's result is bound before it is returned",
+        control_find="    return globalThis.ctP18Run();\n",
+        control_replace="    const outcome = globalThis.ctP18Run();\n    return outcome;\n",
+    ),
+
+    # -------------------------------------------------------------------
+    # The developer profile — wasm32 builds without emcc's per-file driver
+    # -------------------------------------------------------------------
+    Arm(
+        id="W1",
+        path=WASM_CC,
+        find='\t\tcat "${pre}"\n',
+        replace='\t\tcat "${src}"\n',
+        grader=G_PROFILE,
+        killer="(a second build comes from the cache)",
+        expect="script-fails",
+        why="THE CACHE KEY IS THE RAW `.c` FILE, not the preprocessed "
+            "source. Two things break and the first is the one that shows: "
+            "Nim writes the nimcache path into every C file's header "
+            "comment, so no object is ever shared between two nimcaches and "
+            "the cache stops doing its job; and a header the file includes "
+            "can change without the key moving, so a hit can be stale",
+        control_name="the preprocessed source is read through a redirect",
+        control_find='\t\tcat "${pre}"\n',
+        control_replace='\t\tcat <"${pre}"\n',
+    ),
+    Arm(
+        id="W2",
+        path=WASM_CC,
+        find='"${clang_bin}" "${target_flags[@]}" -c "${flags[@]}" -o "${obj}" "${src}" || exit $?\n',
+        replace='"${clang_bin}" -c "${flags[@]}" -o "${obj}" "${src}" || exit $?\n',
+        grader=G_PROFILE,
+        killer="(identity against emcc)",
+        expect="script-fails",
+        why="THE TARGET FLAGS ARE DROPPED FROM A CACHE MISS. `emcc --cflags` "
+            "is what makes a direct clang call the same compile emcc would "
+            "run — the target, the sysroot, the Emscripten defines. Without "
+            "them the object is not the one emcc would have written, which "
+            "is the claim the whole profile rests on",
+        control_name="the compile's exit status is taken from a named variable",
+        control_find='"${clang_bin}" "${target_flags[@]}" -c "${flags[@]}" -o "${obj}" "${src}" || exit $?\n',
+        control_replace='"${clang_bin}" "${target_flags[@]}" -c "${flags[@]}" -o "${obj}" "${src}" || { status=$?; exit "${status}"; }\n',
+    ),
+    Arm(
+        id="W3",
+        path=WASM_CC,
+        find='-E -P "${src}" -o "${pre}" ${dep_args[@]+"${dep_args[@]}"}; then\n',
+        replace='-E -P "${src}" -o "${pre}"; then\n',
+        grader=G_PROFILE,
+        killer="(the dependency file is written)",
+        expect="script-fails",
+        why="THE DEPENDENCY FILE IS NOT WRITTEN. Nim asks every compile for "
+            "one (`-MD -MF`) and reads it to decide what to rebuild after a "
+            "header changes; the profile writes it from the preprocessor run, "
+            "so a hit and a miss leave the same thing behind. Without it the "
+            "next incremental build cannot know which objects a header "
+            "change invalidates",
+        control_name="the dependency arguments are expanded unconditionally",
+        control_find='-E -P "${src}" -o "${pre}" ${dep_args[@]+"${dep_args[@]}"}; then\n',
+        control_replace='-E -P "${src}" -o "${pre}" "${dep_args[@]}"; then\n',
+    ),
 ]
 
 
@@ -644,12 +843,29 @@ BECAUSE: dict = {
     # "the panel reached the document" and "the rows are identifiable in it"
     # are different properties, and one row count answered 0 for both — §32a,
     # and the repair is in driver.js's `checkAttached`.
-    'S1': 'js-crossing/MOUNT: the panel never reached the document — the container holds 0 child element(s)',
-    'S2': 'js-crossing/MOUNT: core says 2 row(s), the document holds 0, expected 2',
+    'S1': 'variables pane, js-crossing/MOUNT: the panel never reached the document — the container holds 0 child element(s)',
+    'S2': 'variables pane, js-crossing/MOUNT: core says 2 row(s), the document holds 0, expected 2',
     # S3 is the ORC-destroys-globals defect restored. It reaches only the wasm
     # arm, which is what tells it from S1: the two JS arms pass and the
     # transcript names the one that did not.
-    'S3': 'wasm-crossing/MOUNT: the panel never reached the document — the container holds 0 child element(s)',
+    'S3': 'variables pane, wasm-crossing/MOUNT: the panel never reached the document — the container holds 0 child element(s)',
+
+    # --- the second pane, parity, the browser host (2026-11-20) -------------
+    # C1 is S1 on the Call Trace pane and says so: the driver names the pane
+    # in every refusal, which is also what keeps S1 and C1 apart.
+    'C1': 'calltrace pane, js-crossing/MOUNT: the panel never reached the document — the container holds 0 child element(s)',
+    'C2': 'calltrace pane, js-direct/MOUNT: core says 600 row(s), the document holds 2, expected 2',
+    'P1': 'parity js-direct/js-crossing MOUNT (rows): item 0 differs at character 120: "0\\" data-variable-name=\\"counter\\" data-variable-path=\\"counter\\" style=\\"padding-left: 0px;\\"><div class=\\"value-expanded-',
+
+    # P2 is the shell's count of the driver's parity lines; B1 stops before
+    # it, at the arm registration only the driver reports.
+    'P2': 'FAIL: expected N parity comparisons (N phases, N pairs), saw N',
+    'B1': 'FAIL: not all three arms registered: no arm line at all',
+
+    # --- the wasm32 developer profile: its test's `FAIL:` lines --------------
+    'W1': 'FAIL: a rebuild of the same suite added N object(s) to the cache',
+    'W2': 'FAIL: the profile build did not build',
+    'W3': 'FAIL: the dependency file for b does not name b.o and value.h',
 
     # --- the fake-timer contracts: RATIOS, so these ARE normalised ----------
     'F1': 'FAIL: debug/native scores N.N, below N — the chain is deferring to a host loop',
@@ -1049,8 +1265,8 @@ def write_control_hashes() -> None:
         "# Control digests for run-plat18-marshalling-mutations.py.",
         "#",
         "# The bytes every arm restores to, and the bytes every arm's verdict",
-        "# was taken against. Both halves of TOUCHED are here — the seven",
-        "# mutation subjects AND the four graders no arm mutates — which is",
+        "# was taken against. Both halves of TOUCHED are here — the twelve",
+        "# mutation subjects AND the five graders no arm mutates — which is",
         "# §16c's gap paid rather than inherited.",
         "#",
         "# TWO ENTRIES ARE OUTSIDE THIS REPOSITORY:",

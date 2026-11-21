@@ -414,7 +414,7 @@ src/frontend/tui/tests/plat57-find-in-files-mutation-control.sha256	src/tests/gu
 src/frontend/tui/tests/plat59-visual-replay-mutation-control.sha256	src/frontend/tui/host/native_host.nim	43a617a67ff08d2dd5b8ffa45869f3eb3930905f653876f387161e982783cbe7	98285e6ce60c1fcf909c121beae19e8c6010d1ca84e2e42e8b169e0d0c111ea9
 src/frontend/tui/tests/plat61-shell-mutation-control.sha256	scripts/plat61-capture-electron.sh	e791bdc4c79bf8eabcec07754a08290507fce4b3af4060360612e922e9931eb5	ddf8eb29ee05d8338a6ae75d6b760fd8e97e93b9d305e91b23edec85ebc78f31
 src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	src/common/paths.nim	7df743fd7a5add06f72fecfef994322f98ac1f2e7694cab386ed7ddfc7e14823	2d38bcb63c5699cafef32316077af1f038dcb0a42413fd16150349c49636dfaf
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	2861fd4f2ac37e7a9501aa67818592239b505c79a23dbe9d7daeec710b607694	caaec829d9755f2c1b8cf61fe2202e2ccbce4084ccf0bd8231df23b774c7d975
+src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	2861fd4f2ac37e7a9501aa67818592239b505c79a23dbe9d7daeec710b607694	f79e6d078f444915a1d74da920345a8a260a98a862fb302a89debb93d4218c0a
 src/frontend/viewmodel/tests/unit/plat29-async-mutation-control.sha256	src/frontend/tests/dap_session_routing_test.nim	23f78b7c75cf637296b0c6f87a1cfe695fb20ace8b7642f04df618a2b88cd56d	62e57ece0d63f73d0c2a18e98f4f3600ee96785701286b8250698fcaf25a06c4
 src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/playwright/codetracer-binding.ts	dac9e35953b0d93636c2284d9c9a858c2bba982b92e9311b0f41fb666e6879c0	a77f567bb5dc349b7214a20299d75d03fbb267af20966113568e0bec4c10a016
 src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/ui/pointer_stamp.nim	b79e312b4a217396fd5c7344a81dd391c8a96fbc02950e366a0b3d9e4b9c2f7a	a24171a98e4d55680be64a05b433b8c9596affba2307f0b3e868115059164c2f
@@ -462,8 +462,8 @@ src/frontend/tui/tests/plat72-screen-reader-mutation-control.sha256	src/frontend
 # memory manager: ci/lib/run-nim-test-lane.sh's native arm and the parity gate's
 # native build pass --mm:orc, and vm-unit-wasm-lane-test.sh asserts both. Every
 # harness that digests those bytes owes a re-grade.
-src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	ci/lib/run-nim-test-lane.sh	d1a2a215a9f74c50d465925aaa14ad2fbc674db88c4dfa5e4a2e24ea222ef97e	5f53ca8e65d9013d2fdf8ada18ecbdb2dd17cf7c1d59776ec471bc684c552f43
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/run-nim-test-lane.sh	d1a2a215a9f74c50d465925aaa14ad2fbc674db88c4dfa5e4a2e24ea222ef97e	5f53ca8e65d9013d2fdf8ada18ecbdb2dd17cf7c1d59776ec471bc684c552f43
+src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	ci/lib/run-nim-test-lane.sh	d1a2a215a9f74c50d465925aaa14ad2fbc674db88c4dfa5e4a2e24ea222ef97e	0543e7a3bdfc614797e0698275a3da9cc0dd08efd20cfb77bfae4c863c9ab138
+src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/run-nim-test-lane.sh	d1a2a215a9f74c50d465925aaa14ad2fbc674db88c4dfa5e4a2e24ea222ef97e	0543e7a3bdfc614797e0698275a3da9cc0dd08efd20cfb77bfae4c863c9ab138
 src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/test/vm-unit-wasm-parity.sh	cc903e83e819a7bf7c0236f21e3be33faa10e476151795eed22bc0d5f95424dc	0d513a0222f93bb9ebd4ba839d2e6f83766ccd7c996ad386228719573c5eb3df
 src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/test/vm-unit-wasm-lane-test.sh	25e02f5edd71b89864b5f771a585bff1f1c6f26e8053d728c5722d1dda5442ee	9c28c6234fae228dd052c5d1cd7d37a941aedd5e684b4a53dbf5b72cf16c851b
 src/frontend/viewmodel/tests/unit/plat13-executable-mutation-control.sha256	src/ct/launch/project_trust_store.nim	7a863b35c9d16470de986c400f643c9159ed1bb8633b92cd3e00bf6eeed3bf12	b9f98f83abf0d8b9260be6ae23dce79f0b6a1aa90b50eb0a52b04cfa31ccddcc
@@ -656,3 +656,8 @@ src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/fro
 # SSL_CERT_FILE / SSL_CERT_DIR (plugin_io, plat8); the plugin-tls lane and its
 # recipe (test-lane-files, justfile: plat17, plat33, plat34).
 src/frontend/viewmodel/tests/unit/plat8-io-mutation-control.sha256	src/frontend/viewmodel/plugin_host/plugin_io.nim	52bc1afdd35a4cfcfc29a5b7d3742d43b3e167a309a6362daa50d11c129f9c06	22f2d01676fd1fc37defd8244c0c97352f008deaa9435f9dfd1c029d2b7435df
+
+# 2026-11-20, the wasm32 developer profile: the wasm lane compiles through
+# ci/lib/wasm-cc.sh, and the justfile gained the profile's, the second pane's
+# and the browser slice's recipes. plat17 and plat70e already owed re-grades
+# for these two subjects; their lines above now carry the new bytes.
