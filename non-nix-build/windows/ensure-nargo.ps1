@@ -198,6 +198,25 @@ function Ensure-Nargo {
         throw "noir's scripts/fetch-trace-format-nim.sh exited 0 but left no '$needed' under '$sourceDir'."
       }
     }
+
+    # The trace writer's build script runs `nim` from PATH ("failed to run
+    # `nim` -- the Nim compiler must be on PATH", run 44940608244). env.ps1
+    # puts Nim on PATH only after every bootstrap step, so resolve the
+    # directory the NIM step (which runs before this one) installed, the way
+    # env.ps1 does, and put its bin first for the cargo build below.
+    $nimVersionRoot = Join-Path $Root ("nim\" + $Toolchain["NIM_VERSION"])
+    $nimDir = Resolve-InstallDirFromRelativePathFile -InstallRoot $Root -RelativePathFile (Join-Path $nimVersionRoot "nim.install.relative-path")
+    if ([string]::IsNullOrWhiteSpace($nimDir)) {
+      foreach ($candidate in @((Join-Path $nimVersionRoot ("prebuilt\nim-" + $Toolchain["NIM_VERSION"])), (Join-Path $nimVersionRoot ("nim-" + $Toolchain["NIM_VERSION"])))) {
+        if (Test-Path -LiteralPath $candidate -PathType Container) { $nimDir = $candidate; break }
+      }
+    }
+    $nimExe = if ($nimDir) { Join-Path $nimDir "bin/nim.exe" } else { "" }
+    if (-not $nimExe -or -not (Test-Path -LiteralPath $nimExe -PathType Leaf)) {
+      throw "nargo's trace writer needs nim.exe, and the NIM bootstrap step left none under '$nimVersionRoot'."
+    }
+    $env:PATH = "$(Split-Path -Parent $nimExe);$env:PATH"
+    Write-Host "nargo bootstrap: the trace writer compiles with $nimExe"
   }
 
   $windowsDir = Join-Path $RepoRoot "non-nix-build/windows"
