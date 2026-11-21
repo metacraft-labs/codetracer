@@ -5584,6 +5584,11 @@ scenario-build *parts:
 scenario-lint:
   bash ci/test/scenarios.sh lint
 
+# The scenario stage tool's own suites (src/tests/scenarios/stages/*_test.nim):
+# the `scenario-stages` test lane.
+scenario-stage-test:
+  bash ci/test/scenarios.sh stage-test
+
 # One flavour's lane: `terminal`, `gpui` or `electron` (the last two need a
 # display: run them under Xvfb, as `scenario-lane-xvfb` does).
 scenario-lane flavour: build-tui
