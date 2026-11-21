@@ -10,10 +10,11 @@
 ## makes that `DapApi` the core's transport, so the core's panes share the
 ## page's engine and its replay instead of opening another:
 ##
-##   * a request goes out through `DapApi.asyncSendCtRequest` — the one send
-##     path every renderer request takes, so it is routed to this tab's
-##     replay and tracked like any other — and its answer comes back as a
-##     DAP response carrying the core's own `seq`;
+##   * a request goes out through `DapApi`'s one send path
+##     (`sendCtRequestForOutcome`) — so it is routed to this tab's replay and
+##     tracked like any other — and its outcome comes back as a DAP response
+##     carrying the core's own `seq`: the body on success, `success: false`
+##     and a message on a refusal or a timeout;
 ##   * every event kind the store subscribes to (`EVENT_KIND_TO_DAP_MAPPING`)
 ##     is forwarded as a DAP event under its DAP name, exactly what the
 ##     engine sent.
@@ -60,17 +61,23 @@ proc newWasmPaneTransport*(dap: DapApi): JsObject =
     let requestSeq = msg["seq"].to(int)
     let args = if msg["arguments"].isUndef: JsObject{} else: msg["arguments"]
     let kind = dapCommandToEventKind(command)
-    discard dap.asyncSendCtRequest(kind, args).then(proc(body: JsObject) =
+    dap.sendCtRequestForOutcome(kind, args, proc(outcome: DapRequestOutcome) =
       let resp = JsObject{}
       resp["type"] = cstring"response"
       resp["seq"] = 0
       resp["request_seq"] = requestSeq
       resp["command"] = command
-      # `asyncSendCtRequest` resolves with the body alone and with `{}` when
-      # nothing came back; the body-only envelope is what
-      # `backend_service.responseBody` reads either way.
-      resp["success"] = not body.isUndef
-      resp["body"] = if body.isUndef: JsObject{} else: body
+      # The OUTCOME, not only the body: the engine answers a refusal with
+      # `success: false`, a message and `body: {}`, and an unanswered request
+      # times out with no message. Both reach the core as failures, as they
+      # would over its own socket, instead of as an empty success.
+      resp["success"] = outcome.succeeded
+      if not outcome.succeeded:
+        resp["message"] =
+          if outcome.timedOut: cstring"the engine did not answer in time"
+          elif outcome.message.len > 0: outcome.message
+          else: cstring"the engine refused the request"
+      resp["body"] = if outcome.body.isUndef: JsObject{} else: outcome.body
       deliver(jsonStringify(resp)))
   transport["onMessage"] = proc(cb: proc(text: cstring)) =
     listeners.add cb

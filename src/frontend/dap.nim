@@ -788,6 +788,16 @@ when not defined(ctInExtension):
           t.onSent(requestId)
     api.ipc.send("CODETRACER::dap-raw-message", packet)
 
+  proc sendCtRequestForOutcome*(dap: DapApi,
+                                kind: CtEventKind,
+                                rawValue: JsObject,
+                                onOutcome: proc(outcome: DapRequestOutcome)) =
+    ## `dispatchCtRequest` for a caller that relays the whole outcome rather
+    ## than reading a body: the WebAssembly panes' transport
+    ## (`web_core/renderer_transport.nim`), which answers its core in DAP's
+    ## own shape and so has to tell a refusal and a timeout from an answer.
+    dap.dispatchCtRequest(kind, rawValue, onOutcome)
+
   proc asyncSendCtRequest*(dap: DapApi,
                          kind: CtEventKind,
                          rawValue: JsObject): Future[JsObject] =

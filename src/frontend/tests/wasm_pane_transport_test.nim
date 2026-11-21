@@ -95,7 +95,30 @@ proc main() {.async.} =
   await settle()
   drainPlatformCallbacks()
   ck not reply.isNil
+  ck responseSucceeded(reply)
   ck responseBody(reply){"marker"}.getInt(0) == 1234
+
+  echo "[Suite] a refusal"
+  echo "  case: reaches the core as a failed response, with the engine's message"
+  sentPackets.setLen(0)
+  var refused: JsonNode = nil
+  onComplete(backend.send("ct/load-locals", %*{"rrTicks": 9}),
+    onSuccess = proc(r: JsonNode) = refused = r,
+    onError = proc(m: string) = discard)
+  let refusedSeq = sentPackets[0]["seq"].to(int)
+  let refusal = JsObject{}
+  refusal["type"] = cstring"response"
+  refusal["request_seq"] = refusedSeq
+  refusal["success"] = false
+  refusal["command"] = cstring"ct/load-locals"
+  refusal["message"] = cstring"no replay for this tab"
+  refusal["body"] = JsObject{}
+  deliverDapResponse(dapApi, dapApi, refusal)
+  await settle()
+  drainPlatformCallbacks()
+  ck not refused.isNil
+  ck not responseSucceeded(refused)
+  ck refused{"message"}.getStr == "no replay for this tab"
 
   echo "[Suite] an event"
   echo "  case: reaches the core under its DAP name, and moves an attached session"
