@@ -58,6 +58,8 @@ import std/[math, strutils]
 from std/unicode import runes, Rune, `$`, runeAtPos
 
 import ../app/views/styled_row
+from ../app/views/glyph_table import GlyphProfile, DefaultGlyphs, ChromeTier,
+  tierAscii, tierBasic, tierExtended
 import isonim/viewmodel
 import nim_agents_isonim_viewmodels/agent_harbor/data_source
 from ../../viewmodel/views/agent_harbor_words import trimBeforeEllipsis,
@@ -74,6 +76,23 @@ const
   Middot* = " \xC2\xB7 "
   DotGlyph* = "\xE2\x97\x8F"     ## ● a filled status mark
   RingGlyph* = "\xE2\x97\x8B"    ## ○ a hollow one (idle, planned)
+  PieGlyphs* = ["\xE2\x97\x8B", "\xE2\x97\x94", "\xE2\x97\x91",
+                "\xE2\x97\x95", "\xE2\x97\x8F"]
+    ## The progress pie in quarters (`pieGlyph`): ○ ◔ ◑ ◕ ●, the Geometric
+    ## Shapes block's circles (U+25CB, U+25D4, U+25D1, U+25D5, U+25CF;
+    ## https://www.unicode.org/charts/PDF/U25A0.pdf). Unicode has no
+    ## eighth-circle pies.
+  PieUnknownGlyph* = "\xE2\x97\x8C"
+    ## ◌ (U+25CC, dotted circle): no known progress on the extended screen,
+    ## so it never reads as 0 % (○); the glyph table's extended set has it
+    ## (`grShellWorking`).
+  PieBasicGlyphs* = ["\xE2\x97\x8B", "\xE2\x97\x8F"]
+    ## The `basic` tier's two: ○ for no progress drawn, ● for any. WGL4 (the
+    ## basic tier's set) carries these two and none of ◔ ◑ ◕.
+  PieAsciiGlyphs* = ["o", "*"]
+    ## The `ascii` tier's two, and the ambiguous-wide screen's, where the
+    ## circles (East Asian Width `A`) take two cells: the glyph table's
+    ## spelling of ○ and ● there (`grBreakpointDisabled`, `grBreakpoint`).
   FoldedGlyph* = "\xE2\x96\xB8"  ## ▸ (what expands)
   UnfoldedGlyph* = "\xE2\x96\xBE" ## ▾
   BarGlyph* = "\xE2\x96\x8E"     ## ▎ an inset bar down a row's left edge
@@ -116,6 +135,10 @@ type
     targets*: seq[AhTarget]
     leave*: seq[proc() {.closure.}]
       ## What a pointer leaving every hover target does (a popup closing).
+    glyphs*: GlyphProfile
+      ## What the terminal can show (`glyph_table`); the zero value is the
+      ## extended, narrow screen every view has drawn for. Only the progress
+      ## pie reads it so far (`pieGlyph`).
 
   AhTone* = object
     ## The surfaces the views separate areas by, resolved for one mode from the
@@ -614,6 +637,58 @@ proc mark*(c: var AhCanvas; parent: AhNode; row, col: int; m: MarkStyle): AhNode
   discard c.put(row, col, if m.ring: RingGlyph else: DotGlyph, m.colour)
   c.node(parent, row, col, 1, 1,
          [("mark", if m.ring: "ring:" & m.colour else: m.colour)])
+
+proc pieQuarter*(pie: ProgressPie): int =
+  ## The quarters of a pie's disc its one-cell glyph fills, 0 to 4: the
+  ## share rounded to the nearest quarter (under 12.5 % none, from 87.5 %
+  ## all). A pie with no known progress fills none, as at 0 %: the glyph
+  ## alone cannot tell them apart; its words (`label`) do.
+  if not pie.known: 0
+  else: clamp(int(floor(pie.fraction * 4.0 + 0.5)), 0, 4)
+
+proc pieGlyph*(pie: ProgressPie; glyphs: GlyphProfile = DefaultGlyphs): string =
+  ## The pie as one cell, by the terminal's glyph tier: the extended
+  ## screen's quarters (`PieGlyphs`), and ◌ for no known progress
+  ## (`PieUnknownGlyph`); on the `basic` tier ○ or ● (none, or any
+  ## quarter), and ○ for no known progress, WGL4 having no ◌; on the `ascii`
+  ## tier and where the circles are two cells wide (`ambiguousWide`), `o` or
+  ## `*`. Where the glyph cannot tell unknown from none, the words can
+  ## (`pieText`, the label: "progress unknown").
+  let q = pie.pieQuarter
+  if glyphs.tier == tierAscii or glyphs.ambiguousWide:
+    PieAsciiGlyphs[min(q, 1)]
+  elif glyphs.tier == tierBasic:
+    PieBasicGlyphs[min(q, 1)]
+  elif not pie.known:
+    PieUnknownGlyph
+  else:
+    PieGlyphs[q]
+
+proc pieText*(pie: ProgressPie; glyphs: GlyphProfile = DefaultGlyphs): string =
+  ## What the terminal shows for a pie: its glyph, or in the screen-reader
+  ## mode (`quiet`) its words in the glyph's place, so a reader speaks the
+  ## state and the progress.
+  if glyphs.quiet: pie.label else: pie.pieGlyph(glyphs)
+
+proc pie*(c: var AhCanvas; parent: AhNode; row, col: int; pie: ProgressPie;
+          ground: string; glyphs: GlyphProfile): AhNode =
+  ## The progress pie at (`row`, `col`) on `ground` in the glyph tier
+  ## `glyphs`: its glyph in the wedge's ink, which holds 3:1 against the
+  ## ground (`pieInks`). Returns its node, with the pie's role, share and
+  ## words as facts.
+  let inks = c.p.pieInks(pie.role, ground)
+  let shown = pie.pieText(glyphs)
+  let w = c.put(row, col, shown, inks.wedge)
+  c.node(parent, row, col, max(1, w), 1,
+         [("pie", $pie.role),
+          ("pie-fraction", if pie.known: pie.pieStopPercent else: "unknown"),
+          ("pie-label", pie.label), ("pie-ink", inks.wedge), ("pie-ground", ground)])
+
+proc pie*(c: var AhCanvas; parent: AhNode; row, col: int; pie: ProgressPie;
+          ground: string): AhNode =
+  ## The progress pie at (`row`, `col`) on `ground`, in the canvas's glyph
+  ## tier (`glyphs`).
+  c.pie(parent, row, col, pie, ground, c.glyphs)
 
 proc target*(c: var AhCanvas; row, col, width, height: int; click: proc() = nil;
              hover: proc() = nil) =
