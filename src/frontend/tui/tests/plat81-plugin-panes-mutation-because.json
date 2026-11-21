@@ -1,0 +1,8 @@
+{
+  "P1": "builtins == @[paneEditor]",
+  "P2": "not leaf.isNil",
+  "P3": "back.docked[0].contributedPane == Metrics",
+  "P4": "l.tree.children[0].activeIndex == 1",
+  "P5": "sess.screenHas(\"\u2713 main 60% (activated)\")",
+  "P6": "decoRow == codeRow"
+}
