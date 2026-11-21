@@ -454,7 +454,7 @@ def build_with(env_var, recipe):
     cmd = os.environ.get(env_var)
     argv = ["bash", "-c", cmd] if cmd else ["just", recipe]
     p = subprocess.run(argv, cwd=REPO, capture_output=True, text=True,
-                       timeout=TIMEOUT)
+                       timeout=build_timeout(TIMEOUT))
     if p.returncode != 0:
         print((p.stdout + p.stderr)[-2000:])
     return p.returncode == 0
@@ -605,7 +605,7 @@ def grade(suites):
 
 
 sys.path.insert(0, str(REPO / "ci" / "lib"))
-from harness_guard import refuse_undeclared_arms  # noqa: E402
+from harness_guard import build_timeout, refuse_undeclared_arms  # noqa: E402
 
 
 def main():
