@@ -811,10 +811,20 @@ proc ariaLabelForSummary*(summary: OriginSummary; prefs: OriginPreferences;
   ## self-contained (spec §13.0). Pure helper — kept here so the
   ## renderer-agnostic IsoNim views can call it without pulling
   ## ``ui/origin_badge`` (which imports ``std/dom`` on the JS target).
+  ##
+  ## It is also the badge's tooltip (D-31), which shows the full value: so
+  ## the expression is NOT abbreviated here, whatever
+  ## `originBadge.expressionStyle` the visible badge text uses, and the text
+  ## starts with what a click does (tooltip.md, "Writing the text").
   if summary.isPlaceholder:
-    return "Resolve origin summary"
-  let visible = badgeTextForSummary(summary, prefs, atSidePanel)
-  "Value origin: " & visible
+    return "Find where this value came from"
+  result = "Show where this value came from: " & summary.terminatorExpr
+  let wantFunction =
+    if atSidePanel: prefs.showContainingFunctionPanel
+    else: prefs.showContainingFunctionInline
+  if wantFunction and summary.terminatorFunction.isSome and
+     summary.terminatorFunction.get.len > 0:
+    result &= " @ " & summary.terminatorFunction.get
 
 proc badgeClassFor*(summary: OriginSummary;
                     iconOnly: bool = false): string =

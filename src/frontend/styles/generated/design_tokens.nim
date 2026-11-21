@@ -358,7 +358,7 @@ const
     dtEditorThemeLineNumber: ["#b0b0b0", "#666055"],
     dtEditorThemeActiveLineNumber: ["#c8c8c8", "#353432"],
     dtEditorThemeExecutionLine: ["#404040", "#e2e0bc"],
-    dtEditorThemeExecutionPointer: ["#facc15", "#353432"],
+    dtEditorThemeExecutionPointer: ["#facc15", "#ea580c"],
     dtEditorThemeSelection: ["#353535", "#4f5b66"],
     dtEditorThemeFindMatch: ["#1e3a8a", "#93c5fd"],
     dtEditorThemeFindMatchHighlight: ["#c2410c", "#fdba74"],

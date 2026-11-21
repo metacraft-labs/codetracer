@@ -199,7 +199,7 @@
     "activeLineNumber": "{colors.ui.text.primary.label}",
     "executionLine": "#e2e0bc",
     "selection": "#4f5b66",
-    "executionPointer": "{colors.ui.text.primary.label}",
+    "executionPointer": "{colors.ui.role.coordinator}",
     "findMatch": "{colors.editor.surface.find-match}",
     "findMatchHighlight": "{colors.editor.surface.find-match-highlight}"
   }

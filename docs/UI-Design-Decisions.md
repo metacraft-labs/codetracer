@@ -172,13 +172,14 @@ panel. (2026-09-14)
 src/frontend/styles/components/button.styl :: PANEL_INSET = 0.5rem
 ```
 
-### D-12: One 6px corner for the tab and its panel
+### D-12: One 4px corner for the tab and its panel
 
 Tabs, strip tabs, and docked and overlay panels share one corner size.
-(2026-10-15)
+(2026-10-15; 6px → 4px on 2026-11-21, when every corner radius in the app
+was made 2px smaller.)
 
 ```guard
-src/frontend/styles/components/golden_layout.styl :: TAB_CORNER_RADIUS = 0.375rem
+src/frontend/styles/components/golden_layout.styl :: TAB_CORNER_RADIUS = 0.25rem
 ```
 
 ### D-13: The agent pills in the settings take the shared look
@@ -406,23 +407,24 @@ src/frontend/styles/components/shared_widgets.styl :: No line between rows, on a
 ### D-30: A dropdown row's hover is quieter than a list row's
 
 A dropdown row's hover uses `colors-ui-surface-primary-default-hover`, `#262626`, in
-the dark themes. In the light theme every dropdown row's hover is pure white,
-`colors/base/white` `#FFFFFF` (Nikolay, 2026-11-18), including the Navigate menu's
-search results and the tracepoint view menu. Lists and tables keep the stronger
+the dark themes. The light theme uses the same token (its light value), for every
+dropdown row, including the Navigate menu's search results and the tracepoint view
+menu. From 2026-11-18 the light hover was pure white, `colors/base/white`; that did not
+look well and was reverted (Nikolay, 2026-11-21). Lists and tables keep the stronger
 `#333333`, which is also the chosen row's fill, so hover no longer looks like the
 chosen row. A dropdown painted `#242424` or lighter stays on the list hover, because
 this colour would not show on it. (2026-11-02)
 
 ```guard
-src/frontend/styles/components/button.styl :: DROPDOWN_HOVER_BG = by-mode(colors-ui-surface-primary-default-hover, colors-base-white)
+src/frontend/styles/components/button.styl :: DROPDOWN_HOVER_BG = colors-ui-surface-primary-default-hover
 src/frontend/styles/components/menu_item.styl :: background: DROPDOWN_HOVER_BG
 ```
 
 ### D-31: One tooltip, from the design system
 
 Every tooltip looks like the Tooltip component in Figma, with no arrow. One line is `sm`:
-4px corners, 12/16 text, padding 6px and 12px in the dark theme, 4px and 8px in the light
-one. Wrapped text is `lg`: 320px wide, 8px corners, padding 6px and 8px. The dark theme
+2px corners, 12/16 text, padding 6px and 12px in the dark theme, 4px and 8px in the light
+one. Wrapped text is `lg`: 320px wide, 6px corners, padding 6px and 8px. The dark theme
 is `colors/ui/surface/base/raised` with a 1px `colors/ui/border/tertiary` border inside
 its edge. The light theme is `colors/ui/surface/on-color/secondary` with no border and
 `colors/ui/text/primary/body` text, because Figma's `text/on-color/body` is unreadable
@@ -542,7 +544,7 @@ rows): a 4px inset, 36px rows, no line between them, the quiet row hover and the
 grey chosen row, and the arrow keys work in them. The settings selects open from a
 26px shared button with the Design System chevron, and their chosen row also keeps
 a tick. "Network access" is the shared switch. Its buttons are the md size (26px)
-with 6px corners. The suggestion chips keep their pill shape but take the shared
+with 4px corners. The suggestion chips keep their pill shape but take the shared
 button's colours, hover and height. Stop stays red, with a darker red on hover. Its
 icons are Design System icons painted in the text colour. The prompt's indigo
 outline shows only while a field in it is being typed in, never beside a
@@ -789,6 +791,32 @@ or switched on, it is `surface/base/panel`; switched on also carries the
 src/frontend/styles/components/menu_bar.styl :: #menu button[class*="ct-button-image-"]:not(:where(#menu-root *))
 src/frontend/styles/components/menu_bar.styl :: background-color: colors-ui-surface-base-canvas !important
 src/frontend/styles/components/menu_bar.styl :: background-color: colors-ui-surface-base-panel !important
+```
+
+### D-48: Switching the theme never shows an unstyled frame
+
+View → theme loads the new theme's stylesheet beside the current one and
+removes the old one only after the new one has loaded. Repointing the one
+`#theme` link dropped the old styles at once, so for a split second the app
+showed system serif text, blank buttons and the caption bar's icons at their
+natural, huge size. (Nikolay, 2026-11-20)
+
+```guard
+src/frontend/renderer.nim :: next.id = 'theme-pending';
+src/frontend/renderer.nim :: link.parentNode.insertBefore(next, link);
+src/frontend/renderer.nim :: function warmUp(sheet)
+src/frontend/renderer.nim :: transition: none !important;
+```
+
+### D-49: Switching Edit ↔ Debug never shows an in-between top bar
+
+A mode switch rebuilds the caption bar (its contents differ per mode). The
+rebuilt bar must come up complete in the same frame: the session tabs are
+filled immediately, never on a timer, or the bar paints for one frame with
+no tabs and the centred search field jumps. (Nikolay, 2026-11-20)
+
+```guard
+src/frontend/ui/menu.nim :: requestSessionTabsRenderNow()
 ```
 
 ## Focus rules

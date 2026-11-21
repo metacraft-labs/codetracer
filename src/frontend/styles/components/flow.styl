@@ -118,7 +118,7 @@
     height: 1.375rem
     padding: 0 0.5rem
     border: 0
-    border-radius: 0.25rem
+    border-radius: 0.125rem
     background: colors-ui-surface-primary-tertiary
     color: colors-ui-text-primary-body
     font: inherit
@@ -163,8 +163,8 @@
 
 .flow-view-more-button
   border-radius: 0 !important
-  border-top-left-radius: 0.25rem !important
-  border-bottom-left-radius: 0.25rem !important
+  border-top-left-radius: 0.125rem !important
+  border-bottom-left-radius: 0.125rem !important
   background-position: center !important
   background-repeat: no-repeat !important
   min-width: 3.5ch
@@ -323,7 +323,7 @@
   // max-width: 100px // 31px // it seems we need a ~200px max or no max? (old: all width should be ~70px for two int values)
   overflow: hidden
   text-align: center
-  border-radius: 0.125rem
+  border-radius: 0
   text-overflow: ellipsis
   font-family: monospace
   margin-top: 0.09375rem
@@ -356,7 +356,7 @@
     color: FLOW_PARALLEL_ITERATION_INFO_COLOR
     height: 1.125rem
     line-height: 1.125rem
-    border-radius: 0.0625rem
+    border-radius: 0
     border: 0
 // box-shadow: -2px -2px #eee
 // box-shadow: -2px -2px #eee
@@ -378,7 +378,7 @@
     // font-size: 12px
     overflow: hidden
     text-align: center
-    border-radius: 0.125rem
+    border-radius: 0
     text-overflow: ellipsis
     font-family: monospace
     font-weight: normal
@@ -397,7 +397,7 @@
   position: absolute
   z-index: -1
   background-color: colors-editor-surface-primary
-  border-radius: 0.3125rem
+  border-radius: 0.1875rem
   border: 0.0625rem solid FLOW_PARALLEL_BACKGROUND_BORDER_COLOR
   opacity: 0.5
 
@@ -432,7 +432,7 @@
     transform: translate(-0.5em, -0.5em) !important
 
   .noUi-handle
-    border-radius: 1em
+    border-radius: calc(max(0rem, 1em - 0.125rem))
     // border: 0.012em solid colors-ui-surface-base-panel
     background: colors-editor-action-tertiary
     width: 0.23em !important
@@ -547,7 +547,7 @@
   position: absolute
   left: 0.09375rem
   top: 0.125rem
-  border-radius: 0.15625rem
+  border-radius: 0.03125rem
 
 .flow-loop-continuous-iteration
   background-color: #384149
@@ -555,15 +555,15 @@
   height: 1rem
   position: absolute
   top: 0.125rem
-  border-radius: 0.03125rem
+  border-radius: 0
 
 .flow-loop-continuous-iteration.first
-  border-top-left-radius: 0.15625rem
-  border-bottom-left-radius: 0.15625rem
+  border-top-left-radius: 0.03125rem
+  border-bottom-left-radius: 0.03125rem
 
 .flow-loop-continuous-iteration.last
-  border-top-right-radius: 0.15625rem
-  border-bottom-right-radius: 0.15625rem
+  border-top-right-radius: 0.03125rem
+  border-bottom-right-radius: 0.03125rem
   margin-right: 0.3125rem
 
 .flow-loop-legend-expression
@@ -578,7 +578,7 @@
   font-size: 0.75rem
   overflow: hidden
   text-align: center
-  border-radius: 0.125rem
+  border-radius: 0
   text-overflow: ellipsis
   font-family: monospace
   background: colors-editor-surface-primary
@@ -593,8 +593,8 @@
   background-color: colors-editor-surface-primary
   border-top-left-radius: 0
   border-top-right-radius: 0
-  border-bottom-left-radius: 0.375em
-  border-bottom-right-radius: 0.375em
+  border-bottom-left-radius: calc(max(0rem, 0.375em - 0.125rem))
+  border-bottom-right-radius: calc(max(0rem, 0.375em - 0.125rem))
   color: colors-ui-text-primary-body
   display: inline-flex
   flex-direction: column
@@ -622,8 +622,8 @@
     top: -1.5em
     left: 0
     background-color: colors-editor-surface-primary
-    border-top-left-radius: 0.375em
-    border-top-right-radius: 0.375em
+    border-top-left-radius: calc(max(0rem, 0.375em - 0.125rem))
+    border-top-right-radius: calc(max(0rem, 0.375em - 0.125rem))
     text-indent: 0.3125em
     font-weight: bold
 
@@ -654,7 +654,7 @@
     background-position: center
     background-repeat: no-repeat
     transform: translateX(-0.25em)
-    border-radius: 6.25em
+    border-radius: calc(max(0rem, 6.25em - 0.125rem))
     outline: 0.0625em solid colors-ui-border-primary-hover
 
     &:hover
@@ -736,7 +736,7 @@
   .review-flow-step
     background: transparent
     border: 0.0625rem solid colors-ui-border-secondary
-    border-radius: 0.1875rem
+    border-radius: 0.0625rem
     color: inherit
     font: inherit
     line-height: 1
@@ -827,7 +827,7 @@
       right: -0.35em !important
       height: 1.1em !important
       top: -0.5em !important
-      border-radius: 0.35em !important
+      border-radius: calc(max(0rem, 0.35em - 0.125rem)) !important
       box-shadow: 0 0 0 0.0625rem rgba(0, 0, 0, 0.55) !important
 
 // The review's Omniscience values (RV-5, UD-3; §4.4 / §7).
@@ -849,7 +849,7 @@
 //     DeepReview style, which §5.3 forbids.
 .review-inline-value
   white-space: pre
-  border-radius: 0.25em
+  border-radius: calc(max(0rem, 0.25em - 0.125rem))
   padding: 0 0.4em
 
 .review-flow-value-box.review-inline-value

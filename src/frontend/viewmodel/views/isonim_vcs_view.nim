@@ -485,8 +485,8 @@ proc attachCommitTooltip[R, N](r: R; header: N;
 # Branch picker
 # ---------------------------------------------------------------------------
 
-const chevronDownSvg = """<svg width="9" height="5" viewBox="0 0 9 5" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M0.353516 0.353577L4.35352 4.35358L8.35352 0.353576" stroke="#DDDDDD" stroke-linejoin="round"/></svg>"""
-const chevronUpSvg  = """<svg width="9" height="5" viewBox="0 0 9 5" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8.35352 4.35358L4.35352 0.353577L0.353516 4.35358" stroke="#DDDDDD" stroke-linejoin="round"/></svg>"""
+const chevronDownSvg = """<svg width="9" height="5" viewBox="0 0 9 5" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M0.353516 0.353577L4.35352 4.35358L8.35352 0.353576" stroke="currentColor" stroke-linejoin="round"/></svg>"""
+const chevronUpSvg  = """<svg width="9" height="5" viewBox="0 0 9 5" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8.35352 4.35358L4.35352 0.353577L0.353516 4.35358" stroke="currentColor" stroke-linejoin="round"/></svg>"""
 
 proc renderBranchPicker[R](r: R; vm: VCSVM; callbacks: VCSCallbacks): auto =
   var chevronHost: typeof(r.createElement("span"))
@@ -602,8 +602,8 @@ proc renderHeader[R](r: R; vm: VCSVM; callbacks: VCSCallbacks): auto =
 proc renderNoRepo[R](r: R; vm: VCSVM): auto =
   ui(r):
     tdiv(class = VCSNoRepoClass):
-      tdiv(class = "vcs-no-repo-icon"):
-        text vm.headerIcon.val
+      # Painted by CSS: extended-icon-set `type=folder-block`.
+      tdiv(class = "vcs-no-repo-icon"): discard
       tdiv(class = "vcs-no-repo-message"):
         text vm.errorMessage.val
 
@@ -784,9 +784,8 @@ proc renderAccordionFileRow[R](r: R; callbacks: VCSCallbacks;
       if file.deletions > 0:
         span(class = "vcs-accordion-file-dels"):
           text "-" & $file.deletions
-      span(ref = diffBtn, class = "vcs-file-diff-btn"):
-        tdiv(class = "custom-tooltip"):
-          text "View Diff"
+      span(ref = diffBtn, class = "vcs-file-diff-btn", title = "View diff"):
+        discard
   r.appendRenderedChild(rowNode, content)
   r.attachFileDiffClick(diffBtn, callbacks, rowTarget)
 
@@ -984,9 +983,8 @@ proc renderChangedFileRow*[R](r: R; callbacks: VCSCallbacks;
       if file.coverageText.len > 0:
         span(class = "vcs-file-coverage"):
           text file.coverageText
-      span(ref = diffBtn, class = "vcs-file-diff-btn"):
-        tdiv(class = "custom-tooltip"):
-          text "View Diff"
+      span(ref = diffBtn, class = "vcs-file-diff-btn", title = "View diff"):
+        discard
   r.attachFileDiffClick(diffBtn, callbacks, rowTarget)
   row
 

@@ -28,7 +28,7 @@ CONTROL_HEIGHT_XS = 1.25rem
 // control (a focused field, an open menu's trigger) turns it `border/action`.
 CONTROL_BORDER_WIDTH = 0.0625rem
 CONTROL_BORDER_COLOR = colors-ui-border-secondary
-CONTROL_RADIUS = 0.375rem
+CONTROL_RADIUS = 0.25rem
 
 // Control gap — ONE space between neighbouring controls: button and button,
 // field and button, in a row or stacked (Nikolay, 2026-11-03).  It is the
@@ -60,8 +60,10 @@ LIST_HOVER_BG = colors-ui-surface-primary-secondary-hover
 // chosen row's fill (Nikolay, 2026-11-02; docs/UI-Design-Decisions.md, D-30).
 // It only shows on the dark surfaces dropdowns normally have (#161616, #1b1b1b):
 // a dropdown painted #242424 or lighter stays on LIST_HOVER_BG.
-// Light: pure white, `colors/base/white` (Nikolay, 2026-11-18, D-30).
-DROPDOWN_HOVER_BG = by-mode(colors-ui-surface-primary-default-hover, colors-base-white)
+// The same token in both themes.  Light was pure white (`colors/base/white`)
+// from 2026-11-18 to 2026-11-21, which did not look well on the light menus,
+// so it is back to `primary/default-hover` (Nikolay, 2026-11-21, D-30).
+DROPDOWN_HOVER_BG = colors-ui-surface-primary-default-hover
 
 // Button transition — ONE timing for every button's state change (hover, and
 // the welcome forms' Record / Download turning primary): the colours ease over
@@ -106,6 +108,8 @@ ICON_CHEVRON_RIGHT = url('../../public/resources/shared/chevron_right.svg') // i
 ICON_TAB_MENU = url('../../public/resources/shared/tab_menu.svg') // icons-lg=tab-menu
 ICON_FOLDER = url('../../public/resources/shared/folder.svg') // icons-lg=folder
 ICON_FILE = url('../../public/resources/shared/file.svg') // type=content-file
+ICON_PLUS_SM = url('../../public/resources/shared/plus_sm.svg') // icons-lg=plus-sm
+ICON_FOLDER_BLOCK = url('../../public/resources/shared/folder_block.svg') // type=folder-block
 // alert-icons, size=lg (20px).  Painted in the status icon tokens, which the
 // light theme re-maps, so one file serves both themes.
 ICON_ALERT_INFO = url('../../public/resources/notifications/alert_info_lg.svg')
@@ -198,7 +202,7 @@ control-button-active()
 // -- Buttons --
 button
   font-family: "SpaceGrotesk"
-  border-radius: 0.5em !important
+  border-radius: calc(max(0rem, 0.5em - 0.125rem)) !important
   display: inline-flex
   outline: none
   border-width: 0em
@@ -258,7 +262,7 @@ button
   padding: 0 0.875em
   align-items: center
   // The xl form fields' 6px (`.ct-input-form`), so the two match side by side.
-  border-radius: 0.375rem !important
+  border-radius: 0.25rem !important
 
 [class*="ct-button-lg-"]
 [class*="ct-button-text-lg-"]
@@ -340,7 +344,7 @@ button
   background-position: center
   background-size: auto 1em !important
   background-repeat: no-repeat
-  border-radius: 0.375em !important
+  border-radius: calc(max(0rem, 0.375em - 0.125rem)) !important
   // `button` is already `display: inline-flex`; these two centre an inline
   // SVG mark the way `background-position: center` centred the images that
   // some of these buttons still use.
@@ -611,7 +615,7 @@ tooltip-look()
   background-color: by-mode(colors-ui-surface-base-raised, colors-ui-surface-on-color-secondary)
   color: by-mode(colors-ui-text-primary-body, colors-ui-text-on-color-body)
   padding: by-mode(0.375rem 0.75rem, 0.25rem 0.5rem)
-  border-radius: 0.25rem
+  border-radius: 0.125rem
   // Drawn inside, as Figma's border is, so it adds nothing to the size.
   box-shadow: inset 0 0 0 TOOLTIP_BORDER_WIDTH colors-ui-border-tertiary, 0 0.5rem 1rem -0.125rem rgba(27, 33, 44, 0.12)
   font-family: "SpaceGrotesk"

@@ -7,26 +7,33 @@ LAYOUT_TAB_GAP = 0.25em
 // strip tabs and the panels share one top line.  4px.
 LAYOUT_TAB_TOP = 0.25rem
 
-// The radius of the curve that joins a tab to its panel.
+// The radius of the curve that joins a tab to its panel: 4px, the same as
+// every tab and panel corner (TAB_CORNER_RADIUS below, D-12).
 //
-// This is the *painted* radius.  The connectors on a GoldenLayout tab are
-// box-shadows with a -0.25em spread, and a negative spread shrinks a shadow's
-// corners, so their 0.625em border-radius reaches the screen as 0.375em.  The
-// stroked outline used to trace the 0.625em instead and cut across the curve it
-// was meant to follow.  One value now, read by the CSS below and by the path
-// builder in `ui/layout.nim` through the custom property.
-LAYOUT_TAB_CONNECTOR_RADIUS = 0.375em
+// The connectors are box-shadows on a tab's `::before` / `::after`.  A box
+// never paints its own shadow under itself, so the curve you see is the
+// pseudo-element's OWN border-radius cut out of the shadow, not the shadow's
+// (shrunk) corner.  That border-radius therefore has to be this value too.  It
+// used to be 0.625em while this said 0.375em, on the belief that the -0.25em
+// spread shrank the painted curve to match.  It did not: the strip and footer
+// tabs painted a 10px (later 8px) curve under a 6px (later 4px) outline, which
+// left a sliver of fill outside the line at every join (Nikolay, 2026-11-21).
+// One value now, used by every connector in this file and auto_hide.styl, and
+// read back by the path builder in `ui/layout.nim` (from the `::before`, and
+// from the outline path's own `border-top-left-radius`).  `rem`, so it lands on
+// 4px whatever text size the tab has.
+LAYOUT_TAB_CONNECTOR_RADIUS = 0.25rem
 
 // The corner radius of every tab and panel — layout tabs and panels, the side
 // and footer strip tabs, docked and hovered (overlay) panels — selected or
-// not.  6px, the same as the joining curve above, so one selected tab-and-
+// not.  4px, the same as the joining curve above, so one selected tab-and-
 // panel shape has a single corner size all round (Nikolay, 2026-10-15).  It
 // was 0.36em, which at 16px is 5.76px: a quarter-pixel tighter than the 6px
 // curves it sat beside, and off the pixel grid, so those corners rendered a
 // touch softer.  `rem` so it lands on 6px whatever text size the element has.
 // The selected-panel outlines read radii back from computed style, so they
 // follow without a change of their own.
-TAB_CORNER_RADIUS = 0.375rem
+TAB_CORNER_RADIUS = 0.25rem
 
 .lm_goldenlayout
   background: colors-ui-surface-primary-default !important
@@ -216,7 +223,7 @@ TAB_CORNER_RADIUS = 0.375rem
     bottom: 0em
     z-index: 1
     left: -1.625em
-    border-radius: 0 0 0.625em 0
+    border-radius: 0 0 LAYOUT_TAB_CONNECTOR_RADIUS 0
     opacity: 1
     box-shadow: 0.625em 0.34em 0 -0.25em colors-ui-surface-base-panel
     transform: translate(0em, 0.25625em)
@@ -231,7 +238,7 @@ TAB_CORNER_RADIUS = 0.375rem
     bottom: 0em
     z-index: 1
     right: -1.625em
-    border-radius: 0 0 0 0.625em
+    border-radius: 0 0 0 LAYOUT_TAB_CONNECTOR_RADIUS
     opacity: 1
     box-shadow: -0.625em 0.34em 0 -0.25em colors-ui-surface-base-panel
     transform: translate(0em, 0.25625em)
@@ -257,7 +264,7 @@ TAB_CORNER_RADIUS = 0.375rem
   opacity: 1 !important
   background-color: colors-ui-surface-primary-default !important
   border: 0.03125em solid colors-ui-border-tertiary !important
-  border-radius: 0.375em !important
+  border-radius: calc(max(0rem, 0.375em - 0.125rem)) !important
   background-position: center !important
   background-repeat: no-repeat !important
   background-size: 1em 1em !important

@@ -284,13 +284,14 @@ CALLTRACE_EXPAND_IMG='../../public/resources/calltrace/expand-call-calltrace-whi
 CALLTRACE_DOT_IMG='../../public/resources/calltrace/dot-call-calltrace-white.svg'
 CALLTRACE_EOP_IMG='../../public/resources/calltrace/end-of-program-white.svg'
 CALLTRACE_EOP_ERROR_IMG='../../public/resources/calltrace/end-of-program-dark.svg'
-// The active call's chevrons and dot. The chevrons are the dark theme's files:
-// they draw amber (#FCD34D) on a #3A3A3A chip of their own, so they carry
-// their ground with them. The dot has no chip, and amber.300 is 1.1:1 on this
-// palette's panel (clay.150); its light file is the same square in amber.700,
-// the same hue at 3.9:1 there.
-CALLTRACE_ACTIVE_COLLAPSE_IMG='../../public/resources/calltrace/collapse-active-call-calltrace-dark.svg'
-CALLTRACE_ACTIVE_EXPAND_IMG='../../public/resources/calltrace/expand-active-call-calltrace-dark.svg'
+// The active call's boxes and dot, in `ui/role/coordinator` (its Light value,
+// #EA580C, baked into the files).  The boxes are the light theme's own boxes
+// (#F3F3F3 inside) with the outline and sign in that colour; they borrowed the
+// dark theme's dark chip with an amber (#FCD34D) outline until 2026-11-21
+// (Nikolay).  The dot was amber.700; it takes the same colour so the current
+// call has one mark colour.  3.2:1 inside the box, 3.1:1 on the panel.
+CALLTRACE_ACTIVE_COLLAPSE_IMG='../../public/resources/calltrace/collapse-active-call-calltrace-white.svg'
+CALLTRACE_ACTIVE_EXPAND_IMG='../../public/resources/calltrace/expand-active-call-calltrace-white.svg'
 CALLTRACE_ACTIVE_DOT_IMG='../../public/resources/calltrace/dot-active-call-calltrace-white.svg'
 
 OUTPUT_COLOR_FG = #fff

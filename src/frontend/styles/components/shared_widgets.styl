@@ -135,7 +135,7 @@ DROPDOWN_TRIGGER_OFFSET = "calc(100% + %s)" % DROPDOWN_TRIGGER_GAP
 // to open from.  rem for the same reason as the gap — these menus sit in
 // containers from 12px to 16px, and an em radius drew a different curve in
 // each.
-DROPDOWN_RADIUS = 0.375rem
+DROPDOWN_RADIUS = 0.25rem
 
 // Scrollbars inside a menu.
 //
@@ -182,7 +182,7 @@ segmented-tab()
   border: none
   // `!important` only to beat the app-wide `button` radius (0.5em, itself
   // `!important`); the tabs are 5px.
-  border-radius: 0.3125rem !important
+  border-radius: 0.1875rem !important
   background-color: transparent
   font-family: "SpaceGrotesk"
   font-weight: 400
@@ -402,7 +402,7 @@ body
   max-width: calc(100vw - 0.625em)
 
 .tippy-box
-  border-radius: 0.25em
+  border-radius: calc(max(0rem, 0.25em - 0.125rem))
   font-size: inherit
 
   &[data-placement^="top"] > .tippy-arrow::before
@@ -669,7 +669,7 @@ CAPTION_BAR_HEIGHT = unquote("var(--caption-bar-height)")
 
 .indeterminate-checkmark
   border: 0.0625rem solid colors-ui-border-secondary
-  border-radius: 0.15625rem
+  border-radius: 0.03125rem
   display: flex
   position: absolute
   top: 0.3125rem
@@ -725,13 +725,13 @@ input:checked ~ .checkmark:after
   transition: opacity 0.3s ease-in-out
   white-space: normal
   pointer-events: none
-  border-radius: 0.375rem
+  border-radius: 0.25rem
 
   .active-line
     .excerpt-code
       color: colors-ui-text-primary-body !important
     background: colors-ui-surface-base-canvas
-    border-radius: 0.25rem
+    border-radius: 0.125rem
     width: fit-content
     padding-right: 0.25rem
 
@@ -740,7 +740,7 @@ input:checked ~ .checkmark:after
 
 .checkmark
   border: 0.03125rem solid colors-ui-border-primary
-  border-radius: 0.15625rem
+  border-radius: 0.03125rem
   display:block
   position: absolute
   top: 0.375rem
@@ -759,7 +759,7 @@ input:checked ~ .checkmark:after
     height: 0.5rem;
     border: solid colors-ui-text-success-primary;
     border-width: 0 0.125rem 0.125rem 0;
-    border-radius: 0.125rem
+    border-radius: 0
     -webkit-transform: rotate(45deg);
     -ms-transform: rotate(45deg);
     transform: rotate(45deg);
@@ -892,7 +892,7 @@ input:checked ~ .checkmark:after
   padding: 0 0.625em
   gap: 0.375em
   user-select: none
-  border-radius: 0.5em
+  border-radius: calc(max(0rem, 0.5em - 0.125rem))
   // The button look (button.styl) — these pickers are where it was taken from,
   // and every other button now follows them.
   control-button()
@@ -919,6 +919,17 @@ input:checked ~ .checkmark:after
   text-overflow: ellipsis
   white-space: nowrap
 
+// The most a picker's list grows before it scrolls: five and a half 36px rows,
+// plus the list's 3px padding top and bottom and its border.  205px, in rem.
+//
+// It was 12.5em, and the list's text is 12px, so 150px — exactly four rows plus
+// the padding.  The border counts inside that cap, so a list of four rows (the
+// Requests panel's Status filter) came out 1px too tall and showed a scrollbar
+// with nothing to scroll (Nikolay, 2026-11-21).  At five and a half rows a list
+// that fits never touches the cap, and one that does not shows half a row at
+// the bottom, which says "there is more".
+DROPDOWN_LIST_MAX_HEIGHT = 12.8125rem
+
 .ct-picker-dropdown
   // The look this defines is now shared — see `dropdown-surface()` above, which
   // every menu that opens over the UI calls.
@@ -929,7 +940,7 @@ input:checked ~ .checkmark:after
   right: 0
   z-index: 100
   padding: 0.25em
-  max-height: 12.5em
+  max-height: DROPDOWN_LIST_MAX_HEIGHT
   overflow-y: auto
 
 // .ct-picker--chevron-left: chevron DOM node is first → naturally appears on

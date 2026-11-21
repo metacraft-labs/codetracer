@@ -89,7 +89,7 @@ proc openShortcutsDialog*() =
     "transform: translateX(-50%); z-index: 10000; max-height: 84vh; " &
     "overflow: auto; min-width: 440px; padding: 16px 20px; " &
     "background: var(--bg-primary, #1e1e1e); color: var(--text-primary, #ddd); " &
-    "border: 1px solid var(--border-color, #555); border-radius: 6px; " &
+    "border: 1px solid var(--border-color, #555); border-radius: 4px; " &
     "box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5)")
 
   # The preset buttons and the close button, wired by the attribute the builder

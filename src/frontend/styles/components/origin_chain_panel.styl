@@ -65,7 +65,7 @@
 
 .ct-origin-breadcrumb-chip
   padding: 0.1em 0.5em
-  border-radius: 0.8em
+  border-radius: calc(max(0rem, 0.8em - 0.125rem))
   border: 0.0625rem solid colors-ui-border-secondary
   background-color: colors-ui-surface-base-raised
 
@@ -94,7 +94,7 @@
 
 .ct-origin-cross-process-badge
   padding: 0 0.4em
-  border-radius: 0.3em
+  border-radius: calc(max(0rem, 0.3em - 0.125rem))
   font-size: 0.75rem
   background-color: colors-ui-surface-alert-information
-  color: colors-ui-text-on-color-body
+  color: on-status-text('information')

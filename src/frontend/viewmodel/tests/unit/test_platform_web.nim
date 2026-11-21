@@ -927,12 +927,15 @@ suite "test_every_entry_form_reaches_the_application — §1b.0, §1b.4":
     # BOTH failure modes are asked about: a MIME-rejected sheet fires `error`,
     # a sheet served as HTML fires `load` and parses to nothing. Asking only
     # the first misses the deployed case entirely.
-    check renderer.contains("link.onerror = function()")
-    check renderer.contains("link.onload = function()")
+    # The new sheet is loaded as a SECOND link (D-48), so the questions are
+    # asked of that one.
+    check renderer.contains("next.onerror = function()")
+    check renderer.contains("next.onload = function()")
     check renderer.contains("rules.length > 0")
-    # And it puts the working theme back rather than leaving the app bare.
-    check renderer.contains("link.href = prevHref")
-    check renderer.contains("link.dataset.theme = prevName")
+    # And the working theme is never taken away: a failed sheet is removed,
+    # and the current one goes only in `commit`, after the new one has loaded.
+    check renderer.contains("next.parentNode.removeChild(next)")
+    check renderer.contains("link.parentNode.removeChild(link)")
     # The old unconditional pair must not come back beside it. `dataset.theme`
     # is still assigned — inside the checked swap — so this asks about the
     # `.href` assignment that was the actual defect.
