@@ -265,6 +265,28 @@ when not LensWasm:
       check "multiply instead of adding" notin r.pane("ct-lens.history/history")
       r.sup.shutdown()
 
+    test "the commit that last changed the function decorates its first line":
+      var r = newRig()
+      r.both()
+      r.stopAt(r.file, 5, 4, 6, "apply")
+      let newest = expectedHistory(r.repo, r.file, 4, 6)[0].split(' ')[0]
+      proc marks(r: Rig; doc: string): JsonNode =
+        r.sup.slot("ct-lens.history").decorations.getOrDefault(doc, newJArray())
+      check r.sup.waitUntil("the decoration", proc(): bool =
+        r.marks(r.file).len == 1)
+      let m = r.marks(r.file)[0]
+      check m{"line"}.getInt(0) == 4
+      check m{"text"}.getStr("").startsWith("history: " & newest & " ")
+      check "multiply instead of adding" in m{"text"}.getStr("")
+      # Another file: the first one's decoration is withdrawn.
+      let loose = r.dir.parentDir / "loose"
+      createDir(loose)
+      writeFile(loose / "y.py", "y = 1\n")
+      r.stopAt(loose / "y.py", 1)
+      check r.sup.waitUntil("withdrawn", proc(): bool =
+        r.marks(r.file).len == 0)
+      r.sup.shutdown()
+
     test "a stop without a function range asks about its line alone":
       var r = newRig()
       r.both()
@@ -440,6 +462,29 @@ when not LensWasm:
         r.sup.topLayerLabel.len == 0)
       r.sup.shutdown()
 
+    test "a call activated in its docked pane is a jump, without the mode":
+      var r = newRig()
+      r.sup.activate("ct-lens.jump")
+      check r.sup.waitUntil("jump active", proc(): bool =
+        r.sup.slot("ct-lens.jump").active)
+      r.calls(["main", "evaluate", "apply_op", "add"], 0)
+      check r.sup.waitUntil("the calls listed", proc(): bool =
+        "evaluate (calc.py:20)" in r.pane("ct-lens.jump/calls") and
+        "add (calc.py:40)" in r.pane("ct-lens.jump/calls"))
+      check r.sup.topLayerLabel.len == 0
+      r.mock.clearReceivedCommands()
+      # Row 1 (from 0) of the list is apply_op, the second call after main:
+      # the transition the terminal's `applyKey` produces for Enter on it.
+      r.sup.viewEvent("ct-lens.jump/calls",
+        %*{"transition": "trActivate", "node": "calls.list", "kind": "List",
+           "index": 1})
+      check r.sup.waitUntil("the jump reached the backend", proc(): bool =
+        r.mock.findCommand("ct/calltrace-jump").isSome)
+      check r.mock.findCommand("ct/calltrace-jump").get.args{"line"}.getInt(0) == 30
+      check r.sup.waitUntil("the pane says so", proc(): bool =
+        "jumped to apply_op (calc.py:30)" in r.pane("ct-lens.jump/calls"))
+      r.sup.shutdown()
+
     test "a mode plugin runs in a process of its own, apart from its siblings":
       var r = newRig()
       r.both()
@@ -478,7 +523,7 @@ when not LensWasm:
         "multiply instead of adding" in r.pane("ct-lens.history/history"))
       r.sup.shutdown()
 
-    test "three Escapes take the keyboard back from its mode":
+    test "three Escapes take the keyboard back from its mode, and the healthy plugin gets it back":
       var r = newRig()
       r.openJump()
       check r.sup.observeEscape() == false
@@ -487,4 +532,14 @@ when not LensWasm:
       check r.sup.topLayerLabel.len == 0
       check "ct-lens.jump" in r.sup.recoveryPlugins
       check not r.sup.resolveLayerKey("1", "").found
+      # The chord is the user's gesture, not a fault: the healthy plugin gets
+      # its key back once its watchdog answers idle, and the mode opens again.
+      check r.sup.waitUntil("no longer suspect", proc(): bool =
+        not r.sup.slot("ct-lens.jump").suspect)
+      check r.sup.waitUntil("its key is live again", proc(): bool =
+        r.sup.resolveStaticKey("shift+f7", "").found)
+      let again = r.sup.resolveStaticKey("shift+f7", "")
+      discard r.sup.routeKey(again, "shift+f7")
+      check r.sup.waitUntil("the mode again", proc(): bool =
+        r.sup.topLayerLabel == "JUMP MODE (ct-lens.jump)")
       r.sup.shutdown()

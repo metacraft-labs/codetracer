@@ -19,8 +19,13 @@
 ## `ct-lens.jump` — JUMP TO CALL. `Shift+F7` pushes a modal layer over the
 ## window: the status line lists up to nine calls from the loaded calltrace,
 ## a digit jumps to one (`calltrace.doubleClickEntry`, relayed) and `q`
-## cancels. Because it captures the window's keys, the host runs it in a
-## process of its own, apart from the other two.
+## cancels. Its docked pane lists the same calls at any time, and a row
+## activated there (Enter, or a click: a `view-event`) is a jump too. Because
+## it captures the window's keys, the host runs it in a process of its own,
+## apart from the other two.
+##
+## Line history also decorates the editor: the first line of the function the
+## debugger is in carries the commit that last changed it.
 
 import std/[algorithm, os, sets, strutils, tables]
 
@@ -53,6 +58,8 @@ type
     rows: seq[seq[string]]
     message: string
     running: bool
+    decorated: string
+      ## The document the last decoration went to, cleared when it moves.
 
 proc targetOf(p: Plugin): HistoryTarget =
   ## The source range the debugger is stopped in: the stop's function when
@@ -119,6 +126,20 @@ proc pushHistory(p: Plugin; h: HistoryState) =
     else: "history: " & h.rows[0][0] & " " & h.rows[0][1] &
           " (" & $h.rows.len & (if h.rows.len == 1: " commit)" else: " commits)")
   p.pushStatus("history.status", viewText("history.status", status))
+  # The editor decoration: on the first line of the range, the commit that
+  # last changed it, the way a blame lens reads.
+  let doc = h.target.file
+  if h.decorated.len > 0 and h.decorated != doc:
+    p.pushDecorations(h.decorated, newJArray())
+    h.decorated = ""
+  if doc.len > 0:
+    var items = newJArray()
+    if not h.running and h.message.len == 0 and h.rows.len > 0:
+      let r = h.rows[0]
+      items.add %*{"line": h.target.first, "glyph": "±", "kind": "marker",
+                   "text": "history: " & r[0] & " " & r[1] & " " & r[3]}
+    p.pushDecorations(doc, items)
+    h.decorated = doc
 
 proc startHistory(p: Plugin; h: HistoryState; force = false) =
   let t = p.targetOf()
@@ -191,6 +212,11 @@ type
   JumpState = ref object
     token: string
     choices: seq[JumpChoice]
+      ## What the open mode offers, fixed when it opened.
+    listed: seq[JumpChoice]
+      ## What the docked pane lists now; a row activated in it (Enter, or a
+      ## click) is a jump.
+    lastJump: string
     fingerprint: string
 
 const JumpKeys = "123456789"
@@ -215,27 +241,38 @@ proc jumpChoices(p: Plugin): seq[JumpChoice] =
     if result.len >= JumpKeys.len: break
     result.add c
 
+proc showChoices(p: Plugin; j: JumpState)
+
 proc pushJumpState(p: Plugin; j: JumpState) =
   let choices = p.jumpChoices()
   var fp = $choices.len & "|" & j.token
-  for c in choices: fp.add "|" & $c.lineIndex
+  for c in choices: fp.add "|" & $c.lineIndex & "=" & c.label
   if fp == j.fingerprint: return
   j.fingerprint = fp
+  j.listed = choices
   p.pushEnablement("jump.open", choices.len > 0,
                    if choices.len > 0: "" else: "the calltrace has not loaded yet")
+  p.showChoices(j)
 
 proc showChoices(p: Plugin; j: JumpState) =
   var opts: seq[ViewOption]
   var line: seq[string]
+  let open = j.token.len > 0
+  let shown = if open: j.choices else: j.listed
+  for i, c in shown:
+    opts.add ViewOption(id: "call." & $i, label:
+      (if open: $JumpKeys[i] & "  " else: "") & c.label)
   for i, c in j.choices:
-    opts.add ViewOption(id: "call." & $i, label: $JumpKeys[i] & "  " & c.label)
     line.add $JumpKeys[i] & " " & c.label.split(' ')[0]
   p.pushView("calls", viewTreeNode("calls.root", "Jump to call",
     @[viewList("calls.list", opts),
-      viewText("calls.hint", "press a digit to jump, q to cancel")], expanded = true))
+      viewText("calls.hint", if open: "press a digit to jump, q to cancel"
+                             else: "Enter on a call jumps to it; Shift+F7 numbers them")] &
+      (if j.lastJump.len > 0: @[viewText("calls.last", "jumped to " & j.lastJump)]
+       else: @[]),
+    expanded = true))
   p.pushStatus("jump.status", viewText("jump.status",
     if j.token.len == 0: "" else: "jump: " & line.join("  ")))
-  let open = j.token.len > 0
   for op in ["jump.pick", "jump.close"]:
     p.pushEnablement(op, open, if open: "" else: "choose a call first (Shift+F7)")
 
@@ -256,6 +293,18 @@ proc setupJump(sdk: PluginSdk) =
     p.pushJumpState(state)
   jp.onSignals = proc(p: Plugin) =
     p.pushJumpState(state)
+  jp.onViewEvent = proc(p: Plugin; surface: string; event: JsonNode) =
+    # A row of the docked pane activated (Enter, or a click): jump to it.
+    if surface != "calls" or event{"transition"}.getStr("") != "trActivate":
+      return
+    let shown = if state.token.len > 0: state.choices else: state.listed
+    let at = event{"index"}.getInt(-1)
+    if at >= 0 and at < shown.len:
+      p.relay("calltrace", "doubleClickEntry",
+              %*{"lineIndex": shown[at].lineIndex})
+      state.lastJump = shown[at].label
+      if state.token.len > 0: p.closeJump(state)
+      else: p.showChoices(state)
   jp.onLayerPopped = proc(p: Plugin; token, reason: string) =
     if token == state.token:
       state.token = ""
@@ -282,6 +331,7 @@ proc setupJump(sdk: PluginSdk) =
     if at >= 0 and at < state.choices.len:
       p.relay("calltrace", "doubleClickEntry",
               %*{"lineIndex": state.choices[at].lineIndex})
+      state.lastJump = state.choices[at].label
     p.closeJump(state)
     p.done(req))
   jp.onInvoke("jump.close", proc(p: Plugin; args: JsonNode; req: Request) =

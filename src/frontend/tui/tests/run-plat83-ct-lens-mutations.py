@@ -51,6 +51,8 @@ CHANGED = "*::what the step changed, before and after, with the command enabled 
 WATCHES = "*::the command adds the changed values as watches in the core State ViewModel"
 NOTHING = "*::a step that changed nothing disables the command, with the reason"
 VISUAL = "*::its visualiser reaches the presenter at the plugin tier"
+DECORATE = "*::the commit that last changed the function decorates its first line"
+PANE_JUMP = "*::a call activated in its docked pane is a jump, without the mode"
 NEXT_SESSION = "*::plugins granted in an earlier session start by themselves in the next"
 STATUS_ITEM = ("*::installed and granted, one process runs history and watch; "
                "history follows the debugger through git")
@@ -93,6 +95,14 @@ ARMS = [
              "  p.publish(\"visualisers-unpublished\", %*[")],
      [(SUITE, VISUAL)],
      "the visualisers go out under a name the host does not read"),
+    ("M12", [(LENS, "    if not h.running and h.message.len == 0 and h.rows.len > 0:",
+              "    if false:")],
+     [(SUITE, DECORATE)],
+     "the history decorates no line"),
+    ("M13", [(LENS, "    if surface != \"calls\" or event{\"transition\"}.getStr(\"\") != \"trActivate\":",
+              "    if true:")],
+     [(SUITE, PANE_JUMP)],
+     "a call activated in the docked pane is ignored"),
     ("M10", [(PROCS, "      p.host.register(pp.text, lp.installed.manifestPath,\n"
                      "                      activationFor(p, id))",
               "      let sup = p.sup\n"

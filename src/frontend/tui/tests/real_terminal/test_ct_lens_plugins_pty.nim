@@ -15,7 +15,8 @@
 ##   bound to F7 with a `when` clause over the context key it pushes, adds the
 ##   changed values as watches in the Variables pane. Its visualiser shows
 ##   Python's `None` as Python spells it.
-## * `ct-lens.jump` pushes a modal layer (Shift+F7) over the window. It is the
+## * `ct-lens.jump` lists calls in its docked pane (Enter on one jumps, a
+##   `view-event`) and pushes a modal layer (Shift+F7) over the window. It is the
 ##   plugin PLAT-82's defences are exercised against: the recovery chord, and
 ##   the input deadline with the process stopped by SIGSTOP — the plugin's own
 ##   code, unchanged, in a state a debugger or a swapping machine puts a
@@ -250,6 +251,10 @@ suite "ct-lens on a real terminal":
                             (if refused: "not a git repository" else: want))
     # Its status item, on the status line beside the last note.
     check sess.statusHas("history: " & (if refused: "unavailable" else: want))
+    # And its editor decoration: the module's first line, which is on screen
+    # at the first stop, carries the commit that last changed it.
+    if not refused:
+      check sess.screenHas("± history: " & want)
     sess.finish(home)
 
   test "F7 watches what the step changed; the plugin's visualiser renders Python's None":
@@ -369,6 +374,27 @@ suite "ct-lens.jump on a real terminal: a mode, and the defences against it":
         break
       sleep(500)
     check left
+    sess.finish(home)
+
+  test "Enter on a call in the docked jump pane jumps to it, without the mode":
+    let home = newHome()
+    var sess = spawnTui(home)
+    settleOnDebugger(sess, Cols, Rows)
+    sess.grant("ct-lens.jump")
+    # `:plugins show` brings the docked pane to the front and focuses it.
+    check sess.commandShows("plugins show ct-lens.jump/calls",
+                            "Enter on a call jumps to it")
+    check "JUMP MODE (ct-lens.jump)" notin sess.statusLine
+    # Enter: the terminal's own key handling activates the highlighted row
+    # and sends the plugin a view event; the plugin jumps and says so.
+    var jumped = false
+    for _ in 0 ..< 5:
+      sess.send("\r")
+      if sess.screenHas("jumped to ", ceilingMs = 10_000):
+        jumped = true
+        break
+      sess.command("plugins show ct-lens.jump/calls")
+    check jumped
     sess.finish(home)
 
   test "three Escapes take the keyboard back from the mode":

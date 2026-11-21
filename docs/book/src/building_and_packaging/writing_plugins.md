@@ -10,14 +10,14 @@ This page walks through the `ct-lens` package in `src/plugins/ct-lens/`, which
 hosts three plugins:
 
 - **Line history** (`ct-lens.history`) runs `git log -L` on the function the
-  debugger is stopped in and shows the commits that changed it, in a pane and
-  on the status line.
+  debugger is stopped in and shows the commits that changed it, in a pane, on
+  the status line, and as a decoration on the function's first line.
 - **Changed values** (`ct-lens.watch`) shows what the last step changed, old
   value and new, and binds `F7` to add those values as watches in the
   Variables pane. It also shows Python's `None` as `None`.
-- **Jump to call** (`ct-lens.jump`) binds `Shift+F7` to a mode that lists the
-  calls around the current one on the status line; a digit jumps to one and
-  `q` leaves the mode.
+- **Jump to call** (`ct-lens.jump`) lists the calls around the current one in
+  its pane, where Enter on one jumps to it, and binds `Shift+F7` to a mode that
+  numbers them on the status line; a digit jumps and `q` leaves the mode.
 
 What users see of plugins (consent, the `:plugins` commands, what happens when
 a plugin misbehaves) is in the [usage guide](../usage_guide/plugins.md).
@@ -195,6 +195,32 @@ every plugin in it takes the blame.
 in a plugin is a malformed frame, and the host counts it as a protocol
 violation. Write diagnostics with `p.log`, or to stderr, which goes to the
 plugin log.
+
+### Panes that answer keys and clicks
+
+A docked pane runs the view vocabulary's own key handling: Enter or a click
+on a list row, a checkbox, a button or a tab changes the view, and the
+transition reaches the plugin as `onViewEvent(p, surface, event)`.
+`event{"transition"}` is `trActivate`, `trSelect` and so on, and
+`event{"index"}` names the row. `ct-lens.jump` lists calls in its pane, and a
+row activated there is a jump:
+
+```nim
+jp.onViewEvent = proc(p: Plugin; surface: string; event: JsonNode) =
+  if surface == "calls" and event{"transition"}.getStr("") == "trActivate":
+    let at = event{"index"}.getInt(-1)
+    if at in 0 ..< listed.len:
+      p.relay("calltrace", "doubleClickEntry", %*{"lineIndex": listed[at].lineIndex})
+```
+
+### Editor decorations
+
+`pushDecorations(document, items)` sets the plugin's decorations for one
+source file (the path the mirrored session names); each item is
+`{"line", "glyph", "text", "kind": "marker"}`. The terminal draws the glyph
+and text on that line of the source pane, and repeats the one on the current
+line on the status line. Push an empty array to clear a document; line
+history clears the file it decorated when the debugger moves to another.
 
 ### Visualisers
 
