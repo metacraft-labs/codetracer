@@ -734,7 +734,7 @@ proc pumpIdle() =
 
 proc usage() =
   stderr.writeLine "usage: ct-plugin-host --package <component dir> [...] " &
-    "[--engine wasmtime|wasmi] [--memory-mb N] [--call-deadline-ms N] " &
+    "[--engine wasmi|wasmtime] [--memory-mb N] [--call-deadline-ms N] " &
     "[--trace-root DIR]"
 
 proc loadPackage(dir: string) =
@@ -757,7 +757,9 @@ proc loadPackage(dir: string) =
     pluginPackage[id] = entry
 
 proc main() =
-  var engineName = when defined(ctPluginHostWasmi): "wasmi" else: "wasmtime"
+  # The engine this binary links (`build.sh --engine`): wasmi unless it was
+  # built against wasmtime for comparison.
+  var engineName = when defined(ctPluginHostWasmtime): "wasmtime" else: "wasmi"
   var dirs: seq[string]
   var i = 1
   let n = paramCount()

@@ -76,7 +76,7 @@ jobs:
           nix develop . --command bash -c '
             set -euo pipefail
             export CT_ENGINE_TARGET="$RUNNER_TEMP/ct-engine-target"
-            src/plugin-host/build.sh --engine wasmtime --out "$RUNNER_TEMP/bin" \
+            src/plugin-host/build.sh --engine wasmi --out "$RUNNER_TEMP/bin" \
               2>&1 | tee test-logs/plugin-host-wasm-build-x86_64-linux.log
             src/plugin_sdk/build-wasm-plugin.sh src/plugins/ct-lens/ct_lens_watch_wasm.nim \
               "$RUNNER_TEMP/modules/ct-lens-watch.wasm" --path:src/plugins/ct-lens \
@@ -194,7 +194,7 @@ jobs:
           nix develop . --command bash -c '
             set -euo pipefail
             export CT_ENGINE_TARGET="$RUNNER_TEMP/ct-engine-target"
-            src/plugin-host/build.sh --engine wasmtime --out "$RUNNER_TEMP/bin" \
+            src/plugin-host/build.sh --engine wasmi --out "$RUNNER_TEMP/bin" \
               2>&1 | tee test-logs/plugin-host-wasm-build-aarch64-darwin.log
             linux_wasm=$(find "$RUNNER_TEMP/linux-artifact" -name ct-lens-watch.wasm 2>/dev/null | head -1)
             mkdir -p "$RUNNER_TEMP/modules"

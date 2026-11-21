@@ -5347,8 +5347,9 @@ test-plugin-tls:
 
 # The WebAssembly plugin host (Extensibility-Model §11.9): the engine layer
 # (src/plugin-host/engine, Rust) as a static library and `ct-plugin-host`
-# linked against it, into build/bin. `engine` is wasmtime or wasmi.
-build-plugin-host engine="wasmtime":
+# linked against it, into build/bin. `engine` is wasmi (what ships; see
+# Extensibility-Model §11.9.1) or wasmtime.
+build-plugin-host engine="wasmi":
   bash src/plugin-host/build.sh --engine {{engine}} --out build/bin
 
 # The WASM host's real-stack suite and ct-lens.watch run from its .wasm

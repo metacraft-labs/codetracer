@@ -3,14 +3,17 @@
 # (Extensibility-Model.md §11.9): the Rust engine layer (engine/, one engine
 # only) as a static library, then the Nim host linked against it.
 #
-#   build.sh [--engine wasmtime|wasmi] [--out DIR] [--debug]
+#   build.sh [--engine wasmi|wasmtime] [--out DIR] [--debug]
+#
+# wasmi is the engine CodeTracer ships (Extensibility-Model.md §11.9.1 has the
+# measurements); wasmtime stays buildable for comparison.
 #
 # Output: DIR/ct-plugin-host (default DIR: build/bin). Needs the codetracer
 # dev shell (cargo, nim). CT_ENGINE_TARGET overrides cargo's target dir.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd "${here}/../.." && pwd)"
-engine="wasmtime"
+engine="wasmi"
 out="${repo}/build/bin"
 profile="release"
 while [ $# -gt 0 ]; do
@@ -32,7 +35,7 @@ lib="${target}/${profile}/libct_plugin_engine.a"
 [ -f "${lib}" ] || { echo "build.sh: cargo produced no ${lib}" >&2; exit 1; }
 mkdir -p "${out}"
 defines=()
-[ "${engine}" = "wasmi" ] && defines+=(-d:ctPluginHostWasmi)
+[ "${engine}" = "wasmtime" ] && defines+=(-d:ctPluginHostWasmtime)
 nim_flags=(-d:release)
 [ "${profile}" = "debug" ] && nim_flags=(--debugger:native)
 nim c --hints:off --warnings:off --threads:on --mm:orc "${nim_flags[@]}" \
