@@ -46,6 +46,7 @@ import ../../../ct/launch/project_trust_store
 import ../../../common/value_comparison
 import ../../viewmodel/viewmodels/point_list_vm
 import ../../viewmodel/viewmodels/point_collection_source
+import ../../viewmodel/store/types as store_types
 
 export checkout_definitions.CheckoutDefinitions
 
@@ -150,6 +151,16 @@ proc visualisersFor*(sd: SessionDefinitions;
     sd.computedProblems = problems
     if vis.computed.len > 0:
       result.add vis
+
+proc valuesOnScreen*(variables: openArray[store_types.Variable]): seq[PValue] =
+  ## The values a Variables pane is about to show — each variable and its
+  ## first level of members — which is what a project's executable visualiser
+  ## is run over. One answer for every front-end that draws the pane.
+  for v in variables:
+    if v.presented.isNil: continue
+    result.add v.presented
+    for m in v.presented.members:
+      if not m.value.isNil: result.add m.value
 
 proc compare*(sd: SessionDefinitions; a, b: PValue): Comparison =
   ## The scratchpad's "is this the same value?": the project's own comparison

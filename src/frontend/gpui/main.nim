@@ -138,6 +138,7 @@ import ./host/certificate_indicator
 import ./design_font_metrics
 import ../tui/host/native_host   # `loadStopPanes`, the terminal's own producer
 import ../tui/host/session_driver   # HSF-S1: what follows a control or a click, shared with the terminal
+import ../tui/host/project_definitions_host   # the checkout's .codetracer/, per session
 import ../styles/generated/design_tokens
 
 # PLAT-34. The editing core, through the sanctioned facade: `editSurfaceFor`
@@ -3607,6 +3608,42 @@ proc verificationRoot(): string =
   ## window, a replay's working directory (Test Results' §8.2 root).
   if gTestsRoot.len > 0: gTestsRoot else: getCurrentDir()
 
+# The open checkout's project definitions, per session: the Variables pane
+# renders through its visualisers as the terminal's does
+# (`project_definitions_host`, front-end-agnostic).
+var gDefinitions: Table[int, SessionDefinitions]
+var gDefinitionsTier: tuple[session: int, tick: uint64, loads: int,
+                            rows: int, tier: seq[Visualiser]] =
+  (0, 0'u64, -1, -1, @[])
+
+proc definitionsOf(s: HeadlessDebugSession): SessionDefinitions =
+  ## `s`'s definitions, read from the window's project the first time the
+  ## pane asks — and, for a checkout that carries a `.codetracer/`, the
+  ## recorded program's own visualiser function, which outranks them.
+  let key = cast[int](s)
+  if key notin gDefinitions:
+    let sd = openSessionDefinitions(verificationRoot(), [s.getCurrentFile()])
+    if sd.defs.present:
+      sd.inProgram = s.loadInProgramVisualiser()
+    gDefinitions[key] = sd
+  gDefinitions[key]
+
+proc visualisersOnScreen(vm: StateVM): seq[Visualiser] =
+  ## The checkout's visualiser tier for the values the pane shows now. The
+  ## project's executable visualiser (once granted) runs over those values,
+  ## so the answer is kept until the stop, the definitions or the rows move.
+  if gSession.isNil or vm.isNil or vm != gSession.session.stateVM:
+    return stateVisualisers
+  let sd = definitionsOf(gSession)
+  let key = cast[int](gSession)
+  let tick = gSession.getCurrentRRTicks()
+  let rows = vm.currentVariables.val.len
+  if gDefinitionsTier.session != key or gDefinitionsTier.tick != tick or
+     gDefinitionsTier.loads != sd.loads or gDefinitionsTier.rows != rows:
+    gDefinitionsTier = (key, tick, sd.loads, rows,
+      sd.visualisersFor(valuesOnScreen(vm.currentVariables.val)))
+  gDefinitionsTier.tier
+
 proc installVerification() =
   ## PLAT-63: the window's Verification host, reading the project's
   ## declared Verno action.
@@ -6573,6 +6610,7 @@ proc closeSessionTab(r: GpuiRenderer; index: int) =
       gAgentHosts[key].close()
       gAgentHosts.del(key)
     closeVisualOf(gSessionsOpened[int(id)])
+    gDefinitions.del(key)
     gSessionsOpened[int(id)].close()
     gSessionsOpened.del(int(id))
   if not gTestsVM.isNil:
@@ -10866,10 +10904,23 @@ proc followListViewports(r: GpuiRenderer) =
     inc gEventLogLoads
     redrawPaneOf(r, paneEventLog)
 
+proc pollDefinitions() =
+  ## The authoring loop, as the terminal's idle tick runs it: when the author
+  ## saved a definition file, read the definitions again and draw the
+  ## Variables pane through the new rules.
+  if gSession.isNil or cast[int](gSession) notin gDefinitions:
+    return
+  let sd = gDefinitions[cast[int](gSession)]
+  if sd.pollChanged(int64(epochTime() * 1000)):
+    traceGesture("project definitions re-read — " & sd.openingNotice())
+    var r: GpuiRenderer
+    redrawPaneOf(r, paneState)
+
 proc vcsTick() {.cdecl.} =
   ## The first trigger: every `VCSRefreshIntervalMs` the loop calls this
   ## (`gpui_set_tick`, on the loop's own thread).
   refreshVcsPane()
+  pollDefinitions()
   var r: GpuiRenderer
   discard pumpPluginsWindow(r)
   pollCertificateIndicator(r)
@@ -10900,6 +10951,7 @@ proc vcsWindowActivated() =
   ## `armHoverTick` shares it with the hover, search and recording polls and
   ## re-arming would postpone whichever of them is pending.
   refreshVcsPane()
+  pollDefinitions()
 
 # ---------------------------------------------------------------------------
 # PLAT-50: the desktop's click behaviours on the window's panes
@@ -12691,7 +12743,7 @@ proc focusedRowText(): tuple[text, what: string] =
       let path = vm.selectedPath.val
       for row in stateRows(vm, gpuiRowBudget()):
         if row.path == path:
-          return (fullValueText(row.presented, row.whole),
+          return (fullValueText(row.presented, row.whole, statePresenters()),
                   "the value of " & row.name)
       return (path, "the variable")
   of $paneEventLog:
@@ -17097,6 +17149,8 @@ proc main() =
   of gckOpen:
     var cmd = cmd
     applyWindowPolicy(cmd)
+    # The Variables pane renders through the open checkout's visualisers.
+    stateVisualisersOf = visualisersOnScreen
     # An open window reads git in the background; a one-shot plan or frame
     # reads it before it reports, as it always did.
     gVcsBackground = opensWindow(cmd)

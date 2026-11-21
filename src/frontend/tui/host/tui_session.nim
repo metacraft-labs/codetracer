@@ -697,11 +697,7 @@ proc onScreenValues(s: TuiSession): seq[PValue] =
   ## level of members, and the scratchpad's pinned values — what a project's
   ## executable visualiser is run over (`project_definitions_host`).
   if not s.state.isNil:
-    for v in s.state.currentVariables.val:
-      if v.presented.isNil: continue
-      result.add v.presented
-      for m in v.presented.members:
-        if not m.value.isNil: result.add m.value
+    result = valuesOnScreen(s.state.currentVariables.val)
   for samples in s.pinned.values:
     if samples.len > 0: result.add samples[^1]
 
