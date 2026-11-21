@@ -5930,6 +5930,19 @@ plat35-capture-electron *args:
   # (`lib/performance-limits.ts`, `CODETRACER_PERF_LIMIT_SCALE`).
   export CODETRACER_PERF_LIMIT_SCALE="${CODETRACER_PERF_LIMIT_SCALE:-4}"
   export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
+  # THE `calc` RECORDING, recorded by the terminal lanes' own fixture provider
+  # when this host has none (a CI job that runs no terminal lane first), as
+  # `scripts/plat49-capture-electron.sh` does — the spec refuses without it.
+  if ! ls -d test-logs/tui-fixtures/calc-* >/dev/null 2>&1; then
+    work="$(mktemp -d)"
+    trap 'rm -rf "$work"' EXIT
+    printf '%s\n' 'import fixtures/fixture_provider' \
+      'let r = resolveFixture("calc")' \
+      'if r.outcome != foRecorded: quit("could not record the calc fixture: " & r.detail, 1)' \
+      >"$work/record_calc.nim"
+    nim c -r --hints:off --warnings:off --path:src/frontend/tui/tests \
+      --nimcache:"$work/nc" -o:"$work/record_calc" "$work/record_calc.nim"
+  fi
   case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*|*_NT*|Darwin)
       just test-e2e tests/visual/visual-alignment-capture.spec.ts "$@"
@@ -5940,6 +5953,7 @@ plat35-capture-electron *args:
       . "{{justfile_directory()}}/scripts/lib/own-xvfb.sh"
       trap "own_xvfb_stop" EXIT
       own_xvfb_start -screen 0 2560x1440x24 -dpi 96 -nolisten tcp || exit 1
+      trap 'own_xvfb_stop; rm -rf "${work:-}"' EXIT
       just test-e2e tests/visual/visual-alignment-capture.spec.ts "$@"
       ;;
   esac
