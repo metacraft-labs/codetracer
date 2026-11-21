@@ -105,6 +105,7 @@ async function snapshot(page) {
     }
     out.stateRows = document.querySelectorAll('[data-pane=state] .value-expanded-name[data-variable-name]').length;
     out.callRows = document.querySelectorAll('[data-pane=calltrace] .calltrace-call-line').length;
+    out.decorated = document.querySelectorAll('.ct-web-core-pane[data-ctw-decorated="1"]').length;
     return out;
   });
 }
@@ -145,6 +146,7 @@ for (const arm of ['wasm', 'js']) {
   if (!phases.some((p) => p.callRows > 0)) problems.push('Call Trace drew no rows at any stop');
   if (!phases.some((p) => p.stateRows > 0)) problems.push('the variables pane drew no rows at any stop');
   if (new Set(positions).size < 2) problems.push(`the position never moved: ${positions.join(' ')}`);
+  if (phases[phases.length - 1].decorated !== 3) problems.push(`${phases[phases.length - 1].decorated} of 3 panes decorated by the host`);
   if (unsettled.length) problems.push(`did not settle within ${SETTLE_MS} ms after: ${unsettled.join(', ')}`);
   if (s.readCrossings !== 0) problems.push(`${s.readCrossings} read crossing(s)`);
   if (errors.length) problems.push(`page errors: ${errors.join(' | ')}`);

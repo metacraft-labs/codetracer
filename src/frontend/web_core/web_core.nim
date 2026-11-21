@@ -48,6 +48,7 @@ import isonim/web/frame_renderer
 import ../viewmodel/codetracer_embed
 import ../viewmodel/backend/worker_backend
 import ../viewmodel/viewport
+from ../viewmodel/views/state_view import fullValueOf
 import ../viewmodel/views/isonim_state_view
 import ../viewmodel/views/isonim_calltrace_view
 import ../viewmodel/views/isonim_event_log_view
@@ -124,6 +125,15 @@ proc ctwOpenFolder(folder: cstring) {.exportc.} =
   session.launch(localFolderTrace($folder))
   ctwPump()
 
+proc ctwAttach(folder: cstring) {.exportc.} =
+  ## Adopt a recording another client already opened on this transport — a
+  ## host whose page already runs a session (the desktop renderer, the web
+  ## build) and that hands this core its own connection to share. Nothing is
+  ## sent; the panes fill from the next move the engine reports.
+  session.followBackendMoves()
+  session.attach(localFolderTrace($folder))
+  ctwPump()
+
 proc ctwPhase(): cint {.exportc.} =
   ## The session's phase, as `DebuggerSessionPhase`'s ordinal.
   cint(ord(session.phase.val))
@@ -166,6 +176,35 @@ proc ctwSetViewport(pane, rows, cols, firstRow: cint) {.exportc.} =
 
 proc ctwMounted(): cint {.exportc.} = cint(ord(mounted))
 
+# What the host's decoration (`web_core_decorations.nim`) asks of the panes'
+# ViewModels: the same calls the `nim js` views' DOM decoration makes in
+# process.
+
+proc ctwFullValueOf(path: cstring): cstring {.exportc.} =
+  ## A cut variable's whole value, for the state pane's overflow hover.
+  if not mounted: return cstring""
+  cstring(session.session.stateVM.fullValueOf($path))
+
+proc ctwEventLogMetrics(cells: cint; charPx: cdouble) {.exportc.} =
+  ## The event log's columns viewport, in characters of its font.
+  if not mounted: return
+  session.session.eventLogVM.setTableMetrics(int(cells), float(charPx))
+  ctwPump()
+
+proc ctwEventLogSearch(query: cstring) {.exportc.} =
+  if not mounted: return
+  session.session.eventLogVM.setSearchQuery($query)
+  ctwPump()
+
+proc ctwEventLogTotal(): cint {.exportc.} =
+  if not mounted: 0.cint else: cint(session.session.eventLogVM.listTotal)
+
+proc ctwEventLogCurrent(): cint {.exportc.} =
+  if not mounted: 0.cint else: cint(session.store.eventLog.currentIndex.val)
+
+proc ctwEventLogRowPx(): cdouble {.exportc.} =
+  if not mounted: 1.0 else: cdouble(session.session.eventLogVM.rowHeightPx.val)
+
 proc ctwPending(): cint {.exportc.} =
   ## Requests sent to the engine and not yet answered.
   cint(worker.pendingCount)
@@ -183,9 +222,13 @@ when defined(js):
   {.emit: """
 globalThis.ctwJsCore = {
   boot: `ctwBoot`, pump: `ctwPump`, deliver: `ctwDeliver`, openFolder: `ctwOpenFolder`,
+  attach: `ctwAttach`,
   phase: `ctwPhase`, failure: `ctwFailure`, step: `ctwStep`, stepping: `ctwStepping`,
   position: `ctwPosition`, readCrossings: `ctwReadCrossings`,
   setViewport: `ctwSetViewport`, mounted: `ctwMounted`, pending: `ctwPending`,
+  fullValueOf: `ctwFullValueOf`, eventLogMetrics: `ctwEventLogMetrics`,
+  eventLogSearch: `ctwEventLogSearch`, eventLogTotal: `ctwEventLogTotal`,
+  eventLogCurrent: `ctwEventLogCurrent`, eventLogRowPx: `ctwEventLogRowPx`,
   frameBytes: function() { return globalThis.isonimFrameBytes(); },
   frameOps: `frameOps`, frameReset: `frameReset`, frameManifest: `frameManifest`,
   dispatch: `frameDispatch`,

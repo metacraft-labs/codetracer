@@ -3515,6 +3515,15 @@ jobs:
         # against an all-skipped run).
         run: nix develop .#devShells.x86_64-linux.default --command just test-cli-record
 
+      - name: The browser front-end's WebAssembly core on a real recording (Chromium, Firefox)
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        # The wasm32 core (src/frontend/web_core) and the same core built with
+        # nim js, each opening a recording of test-programs/js_flow_test made
+        # here with the `ct` built above and the JS recorder the recorder-gated
+        # step built, served by the replay-server that step built; documents
+        # compared stop for stop.
+        run: nix develop .#devShells.x86_64-linux.default --command bash -c 'source scripts/detect-siblings.sh && just test-web-core-browser'
+
       - name: The desktop opens the one shared default arrangement, and follows it
         if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The desktop's first-run default is GENERATED from the arrangement the
