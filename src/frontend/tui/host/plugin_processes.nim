@@ -180,6 +180,39 @@ proc attach*(p: SessionPlugins; session: SessionViewModel; sessionId: string) =
     except CatchableError as e:
       p.problems.add "plugin '" & id & "' could not be started: " & e.msg
 
+proc closedPanes*(p: SessionPlugins): seq[string] =
+  ## The plugin panes the user closed in the terminal's layout, remembered in
+  ## the plugin settings beside the grant ledger
+  ## (`plugins.<id>.closedPanes`, qualified ids), so a later session does
+  ## not place them again when their plugin activates.
+  if p.isNil or p.settings.isNil: return
+  let plugins = p.settings{"plugins"}
+  if plugins.isNil or plugins.kind != JObject: return
+  for _, entry in plugins:
+    let closed = entry{"closedPanes"}
+    if closed.isNil or closed.kind != JArray: continue
+    for c in closed:
+      if c.kind == JString and c.getStr notin result: result.add c.getStr
+
+proc setPaneClosed*(p: SessionPlugins; id: string; closed: bool) =
+  ## Remember (or forget) that the user closed plugin pane `id`
+  ## (`<plugin>/<surface>`), under its plugin's settings entry.
+  if p.isNil: return
+  let at = id.find('/')
+  if at <= 0: return
+  let entry = p.entryFor(id[0 ..< at])
+  var list = newJArray()
+  let before = entry{"closedPanes"}
+  if not before.isNil and before.kind == JArray:
+    for c in before:
+      if c.kind == JString and c.getStr != id: list.add c
+  if closed: list.add %id
+  if list.len == 0:
+    if entry.hasKey("closedPanes"): entry.delete("closedPanes")
+  else:
+    entry["closedPanes"] = list
+  p.writeSettings()
+
 proc pump*(p: SessionPlugins): bool =
   ## The idle tick. True when something a front-end shows changed.
   if p.isNil: return false

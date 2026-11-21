@@ -528,6 +528,14 @@ type
     decorations*: proc(document: string):
       seq[tuple[line: int; glyph, text, plugin: string]] {.closure.}
       ## The plugins' editor decorations for a document (§11.4.4).
+    markers*: proc(document: string):
+      seq[tuple[line: int; glyph, text, plugin: string]] {.closure.}
+      ## The plugins' declared `marker` surfaces for a document: gutter
+      ## marks, from the rows each plugin pushed for its marker surface.
+    closedPanes*: proc(): seq[string] {.closure.}
+      ## The plugin panes the user closed, remembered across sessions.
+    setPaneClosed*: proc(id: string; closed: bool) {.closure.}
+      ## Remember (or forget) that the user closed plugin pane `id`.
 
   TerminalService* = ref object
     ## PLAT-71 (Terminal-Adaptation §5, §10): what only the host can do
@@ -721,6 +729,12 @@ type
     plugins*: PluginsService
       ## The HOST's half of `:plugins` (Extensibility-Model.md §11). Nil in a
       ## host that runs no plugins.
+    closedPanesLoaded*: bool
+    closedPanesPersisted*: seq[string]
+      ## The plugin panes the user closed, as the host remembers them: read
+      ## into the binding once, and every new `:close-pane` of a plugin pane
+      ## written back, so placement on first activation does not put a pane
+      ## back that the user removed in an earlier session.
     terminalService*: TerminalService
       ## PLAT-71: the HOST's half of the terminal settings and the report —
       ## re-resolving the capability profile when `:set` changes one (rank 1
@@ -985,7 +999,11 @@ proc rebuildFocus(rt: TuiRuntime) =
   var docked: seq[PaneRegion] = @[]
   if rt.layoutBindingEnabled():
     let geometry = rt.layoutGeometry()
-    if not geometry.openDock.isEmptyArea:
+    # An extension's pane shown open is not a built-in focus region (its
+    # `openDockPane` is the enum's zero value); it takes the keys through
+    # `contributedFocus`.
+    if not geometry.openDock.isEmptyArea and
+       geometry.openDockContributed.len == 0:
       docked.add PaneRegion(pane: geometry.openDockPane,
                             area: geometry.openDock, activeTab: -1)
   rt.focus = newPaneFocus(projection,
@@ -2814,6 +2832,8 @@ proc paneAt(geometry: LayoutGeometry; row, col: int):
   # The revealed overlay is painted OVER the arrangement, so it is asked
   # first.
   if geometry.revealing and geometry.reveal.contains(row, col):
+    if geometry.revealContributed.len > 0:
+      return   # an extension's pane: no built-in pane is painted here
     return (true, PaneRegion(pane: geometry.revealPane, area: geometry.reveal,
                              activeTab: -1),
             geometry.reveal)
@@ -2821,7 +2841,8 @@ proc paneAt(geometry: LayoutGeometry; row, col: int):
   if idx >= 0:
     return (true, geometry.projection.regions[idx],
             paneUnderStrip(geometry, idx))
-  if not geometry.openDock.isEmptyArea and geometry.openDock.contains(row, col):
+  if not geometry.openDock.isEmptyArea and geometry.openDock.contains(row, col) and
+     geometry.openDockContributed.len == 0:
     return (true, PaneRegion(pane: geometry.openDockPane,
                              area: geometry.openDock, activeTab: -1),
             geometry.openDock)
@@ -2834,9 +2855,11 @@ proc paneAreaOf*(rt: TuiRuntime; kind: PaneKind): CellArea =
   for i, region in geometry.projection.regions:
     if region.pane == kind:
       return paneUnderStrip(geometry, i)
-  if geometry.revealing and geometry.revealPane == kind:
+  if geometry.revealing and geometry.revealContributed.len == 0 and
+     geometry.revealPane == kind:
     return geometry.reveal
-  if not geometry.openDock.isEmptyArea and geometry.openDockPane == kind:
+  if not geometry.openDock.isEmptyArea and
+     geometry.openDockContributed.len == 0 and geometry.openDockPane == kind:
     return geometry.openDock
   CellArea()
 
@@ -6511,10 +6534,13 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
   if event.kind == mekPress and event.button == mbLeft:
     let r = event.row
     let c = event.col
-    if geometry.revealing and geometry.reveal.contains(r, c):
+    if geometry.revealing and geometry.reveal.contains(r, c) and
+       geometry.revealContributed.len == 0:
       rt.dockKeys = geometry.revealPane
       rt.hasDockKeys = true
-    elif not geometry.openDock.isEmptyArea and geometry.openDock.contains(r, c):
+    elif not geometry.openDock.isEmptyArea and
+         geometry.openDock.contains(r, c) and
+         geometry.openDockContributed.len == 0:
       rt.dockKeys = geometry.openDockPane
       rt.hasDockKeys = true
     else:
@@ -6580,15 +6606,30 @@ proc routeMouseReport(rt: TuiRuntime; event: MouseEvent;
   if acted.status == lasNoGesture and not inGesture and
      event.kind == mekPress and event.button == mbLeft and
      not rt.plugins.isNil and not rt.plugins.paneClick.isNil:
-    let c = geometry.contributedIndexAt(event.row, event.col)
-    if c >= 0:
-      let region = geometry.projection.contributed[c]
-      if event.row > region.area.row:
-        var row = event.row - region.area.row - 1
-        if not rt.plugins.paneView.isNil and
-           rt.plugins.paneView(region.id).stale:
+    # The plugin pane under the press: placed, shown open in its band, or
+    # revealed over the body.
+    var hitId = ""
+    var hitArea = CellArea()
+    if geometry.revealing and geometry.revealContributed.len > 0 and
+       geometry.reveal.contains(event.row, event.col):
+      hitId = geometry.revealContributed
+      hitArea = geometry.reveal
+    elif not geometry.openDock.isEmptyArea and
+         geometry.openDockContributed.len > 0 and
+         geometry.openDock.contains(event.row, event.col):
+      hitId = geometry.openDockContributed
+      hitArea = geometry.openDock
+    else:
+      let c = geometry.contributedIndexAt(event.row, event.col)
+      if c >= 0:
+        hitId = geometry.projection.contributed[c].id
+        hitArea = geometry.projection.contributed[c].area
+    if hitId.len > 0:
+      if event.row > hitArea.row:
+        var row = event.row - hitArea.row - 1
+        if not rt.plugins.paneView.isNil and rt.plugins.paneView(hitId).stale:
           dec row   # the stale banner is the first row
-        discard rt.plugins.paneClick(region.id, row)
+        discard rt.plugins.paneClick(hitId, row)
       outcome.repaint = true
       return
   if acted.status == lasNoGesture and not inGesture and
@@ -8167,13 +8208,13 @@ proc cycleReveal(rt: TuiRuntime; outcome: var RuntimeOutcome) =
   var next = 0
   if b.interaction.kind == ikRevealingDock:
     for i, d in docked:
-      if d.pane == b.interaction.pane:
+      if sameSlot(d.paneRefOf, b.interaction.revealRef):
         next = i + 1
   if next >= docked.len:
     discard b.cancelGesture()
     rt.note("hid the auto-hide pane")
     return
-  rt.note(b.beginRevealDock(docked[next].pane).message)
+  rt.note(b.beginRevealDock(docked[next].paneRefOf).message)
 
 proc applyAutoHideReply(rt: TuiRuntime; reply: AutoHideReply): bool =
   ## Carry out what the hover machine said: open the preview overlay (the
@@ -10586,9 +10627,12 @@ proc contributedFocus*(rt: TuiRuntime): string =
   if not rt.layoutBindingEnabled(): return ""
   let id = rt.app.layoutBinding.focusContributed
   if id.len == 0: return ""
-  if rt.layoutGeometry().projection.regionForContributed(id).isEmptyArea:
-    return ""
-  id
+  let g = rt.layoutGeometry()
+  if not g.projection.regionForContributed(id).isEmptyArea or
+     (not g.openDock.isEmptyArea and g.openDockContributed == id) or
+     (g.revealing and g.revealContributed == id):
+    return id
+  ""
 
 proc syncContributedPanes*(rt: TuiRuntime): bool =
   ## A plugin's panes go into the layout when the plugin first activates and
@@ -10601,6 +10645,18 @@ proc syncContributedPanes*(rt: TuiRuntime): bool =
      not rt.layoutBindingEnabled():
     return false
   let b = rt.app.layoutBinding
+  # THE USER'S REMOVALS, BOTH WAYS: remembered ones read in once, new ones
+  # (`:close-pane` on a plugin pane) written back.
+  if not rt.plugins.closedPanes.isNil and not rt.closedPanesLoaded:
+    rt.closedPanesLoaded = true
+    for id in rt.plugins.closedPanes():
+      rt.closedPanesPersisted.add id
+      if id notin b.closedContributed: b.closedContributed.add id
+  if not rt.plugins.setPaneClosed.isNil:
+    for id in b.closedContributed:
+      if id notin rt.closedPanesPersisted:
+        rt.closedPanesPersisted.add id
+        rt.plugins.setPaneClosed(id, true)
   if b.interaction.kind in GestureInteractions:
     return false
   # NOT WHILE A HOST MODAL IS OPEN: placing re-derives the focus ring, and a
@@ -10638,6 +10694,14 @@ proc showContributedPane(rt: TuiRuntime; id: string): bool =
   for c in b.closedContributed:
     if c != id: kept.add c
   b.closedContributed = kept
+  # SHOWN AGAIN, SO NO LONGER CLOSED — in later sessions either.
+  if id in rt.closedPanesPersisted:
+    var still: seq[string] = @[]
+    for c in rt.closedPanesPersisted:
+      if c != id: still.add c
+    rt.closedPanesPersisted = still
+  if not rt.plugins.setPaneClosed.isNil:
+    rt.plugins.setPaneClosed(id, false)
   if b.layout.dockedIndex(r) >= 0:
     discard b.dispatch(cmdRestoreDocked(r))
   elif not b.layout.tree.contains(r):
@@ -10659,7 +10723,13 @@ proc contributedPaneModel(rt: TuiRuntime; model: var ShellModel) =
   if not rt.plugins.panes.isNil and not rt.plugins.paneView.isNil:
     var loaded: seq[string] = @[]
     for p in rt.plugins.panes(): loaded.add p.id
-    for id in allContributedPanes(model.layout):
+    var ids = allContributedPanes(model.layout)
+    if rt.layoutBindingEnabled():
+      # A docked extension pane is drawn too when it is shown open or
+      # revealed, so every pane the arrangement knows gets its view.
+      for id in allContributedPanes(rt.app.layoutBinding.layout):
+        if id notin ids: ids.add id
+    for id in ids:
       if id in loaded:
         let v = rt.plugins.paneView(id)
         model.contributedViews[id] = ContributedPaneView(
@@ -10667,6 +10737,10 @@ proc contributedPaneModel(rt: TuiRuntime; model: var ShellModel) =
   if not rt.plugins.decorations.isNil and model.source.path.len > 0:
     for d in rt.plugins.decorations(model.source.path):
       model.sourceDecorations.add SourceDecorationMark(
+        line: d.line, glyph: d.glyph, text: d.text, plugin: d.plugin)
+  if not rt.plugins.markers.isNil and model.source.path.len > 0:
+    for d in rt.plugins.markers(model.source.path):
+      model.sourceMarkers.add SourceDecorationMark(
         line: d.line, glyph: d.glyph, text: d.text, plugin: d.plugin)
 
 proc shellScreenOf*(rt: TuiRuntime): ShellScreen =
@@ -10726,7 +10800,7 @@ proc shellScreenOf*(rt: TuiRuntime): ShellScreen =
   if not rt.app.source.isEmpty:
     # A decoration on the CURRENT line says what it says on the status line
     # too, where a reader of the code can see it whatever the pane's width.
-    for d in model.sourceDecorations:
+    for d in model.sourceDecorations & model.sourceMarkers:
       if d.line == rt.app.source.executionLine and d.text.len > 0:
         let note = d.plugin & ": " & d.text
         model.status.notification =

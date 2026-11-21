@@ -45,6 +45,15 @@
             "title": "Metrics: Echo"
           }
         ],
+        "marker": [
+          {
+            "id": "hotspot",
+            "title": "Hotspot",
+            "views": [
+              "Table"
+            ]
+          }
+        ],
         "statusItem": [
           {
             "id": "metrics.status",

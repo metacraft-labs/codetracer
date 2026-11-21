@@ -164,9 +164,14 @@ type
       ## band against its edge that the TREE GIVES UP (`inner` excludes it),
       ## so it is part of the tiled screen, not an overlay. Zero when none.
     openDockPane*: PaneKind
+    openDockContributed*: string
+      ## The docked pane shown open is an extension's (`openDockPane` is then
+      ## meaningless): the shell paints it from its plugin's pushed tree.
     openDockTitle*: string
     revealing*: bool
     revealPane*: PaneKind
+    revealContributed*: string
+      ## The revealed docked pane is an extension's.
     reveal*: CellArea
       ## Where a revealed dock overlay is painted, or a zero rectangle. An
       ## OVERLAY: it is deliberately not one of the projection's rectangles,
@@ -289,6 +294,9 @@ type
       ## by the application with every frame it builds, so the bottom
       ## labels' hit-test is where the frame drew them.
     pendingPick*: Option[PaneKind]
+    pendingPickRef*: Option[PaneRef]
+      ## The pane a press marked, in EITHER namespace — what the drag starts
+      ## from. `pendingPick` stays the built-in half, for its readers.
       ## PLAT-49: the pane a press on its tab (a lone pane's strip, a dock
       ## label) WOULD pick up. A press alone picks nothing up: the drag
       ## begins only when the pointer has moved `DragThresholdCells` from the
@@ -540,17 +548,18 @@ proc geometryOf*(layout: Layout; body: CellArea;
   # its edge (a third of that axis, the reveal's share), and the tree is
   # projected into what is left — tiled, never over it.
   let opened = layout.openDocked
-  # A docked CONTRIBUTED pane is not shown open in the terminal: the open band
-  # is painted by built-in pane painters (`openDockPane` is a `PaneKind`).
-  if opened.isSome and not opened.get.isContributed:
+  if opened.isSome:
     let band = openDockAreaFor(result.inner, opened.get.edge)
     if not band.isEmptyArea and
        (if opened.get.edge in {leTop, leBottom}: band.height < result.inner.height
         else: band.width < result.inner.width):
       result.openDock = band
       result.openDockPane = opened.get.pane
+      result.openDockContributed = opened.get.contributedPane
       result.openDockTitle =
         if opened.get.title.len > 0: opened.get.title
+        elif opened.get.isContributed:
+          contributedTabName(opened.get.contributedPane)
         else: terminalPaneName(opened.get.pane)
       case opened.get.edge
       of leLeft:
@@ -575,6 +584,7 @@ proc geometryOf*(layout: Layout; body: CellArea;
   if interaction.kind == ikRevealingDock:
     result.revealing = true
     result.revealPane = interaction.pane
+    result.revealContributed = interaction.paneContributed
     result.reveal = revealAreaFor(result.inner, interaction.edge)
 
 proc pathOfPane*(geom: LayoutGeometry; pane: PaneKind): Option[string] =
@@ -764,7 +774,8 @@ type
     paths*: seq[string]
       ## Per stack, its path in the layout the frame drew.
     regions*: seq[int]
-      ## Per stack, its projection region.
+      ## Per stack, its projection region: an index into `regions`, or —
+      ## past their end — into `contributed` (offset by `regions.len`).
     cellW*, cellH*: float
     placeholderCells*: int
       ## The tab-drop placeholder's width in cells (`placeholderCellsFor`).
@@ -821,19 +832,39 @@ proc goldenHitOf*(layout: Layout; geom: LayoutGeometry;
     rootIsStack: not layout.tree.isNil and
                  layout.tree.kind in {lnStack, lnPane},
     placeholderPx: float(result.placeholderCells + TabGapCells) * cw)
+  proc under(p, path: string): bool =
+    let child =
+      if path.len == 0: p.len > 0 and '/' notin p
+      else: p.startsWith(path & "/") and p.count('/') == path.count('/') + 1
+    p == path or child
   for path in goldenStackPaths(layout):
+    # THE STACK'S VISIBLE PANE, IN EITHER NAMESPACE: an extension's pane is a
+    # GoldenLayout stack like any other — something can be dropped beside it
+    # and into its strip — so its region is measured from `contributed`.
     var idx = -1
+    var region: PaneRegion
+    var loneLabel = 0
     for entry in geom.paths:
-      let child =
-        if path.len == 0: entry[1].len > 0 and '/' notin entry[1]
-        else: entry[1].startsWith(path & "/") and
-              entry[1].count('/') == path.count('/') + 1
-      if entry[1] == path or child:
+      if under(entry[1], path):
         idx = geom.regionIndexOfPane(entry[0])
+        if idx >= 0:
+          region = geom.projection.regions[idx]
+          loneLabel = loneLabelCells(region.pane)
         break
     if idx < 0:
+      for entry in geom.contributedPaths:
+        if under(entry[1], path):
+          for i, c in geom.projection.contributed:
+            if c.id == entry[0]:
+              idx = geom.projection.regions.len + i
+              region = PaneRegion(title: c.title, area: c.area, tabs: c.tabs,
+                                  activeTab: c.activeTab)
+              loneLabel = textCells(" " & (if c.title.len > 0: c.title
+                                           else: contributedTabName(c.id)) &
+                                    " ")
+          break
+    if idx < 0:
       continue
-    let region = geom.projection.regions[idx]
     let box = geom.boxOfRegion(region.area)
     if box.isEmptyArea:
       continue
@@ -851,8 +882,7 @@ proc goldenHitOf*(layout: Layout; geom: LayoutGeometry;
                                   width: span.width, height: 1), cw, ch)
     else:
       st.tabs.add pxOf(CellArea(col: box.col, row: box.row,
-                                width: min(box.width,
-                                           loneLabelCells(region.pane)),
+                                width: min(box.width, loneLabel),
                                 height: 1), cw, ch)
     result.geom.stacks.add st
     result.paths.add path
@@ -1084,6 +1114,11 @@ proc ghostLabelFor*(source: PaneKind): string =
   ## The dragged pane's name as the ghost shows it, padded like a tab.
   " " & terminalPaneName(source) & " "
 
+proc ghostLabelFor*(source: PaneRef): string =
+  ## The same for a pane in either namespace: an extension's by its surface.
+  if source.isContributed: " " & contributedTabName(source.id) & " "
+  else: ghostLabelFor(source.builtin)
+
 # ---------------------------------------------------------------------------
 # §5 obligation 3: drawing the transient state
 # ---------------------------------------------------------------------------
@@ -1094,7 +1129,7 @@ proc stripLabel(strip: DockStrip): string =
     parts.add s.title
   parts.join(" ")
 
-proc ghostAreaFor(geom: LayoutGeometry; source: PaneKind;
+proc ghostAreaFor(geom: LayoutGeometry; source: PaneRef;
                   origin: DragOrigin): CellArea =
   ## Where the dragged pane currently is — its own rectangle, its tab's cells,
   ## or its collapsed slot in a dock strip.
@@ -1104,7 +1139,9 @@ proc ghostAreaFor(geom: LayoutGeometry; source: PaneKind;
       if s.edge != origin.dockEdge:
         continue
       for slot in s.slots:
-        if slot.pane == source:
+        let r = if slot.contributed.len > 0: contributedRef(slot.contributed)
+                else: builtinRef(slot.pane)
+        if sameSlot(r, source):
           return slot.area
     CellArea()
   of doStack:
@@ -1198,7 +1235,7 @@ proc decorationsFor*(layout: Layout; geom: LayoutGeometry;
     if not cells.caret.isEmptyArea:
       result.add LayoutDecoration(kind: ldDropCaret, area: cells.caret,
                                   label: "slot " & $indication.slot)
-    let label = ghostLabelFor(interaction.source)
+    let label = ghostLabelFor(interaction.sourceRef)
     if pointerRow >= 0 and pointerCol >= 0:
       # GoldenLayout's drag proxy: beside the pointer, not under it, so the
       # cell being pointed at stays visible.
@@ -1209,10 +1246,10 @@ proc decorationsFor*(layout: Layout; geom: LayoutGeometry;
                                                  width: w, height: 1),
                                   label: label)
     else:
-      let ghost = ghostAreaFor(geom, interaction.source, interaction.origin)
+      let ghost = ghostAreaFor(geom, interaction.sourceRef, interaction.origin)
       if not ghost.isEmptyArea:
         result.add LayoutDecoration(kind: ldDragGhost, area: ghost,
-                                    label: $interaction.source)
+                                    label: $interaction.sourceRef)
   of ikResizingSplit:
     let guide = resizeGuideFor(layout, geom, interaction, policy)
     if not guide.isEmptyArea:
@@ -1221,7 +1258,7 @@ proc decorationsFor*(layout: Layout; geom: LayoutGeometry;
   of ikRevealingDock:
     if not geom.reveal.isEmptyArea:
       result.add LayoutDecoration(kind: ldRevealOverlay, area: geom.reveal,
-                                  label: $interaction.pane)
+                                  label: $interaction.revealRef)
 
 proc glyphFor*(kind: LayoutDecorationKind): string =
   case kind
@@ -1406,9 +1443,10 @@ proc redoLayout*(b: LayoutBinding): LayoutAction =
     action(lasApplied, "layout redone")
   else: action(lasNoOp, "nothing to redo")
 
-proc beginDrag*(b: LayoutBinding; pane: PaneKind): LayoutAction =
-  ## Pick a pane up. Refused — reported, not silent — when it is in neither the
-  ## tree nor `docked`.
+proc beginDrag*(b: LayoutBinding; pane: PaneRef): LayoutAction =
+  ## Pick a pane up — a built-in pane or an extension's, through the same
+  ## machine. Refused — reported, not silent — when it is in neither the tree
+  ## nor `docked`.
   let started = beginDragTab(b.layout, pane)
   if started.isNone:
     return action(lasNoGesture, $pane & " is neither placed nor docked")
@@ -1420,6 +1458,9 @@ proc beginDrag*(b: LayoutBinding; pane: PaneKind): LayoutAction =
                           lastValid: -1)
   b.glPaths = @[]
   action(lasPending, "dragging " & $pane)
+
+proc beginDrag*(b: LayoutBinding; pane: PaneKind): LayoutAction =
+  b.beginDrag(builtinRef(pane))
 
 proc hoverAtPx*(b: LayoutBinding; geom: LayoutGeometry;
                 px, py: float): LayoutAction =
@@ -1499,14 +1540,17 @@ proc cancelGesture*(b: LayoutBinding): LayoutAction =
   b.glPaths = @[]
   action(lasCancelled, "gesture cancelled")
 
-proc beginRevealDock*(b: LayoutBinding; pane: PaneKind): LayoutAction =
+proc beginRevealDock*(b: LayoutBinding; pane: PaneRef): LayoutAction =
   let revealed = beginReveal(b.layout, pane)
   if revealed.isNone:
     return action(lasNoGesture, $pane & " is not docked")
   b.interaction = revealed.get
   action(lasPending, "revealing " & $pane)
 
-proc toggleDockOpen*(b: LayoutBinding; pane: PaneKind): LayoutAction =
+proc beginRevealDock*(b: LayoutBinding; pane: PaneKind): LayoutAction =
+  b.beginRevealDock(builtinRef(pane))
+
+proc toggleDockOpen*(b: LayoutBinding; pane: PaneRef): LayoutAction =
   ## PLAT-49 part B (finding 9, the user's direction): A CLICK ON A DOCKED
   ## PANE'S LABEL DOCKS IT OPEN — inline at its edge, taking space from the
   ## arrangement, no longer an overlay (`cmdOpenDocked`, the desktop's
@@ -1523,9 +1567,18 @@ proc toggleDockOpen*(b: LayoutBinding; pane: PaneKind): LayoutAction =
   else:
     b.dispatch(cmdOpenDocked(pane))
 
-proc labelClicked(b: LayoutBinding; pane: PaneKind): LayoutAction =
+proc toggleDockOpen*(b: LayoutBinding; pane: PaneKind): LayoutAction =
+  b.toggleDockOpen(builtinRef(pane))
+
+proc labelClicked(b: LayoutBinding; pane: PaneRef): LayoutAction =
   ## A click on a docked pane's label: docked open or closed here, or — when
   ## the front-end routes the press (`routeLabelClicks`) — handed back to it.
+  ## An extension's label is docked open or closed HERE in either case: the
+  ## front-end's route is keyed by `PaneKind` (`labelPress`), and the gesture
+  ## is the same one.
+  if pane.isContributed:
+    return b.toggleDockOpen(pane)
+  let pane = pane.builtin
   if b.routeLabelClicks:
     if b.interaction.kind == ikRevealingDock:
       b.interaction = b.interaction.cancel()
@@ -1833,12 +1886,20 @@ proc dragThresholdPassed*(b: LayoutBinding; row, col: int): bool =
     (abs(col - b.pressCol) >= DragThresholdCols or
      abs(row - b.pressRow) >= DragThresholdRows)
 
-proc activateClickedTab(b: LayoutBinding; pane: PaneKind): LayoutAction =
+proc activateClickedTab(b: LayoutBinding; pane: PaneRef): LayoutAction =
   ## A completed pointer click focuses its tab even when already active.
   ## Programmatic activation and wheel navigation keep their own focus rules.
   result = b.dispatch(cmdActivateTab(pane))
   if result.status in {lasApplied, lasNoOp}:
-    b.focusOn(builtinRef(pane))
+    b.focusOn(pane)
+
+proc activateClickedTab(b: LayoutBinding; pane: PaneKind): LayoutAction =
+  b.activateClickedTab(builtinRef(pane))
+
+proc markPick(b: LayoutBinding; r: PaneRef) =
+  ## A press MARKS a pane (PLAT-49): the drag starts past the threshold.
+  b.pendingPickRef = some(r)
+  b.pendingPick = if r.isContributed: none(PaneKind) else: some(r.builtin)
 
 proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
               event: MouseEvent): LayoutAction =
@@ -1930,11 +1991,12 @@ proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
       # previews where it would land; nothing else listens to motion.
       # PLAT-49: a marked tab becomes a drag only once the pointer is past
       # the threshold; a held divider previews only from then on.
-      if b.pendingPick.isSome:
+      if b.pendingPickRef.isSome:
         if not b.dragThresholdPassed(event.row, event.col):
           return action(lasNoGesture, "within the drag threshold")
-        let pane = b.pendingPick.get
+        let pane = b.pendingPickRef.get
         b.pendingPick = none(PaneKind)
+        b.pendingPickRef = none(PaneRef)
         let started = b.beginDrag(pane)
         if b.interaction.kind != ikDraggingTab:
           return started
@@ -1958,6 +2020,7 @@ proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
       b.pointerRow = event.row
       b.pointerCol = event.col
       b.pendingPick = none(PaneKind)
+      b.pendingPickRef = none(PaneRef)
       b.pressWasRevealing = b.interaction.kind == ikRevealingDock
       if b.pressWasRevealing:
         b.pressRevealedPane = b.interaction.pane
@@ -1980,41 +2043,50 @@ proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
           return action(lasCancelled, "hid " & $hidden)
       # A CONTRIBUTED PANE'S TAB, OR A PRESS IN ONE'S REGION. Before the
       # built-in tests below, every one of which reads a `PaneKind` and would
-      # name `paneEditor` for it. A contributed tab is activated and focused
-      # on the press (it is not picked up: dragging an extension's pane is
-      # not a gesture this binding has; the layout verbs move it).
+      # name `paneEditor` for it. A tab — an extension's, or a built-in one on
+      # an extension's strip — is MARKED exactly as a built-in tab is: a
+      # release within the threshold is a click (activate and focus), and
+      # past it the pane is picked up and dragged through the same machine.
       let ctab = b.contributedTabAtCell(geom, event.row, event.col)
       if ctab.isSome:
-        b.pressRow = -1
-        b.pressCol = -1
-        let r = contributedRef(ctab.get)
-        result = b.dispatch(cmdActivateTab(r))
-        if result.status in {lasApplied, lasNoOp}:
-          b.focusOn(r)
-        return
+        b.markPick(contributedRef(ctab.get))
+        return action(lasNoGesture, "pressed the " & ctab.get & " tab")
       let btab = b.builtinTabInContributedAt(geom, event.row, event.col)
       if btab.isSome:
-        b.pressRow = -1
-        b.pressCol = -1
-        return b.activateClickedTab(btab.get)
+        b.markPick(builtinRef(btab.get))
+        return action(lasNoGesture, "pressed the " & $btab.get & " tab")
       let cidx = geom.contributedIndexAt(event.row, event.col)
       if cidx >= 0:
-        b.focusOn(contributedRef(geom.projection.contributed[cidx].id))
+        let c = geom.projection.contributed[cidx]
+        b.focusOn(contributedRef(c.id))
+        if c.activeTab < 0 and event.row == c.area.row:
+          # A lone extension pane's one tab: its label marks the pane.
+          let name = if c.title.len > 0: c.title else: contributedTabName(c.id)
+          if event.col - c.area.col < textCells(" " & name & " "):
+            b.markPick(contributedRef(c.id))
+            return action(lasNoGesture, "pressed the " & c.id & " tab")
+        return action(lasNoGesture, "focus " & b.focusContributed)
+      if not geom.openDock.isEmptyArea and
+         geom.openDock.contains(event.row, event.col) and
+         geom.openDockContributed.len > 0:
+        # A docked extension pane shown OPEN: a press in it focuses it.
+        b.focusOn(contributedRef(geom.openDockContributed))
         return action(lasNoGesture, "focus " & b.focusContributed)
       let tab = b.tabAtCell(geom, event.row, event.col)
       if tab.isSome:
-        b.pendingPick = tab
+        b.markPick(builtinRef(tab.get))
         return action(lasNoGesture, "pressed the " & $tab.get & " tab")
       let strip = geom.stripIndexAt(event.row, event.col)
       if strip >= 0:
         let slot = geom.strips[strip].slotAt(event.row, event.col)
         if slot >= 0 and geom.strips[strip].slots[slot].contributed.len > 0:
-          # A docked extension pane's label: `:unpin <id>` brings it back.
-          return action(lasNoGesture, "the docked " &
-            geom.strips[strip].slots[slot].contributed & " label (:unpin " &
-            geom.strips[strip].slots[slot].contributed & ")")
+          # A docked extension pane's label, marked as a built-in one's is:
+          # a click docks it open or closed, a drag takes it off the strip.
+          let id = geom.strips[strip].slots[slot].contributed
+          b.markPick(contributedRef(id))
+          return action(lasNoGesture, "pressed the " & id & " label")
         if slot >= 0:
-          b.pendingPick = some(geom.strips[strip].slots[slot].pane)
+          b.markPick(builtinRef(geom.strips[strip].slots[slot].pane))
           return action(lasNoGesture, "pressed the " &
                                       $geom.strips[strip].slots[slot].pane &
                                       " label")
@@ -2028,7 +2100,7 @@ proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
          b.onStripLabel(geom, idx, event.col):
         # A pane not in a stack is marked by its one tab. PLAT-50: on its
         # LABEL — the rest of the strip is the divider above (`dividerAt`).
-        b.pendingPick = some(region.pane)
+        b.markPick(builtinRef(region.pane))
         return action(lasNoGesture, "pressed the " & $region.pane & " tab")
       let divider = b.dividerAt(geom, event.row, event.col)
       if divider.isSome:
@@ -2041,8 +2113,9 @@ proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
       return action(lasNoGesture, "focus " & $b.focus)
     # Release.
     let past = b.dragThresholdPassed(event.row, event.col)
-    let pending = b.pendingPick
+    let pending = b.pendingPickRef
     b.pendingPick = none(PaneKind)
+    b.pendingPickRef = none(PaneRef)
     b.pressRow = -1
     b.pressCol = -1
     if b.interaction.kind == ikResizingSplit and b.interaction.divider.isSome:
@@ -2066,7 +2139,7 @@ proc onMouse*(b: LayoutBinding; geom: LayoutGeometry;
       # A plain click, or the release of a press that marked nothing: not a
       # drag, and nothing to say about one.
       return action(lasNoGesture, "click")
-    let source = b.interaction.source
+    let source = b.interaction.sourceRef
     if not past:
       # A CLICK. Cancel the drag first, so the click's own command is the only
       # thing that reaches `dispatch` — a drag that also committed would push
@@ -2388,8 +2461,8 @@ proc runLayoutCommand*(b: LayoutBinding; geom: LayoutGeometry;
     b.dispatch(cmdRestoreDocked(b.focusRef, some(pane)))
   of lvReveal:
     if arg.len == 0:
-      return b.beginRevealDock(b.focus)
-    let (ok, pane) = parsePaneWord(arg)
+      return b.beginRevealDock(b.focusRef)
+    let (ok, pane) = parsePaneRefWord(arg)
     if not ok:
       return action(lasBadArgument,
                     ":reveal needs the name of a pane, not '" & arg & "'")
@@ -2510,6 +2583,7 @@ proc adoptModeArrangement*(b: LayoutBinding; layout: Layout;
   b.interaction = noInteraction()
   b.dragLayout = Layout()
   b.pendingPick = none(PaneKind)
+  b.pendingPickRef = none(PaneRef)
   b.pressRow = -1
   b.pressCol = -1
   b.pointerRow = -1
