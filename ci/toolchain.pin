@@ -185,7 +185,15 @@ LOCK_FENIX=dd2c80d0b88463ccc0402c86e9e72dbb354ac091
 # --test-name`). Both descend from 1786e598 and keep its trace-format pin,
 # `codetracer-trace-format` c8e57b1, so `nargo trace` still writes `meta.dat`
 # version 7.
-LOCK_NOIR=a5e92b847ec95a7f20eadee36745b55d7c8f9659
+#
+# Moved to f09f4597 (`codetracer`): nargo_cli writes `--watch`'s escape
+# sequences itself instead of through termion, which builds only on Unix and
+# kept nargo from compiling for Windows (codetracer run 44577379303). It also
+# takes the five tracer fixes the branch carried since 2026-10-28 (main public
+# return values, mutable reference snapshots, constant-body call anchoring,
+# shadowed-binding order, the schema-6 fixture recorder); same trace-format
+# pin, so `nargo trace` still writes `meta.dat` version 7.
+LOCK_NOIR=f09f459714b839a5952b59e09ce0546a936c797e
 
 # ## Private siblings a CI lane clones by revision
 #
