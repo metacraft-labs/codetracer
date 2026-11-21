@@ -124,6 +124,7 @@ cd "${REPO_ROOT}" || exit 2
 # one predicate, two call sites, is right for a PREDICATE; an expectation has
 # to come from somewhere else or it is a self-comparison).
 EXPECTED_WASM_EXCLUSIONS=(
+	src/frontend/viewmodel/tests/unit/test_ct_lens_plugins.nim
 	src/frontend/viewmodel/tests/unit/test_editor_async_closure.nim
 	src/frontend/viewmodel/tests/unit/test_native_file_tree_operations.nim
 	src/frontend/viewmodel/tests/unit/test_platform_desktop_native.nim
