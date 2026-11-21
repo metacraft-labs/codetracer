@@ -163,6 +163,43 @@ function Ensure-Nargo {
     }
   }
 
+  # nargo_cli links codetracer_trace_writer_nim, whose build.rs compiles the
+  # Nim trace writer from `.codetracer-deps/codetracer-trace-format-nim` (noir's
+  # .cargo/config.toml names it). A cargo git checkout has no such siblings, and
+  # noir's own scripts/fetch-trace-format-nim.sh provisions them at its pinned
+  # revisions. Without it the build stopped at "Nim FFI entry point not found"
+  # (run 44900586259, origin-DAP Windows, noir f09f4597). It is a bash script,
+  # run with Git for Windows' bash: the bash on PATH can be the WSL launcher.
+  $fetchScript = Join-Path $sourceDir "scripts/fetch-trace-format-nim.sh"
+  if (Test-Path -LiteralPath $fetchScript -PathType Leaf) {
+    $gitBash = Join-Path (Split-Path -Parent (Split-Path -Parent $gitCommand.Source)) "bin/bash.exe"
+    if (-not (Test-Path -LiteralPath $gitBash -PathType Leaf)) {
+      $gitBash = Get-BashExe
+    }
+    # Without the WindowsApps directory on PATH: its `python3` is the
+    # Microsoft Store alias, which `command -v` finds and which exits 49 when
+    # run, and the script's optional pin cross-check then ended it under
+    # `set -e` before it wrote .codetracer-deps/nim.cfg (measured on
+    # win-ci-bare-001). With no python3 the script skips that check.
+    $savedPath = $env:PATH
+    $env:PATH = (($env:PATH -split ';') | Where-Object { $_ -and ($_ -notmatch '\\WindowsApps\\?$') }) -join ';'
+    Push-Location -LiteralPath $sourceDir
+    try {
+      & $gitBash "scripts/fetch-trace-format-nim.sh"
+      if ($LASTEXITCODE -ne 0) {
+        throw "noir's scripts/fetch-trace-format-nim.sh failed (exit $LASTEXITCODE) with '$gitBash'; nargo_cli's trace writer needs its .codetracer-deps/."
+      }
+    } finally {
+      Pop-Location
+      $env:PATH = $savedPath
+    }
+    foreach ($needed in @(".codetracer-deps/codetracer-trace-format-nim/src/codetracer_trace_writer_ffi.nim", ".codetracer-deps/nim.cfg")) {
+      if (-not (Test-Path -LiteralPath (Join-Path $sourceDir $needed) -PathType Leaf)) {
+        throw "noir's scripts/fetch-trace-format-nim.sh exited 0 but left no '$needed' under '$sourceDir'."
+      }
+    }
+  }
+
   $windowsDir = Join-Path $RepoRoot "non-nix-build/windows"
   $msvcExportScript = Join-Path $windowsDir "export-msvc-env.ps1"
   if (Test-Path -LiteralPath $msvcExportScript -PathType Leaf) {
