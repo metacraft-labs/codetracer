@@ -20,7 +20,9 @@ permissions:
 jobs:
   plugin-transport-darwin:
     runs-on: aarch64-darwin  # CIP-5: nix macOS job -> self-hosted m3 (aarch64-darwin)
-    timeout-minutes: 60
+    # The first run (44851939713) spent 55 minutes realising the dev shell and
+    # its siblings before the suite started, and was cancelled at 60.
+    timeout-minutes: 180
     steps:
       - name: Mint installation token for cross-repo sibling access
         id: ci_token
