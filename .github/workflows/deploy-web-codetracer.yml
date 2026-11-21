@@ -450,6 +450,7 @@ jobs:
             # isonim 2026-11-18, after flake.lock and repro.lock moved it to 38ace5de.
             # isonim-gpui 2026-11-19 (a double click is counted by its presses' times).
             # nim-agents 2026-11-21, after flake.lock moved it to 49deaac.
+            # nim-agents 2026-11-21 again, after flake.lock moved it to e071705.
             # isonim 2026-11-20, after flake.lock and repro.lock moved it to b56bd098
             # (the ui macro's templates, which isonim-zgui's renderer needs).
             # nim-termctl 2026-11-20, after flake.lock and repro.lock moved it to
@@ -464,7 +465,7 @@ jobs:
             nim-pty=6ffb8d788e8a740ca78ec29c7a3a489a13818bcb
             nim-acp=0bf10b4c35064a08d8c96eb912190521322017e2
             nim-agent-harbor=9694f6b41be21315243df1b19cabd02c5f271d7d
-            nim-agents=49deaac6a759ccc34ae94d494d93eee07f7cc42e
+            nim-agents=e071705e8b811309bdde41b1d0c57f6ee083e92b
             # THE REPROBUILD-PACKAGES CATALOG, pinned to the revision the
             # locked reprobuild (flake.lock root input `reprobuild`,
             # 33be1e9964) is tested against: its own `repro.lock` pins
