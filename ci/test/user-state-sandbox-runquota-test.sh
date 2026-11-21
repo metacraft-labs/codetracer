@@ -366,11 +366,21 @@ case "$(probe socket)" in
 "${scratch}/tmp/ct-uss-rq."*/rq.sock) t_pass "stage: the sandboxed command was given the relay's private socket" ;;
 *) t_fail "stage: the sandboxed command was given the relay's private socket (RUNQUOTA_SOCKET=$(probe socket))" ;;
 esac
-# The compensation's control: unmapped, the relayed client got as far as the
-# daemon, which refused it for the declared uid alone.
-if [ "$(probe unmapped.rc)" != "" ] && [ "$(probe unmapped.rc)" != 0 ] &&
-	grep -q "client declared uid 1004 but its peer credentials say uid 0" "${scratch}/tmp/probe/unmapped.err"; then
-	t_pass "stage: unmapped, the relayed client is answered by the daemon itself (the fixture's declared-uid artefact only)"
+# The compensation's control: unmapped, the relayed client gets as far as the
+# daemon, so the answer is the daemon's own. A daemon before RunQuota's
+# namespace judgement refuses it for the declared uid alone. One with that
+# judgement (the pinned aad94ad: judgeNamespaces in runquota_daemon.nim)
+# excuses the uid of a client that declares a user namespace other than its
+# own, and serves the request, printing its status. Run 44864106832's nixos
+# leg got that answer ("sessions: 0 / leases: 0", rc=0) and this control,
+# which knew only the refusal, failed it. Either answer shows the relay
+# reached the daemon. Anything else -- a refusal of the endpoint by the client,
+# or no connection -- does not.
+unmapped_rc="$(probe unmapped.rc)"
+if { [ -n "$unmapped_rc" ] && [ "$unmapped_rc" != 0 ] &&
+	grep -q "client declared uid 1004 but its peer credentials say uid 0" "${scratch}/tmp/probe/unmapped.err"; } ||
+	{ [ "$unmapped_rc" = 0 ] && grep -q '^sessions: ' "${scratch}/tmp/probe/unmapped.err"; }; then
+	t_pass "stage: unmapped, the relayed client is answered by the daemon itself (the declared-uid refusal, or the status a namespace-judging daemon serves)"
 else
 	t_fail "stage: unmapped, the relayed client is answered by the daemon itself (rc=$(probe unmapped.rc))"
 	show "${scratch}/tmp/probe/unmapped.err"
