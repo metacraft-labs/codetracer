@@ -108,7 +108,9 @@ def build_timeout(default: int, environ=None) -> int:
     than the harnesses' 3600 s (reprobuild-pm issues 6afc8f22, serial producer
     interface extraction). plat54, plat60 and plat70f were killed inside their
     builds and graded nothing. The suites keep their own TIMEOUT; only the
-    build step is widened. A value that is not a positive integer exits 2, the
+    build step is widened, and the Electron gates whose capture builds the
+    desktop prefix first (`scripts/plat45-desktop-prefix.sh`: plat47, plat48,
+    plat50, plat51, plat52, plat57), whose cost is that build. A value that is not a positive integer exits 2, the
     harnesses' usage-error code, rather than falling back silently."""
     import os
     env = os.environ if environ is None else environ

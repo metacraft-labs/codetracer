@@ -546,9 +546,12 @@ def run_electron(path: str, grep: str) -> RunResult:
         proc = subprocess.run(["bash", suite_file(path),
                                *(["-g", grep] if grep else [])], cwd=ROOT,
                               capture_output=True, text=True,
-                              timeout=SUITE_TIMEOUT, encoding="utf-8",
+                              timeout=build_timeout(SUITE_TIMEOUT), encoding="utf-8",
                               errors="replace", env=env)
     except subprocess.TimeoutExpired:
+        print(f"      ---- {path}: NO RESULT AFTER "
+              f"{build_timeout(SUITE_TIMEOUT)}s (the capture builds the "
+              "desktop prefix first; CT_MUTATION_BUILD_TIMEOUT widens it) ----")
         return RunResult(rc=1, ran=False, hung=True)
     finally:
         for a in ANSWER_FILES:
@@ -955,7 +958,7 @@ def check_control_hashes() -> bool:
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "ci" / "lib"))
-from harness_guard import refuse_undeclared_arms  # noqa: E402
+from harness_guard import build_timeout, refuse_undeclared_arms  # noqa: E402
 
 
 def main() -> int:
