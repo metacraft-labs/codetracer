@@ -6826,9 +6826,8 @@ jobs:
       - name: Setup dev env
         # setup-dev-env installs Nix (with the Attic substituter/keys) and
         # clones every source dependency used by the visual gate adjacent to
-        # this checkout at their pinned refs -- `agents` for isonim, nim-acp
-        # and nim-agents, whose flake.nix inputs follow that branch
-        # (ci/test/sibling-input-branch-test.sh). That includes the
+        # this checkout at their pinned refs -- repro.lock's for the IsoNim
+        # and agent libraries. That includes the
         # frontend's IsoNim/agent libraries, the incremental runner's trace and
         # I/O libraries, and visual replay's own native siblings. A missing
         # lock entry fails loudly before the build starts.
@@ -6849,11 +6848,15 @@ jobs:
           attic-token: ${{ secrets.ATTIC_TOKEN }}
           attic-cache: ${{ vars.ATTIC_CACHE }}
           siblings: |
-            isonim=agents
-            nim-everywhere=dev
-            nim-acp=agents
-            nim-agent-harbor=dev
-            nim-agents=agents
+            # BARE, so clone-siblings takes repro.lock's revisions: build-once
+            # refuses a producer checkout the lock does not name, and
+            # `isonim=agents` cloned the branch tip (530cfa8) where the lock
+            # pins b56bd098 (run 44900586259).
+            isonim
+            nim-everywhere
+            nim-acp
+            nim-agent-harbor
+            nim-agents
             # codetracer-trace-format{,-nim} BY COMMIT, not `=dev`: the two halves of
             # the FFI pair are `/agents` inputs in flake.nix, and trace-format's `dev`
             # tip (051a298, 2026-09-30) predates the FileTable / PathTableKind API that
