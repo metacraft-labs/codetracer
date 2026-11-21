@@ -1,0 +1,22 @@
+<!doctype html>
+<!--
+  page.html — IsoNim's frame applier hosting a core that cannot hold a node.
+  `?arm=js` loads the `nim js` build of frame_events_core.nim, `?arm=wasm` the
+  wasm32 one; host.js binds either to the same applier. See
+  ci/test/frame-applier-browser.sh.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>frame applier events</title>
+  </head>
+  <body>
+    <div id="mount"></div>
+    <!-- The source the browser test copies from, so a paste is a real one. -->
+    <textarea id="fe-clip">ls -la</textarea>
+    <script src="frame_applier.js"></script>
+    <script src="core_js.js"></script>
+    <script src="core_wasm.js"></script>
+    <script src="host.js"></script>
+  </body>
+</html>

@@ -254,7 +254,17 @@ echo "PLAT18-SLICE-ARTIFACT build=${build_label}" \
 # ---------------------------------------------------------------------------
 # Assemble the page
 # ---------------------------------------------------------------------------
-cp "${host_src}/applier.js" "${host_src}/driver.js" \
+# The host half is IsoNim's frame applier, the library a WebAssembly core's
+# host ships, copied under the name the page loads. `ISONIM_SRC` is the
+# override `config.nims` reads too, so the applier and the renderer it pairs
+# with always come from the same checkout.
+isonim_src="${ISONIM_SRC:-${repo_root}/../isonim/src}"
+if [ ! -f "${isonim_src}/isonim/web/frame_applier.js" ]; then
+	echo "PLAT18-SLICE-VERDICT FAIL ${isonim_src}/isonim/web/frame_applier.js is missing"
+	exit 1
+fi
+cp "${isonim_src}/isonim/web/frame_applier.js" "${out}/applier.js"
+cp "${host_src}/driver.js" \
 	"${host_src}/wasm_bridge.js" "${host_src}/main.js" \
 	"${host_src}/coldstart.html" "${host_src}/browser.mjs" "${out}/"
 cat >"${out}/package.json" <<'PKG'
@@ -372,6 +382,22 @@ if [ "${parity_lines}" -ne 8 ]; then
 	echo "  FAIL: expected 8 parity comparisons (4 phases, 2 pairs), saw ${parity_lines}"
 	exit 1
 fi
+
+# SAME-VALUE ELISION: a step re-sends no row it did not change. Every Call
+# Trace row's class reads the selection, so every row's effect re-runs on a
+# step; before the frame renderer kept a shadow of what it last wrote, that
+# crossed 1,800 operations for 600 rows. A step changes two rows, so the
+# floor is far below one operation per row and far above what it does cross.
+step_ops="$(sed -n 's/^PLAT18-SLICE arm=wasm-crossing phase=STEP .* ops=\([0-9]*\) .*/\1/p' "${run_log}" | head -1)"
+step_ceiling=$((expanded_rows / 10))
+if [ -z "${step_ops}" ]; then
+	echo "  FAIL: no wasm-crossing STEP line to read the operation count from"
+	exit 1
+elif [ "${step_ops}" -ge "${step_ceiling}" ]; then
+	echo "  FAIL: a step crossed ${step_ops} operations for ${expanded_rows} rows (ceiling ${step_ceiling}) — unchanged writes are not elided"
+	exit 1
+fi
+echo "PLAT18-SLICE-ELISION step_ops=${step_ops} ceiling=${step_ceiling} rows=${expanded_rows}"
 
 bench_min_samples="${CT_P18_BENCH_MIN_SAMPLES:-5}"
 if [ "${samples}" -lt "${bench_min_samples}" ]; then

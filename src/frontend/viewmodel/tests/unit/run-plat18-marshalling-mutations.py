@@ -140,10 +140,10 @@ WORKSPACE = ROOT.parent           # .../codetracer-gui
 
 # -- mutation subjects ------------------------------------------------------
 METER = "../isonim/src/isonim/core/boundary_meter.nim"          # sibling repo
-FRAME = "src/frontend/viewmodel/tests/manual/plat18_frame_renderer.nim"
+FRAME = "../isonim/src/isonim/web/frame_renderer.nim"          # sibling repo
 PROBE = "src/frontend/viewmodel/tests/manual/plat18_marshalling_probe.nim"
 SLICE = "src/frontend/viewmodel/tests/manual/plat18_slice.nim"
-APPLIER = "src/frontend/viewmodel/tests/manual/plat18_slice_host/applier.js"
+APPLIER = "../isonim/src/isonim/web/frame_applier.js"           # sibling repo
 VIEW = "src/frontend/viewmodel/views/isonim_state_view.nim"
 FT_SH = "ci/test/plat18-fake-timer-builds.sh"
 DEV_SH = "ci/test/plat18-dev-loop.sh"
@@ -158,14 +158,18 @@ DRIVER = "src/frontend/viewmodel/tests/manual/plat18_slice_host/driver.js"
 FT_PROBE = "src/frontend/viewmodel/tests/manual/wasm_fake_timer_probe.nim"
 PROFILE_SH = "ci/test/wasm-dev-profile-test.sh"
 CT_VIEW = "src/frontend/viewmodel/views/isonim_calltrace_view.nim"
+FR_SUITE_SH = "ci/test/frame-renderer-suite.sh"
+FR_SUITE = "../isonim/tests/test_frame_renderer.nim"            # sibling repo
+FA_SH = "ci/test/frame-applier-browser.sh"
+FA_DIR = "src/frontend/viewmodel/tests/e2e/frame_applier"
 
 TOUCHED = [
     # Mutated by at least one arm:
     METER,     # M1 M2 M3 M4        (sibling repo isonim)
-    FRAME,     # M6 M7
+    FRAME,     # M6 M7 E1 E2 E3     (sibling repo isonim)
     PROBE,     # M5 M8              — and the grader for M1-M9
     SLICE,     # S1 S3
-    APPLIER,   # S2
+    APPLIER,   # S2 P1 E4 E5        (sibling repo isonim)
     VIEW,      # M9
     FT_SH,     # F1 F2 F3           — and the grader for itself
     DEV_SH,    # D1                 — and the grader for itself
@@ -181,6 +185,12 @@ TOUCHED = [
     FT_PROBE,  # the chain F1-F3's contracts are taken over
     PROFILE_SH,  # grades W1 W2 W3
     CT_VIEW,   # the Call Trace pane C1 and C2 render
+    FR_SUITE_SH,  # grades E3
+    FR_SUITE,     # the cases E3 is killed by
+    FA_SH,        # grades E4 E5
+    FA_DIR + "/frame_events_core.nim",  # the core E4 and E5 drive
+    FA_DIR + "/host.js",
+    FA_DIR + "/browser.mjs",            # the checks E4 and E5 are killed by
 ]
 
 CONTROL_HASHES = HERE / "plat18-marshalling-mutation-control.sha256"
@@ -260,6 +270,15 @@ G_SLICE_BROWSER = Grader("script", SLICE_SH,
 # THE DEVELOPER PROFILE'S OWN TEST: identity against emcc, the cache used,
 # the suite run, a changed header a miss, the dependency file written.
 G_PROFILE = Grader("script", PROFILE_SH)
+
+# THE FRAME RENDERER'S OWN SUITE on C, nim js and wasm32, and the applier in
+# a real browser. One engine is enough for an arm: the checks are the same
+# code in both, and Firefox doubles the run.
+G_FR_SUITE = Grader("script", FR_SUITE_SH,
+                    env={"CT_FRAME_RENDERER_OUT": str(SCRATCH / "frame-renderer")})
+G_FA = Grader("script", FA_SH,
+              env={"CT_FRAME_APPLIER_ENGINES": "chromium",
+                   "CT_FRAME_APPLIER_OUT": str(SCRATCH / "frame-applier")})
 
 G_FT = Grader("script", FT_SH,
               env={"CT_FAKE_TIMER_ITERATIONS": "100000",
@@ -410,8 +429,8 @@ ARMS = [
     Arm(
         id="M7",
         path=FRAME,
-        find="proc appendChild*(r: FrameRenderer; parent, child: FrameNode) =\n  op(boAppendChild):\n    wirePutU32(int(parent))\n    wirePutU32(int(child))\n",
-        replace="proc appendChild*(r: FrameRenderer; parent, child: FrameNode) =\n  op(boAppendChild):\n    wirePutU32(int(parent))\n",
+        find="  op(boAppendChild):\n    wirePutU32(int(parent))\n    wirePutU32(int(child))\n",
+        replace="  op(boAppendChild):\n    wirePutU32(int(parent))\n",
         grader=G_PROBE,
         killer="(the wire/meter cross-check)",
         expect="verdict-fails",
@@ -420,8 +439,8 @@ ARMS = [
             "expand — so undercharging it by four bytes moves "
             "the headline figure by 60,008 bytes while the stream still applies",
         control_name="the two handles are written from a tuple",
-        control_find="proc appendChild*(r: FrameRenderer; parent, child: FrameNode) =\n  op(boAppendChild):\n    wirePutU32(int(parent))\n    wirePutU32(int(child))\n",
-        control_replace="proc appendChild*(r: FrameRenderer; parent, child: FrameNode) =\n  let pair = (int(parent), int(child))\n  op(boAppendChild):\n    wirePutU32(pair[0])\n    wirePutU32(pair[1])\n",
+        control_find="  op(boAppendChild):\n    wirePutU32(int(parent))\n    wirePutU32(int(child))\n",
+        control_replace="  let pair = (int(parent), int(child))\n  op(boAppendChild):\n    wirePutU32(pair[0])\n    wirePutU32(pair[1])\n",
     ),
 
     # -------------------------------------------------------------------
@@ -468,8 +487,8 @@ ARMS = [
     Arm(
         id="S2",
         path=APPLIER,
-        find="  SetAttribute: (c) => { const h = c.u32(); const n = c.str(), v = c.str(); c.nodes[h].setAttribute(n, v); },\n",
-        replace="  SetAttribute: (c) => { c.u32(); c.str(); c.str(); },\n",
+        find="      SetAttribute: (c) => { const h = c.u32(); const n = c.str(), v = c.str(); nodes[h].setAttribute(n, v); },\n",
+        replace="      SetAttribute: (c) => { c.u32(); c.str(); c.str(); },\n",
         grader=G_SLICE,
         killer="(the slice's row floor)",
         expect="script-fails",
@@ -479,8 +498,8 @@ ARMS = [
             "applier has that a direct renderer does not, and the one a "
             "count-only check could never see",
         control_name="the attribute name and value are read into separate statements",
-        control_find="  SetAttribute: (c) => { const h = c.u32(); const n = c.str(), v = c.str(); c.nodes[h].setAttribute(n, v); },\n",
-        control_replace="  SetAttribute: (c) => { const h = c.u32(); const n = c.str(); const v = c.str(); c.nodes[h].setAttribute(n, v); },\n",
+        control_find="      SetAttribute: (c) => { const h = c.u32(); const n = c.str(), v = c.str(); nodes[h].setAttribute(n, v); },\n",
+        control_replace="      SetAttribute: (c) => { const h = c.u32(); const n = c.str(); const v = c.str(); nodes[h].setAttribute(n, v); },\n",
     ),
     Arm(
         id="S3",
@@ -628,8 +647,8 @@ ARMS = [
     Arm(
         id="P1",
         path=APPLIER,
-        find="  SetStyle: (c) => { const h = c.u32(); const p = c.str(), v = c.str(); c.nodes[h].style.setProperty(p, v); },\n",
-        replace="  SetStyle: (c) => { c.u32(); c.str(); c.str(); },\n",
+        find="      SetStyle: (c) => { const h = c.u32(); const p = c.str(), v = c.str(); nodes[h].style.setProperty(p, v); },\n",
+        replace="      SetStyle: (c) => { c.u32(); c.str(); c.str(); },\n",
         grader=G_SLICE,
         killer="(the parity check, js-direct against js-crossing)",
         expect="script-fails",
@@ -640,8 +659,8 @@ ARMS = [
             "crossing arms lose the styles together, so it is the comparison "
             "with `js-direct` that has to notice",
         control_name="the property and value are read in separate statements",
-        control_find="  SetStyle: (c) => { const h = c.u32(); const p = c.str(), v = c.str(); c.nodes[h].style.setProperty(p, v); },\n",
-        control_replace="  SetStyle: (c) => { const h = c.u32(); const p = c.str(); const v = c.str(); c.nodes[h].style.setProperty(p, v); },\n",
+        control_find="      SetStyle: (c) => { const h = c.u32(); const p = c.str(), v = c.str(); nodes[h].style.setProperty(p, v); },\n",
+        control_replace="      SetStyle: (c) => { const h = c.u32(); const p = c.str(); const v = c.str(); nodes[h].style.setProperty(p, v); },\n",
     ),
 
     Arm(
@@ -740,6 +759,93 @@ ARMS = [
         control_name="the dependency arguments are expanded unconditionally",
         control_find='-E -P "${src}" -o "${pre}" ${dep_args[@]+"${dep_args[@]}"}; then\n',
         control_replace='-E -P "${src}" -o "${pre}" "${dep_args[@]}"; then\n',
+    ),
+
+    # -------------------------------------------------------------------
+    # Same-value elision and events — the frame renderer as a library
+    # -------------------------------------------------------------------
+    Arm(
+        id="E1",
+        path=FRAME,
+        find="  if elisionOn and s != nil and s.attrs.hasKey(name) and s.attrs[name] == value:\n",
+        replace="  if false and elisionOn and s != nil and s.attrs.hasKey(name) and s.attrs[name] == value:\n",
+        grader=G_SLICE_CT,
+        killer="(the step's elision ceiling)",
+        expect="script-fails",
+        why="AN UNCHANGED ATTRIBUTE CROSSES AGAIN. Every Call Trace row's "
+            "class reads the selection, so a step re-runs 600 effects; "
+            "without the shadow each one re-sends its class and the step "
+            "crosses 1,800 operations, the cost PLAT-18 measured. Every "
+            "document still matches, so only a ceiling on what a step "
+            "crosses can see it",
+        control_name="the shadow's lookup is parenthesised",
+        control_find="  if elisionOn and s != nil and s.attrs.hasKey(name) and s.attrs[name] == value:\n",
+        control_replace="  if elisionOn and s != nil and s.attrs.hasKey(name) and (s.attrs[name] == value):\n",
+    ),
+    Arm(
+        id="E2",
+        path=FRAME,
+        find="  if elisionOn and s != nil and s.attrs.hasKey(name) and s.attrs[name] == value:\n",
+        replace="  if elisionOn and s != nil and s.attrs.hasKey(name):\n",
+        grader=G_SLICE_CT,
+        killer="(the parity check, js-direct against js-crossing)",
+        expect="script-fails",
+        why="THE SHADOW ELIDES A CHANGED VALUE. Any write to an attribute it "
+            "has seen is skipped, so the selection never moves in the "
+            "document: the row counts and the op counts agree, and the "
+            "comparison with the shipping build's document is what notices",
+        control_name="the value comparison is written the other way round",
+        control_find="  if elisionOn and s != nil and s.attrs.hasKey(name) and s.attrs[name] == value:\n",
+        control_replace="  if elisionOn and s != nil and s.attrs.hasKey(name) and value == s.attrs[name]:\n",
+    ),
+    Arm(
+        id="E3",
+        path=FRAME,
+        find="proc appendChild*(r: FrameRenderer; parent, child: FrameNode) =\n  forgetText(parent)\n",
+        replace="proc appendChild*(r: FrameRenderer; parent, child: FrameNode) =\n",
+        grader=G_FR_SUITE,
+        killer="(the suite's child-change case)",
+        expect="script-fails",
+        why="A CHILD CHANGE NO LONGER INVALIDATES THE PARENT'S TEXT. After an "
+            "append the DOM's textContent is no longer what the shadow says, "
+            "so writing the old text back is skipped and the child stays. "
+            "Neither slice pane writes a parent's text after appending to it, "
+            "so the library's own suite is the only place this can fail",
+        control_name="the invalidation is called through a local",
+        control_find="proc appendChild*(r: FrameRenderer; parent, child: FrameNode) =\n  forgetText(parent)\n",
+        control_replace="proc appendChild*(r: FrameRenderer; parent, child: FrameNode) =\n  let p = parent\n  forgetText(p)\n",
+    ),
+    Arm(
+        id="E4",
+        path=APPLIER,
+        find="      value = String(ev.target.value);\n",
+        replace="      value = '';\n",
+        grader=G_FA,
+        killer="(the browser test's document check)",
+        expect="script-fails",
+        why="THE HOST STOPS SENDING THE TARGET'S VALUE. A core cannot read a "
+            "DOM input; the value has to arrive with the event, and without "
+            "it every `input` and `change` handler reads an empty string "
+            "while every listener still fires",
+        control_name="the value is converted with a template literal",
+        control_find="      value = String(ev.target.value);\n",
+        control_replace="      value = `${ev.target.value}`;\n",
+    ),
+    Arm(
+        id="E5",
+        path=APPLIER,
+        find="        if (flags & FLAG_PREVENT_DEFAULT) ev.preventDefault();\n",
+        replace="",
+        grader=G_FA,
+        killer="(the browser test's preventDefault check)",
+        expect="script-fails",
+        why="THE HANDLER'S preventDefault NEVER REACHES THE REAL EVENT. The "
+            "core sets the flag on its own event record, and only the host "
+            "can act on it: a form submits and the page navigates away, a "
+            "wheel scrolls the page under the shell",
+        control_name="the flag test is parenthesised",
+        control_find="        if (flags & FLAG_PREVENT_DEFAULT) ev.preventDefault();\n",
+        control_replace="        if ((flags & FLAG_PREVENT_DEFAULT) !== 0) ev.preventDefault();\n",
     ),
 ]
 
@@ -871,6 +977,18 @@ BECAUSE: dict = {
     'F1': 'FAIL: debug/native scores N.N, below N — the chain is deferring to a host loop',
     'F2': "FAIL: debug: wasm is N.Nx native's wall time, above N.Nx — §N's rejection criterion",
     'F3': 'FAIL: debug/native wall time is N.N ms, under the N ms floor — raise CT_FAKE_TIMER_ITERATIONS; a N ms clock quantum is worth N.N% of this number',
+
+    # --- the frame renderer as a library (2026-11-21) -----------------------
+    # E1 is the slice's own ceiling on what a step crosses; E2 the parity
+    # check on the first phase whose rows read the selection; E3 the suite's
+    # case by name; E4 and E5 the browser test's document, which loses the
+    # values (E4) or, once the form's submit navigates the page, every line
+    # before the reload (E5).
+    'E1': 'FAIL: a step crossed N operations for N rows (ceiling N) — unchanged writes are not elided',
+    'E2': 'parity js-direct/js-crossing EXPAND (rows): item 2 differs at character 439: " data-ct-cell=\\"call-trace|2|call\\" data-ct-full=\\"worker_2 #2(item=Record(id=2, stage=\'parse\'), budget=6)\\" data-ct-calle',
+    'E3': "FAIL: c: a child change makes the parent's next text write cross",
+    'E4': 'FAIL: chromium/js: the log reads "click N\\nclick N\\nfocus\\ninput \\nblur \\nchange \\nsubmit go\\nkeydown ctrl+V\\npaste ls -la\\nkeydown ctrl+shift+ArrowDown\\nwheel down\\ninner"',
+    'E5': 'FAIL: chromium/js: the log reads "keydown ctrl+V\\npaste ls -la\\nkeydown ctrl+shift+ArrowDown\\nwheel down\\ninner"',
 
     # --- the developer loop: also a ratio, so also normalised --------------
     'D1': 'FAIL: one edit-compile-run is N.Nx the nim js loop under wasm, above the N.Nx regression limit',

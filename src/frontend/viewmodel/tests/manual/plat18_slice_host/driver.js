@@ -163,16 +163,21 @@ function makeArm(name, api, frameBytesOf) {
     name,
     api,
     crossing: frameBytesOf !== null,
-    nodes: null,
-    opTable: null,
+    applier: null,
     frameBytesOf,
   };
 }
 
+/** A fresh host for a crossing arm: IsoNim's frame applier, its opcode table
+ *  read from the core's own manifest, handle 0 standing for the pane's root. */
 function prepareArm(arm) {
   if (!arm.crossing) return;
   arm.api.opManifest();
-  arm.opTable = globalThis.ctP18Applier.buildOpTable(arm.frameBytesOf());
+  arm.applier = globalThis.IsonimFrameApplier.createFrameApplier({
+    manifest: arm.frameBytesOf().slice(),
+    mount: rootEl(),
+    dispatch: (id) => { arm.api.dispatch(id); return 0; },
+  });
 }
 
 /** Run one phase. Returns {coreMs, hostMs, bytes, ops}.
@@ -199,8 +204,7 @@ function phase(arm, phaseName, fn) {
     // the counter under the comparison.
     const emitted = arm.api.ops();
     const h0 = now();
-    ops = globalThis.ctP18Applier.applyFrame(frame, arm.opTable, arm.nodes,
-                                             (id) => arm.api.dispatch(id));
+    ops = arm.applier.apply(frame);
     hostMs = now() - h0;
     checkOps(arm, phaseName, emitted, ops);
   }
@@ -321,7 +325,6 @@ function run() {
   for (let i = 0; i < SAMPLES; i++) {
     for (const arm of arms) {
       clearRoot();
-      arm.nodes = { 0: rootEl() };
       prepareArm(arm);
       arm.api.reset();
 
@@ -358,7 +361,6 @@ function run() {
   // the comparison this line exists to prevent.
   for (const arm of arms) {
     clearRoot();
-    arm.nodes = { 0: rootEl() };
     prepareArm(arm);
     arm.api.reset();
     phase(arm, 'MEMORY-MOUNT', () => arm.api.mount());

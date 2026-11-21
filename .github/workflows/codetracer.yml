@@ -3451,6 +3451,19 @@ jobs:
         # shell; headless, so no display is needed.
         run: nix develop .#devShells.x86_64-linux.default --command just test-plat18-slice-browser
 
+      - name: The frame renderer on C, nim js and wasm32
+        if: ${{ !cancelled() }}
+        # IsoNim's command-frame renderer, the boundary a WebAssembly core
+        # draws through: same-value elision, its invalidation, the op
+        # manifest and event dispatch, the same cases on all three backends.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-frame-renderer-suite
+
+      - name: The frame applier in a browser (Chromium, Firefox)
+        if: ${{ !cancelled() }}
+        # The applier and a nim js and a wasm32 core, driven with real input
+        # for every event the panes listen for; headless.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-frame-applier-browser
+
       - name: The wasm32 developer profile builds what emcc builds
         if: ${{ !cancelled() }}
         run: nix develop .#devShells.x86_64-linux.default --command just test-wasm-dev-profile

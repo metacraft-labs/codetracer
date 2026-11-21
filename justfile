@@ -4115,6 +4115,15 @@ test-plat18-slice-browser:
     done
   done
 
+# IsoNim's frame renderer — the boundary a WebAssembly ViewModel core draws
+# through — on C, nim js and wasm32 (same cases on each), and its applier in
+# Chromium and Firefox with real input for every event the panes listen for.
+test-frame-renderer-suite:
+  bash ci/test/frame-renderer-suite.sh
+
+test-frame-applier-browser:
+  bash ci/test/frame-applier-browser.sh
+
 # The wasm32 developer profile builds the same program as `emcc`: every object
 # and the linked module byte-identical, the object cache used and never stale
 # after a header change. `ci/lib/wasm-cc.sh` is the wasm lanes' C compiler.

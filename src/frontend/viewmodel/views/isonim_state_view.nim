@@ -77,7 +77,7 @@ when defined(ctPlat18Slice):
   # Everything else PLAT-18 adds is at the END of this file. See the block
   # there for why the slice is in this module at all and when it must be
   # removed.
-  import ../tests/manual/plat18_frame_renderer
+  import isonim/web/frame_renderer
   template BadgeEvent*(r: FrameRenderer): typedesc = FrameEvent
     ## The event object does not cross the boundary either — `FrameEvent`
     ## carries the two flags the product's own badge handler sets back out to
@@ -1064,7 +1064,7 @@ when defined(js):
 # asks for "the variables pane with the 600-member fixture … driven by
 # PLAT-17's core in Electron". A WASM core cannot hold a DOM node, so the
 # renderer it runs against emits a HANDLE-and-BYTES command stream that the
-# host applies — `tests/manual/plat18_frame_renderer.nim`.
+# host applies — `isonim/web/frame_renderer`.
 #
 # It is here, under `-d:ctPlat18Slice`, and not in its own module, for one
 # reason: the alternative is a COPY of this pane's markup, and a copy would

@@ -299,7 +299,7 @@ src/frontend/tui/tests/plat70b-table-mutation-control.sha256	src/frontend/tui/ap
 src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	src/frontend/tui/app/tui_app.nim	5e29fc96fe73c25b52f244228fa9880cac9205a1607f7214b733c6c0dcd3e647	8347f6dd5e98fae5b047d60a282bfbd85d0f6bb70c34ba82a2149356942971f3
 src/frontend/gpui/tests/plat21-mutation-control.sha256	src/frontend/tui/tests/test_cross_renderer_panes.nim	f58e0ab79f8baa9e37275ea9ddafaca479a26a0ec8bc5f437c8eb36eea585662	67ac431c067fccf6fd36ea4c768c58fc243ac34fbe2985f50b1c6e9167e57aad
 src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/viewmodel/views/isonim_low_level_code_view.nim	efdc4537b69d3f243da39f93f2ac218aab72ec4af8e61bd94990fad61fe178b2	d6b2ab69d75ea8897bfedb675036edb416437674f61e83cf5d805adda5ae712d
-src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/viewmodel/views/isonim_state_view.nim	afe19051c4d4f5f4622cf774a9c8af2a892c5bfb162561b65a6e7d23fa08ef25	2bf5cf331cabc68c9a48c2f6a055ae5e8f473d9992dced21a86f1848e346aa34
+src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/viewmodel/views/isonim_state_view.nim	afe19051c4d4f5f4622cf774a9c8af2a892c5bfb162561b65a6e7d23fa08ef25	68a33a4b16b1e15562812871ca34f0a159dd99b2d46ea6044ca8a32aad31ceca
 
 # The Test Results pane leaves a running test's duration empty
 # (test_results_vm.rowDuration, with one added check in the PLAT-53 unit test),
@@ -701,3 +701,13 @@ src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/headle
 # common/node_os on JS. plat81 is re-graded by its owner over these bytes.
 src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/supervisor.nim	8c1c38708bbfe0e278fe1bbdd56d9c362d56e2f7804220cb42bc2958ab52cc3b	9c5739a3e43b891145fb03985c8d59531341c4bc0fd40d5f612789cdf476b6e0
 src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/process_link.nim	627f6f9b42b7d0376bc5c5690bc57649e3bf51a6c32b2ef8618db605bb748932	92855333df47ca9e0a3bdb7b026ff27a9620efda405af90a379c7fce665fd526
+
+# 2026-11-21, the WebAssembly ViewModel core: the views import IsoNim's frame
+# renderer under -d:ctWasmCore (the event log view newly), and the justfile
+# gained the frame renderer's, applier's and web core's recipes.
+ci/test/plat70i-fit-mutation-control.sha256	src/frontend/viewmodel/views/isonim_event_log_view.nim	db9c4c6924195d6630347f931128a1d0a9d7c22f5b784749911716d1d5ac556a	eb7ea02e87b26fa488265940b952d2d3065a7b07831b9e38bd55225bc0c5c858
+src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/viewmodel/views/isonim_event_log_view.nim	db9c4c6924195d6630347f931128a1d0a9d7c22f5b784749911716d1d5ac556a	eb7ea02e87b26fa488265940b952d2d3065a7b07831b9e38bd55225bc0c5c858
+src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/viewmodel/views/isonim_event_log_view.nim	db9c4c6924195d6630347f931128a1d0a9d7c22f5b784749911716d1d5ac556a	eb7ea02e87b26fa488265940b952d2d3065a7b07831b9e38bd55225bc0c5c858
+src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/viewmodel/views/isonim_state_view.nim	2bf5cf331cabc68c9a48c2f6a055ae5e8f473d9992dced21a86f1848e346aa34	68a33a4b16b1e15562812871ca34f0a159dd99b2d46ea6044ca8a32aad31ceca
+src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend/viewmodel/views/isonim_event_log_view.nim	db9c4c6924195d6630347f931128a1d0a9d7c22f5b784749911716d1d5ac556a	eb7ea02e87b26fa488265940b952d2d3065a7b07831b9e38bd55225bc0c5c858
+src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	f79e6d078f444915a1d74da920345a8a260a98a862fb302a89debb93d4218c0a	08cc9bfeb1ef114588766946f7a6a6fe6e3157bc946b9f1db5fe516e71cba0fd
