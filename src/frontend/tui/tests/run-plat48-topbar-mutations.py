@@ -481,7 +481,7 @@ ARMS = [
         "a fully queued mouse report returns idle and needs another event-loop "
         "turn instead of being delivered immediately"),
     Arm("DR2", DRIVER,
-        "    if next >= 0 and char(next) in {'[', 'O'}:\n",
+        "    if next >= 0 and (char(next) in {'[', 'O'} or answer):\n",
         "    if false:\n",
         E_LATE,
         "the queued tail of a held ESC is split into Esc and keys instead "
