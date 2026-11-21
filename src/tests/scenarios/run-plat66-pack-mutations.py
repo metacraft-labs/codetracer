@@ -214,7 +214,17 @@ def build(part):
 
 
 class Display:
-    """A private Xvfb for the desktop's runs (2560x1440, 96 dpi)."""
+    """A private Xvfb for the desktop's runs (2560x1440, 96 dpi).
+
+    Started through scripts/lib/own-xvfb.sh, as every own Xvfb in this repo
+    is (scripts/test-own-xvfb.sh): the helper hands back the display only
+    once the server answers. A bash child sources it, prints the display,
+    and holds the server until its stdin closes; its EXIT trap stops it.
+    """
+
+    SCRIPT = ('. "$1"; trap own_xvfb_stop EXIT; '
+              'own_xvfb_start -screen 0 2560x1440x24 -dpi 96 -nolisten tcp >&2 || exit 1; '
+              'echo "$DISPLAY"; read -r _ || true')
 
     def __init__(self):
         self.proc = None
@@ -223,25 +233,26 @@ class Display:
     def ensure(self):
         if self.proc is not None and self.proc.poll() is None:
             return self.name
-        for n in range(150, 260):
-            if not os.path.exists(f"/tmp/.X11-unix/X{n}") and \
-                    not os.path.exists(f"/tmp/.X{n}-lock"):
-                self.proc = subprocess.Popen(
-                    ["Xvfb", f":{n}", "-screen", "0", "2560x1440x24", "-dpi", "96",
-                     "-nolisten", "tcp"], stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL)
-                for _ in range(100):
-                    if os.path.exists(f"/tmp/.X11-unix/X{n}"):
-                        self.name = f":{n}"
-                        return self.name
-                    time.sleep(0.1)
-                self.proc.kill()
-        raise RuntimeError("no free display for Xvfb")
+        self.proc = subprocess.Popen(
+            ["bash", "-c", self.SCRIPT, "own-xvfb", str(REPO / "scripts/lib/own-xvfb.sh")],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True)
+        line = self.proc.stdout.readline().strip()
+        if not line.startswith(":"):
+            err = self.proc.stderr.read() if self.proc.poll() is not None else ""
+            self.stop()
+            raise RuntimeError(f"own-xvfb.sh did not start Xvfb: {err.strip()}")
+        self.name = line
+        return self.name
 
     def stop(self):
         if self.proc is not None:
-            self.proc.kill()
-            self.proc.wait()
+            try:
+                self.proc.stdin.close()
+                self.proc.wait(timeout=10)
+            except Exception:
+                self.proc.kill()
+                self.proc.wait()
 
 
 DISPLAY = Display()
