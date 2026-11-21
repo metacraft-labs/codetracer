@@ -397,7 +397,9 @@ proc stripsOf(layout: Layout; area, footer: PxRect; footerLead = 0):
     let horizontal = edge in {leTop, leBottom}
     var cursor = (if horizontal: rect.x + SlotGapPx else: rect.y + StripInsetPx)
     for d in layout.dockedAt(edge):
-      let label = if d.title.len > 0: d.title else: labelOf($d.pane)
+      # A docked CONTRIBUTED pane is named by its qualified id, never by the
+      # `PaneKind` zero value its `pane` field holds (`paneRefOf`).
+      let label = if d.title.len > 0: d.title else: labelOf($d.paneRefOf)
       let extent = slotExtentPx(edge, label)
       # A footer label is a 24 px chip on the bar's content row.
       let inset = if edge == leBottom: max(0, (rect.h - TabHeightPx) div 2)
@@ -407,7 +409,7 @@ proc stripsOf(layout: Layout; area, footer: PxRect; footerLead = 0):
           PxRect(x: cursor, y: rect.y + inset, w: extent, h: rect.h - 2 * inset)
         else:
           PxRect(x: rect.x, y: cursor, w: rect.w, h: extent)
-      strip.slots.add GeomSlot(pane: $d.pane, label: label, rect: slot)
+      strip.slots.add GeomSlot(pane: $d.paneRefOf, label: label, rect: slot)
       cursor += extent + (if horizontal: SlotGapPx else: 0)
     result.strips.add strip
 

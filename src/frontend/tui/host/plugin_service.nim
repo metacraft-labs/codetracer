@@ -15,34 +15,12 @@ import ./plugin_panes
 # The runtime's door
 # ---------------------------------------------------------------------------
 
-const
-  ReservedPaletteEntries* = [
-    ("Plugins: Show status", ":plugins"),
-    ("Plugins: Recover input", ":plugins recover"),
-    ("Plugins: Disable all for this session", ":plugins disable-all"),
-    ("Plugins: Find the plugin causing a problem", ":plugins bisect")]
-    ## §11.7.6: entries no plugin can shadow. A plugin's own entries carry its
-    ## id in their label, so none can spell one of these exactly.
-
 proc paletteEntries*(p: SessionPlugins): seq[OmnibarEntry] =
-  for (label, line) in ReservedPaletteEntries:
-    result.add OmnibarEntry(kind: OmnibarMode.omCommand, label: label,
-                            detail: line, target: CommandLineTargetPrefix & line)
-  if p.isNil: return
-  for c in p.sup.commands:
-    let line = ":plugins run " & c.plugin & " " & c.op
-    result.add OmnibarEntry(kind: OmnibarMode.omCommand,
-      label: c.title & " (" & c.plugin & ")", detail: line,
-      target: CommandLineTargetPrefix & line)
-  for pane in p.sup.contributedPanes:
-    let line = ":plugins show " & pane.id
-    result.add OmnibarEntry(kind: OmnibarMode.omCommand,
-      label: "Show pane: " & pane.title & " (" & pane.id & ")", detail: line,
-      target: CommandLineTargetPrefix & line)
+  ## The plugins' palette entries (`plugin_processes.pluginPaletteEntries`),
+  ## each a command line the terminal runs as typed.
+  p.pluginPaletteEntries(CommandLineTargetPrefix)
 
 proc service*(p: SessionPlugins): PluginsService =
-  var lastLine = ""
-  var shownFaults = 0
   let panes = newPluginPanes(p)
   PluginsService(
     panes: proc(): seq[tuple[id, title: string; running: bool]] =
@@ -63,14 +41,7 @@ proc service*(p: SessionPlugins): PluginsService =
     control: proc(words: seq[string]): tuple[title, body: string] =
       p.control(words),
     statusText: proc(): string = p.statusText(),
-    takeNote: proc(): string =
-      if p.sup.notifications.len > shownFaults:
-        shownFaults = p.sup.notifications.len
-        return p.sup.notifications[^1].text & " (:plugins for more)"
-      if p.sup.statusLine != lastLine:
-        lastLine = p.sup.statusLine
-        return lastLine
-      "",
+    takeNote: proc(): string = p.takeNote(),
     observeEscape: proc(): bool = p.sup.observeEscape(),
     busy: proc(): bool = p.sup.busy,
     layerLabel: proc(): string = p.sup.topLayerLabel,

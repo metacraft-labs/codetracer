@@ -371,7 +371,8 @@ proc leavesFor*(shell: GpuiShell; id: WindowId;
   if idx >= 0:
     let top = shell.windows.windows[idx].layout.dockedAt(leTop)
     for i, d in top:
-      let slot = DockPaneSlot(pane: $d.pane, contributed: false, path: @[],
+      let slot = DockPaneSlot(pane: $d.paneRefOf, contributed: d.isContributed,
+                              path: @[],
                               tabIndex: i, tabCount: top.len, activeIndex: 0)
       var leaf = leafOf(slot, session, tree, loadedExtensions, d.title)
       leaf.topStrip = true

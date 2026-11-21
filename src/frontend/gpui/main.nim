@@ -159,6 +159,7 @@ import ../viewmodel/host/layout_preferences
 import ../viewmodel/host/table_column_widths
 import ../viewmodel/host/native_state
 import ./host/gpui_host
+import ./host/gpui_plugins             # Extensibility-Model §11: the session's plugin processes
 import ./host/pixel_capture             # PLAT-35: `--pixels-out`'s capture
 import headless_app/auto_hide_hover
 import headless_app/footer_info
@@ -398,6 +399,10 @@ OPTIONS:
                     remembered layouts are other files and are not read.
   --reset-layout    PLAT-45. Delete this product's remembered layout and open
                     the shared default arrangement.
+  --no-extensions   Safe mode: start no plugin process (as does
+                    CODETRACER_NO_EXTENSIONS=1). A pane a remembered layout
+                    places from a plugin keeps its slot and says which
+                    extension is not loaded.
   --dock-out=<file> PLAT-45. Write the window's projected dock document.
   --replay-ops=<spec>
                     Advance the recording before the window is drawn.
@@ -618,6 +623,9 @@ type
     reviewDataset: string
       ## PLAT-54: `--deepreview=<dataset>` — the review this window opens on
       ## (the desktop's `--deepreview`), entered into the VCS pane.
+    noExtensions: bool
+      ## `--no-extensions` (Extensibility-Model §11.7.6, safe mode): the
+      ## window starts no plugin process.
     keymap: string
       ## PLAT-68: `--keymap=<cua|emacs|vim|kakoune>`, this window only — the
       ## terminal's flag, through the same `sessionKeymap` precedence.
@@ -805,6 +813,8 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
       result.reviewSession = arg["--review-session=".len .. ^1]
     elif arg.startsWith("--deepreview="):
       result.reviewDataset = arg["--deepreview=".len .. ^1]
+    elif arg == "--no-extensions":
+      result.noExtensions = true
     elif arg.startsWith("--keymap="):
       let name = arg["--keymap=".len .. ^1]
       let selection = selectKeymap(name, "--keymap")
@@ -1325,6 +1335,9 @@ proc leaveFilesField(r: GpuiRenderer)
 
 proc routeWindowKey(r: GpuiRenderer; key: string; mods: seq[string])
   ## PLAT-68: forward-declared; defined with the router below.
+proc showPluginsRecovery(r: GpuiRenderer)
+  ## Extensibility-Model §11.7.6: forward-declared for `windowKey`; defined
+  ## with the plugins' pump.
 proc editKeyInert(name: string): bool
   ## PLAT-68 (Mode-Transitions §8.1): FORWARD-DECLARED; defined with the
   ## router's section beside `routeWindowKey`.
@@ -1720,6 +1733,56 @@ proc sayStatus(line: string) =
   gStatusNote = line
   gInertNoteShown = false
   traceGesture("status: " & line)
+
+# ---------------------------------------------------------------------------
+# Extensibility-Model §11: the session's plugins (`host/gpui_plugins`)
+# ---------------------------------------------------------------------------
+
+var
+  gPlugins: SessionPlugins = nil
+    ## The window's session's plugin processes; nil before the window opens,
+    ## in a plan or an off-screen frame, and in an Edit window.
+  gPluginMoves = new(seq[string])
+    ## The plugins' relayed debugger moves, as transport control ids, for
+    ## the loop to run as its own (`pumpPluginsWindow`).
+  gPluginsState = ""
+    ## The last status report the gesture trace was given, one line.
+  gPluginsFooter = ""
+    ## And the last footer note.
+  gPluginRecoveryKey = false
+    ## The key being handled is the recovery chord's third `Escape`: it is
+    ## delivered as usual but never to a plugin layer (`routeWindowKey`).
+
+proc pluginPanes(): HashSet[string] =
+  ## The contributed panes this window can draw (`leavesFor`'s
+  ## `loadedExtensions`).
+  gPlugins.loadedPanes
+
+proc pluginView(leaf: GpuiLeaf): ViewNode =
+  ## A contributed leaf's view: the tree its plugin last pushed
+  ## (`Supervisor.renderSurface`, never plugin code); nil for any other leaf.
+  if gPlugins.isNil or leaf.kind != glkContributed: nil
+  else: gPlugins.paneView(leaf.paneId)
+
+proc pluginViews(leafSet: GpuiLeafSet): Table[string, ViewNode] =
+  ## Every contributed leaf's view, for `renderLeaves`.
+  for leaf in leafSet.leaves:
+    if leaf.kind == glkContributed and not gPlugins.isNil:
+      result[leaf.paneId] = pluginView(leaf)
+
+proc tracePluginsState() =
+  ## The gesture trace's reading of the plugins' state, when it changed:
+  ## what a window lane reads to know a plugin started, ran or stopped.
+  if gPlugins.isNil:
+    return
+  let line = gPlugins.stateLine
+  if line != gPluginsState:
+    gPluginsState = line
+    traceGesture("plugins state " & line)
+  let footer = gPlugins.windowFooterNote(gStatusNote)
+  if footer != gPluginsFooter:
+    gPluginsFooter = footer
+    traceGesture("plugins footer " & footer)
 
 proc committedLayout(): Layout =
   let idx = gShell.windows.indexOf(gWindow)
@@ -2428,7 +2491,7 @@ proc adoptNewLeaves(r: GpuiRenderer) =
   ## draws it.
   if gShell.isNil:
     return
-  let fresh = gShell.leavesFor(gWindow)
+  let fresh = gShell.leavesFor(gWindow, pluginPanes())
   for adopted in fresh.leaves:
     if adopted.paneId.len == 0 or gPanes.hasKey(adopted.paneId):
       continue
@@ -2447,7 +2510,9 @@ proc adoptNewLeaves(r: GpuiRenderer) =
       let vm = searchVM()
       if not vm.isNil:
         leaf.vm = ViewModel(vm)
-    let (node, _) = renderLeaf(r, leaf, gEditorSurface, gEditorViewportPx)
+    # A plugin's pane docked by the omnibar draws its plugin's last view.
+    let (node, _) = renderLeaf(r, leaf, gEditorSurface, gEditorViewportPx,
+                               contributedView = pluginView(leaf))
     stripHeading(r, node)
     applyTextFaces(r, node)
     gPanes[leaf.paneId] = node
@@ -2641,7 +2706,8 @@ proc syncLeafContext() =
     callTracePaneWidthPx = gGeom.nodes[ct].body.w
     callTracePaneHeightPx = gGeom.nodes[ct].body.h
 
-proc redrawWindowLeaf(r: GpuiRenderer; pane: GpuiElement; leaf: GpuiLeaf) =
+proc redrawWindowLeaf(r: GpuiRenderer; pane: GpuiElement; leaf: GpuiLeaf;
+                      contributedView: ViewNode = nil) =
   ## `leaves.redrawLeafBody` for a pane whose heading the window removed:
   ## that procedure keeps its node's FIRST child as the heading and redraws
   ## the rest, so the old content is cleared first and a stand-in first child
@@ -2654,7 +2720,7 @@ proc redrawWindowLeaf(r: GpuiRenderer; pane: GpuiElement; leaf: GpuiLeaf) =
     r.removeChild(pane, nthChild(pane, childCount(pane) - 1))
   let stand = r.createElement("div")
   r.appendChild(pane, stand)
-  redrawLeafBody(r, pane, leaf)
+  redrawLeafBody(r, pane, leaf, contributedView = contributedView)
   r.removeChild(pane, stand)
   # M71 (#838): the Files and VCS panes' scrollbars were the pane's children
   # too; drawn again over what the leaf now shows.
@@ -4882,6 +4948,16 @@ proc windowKey(key: string; mods: seq[string]) =
       inc gGeometryKeys
       writeGeometry()
   traceGesture("window key " & key & (if mods.len > 0: " " & $mods else: ""))
+  # EXTENSIBILITY-MODEL §11.7.6: EVERY `Escape` is counted towards the
+  # recovery chord before anything below resolves it, so no binding — a
+  # plugin layer's, a menu's, a text over the window — can take it. The key is
+  # still delivered as usual; the third within a second popped every plugin
+  # layer, and the recovery dialog says which plugins held the keyboard.
+  gPluginRecoveryKey = gPlugins.observeWindowEscape(canonicalKeyOfGpui(key, mods))
+  defer:
+    if gPluginRecoveryKey:
+      gPluginRecoveryKey = false
+      showPluginsRecovery(r)
   # Any key between Alt's press and release makes it a chord, not a tap.
   if key != "alt":
     gAltTap.interrupted()
@@ -5461,22 +5537,28 @@ proc drawFooter(r: GpuiRenderer) =
                       else: groteskTextPx(locationCuts[^1], 14.0) + 2
   let rowEnd = if gSession.isNil: gGeom.footer.x + gGeom.footer.w - 8
                else: copyPathRect().x - 8
-  let noteNeed = if gStatusNote.len > 0: groteskTextPx(gStatusNote, 14.0) + 8
+  # Extensibility-Model §11.7.3: the top plugin layer names its plugin here,
+  # before the note; with no note, the plugins' status items.
+  let footerNote = gPlugins.windowFooterNote(gStatusNote)
+  let noteNeed = if footerNote.len > 0: groteskTextPx(footerNote, 14.0) + 8
                  else: 0
-  let fit = if gStatusNote.len > 0:
+  let fit = if footerNote.len > 0:
               fitFooterRow(rowEnd - noteX - 16, noteNeed, locationW,
                            locationFloor, certW)
             else:
               (note: 0, location: locationW, certificate: certW)
-  if gStatusNote.len > 0:
+  if footerNote.len > 0:
     let noteEnd = if gSession.isNil: rowEnd
                   else: rowEnd - fit.location - 16 - fit.certificate
     let note = absBox(r, PxRect(x: noteX, y: rowY, w: max(0, noteEnd - noteX),
                                 h: TabHeightPx))
     r.setAttribute(note, "data-ct-footer-note", gStatusNote)
+    if not gPlugins.isNil:
+      # What the note shows with the plugins: their layer, their items.
+      r.setAttribute(note, "data-ct-footer-plugins", footerNote)
     r.setStyle(note, "color", ink)
     r.setStyle(note, "overflow", "hidden")
-    text(r, note, gStatusNote)
+    text(r, note, footerNote)
     gTopEls.add note
   if not gSession.isNil:
     # From the right: the copy button, the location before it, the
@@ -6388,7 +6470,7 @@ proc showSession(r: GpuiRenderer; id: HeadlessSessionId) =
   applyRememberedColumnWidths()
   let rows = editorRowsOf(gGeom)
   gSourceService = newGpuiSourceService(gSession, gSession.tracePath, rows)
-  var leafSet = gShell.leavesFor(gWindow)
+  var leafSet = gShell.leavesFor(gWindow, pluginPanes())
   attachVcs(leafSet, getCurrentDir())
   attachTests(leafSet)
   attachProblems(leafSet)
@@ -7155,6 +7237,118 @@ proc performControl(r: GpuiRenderer; id: string) =
   traceGesture("control " & id & " tick=" & $gSession.getCurrentRRTicks())
   refreshReplayWindow(r)
 
+proc showContent(r: GpuiRenderer; title, text: string; diff = false)
+  ## Forward-declared for the plugins' verbs; defined with the overlays.
+
+proc elementText(node: GpuiElement): string =
+  ## The text an element subtree holds in the shim's element store, its
+  ## leaves' texts joined by spaces: what a contributed pane DREW, read back
+  ## across the FFI boundary rather than from the tree it was drawn from.
+  if node.isNil:
+    return ""
+  let n = childCount(node)
+  if n == 0:
+    return textContent(node).strip
+  var parts: seq[string]
+  for i in 0 ..< n:
+    let t = elementText(nthChild(node, i))
+    if t.len > 0:
+      parts.add t
+  parts.join(" ")
+
+proc redrawPluginPanes(r: GpuiRenderer) =
+  ## Every contributed leaf drawn again from the view its plugin last pushed
+  ## — never by running plugin code — and what it drew traced.
+  if gPlugins.isNil:
+    return
+  for leaf in gLeafSet.leaves:
+    if leaf.kind != glkContributed:
+      continue
+    let pane = gPanes.getOrDefault(leaf.paneId)
+    if pane.isNil:
+      continue
+    redrawWindowLeaf(r, pane, leaf, pluginView(leaf))
+    applyTextFaces(r, pane)
+    traceGesture("plugin pane " & leaf.paneId & " drew: " & elementText(pane))
+
+proc pumpPluginsWindow(r: GpuiRenderer): bool =
+  ## Extensibility-Model §11: the plugin processes — what they pushed, their
+  ## liveness, their deadlines and breakers — on every tick. Never blocks. A
+  ## plugin's relayed step runs as the window's own control (`performControl`,
+  ## a toolbar press's path), so the move is settled and drawn. Answers
+  ## whether anything the window shows changed.
+  if gPlugins.isNil:
+    return false
+  var changed = gPlugins.pump()
+  while gPluginMoves[].len > 0:
+    let control = gPluginMoves[][0]
+    gPluginMoves[].delete(0)
+    traceGesture("plugin move " & control)
+    performControl(r, control)
+    changed = true
+  let note = gPlugins.takeNote(" (Plugins: Show status for more)")
+  if note.len > 0:
+    sayStatus(note)
+    changed = true
+  tracePluginsState()
+  if changed:
+    redrawPluginPanes(r)
+    drawTopBar(r)
+  changed
+
+proc showPluginsRecovery(r: GpuiRenderer) =
+  ## §11.7.6: the recovery dialog, a host modal over every plugin layer.
+  if gPlugins.isNil:
+    return
+  let (title, body) = gPlugins.control(@["recovery-dialog"])
+  traceGesture("plugins dialog " & title & ": " & body.splitLines.join(" / "))
+  showContent(r, title, body)
+  drawTopBar(r)
+
+proc dockPluginPane(r: GpuiRenderer; id: string) =
+  ## *Show pane: …* — a running plugin's pane docked into the arrangement
+  ## (the layout model's `addContributedPane`, the one door), remembered with
+  ## the layout like any other pane, then focused. A pane already placed is
+  ## focused.
+  if gPlugins.isNil or id notin gPlugins.loadedPanes:
+    sayStatus("no plugin in this session contributes '" & id & "'")
+    drawTopBar(r)
+    return
+  if not committedLayout().tree.containsContributed(id):
+    var title = id
+    for pane in gPlugins.pluginPanesShown:
+      if pane.id == id: title = pane.title
+    applyGestureCommand(r, cmdAddContributedPane(id, title))
+    discard drawArrangement(r)
+  redrawPluginPanes(r)
+  focusWindowPane(r, id)
+  drawTopBar(r)
+
+proc runPluginsWords(r: GpuiRenderer; words: seq[string]) =
+  ## The `:plugins` verbs (`SessionPlugins.control`, the terminal's), from
+  ## the omnibar: a report is shown over the window, a one-line answer on the
+  ## status bar. `show` docks the pane instead of printing it.
+  if gPlugins.isNil:
+    sayStatus("this window runs no plugins")
+    drawTopBar(r)
+    return
+  if words.len >= 2 and words[0] == "show":
+    dockPluginPane(r, words[1])
+    return
+  let (title, body) = gPlugins.control(words)
+  traceGesture("plugins " & words.join(" ") & " -> " &
+               (if title.len > 0: title else: body))
+  if title.len > 0:
+    for line in body.splitLines:
+      traceGesture("plugins report " & line)
+    showContent(r, title, body)
+  else:
+    sayStatus(body)
+  # A grant, an enable or a disable changes what the panes show.
+  discard pumpPluginsWindow(r)
+  redrawPluginPanes(r)
+  drawTopBar(r)
+
 proc showPaneFromMenu(r: GpuiRenderer; pane: PaneKind) =
   let layout = committedLayout()
   let docked = layout.dockedIndex(pane)
@@ -7196,6 +7390,12 @@ proc showPaneFromMenu(r: GpuiRenderer; pane: PaneKind) =
     focusWindowPane(r, $pane)
   discard drawArrangement(r)
 
+proc windowPluginEntries(): seq[OmnibarEntry] =
+  ## Extensibility-Model §11.7.6: the reserved *Plugins: …* entries, every
+  ## plugin command and pane, and *Review* / *Grant* for a plugin waiting for
+  ## consent — read at each open, so a plugin that started since is listed.
+  if gPlugins.isNil: @[] else: gPlugins.pluginEntries()
+
 proc openOmnibar(r: GpuiRenderer; query = "") =
   if gOmnibar.isNil:
     # An Edit window's omnibox (Build-Output-Pane.md §3.12), made when first
@@ -7209,7 +7409,7 @@ proc openOmnibar(r: GpuiRenderer; query = "") =
     gOmnibar.setIndex(omnibarIndexOf(gSession.session.fileTreeVM,
                                      gSession.session.store, gMenu,
       terminalSettings = false) &
-                      gRecordings)
+                      gRecordings & windowPluginEntries())
   gOmnibar.open(query)
   drawTopBar(r)
 
@@ -7406,8 +7606,6 @@ proc runGpuiMenuAction(r: GpuiRenderer; action: string) =
     # Unreachable: `gpuiMenuRouteOf` gives `gmrNone` a reason.
     traceGesture("menu action " & action & " is not available here")
   drawTopBar(r)
-
-proc showContent(r: GpuiRenderer; title, text: string; diff = false)
 
 proc showTracepointHits(r: GpuiRenderer; hits: seq[TracepointSweepHit];
                         title: string) =
@@ -7690,6 +7888,15 @@ proc acceptOmnibar(r: GpuiRenderer) =
   # the search runs into the pane; `:grep` alone keeps the field open.
   # `:cnext` / `:cprev` (`:cn` / `:cp`) open the next / previous result.
   let (mode, needle) = classifyOmnibarQuery(gOmnibar.query)
+  # Extensibility-Model §11: `:plugins …` — the terminal's verbs (status,
+  # review, grant, run, show, disable, recover, bisect, …), typed.
+  if mode == omCommand:
+    let typed = pluginsWordsOf(needle)
+    if typed.ok:
+      gOmnibar.close()
+      drawTopBar(r)
+      runPluginsWords(r, typed.words)
+      return
   # PLAT-58 (Request-Panel.md § N.4): `:requests <text>` is the Requests
   # pane's URL search; `:requests` alone keeps the field open; `:requests `
   # with nothing after the verb clears it.
@@ -7818,6 +8025,12 @@ proc acceptOmnibar(r: GpuiRenderer) =
       refreshReplayWindow(r)
       return
   of omCommand:
+    # A plugin entry's target is a `:plugins …` line, not a menu action.
+    let chosen = pluginsWordsOf(entry.target)
+    if entry.target.startsWith(GpuiPluginsTargetPrefix) and chosen.ok:
+      drawTopBar(r)
+      runPluginsWords(r, chosen.words)
+      return
     runGpuiMenuAction(r, entry.target)
     return
   of omRecording:
@@ -7836,7 +8049,7 @@ proc revealNext(r: GpuiRenderer) =
   var next = 0
   if gGestures.revealing:
     for i, d in layout.docked:
-      if d.pane == gGestures.reveal.pane:
+      if not d.isContributed and d.pane == gGestures.reveal.pane:
         next = i + 1
   if next >= layout.docked.len:
     gGestures.reveal = noInteraction()
@@ -8066,6 +8279,8 @@ proc applyHoverReply(r: GpuiRenderer; reply: AutoHideReply) =
 
 proc hoverTick() {.cdecl.}
 proc vcsTick() {.cdecl.}
+proc pluginTick() {.cdecl.}
+  ## Extensibility-Model §11: the plugins' own tick (`armHoverTick`).
 proc flowAfterWindowTick() {.cdecl.}
   ## Forward-declared; defined with the replay window's refresh.
 
@@ -8118,6 +8333,14 @@ var gVcsBackground = false
   ## by `vcsTick` and on every return to the window by `vcsWindowActivated`;
   ## "" when the window has no VCS pane.
 
+const
+  PluginBusyPollMs = 5
+    ## Extensibility-Model §11.7.4: while a plugin request is in flight.
+  PluginIdlePollMs = 50
+    ## While plugins run and nothing is in flight.
+var gPluginVcsAtMs = 0'i64
+  ## When the plugins' tick last refreshed the VCS pane (`pluginTick`).
+
 var gArmedTick = (due: -2'i64, vcs: false)
   ## What the shim's tick is armed for: the hover machine's due moment, or
   ## the VCS refresh, or nothing (`due` -1, `vcs` false). The shim restarts
@@ -8151,6 +8374,17 @@ proc armHoverTick() =
     if gArmedTick != want:
       gArmedTick = want
       gpui_set_tick(uint32(FlowAfterWindowPollMs), flowAfterWindowTick)
+    return
+  # Extensibility-Model §11.7.4: a key routed to a plugin has a 50 ms budget
+  # and a 500 ms deadline, and a process starting or due to restart is
+  # watched closely: while one is in flight the plugins are polled every
+  # `PluginBusyPollMs`, ahead of every other activity (each of which pumps
+  # them too).
+  if due < 0 and gPlugins.pluginsBusy:
+    let want = (due: -12'i64, vcs: false)
+    if gArmedTick != want:
+      gArmedTick = want
+      gpui_set_tick(uint32(PluginBusyPollMs), pluginTick)
     return
   if due < 0 and nativeFindInFiles.running:
     let want = (due: -4'i64, vcs: false)
@@ -8229,6 +8463,15 @@ proc armHoverTick() =
     if gArmedTick != want:
       gArmedTick = want
       gpui_set_tick(uint32(CertificatePollMs), certificateTick)
+    return
+  # A running plugin pushes when it likes (a new view after a step), so a
+  # window with plugins is polled every `PluginIdlePollMs` when nothing else
+  # wakes it — the tick then keeps the VCS refresh's own pace too.
+  if due < 0 and gPlugins.pluginsLive:
+    let want = (due: -13'i64, vcs: false)
+    if gArmedTick != want:
+      gArmedTick = want
+      gpui_set_tick(uint32(PluginIdlePollMs), pluginTick)
     return
   let want = (due: due, vcs: due < 0 and gVcsDirectory.len > 0)
   if want == gArmedTick:
@@ -10119,6 +10362,7 @@ proc pollCertificateIndicator(r: GpuiRenderer) =
 proc certificateTick() {.cdecl.} =
   var r: GpuiRenderer
   discard pumpShellWindow(r)   # PLAT-61: a running shell rides every tick
+  discard pumpPluginsWindow(r)   # Extensibility-Model §11: and the plugins
   gArmedTick = (due: -2'i64, vcs: false)
   pollCertificateIndicator(r)
   armHoverTick()
@@ -10439,6 +10683,7 @@ proc recordTick() {.cdecl.} =
   ## recording opens in the tab that asked (`pollWelcomeRecording`).
   var r: GpuiRenderer
   discard pumpShellWindow(r)   # PLAT-61: a running shell rides every tick
+  discard pumpPluginsWindow(r)   # Extensibility-Model §11: and the plugins
   gArmedTick = (due: -2'i64, vcs: false)
   discard pollWelcomeRecording(r)
   discard pollGpuiNimTrace(r)
@@ -10457,6 +10702,7 @@ proc agentTick() {.cdecl.} =
   ## works.
   var r: GpuiRenderer
   discard pumpShellWindow(r)   # PLAT-61: a running shell rides every tick
+  discard pumpPluginsWindow(r)   # Extensibility-Model §11: and the plugins
   gArmedTick = (due: -2'i64, vcs: false)
   var changed = false
   for h in gAgentHosts.values:
@@ -10473,6 +10719,7 @@ proc searchTick() {.cdecl.} =
   ## drawn again when what it shows moved; re-armed while it runs.
   var r: GpuiRenderer
   discard pumpShellWindow(r)   # PLAT-61: a running shell rides every tick
+  discard pumpPluginsWindow(r)   # Extensibility-Model §11: and the plugins
   gArmedTick = (due: -2'i64, vcs: false)
   let vm = searchVM()
   let before = if vm.isNil: (-1, false) else: (vm.results.val.len,
@@ -10489,6 +10736,7 @@ proc hoverTick() {.cdecl.} =
   ## with keeps its own pace.
   var r: GpuiRenderer
   discard pumpShellWindow(r)   # PLAT-61: a running shell rides every tick
+  discard pumpPluginsWindow(r)   # Extensibility-Model §11: and the plugins
   # The arming this tick answered is spent: whatever is due next is armed.
   gArmedTick = (due: -2'i64, vcs: false)
   applyHoverReply(r, gAutoHide.tick(hoverNowMs()))
@@ -10600,7 +10848,23 @@ proc vcsTick() {.cdecl.} =
   ## (`gpui_set_tick`, on the loop's own thread).
   refreshVcsPane()
   var r: GpuiRenderer
+  discard pumpPluginsWindow(r)
   pollCertificateIndicator(r)
+
+proc pluginTick() {.cdecl.} =
+  ## Extensibility-Model §11: the plugins pumped, then whatever is due next
+  ## armed — and, while this tick stands in for the VCS refresh's, the VCS
+  ## pane refreshed at that refresh's own pace.
+  var r: GpuiRenderer
+  discard pumpShellWindow(r)   # PLAT-61: a running shell rides every tick
+  discard pumpPluginsWindow(r)
+  let now = hoverNowMs()
+  if gVcsDirectory.len > 0 and now - gPluginVcsAtMs >= int64(VCSRefreshIntervalMs):
+    gPluginVcsAtMs = now
+    refreshVcsPane()
+  pollCertificateIndicator(r)
+  gArmedTick = (due: -2'i64, vcs: false)
+  armHoverTick()
 
 proc vcsWindowActivated() =
   ## The second trigger: the user came back to the window from another
@@ -13066,7 +13330,7 @@ proc buildWindowOperationTables(r: GpuiRenderer) =
     let docked = committedLayout().docked
     var open = false
     for d in docked:
-      if d.pane == c.target.pane: open = d.open
+      if not d.isContributed and d.pane == c.target.pane: open = d.open
     gAutoHide.clicked()
     applyGestureCommand(r, if open: cmdCloseDocked(c.target.pane)
                            else: cmdOpenDocked(c.target.pane))
@@ -13401,6 +13665,13 @@ proc probeWindowKey(key: string; mods: seq[string]): string =
   canonicalKeyOfGpui(key, mods) & " at " & $windowScopePath() & " -> " &
     describeResolution(res)
 
+proc pluginHostModalOpen(): bool =
+  ## §11.7.3: the window's own modal surfaces, every one of which ranks above
+  ## every plugin layer: the omnibar, a text shown over the window, the
+  ## program menu, the right-click menu and the find bar.
+  (not gOmnibar.isNil and gOmnibar.isOpen) or gContent.open or
+    (not gMenu.isNil and gMenu.isOpen) or gCtxMenu.open or gFind.open
+
 proc routeWindowKey(r: GpuiRenderer; key: string; mods: seq[string]) =
   ## One GPUI keystroke through the shared router: decoded to its canonical
   ## name (`canonicalKeyOfGpui`, GPUI's one decoder), resolved for THIS
@@ -13430,6 +13701,21 @@ proc routeWindowKey(r: GpuiRenderer; key: string; mods: seq[string]) =
   if editorFocused():
     discard debugDocumentFor(editorPath(), gEditorSurface.executionLine)
   syncOverlayLayers()
+  # EXTENSIBILITY-MODEL §11.7: THE PLUGINS, DECIDED FROM WHAT THEY PUSHED, in
+  # this turn. Their layers rank below every host modal (the supervisor asks
+  # `pluginHostModalOpen`); the plugin pass is consulted only when the user's
+  # own layer has no row for the key (user, then plugins, then the base). A
+  # key routed to a plugin is consumed here; one it never answers is dropped
+  # and the status bar says so (`pumpPluginsWindow`).
+  if not gPlugins.isNil and not gPluginRecoveryKey:
+    var userBound = false
+    for b in gRouter.user.bindings:
+      if b.chords.len == 1 and b.chords[0].toLowerAscii == name.toLowerAscii:
+        userBound = true
+    if gPlugins.routePluginKey(name, userBound):
+      traceGesture("plugin key " & name)
+      drawTopBar(r)
+      return
   let path = windowScopePath()
   traceGesture("key " & name & " at " & $path)
   let mode = if gFindBrowsing and not gFind.open: nmSearch else: nmNormal
@@ -16477,7 +16763,28 @@ proc runOpen(cmd: GpuiCommand): int =
   gEditorTab = editorTabLabel(surface.path, false)
 
   var r: GpuiRenderer
-  var leafSet = shell.leavesFor(windowId)
+  # EXTENSIBILITY-MODEL §11: THE SESSION'S PLUGINS, each installed package's
+  # native process beside this session — for a window only (a plan or an
+  # off-screen frame runs no loop to pump them). `--no-extensions` and
+  # `CODETRACER_NO_EXTENSIONS` are read before anything is discovered, so
+  # safe mode starts no process at all. Before the leaves, so a contributed
+  # pane the remembered layout places is drawn from its plugin, and one from
+  # a plugin that is not loaded is the report naming it.
+  if opensWindow(cmd):
+    gPlugins = openWindowPlugins(session.session, cmd.noExtensions,
+                                 cmd.traceFolder)
+    gPlugins.routeMovesToControls(gPluginMoves)
+    gPlugins.setHostModal(pluginHostModalOpen)
+    for id in gPlugins.awaitingConsent:
+      traceGesture("plugins awaiting consent " & id)
+    tracePluginsState()
+  defer:
+    gPlugins.close()
+    gPlugins = nil
+  var leafSet = shell.leavesFor(windowId, pluginPanes())
+  for leaf in leafSet.leaves:
+    if leaf.kind == glkUnloadedExtension:
+      traceGesture("leaf " & leaf.paneId & " unloaded-extension")
   # PLAT-54: the session first, so the Agent Activity leaf gets its host's
   # ViewModel beside the VCS pane's.
   gSession = session
@@ -16566,7 +16873,8 @@ proc runOpen(cmd: GpuiCommand): int =
   followEditorView()
   let drawn = renderLeaves(r, leafSet, gEditorSurface, gEditorViewportPx,
                            gEditorView.leftCol, gEditorView.contentCols,
-                           editorCaretMark())
+                           editorCaretMark(),
+                           contributedViews = pluginViews(leafSet))
   # PLAT-47 part B: what the window's gestures and the call trace's paging
   # act on. A rearrangement is remembered on the terms `--layout-ops` is:
   # never over a quarantined file, and not for a session opened from a named

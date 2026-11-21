@@ -36,6 +36,24 @@ The palette lists every plugin command and pane, and four entries no plugin can
 shadow: *Plugins: Show status*, *Plugins: Recover input*, *Plugins: Disable all
 for this session* and *Plugins: Find the plugin causing a problem*.
 
+## In the GPUI window
+
+`codetracer-gpui` runs the same plugins. Open the omnibar (`Ctrl+Shift+P`)
+and type any of the `:plugins` lines above, or pick an entry:
+
+- *Plugins: Review <id>* and *Plugins: Grant <id>* for a plugin waiting for
+  your consent;
+- each plugin command, for example *Metrics: Step forward (acme-tools.metrics)*;
+- *Show pane: <title> (<plugin>/<pane>)*, which docks the plugin's pane into the
+  window. The window remembers it with the rest of the layout. If you later
+  start without that plugin, the pane keeps its place and says which extension
+  is not loaded.
+
+The footer names the plugin that holds the keyboard (`FLAME MODE
+(acme-tools.flame)`) and shows the plugins' status items and the sentence about
+a dropped key. `--no-extensions` (or `CODETRACER_NO_EXTENSIONS=1`) starts no
+plugin process.
+
 Each plugin has its own settings and its own switch, in
 `plugin-settings.json` in your CodeTracer user directory:
 
