@@ -551,7 +551,7 @@ else
 	# against a mutant with the fix removed.
 	printf 'use flake\n' >"$repo/.envrc"
 	git -C "$repo" init -q 2>/dev/null
-	git -C "$repo" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init 2>/dev/null
+	git -C "$repo" -c user.email=t@t -c user.name=t -c commit.gpgsign=false commit -q --allow-empty -m init 2>/dev/null
 
 	# The condition that mattered: no submodules at all, so `grep -c '^-'`
 	# counts zero and exits 1.

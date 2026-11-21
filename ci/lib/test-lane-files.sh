@@ -1725,6 +1725,7 @@ test_lane_files() {
 				'/test_plugin_surfaces\.nim$' \
 				'/test_plugin_grant_lifecycle\.nim$' \
 				'/test_plugin_process_host\.nim$' \
+				'/test_ct_lens_plugins\.nim$' \
 				'/test_every_mountable_pane_has_a_factory_arm\.nim$' \
 				'/test_every_status_surface_has_an_entry_point\.nim$' \
 				'/test_view_census\.nim$' \
@@ -1735,7 +1736,8 @@ test_lane_files() {
 		# plugin processes with `fork`/`execve` over `std/posix` pipes — the
 		# native front-ends' plugin supervisor — which this backend has no
 		# process to run; its wire half, `test_plugin_protocol_schema`, runs
-		# here.
+		# here. `test_ct_lens_plugins` starts the `ct-lens` package the same
+		# way, and runs git.
 		# `test_native_file_tree_operations` (K19) creates, renames and moves
 		# to a trash REAL files in a temporary directory: its subject,
 		# `host/native_file_tree.nim`, is the native front-ends' disk half and
@@ -2005,7 +2007,10 @@ test_lane_files() {
 				'/test_platform_desktop_native\.nim$' \
 				'/test_project_action_runner\.nim$' \
 				'/test_native_file_tree_operations\.nim$' \
-				'/test_plugin_process_host\.nim$'
+				'/test_plugin_process_host\.nim$' \
+				'/test_ct_lens_plugins\.nim$'
+		# TWELVE entries since the `ct-lens` plugin package: its suite, like
+		# the supervisor's, forks and execs real plugin processes.
 		# ELEVEN entries since Extensibility-Model.md §11: the plugin
 		# supervisor's suite forks and execs real plugin processes.
 		# TEN entries since K19: `test_native_file_tree_operations` creates,

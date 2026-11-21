@@ -1,0 +1,211 @@
+{
+  "package": "ct-lens",
+  "host": {
+    "kind": "native",
+    "executable": "bin/ct-lens-plugins"
+  },
+  "plugins": [
+    {
+      "id": "ct-lens.history",
+      "displayName": "Line history",
+      "version": "0.1.0",
+      "requires": {
+        "core": ">=1.0.0 <2.0.0"
+      },
+      "capabilities": [
+        "process"
+      ],
+      "traceEgress": {
+        "acknowledged": true,
+        "statement": "runs git on the source files of the recording you are debugging; nothing leaves this machine"
+      },
+      "activation": [
+        {
+          "event": "trace-opened"
+        }
+      ],
+      "contributes": {
+        "pane": [
+          {
+            "id": "history",
+            "title": "Line history",
+            "views": [
+              "Tree",
+              "Table",
+              "Text"
+            ]
+          }
+        ],
+        "command": [
+          {
+            "id": "history.refresh",
+            "title": "Line history: Refresh"
+          }
+        ],
+        "statusItem": [
+          {
+            "id": "history.status",
+            "title": "Line history",
+            "views": [
+              "Text"
+            ]
+          }
+        ]
+      },
+      "settings": {
+        "type": "object",
+        "properties": {
+          "git": {
+            "type": "string",
+            "default": "git"
+          },
+          "limit": {
+            "type": "integer",
+            "default": 5
+          },
+          "timeoutMs": {
+            "type": "integer",
+            "default": 15000
+          }
+        }
+      }
+    },
+    {
+      "id": "ct-lens.watch",
+      "displayName": "Changed values",
+      "version": "0.1.0",
+      "requires": {
+        "core": ">=1.0.0 <2.0.0"
+      },
+      "capabilities": [
+        "process"
+      ],
+      "traceEgress": {
+        "acknowledged": true,
+        "statement": "reads the values of the recording you are debugging and keeps them on this machine"
+      },
+      "activation": [
+        {
+          "event": "trace-opened"
+        }
+      ],
+      "contributes": {
+        "pane": [
+          {
+            "id": "changes",
+            "title": "Changed values",
+            "views": [
+              "Tree",
+              "Table",
+              "Text"
+            ]
+          }
+        ],
+        "command": [
+          {
+            "id": "watch.add-changed",
+            "title": "Changed values: Watch what this step changed"
+          }
+        ],
+        "statusItem": [
+          {
+            "id": "watch.status",
+            "title": "Changed values",
+            "views": [
+              "Text"
+            ]
+          }
+        ],
+        "viewModel": [
+          {
+            "id": "visualisers",
+            "version": "1.0.0"
+          }
+        ]
+      },
+      "keybindings": [
+        {
+          "key": "f7",
+          "command": "watch.add-changed",
+          "scope": "window",
+          "when": "plugin.ct-lens.watch.hasChanges"
+        }
+      ],
+      "settings": {
+        "type": "object",
+        "properties": {
+          "nested": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      }
+    },
+    {
+      "id": "ct-lens.jump",
+      "displayName": "Jump to call",
+      "version": "0.1.0",
+      "requires": {
+        "core": ">=1.0.0 <2.0.0"
+      },
+      "capabilities": [
+        "process"
+      ],
+      "traceEgress": {
+        "acknowledged": true,
+        "statement": "reads the calls of the recording you are debugging and keeps them on this machine"
+      },
+      "capturesWindowInput": {
+        "reason": "while you choose a call, the digits 1-9 pick it and q cancels"
+      },
+      "activation": [
+        {
+          "event": "trace-opened"
+        }
+      ],
+      "contributes": {
+        "pane": [
+          {
+            "id": "calls",
+            "title": "Jump to call",
+            "views": [
+              "Tree",
+              "List",
+              "Text"
+            ]
+          }
+        ],
+        "command": [
+          {
+            "id": "jump.open",
+            "title": "Jump to call: Choose a call"
+          },
+          {
+            "id": "jump.pick",
+            "title": "Jump to call: Jump to the chosen call"
+          },
+          {
+            "id": "jump.close",
+            "title": "Jump to call: Cancel"
+          }
+        ],
+        "statusItem": [
+          {
+            "id": "jump.status",
+            "title": "Jump to call",
+            "views": [
+              "Text"
+            ]
+          }
+        ]
+      },
+      "keybindings": [
+        {
+          "key": "shift+f7",
+          "command": "jump.open",
+          "scope": "window"
+        }
+      ]
+    }
+  ]
+}

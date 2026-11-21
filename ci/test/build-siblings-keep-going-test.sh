@@ -90,7 +90,7 @@ make_sibling() {
 	if ! {
 		git -C "$dir" init -q &&
 			git -C "$dir" add justfile &&
-			git -C "$dir" -c user.name=t -c user.email=t@t commit -qm init
+			git -C "$dir" -c user.name=t -c user.email=t@t -c commit.gpgsign=false commit -qm init
 	}; then
 		echo "FAIL: cannot create the scratch sibling $1" >&2
 		exit 1

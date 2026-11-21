@@ -10,7 +10,9 @@
 # which opens the recording, steps it and compares the two cores' documents.
 #
 #   REPLAY_SERVER_BIN          the engine (required)
-#   CT_WEB_CORE_RECORDING      the recording folder (required)
+#   CT_WEB_CORE_RECORDING      the recording folder; without one, CT_WEB_CORE_PROGRAM
+#                              (default test-programs/js_flow_test/flow_test.js) is
+#                              recorded with CT_BIN (default the build's ct)
 #   CT_WEB_CORE_ENGINES        engines to run (default "chromium firefox")
 #   CT_WEB_CORE_STEPS          steps per run (default 4)
 #   CT_WEB_CORE_RELEASE=1      build both cores -d:release
@@ -34,12 +36,43 @@ for tool in nim emcc node; do
 	fi
 done
 replay_server="${REPLAY_SERVER_BIN:-}"
+# Unset: the places the other suites search, in src/common/replay_server_path's
+# order (a CI job builds it into cargo's tree with `test-vm-recorder-gated`).
+if [ -z "${replay_server}" ]; then
+	for c in "src/build-debug-repro/bin/replay-server" "src/build-debug/bin/replay-server" \
+		src/db-backend/target/debug/replay-server src/db-backend/target/release/replay-server; do
+		if [ -x "${c}" ]; then replay_server="${repo_root}/${c}" && break; fi
+	done
+fi
 recording="${CT_WEB_CORE_RECORDING:-}"
 if [ -z "${replay_server}" ] || [ ! -x "${replay_server}" ]; then
 	echo "ERROR: REPLAY_SERVER_BIN must name a replay-server binary (got '${replay_server}')." >&2
 	exit 2
 fi
-if [ -z "${recording}" ] || [ ! -d "${recording}" ]; then
+# No recording given: make one, with the same `ct record` a user records
+# with, from CT_WEB_CORE_PROGRAM (default: the JavaScript flow test, which the
+# CI job's JS recorder can record).
+if [ -z "${recording}" ]; then
+	program="${CT_WEB_CORE_PROGRAM:-test-programs/js_flow_test/flow_test.js}"
+	ct_bin="${CT_BIN:-}"
+	if [ -z "${ct_bin}" ]; then
+		for c in src/build-debug/bin/ct src/build-debug-repro/bin/ct src/build-release/bin/ct; do
+			[ -x "${c}" ] && ct_bin="${c}" && break
+		done
+	fi
+	if [ -z "${ct_bin}" ] || [ ! -x "${ct_bin}" ]; then
+		echo "ERROR: no recording given and no ct to record one (set CT_BIN or build ct)." >&2
+		exit 2
+	fi
+	recording="${CT_WEB_CORE_OUT:-${repo_root}/test-logs/web-core}-recording"
+	rm -rf "${recording}"
+	echo "--- recording ${program} with ${ct_bin} ---"
+	if ! "${ct_bin}" record -o "${recording}" "${program}"; then
+		echo "  FAIL: ct record ${program} failed"
+		exit 1
+	fi
+fi
+if [ ! -d "${recording}" ]; then
 	echo "ERROR: CT_WEB_CORE_RECORDING must name a recording folder (got '${recording}')." >&2
 	exit 2
 fi
@@ -66,6 +99,7 @@ nim_common=(--hints:off --warnings:off --path:src/frontend/viewmodel -d:ctWasmCo
 
 echo "--- building the wasm32 core (${build_label}) ---"
 exports="_main,_ctwBoot,_ctwPump,_ctwDeliver,_ctwOpenFolder,_ctwPhase,_ctwFailure,_ctwStep,_ctwStepping,_ctwPosition,_ctwReadCrossings,_ctwSetViewport,_ctwMounted,_ctwPending"
+exports="${exports},_ctwFullValueOf,_ctwEventLogMetrics,_ctwEventLogSearch,_ctwEventLogTotal,_ctwEventLogCurrent,_ctwEventLogRowPx,_ctwAttach"
 exports="${exports},_isonimFrameBase,_isonimFrameLen,_isonimFrameOps,_isonimFrameReset,_isonimFrameManifest,_isonimFrameDispatch,_isonimFrameForget"
 if ! nim c "${nim_common[@]}" "${opt_flags[@]}" \
 	--cpu:wasm32 --os:linux -d:emscripten \
@@ -97,6 +131,18 @@ fi
 	cat "${out}/core_js.raw.js"
 	echo "})();"
 } >"${out}/core_js.js"
+
+echo "--- building the host's decoration bundle (${build_label}) ---"
+if ! nim js "${nim_common[@]}" "${opt_flags[@]}" --nimcache:"${cache_root}/decorations" \
+	-o:"${out}/decorations.raw.js" src/frontend/web_core/web_core_decorations.nim; then
+	echo "  FAIL: the decoration bundle did not build"
+	exit 1
+fi
+{
+	echo "(function(){"
+	cat "${out}/decorations.raw.js"
+	echo "})();"
+} >"${out}/decorations.js"
 
 cp "${applier}" src/frontend/web_core/web_core_host.js ci/test/web-core-browser/page.html "${out}/"
 echo "WEB-CORE-ARTIFACT build=${build_label}" \

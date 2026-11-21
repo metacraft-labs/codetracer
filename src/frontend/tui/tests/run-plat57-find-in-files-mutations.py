@@ -623,7 +623,7 @@ def build_prefix() -> tuple:
     shutil.rmtree(str(PREFIX) + ".build", ignore_errors=True)
     p = subprocess.run(["bash", "scripts/plat45-desktop-prefix.sh", str(PREFIX),
                         "src/config/default_layout.json"], cwd=ROOT,
-                       capture_output=True, text=True, timeout=SUITE_TIMEOUT)
+                       capture_output=True, text=True, timeout=build_timeout(SUITE_TIMEOUT))
     if p.returncode != 0:
         return False, p.stdout + p.stderr
     frontend = PREFIX / "frontend"
@@ -681,7 +681,7 @@ def run_electron(path: str) -> RunResult:
                             text=True, encoding="utf-8", errors="replace",
                             env=env, start_new_session=True)
     try:
-        stdout, stderr = proc.communicate(timeout=SUITE_TIMEOUT)
+        stdout, stderr = proc.communicate(timeout=build_timeout(SUITE_TIMEOUT))
     except BaseException as e:
         try:
             os.killpg(proc.pid, signal.SIGKILL)
@@ -908,7 +908,7 @@ def check_control_hashes() -> bool:
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "ci" / "lib"))
-from harness_guard import refuse_undeclared_arms  # noqa: E402
+from harness_guard import build_timeout, refuse_undeclared_arms  # noqa: E402
 
 
 def main() -> int:

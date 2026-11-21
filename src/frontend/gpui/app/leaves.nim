@@ -4736,6 +4736,25 @@ proc renderPaneView(r: GpuiRenderer; parent: GpuiElement;
     r.appendChild(parent, binding.root)
   pv.report.len == 0
 
+const ContributedPaneAttribute* = "data-ct-contributed-pane"
+  ## A contributed leaf drawing its plugin's view names the qualified pane id
+  ## it drew (`renderContributedView`).
+
+const NoContributedViewReport* =
+  "no view was attached to this contributed pane: the window runs no " &
+  "plugin host for it"
+  ## A contributed leaf the host attached no view to. Not the "extension that
+  ## is not loaded" report: the pane's plugin IS loaded (that is what
+  ## `glkContributed` says), and a host that forgot to attach its view must
+  ## not read as a plugin the user has to install.
+
+proc renderContributedView*(r: GpuiRenderer; parent: GpuiElement;
+                            leaf: GpuiLeaf; view: ViewNode) =
+  ## A contributed pane's view, through the vocabulary's GPUI binding — the
+  ## binding every built-in pane's generic view is drawn by.
+  r.setAttribute(parent, ContributedPaneAttribute, leaf.paneId)
+  r.appendChild(parent, renderGpui(r, view).root)
+
 proc paneTitleElement(r: GpuiRenderer; leaf: GpuiLeaf): GpuiElement =
   ## A leaf's title, carrying its TEXT ROLE, its metric and its token.
   ##
@@ -4756,7 +4775,8 @@ proc renderLeaf*(r: GpuiRenderer; leaf: GpuiLeaf;
                 editorViewportPx = 0;
                 editorScrollLeftCols = 0;
                 editorContentCols = -1;
-                editorCaretMark = -1): (GpuiElement, bool) =
+                editorCaretMark = -1;
+                contributedView: ViewNode = nil): (GpuiElement, bool) =
   ## One leaf's subtree, and whether it is a REPORT rather than a live pane.
   ##
   ## Three states and not two, which is PLAT-9's `PaneRefKind` arriving at a
@@ -4818,6 +4838,22 @@ proc renderLeaf*(r: GpuiRenderer; leaf: GpuiLeaf;
       r.appendChild(node, paneTitleElement(r, leaf))
       discard renderPaneView(r, node, leaf, GpuiPanelBudget)
       return (node, true)
+    # A CONTRIBUTED pane from a loaded plugin draws the view its plugin last
+    # pushed (Extensibility-Model §11.4), which the host hands over as
+    # `contributedView` from `Supervisor.renderSurface`: no plugin code runs
+    # to draw it, and the supervisor answers a fault, a starting or disabled
+    # plugin and a refused view with a sentence of its own, never nil. The
+    # view is a parameter, not a field of the leaf, because the shell
+    # (`app/shell.nim`) is vocabulary-free by construction.
+    if leaf.kind == glkContributed:
+      r.appendChild(node, paneTitleElement(r, leaf))
+      if contributedView.isNil:
+        r.setAttribute(node, StateAttribute, "pane-report")
+        r.appendChild(node, r.createTextNode(NoContributedViewReport))
+        return (node, true)
+      r.setAttribute(node, StateAttribute, "live")
+      renderContributedView(r, node, leaf, contributedView)
+      return (node, false)
     if not leaf.live:
       r.setAttribute(node, StateAttribute, "not-launched")
       # **THE SENTENCE NAMES THE PRODUCT MODE**, because "waiting for the
@@ -4847,11 +4883,7 @@ proc renderLeaf*(r: GpuiRenderer; leaf: GpuiLeaf;
         r.setAttribute(node, StateAttribute, "pane-report")
         return (node, true)
       return (node, false)
-    # A CONTRIBUTED pane that IS loaded has no `PaneKind` and therefore no
-    # entry in `pane_views`' exhaustive `case`. It keeps the title it had,
-    # which is what a plugin's pane was before PLAT-22 and still is: PLAT-9
-    # owns what a plugin surface renders, and inventing a tree for it here
-    # would be this front-end deciding a question that milestone owns.
+    # A contributed leaf returned above, drawn from its plugin's view.
     return (node, false)
 
 proc setHeadingText*(r: GpuiRenderer; node: GpuiElement; text: string) =
@@ -4866,16 +4898,21 @@ proc setHeadingText*(r: GpuiRenderer; node: GpuiElement; text: string) =
   r.appendChild(heading, r.createTextNode(text))
 
 proc redrawLeafBody*(r: GpuiRenderer; node: GpuiElement; leaf: GpuiLeaf;
-                     heading = "") =
+                     heading = ""; contributedView: ViewNode = nil) =
   ## PLAT-47 B3: draw a live pane's view again, in place — everything after
   ## its heading removed and rebuilt by `renderPaneView`, the function that
   ## drew it the first time — after its ViewModel moved (a scrolled call
   ## trace). `heading`, when given, replaces the title's text.
-  if node.isNil or leaf.kind != glkBuiltin:
+  if node.isNil or leaf.kind == glkUnloadedExtension:
+    return
+  if leaf.kind == glkContributed and contributedView.isNil:
     return
   while childCount(node) > 1:
     r.removeChild(node, nthChild(node, childCount(node) - 1))
-  discard renderPaneView(r, node, leaf, GpuiPanelBudget)
+  if leaf.kind == glkContributed:
+    renderContributedView(r, node, leaf, contributedView)
+  else:
+    discard renderPaneView(r, node, leaf, GpuiPanelBudget)
   if heading.len > 0:
     setHeadingText(r, node, heading)
 
@@ -4899,7 +4936,8 @@ proc renderLeaves*(r: GpuiRenderer; leafSet: GpuiLeafSet;
                    editorViewportPx = 0;
                    editorScrollLeftCols = 0;
                    editorContentCols = -1;
-                   editorCaretMark = -1):
+                   editorCaretMark = -1;
+                   contributedViews = initTable[string, ViewNode]()):
                    LeafRenderOutcome =
   ## Build the element tree for one window.
   ##
@@ -4927,7 +4965,8 @@ proc renderLeaves*(r: GpuiRenderer; leafSet: GpuiLeafSet;
   for leaf in leafSet.leaves:
     let (node, reported) = renderLeaf(r, leaf, surface, editorViewportPx,
                                       editorScrollLeftCols,
-                                      editorContentCols, editorCaretMark)
+                                      editorContentCols, editorCaretMark,
+                                      contributedViews.getOrDefault(leaf.paneId))
     # PLAT-35's focus-order row. The index is the leaf's position in the
     # projected document's own order — the order this front-end would move
     # focus in — stamped so the question can be answered from the RENDERED

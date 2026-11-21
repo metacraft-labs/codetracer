@@ -4,7 +4,8 @@ name: Screen oracle
 # this job takes them in CI: the Electron frames here
 # (`just plat35-capture-electron`, the desktop from ct-build's products), the
 # GPUI windows from gpui-window-captures shard 1's `plat35-gpui-window-frames`
-# artifact, and then runs the oracle's case floor over both. Its own job
+# artifact (the caller `needs` that job, so the artifact is there or never
+# will be), and then runs the oracle's case floor over both. Its own job
 # because the ViewModel job already runs past its bound before its last steps.
 on:
   workflow_call:
@@ -12,17 +13,14 @@ on:
 permissions:
   contents: read
   id-token: write
-  # ci/wait-for-run-artifact.sh lists this run's artifacts and jobs.
   actions: read
 
 jobs:
   screen-oracle:
     runs-on: [self-hosted, linux, x64]
     # Unmeasured until its first green run. ~55m of provisioning on a cold
-    # garm VM (gpui-window-captures' measurement), ~10m of capture, the wait
-    # for the GPUI frames (bounded at 90m, normally overlapping the
-    # provisioning: the frames come from a job that starts with this one) and
-    # ~60m of OCR in the case floor. Tighten from the first green run.
+    # garm VM (gpui-window-captures' measurement), ~10m of capture and ~60m
+    # of OCR in the case floor. Tighten from the first green run.
     timeout-minutes: 210
     name: Screen oracle (both front-ends' frames)
     steps:
@@ -72,12 +70,6 @@ jobs:
       - name: The Electron frames (PLAT-35's capture)
         # Its own Xvfb at -dpi 96; records the `calc` fixture when absent.
         run: nix develop .#devShells.x86_64-linux.default --command just plat35-capture-electron
-
-      - name: Wait for the GPUI window frames
-        id: gpui_frames
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: nix develop .#ci --command bash ci/wait-for-run-artifact.sh plat35-gpui-window-frames "gpui-window-captures / GPUI window captures (headless sway) (1/20)" 5400
 
       - name: Restore the GPUI window frames
         uses: actions/download-artifact@v4

@@ -61,7 +61,7 @@ build_fixture() {
 	git -C "$root" init -q --initial-branch=main main
 	git -C "$root/main" config user.email t@example.com
 	git -C "$root/main" config user.name t
-	git -C "$root/main" commit -q --allow-empty -m init
+	git -C "$root/main" -c commit.gpgsign=false commit -q --allow-empty -m init
 	git -C "$root/main" worktree add -q "$root/wt" -b wt >/dev/null 2>&1
 	if [ "$with_pre_push" = "yes" ]; then
 		printf '#!/bin/sh\nexit 0\n' >"$root/main/.git/hooks/pre-push"

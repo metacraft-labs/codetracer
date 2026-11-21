@@ -151,7 +151,7 @@ make_commit() {
 	printf '%s\n' "$message" >>"$dir/log.txt"
 	git -C "$dir" add log.txt
 	GIT_AUTHOR_DATE="@$epoch +0000" GIT_COMMITTER_DATE="@$epoch +0000" \
-		git -C "$dir" commit -qm "$message"
+		git -C "$dir" -c commit.gpgsign=false commit -qm "$message"
 	git -C "$dir" rev-parse HEAD
 }
 

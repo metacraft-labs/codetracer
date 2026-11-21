@@ -366,6 +366,20 @@ jobs:
         id: pins
         run: bash scripts/sibling-pins.sh --github-output
 
+      - name: Resolve the IsoNim family's pins from flake.lock
+        # One name=<rev> line each, for the setup step's siblings list.
+        id: isonim_pins
+        run: |
+          set -euo pipefail
+          {
+            echo "isonim_family<<ISONIM_FAMILY_EOF"
+            for name in isonim isonim-tui isonim-gpui nim-everywhere nim-termctl nim-pty nim-acp nim-agent-harbor nim-agents; do
+              rev="$(jq -er --arg n "$name" '.nodes[.nodes[.root].inputs[$n] | if type == "array" then .[0] else . end].locked.rev' flake.lock)"
+              echo "${name}=${rev}"
+            done
+            echo "ISONIM_FAMILY_EOF"
+          } | tee -a "$GITHUB_OUTPUT"
+
       - name: Setup dev env
         # Installs Nix (with the Attic substituter/keys) and clones the
         # cross-repo siblings adjacent to this checkout at the exact revisions
@@ -398,78 +412,14 @@ jobs:
           attic-cache: ${{ vars.ATTIC_CACHE }}
           siblings: |
             ${{ steps.pins.outputs.pins }}
-            # THE ISONIM FAMILY, pinned to explicit commits.
-            #
-            # Needed because this is the first workflow that compiles the
-            # RENDERER: `src/frontend/ui_js.nim` reaches `isonim/dsl/tailwind`,
-            # and codetracer's `config.nims` puts each of these on the Nim
-            # search path.
-            #
-            # PINNED BY SHA RATHER THAN `=dev`, for two independent reasons and
-            # both were measured rather than assumed:
-            #
-            #  1. `.github/actions/setup-isonim-siblings` is the normal way in,
-            #     and it cannot be used here. Four of its nine entries are BARE,
-            #     which resolves them from the per-commit workspace lock — and
-            #     `cloud` is a merge branch whose commits carry no lock, so the
-            #     action fails outright: "No workspace lock for codetracer
-            #     (candidates: ...)". That is not a thing this workflow can fix;
-            #     it is a property of deploying from a branch the lock tooling
-            #     does not publish for.
-            #
-            #  2. `=dev` would work and would make things worse.
-            #     `ci/test/sibling-provisioning-test.sh` counts branch-tip pins
-            #     against a ceiling that "is lowered as blocks are converted and
-            #     is never raised"; `dev` already sits at 70 against a ceiling of
-            #     59, and nine more would take it to 79. An explicit 40-hex SHA
-            #     is what that gate asks for instead, and it is the better answer
-            #     on its own terms: a re-run of this deploy builds against the
-            #     same siblings it built against the first time, which `=dev`
-            #     cannot promise.
-            #
-            # TO REFRESH: copy each input's `locked.rev` from this commit's
-            # flake.lock (which `repro.lock` agrees with), so the renderer is
-            # compiled against the same siblings the Nix lane uses. Refreshed
-            # 2026-10-09: the 2026-08-31 pins predated APIs the renderer now
-            # calls (`selection.nim` no longer compiled against them). Refreshed
-            # again 2026-10-27: deploy run 40431335005 failed at "renderer: did
-            # not build" -- `isonim_menu_shell_view.nim` calls
-            # `firstElementChild`, which isonim 45673bba does not define.
-            # isonim and isonim-tui refreshed again 2026-11-01; isonim-tui and
-            # isonim-gpui again 2026-11-09, after the flake.lock re-pin ffbaf94f3;
-            # isonim-gpui again 2026-11-11, after cfdda1ce1; isonim-tui again
-            # 2026-11-12 (its web driver reads the browser's capabilities).
-            # nim-agents 2026-11-14, after flake.lock moved it (7736bcea7ff).
-            # isonim, isonim-gpui, nim-everywhere, nim-termctl, nim-pty, nim-acp and
-            # nim-agent-harbor 2026-11-15, after the lock re-pin 7cae04a33.
-            # isonim, nim-pty and nim-agents 2026-11-16, to the revisions
-            # flake.lock and repro.lock pin (they had moved past this list).
-            # isonim-gpui 2026-11-18 (it renders only what changed per frame).
-            # nim-agents 2026-11-18, after flake.lock moved it to 2758cde.
-            # nim-agents 2026-11-18 again, after flake.lock moved it to 77f8a5a;
-            # isonim 2026-11-18, after flake.lock and repro.lock moved it to 38ace5de.
-            # isonim-gpui 2026-11-19 (a double click is counted by its presses' times).
-            # nim-agents 2026-11-21, after flake.lock moved it to 49deaac.
-            # nim-agents 2026-11-21 again, after flake.lock moved it to e071705.
-            # isonim 2026-11-20, after flake.lock and repro.lock moved it to b56bd098
-            # (the ui macro's templates, which isonim-zgui's renderer needs).
-            # nim-termctl 2026-11-20, after flake.lock and repro.lock moved it to
-            # 296b778 (the restore runs on whichever thread takes the signal).
-            # nim-termctl 2026-11-21, after flake.lock and repro.lock moved it to
-            # 72574fd (the re-raise on the handler's own thread, 9bd08c3).
-            # isonim-gpui 2026-11-21, after flake.lock moved it to 936f27d
-            # (sibling-provisioning-test named the drift in run 44864106832).
-            # isonim 2026-11-21, after flake.lock and repro.lock moved it to 530cfa81
-            # (the frame renderer and applier a WebAssembly core draws through).
-            isonim=530cfa8154dc8dea1b87f804082f04f56f31754e
-            isonim-tui=8e43ce06f7f078530c7a8585c210ad7648fa0051
-            isonim-gpui=936f27dce1fa099d1b59138f7b01a5b0324490eb
-            nim-everywhere=2f5b67a5dafd96ca5d57c9270fc3c2da2c5f2b0b
-            nim-termctl=72574fda6f238d06f9b09941a5c9441c199c1a78
-            nim-pty=6ffb8d788e8a740ca78ec29c7a3a489a13818bcb
-            nim-acp=0bf10b4c35064a08d8c96eb912190521322017e2
-            nim-agent-harbor=9694f6b41be21315243df1b19cabd02c5f271d7d
-            nim-agents=e071705e8b811309bdde41b1d0c57f6ee083e92b
+            # THE ISONIM FAMILY, at flake.lock's revisions, which the "Resolve the
+            # IsoNim family's pins" step reads. The renderer this job
+            # compiles reaches isonim/dsl/tailwind, and config.nims puts each of
+            # these on the Nim search path. They used to be hand-copied 40-hex
+            # literals that had to be refreshed whenever flake.lock moved one;
+            # isonim-gpui drifted twice on 2026-11-21 (sibling-provisioning-test
+            # named it in runs 44864106832 and 44900586259).
+            ${{ steps.isonim_pins.outputs.isonim_family }}
             # THE REPROBUILD-PACKAGES CATALOG, pinned to the revision the
             # locked reprobuild (flake.lock root input `reprobuild`,
             # 33be1e9964) is tested against: its own `repro.lock` pins

@@ -35,6 +35,7 @@
       pump: c('ctwPump', null),
       deliver: c('ctwDeliver', null, ['string']),
       openFolder: c('ctwOpenFolder', null, ['string']),
+      attach: c('ctwAttach', null, ['string']),
       phase: c('ctwPhase', 'number'),
       failure: c('ctwFailure', 'string'),
       step: c('ctwStep', null, ['number']),
@@ -44,6 +45,12 @@
       setViewport: c('ctwSetViewport', null, ['number', 'number', 'number', 'number']),
       mounted: c('ctwMounted', 'number'),
       pending: c('ctwPending', 'number'),
+      fullValueOf: c('ctwFullValueOf', 'string', ['string']),
+      eventLogMetrics: c('ctwEventLogMetrics', null, ['number', 'number']),
+      eventLogSearch: c('ctwEventLogSearch', null, ['string']),
+      eventLogTotal: c('ctwEventLogTotal', 'number'),
+      eventLogCurrent: c('ctwEventLogCurrent', 'number'),
+      eventLogRowPx: c('ctwEventLogRowPx', 'number'),
       frameOps: c('isonimFrameOps', 'number'),
       frameReset: c('isonimFrameReset', null),
       frameManifest: c('isonimFrameManifest', null),
@@ -117,11 +124,30 @@
         }
       });
     };
-    const timer = setInterval(() => { call(core.pump)(); measure(); }, pumpMs || 16);
+    // The panes' DOM decoration (`web_core_decorations.nim`): table fit and
+    // overflow, the event log's search field and scrubber, run here against
+    // the nodes the applier owns. Every call it makes into the core is
+    // followed by a flush, like any other.
+    const decorationApi = {
+      fullValueOf: (p) => core.fullValueOf(p),
+      eventLogMetrics: call(core.eventLogMetrics),
+      eventLogSearch: call(core.eventLogSearch),
+      eventLogTotal: () => core.eventLogTotal(),
+      eventLogCurrent: () => core.eventLogCurrent(),
+      eventLogRowPx: () => core.eventLogRowPx(),
+    };
+    const decorate = () => {
+      if (core.mounted() && root.ctwDecoratePanes) root.ctwDecoratePanes(mount, decorationApi);
+    };
+    const timer = setInterval(() => { call(core.pump)(); measure(); decorate(); }, pumpMs || 16);
     root.addEventListener && root.addEventListener('resize', measure);
 
     return {
       openFolder: call(core.openFolder),
+      attach: call(core.attach),
+      // A pane's container, for a host that places panes itself (moving it
+      // keeps every handle valid: the applier holds the nodes, not paths).
+      paneElement: (name) => mount.querySelector(`[data-pane="${name}"]`),
       step: call(core.step),
       pump: call(core.pump),
       node: applier.node,

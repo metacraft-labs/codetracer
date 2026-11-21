@@ -338,17 +338,22 @@ proc dockStateFor(layout: Layout; edge: LayoutEdge; extent: int;
     for d in docked:
       problems.add DockProjectionProblem(
         kind: dppNoPlacementForEdge,
-        detail: $d.pane & " is docked to '" & $edge &
+        detail: $d.paneRefOf & " is docked to '" & $edge &
                 "' and gpui-kit's DockPlacement has no 'top'")
     return nil
   var leaves: seq[JsonNode] = @[]
   for d in docked:
     var info = newJObject()
-    info[PaneInfoKey] = %($d.pane)
+    # A docked contributed pane carries its id under its own key, as a
+    # contributed leaf of the tree does (`leafPanelState`).
+    if d.isContributed:
+      info[ContributedPaneInfoKey] = %d.contributedPane
+    else:
+      info[PaneInfoKey] = %($d.pane)
     if d.title.len > 0:
       info["title"] = %d.title
     var leaf = newJObject()
-    leaf["panel_name"] = %($d.pane)
+    leaf["panel_name"] = %($d.paneRefOf)
     leaf["children"] = newJArray()
     leaf["info"] = %*{"panel": info}
     leaves.add leaf

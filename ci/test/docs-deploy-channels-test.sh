@@ -505,7 +505,7 @@ git clone -q --branch gh-pages "$REMOTE_URL" "$INTRUDER"
 mkdir -p "$INTRUDER/nightly"
 echo "<html>pushed by the other channel mid-race</html>" >"$INTRUDER/nightly/raced.html"
 git -C "$INTRUDER" add -A
-git -C "$INTRUDER" -c user.email=t@t -c user.name=t commit -qm "the other channel's deploy"
+git -C "$INTRUDER" -c user.email=t@t -c user.name=t -c commit.gpgsign=false commit -qm "the other channel's deploy"
 ORIG_TIP="$(git -C "$BARE" rev-parse refs/heads/gh-pages)"
 git -C "$INTRUDER" push -q origin gh-pages
 RACE_TIP="$(git -C "$BARE" rev-parse refs/heads/gh-pages)"
@@ -578,7 +578,7 @@ git clone -q --branch gh-pages "$REMOTE_URL" "$FF_INTRUDER"
 mkdir -p "$FF_INTRUDER/nightly"
 echo "<html>landed while the loser was assembling</html>" >"$FF_INTRUDER/nightly/ff-raced.html"
 git -C "$FF_INTRUDER" add -A
-git -C "$FF_INTRUDER" -c user.email=t@t -c user.name=t commit -qm "the winner's deploy"
+git -C "$FF_INTRUDER" -c user.email=t@t -c user.name=t -c commit.gpgsign=false commit -qm "the winner's deploy"
 FF_ORIG_TIP="$(git -C "$BARE" rev-parse refs/heads/gh-pages)"
 git -C "$FF_INTRUDER" push -q origin gh-pages
 FF_TIP="$(git -C "$BARE" rev-parse refs/heads/gh-pages)"

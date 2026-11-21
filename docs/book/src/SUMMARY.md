@@ -54,6 +54,7 @@
 ## Building & packaging
 
 - [Build systems](./building_and_packaging/build_systems.md)
+- [Writing a plugin](./building_and_packaging/writing_plugins.md)
 
 ### Misc
 

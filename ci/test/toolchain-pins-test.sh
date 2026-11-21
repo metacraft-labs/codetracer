@@ -558,10 +558,10 @@ make_sibling_noir() {
 	# a dirty tree, and the dirty arm below would pass for the wrong reason.
 	printf 'target/\n' >"$WS/noir/.gitignore"
 	printf 'one\n' >"$WS/noir/a.txt"
-	git -C "$WS/noir" add -A && git -C "$WS/noir" commit -qm one
+	git -C "$WS/noir" add -A && git -C "$WS/noir" -c commit.gpgsign=false commit -qm one
 	built_rev="$(git -C "$WS/noir" rev-parse HEAD)"
 	printf 'two\n' >"$WS/noir/a.txt"
-	git -C "$WS/noir" add -A && git -C "$WS/noir" commit -qm two
+	git -C "$WS/noir" add -A && git -C "$WS/noir" -c commit.gpgsign=false commit -qm two
 	head_rev="$(git -C "$WS/noir" rev-parse HEAD)"
 	[ "$1" = fresh ] && built_rev="$head_rev"
 	make_tool "$WS/noir/target/release/nargo" \

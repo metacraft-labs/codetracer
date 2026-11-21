@@ -26,7 +26,7 @@
 ## 5. Every other enabled plugin is activated on `trace-opened`, lazily: its
 ##    package's process starts when the first of its plugins is activated.
 
-import std/[json, sequtils, strutils, tables, times]
+import std/[json, sequtils, sets, strutils, tables, times]
 when defined(js):
   # Node (the desktop's main process, `ct host`): `std/os`'s file procedures
   # are not this backend's (common/node_os).
@@ -40,6 +40,7 @@ import ../../../common/plugin_model
 import ../../../ct/launch/[grant_store, plugin_components]
 import ../../viewmodel/session_vm
 import ../../viewmodel/plugin_host/[host, supervisor]
+import ../../viewmodel/viewmodels/omnibar_vm
 import ../../../common/view_vocabulary/vocabulary
 
 type
@@ -56,6 +57,8 @@ type
     toStart: seq[string]
       ## Plugins the host's activation reached, started by `attach` AFTER
       ## `activateFor` returns (`activationFor`).
+    shownFaults: int
+    lastStatusLine: string
 
 proc readSettings(path: string): JsonNode =
   try:
@@ -110,6 +113,13 @@ proc activationFor(p: SessionPlugins; id: string): proc(ctx: PluginContext) =
   result = proc(ctx: PluginContext) =
     p.toStart.add id
     ctx.onPluginCleanup(proc() = sup.deactivate(id))
+
+proc extensionsOffFor*(noExtensionsFlag: bool): bool =
+  ## Safe mode (§11.7.6): `--no-extensions` on the command line, or the
+  ## environment's `CODETRACER_NO_EXTENSIONS`. Read by every native binary
+  ## BEFORE `openSessionPlugins`, so the flag starts no process at all.
+  noExtensionsFlag or getEnv("CODETRACER_NO_EXTENSIONS").strip.toLowerAscii in
+    ["1", "true", "yes", "on"]
 
 proc openSessionPlugins*(session: SessionViewModel; sessionId: string;
                          extensionsEnabled: bool; startDir = getCurrentDir();
@@ -221,6 +231,16 @@ proc setPaneClosed*(p: SessionPlugins; id: string; closed: bool) =
     entry["closedPanes"] = list
   p.writeSettings()
 
+proc loadedPanes*(p: SessionPlugins): HashSet[string] =
+  ## The contributed panes this session can draw (`layout_model.classify`'s
+  ## `loaded` set): the qualified ids of every enabled plugin's panes. A pane
+  ## a saved layout names from any other plugin — not installed, or
+  ## `--no-extensions` — is the "extension that is not loaded" report.
+  result = initHashSet[string]()
+  if p.isNil or not p.sup.extensionsEnabled: return
+  for pane in p.sup.contributedPanes:
+    result.incl pane.id
+
 proc pump*(p: SessionPlugins): bool =
   ## The idle tick. True when something a front-end shows changed.
   if p.isNil: return false
@@ -228,6 +248,20 @@ proc pump*(p: SessionPlugins): bool =
   p.sup.onChange = proc() = changed = true
   p.sup.poll()
   changed
+
+proc takeNote*(p: SessionPlugins; moreHint = " (:plugins for more)"): string =
+  ## What the status line should say now that it has not said yet: the newest
+  ## fault notification, or the supervisor's latest sentence (a dropped key, a
+  ## refusal); "" when there is nothing new. `moreHint` says where the rest
+  ## of a fault is, in the front-end's own words.
+  if p.isNil: return ""
+  if p.sup.notifications.len > p.shownFaults:
+    p.shownFaults = p.sup.notifications.len
+    return p.sup.notifications[^1].text & moreHint
+  if p.sup.statusLine != p.lastStatusLine:
+    p.lastStatusLine = p.sup.statusLine
+    return p.lastStatusLine
+  ""
 
 proc close*(p: SessionPlugins) =
   if not p.isNil:
@@ -398,3 +432,49 @@ proc control*(p: SessionPlugins; words: seq[string]): tuple[title, body: string]
   else:
     ("", ":plugins takes status, show, run, review, grant, enable, disable, " &
          "re-enable, disable-session, disable-all, log, recover or bisect")
+
+# ---------------------------------------------------------------------------
+# The palette (every front-end's omnibar lists the same entries)
+# ---------------------------------------------------------------------------
+
+const
+  ReservedPaletteEntries* = [
+    ("Plugins: Show status", ":plugins"),
+    ("Plugins: Recover input", ":plugins recover"),
+    ("Plugins: Disable all for this session", ":plugins disable-all"),
+    ("Plugins: Find the plugin causing a problem", ":plugins bisect")]
+    ## §11.7.6: entries no plugin can shadow. A plugin's own entries carry its
+    ## id in their label, so none can spell one of these exactly.
+
+proc pluginPaletteEntries*(p: SessionPlugins;
+                           targetPrefix: string): seq[OmnibarEntry] =
+  ## The reserved entries, then every plugin command and pane. Each runs a
+  ## `:plugins` line: `targetPrefix` is how the front-end's omnibar marks a
+  ## command line as its entry's target.
+  for (label, line) in ReservedPaletteEntries:
+    result.add OmnibarEntry(kind: OmnibarMode.omCommand, label: label,
+                            detail: line, target: targetPrefix & line)
+  if p.isNil: return
+  for c in p.sup.commands:
+    let line = ":plugins run " & c.plugin & " " & c.op
+    result.add OmnibarEntry(kind: OmnibarMode.omCommand,
+      label: c.title & " (" & c.plugin & ")", detail: line,
+      target: targetPrefix & line)
+  for pane in p.sup.contributedPanes:
+    let line = ":plugins show " & pane.id
+    result.add OmnibarEntry(kind: OmnibarMode.omCommand,
+      label: "Show pane: " & pane.title & " (" & pane.id & ")", detail: line,
+      target: targetPrefix & line)
+
+proc consentPaletteEntries*(p: SessionPlugins;
+                            targetPrefix: string): seq[OmnibarEntry] =
+  ## For each plugin waiting for the user's decision (installing is not
+  ## accepting): *Plugins: Review <id>* (the grant screen) and *Plugins:
+  ## Grant <id>*, the `:plugins review` / `:plugins grant` verbs as entries.
+  if p.isNil: return
+  for id in p.awaitingConsent:
+    for (verb, title) in [("review", "Review"), ("grant", "Grant")]:
+      let line = ":plugins " & verb & " " & id
+      result.add OmnibarEntry(kind: OmnibarMode.omCommand,
+        label: "Plugins: " & title & " " & id, detail: line,
+        target: targetPrefix & line)

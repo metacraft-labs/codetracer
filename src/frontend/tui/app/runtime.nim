@@ -10784,12 +10784,16 @@ proc shellScreenOf*(rt: TuiRuntime): ShellScreen =
     # the profiles build, so `projectLayout`'s totality checks apply to the
     # maximized screen unchanged.
     model.layout = rt.shownMaximize.layoutFor(model.profile)
+  # §11.7.3: the plugins' status items, beside the last note rather than
+  # under it: a note stays until the next one, so items shown only without
+  # one were gone after the first command of a session.
+  let pluginStatus = if rt.plugins.isNil: "" else: rt.plugins.statusText()
   if rt.app.notification.len > 0:
     model.status.notification = rt.app.notification
+    if pluginStatus.len > 0:
+      model.status.notification.add "  " & pluginStatus
   elif not rt.plugins.isNil:
-    # §11.7.3: the top plugin layer names its plugin; and the plugins'
-    # status items.
-    model.status.notification = rt.plugins.statusText()
+    model.status.notification = pluginStatus
   # Test-Results-Pane.md §9.6: the hovered control's title, over the
   # notification while the pointer is on the control (the notification is
   # kept, and is what the line says again when it leaves).
