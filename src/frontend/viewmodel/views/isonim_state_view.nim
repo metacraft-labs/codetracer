@@ -64,7 +64,7 @@ when defined(js):
 else:
   template BadgeEvent*(r: MockRenderer): typedesc = MockEvent
 
-when defined(ctPlat18Slice):
+when defined(ctPlat18Slice) or defined(ctWasmCore):
   # PLAT-18's third renderer. THE IMPORT AND THIS TEMPLATE HAVE TO BE HERE,
   # ahead of `renderVariableRow`, and that is a fact about Nim rather than
   # a preference: a template binds the symbols in its body at its DEFINITION

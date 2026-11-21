@@ -4124,6 +4124,13 @@ test-frame-renderer-suite:
 test-frame-applier-browser:
   bash ci/test/frame-applier-browser.sh
 
+# The browser front-end's WebAssembly ViewModel core (src/frontend/web_core)
+# on a real recording served by a real replay-server, in Chromium and
+# Firefox, document for document against the same core built with nim js.
+# Needs REPLAY_SERVER_BIN and CT_WEB_CORE_RECORDING (a recording folder).
+test-web-core-browser:
+  bash ci/test/web-core-browser.sh
+
 # The wasm32 developer profile builds the same program as `emcc`: every object
 # and the linked module byte-identical, the object cache used and never stale
 # after a header change. `ci/lib/wasm-cc.sh` is the wasm lanes' C compiler.
