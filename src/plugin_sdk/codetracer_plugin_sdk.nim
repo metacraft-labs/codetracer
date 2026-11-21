@@ -450,6 +450,11 @@ proc deliverState(sdk: PluginSdk; msg: JsonNode) =
       if sid.len > 0 and p.mirror.following != sid:
         p.mirror.channel.deliver(%*{"type": "activate", "session": sid})
       p.mirror.channel.deliver(msg)
+      when defined(ctPluginSdkTrace):
+        p.log("sdk: applied " & msg{"type"}.getStr("") &
+          " rev " & $msg{"revision"}.getInt(-1) & " following " & p.mirror.following &
+          " valueChangesKnown " & (if p.session.isNil or p.session.stateVM.isNil: "nil"
+                                   else: $p.session.stateVM.valueChanges.val.currentKnown))
       if not p.onSignals.isNil:
         p.onSignals(p)
 
@@ -461,6 +466,10 @@ proc requestOf(msg: JsonNode): Request =
 
 proc handle(sdk: PluginSdk; msg: JsonNode) =
   let t = msg{"type"}.getStr("")
+  when defined(ctPluginSdkTrace):
+    stderr.writeLine "sdk: handle " & t & " plugins " & $sdk.plugins.len
+    for q in sdk.plugins.values:
+      stderr.writeLine "sdk:   " & q.id & " active " & $q.active & " mirror " & $(not q.mirror.isNil)
   let p = sdk.plugins.getOrDefault(msg{"plugin"}.getStr(""), nil)
   case t
   of "hello":
@@ -554,6 +563,22 @@ when defined(wasm32):
 
   proc NimMain() {.importc.}
 
+  template guarded(what: string; body: untyped) =
+    ## Nothing may escape into the host: under Nim's C exceptions an
+    ## exception left unhandled at an export would leave the module running
+    ## in error mode, ignoring every later frame. A handler's
+    ## `CatchableError` is already its plugin's `error`; what reaches here is
+    ## a `Defect`, which ends the instance (§11.5's rule, the instance being
+    ## this plugin's process), with the defect on the plugin log.
+    try:
+      body
+    except CatchableError as e:
+      stderr.writeLine "ct-plugin: " & what & ": " & $e.name & ": " & e.msg
+    except Defect as e:
+      stderr.writeLine "ct-plugin-crash: " & what & ": " & $e.name & ": " & e.msg
+      stderr.writeLine e.getStackTrace()
+      quit(70)
+
   proc run*(sdk: PluginSdk) =
     ## Under `ct-plugin-host` there is no loop to run: the host calls
     ## `ct_plugin_frame` with each frame. `run` registers the SDK and returns.
@@ -564,7 +589,8 @@ when defined(wasm32):
       codegenDecl: "__attribute__((export_name(\"ct_plugin_init\"))) $# $#$#".} =
     ## The module's own initialisation: the plugin's top level, which builds
     ## its SDK, adds its plugins and calls `run`.
-    NimMain()
+    guarded("init"):
+      NimMain()
 
   proc ct_plugin_alloc(n: int32): pointer {.exportc,
       codegenDecl: "__attribute__((export_name(\"ct_plugin_alloc\"))) $# $#$#".} =
@@ -580,17 +606,19 @@ when defined(wasm32):
       copyMem(frame[0].addr, p, n)
     deallocShared(p)
     if not guestSdk.isNil:
-      guestSdk.handleFrame(frame)
-      if not guestSdk.running:
-        for q in guestSdk.plugins.values:
-          q.deactivate()
+      guarded("frame"):
+        guestSdk.handleFrame(frame)
+        if not guestSdk.running:
+          for q in guestSdk.plugins.values:
+            q.deactivate()
     int32(not guestSdk.isNil and guestSdk.idle.len > 0)
 
   proc ct_plugin_idle(): int32 {.exportc,
       codegenDecl: "__attribute__((export_name(\"ct_plugin_idle\"))) $# $#$#".} =
     if guestSdk.isNil: return 0
-    for f in guestSdk.idle:
-      f()
+    guarded("idle"):
+      for f in guestSdk.idle:
+        f()
     int32(guestSdk.idle.len > 0)
 
 else:

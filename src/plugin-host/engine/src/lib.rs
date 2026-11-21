@@ -31,6 +31,7 @@
 use std::ffi::{c_char, c_void, CStr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+#[allow(unused_imports)]
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -122,6 +123,12 @@ mod wt {
     use super::*;
     use wasmtime as w;
 
+    /// wasmtime 48 has an error type of its own; the engine-neutral surface
+    /// speaks anyhow.
+    fn ae(e: w::Error) -> anyhow::Error {
+        anyhow::anyhow!("{:#}", e)
+    }
+
     pub struct Data {
         pub limits: LimitState,
         pub call: Box<HostCall>,
@@ -129,14 +136,14 @@ mod wt {
     }
 
     impl w::ResourceLimiter for Data {
-        fn memory_growing(&mut self, _c: usize, desired: usize, maximum: Option<usize>) -> anyhow::Result<bool> {
+        fn memory_growing(&mut self, _c: usize, desired: usize, maximum: Option<usize>) -> w::Result<bool> {
             if self.limits.growing(desired, maximum) {
                 Ok(true)
             } else {
-                anyhow::bail!("memory limit of {} bytes reached (asked for {})", self.limits.memory_bytes, desired)
+                w::bail!("memory limit of {} bytes reached (asked for {})", self.limits.memory_bytes, desired)
             }
         }
-        fn table_growing(&mut self, _c: usize, desired: usize, _m: Option<usize>) -> anyhow::Result<bool> {
+        fn table_growing(&mut self, _c: usize, desired: usize, _m: Option<usize>) -> w::Result<bool> {
             Ok(desired <= 1_000_000)
         }
     }
@@ -175,7 +182,7 @@ mod wt {
                 p.max_memory_size(1 << 30);
                 cfg.allocation_strategy(w::InstanceAllocationStrategy::Pooling(p));
             }
-            let engine = w::Engine::new(&cfg)?;
+            let engine = w::Engine::new(&cfg).map_err(ae)?;
             let stop = Arc::new(AtomicBool::new(false));
             if mode == DeadlineMode::Epoch {
                 let weak = engine.weak();
@@ -227,7 +234,7 @@ mod wt {
                 };
                 if let Err(e) = r {
                     caller.data_mut().refused = Some(e.clone());
-                    anyhow::bail!(e);
+                    w::bail!("{}", e);
                 }
                 for (i, t) in results_ty.iter().enumerate() {
                     results[i] = match t {
@@ -236,7 +243,8 @@ mod wt {
                     };
                 }
                 Ok(())
-            })?;
+            })
+            .map_err(ae)?;
             Ok(())
         }
     }
@@ -244,7 +252,7 @@ mod wt {
     pub struct Module(pub w::Module);
 
     pub fn module(e: &Engine, bytes: &[u8]) -> anyhow::Result<Module> {
-        Ok(Module(w::Module::new(&e.engine, bytes)?))
+        Ok(Module(w::Module::new(&e.engine, bytes).map_err(ae)?))
     }
 
     pub struct Instance {
@@ -260,10 +268,10 @@ mod wt {
         store.limiter(|d| d as &mut dyn w::ResourceLimiter);
         match e.mode {
             DeadlineMode::Epoch => store.set_epoch_deadline(60_000),
-            DeadlineMode::Fuel => store.set_fuel(e.fuel_per_ms.saturating_mul(60_000))?,
+            DeadlineMode::Fuel => store.set_fuel(e.fuel_per_ms.saturating_mul(60_000)).map_err(ae)?,
             DeadlineMode::None => {}
         }
-        let instance = e.linker.instantiate(&mut store, &m.0)?;
+        let instance = e.linker.instantiate(&mut store, &m.0).map_err(ae)?;
         Ok(Instance { store, instance, mode: e.mode, fuel_per_ms: e.fuel_per_ms })
     }
 
@@ -395,6 +403,13 @@ mod wi {
             }
             let mut cfg = w::Config::default();
             cfg.consume_fuel(mode == DeadlineMode::Fuel);
+            // EAGER, not wasmi's default lazy translation: a function translated
+            // lazily is charged its translation in fuel at its first call, and a
+            // large one (165,788 fuel for the SDK's biggest, measured) asks for
+            // more than a slice holds. That ends the call with an error that
+            // cannot be resumed — every plugin's `ct_plugin_init` overran its
+            // deadline at once. Translated up front, fuel counts execution only.
+            cfg.compilation_mode(w::CompilationMode::Eager);
             let engine = w::Engine::new(&cfg);
             let linker = w::Linker::new(&engine);
             Ok(Engine { engine, linker, mode, fuel_slice: fuel_slice.max(1_000) })
@@ -696,9 +711,6 @@ pub struct CModule(Module);
 
 pub struct CInstance(Instance);
 
-struct SendPtr(*mut c_void);
-unsafe impl Send for SendPtr {}
-
 fn write_err(buf: *mut c_char, cap: usize, msg: &str) {
     if buf.is_null() || cap == 0 {
         return;
@@ -798,11 +810,13 @@ pub unsafe extern "C" fn cte_instance_new(
 ) -> *mut CInstance {
     let e = &*e;
     let m = &*m;
-    let ctx = SendPtr(ctx);
+    // An address, so the closure is `Send`: the host's context outlives the
+    // instance, and the engine calls back on the thread that made the call.
+    let ctx = ctx as usize;
     let call: Box<HostCall> = Box::new(move |id, args, results, mem| {
         let mut buf = [0u8; 512];
         let rc = cb(
-            ctx.0,
+            ctx as *mut c_void,
             id,
             args.as_ptr(),
             args.len() as u32,

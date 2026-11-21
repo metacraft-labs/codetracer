@@ -46,7 +46,8 @@ proc sdkSources*(): seq[string] =
     SdkDir / "build-wasm-plugin.sh",
     RepoRoot / "src/frontend/viewmodel/plugin_host/protocol.nim",
     RepoRoot / "src/frontend/viewmodel/plugin_host/plugin_io.nim",
-    RepoRoot / "src/frontend/viewmodel/sync/mirror_session.nim"]
+    RepoRoot / "src/frontend/viewmodel/sync/mirror_session.nim",
+    RepoRoot / "src/frontend/viewmodel/sync/synced_signals.nim"]
 
 proc buildWasmModule*(source, name: string; flags: seq[string] = @[];
                       extraSources: seq[string] = @[]): string =

@@ -93,6 +93,8 @@ var
   callDeadlineMs = DefaultCallDeadlineMs
   traceRoots: seq[string]
   running = true
+  traceFrames = existsEnv("CT_PLUGIN_HOST_TRACE")
+    ## Log every frame handed to an instance to stderr (the plugin log).
   ioCompletions: seq[(string, JsonNode)]
     ## (plugin, io-result) waiting to be delivered by the main loop.
 
@@ -587,6 +589,9 @@ proc invoke(g: Guest; name: string; args: openArray[int64]; nresults = 0;
 proc deliver(g: Guest; msg: JsonNode) =
   ## Copy one frame into the instance's memory and hand it over.
   let text = $msg
+  if traceFrames:
+    logLine("ct-plugin-host: deliver " & msg{"type"}.getStr("") & " to " & g.id &
+            " (" & $text.len & " bytes)")
   let (ok, res) = g.invoke("ct_plugin_alloc", [text.len.int64], nresults = 1)
   if not ok: return
   let p = res[0]
@@ -671,7 +676,7 @@ proc handle(msg: JsonNode) =
     var list: seq[(string, string)]
     for pkg in packages.values:
       for pp in pkg.spec.plugins:
-        list.add (pp.parsed.manifest.id, pp.parsed.manifest.version)
+        list.add (pp.parsed.manifest.id, $pp.parsed.manifest.version)
     sendRaw(processHello(HostPackage, list, @[InstanceFaultsFeature]))
   of "activate":
     if guests.hasKey(id):

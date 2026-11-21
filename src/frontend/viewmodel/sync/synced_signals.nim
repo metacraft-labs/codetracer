@@ -23,7 +23,7 @@
 ##
 ## Works on both the C and JS backends.
 
-import std/[json, jsonutils, options, sets, tables]
+import std/[json, jsonutils, options, sets, strutils, tables]
   # `sets` and `tables` are not used by name: `jsonutils` finds its hooks for
   # `HashSet` and `Table` only when those modules are in scope where the
   # generic is instantiated. Without them a `HashSet` is written as an object
@@ -56,6 +56,28 @@ type
 const
   EncodeOptions = ToJsonOptions(enumMode: joptEnumString)
   DecodeOptions = Joptions(allowMissingKeys: true, allowExtraKeys: true)
+
+# A `Table` whose key is an enum, by its entries. `jsonutils` has hooks for
+# string keys only, and without these the table went out as its internal
+# layout — its `data` seq, each slot's `hcode` — which is not a value: a hash is
+# an `int`, and a mirror whose `int` is 32 bits (a WebAssembly plugin) could not
+# read a 64-bit primary's hashes at all (a RangeDefect on the first snapshot,
+# measured on `state.originPreferences.eagerMode`). Both ends go through this
+# module, so the encoding changes for both at once.
+proc toJsonHook*[K: enum; V](t: Table[K, V]; opt = initToJsonOptions()): JsonNode =
+  result = newJObject()
+  for k, v in t:
+    result[$k] = toJson(v, opt)
+
+proc fromJsonHook*[K: enum; V](t: var Table[K, V]; jsonNode: JsonNode;
+                               opt = Joptions()) =
+  t = initTable[K, V]()
+  if jsonNode.isNil or jsonNode.kind != JObject:
+    raise newException(ValueError, "an enum-keyed table is a JSON object")
+  for k, v in jsonNode:
+    var value: V
+    fromJson(value, v, opt)
+    t[parseEnum[K](k)] = value
 
 proc holdsNil(node: JsonNode): bool =
   ## Whether `node` is nil or holds a nil node at any depth.
