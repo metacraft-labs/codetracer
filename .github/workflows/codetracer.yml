@@ -3905,7 +3905,12 @@ jobs:
 
   screen-oracle:
     # In screen-oracle.yml: PLAT-39's oracle over both front-ends' frames.
-    needs: [ct-build]
+    # It needs gpui-window-captures, whose shard 1 uploads the GPUI frames,
+    # rather than waiting for them on a runner: in run 44900586259 shard 1
+    # sat queued for 3h25m, past any wait bound, while the waiting job held a
+    # runner the shard could have used. It still runs when a GPUI shard
+    # fails, and refuses on its own if shard 1 left no frames.
+    needs: [ct-build, gpui-window-captures]
     if: ${{ !cancelled() && needs.ct-build.result == 'success' }}
     permissions:
       contents: read
