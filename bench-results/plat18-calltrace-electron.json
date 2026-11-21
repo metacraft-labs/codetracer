@@ -1,0 +1,134 @@
+[
+  {
+    "name": "plat18/calltrace/electron/step-total/js-direct",
+    "unit": "ms",
+    "value": 12.7,
+    "extra": "load1=92.55 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one Electron renderer; one repetition is the selected call moves one row with 600 calls on screen\" core_ms=12.700 host_ms=0.000 min=9.400 max=193.900 p99=92.100 bytes_crossed=0 ops=0 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/electron/expand-total/js-direct",
+    "unit": "ms",
+    "value": 3324.2,
+    "extra": "load1=92.55 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one Electron renderer; one repetition is a 600-call section loads: 600 rows with their arguments appear in one update\" core_ms=3324.200 host_ms=0.000 min=1982.400 max=30029.400 p99=28187.000 bytes_crossed=0 ops=0 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/electron/mount-total/js-direct",
+    "unit": "ms",
+    "value": 2.2,
+    "extra": "load1=92.55 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one Electron renderer; one repetition is the pane's first render over a two-call section\" core_ms=2.200 host_ms=0.000 min=1.400 max=277.000 p99=100.600 bytes_crossed=0 ops=0 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/electron/collapse-total/js-direct",
+    "unit": "ms",
+    "value": 90.7,
+    "extra": "load1=92.55 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one Electron renderer; one repetition is the section goes back to two calls\" core_ms=90.700 host_ms=0.000 min=65.700 max=1114.900 p99=681.100 bytes_crossed=0 ops=0 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/electron/step-total/js-crossing",
+    "unit": "ms",
+    "value": 26.1,
+    "extra": "load1=92.55 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one Electron renderer; one repetition is the selected call moves one row with 600 calls on screen\" core_ms=21.200 host_ms=3.400 min=15.400 max=354.800 p99=258.900 bytes_crossed=69335 ops=1800 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/electron/expand-total/js-crossing",
+    "unit": "ms",
+    "value": 3959.4,
+    "extra": "load1=92.55 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one Electron renderer; one repetition is a 600-call section loads: 600 rows with their arguments appear in one update\" core_ms=3592.900 host_ms=186.800 min=2137.400 max=14501.000 p99=13919.900 bytes_crossed=1768147 ops=86119 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/electron/mount-total/js-crossing",
+    "unit": "ms",
+    "value": 2.8,
+    "extra": "load1=92.55 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one Electron renderer; one repetition is the pane's first render over a two-call section\" core_ms=1.800 host_ms=0.900 min=1.400 max=65.800 p99=31.500 bytes_crossed=6815 ops=330 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/electron/collapse-total/js-crossing",
+    "unit": "ms",
+    "value": 100.1,
+    "extra": "load1=92.55 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one Electron renderer; one repetition is the section goes back to two calls\" core_ms=81.500 host_ms=14.800 min=61.000 max=872.900 p99=615.800 bytes_crossed=51393 ops=3595 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/electron/step-total/wasm-crossing",
+    "unit": "ms",
+    "value": 5.6,
+    "extra": "load1=92.55 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one Electron renderer; one repetition is the selected call moves one row with 600 calls on screen\" core_ms=2.100 host_ms=3.400 min=3.700 max=217.000 p99=115.200 bytes_crossed=69335 ops=1800 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/electron/expand-total/wasm-crossing",
+    "unit": "ms",
+    "value": 870.9,
+    "extra": "load1=92.55 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one Electron renderer; one repetition is a 600-call section loads: 600 rows with their arguments appear in one update\" core_ms=683.500 host_ms=176.100 min=531.100 max=9237.400 p99=8772.000 bytes_crossed=1768147 ops=86119 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/electron/mount-total/wasm-crossing",
+    "unit": "ms",
+    "value": 1.0,
+    "extra": "load1=92.55 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one Electron renderer; one repetition is the pane's first render over a two-call section\" core_ms=0.200 host_ms=0.800 min=0.600 max=21.000 p99=9.200 bytes_crossed=6815 ops=330 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/electron/collapse-total/wasm-crossing",
+    "unit": "ms",
+    "value": 22.9,
+    "extra": "load1=92.55 cpus=24 build=release samples=100 shape=\"the MEDIAN of 100 interleaved repetitions of all three arms against one document in one Electron renderer; one repetition is the section goes back to two calls\" core_ms=8.500 host_ms=14.400 min=14.700 max=429.500 p99=252.600 bytes_crossed=51393 ops=3595 rows=600"
+  },
+  {
+    "name": "plat18/calltrace/electron/bytes-per-step",
+    "unit": "bytes",
+    "value": 69335,
+    "extra": "load1=92.55 cpus=24 build=release samples=1 shape=\"a STRUCTURAL count, not a measurement: the flat wire size of the operations one step issues with 600 rows on screen. Identical on native, nim js and wasm32 \u2014 that is what makes the three comparable\" ops=1800"
+  },
+  {
+    "name": "plat18/calltrace/electron/bytes-per-expand",
+    "unit": "bytes",
+    "value": 1768147,
+    "extra": "load1=92.55 cpus=24 build=release samples=1 shape=\"the same count for the pane's largest update: 600 rows appearing at once\" ops=86119"
+  },
+  {
+    "name": "plat18/calltrace/electron/cold-start/js-direct",
+    "unit": "ms",
+    "value": 313.3,
+    "extra": "load1=92.55 cpus=24 build=release samples=9 shape=\"the MEDIAN of 9 loads, each in a FRESH renderer process (a second load in one process would not be cold), the arms rotated. Script fetch, parse and evaluate, plus (wasm) compile, instantiate and run main, to the point where the entry points exist\" min=210.0 max=989.7 target<=20%-regression-vs-js-direct"
+  },
+  {
+    "name": "plat18/calltrace/electron/cold-start/js-crossing",
+    "unit": "ms",
+    "value": 519.6,
+    "extra": "load1=92.55 cpus=24 build=release samples=9 shape=\"the MEDIAN of 9 loads, each in a FRESH renderer process (a second load in one process would not be cold), the arms rotated. Script fetch, parse and evaluate, plus (wasm) compile, instantiate and run main, to the point where the entry points exist\" min=194.2 max=2119.3 target<=20%-regression-vs-js-direct"
+  },
+  {
+    "name": "plat18/calltrace/electron/cold-start/wasm-crossing",
+    "unit": "ms",
+    "value": 86.2,
+    "extra": "load1=92.55 cpus=24 build=release samples=9 shape=\"the MEDIAN of 9 loads, each in a FRESH renderer process (a second load in one process would not be cold), the arms rotated. Script fetch, parse and evaluate, plus (wasm) compile, instantiate and run main, to the point where the entry points exist\" min=35.6 max=551.8 target<=20%-regression-vs-js-direct"
+  },
+  {
+    "name": "plat18/calltrace/electron/steady-rss/js-direct",
+    "unit": "MB",
+    "value": 158.328,
+    "extra": "load1=92.55 cpus=24 build=release samples=9 shape=\"the MEDIAN of 9 reads of Electron getAppMetrics(), one per fresh renderer process holding the 600-row pane. performance.memory.usedJSHeapSize was tried and rejected: Chromium coarsens it and all three arms reported the identical 157,000,000 with one of them additionally holding 50 MiB of linear memory\" target<=25%-growth-vs-js-direct"
+  },
+  {
+    "name": "plat18/calltrace/electron/steady-rss/js-crossing",
+    "unit": "MB",
+    "value": 220.953,
+    "extra": "load1=92.55 cpus=24 build=release samples=9 shape=\"the MEDIAN of 9 reads of Electron getAppMetrics(), one per fresh renderer process holding the 600-row pane. performance.memory.usedJSHeapSize was tried and rejected: Chromium coarsens it and all three arms reported the identical 157,000,000 with one of them additionally holding 50 MiB of linear memory\" target<=25%-growth-vs-js-direct"
+  },
+  {
+    "name": "plat18/calltrace/electron/steady-rss/wasm-crossing",
+    "unit": "MB",
+    "value": 101.605,
+    "extra": "load1=92.55 cpus=24 build=release samples=9 shape=\"the MEDIAN of 9 reads of Electron getAppMetrics(), one per fresh renderer process holding the 600-row pane. performance.memory.usedJSHeapSize was tried and rejected: Chromium coarsens it and all three arms reported the identical 157,000,000 with one of them additionally holding 50 MiB of linear memory\" target<=25%-growth-vs-js-direct"
+  },
+  {
+    "name": "plat18/calltrace/electron/artifact/js-direct",
+    "unit": "bytes",
+    "value": 2671043,
+    "extra": "load1=92.55 cpus=24 build=release samples=1 shape=\"wc -c of the nim js bundle, UNMINIFIED and unbundled \u2014 the shipped renderer goes through webpack, so this over-states what a user downloads; the gzip figures in the run log are the closer stand-in\""
+  },
+  {
+    "name": "plat18/calltrace/electron/artifact/wasm",
+    "unit": "bytes",
+    "value": 619963,
+    "extra": "load1=92.55 cpus=24 build=release samples=1 shape=\"wc -c of the .wasm plus its emscripten glue, browser target (-sENVIRONMENT=web, no NODERAWFS). NOT PLAT-17's 1,178,754 B, which is the node build\""
+  }
+]
