@@ -31,7 +31,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  ISONIM_ZGUI_REV: a432efd1eb79787996ed96e5724c6e37f076fafa
+  ISONIM_ZGUI_REV: 328155b7086fa6a2921287c1aec8ff5d305aa645
 
 jobs:
   linux:
