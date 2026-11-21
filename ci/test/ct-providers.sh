@@ -135,6 +135,13 @@ run_nim_test src/ct_test/m12_fallback_languages_test.nim
 run_nim_test src/ct_test/noir_providers_test.nim
 run_nim_test src/ct_test/js_providers_test.nim
 run_nim_test src/ct_test/ruby_providers_test.nim
+# The Nim provider's build-and-ask path: `ct test` builds Nim test sources with
+# the dev shell's `nim` and runs them through their tests entry. Its fixtures
+# compile against two siblings, nim-entrypoints and reprobuild's
+# `libs/ct_test_unittest_parallel` (or $ENTRYPOINTS_SRC and
+# $CT_TEST_UNITTEST_PARALLEL_SRC); a missing or too old one fails the suite
+# with the remedy, it never skips.
+run_nim_test src/ct_test/cs_m14_ct_test_collects_through_entry_test.nim
 
 echo "ct-providers: running framework gate suites"
 run_nim_test src/ct_test/contracts_test.nim

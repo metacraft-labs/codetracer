@@ -3,6 +3,14 @@ import std/[json, options, strutils, tables]
 const
   TestCatalogSchemaVersion* = 1
   TestEventSchemaVersion* = 1
+  NotRunnableTag* = "not-runnable"
+    ## A ``TestItem`` tag: its provider discovered the test but cannot run
+    ## it, although it can run single tests in general. The run refuses such
+    ## an item exactly as it refuses a scope the provider's capabilities
+    ## exclude (``run_orchestration.isRunnableUnit``): counted as
+    ## ``unrunnable``, never dispatched. The Nim provider puts it on the
+    ## tests it found only by reading the source, because only a test its
+    ## built binary lists can be run by name (``frameworks/nim_tests_entry``).
 
 type
   TestItemKind* = enum

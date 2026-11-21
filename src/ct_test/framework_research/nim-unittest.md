@@ -162,14 +162,41 @@
 - External adapter binary: none for M2
 - Location strategy: lexical parser source ranges for stdlib declarations
 - Declarative tree-sitter/pattern rules file: none for M2
-- Implemented commands: `detect`, `discoverProject`, `discoverFile`, `locateTests`
-- Not implemented in M2: `run`, `record`, `parseEvent`, `mapTraceEntryPoints`
+- Implemented commands: `detect`, `discoverProject`, `discoverFile`, `locateTests`,
+  and `run` for single tests listed through the tests entry (below)
+- Not implemented: `record`, `parseEvent`, `mapTraceEntryPoints`
 - Declarative behavior: candidate `.nim` files and config markers
 - Imperative behavior: import detection, source scanning, selector construction,
   diagnostics
 - Contract feedback: final provider API should let external adapters report
   exact ranges, while lightweight parser/pattern rules remain valid for
   frameworks like stdlib Nim unittest.
+
+## Running Through the Tests Entry
+
+A source that imports `entrypoints` (nim-entrypoints) or
+`ct_test_unittest_parallel` (reprobuild's `std/unittest` shim) can answer the
+tests entry, so `ct test` builds it (`nim c` from `PATH`, in the project root,
+with `-d:nimBetterRun` so an unchanged source is not recompiled) and asks the
+binary:
+
+- `<binary> --entrypoint=list` must print an `entrypoints/1` document naming a
+  `tests` entry selectable at run time. A plain `std/unittest` binary built
+  with the codetracer Nim fork answers `--entrypoint=tests --list` with its
+  tests' names, but then runs nothing for `--run-exact=<name>` and exits 0, so
+  without this check every one of its tests would pass vacuously.
+- `<binary> --entrypoint=tests --list` gives the tests, one name per line
+  (`<suite>::<test>`, or `<test>` outside a suite, for the shim); they replace
+  the lexical scan's items, which only place them in the source.
+- `<binary> --entrypoint=tests --run-exact=<name>` runs one; the exit code is
+  the outcome. The entry has no status for a skip, so a test that calls
+  `skip` exits 0 and is reported as passed (a known gap).
+
+Everything else (a plain `std/unittest` source, a source that does not
+build, a binary without the entry) keeps the lexical scan's items, tagged
+`not-runnable`, which the run refuses. Implementation:
+`ct_test/frameworks/nim_tests_entry.nim`; test:
+`src/ct_test/cs_m14_ct_test_collects_through_entry_test.nim`.
 
 ## Fixture and Test Plan
 

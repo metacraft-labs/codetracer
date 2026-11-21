@@ -2350,6 +2350,7 @@ test_lane_files() {
 			src/ct_test/noir_providers_test.nim \
 			src/ct_test/js_providers_test.nim \
 			src/ct_test/ruby_providers_test.nim \
+			src/ct_test/cs_m14_ct_test_collects_through_entry_test.nim \
 			src/ct_test/contracts_test.nim \
 			src/ct_test/discovery_test.nim \
 			src/ct_test/run_orchestration_test.nim \

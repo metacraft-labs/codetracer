@@ -37,6 +37,15 @@ type
     ## telemetry no longer have to time the call by hand.
     output*: string                    ## combined stdout+stderr; when the bound
                                        ## cut it, this is the retained TAIL
+    stdout*: string
+      ## Standard output ALONE, for a caller that reads a machine answer the
+      ## child prints there and must not see its diagnostics mixed in (the
+      ## Nim provider reads a test binary's ``--entrypoint=tests --list``
+      ## this way). A backend that merges the two streams puts both here,
+      ## which a caller reading a list sees as a malformed list, not a
+      ## shorter one.
+    stderr*: string
+      ## Standard error alone; see ``stdout``.
     exitCode*: int
     timedOut*: bool
     durationMs*: int
@@ -106,6 +115,8 @@ proc execCaptured*(argv: openArray[string]; cwd = "";
     if completion.stderr.len == 0: completion.stdout
     elif completion.stdout.len == 0: completion.stderr
     else: completion.stdout & completion.stderr
+  result.stdout = completion.stdout
+  result.stderr = completion.stderr
   result.exitCode = completion.exitCode
   result.timedOut = completion.timedOut
   result.durationMs = int(completion.elapsedMillis)

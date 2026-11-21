@@ -23,6 +23,7 @@ import std/[algorithm, options, os, sequtils, strutils, tables]
 import ../contracts
 import ../discovery
 import ../nim_lexer
+import nim_tests_entry
 
 const
   NimUnittestProviderId* = "nim-unittest"
@@ -34,6 +35,11 @@ type
     nufStdUnittest
     nufUnittest2
     nufUnittestParallel
+    nufCtTestShim
+      ## reprobuild's ``ct_test_unittest_parallel``: ``std/unittest``'s
+      ## ``suite``/``test``, plus the tests entry.
+    nufEntrypoints
+      ## nim-entrypoints: ``testCase`` and ``tests:`` blocks.
 
   NimUnitDeclarationKind = enum
     nudSuite
@@ -50,13 +56,16 @@ type
     parentSelector: string
 
 proc providerCapabilities*(): TestCapabilities =
+  ## Runs single tests: the ones a built binary lists through its tests
+  ## entry (``nim_tests_entry``). A test found only by reading the source
+  ## carries ``NotRunnableTag``, so the run refuses it as before.
   TestCapabilities(
     canDiscoverProject: true,
     canDiscoverFile: true,
     canLocateTests: true,
     canRunProject: false,
     canRunFile: false,
-    canRunSingle: false,
+    canRunSingle: true,
     canRecordProject: false,
     canRecordFile: false,
     canRecordSingle: false,
@@ -88,8 +97,13 @@ proc frameworkForImport(raw: string): Option[NimUnitFramework] =
     some(nufUnittest2)
   of "unittest_parallel":
     some(nufUnittestParallel)
+  of "ct_test_unittest_parallel":
+    some(nufCtTestShim)
   else:
-    none(NimUnitFramework)
+    if name == "entrypoints" or name.startsWith("entrypoints/"):
+      some(nufEntrypoints)
+    else:
+      none(NimUnitFramework)
 
 proc importCandidates(raw: string): seq[string] =
   let item = raw.strip
@@ -286,6 +300,8 @@ proc frameworkName(framework: NimUnitFramework): string =
   of nufStdUnittest: "std/unittest"
   of nufUnittest2: "unittest2"
   of nufUnittestParallel: "unittest_parallel"
+  of nufCtTestShim: "ct_test_unittest_parallel"
+  of nufEntrypoints: "entrypoints"
 
 proc suiteSelector(path: seq[string]): string =
   path.join("::") & "::"
@@ -297,7 +313,7 @@ proc testSelector(path: seq[string]; name: string): string =
     path.join("::") & "::" & name
 
 proc parseNimUnittestDeclarations(content: string; tokens: seq[NimToken];
-    filePath = ""): ProviderResult[seq[NimUnitDeclaration]] =
+    filePath = ""; testCases = false): ProviderResult[seq[NimUnitDeclaration]] =
   ## Find every literal ``suite "…":`` / ``test "…":`` declaration.
   ##
   ## Runs over the shared Nim token stream (``ct_test/nim_lexer``) rather than
@@ -321,6 +337,10 @@ proc parseNimUnittestDeclarations(content: string; tokens: seq[NimToken];
   ## runner.  Reporting them would be the mirror of the bug above — discovery
   ## claiming cases the runner will never produce — so the block is skipped and
   ## the skip is reported as an ``info`` diagnostic rather than hidden.
+  ##
+  ## ``testCases`` also reads nim-entrypoints' ``testCase "…":`` as a test:
+  ## for a source that imports ``entrypoints``, where that is how a test is
+  ## declared.
   var
     suiteStack: seq[NimUnitDeclaration] = @[]
     diagnostics: seq[TestDiagnostic] = @[]
@@ -375,6 +395,7 @@ proc parseNimUnittestDeclarations(content: string; tokens: seq[NimToken];
     let keywordToken =
       if content.identIs(token, "suite"): "suite"
       elif content.identIs(token, "test"): "test"
+      elif testCases and content.identIs(token, "testCase"): "test"
       else: ""
 
     if keywordToken.len > 0:
@@ -441,10 +462,11 @@ proc parseNimUnittestDeclarations(content: string; tokens: seq[NimToken];
 
   ProviderResult[seq[NimUnitDeclaration]](diagnostics: diagnostics, value: declarations)
 
-proc parseNimUnittestDeclarations*(content: string; filePath = ""):
-    ProviderResult[seq[NimUnitDeclaration]] =
+proc parseNimUnittestDeclarations*(content: string; filePath = "";
+    testCases = false): ProviderResult[seq[NimUnitDeclaration]] =
   ## Convenience wrapper for callers that have source text but no tokens.
-  parseNimUnittestDeclarations(content, scanNimSource(content), filePath)
+  parseNimUnittestDeclarations(content, scanNimSource(content), filePath,
+    testCases)
 
 proc itemKind(kind: NimUnitDeclarationKind): TestItemKind =
   case kind
@@ -477,7 +499,10 @@ proc itemFromDeclaration(
       endColumn: declaration.endColumn),
     selector: declaration.selector,
     parentId: parentId,
-    tags: @["nim", "std-unittest"],
+    # Found by reading the source only: nothing here says the test can be
+    # run by name, so the run refuses it (``NotRunnableTag``). A test its
+    # built binary lists replaces it (``listedCatalog``).
+    tags: @["nim", "std-unittest", NotRunnableTag],
     location: LocationProvenance(
       source: lskParser,
       detail: "M2 lightweight Nim unittest lexical scanner",
@@ -489,6 +514,8 @@ proc unsupportedDiagnostics(filePath: string; frameworks: seq[NimUnitFramework])
   for framework in frameworks:
     case framework
     of nufStdUnittest:
+      discard
+    of nufCtTestShim, nufEntrypoints:
       discard
     of nufUnittest2, nufUnittestParallel:
       result.add diagnostic(
@@ -546,13 +573,17 @@ proc noFrameworkMessage*(clauses: seq[NimImportClause]): string =
     result.add ". It also has " & $included.len & " `include` clause(s) (" &
       summarise(included) & ") whose own imports this scan does not follow"
 
-proc nimUnittestFileCatalog*(projectRoot, filePath: string): ProviderResult[TestCatalog] =
-  let info = providerInfo()
-  if not filePath.endsWith(".nim"):
-    return ProviderResult[TestCatalog](
-      diagnostics: @[diagnostic(dsWarning, "not a Nim source file", filePath)],
-      value: TestCatalog(schemaVersion: TestCatalogSchemaVersion, provider: info, items: @[], diagnostics: @[]))
+type
+  LexedFile = object
+    ## One source as the lexical scan read it.
+    catalog: TestCatalog
+    declarations: seq[NimUnitDeclaration]
+    clauses: seq[NimImportClause]
 
+proc lexNimFile(projectRoot, filePath: string): LexedFile =
+  let info = providerInfo()
+  result.catalog = TestCatalog(schemaVersion: TestCatalogSchemaVersion,
+    provider: info, items: @[], diagnostics: @[])
   let content = readFile(filePath)
   # Tokenize ONCE and hand the same stream to both consumers: this runs over
   # every candidate file in a workspace, and a second scan per file is a
@@ -560,14 +591,19 @@ proc nimUnittestFileCatalog*(projectRoot, filePath: string): ProviderResult[Test
   let tokens = scanNimSource(content)
   # Read the import clauses once: the framework answer and the diagnostic that
   # explains a negative answer are two readings of the same evidence.
-  let clauses = scanNimImportClauses(content, tokens)
-  let frameworks = detectFrameworksInClauses(clauses)
+  result.clauses = scanNimImportClauses(content, tokens)
+  let frameworks = detectFrameworksInClauses(result.clauses)
   var catalogDiagnostics = unsupportedDiagnostics(filePath, frameworks)
   var items: seq[TestItem] = @[]
 
-  if nufStdUnittest in frameworks:
-    let parsed = parseNimUnittestDeclarations(content, tokens, filePath)
+  # The shim re-exports std/unittest's `suite`/`test`, and nim-entrypoints
+  # declares tests with `testCase` (and runs std/unittest ones in `tests:`
+  # blocks), so all three are read the same way.
+  if frameworks.anyIt(it in {nufStdUnittest, nufCtTestShim, nufEntrypoints}):
+    let parsed = parseNimUnittestDeclarations(content, tokens, filePath,
+      testCases = nufEntrypoints in frameworks)
     catalogDiagnostics.add parsed.diagnostics
+    result.declarations = parsed.value
     var idsBySelector = initTable[string, string]()
     for declaration in parsed.value:
       let item = itemFromDeclaration(info, projectRoot, filePath, declaration, idsBySelector)
@@ -581,16 +617,123 @@ proc nimUnittestFileCatalog*(projectRoot, filePath: string): ProviderResult[Test
   elif frameworks.len == 0:
     catalogDiagnostics.add diagnostic(
       dsInfo,
-      noFrameworkMessage(clauses),
+      noFrameworkMessage(result.clauses),
       filePath)
+  result.catalog.items = items
+  result.catalog.diagnostics = catalogDiagnostics
 
+proc notNimSource(filePath: string): ProviderResult[TestCatalog] =
   ProviderResult[TestCatalog](
-    diagnostics: @[],
-    value: TestCatalog(
-      schemaVersion: TestCatalogSchemaVersion,
-      provider: info,
-      items: items,
-      diagnostics: catalogDiagnostics))
+    diagnostics: @[diagnostic(dsWarning, "not a Nim source file", filePath)],
+    value: TestCatalog(schemaVersion: TestCatalogSchemaVersion,
+      provider: providerInfo(), items: @[], diagnostics: @[]))
+
+proc nimUnittestFileCatalog*(projectRoot, filePath: string): ProviderResult[TestCatalog] =
+  ## The tests of one file as the lexical scan reads them, building nothing.
+  ## Every item carries ``NotRunnableTag``. ``nimTestFileCatalog`` is what
+  ## discovery uses: it replaces these with the binary's own list when the
+  ## file can be built and asked.
+  if not filePath.endsWith(".nim"):
+    return notNimSource(filePath)
+  ProviderResult[TestCatalog](diagnostics: @[],
+    value: lexNimFile(projectRoot, filePath).catalog)
+
+proc locate(declarations: seq[NimUnitDeclaration]; name: string):
+    Option[NimUnitDeclaration] =
+  ## The declaration the scan read for the test the binary lists as
+  ## ``name``. The scan spells a test outside any suite ``::<test>``; the
+  ## tests entry spells it ``<test>``. Inside a suite both are
+  ## ``<suite>::<test>``.
+  for declaration in declarations:
+    if declaration.kind == nudTest and
+        (declaration.selector == name or declaration.selector == "::" & name):
+      return some(declaration)
+  none(NimUnitDeclaration)
+
+proc listedCatalog(projectRoot, filePath: string; lexed: LexedFile;
+    collected: EntryCollection): TestCatalog =
+  ## One item per name the binary listed, in listing order: these are the
+  ## tests ``ct test`` can run, by exactly that name. The scan's declarations
+  ## only place them in the source. Suites are not items: the binary lists
+  ## tests, and a suite item would be a unit the run cannot run by a name.
+  let info = providerInfo()
+  let relative = normalizedRelative(projectRoot, filePath)
+  result = TestCatalog(schemaVersion: TestCatalogSchemaVersion,
+    provider: info, items: @[], diagnostics: @[])
+  var unplaced: seq[string] = @[]
+  for name in collected.names:
+    let declaration = lexed.declarations.locate(name)
+    var item = TestItem(
+      id: makeTestItemId(info.id, info.language, info.framework, relative,
+        name),
+      providerId: info.id,
+      language: info.language,
+      framework: info.framework,
+      name: name,
+      kind: tikCase,
+      file: relative,
+      range: SourceRange(startLine: 1, startColumn: 1, endLine: 1,
+        endColumn: 1),
+      selector: name,
+      parentId: "",
+      tags: @["nim", TestsEntryTag],
+      location: LocationProvenance(
+        source: lskFramework,
+        detail: "listed by the built test binary's " & TestsEntryArg & " " &
+          TestsEntryListArg & "; not placed in the source by the lexical " &
+          "scanner",
+        confidence: lcUnknown),
+      stale: false,
+      staleReason: "")
+    if declaration.isSome:
+      let found = declaration.get
+      item.name = found.name
+      item.range = SourceRange(startLine: found.line,
+        startColumn: found.column, endLine: found.line,
+        endColumn: found.endColumn)
+      item.location.detail = "listed by the built test binary's " &
+        TestsEntryArg & " " & TestsEntryListArg & "; placed in the source " &
+        "by the lexical scanner"
+      item.location.confidence = lcHigh
+    else:
+      unplaced.add name
+    result.items.add item
+  result.diagnostics.add diagnostic(dsInfo,
+    $collected.names.len & " test(s) listed by the built binary's " &
+    TestsEntryArg & " " & TestsEntryListArg & " (" & collected.binary & ")",
+    filePath)
+  if unplaced.len > 0:
+    result.diagnostics.add diagnostic(dsInfo,
+      $unplaced.len & " listed test(s) have no literal declaration the " &
+      "lexical scanner can place, so they point at the top of the file: " &
+      unplaced.join(", "), filePath)
+
+proc nimTestFileCatalog*(projectRoot, filePath: string): ProviderResult[TestCatalog] =
+  ## The tests of one file, for discovery. A file that imports something
+  ## answering the tests entry is built and its binary asked
+  ## (``nim_tests_entry``): its items are then what the binary lists, and
+  ## the run runs each by name. Otherwise, or when the file does not build
+  ## or its binary has no tests entry, the lexical scan's items are the
+  ## answer, marked ``NotRunnableTag``, and a diagnostic says why the binary
+  ## was not used.
+  if not filePath.endsWith(".nim"):
+    return notNimSource(filePath)
+  let lexed = lexNimFile(projectRoot, filePath)
+  var modules: seq[string] = @[]
+  for clause in lexed.clauses:
+    if clause.keyword != "include":
+      modules.add clause.modules
+  if not importsTestsEntry(modules):
+    return ProviderResult[TestCatalog](diagnostics: @[], value: lexed.catalog)
+  let collected = collectThroughEntry(projectRoot, filePath)
+  if collected.kind == eckListed:
+    return ProviderResult[TestCatalog](diagnostics: @[],
+      value: listedCatalog(projectRoot, filePath, lexed, collected))
+  var fallback = lexed.catalog
+  fallback.diagnostics.add diagnostic(dsWarning,
+    "this file's tests were found by reading the source and cannot be run " &
+    "by ct test: " & collected.problem, filePath)
+  ProviderResult[TestCatalog](diagnostics: @[], value: fallback)
 
 proc isCandidateNimTestFile(path: string): bool =
   if not path.endsWith(".nim") or not fileExists(path):
@@ -635,7 +778,7 @@ proc detectProject(projectRoot: string): ProviderResult[bool] =
   ProviderResult[bool](diagnostics: @[], value: false)
 
 proc discoverFileImpl(projectRoot, filePath: string): ProviderResult[TestCatalog] =
-  nimUnittestFileCatalog(projectRoot, filePath)
+  nimTestFileCatalog(projectRoot, filePath)
 
 proc discoverProjectImpl(projectRoot: string): ProviderResult[TestCatalog] =
   let info = providerInfo()
@@ -645,7 +788,7 @@ proc discoverProjectImpl(projectRoot: string): ProviderResult[TestCatalog] =
     items: @[],
     diagnostics: @[])
   for path in nimProjectFiles(projectRoot):
-    let fileResult = nimUnittestFileCatalog(projectRoot, path)
+    let fileResult = nimTestFileCatalog(projectRoot, path)
     catalog.items.add fileResult.value.items
     catalog.diagnostics.add fileResult.value.diagnostics
   ProviderResult[TestCatalog](diagnostics: @[], value: catalog)
@@ -658,8 +801,14 @@ proc locateTestsImpl(projectRoot, filePath: string): ProviderResult[seq[TestItem
 
 proc notImplementedEvents(scope: TestScope): ProviderResult[seq[TestEvent]] {.gcsafe.} =
   ProviderResult[seq[TestEvent]](
-    diagnostics: @[diagnostic(dsWarning, "Nim unittest run/record is not implemented in M2", scope.file)],
+    diagnostics: @[diagnostic(dsWarning, "Nim unittest recording is not implemented", scope.file)],
     value: @[])
+
+proc runNimTest(scope: TestScope): ProviderResult[seq[TestEvent]] {.gcsafe.} =
+  ## Run one test its built binary lists, by that name
+  ## (``nim_tests_entry.runThroughEntry``). Only listed items reach here:
+  ## the others carry ``NotRunnableTag`` and the run refuses them first.
+  runThroughEntry(NimUnittestProviderId, scope)
 
 proc parseEventUnsupported(raw: string): ProviderResult[TestEvent] {.gcsafe.} =
   ProviderResult[TestEvent](
@@ -683,7 +832,7 @@ proc newNimUnittestM1Provider*(): M1Provider =
     discoverProjectImpl(projectRoot)
   provider.locateTests = proc(projectRoot, file: string): ProviderResult[seq[TestItem]] {.gcsafe.} =
     locateTestsImpl(projectRoot, file)
-  provider.run = notImplementedEvents
+  provider.run = runNimTest
   provider.record = notImplementedEvents
   provider.parseEvent = parseEventUnsupported
   provider.mapTraceEntryPoints = mapTraceUnsupported

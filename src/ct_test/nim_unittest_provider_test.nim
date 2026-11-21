@@ -4,6 +4,7 @@ import ct_test
 import contracts
 import discovery
 import nim_lexer
+import run_orchestration
 import frameworks/nim_unittest
 
 proc fixtureRoot(): string =
@@ -45,7 +46,14 @@ suite "ct-test M2 Nim unittest provider":
     check fileCatalog.provider.framework == "std/unittest"
     check fileCatalog.provider.capabilities.canDiscoverFile
     check fileCatalog.provider.capabilities.canDiscoverProject
-    check not fileCatalog.provider.capabilities.canRunSingle
+    # The provider runs single tests, but only those a built binary lists
+    # through its tests entry (cs_m14_ct_test_collects_through_entry_test).
+    # Every test the lexical scan found carries `NotRunnableTag`, so the run
+    # refuses it exactly as it did when the provider could run nothing.
+    check fileCatalog.provider.capabilities.canRunSingle
+    check fileCatalog.items.len > 0
+    for item in fileCatalog.items:
+      check NotRunnableTag in item.tags
     check not fileCatalog.provider.capabilities.canRecordSingle
     check fileCatalog.validateCatalog.valid
 
@@ -95,10 +103,11 @@ suite "ct-test M2 Nim unittest provider":
     check selectors.len == 9
 
   test "project discovery aggregates multiple Nim unittest files":
+    let registry = newNimUnittestProviderRegistry()
     let response = discover(
       DiscoverRequest(scope: dskWorkspace, workspaceRoot: fixtureRoot(),
           jsonOutput: true),
-      newNimUnittestProviderRegistry(),
+      registry,
       newDiscoveryCache())
 
     check discoverExitCode(response) == 0
@@ -114,6 +123,13 @@ suite "ct-test M2 Nim unittest provider":
     # `nim c -r` on that fixture actually reports).
     check catalog.items.len == 17
     check catalog.validateCatalog.valid
+    # These are plain std/unittest sources, so every test was found by the
+    # lexical scan only: the run must refuse each one before dispatch, as it
+    # did when the provider declared it could run nothing.
+    let units = enumerateRunUnits(response, registry)
+    check units.len == 17
+    for unit in units:
+      check not isRunnableUnit(registry, unit)
 
   test "CLI JSON for real Nim fixture uses nim-unittest provider":
     let binary = getTempDir() / ("ct-test-m2-cli-" & $getCurrentProcessId())
@@ -160,7 +176,9 @@ suite "ct-test M2 Nim unittest provider":
     check unittest2Catalog.items.len == 0
     check parallelCatalog.items.len == 0
     check unittest2Catalog.provider.capabilities.canDiscoverFile
-    check not unittest2Catalog.provider.capabilities.canRunSingle
+    # The provider-level capability is the same for every file; what keeps a
+    # unittest2 test from being run is that it yields no item at all (above).
+    check unittest2Catalog.provider.capabilities.canRunSingle
 
     var messages = ""
     for diagnostic in unittest2Catalog.diagnostics:
