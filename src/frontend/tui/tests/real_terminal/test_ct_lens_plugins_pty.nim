@@ -227,9 +227,9 @@ suite "ct-lens on a real terminal":
     var sess = spawnTui(home)
     settleOnDebugger(sess, Cols, Rows)
     check sess.commandShows("plugins", "Waiting for your consent: ct-lens.history")
-    check lensPids().len == 0
+    check lensPids(home / "components").len == 0
     sess.grant("ct-lens.history", "ct-lens.watch")
-    check lensPids().len == 1
+    check lensPids(home / "components").len == 1
     # The first stop of `calc` is the module's first line: the function the
     # stop reports is the module, and its range is what git is asked about.
     const head = "History of <__main__> (main.py:"
@@ -244,11 +244,15 @@ suite "ct-lens on a real terminal":
     check first > 0 and last >= first
     let src = calcSource()
     check src.len > 0
-    let want = gitSays(src, first, last)
+    # The recording names its source by the path it was recorded at; when
+    # that file is no longer on this machine the plugin says so instead.
+    let onDisk = fileExists(src)
+    let want = if onDisk: gitSays(src, first, last)
+               else: "the source is not on this machine"
     check want.len > 0
-    let refused = "not a git repository" in want.toLowerAscii
+    let refused = not onDisk or "not a git repository" in want.toLowerAscii
     check sess.commandShows("plugins show ct-lens.history/history",
-                            (if refused: "not a git repository" else: want))
+      (if not onDisk: want elif refused: "not a git repository" else: want))
     # Its status item, on the status line beside the last note.
     check sess.statusHas("history: " & (if refused: "unavailable" else: want))
     # And its editor decoration: the module's first line, which is on screen
@@ -302,7 +306,14 @@ suite "ct-lens on a real terminal":
       refused = sess.commandShows("plugins run ct-lens.watch watch.add-changed",
                                   "every changed value is already watched",
                                   ceilingMs = 30_000)
-      if not refused: continue
+      if not refused:
+        # What the host recorded, for whoever reads a red run.
+        for f in walkDirRec(home / "state"):
+          if f.endsWith("plugins.log"):
+            checkpoint "plugin log " & f & ":\n" & readFile(f)
+        sess.command("plugins")
+        checkpoint "after F7 on " & changed & ":\n" & sess.screen
+        continue
       # The watch row arrives with the locals of the next stop.
       for _ in 0 ..< 6:
         sess.command("next")
@@ -326,7 +337,7 @@ suite "ct-lens on a real terminal":
     var sess = spawnTui(home)
     settleOnDebugger(sess, Cols, Rows)
     sess.grant("ct-lens.history", "ct-lens.watch")
-    let pids = lensPids()
+    let pids = lensPids(home / "components")
     check pids.len == 1
     var disabled = false
     for _ in 0 ..< 6:
@@ -338,7 +349,7 @@ suite "ct-lens on a real terminal":
     check sess.commandShows("plugins", "ct-lens.history  running")
     sess.command("step")
     check sess.commandShows("plugins show ct-lens.history/history", "History of ")
-    check lensPids() == pids
+    check lensPids(home / "components") == pids
     sess.finish(home)
 
   test "plugins granted in an earlier session start by themselves in the next":
@@ -423,7 +434,7 @@ suite "ct-lens.jump on a real terminal: a mode, and the defences against it":
     sess.grant("ct-lens.history", "ct-lens.watch", "ct-lens.jump")
     let pid = sess.jumpPid()
     check pid > 0
-    check lensPids().len == 2
+    check lensPids(home / "components").len == 2
     check sess.openJump()
     check kill(Pid(pid), SIGSTOP) == 0
     sess.send("1")

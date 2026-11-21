@@ -87,9 +87,13 @@ proc installLensWasm*(root: string): string =
 proc lensManifest*(): JsonNode =
   parseJson(readFile(LensSrcDir / "plugin.json"))
 
-proc lensPids*(): seq[int] =
-  ## Every running `ct-lens-plugins` started from an installed component.
-  let (o, _) = execCmdEx("pgrep -f " & LensComponent & "/bin/" & LensExecutable)
+proc lensPids*(root = ""): seq[int] =
+  ## Every running `ct-lens-plugins` started from a component installed under
+  ## `root` (every one on the machine when `root` is empty). A suite passes
+  ## its own root: other suites on a shared host run the package too.
+  let pattern = (if root.len > 0: root & "/" else: "") & LensComponent & "/bin/" &
+                LensExecutable
+  let (o, _) = execCmdEx("pgrep -f " & quoteShell(pattern))
   for l in o.splitLines:
     if l.strip.len > 0: result.add parseInt(l.strip)
 

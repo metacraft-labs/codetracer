@@ -180,6 +180,8 @@ suite "GPUI: the ct-lens package behind the window's plugins":
     ck r.p.waitFor("the status item", proc(): bool =
       "(2 commits)" in r.p.windowFooterNote(""))
     ck "history: " in r.p.windowFooterNote("")
+    # Beside the window's own note too: a note stays until the next one.
+    ck "(2 commits)" in r.p.windowFooterNote("a note")
     r.p.close()
 
   test "F7 from the window watches what the step changed":
@@ -243,5 +245,5 @@ suite "GPUI: the ct-lens package behind the window's plugins":
     r.p.close()
 
   test "assertion count":
-    ck CHECKS == 37
+    ck CHECKS == 40
     echo "CHECKS: ", CHECKS
