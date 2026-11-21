@@ -378,9 +378,20 @@ proc readList(g: ScreenGrid; b: Box; t: var Tree; root: SurfaceNode;
       # a category letter column, then `name: value` / `name type value`
       var s = text
       if parts[0].len == 1 and parts.len > 1: s = text[text.find(parts[1]) .. ^1]
+      # a compound value's fold glyph sits before its name (`▶ m  Tuple …`)
+      for glyph in ["▶ ", "▼ ", "▸ ", "▾ "]:
+        if s.startsWith(glyph): s = s[glyph.len .. ^1].strip
       let colon = s.find(':')
       let name = (if colon > 0: s[0 ..< colon] else: s.splitWhitespace()[0]).strip
-      let value = if colon > 0: s[colon + 1 .. ^1].strip else: ""
+      var value = if colon > 0: s[colon + 1 .. ^1].strip else: ""
+      if colon <= 0:
+        # the columns: name, type (cut to the column), then the value, which the
+        # row ends with the origin and history controls (`↺⇠`)
+        let cols = s.splitWhitespace()
+        if cols.len >= 3:
+          value = cols[2 .. ^1].join(" ")
+          for ctl in ["↺⇠", "↺", "⇠"]:
+            if value.endsWith(ctl): value = value[0 ..< value.len - ctl.len].strip
       if name.len == 0 or name.contains(' '): continue
       keyVal = name
       props = %*{"name": name, "value": value, "type": ""}

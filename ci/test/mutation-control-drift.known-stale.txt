@@ -800,3 +800,7 @@ src/frontend/viewmodel/tests/unit/plat18-marshalling-mutation-control.sha256	src
 # owes a re-grade.
 src/frontend/gpui/tests/gpui-plugins-mutation-control.sha256	src/frontend/tui/host/plugin_processes.nim	bdde0ab70f86f9e4479f68422e98de3e46fa3cc99095722b8dccc431f8dd6677	b66e37349e229620a58a6b952e9f5587e5cf10f1c2a127af64c26e45364dae54
 src/frontend/gpui/tests/gpui-plugins-mutation-control.sha256	src/frontend/gpui/app/leaves.nim	efe5e20ddafa3f7518b3aa5050f7a00b17a70339f2d89ec98e56a0c5507ec8f9	b4caea18c44ccc3c4d1a634b1f1ff12123374e1aebecba0c30b5a725880bb61b
+
+# 2026-11-21, the terminal binding's Variables reader reads the column layout
+# (a fold glyph, then name, type and value), for the project-definitions port.
+src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/termassert/ct_tui_screen.nim	255a2526134d381474f695d7fd979d939f84bcbce60d0cffb1893725869e1816	6de7b081797168b30f90b8958bcfd5d6f155ef87a3b492941050638f6440d690
