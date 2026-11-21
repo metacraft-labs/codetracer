@@ -448,7 +448,7 @@ src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/gpui/t
 # above, test_plat64_reachability.nim (its press-only operations); it re-counted
 # test_gpui_window_frame.nim (one more scanned GPUI source). Re-grade those arms.
 src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend/viewmodel/keymap/overlay_rows.nim	29d13621166a061d890ce4e32b6f11947812f0926f5f1929385f4b3209618834	02d1e69873fd133c75c358cfcf5565020f6cdb7db78a91e0339ed7ceefa045fd
-src/frontend/gpui/tests/plat37-window-mutation-control.sha256	src/frontend/gpui/tests/test_gpui_window_frame.nim	40f5de09b1e97db5d711bbbc47ea609c1b675e2f73e2a80c8adb382d3f709677	68b9f3dc7e6bebae53388af6d8e521ce1dfcc9f275fb5e91fab14f28597dc972
+src/frontend/gpui/tests/plat37-window-mutation-control.sha256	src/frontend/gpui/tests/test_gpui_window_frame.nim	40f5de09b1e97db5d711bbbc47ea609c1b675e2f73e2a80c8adb382d3f709677	bebc3bb68edf27c250d8d1d1aa82aab15c7c8ca458776d8765f7dbe83c2e93df
 # The status line keeps a message a late answer did not write (`fix(tui): a terminal's late answer
 # no longer replaces a message on the status line`) moved src/frontend/tui/main.nim.
 # Re-grade the arms whose needles sit in it.
