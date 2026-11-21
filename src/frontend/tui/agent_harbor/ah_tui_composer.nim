@@ -451,13 +451,18 @@ proc chipStyle(c: AhCanvas; ink: Inks; state: string): ChipStyle =
   ## Cited: the cited ground, the body text bold and underlined in the
   ## action colour (SGR 58, the focused initiative's mark: TUI §3.4), as the
   ## web outlines a cited chip in that colour. Offered: the chip ground, the
-  ## label role. Uncited (switched off by the operator): no ground, the
-  ## disabled role in italics, as removed (the cell style has no
-  ## strike-through). A note: no ground, a quiet italic after a dotted ring.
+  ## label role. Uncited (switched off by the operator): no ground, in
+  ## italics, as removed (the cell style has no strike-through), in the
+  ## web's and GPUI's ink for it (the palette's `editedOut`, caption-subtle)
+  ## where that still reads on the band (3:1), else the band's caption: with
+  ## no strike-through the ink cannot fade further than the words can be
+  ## read. Either is well under the offered chip's label role (P2c study,
+  ## manager note 122). A note: no ground, a quiet italic after a dotted
+  ## ring.
   case state
   of "cited": ChipStyle(fg: ink.citedText, bg: ink.cited, mark: c.p.borderAction, bold: true)
   of "uncited":
-    let fg = if contrastOf(c.p.textDisabled, ink.band) >= CaptionMinContrast: c.p.textDisabled
+    let fg = if contrastOf(c.p.editedOut, ink.band) >= CaptionMinContrast: c.p.editedOut
              else: ink.bandCaption
     ChipStyle(fg: fg, italic: true)
   of "note": ChipStyle(fg: ink.bandCaption, italic: true)

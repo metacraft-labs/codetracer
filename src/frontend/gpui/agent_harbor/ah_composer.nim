@@ -38,8 +38,9 @@
 ##
 ## A field of the launch and initiative forms is a one-line input: a value
 ## wider than it is cut in its middle by the views' one rule for an input
-## (`cut_text_rules.cutInputValue`, the P2c study's D35), so a path keeps its
-## end, the file name, and is never wrapped.
+## (`cut_text_rules.cutInputValueInFace`, the P2c study's D35, as the web
+## cuts its fields), so a path keeps its end, the file name, and is never
+## wrapped.
 ##
 ## Presses are routed (Input-Routing-And-Keymaps.md §5.1), as on the web:
 ## each element a press acts on carries its operation (`data-ct-operation`,
@@ -52,10 +53,10 @@
 ## Facts (`data-ah-*`) are the terminal's (`tui/agent_harbor/ah_tui_composer.nim`).
 
 import std/strutils
-from std/unicode import runes, runeSubStr, `$`
+from std/unicode import `$`
 import nim_agents_isonim_viewmodels/agent_harbor/omnibox_composer_vm
 import ../../viewmodel/views/agent_harbor_composer_words
-from ../../viewmodel/views/cut_text_rules import cutInputValue
+from ../../viewmodel/views/cut_text_rules import cutInputValueInFace
 import ./ah_theme
 from ./ah_session_activity import wrappedRows
 from ../../viewmodel/input/element_press import OperationAttribute
@@ -200,7 +201,8 @@ proc chip(r: GpuiRenderer; p: AhPalette; label, fg: string; border = "";
           bg = ""; bold = false; dashed = false; struck = false): (GpuiElement, int) =
   ## A small control sized to its words: 24px, 8px each side, a hairline.
   ## `struck`: its words struck through (`text-decoration: line-through`),
-  ## as the web draws a context item the operator left out.
+  ## as the web draws a context item the operator left out (in the
+  ## palette's `editedOut` ink, the web's caption-subtle role).
   let el = r.box(pairs = [("height", $ControlPx & "px"), ("items", "center"),
                           ("padding-left", "8px"), ("padding-right", "8px"),
                           ("flex-shrink", "0"), ("rounded", $ControlRadiusPx & "px"),
@@ -259,7 +261,7 @@ proc contextBlocks(r: GpuiRenderer; p: AhPalette; vm: OmniboxComposerVM;
     let (el, w) = case state
       of "cited": r.chip(p, ch.item.label, p.textBody, border = p.borderAction,
                          bg = p.hover)
-      of "uncited": r.chip(p, ch.item.label, p.textDisabled, struck = true)
+      of "uncited": r.chip(p, ch.item.label, p.editedOut, struck = true)
       of "note": r.chip(p, ch.item.label, p.textCaption, dashed = true)
       else: r.chip(p, ch.item.label, p.textCaption)
     r.tag(el, "chip", ch.item.id)
@@ -421,25 +423,15 @@ const
   FieldValuePadPx = 8 + 1
     ## A field's value box: 0.5rem of padding and the control's hairline on
     ## each side of its text.
-  InputCutStartChars = 8
-    ## The most a one-line input's middle cut keeps of its start: its first 8
-    ## characters (D35's 8 cells, as much as says what the value begins
-    ## with, `mileston…`).
 
 proc inputValueShown*(value: string; boxPx: int): string =
   ## A one-line input's value as a field `boxPx` wide shows it: whole when
   ## it fits, else cut in its middle by the views' one rule for an input
-  ## (`cutInputValue`, D35), measured as the face sets it. Never wrapped.
+  ## (`cutInputValueInFace`, D35), measured as the face sets it, as the web
+  ## cuts its fields (`ah_cut_text`, `data-ah-cut="input"`). Never wrapped.
   let room = boxPx - 2 * FieldValuePadPx
-  let measure = proc(t: string): int = int(textWidth(t, BodyPx, faceGlyphs = true) + 0.999)
-  var startChars = ""
-  var n = 0
-  for ch in value.runes:
-    if n == InputCutStartChars: break
-    startChars.add $ch
-    inc n
-  cutInputValue(value, room, measure, measure(Ellipsis), measure(startChars),
-                measure(value.runeSubStr(0, 1)))
+  cutInputValueInFace(value, room,
+    proc(t: string): int = int(textWidth(t, BodyPx, faceGlyphs = true) + 0.999))
 
 proc fieldEl(r: GpuiRenderer; p: AhPalette; label, value, problem: string;
              widthPx: int; placeholder = ""): (GpuiElement, int) =

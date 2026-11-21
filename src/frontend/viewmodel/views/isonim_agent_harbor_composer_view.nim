@@ -44,7 +44,8 @@ import std/strutils
 import isonim/core/[signals, computation]
 import isonim/dsl/[ui, components]
 # Its one-line texts (`data-ah-cut`) are cut in code, by the views' one rule
-# for a cut (`ah_cut_text`, CTF-P1c D6).
+# for a cut (`ah_cut_text`, CTF-P1c D6), and its form fields' values in their
+# middle by the one-line input rule (`CutInputValue`, P2c D35).
 import ./ah_cut_text
 from ../keymap/scope_path import ComposerScope
 from ../input/element_press import OperationAttribute
@@ -232,14 +233,21 @@ proc renderRow[R](r: R; vm: OmniboxComposerVM; row: DestinationRow): auto =
 proc renderField[R](r: R; label, value: string; problem = "";
                     wide = false; placeholder = ""): auto =
   ## One form field: its label over a value drawn as the app's input field.
+  ## A value wider than the field is cut in its middle by the one-line input
+  ## rule (`data-ah-cut="input"`, the P2c study's D35), as GPUI and the
+  ## terminal cut it, so a goal keeps its end and a plan file its file name;
+  ## the element keeps the whole value as its text (what a reader and the
+  ## accessibility tree read) and in its tooltip. A placeholder is cut at
+  ## its end like any line.
   let shown = if value.len > 0: value else: placeholder
+  let cut = if value.len > 0: CutInputValue else: "line"
   ui(r):
     tdiv(class = "ah-composer-field" & (if wide: " ah-composer-field-wide" else: "") &
                  (if problem.len > 0: " ah-composer-field-problem" else: ""),
          `data-ah-field` = label):
       span(class = "ah-composer-field-label"):
         text label
-      span(`data-ah-cut` = "line",
+      span(`data-ah-cut` = cut, title = shown,
            class = "ah-composer-field-value" & (if value.len == 0: " ah-composer-field-empty" else: "")):
         text shown
       if problem.len > 0:

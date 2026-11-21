@@ -30,12 +30,16 @@
 ##   on the primary surface's ground with the inputs' hairline, at the web's top, its
 ##   text clipped inside its padding; every form field's hairline and its
 ##   value on the box's line; a context item the instruction left out struck
-##   through in the disabled ink; the section labels, row titles and state
+##   through in the caption-subtle ink; the section labels, row titles and state
 ##   words in the face's Medium with the labels' tracking, and nothing in the
 ##   composer semibold; the add-context menu's rows on the dropdown rows'
 ##   ground; the `+` control as wide as the web lays it out. The values are
 ##   the design-system roles the web stylesheet names, measured in the
 ##   browser's computed styles (`agent_harbor_composer.styl`).
+## * **A left-out context item reads dimmer than an offered one** (manager
+##   note 122): in both themes its ink's contrast on the sheet is well under
+##   an offered chip's, so struck through it also recedes. In Light the
+##   disabled role it had is no dimmer than the offered chips' caption.
 ## * **A form field is one line** (the P2c study's D35): a value wider than
 ##   its field is cut in its middle, keeping at most its first 8 characters
 ##   and as much of its end as fits, so the plan file keeps its file name; a
@@ -46,7 +50,7 @@
 ## router and action source; the web side is the committed layout record the
 ## window captures are judged against.
 
-import std/[json, os, sequtils, strutils, unittest]
+import std/[json, math, os, sequtils, strutils, tables, unittest]
 
 import isonim_gpui/renderer
 from isonim_gpui/bindings import gpui_reset_tree
@@ -293,14 +297,15 @@ proc styleProblems(fixture: string; w: int; mode: DesignMode): seq[string] =
       want("a field's border", b.style("border_color"), hexOf(dtColorsUiBorderSecondary, mode))
   for v in plan.allWith("data-ah-value"):
     want("a field value's line", v.style("line_height"), $ControlPx & "px")
-  # A context item left out: struck through, in the disabled ink.
+  # A context item left out: struck through, in the web's caption-subtle
+  # role (manager note 122).
   for ch in plan.allWith("data-ah-chip-state"):
     if ch.attr("data-ah-chip-state") != "uncited": continue
     let t = ch{"children"}.getElems
     if t.len == 0 or "line-through" notin t[0].style("text_decoration"):
       result.add at & "the left-out chip " & ch.attr("data-ah-chip-label") & " is not struck through"
     else:
-      want("the left-out chip's ink", t[0].style("text_color"), hexOf(dtColorsUiTextPrimaryDisabled, mode))
+      want("the left-out chip's ink", t[0].style("text_color"), hexOf(dtColorsUiTextPrimaryCaptionSubtle, mode))
   # Labels, titles and state words: Medium, the labels tracked; nothing
   # semibold.
   for name in ["data-ah-section", "data-ah-dest-title"]:
@@ -335,6 +340,40 @@ suite "CTF-P2c: the GPUI composer's parts take the web's styles":
     for p in problems: checkpoint p
     check checked == 36
     check problems.len == 0
+
+  test "a left-out chip reads dimmer than an offered one, in both themes":
+    # WCAG 2's contrast ratio (https://www.w3.org/TR/WCAG21/#dfn-contrast-ratio):
+    # how far an ink stands off the sheet it is drawn on.
+    proc luminance(hex: string): float =
+      for k, i in [1, 3, 5]:
+        let c = float(parseHexInt(hex[i .. i + 1])) / 255.0
+        let lin = if c <= 0.04045: c / 12.92 else: pow((c + 0.055) / 1.055, 2.4)
+        result += [0.2126, 0.7152, 0.0722][k] * lin
+    proc contrast(a, b: string): float =
+      let (la, lb) = (luminance(a), luminance(b))
+      (max(la, lb) + 0.05) / (min(la, lb) + 0.05)
+    for w in [1440, 360]:
+      for mode in [dmDark, dmLight]:
+        gpui_reset_tree()
+        let m = r.mountAgentHarborStoryGpui("agent-harbor-composer", "context-edited", w, 900, mode)
+        let plan = m.planOf
+        m.dispose()
+        let sheets = plan.allWith("data-ah-sheet")
+        check sheets.len == 1
+        if sheets.len != 1: continue
+        let ground = sheets[0].style("bg")
+        var inks: Table[string, string]
+        for ch in plan.allWith("data-ah-chip-state"):
+          let t = ch{"children"}.getElems
+          if t.len > 0: inks[ch.attr("data-ah-chip-state")] = t[0].style("text_color")
+        checkpoint $w & " " & $mode & ": " & $inks & " on " & ground
+        check "uncited" in inks and "offered" in inks
+        if "uncited" notin inks or "offered" notin inks: continue
+        let (left, offered) = (contrast(inks["uncited"], ground), contrast(inks["offered"], ground))
+        checkpoint "left out " & $left & ":1, offered " & $offered & ":1"
+        # A step under it: at most four fifths of an offered chip's contrast
+        # (Light: 2.90:1 against 4.25:1; Dark: 3.58:1 against 8.31:1).
+        check left <= offered * 0.8
 
   test "context-edited has a left-out chip to judge":
     gpui_reset_tree()

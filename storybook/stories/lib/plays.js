@@ -188,6 +188,78 @@ const destinationsInOrder = (el) =>
   expect([...el.querySelectorAll(".ah-composer-row")].map((r) => r.dataset.ahTarget))
     .toEqual(["session", "manager", "ui-action"]);
 
+// WCAG 2's contrast ratio of two computed colours
+// (https://www.w3.org/TR/WCAG21/#dfn-contrast-ratio): how far an ink stands
+// off the ground it is drawn on.
+function contrastOf(a, b) {
+  const lum = (css) => {
+    const [r, g, bl] = css.match(/[\d.]+/g).slice(0, 3).map((v) => {
+      const c = Number(v) / 255;
+      return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * bl;
+  };
+  const [la, lb] = [lum(a), lum(b)];
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+
+// A context item the operator left out reads dimmer than an offered one, in
+// both themes (manager note 122): its ink's contrast on the sheet at most
+// four fifths of an offered chip's. In Light the disabled role it had
+// (4.46:1) was no dimmer than the offered chips' caption (4.25:1); the
+// caption-subtle role is 2.90:1.
+function expectLeftOutChipDimmer(el) {
+  const ground = getComputedStyle(el.querySelector(".ah-composer-sheet")).backgroundColor;
+  expect(TRANSPARENT.has(ground)).toBe(false);
+  const inkOf = (state) => {
+    const chip = el.querySelector(`.ah-composer-chip[data-ah-chip="${state}"] .ah-composer-chip-text`);
+    expect(chip).toBeTruthy();
+    return settledColor(chip);
+  };
+  const left = contrastOf(inkOf("uncited"), ground);
+  const offered = contrastOf(inkOf("offered"), ground);
+  expect(left).toBeLessThanOrEqual(offered * 0.8);
+}
+
+// The width the sheet has in the brief's sidebar window (360px):
+// `min(40rem, 100vw - 1rem)`.
+const SIDEBAR_SHEET_PX = 344;
+
+// A form field's value wider than its field is cut in its MIDDLE (the P2c
+// study's D35, manager note 128), as GPUI and the terminal cut it: what is
+// drawn (`data-ah-shown`) is the value's start, one "…", and the value's
+// end, each side non-empty; the element keeps the whole value, and its
+// tooltip says it. The sheet is held at its sidebar width while this
+// reads, so the check cuts at the size the note is about whatever window
+// the story runs in, then given back its own width.
+async function expectMiddleCutAtSidebar(el, fields) {
+  const sheet = el.querySelector(".ah-composer-sheet");
+  const own = sheet.style.width;
+  sheet.style.width = `${SIDEBAR_SHEET_PX}px`;
+  const values = fields.map((name) => el.querySelector(`[data-ah-field="${name}"] .ah-composer-field-value`));
+  try {
+    for (const [i, value] of values.entries()) {
+      expect(value).toBeTruthy();
+      const whole = value.textContent;
+      await waitUntil(() => value.hasAttribute("data-ah-shown"), `${fields[i]} cut at the sidebar's width`);
+      const shown = value.getAttribute("data-ah-shown");
+      const parts = shown.split("…");
+      expect(parts.length).toBe(2);
+      const [head, tail] = parts;
+      expect(head.length).toBeGreaterThan(0);
+      expect(tail.length).toBeGreaterThan(0);
+      expect(whole.startsWith(head)).toBe(true);
+      expect(whole.endsWith(tail)).toBe(true);
+      expect(globalThis.ahCutTextDangles(shown)).toBe(false);
+      expect(value.getAttribute("title")).toBe(whole);
+    }
+  } finally {
+    sheet.style.width = own;
+  }
+  // Back at its own width, each field is drawn as it was before the check.
+  await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+}
+
 async function composedTo(el, target, mark = "Routed") {
   expect(sheetOf(el).dataset.ahPhase).toBe("composing");
   destinationsInOrder(el);
@@ -254,6 +326,7 @@ const composerChecks = {
   }),
   "agent-harbor-composer-context-edited": composerCheck(async (el) => {
     expect(chipStates(el)).toMatchObject({ file: "cited", replay: "uncited", pane: "cited" });
+    expectLeftOutChipDimmer(el);
   }),
   "agent-harbor-composer-add-context": composerCheck(async (el) => {
     expect([...el.querySelectorAll(".ah-composer-menu-item")].map((i) => i.textContent))
@@ -352,6 +425,7 @@ const composerChecks = {
     expect(sendButton(el).textContent).toBe("Start initiative");
     expect(el.querySelector('[data-ah-field="Plan file"] .ah-composer-field-value').textContent)
       .toBe("milestones/2026-11-17-asteroid-fields-generated-from-seeds-end.milestones.org");
+    await expectMiddleCutAtSidebar(el, ["Goal", "Plan file"]);
   }),
   "agent-harbor-composer-new-initiative-invalid": composerCheck(async (el) => {
     expect(sendButton(el).disabled).toBe(true);

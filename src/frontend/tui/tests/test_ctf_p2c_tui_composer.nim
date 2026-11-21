@@ -15,12 +15,19 @@
 ##   "…", keeping its start and as much of its end as fits, so the plan
 ##   file's name is whole wherever it fits and the value never wraps.
 ##
+## * **A left-out context item reads dimmer than an offered one** (manager
+##   note 122): in the web's ink for it where that holds 3:1 on the band,
+##   else the band's caption, in italics.
+##
 ## No mocks: the composer stories' own viewmodels over their scripted router
 ## and action source, drawn by the real view onto the real canvas.
 
 import std/[sequtils, strutils, unittest]
 
 import ../agent_harbor/ah_tui_stories
+from ../agent_harbor/ah_tui_composer import inksFor
+from ../app/theme/cell_style import CellStyle
+from ../app/views/styled_row import styleAt, runeAt
 from ../../viewmodel/views/agent_harbor_words import danglesAroundEllipsis
 
 proc mount(fixture: string): AhTuiMount =
@@ -147,3 +154,35 @@ suite "CTF-P2c: a form's input value is cut in its middle (D35)":
         check drawn.endsWith(PlanFileName)
         check drawn.startsWith("mileston")
       m.dispose()
+
+suite "CTF-P2c: a left-out context item in the terminal":
+  test "it takes the web's ink where that reads, and reads dimmer than an offered one":
+    # Manager note 122: the web and GPUI draw a left-out chip in the
+    # caption-subtle role (`AhPalette.editedOut`); the terminal, which has no
+    # strike-through, takes it where it holds 3:1 on the band and the band's
+    # caption otherwise. Either way it reads well under an offered chip.
+    for mode in [dmDark, dmLight]:
+      for cols in [180, 45]:
+        let m = mountAgentHarborStoryTui("agent-harbor-composer", "context-edited", cols, 56, mode)
+        let p = m.canvas.p
+        let ink = inksFor(m.canvas)
+        var drawn: seq[(string, CellStyle)]
+        for n in m.view.all("chip-state"):
+          # The chip's first letter: its ink and the ground it is drawn on.
+          var c = n.col
+          while c < n.col + n.width and m.canvas.grid.runeAt(n.row, c).strip.len == 0: inc c
+          drawn.add (n.attr("chip-state"), m.canvas.grid.styleAt(n.row, c))
+        let left = drawn.filterIt(it[0] == "uncited")
+        let offered = drawn.filterIt(it[0] == "offered")
+        checkpoint $mode & " " & $cols & ": " & $drawn
+        check left.len == 1 and offered.len >= 1
+        if left.len == 1 and offered.len >= 1:
+          let l = left[0][1]
+          let o = offered[0][1]
+          let wanted = if contrastOf(p.editedOut, ink.band) >= 3.0: p.editedOut
+                       else: ink.bandCaption
+          check l.fg == wanted
+          check l.italic
+          let ground = if l.bg.len > 0: l.bg else: ink.band
+          check contrastOf(l.fg, ground) <= contrastOf(o.fg, o.bg) * 0.8
+        m.dispose()

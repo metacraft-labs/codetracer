@@ -234,9 +234,13 @@ AH_COMPOSER_PAD = 0.75rem
     color: colors-ui-text-primary-body
     background: colors-ui-surface-primary-secondary-hover
 
+  // Left out by the operator: struck through, a step dimmer than an
+  // offered chip's caption in both themes. The caption-subtle role, not the
+  // disabled one: in Light the disabled grey is no dimmer than the caption
+  // (P2c study, manager note 122); in Dark the two are the same grey.
   &.ah-chip-excluded .ah-composer-chip-text
     text-decoration: line-through
-    color: colors-ui-text-primary-disabled
+    color: colors-ui-text-primary-caption-subtle
 
   &.ah-chip-note
     border-style: dashed

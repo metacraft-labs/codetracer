@@ -175,6 +175,28 @@ proc cutInputValue*(value: string; room: int; widthOf: proc(text: string): int;
   let tail = if tailStart < value.len: value[tailStart .. ^1] else: ""
   trimBeforeEllipsis(head) & CutEllipsis & trimAfterEllipsis(tail)
 
+const InputCutStartRunes* = 8
+  ## The most a one-line input's middle cut keeps of its start, in a host
+  ## that measures in a face's units rather than cells: its first 8
+  ## characters (D35's 8 cells, as much as says what the value begins with,
+  ## `mileston…`).
+
+proc cutInputValueInFace*(value: string; room: int;
+                          widthOf: proc(text: string): int): string =
+  ## **THE ONE-LINE INPUT RULE** (D35, `cutInputValue`) for a host that sets
+  ## text in a proportional face: `room` and `widthOf` in the host's unit
+  ## (GPUI pixels; the web's 1/64 px, `ah_cut_text`'s `data-ah-cut="input"`).
+  ## The start keeps at most the width of the value's first
+  ## `InputCutStartRunes` characters, and never less than its first
+  ## character's, so the same value is cut at the same characters wherever
+  ## the face sets it at the same width. GPUI's form fields and the web's
+  ## both draw through this.
+  let starts = runeStarts(value)
+  let first = value[0 ..< starts[min(1, starts.high)]]
+  let firstEight = value[0 ..< starts[min(InputCutStartRunes, starts.high)]]
+  cutInputValue(value, room, widthOf, widthOf(CutEllipsis), widthOf(firstEight),
+                widthOf(first))
+
 proc danglesAroundEllipsis*(shown: string): bool =
   ## Whether a drawn cut breaks the trim rule: an end cut (it ends in "…")
   ## by `danglesBeforeEllipsis`; a middle cut on either side of its last

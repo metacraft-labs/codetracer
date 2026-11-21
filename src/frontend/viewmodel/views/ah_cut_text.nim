@@ -56,6 +56,19 @@
 ## (`elidePath`) and GPUI (isonim-gpui's middle cut, `ah_theme.pathText`)
 ## cut a path the same way.
 ##
+## A marked element whose value is `input` (`data-ah-cut="input"`,
+## `CutInputValue`) holds a one-line input's value (a form field's), cut in
+## its middle by the views' one rule for an input (`cutInputValueInFace`,
+## the P2c study's D35): its start, at most its first 8 characters, then
+## "…", then as much of its end as fits, so `Asteroid fields generated from
+## seeds, end to end` keeps its end and a plan file its file name. The rule
+## is run here, in the page, measuring each candidate in the element's face
+## (the hidden span below) in 1/64 px, the browser's layout unit
+## (https://drafts.csswg.org/css-values-4/#absolute-lengths and LayoutNG's
+## `LayoutUnit`), so it cuts where it would cut in GPUI (pixels) and the
+## terminal (cells). The terminal (`elideMiddle`) and GPUI
+## (`ah_composer.inputValueShown`) cut a form field the same way.
+##
 ## Every element marked must hold its text in one colour: the drawn cut is
 ## one string. A line made of spans in different colours keeps CSS's
 ## ellipsis (`agent_harbor.styl` says which, and why).
@@ -79,6 +92,12 @@ const
     ## The cut text drawn over the element, present only while it is cut.
   CutPathValue* = "path"
     ## `CutTextAttribute`'s value on a file path: cut in its middle.
+  CutInputValue* = "input"
+    ## `CutTextAttribute`'s value on a one-line input's value: cut in its
+    ## middle by the one-line input rule (D35).
+  LayoutUnitsPerPx = 64
+    ## The browser's layout unit, 1/64 px: the unit the input rule is run in
+    ## on the page, fine enough that rounding never moves a cut by a glyph.
 
 when defined(js):
   proc ahCutTextTrim(kept: cstring): cstring {.exportc.} =
@@ -95,14 +114,31 @@ when defined(js):
     ## The shared middle cuts of a path, longest first, one a line.
     cstring(pathCutCandidates($path).join("\n"))
 
+  proc ahCutTextInputCut(value: cstring; roomPx: float;
+                         measure: proc(text: cstring): float): cstring {.exportc.} =
+    ## The one-line input rule, for the observer below: `value` in `roomPx`,
+    ## `measure` giving a text's advance in px in the element's face; run in
+    ## layout units (`LayoutUnitsPerPx`). The room is rounded down and each
+    ## width up, so a text is said to fit only when it does.
+    let room = int(roomPx * float(LayoutUnitsPerPx))
+    let widthOf = proc(text: string): int =
+      let units = measure(cstring(text)) * float(LayoutUnitsPerPx)
+      # Up to the next whole unit; a hair under one is taken as that one,
+      # since the advance itself is a float sum of whole units.
+      let whole = int(units)
+      if units - float(whole) > 0.001: whole + 1 else: whole
+    cstring(cutInputValueInFace($value, room, widthOf))
+
   proc installCutText(trim: proc(kept: cstring): cstring;
                       dangles: proc(shown: cstring): bool;
-                      pathCuts: proc(path: cstring): cstring) {.importjs: """
-    (function (trim, dangles, pathCuts) {
+                      pathCuts: proc(path: cstring): cstring;
+                      inputCut: proc(value: cstring; roomPx: float;
+                                     measure: proc(text: cstring): float): cstring) {.importjs: """
+    (function (trim, dangles, pathCuts, inputCut) {
       // Every rule must reach the page: a rule the call drops would fail
       // only at the first element that needs it.
       if (typeof trim !== 'function' || typeof dangles !== 'function' ||
-          typeof pathCuts !== 'function')
+          typeof pathCuts !== 'function' || typeof inputCut !== 'function')
         throw new TypeError('ah_cut_text: a shared cut rule did not reach the page');
       if (typeof document === 'undefined' || typeof ResizeObserver === 'undefined' ||
           globalThis.__ahCutText) return;
@@ -216,6 +252,7 @@ when defined(js):
         var cs = getComputedStyle(el);
         var contentLeft = box.left + px(cs.borderLeftWidth) + px(cs.paddingLeft);
         var isPath = el.getAttribute(ATTR) === 'path';
+        var isInput = el.getAttribute(ATTR) === 'input';
         var contentRight = box.right - px(cs.borderRightWidth) - px(cs.paddingRight);
         var all = document.createRange();
         all.setStart(nodes[0], 0);
@@ -236,6 +273,21 @@ when defined(js):
               return;
             }
           }
+        }
+        // A one-line input's value: cut in its middle by the shared rule,
+        // each candidate measured in the element's face (memoised: the rule
+        // measures every start and end it tries).
+        if (isInput) {
+          var widths = new Map();
+          var measure = function (t) {
+            t = String(t);
+            if (!widths.has(t)) widths.set(t, textWidth(cs, t));
+            return widths.get(t);
+          };
+          var middle = String(inputCut(full, contentRight - text.left + 0.01, measure));
+          el.style.setProperty('--ah-cut-indent', Math.max(0, text.left - contentLeft) + 'px');
+          if (el.getAttribute(SHOWN) !== middle) el.setAttribute(SHOWN, middle);
+          return;
         }
         // CSS's cut: the most text whose last glyph, and the ellipsis after
         // it, end inside the content box.
@@ -305,6 +357,7 @@ when defined(js):
         document.fonts.addEventListener('loadingdone', again);
         document.fonts.ready.then(again);
       }
-    })(#, #, #)""".}
+    })(#, #, #, #)""".}
 
-  installCutText(ahCutTextTrim, ahCutTextDangles, ahCutTextPathCandidates)
+  installCutText(ahCutTextTrim, ahCutTextDangles, ahCutTextPathCandidates,
+                 ahCutTextInputCut)

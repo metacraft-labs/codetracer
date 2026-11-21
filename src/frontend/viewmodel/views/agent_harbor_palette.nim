@@ -39,6 +39,15 @@ type
     textCaption*: string
     textLabel*: string
     textDisabled*: string
+    editedOut*: string
+      ## A context item the operator left out of an instruction (the
+      ## composer's uncited chip, struck through): the caption-subtle role
+      ## (`text/primary/caption-subtle`, `agent_harbor_composer.styl`). In
+      ## Light the disabled role (#727272, 4.46:1 on the sheet) is no dimmer
+      ## than an offered chip's caption (#7a756a, 4.25:1), so a left-out item
+      ## read as offered; caption-subtle (#999180, 2.90:1) is a step under it,
+      ## as the disabled role is in Dark, where caption-subtle is the same
+      ## grey (#727272). P2c study, manager note 122.
     textWarning*: string
     textSuccess*: string
     textError*: string
@@ -126,6 +135,7 @@ proc ahPalette*(mode: DesignMode): AhPalette =
     textCaption: t(dtColorsUiTextPrimaryCaption),
     textLabel: t(dtColorsUiTextPrimaryLabel),
     textDisabled: t(dtColorsUiTextPrimaryDisabled),
+    editedOut: t(dtColorsUiTextPrimaryCaptionSubtle),
     textWarning: t(dtColorsUiTextWarningPrimary),
     textSuccess: t(dtColorsUiTextSuccessPrimary),
     textError: t(dtColorsUiTextErrorPrimary),
