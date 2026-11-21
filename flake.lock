@@ -8596,11 +8596,11 @@
     "nim-termctl": {
       "flake": false,
       "locked": {
-        "lastModified": 1795208837,
-        "narHash": "sha256-DVsoMFB1HBOlnYGRJiWp1Y8EN+8YQ58Vo1cVz2MrTAg=",
+        "lastModified": 1795241982,
+        "narHash": "sha256-uv2REA0ardQxnxMSqovPIwd/kqKiSRE6gYexrJgdTMg=",
         "owner": "metacraft-labs",
         "repo": "nim-termctl",
-        "rev": "296b778cc7617bcba35ed6b70f479eea4271f34d",
+        "rev": "72574fda6f238d06f9b09941a5c9441c199c1a78",
         "type": "github"
       },
       "original": {

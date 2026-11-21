@@ -454,13 +454,15 @@ jobs:
             # (the ui macro's templates, which isonim-zgui's renderer needs).
             # nim-termctl 2026-11-20, after flake.lock and repro.lock moved it to
             # 296b778 (the restore runs on whichever thread takes the signal).
+            # nim-termctl 2026-11-21, after flake.lock and repro.lock moved it to
+            # 72574fd (the re-raise on the handler's own thread, 9bd08c3).
             # isonim-gpui 2026-11-21, after flake.lock moved it to 936f27d
             # (sibling-provisioning-test named the drift in run 44864106832).
             isonim=b56bd098474244ce3eae401312b8a567cf74c30f
             isonim-tui=8e43ce06f7f078530c7a8585c210ad7648fa0051
             isonim-gpui=936f27dce1fa099d1b59138f7b01a5b0324490eb
             nim-everywhere=2f5b67a5dafd96ca5d57c9270fc3c2da2c5f2b0b
-            nim-termctl=296b778cc7617bcba35ed6b70f479eea4271f34d
+            nim-termctl=72574fda6f238d06f9b09941a5c9441c199c1a78
             nim-pty=6ffb8d788e8a740ca78ec29c7a3a489a13818bcb
             nim-acp=0bf10b4c35064a08d8c96eb912190521322017e2
             nim-agent-harbor=9694f6b41be21315243df1b19cabd02c5f271d7d
