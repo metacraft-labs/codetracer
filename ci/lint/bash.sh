@@ -491,6 +491,13 @@ lint_step "contract suite: reprobuild catalog coverage guard" \
 lint_step "reprobuild catalog covers every repro.nim uses: name (real pins)" \
 	env CT_CATALOG_COVERAGE_STRICT=1 bash scripts/test-reprobuild-catalog-coverage.sh
 
+# The Windows tree-sitter contribution repro.nim imports must target the
+# interface the pinned reprobuild's stdlib declares. Only Windows extracts it,
+# so a stale import failed every Windows dev env and no Linux job saw it. Reads
+# the same two pinned trees as the step above; STRICT for the same reason.
+lint_step "repro.nim's tree-sitter contribution targets the pinned stdlib interface" \
+	env CT_TS_CONTRIBUTION_STRICT=1 bash ci/test/repro-tree-sitter-contribution-matches-stdlib.sh
+
 # The same argument for the lock-node-dates guard, and it needed making twice
 # over: that guard has SEVEN failure paths that could accuse the wrong thing,
 # including reading a commit date out of a fork that merely shares a directory

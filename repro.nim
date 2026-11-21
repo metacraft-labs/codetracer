@@ -4,7 +4,7 @@ import std/[os, strutils]
 import repro_dsl_stdlib
 
 when defined(windows):
-  import "../reprobuild-packages/packages/contributions/tree-sitter/repro"
+  import "../reprobuild-packages/packages/contributions/tree-sitter-generation/repro"
   import "../reprobuild-packages/packages/contributions/rustup/repro"
 
 
