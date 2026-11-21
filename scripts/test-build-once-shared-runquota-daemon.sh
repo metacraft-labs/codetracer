@@ -72,7 +72,14 @@ fail() {
 	exit 1
 }
 
-[ "$(uname -s)" = Linux ] || fail "this is the Linux leg; /proc is used to count daemons"
+# The `test` recipe runs this lane on every host (macOS test-non-gui failed it
+# in run 44864106832). It counts daemons through /proc, which only Linux has,
+# so elsewhere it says it does not apply, as test-user-state-sandbox-runquota
+# does, instead of failing a host it was never written for.
+if [ "$(uname -s)" != Linux ]; then
+	echo "build-once-shared-runquota-daemon: n/a: the daemon count reads /proc, which exists only on Linux"
+	exit 0
+fi
 
 # Locate the RunQuota binaries.
 rq_dir=""

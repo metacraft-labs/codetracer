@@ -60,7 +60,7 @@
 # timeout (run 43859070538). --list-shard prints the shard's files and exits.
 #
 # Environment:
-#   CT_NIM_CACHE_ROOT  nimcache root (default /tmp/ct-nim-cache)
+#   CT_NIM_CACHE_ROOT  nimcache root (default /tmp/ct-nim-cache-<uid>/<checkout>-<tag>)
 #   CT_LANE_TIMEOUT    per-file timeout in seconds (default 1800)
 
 set -uo pipefail
@@ -225,7 +225,9 @@ if [ -n "${CT_NIM_CACHE_ROOT:-}" ]; then
 else
 	_ct_checkout="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 	_ct_tag="$(printf '%s' "${_ct_checkout}" | cksum | awk '{print $1}')"
-	cache_root="/tmp/ct-nim-cache/$(basename "${_ct_checkout}")-${_ct_tag}"
+	# Per account too, as ci/lib/nim-cache-root.sh says: a shared /tmp root
+	# created by one runner user refuses the others.
+	cache_root="/tmp/ct-nim-cache-$(id -u)/$(basename "${_ct_checkout}")-${_ct_tag}"
 fi
 lane_timeout="${CT_LANE_TIMEOUT:-1800}"
 
