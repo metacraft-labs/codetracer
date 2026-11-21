@@ -145,7 +145,11 @@ suite "PLAT-35 tier 3 — the tier-4 ledger's own integrity":
     # A ledger that parsed to `{}` would satisfy every count equality in this
     # suite by making both sides zero.
     ck findings.kind == JArray
-    ck findings.len > 0
+    # The population is open AND resolved findings: once the last open one
+    # closes `findings` is legitimately empty, and an empty `{}` still fails
+    # because it has no `resolved` either.
+    ck ledger{"resolved"}.kind == JArray
+    ck findings.len + ledger{"resolved"}.len > 0
     ck iterations.kind == JArray
     ck iterations.len > 0
     ck gate.kind == JObject
@@ -292,7 +296,7 @@ suite "PLAT-35 tier 3 — the tier-4 ledger's own integrity":
     # a function of the two POPULATIONS, so it is written as that function and
     # never needs bumping:
     #
-    #   18                     the fixed assertions in the seven cases
+    #   19                     the fixed assertions in the seven cases
     #   + 6 x findings         5 per finding in *"every finding carries…"*
     #                          plus 1 per finding in the resolved-disjoint loop
     #   + 6 x resolved         6 per entry in *"every RESOLVED entry carries
@@ -306,7 +310,7 @@ suite "PLAT-35 tier 3 — the tier-4 ledger's own integrity":
     # the only thing the number is for. A floor would have lost the second
     # property; a literal would have lost the first.
     let expected = expectedScenarioCount(scenarios)
-    let derived = 18 + 6 * findings.len + 6 * ledger{"resolved"}.len +
+    let derived = 19 + 6 * findings.len + 6 * ledger{"resolved"}.len +
                   iterations.len * (3 + 4 * expected)
     # `ck` INCREMENTS AND THEN CHECKS, so the echo goes AFTER it or it prints
     # one less than the number being compared — which is exactly the kind of

@@ -16,6 +16,22 @@
     "stepIn=44@6",
     "setBreakpoint=44@6"
   ],
+  "entrySettle": {
+    "state": {
+      "line": 1,
+      "path": "test-programs/calc/main.py",
+      "rrTicks": 1,
+      "busy": false
+    },
+    "firstSample": {
+      "line": 1,
+      "path": "test-programs/calc/main.py",
+      "rrTicks": 1,
+      "busy": false
+    },
+    "polls": 2,
+    "waitedMs": 372
+  },
   "viewportCss": "1440x900",
   "capturePixels": "1440x900",
   "capture": "src/tests/visual/captures/electron/breakpoint-editor.png",

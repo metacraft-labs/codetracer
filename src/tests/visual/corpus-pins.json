@@ -198,8 +198,11 @@
         "rows=34;first=28;last=61"
       ],
       "electronEditorRows": [
-        "rows=38;first=25;last=62"
-      ]
+        "rows=38;first=25;last=62",
+        "rows=38;first=7;last=44"
+      ],
+      "electronEditorRowsDefect": "PLAT35-PD4",
+      "_whyEditorRowsIsASet": "Measured 2026-11-21 at codetracer agents 78b86c90681 (two captures, the same answer): the editor revealed line 44 as its LAST row (`revealLineInCenterIfOutsideViewport` leaves a line already inside the viewport where it is) and the content then grew, so it rests at first=7 last=44 with the execution line under the pane's bottom edge — `PLAT35-PD4`, quarantined in `tier4-review.json` for this scenario. The centred window (first=25 last=62) is what the capture took before. Tighten this to one member on the day PD4 is closed."
     }
   }
 }

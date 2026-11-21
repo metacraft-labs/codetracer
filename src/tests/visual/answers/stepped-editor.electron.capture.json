@@ -15,6 +15,22 @@
     "stepIn=39@5",
     "stepIn=44@6"
   ],
+  "entrySettle": {
+    "state": {
+      "line": 1,
+      "path": "test-programs/calc/main.py",
+      "rrTicks": 1,
+      "busy": false
+    },
+    "firstSample": {
+      "line": 1,
+      "path": "test-programs/calc/main.py",
+      "rrTicks": 1,
+      "busy": false
+    },
+    "polls": 2,
+    "waitedMs": 143
+  },
   "viewportCss": "1920x1080",
   "capturePixels": "1920x1080",
   "capture": "src/tests/visual/captures/electron/stepped-editor.png",
