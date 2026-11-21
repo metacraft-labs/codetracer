@@ -292,6 +292,7 @@ vm-unit
 vm-unit-js
 vm-unit-wasm
 plugin-tls
+plugin-host-wasm
 vm-collab-units
 vm-collab-integration
 vm-native
@@ -346,6 +347,7 @@ test_lane_description() {
 	vm-unit-js) echo "the same ViewModel unit suites, JS backend via node" ;;
 	vm-unit-wasm) echo "the same ViewModel unit suites, WASM backend (nim c --cpu:wasm32 via Emscripten) under node" ;;
 	plugin-tls) echo "plugins' TLS connections against a real TLS server (needs -d:ssl and openssl)" ;;
+	plugin-host-wasm) echo "WebAssembly plugins in one real ct-plugin-host (needs just build-plugin-host and emcc)" ;;
 	vm-collab-units) echo "collaboration ViewModel unit suites" ;;
 	vm-collab-integration) echo "collaboration integration + soak suites" ;;
 	vm-native) echo "GUI ViewModel headless suites, native (C) backend" ;;
@@ -682,6 +684,11 @@ test_lane_extra_flags() {
 		# The suite opens real TLS connections through `plugin_io.connectTcp`;
 		# without an SSL backend its TLS arm answers `ioUnsupported`.
 		echo "--path:src/frontend/viewmodel -d:ssl -d:useOpenssl3"
+		;;
+	plugin-host-wasm)
+		# The suite imports `plugin_host/supervisor` by that path, as the
+		# other plugin suites do through the lane's viewmodel root.
+		echo "--path:src/frontend/viewmodel"
 		;;
 	identity-device-grant-live)
 		# Same define, a DIFFERENT reason, and the difference matters: this
@@ -1678,9 +1685,20 @@ test_lane_files() {
 		# lane imports a JS-only module, and proves the discovery on synthetic
 		# suites nobody listed.
 		_tlf_vm_unit_candidates | _tlf_js_only_suites reject |
-			_tlf_reject '/test_plugin_tls\.nim$'
+			_tlf_reject '/test_plugin_tls\.nim$' '/test_plugin_host_wasm\.nim$'
 		# `test_plugin_tls` opens real TLS connections, which need a build with
 		# an SSL backend and OpenSSL at run time: it is `plugin-tls`'s.
+		;;
+
+	plugin-host-wasm)
+		# Extensibility-Model.md §11.9: WebAssembly plugins from several
+		# packages in ONE real `ct-plugin-host`, faulted one instance at a
+		# time, a read import refused and granted by `decide`, and the host
+		# killed mid-call. Its own lane because it needs the host binary
+		# (`just build-plugin-host`, a Rust engine) and Emscripten to build
+		# its plugin modules, which no other ViewModel suite does. The suite
+		# FAILS by name when the host is not built.
+		echo src/frontend/viewmodel/tests/unit/test_plugin_host_wasm.nim
 		;;
 
 	plugin-tls)
@@ -1730,6 +1748,7 @@ test_lane_files() {
 				'/test_plugin_surfaces\.nim$' \
 				'/test_plugin_grant_lifecycle\.nim$' \
 				'/test_plugin_process_host\.nim$' \
+				'/test_plugin_host_wasm\.nim$' \
 				'/test_ct_lens_plugins\.nim$' \
 				'/test_every_mountable_pane_has_a_factory_arm\.nim$' \
 				'/test_every_status_surface_has_an_entry_point\.nim$' \

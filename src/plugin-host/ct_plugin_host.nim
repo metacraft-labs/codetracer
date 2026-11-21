@@ -648,7 +648,7 @@ proc startGuest(id: string; msg: JsonNode) =
   # Emscripten's reactor initialiser, then the SDK's own.
   if not g.invoke("_initialize", [], optional = true)[0]: return
   if not g.invoke("ct_plugin_init", [])[0]: return
-  g.deliver(hostHello)
+  g.deliver(if hostHello.isNil: %*{"type": "hello"} else: hostHello)
   if g.dead: return
   if not g.helloSeen or g.helloProblem.len > 0:
     let why = if g.helloSeen: g.helloProblem
