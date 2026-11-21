@@ -2,6 +2,7 @@
   "P1": "builtins == @[paneEditor]",
   "P10": "\"Flame\" notin sess.text(strip)",
   "P11": "screen.rows[marked].runeAtPos(editor.col) == \"\u2605\".runeAt(0)",
+  "P12": "sess.screenHas(\"main 60%\", ceilingMs = 10000)",
   "P2": "not leaf.isNil",
   "P3": "back.docked[0].contributedPane == Metrics",
   "P4": "l.tree.children[0].activeIndex == 1",
