@@ -397,7 +397,7 @@ suite "ct-lens.jump on a real terminal: a mode, and the defences against it":
     check jumped
     sess.finish(home)
 
-  test "three Escapes take the keyboard back from the mode":
+  test "three Escapes take the keyboard back from the mode, and the healthy plugin gets it back":
     let home = newHome()
     var sess = spawnTui(home)
     settleOnDebugger(sess, Cols, Rows)
@@ -410,6 +410,10 @@ suite "ct-lens.jump on a real terminal: a mode, and the defences against it":
     check sess.screenHas("The plugins that held the keyboard: ct-lens.jump")
     sess.closeOverlay()
     check "JUMP MODE (ct-lens.jump)" notin sess.statusLine
+    # The plugin was healthy: it is running again (not "not responding")
+    # without a re-enable, and its key opens the mode again.
+    check sess.commandShows("plugins", "ct-lens.jump  running")
+    check sess.openJump()
     sess.finish(home)
 
   test "stopped while it holds the keyboard, the plugin loses it within its deadline; its siblings keep running":

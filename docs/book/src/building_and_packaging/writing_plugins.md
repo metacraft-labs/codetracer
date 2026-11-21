@@ -288,7 +288,8 @@ ct-lens.history`, then `:plugins grant ct-lens.history`, once per plugin.
 - `:plugins disable <id>` turns one plugin off; its siblings keep running in
   the same process.
 - After three Escapes, a plugin that held a layer reads `not responding`
-  until `:plugins re-enable <id>`, even when it is healthy.
+  until its watchdog next answers with no handler running, usually within a
+  second or two; `:plugins re-enable <id>` does it at once.
 
 ## Testing
 
