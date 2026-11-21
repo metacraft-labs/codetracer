@@ -108,9 +108,12 @@ What the SDK gives each plugin:
   a click in a front-end does. `ct-lens.watch` calls
   `p.relay("state", "addWatch", %*{"expression": path})`. The actions a
   plugin can relay are the ones `src/frontend/viewmodel/sync/action_relay.nim`
-  lists. In the terminal, the six step and continue moves run as the
-  terminal's own commands; other actions reach the session but are shown at
-  the next stop (a relayed watch's row, a relayed calltrace jump).
+  lists. In the terminal every relayed action takes the terminal's own route
+  and is shown at once: a step as its command, a calltrace jump as the call
+  trace pane's jump, a watch as `:watch`, a seek as the timeline's. An action
+  the terminal cannot show (a live restore on a finished recording, a
+  search result the session does not hold, "continue tracing" under an
+  origin chain) is refused, and the status line names your plugin and why.
 - **`pushView`, `pushStatus`, `pushEnablement`, `pushContext`, `publish`,
   `pushLayer`/`popLayer`**: everything a plugin shows or binds is pushed.
   CodeTracer never waits for a plugin to decide what a key does or what a pane

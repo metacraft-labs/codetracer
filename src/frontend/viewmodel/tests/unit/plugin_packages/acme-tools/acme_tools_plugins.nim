@@ -16,6 +16,12 @@
 ## the same line through its declared `hotspot` marker surface (a `★` in the
 ## gutter's mark column).
 ##
+## Three more commands relay actions the terminal must carry out on its own
+## routes: `metrics.jump` goes to the `mul` call of the loaded call trace
+## (`calltrace.doubleClickEntry`), `metrics.watch` adds the watch `left*9`
+## (`state.addWatch`) and `metrics.stepout` steps out
+## (`debugControls.stepOut`).
+##
 ## `flame`'s list answers `view-event`: activating a row (Enter, or a click)
 ## re-pushes the list with that row marked `✓` and selected, which is how a
 ## front-end's round trip through the plugin is seen on screen.
@@ -144,6 +150,10 @@ proc setupMetrics(sdk: PluginSdk) =
     p.pushHotspot()
     p.pushStatus("metrics.status", viewText("metrics.status", "metrics ok"))
     p.pushEnablement("metrics.step", true)
+    # Every command a key or `:plugins run` reaches is enabled by a pushed
+    # value (§11.7.2): one never pushed reads "plugin starting" for ever.
+    for op in ["metrics.jump", "metrics.watch", "metrics.stepout"]:
+      p.pushEnablement(op, true)
     p.pushContext("ready", %true)
     # A per-type visualiser for the value panes (PLAT-12's plugin tier): data,
     # not code — the host presents the value with it.
@@ -158,6 +168,28 @@ proc setupMetrics(sdk: PluginSdk) =
     p.pushView("overview", metricsView(p))
   m.onInvoke("metrics.step", proc(p: Plugin; args: JsonNode; req: Request) =
     p.relay("debugControls", "stepForward")
+    p.done(req))
+  m.onInvoke("metrics.jump", proc(p: Plugin; args: JsonNode; req: Request) =
+    # The `mul` call, as the call trace the mirror holds names it.
+    let s = p.session
+    if s.isNil or s.store.isNil:
+      p.fail(req, "no session")
+      return
+    let lines = s.store.calltrace.lines.val
+    let start = s.store.calltrace.startLineIndex.val
+    for i, l in lines:
+      let name = if l.displayName.len > 0: l.displayName else: l.name
+      if name == "mul" or name.endsWith(".mul"):
+        p.relay("calltrace", "doubleClickEntry",
+                %*{"lineIndex": start + i.int64})
+        p.done(req)
+        return
+    p.fail(req, "the call trace holds no mul call"))
+  m.onInvoke("metrics.watch", proc(p: Plugin; args: JsonNode; req: Request) =
+    p.relay("state", "addWatch", %*{"expression": "left*9"})
+    p.done(req))
+  m.onInvoke("metrics.stepout", proc(p: Plugin; args: JsonNode; req: Request) =
+    p.relay("debugControls", "stepOut")
     p.done(req))
   m.onInvoke("metrics.echo", proc(p: Plugin; args: JsonNode; req: Request) =
     p.answer(req, %*{"key": args{"key"}, "line": p.currentLine}))

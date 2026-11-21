@@ -278,6 +278,38 @@ suite "§11.4: mirrored state, epochs and the action relay":
     check r.mock.receivedCommands.len > 0
     r.sup.shutdown()
 
+  test "a front-end's own route takes a relayed action, and its refusal is the plugin's, by name":
+    var r = newRig()
+    var taken: seq[string]
+    r.sup.actionHook = proc(msg: JsonNode; refusal: var string): bool =
+      let name = msg{"vm"}.getStr("") & "." & msg{"action"}.getStr("")
+      if name == "state.addWatch":
+        refusal = "the front-end cannot show a watch here"
+        return false
+      taken.add name
+      true
+    r.both()
+    check r.sup.waitUntil("active", proc(): bool = r.active("acme-tools.metrics"))
+    r.mock.clearReceivedCommands()
+    # Taken by the front-end: counted as applied, never sent behind it.
+    discard r.sup.invoke("acme-tools.metrics", "metrics.step")
+    check r.sup.waitUntil("taken", proc(): bool =
+      r.sup.slot("acme-tools.metrics").actionsApplied == 1)
+    check taken == @["debugControls.stepForward"]
+    check r.mock.receivedCommands.len == 0
+    # Refused: on the status line and in the plugin's refusals, and never
+    # applied to the session.
+    let watches = r.session.stateVM.watchExpressions.val.len
+    discard r.sup.invoke("acme-tools.metrics", "metrics.watch")
+    check r.sup.waitUntil("refused", proc(): bool =
+      r.sup.slot("acme-tools.metrics").refusals.anyIt(
+        it.contains("cannot show a watch")))
+    check r.sup.statusLine.contains("acme-tools.metrics")
+    check r.sup.statusLine.contains("cannot show a watch")
+    check r.session.stateVM.watchExpressions.val.len == watches
+    check r.sup.slot("acme-tools.metrics").actionsApplied == 1
+    r.sup.shutdown()
+
 suite "§11.6, §11.8: faults are attributed, and siblings survive":
 
   test "SIGKILL restarts the process, re-activates both, re-sends a snapshot":

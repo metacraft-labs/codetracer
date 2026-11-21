@@ -68,9 +68,10 @@ HOST = "src/frontend/viewmodel/tests/unit/test_plugin_process_host.nim"
 PTY = "src/frontend/tui/tests/real_terminal/test_plat81_plugin_processes_pty.nim"
 TLS = "src/frontend/viewmodel/tests/unit/test_plugin_tls.nim"
 CLITEST = "src/ct/plugins_cli_test.nim"
+MOVES = "src/frontend/tui/tests/test_plugin_relayed_moves.nim"
 
 SUBJECTS = [SUP, LINK, SDK, PKG, RUNTIME, SERVICE, MAIN, IO, CLI]
-SUITES = [HOST, PTY, TLS, CLITEST]
+SUITES = [HOST, PTY, TLS, CLITEST, MOVES]
 IN_BINARY = {RUNTIME, SERVICE, MAIN}
 
 P_GRANT = "*::installing is not accepting; granted, one process runs both plugins and draws their panes"
@@ -98,6 +99,11 @@ GROUP = "*::a program past its deadline is killed with its whole process group"
 SWEEP = "*::a loopback listener and a connection; deactivation closes them and kills what it started"
 PONG = "*::a pong never waits behind a frame the plugin is writing (measured)"
 INFLIGHT = "*::the chord landing while a routine ping is in flight still probes the plugin"
+HOOK = "*::a front-end's own route takes a relayed action, and its refusal is the plugin's, by name"
+
+M_ROUTES = "*::steps, the call trace jump, the watch and the seek move the stop the screen shows"
+M_TAB = "*::while another tab is shown only a plain step runs; the rest is refused"
+P_MOVES = "*::a plugin's relayed jump, watch and step out are shown at once, with no :next"
 
 ARMS = [
     ("M1", [(SUP, "  if p.kind == pkQuery and not samePosition(e, sup.epoch):",
@@ -146,8 +152,8 @@ ARMS = [
               "      recovery = false")],
      [(PTY, P_SWALLOW)],
      "§11.7.6: the terminal's router no longer observes Escape for the recovery chord"),
-    ("M12", [(SERVICE, "        queue[].add line",
-              "        discard line")],
+    ("M12", [(SERVICE, "      queue[].add move",
+              "      discard move")],
      [(PTY, P_GRANT)],
      "a plugin's relayed step is swallowed instead of run as the terminal's own move"),
     ("M13", [(MAIN, "  let extensionsOff = command.flags.noExtensions or",
@@ -207,6 +213,22 @@ ARMS = [
      [(HOST, INFLIGHT)],
      "§11.7.6: a chord-suspect plugin is asked again only at the liveness "
      "interval; a healthy one stays not responding while a ping was in flight"),
+    ("M16", [(SERVICE, "  of pmkOutcome, pmkRelayMove:\n    if move.session != shown:",
+              "  of pmkOutcome, pmkRelayMove:\n    if false:")],
+     [(MOVES, M_TAB)],
+     "a plugin's jump classified against its session runs on whichever tab is shown"),
+    ("M22", [(SERVICE, "      move.outcome.jumpsToCall = true",
+              "      move.outcome.jumpsToCall = false")],
+     [(MOVES, M_ROUTES)],
+     "a relayed call trace jump is not the call trace pane's own jump"),
+    ("M23", [(SUP, "      if refusal.len > 0:\n        sup.refuse(s, refusal)\n        return",
+              "      if false:\n        sup.refuse(s, refusal)\n        return")],
+     [(HOST, HOOK)],
+     "an action the front-end refused is applied to the session behind it anyway"),
+    ("M24", [(MAIN, "        session.applyOutcome(rt, moved)\n        owedRefresh = false",
+              "        discard moved\n        owedRefresh = false")],
+     [(PTY, P_MOVES)],
+     "a relayed jump, watch or step out is taken and never carried out by the terminal's loop"),
 ]
 
 

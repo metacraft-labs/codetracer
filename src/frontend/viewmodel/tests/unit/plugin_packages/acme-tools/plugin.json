@@ -43,6 +43,18 @@
           {
             "id": "metrics.echo",
             "title": "Metrics: Echo"
+          },
+          {
+            "id": "metrics.jump",
+            "title": "Metrics: Jump to the mul call"
+          },
+          {
+            "id": "metrics.watch",
+            "title": "Metrics: Watch left*9"
+          },
+          {
+            "id": "metrics.stepout",
+            "title": "Metrics: Step out"
           }
         ],
         "marker": [

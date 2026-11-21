@@ -79,7 +79,7 @@ proc routeMovesToControls*(p: SessionPlugins; queue: ref seq[string]) =
   ## Take the plugins' debugger moves into `queue` (transport control ids),
   ## for the window's loop to run as its own.
   if p.isNil: return
-  p.sup.actionHook = proc(msg: JsonNode): bool =
+  p.sup.actionHook = proc(msg: JsonNode; refusal: var string): bool =
     if msg{"vm"}.getStr("") != "debugControls": return false
     let action = msg{"action"}.getStr("")
     for (name, control) in GpuiPluginMoves:

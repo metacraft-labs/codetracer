@@ -330,12 +330,19 @@ type
       ## Persist `plugins.<id>.enabled` (the user's *Disable*).
     onChange*: proc()
       ## Something a front-end shows changed.
-    actionHook*: proc(msg: JsonNode): bool
+    actionHook*: proc(msg: JsonNode; refusal: var string): bool
       ## A front-end's own route for a relayed action, tried before the
       ## session's `applyAction`; true when it took the action. A front-end
       ## whose loop drives the debugger's moves itself (the terminal pumps each
-      ## move to its stop) takes the debugger's moves here, so a plugin's step
-      ## is a step like a key's.
+      ## move to its stop and rebuilds its panes) takes the relayed actions
+      ## here — steps, a call trace jump, a seek, the watch edits — so a
+      ## plugin's step is a step like a key's, shown where it lands. `false`
+      ## with `refusal` set: the action must not run at all (it would send a
+      ## request no stop answers, such as a live restore on a finished
+      ## recording, or the front-end cannot show it); it is refused like any
+      ## other push (`refuse`: the status line and a note) and never reaches
+      ## `applyAction`. `false` with `refusal` empty: not the front-end's, and
+      ## `applyAction` takes it.
     rng: Rand
     # thresholds (§11.4.7, §11.6.2, §11.7.4, §11.7.5, §11.8)
     helloDeadlineMs*: int
@@ -968,6 +975,16 @@ proc refuse(sup: Supervisor; s: PluginSlot; what: string) =
   sup.statusLine = "plugin '" & s.id & "': " & what
   sup.note("refused " & s.id & ": " & what)
 
+proc refuseRelayed*(sup: Supervisor; plugin, what: string) =
+  ## A front-end could not carry out an action `plugin` relayed, found only
+  ## when it came to run it (`actionHook` took it): refused like any other
+  ## push, on the status line and in the notes, naming the plugin.
+  let s = sup.slot(plugin)
+  if s.isNil:
+    sup.statusLine = what
+    return
+  sup.refuse(s, what)
+
 proc declaresSurface(s: PluginSlot; surface: string): bool =
   for c in s.spec.parsed.manifest.contributions:
     if c.kind in {ckPane, ckMarker, ckStatusItem} and
@@ -1191,9 +1208,15 @@ proc handleMessage(sup: Supervisor; inst: Instance; msg: JsonNode) =
     if vm in ["collab", "viewport"]:
       sup.refuse(s, "a plugin cannot relay '" & vm & "' actions")
       return
-    if not sup.actionHook.isNil and sup.actionHook(msg):
-      inc s.actionsApplied
-    elif not sup.session.isNil and sup.session.applyAction(msg):
+    if not sup.actionHook.isNil:
+      var refusal = ""
+      if sup.actionHook(msg, refusal):
+        inc s.actionsApplied
+        return
+      if refusal.len > 0:
+        sup.refuse(s, refusal)
+        return
+    if not sup.session.isNil and sup.session.applyAction(msg):
       inc s.actionsApplied
   of "publish-batch":
     s.published[msg{"viewModel"}.getStr("")] =

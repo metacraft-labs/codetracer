@@ -93,6 +93,53 @@ proc commandShows(sess: var TuiTestSession; line, needle: string;
   checkpoint "never shown by :" & line & ": " & needle & "\n" & sess.screen
   false
 
+proc tickShown(screen: string): int =
+  ## The stop's tick as the screen reads it: the title bar's `tick: N / M`
+  ## (on every stop, a module's too, where the Variables pane is empty and
+  ## shows no `tick N` title); -1 when none is.
+  for marker in ["tick: ", "tick "]:
+    var at = screen.find(marker)
+    while at >= 0:
+      var digits = ""
+      var i = at + marker.len
+      while i < screen.len and screen[i] in Digits:
+        digits.add screen[i]
+        inc i
+      if digits.len > 0: return parseInt(digits)
+      at = screen.find(marker, at + marker.len)
+  -1
+
+proc settledTick(sess: var TuiTestSession; ceilingMs = 60_000): int =
+  ## The tick of a stop that HOLDS STILL: the same on three reads in a row.
+  ## The panes redraw in pieces after a move, so one read can catch the
+  ## title of the old stop under the source of the new one.
+  var last = -2
+  var same = 0
+  var waited = 0
+  while waited < ceilingMs:
+    let t = tickShown(sess.screen)
+    if t >= 0 and t == last:
+      inc same
+      if same >= 2: return t
+    else:
+      same = 0
+    last = t
+    sleep(300)
+    waited += 300
+  last
+
+proc tickMoves(sess: var TuiTestSession; from0: int;
+               ceilingMs = 60_000): int =
+  ## Wait for the screen to settle on a stop other than tick `from0`; its
+  ## tick, or `from0` when it never moved.
+  var waited = 0
+  while waited < ceilingMs:
+    let t = sess.settledTick(ceilingMs = 10_000)
+    if t >= 0 and t != from0: return t
+    waited += 1_000
+  checkpoint "the screen stayed at tick " & $from0 & "\n" & sess.screen
+  from0
+
 proc pluginPids(home: string): seq[int] =
   ## The plugin processes of THIS test's install, by their executable's path
   ## under `home`: other suites on the same machine run the same package.
@@ -168,6 +215,38 @@ suite "Extensibility-Model §11 on a real terminal":
     check pluginPids(home).len == 0
     removeDir(home)
 
+  test "a plugin's relayed jump, watch and step out are shown at once, with no :next":
+    # The terminal pumps each move to its stop in its loop. A relayed action
+    # applied to the session behind the loop moved the replay but kept the
+    # screen at the old stop until the user's next step: these three commands
+    # relay `calltrace.doubleClickEntry`, `state.addWatch` and
+    # `debugControls.stepOut`, and every check below is made BEFORE any key
+    # of the user's moves the debugger.
+    let home = newHome()
+    var sess = spawnTui(home)
+    settleOnDebugger(sess, Cols, Rows)
+    sess.command("plugins grant acme-tools.metrics")
+    sess.command("plugins grant acme-tools.flame")
+    check sess.commandShows("plugins", "acme-tools.metrics  running")
+    let start = sess.settledTick()
+    check start >= 0
+    # The jump: the call trace pane's own jump to the `mul` call.
+    sess.command("plugins run acme-tools.metrics metrics.jump")
+    let jumped = sess.tickMoves(start)
+    check jumped != start
+    check sess.screenHas("main.py:39")
+    # The watch: its row in the Variables pane at once, as `:watch` draws it.
+    sess.command("plugins run acme-tools.metrics metrics.watch")
+    check sess.screenHas("left*9")
+    # Step out of `mul`: a later stop, shown.
+    sess.command("plugins run acme-tools.metrics metrics.stepout")
+    let stepped = sess.tickMoves(jumped)
+    check stepped > jumped
+    sess.send(":quit\r")
+    discard sess.waitExit(initDuration(seconds = 30))
+    sess.close()
+    removeDir(home)
+
   test "--no-extensions starts no plugin process":
     let home = newHome()
     var sess = spawnTui(home, @["--no-extensions"])
@@ -190,8 +269,9 @@ suite "Extensibility-Model §11 on a real terminal":
     sess.command("plugins grant acme-tools.metrics")
     sess.command("plugins grant acme-tools.flame")
     check sess.screenHas("FLAME MODE (acme-tools.flame)")
-    sess.send("\e")
-    sleep(1_200)
+    # No Escape first: the layer binds `escape`, and an Escape is delivered
+    # to a layer like any key (§11.7.6), so it would be the key the plugin
+    # never answers.
     sess.send("j")
     check sess.screenHas("`j` went to acme-tools.flame, which did not answer")
     sess.escapeKey()

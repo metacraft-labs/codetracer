@@ -328,7 +328,7 @@ proc openDesktopPluginSession*(window, tab: int; deliver: PluginDeliver;
   let m = mirror
   # A relayed action (a plugin's step) runs on the renderer's session, the
   # primary, as a mirror's view operations do.
-  result.plugins.sup.actionHook = proc(msg: JsonNode): bool =
+  result.plugins.sup.actionHook = proc(msg: JsonNode; refusal: var string): bool =
     m.relay(msg{"vm"}.getStr(""), msg{"action"}.getStr(""),
             (if msg{"args"}.isNil: newJObject() else: msg{"args"}))
     true
