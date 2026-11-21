@@ -794,3 +794,9 @@ src/frontend/tui/tests/plat70d-grep-mutation-control.sha256	src/frontend/viewmod
 src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/run-nim-test-lane.sh	3faa671c35896f38d4e764ee8cdf379953e6adeec265a186ab966956f4f79811	3466f2374fa109b34c6326f47f0bccff13a5591911f251156bc5a4255f010916
 src/frontend/viewmodel/tests/unit/plat18-marshalling-mutation-control.sha256	src/frontend/viewmodel/views/isonim_state_view.nim	68a33a4b16b1e15562812871ca34f0a159dd99b2d46ea6044ca8a32aad31ceca	8e1de68d24e6d9f91cc832493a6f249b0c1ad837817abec409035700ec589076
 src/frontend/viewmodel/tests/unit/plat18-marshalling-mutation-control.sha256	src/frontend/viewmodel/views/isonim_calltrace_view.nim	c996fd7c21e2c4571a7fdf84a475c3bb9b8fcb1767536f1ef0b1d0c07a9bfe04	3a398cb37f521bf15de6e524138eb911d9faced298286d92b7bee80ebe226247
+
+# 2026-11-21, the GPUI plugin harness (gpui-plugins, 10/10 KILLED at 467102fb217 plus the
+# footer fix) was graded before plugin_processes.nim and leaves.nim moved on agents; it
+# owes a re-grade.
+src/frontend/gpui/tests/gpui-plugins-mutation-control.sha256	src/frontend/tui/host/plugin_processes.nim	bdde0ab70f86f9e4479f68422e98de3e46fa3cc99095722b8dccc431f8dd6677	b66e37349e229620a58a6b952e9f5587e5cf10f1c2a127af64c26e45364dae54
+src/frontend/gpui/tests/gpui-plugins-mutation-control.sha256	src/frontend/gpui/app/leaves.nim	efe5e20ddafa3f7518b3aa5050f7a00b17a70339f2d89ec98e56a0c5507ec8f9	b4caea18c44ccc3c4d1a634b1f1ff12123374e1aebecba0c30b5a725880bb61b
