@@ -803,16 +803,41 @@ fi
 # Every name the planner can emit must be declared, so a recorder added to a
 # fan-out matrix without being added here is a failure rather than a surprise.
 # The cases above are derived from the matrices, so this now tracks them.
+#
+# The private corners are the exception, and are held to their own rule. The
+# clone-list declares what codetracer's PUBLIC repro.lock pins
+# (workspace-lock-freshness.sh), and that lock can pin no private repo
+# (bbf7dbed4a6). So they must NOT be listed. Where the trigger is codetracer,
+# the workflow's private_pins step must give each a recorded revision, and
+# the setup step must clone from that step's list, not the planner's.
+PRIVATE_CORNERS=(codetracer-launcher codetracer-native-backend)
 uncovered=()
 for sib in $(printf '%s' "$EMITTED_SIBLINGS" | tr ' ' '\n' | sort -u); do
 	[ "$sib" = "codetracer" ] && continue
+	[[ " ${PRIVATE_CORNERS[*]} " == *" $sib "* ]] && continue
 	grep -qx -- "$sib" <<<"$clone_entries" || uncovered+=("$sib")
 done
 if [ "${#uncovered[@]}" -eq 0 ] && [ -n "$EMITTED_SIBLINGS" ]; then
-	ok "every sibling the workflow can emit is declared in the clone-list"
+	ok "every public sibling the workflow can emit is declared in the clone-list"
 else
-	fail "every sibling the workflow can emit is declared in the clone-list" \
+	fail "every public sibling the workflow can emit is declared in the clone-list" \
 		"${uncovered[@]:-the planner emitted nothing, so this proves nothing}"
+fi
+private_bad=()
+for sib in "${PRIVATE_CORNERS[@]}"; do
+	grep -qx -- "$sib" <<<"$clone_entries" &&
+		private_bad+=("'$sib' is in the clone-list, which declares that codetracer's public repro.lock pins it; it cannot")
+done
+grep -q 'PRIVATE_SIBLING_CODETRACER_LAUNCHER' <<<"$(strip_cr "$REUSABLE")" ||
+	private_bad+=("no step gives codetracer-launcher ci/toolchain.pin's PRIVATE_SIBLING_CODETRACER_LAUNCHER on the desktop edge")
+# shellcheck disable=SC2016 # the workflow expression, literally
+grep -qF '${{ steps.private_pins.outputs.siblings }}' <<<"$(strip_cr "$REUSABLE")" ||
+	private_bad+=("the setup step does not clone from the private_pins step's list, so the desktop edge's launcher stays bare")
+if [ "${#private_bad[@]}" -eq 0 ]; then
+	ok "the private corners (${PRIVATE_CORNERS[*]}) stay off the clone-list, and the desktop edge pins the launcher from ci/toolchain.pin"
+else
+	fail "the private corners stay off the clone-list, and the desktop edge pins the launcher from ci/toolchain.pin" \
+		"${private_bad[@]}"
 fi
 
 # The clone-list is read only when a call site passes no `siblings:`.  Every
@@ -2399,7 +2424,7 @@ fi
 # reporting success on fewer checks than it claims.
 # ---------------------------------------------------------------------------
 echo
-readonly EXPECTED_ASSERTIONS=50
+readonly EXPECTED_ASSERTIONS=51
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))

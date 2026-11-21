@@ -507,6 +507,55 @@ jobs:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
 
+      - name: Pin the private siblings codetracer's public lock cannot
+        # The planner's entries are BARE, and `clone-siblings` resolves each
+        # against the TRIGGERING repo's lock. On the launcher and recorder
+        # edges that lock is a private repo's, and it pins every corner
+        # (codetracer-native-recorder's pins codetracer-launcher and
+        # codetracer-native-backend). On the desktop edge it is codetracer's,
+        # which is public and so can neither declare nor pin a private repo
+        # (bbf7dbed4a6; sibling-provisioning-test's UNLOCKED_SIBLINGS). A bare
+        # codetracer-launcher there resolves to nothing. So, on that edge only,
+        # this step gives the launcher the revision this commit records,
+        # ci/toolchain.pin's PRIVATE_SIBLING_CODETRACER_LAUNCHER, as tui-tests
+        # does. Any other private name the desktop edge comes to emit fails
+        # here by name, rather than at clone time. The planner's own rule (no
+        # `=` in what it emits) is unchanged; this is the one place a revision
+        # is added, and only from a file the commit carries.
+        id: private_pins
+        env:
+          SELF: ${{ steps.plan.outputs.self }}
+          PLANNED: ${{ steps.plan.outputs.siblings }}
+        run: |
+          set -euo pipefail
+          out=()
+          while IFS= read -r e; do
+            [ -n "${e}" ] || continue
+            if [ "${SELF}" = codetracer ]; then
+              case "${e}" in
+                codetracer-launcher)
+                  rev=""
+                  while IFS= read -r line; do
+                    [[ "${line}" =~ ^PRIVATE_SIBLING_CODETRACER_LAUNCHER=([0-9a-f]{40})$ ]] && rev="${BASH_REMATCH[1]}"
+                  done <ci/toolchain.pin
+                  [ -n "${rev}" ] || { echo "::error::ci/toolchain.pin has no 40-hex PRIVATE_SIBLING_CODETRACER_LAUNCHER"; exit 1; }
+                  e="${e}=${rev}"
+                  ;;
+                codetracer-native-backend | codetracer-native-recorder | codetracer-visual-replay | codetracer-native-test-programs | codetracer-snapshot-codecs)
+                  echo "::error::the desktop edge would clone the private '${e}' bare, and codetracer's public repro.lock cannot pin it; give it a recorded revision in this step"
+                  exit 1
+                  ;;
+              esac
+            fi
+            out+=("${e}")
+          done <<<"${PLANNED}"
+          {
+            echo "siblings<<LRC6_PINNED_EOF"
+            printf '%s\n' "${out[@]}"
+            echo "LRC6_PINNED_EOF"
+          } >>"${GITHUB_OUTPUT}"
+          printf '  %s\n' "${out[@]}"
+
       - name: Setup dev env + clone the remaining siblings
         # setup-dev-env installs Nix (with the Attic substituter + keys) and
         # delegates sibling cloning to `clone-siblings`, which places each one
@@ -692,7 +741,7 @@ jobs:
           # `#` comments, so the expression's three names and the literal names
           # below arrive as one flat list.
           siblings: |
-            ${{ steps.plan.outputs.siblings }}
+            ${{ steps.private_pins.outputs.siblings }}
             nim-everywhere
             nim-acp
             nim-agent-harbor
