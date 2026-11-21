@@ -197,6 +197,23 @@ suite "§11.2: one native process hosts a package's plugins":
       r.sup.renderSurface("acme-tools.metrics/overview").allText.contains("label fast"))
     r.sup.shutdown()
 
+  test "a settings change made while the plugin is activating still reaches it":
+    # `activate` carries the settings of the moment it is sent. A change made
+    # before `activated` comes back is the change the user made last, and the
+    # plugin must end up with it. The wait stops in that window: the poll that
+    # sends `activate` cannot also read its answer, because the write is
+    # flushed at the end of that poll.
+    var r = newRig()
+    r.sup.configure("acme-tools.metrics", true, %*{"label": "speed"})
+    r.both()
+    check r.sup.waitUntil("activating", proc(): bool =
+      r.sup.slot("acme-tools.metrics").activating)
+    check not r.active("acme-tools.metrics")
+    r.sup.settingsChanged("acme-tools.metrics", %*{"label": "fast"})
+    check r.sup.waitUntil("new label", proc(): bool =
+      r.sup.renderSurface("acme-tools.metrics/overview").allText.contains("label fast"))
+    r.sup.shutdown()
+
 suite "PLAT-12's plugin tier: a plugin that publishes visualisers":
 
   test "a published `visualisers` ViewModel becomes ptPlugin-tier visualisers":
@@ -572,6 +589,73 @@ suite "§11.7.6: the escape no plugin can capture":
     check not r.sup.resolveLayerKey("escape", "").found
     r.sup.disableAllForSession()
     check r.sup.waitUntil("no process", proc(): bool = r.sup.processIds.len == 0)
+    r.sup.shutdown()
+
+  test "a healthy plugin whose layer the chord popped answers a probe and gets its bindings back":
+    # The chord is not evidence about the plugin (the user may simply have
+    # pressed Escape three times), so the host asks the process at once
+    # instead of waiting for an `ack` that can never come: a suspect plugin
+    # receives no key and no command. Both ping intervals are widened far past
+    # the ceiling, so only the chord's own probe can clear it in time.
+    var r = newRig("slow-ack", manifest = inputManifest(),
+                   tune = proc(s: Supervisor) =
+                     s.pingIdleMs = 600_000
+                     s.pingBusyMs = 600_000)
+    r.sup.configure("acme-tools.flame", true,
+                    %*{"mode": "slow-ack", "ackDelayMs": 0})
+    r.both()
+    check r.layerUp()
+    check r.sup.waitUntil("enablement pushed", proc(): bool =
+      r.sup.enablementOf("acme-tools.flame", "flame.refresh").enabled)
+    check not r.sup.observeEscape()
+    check not r.sup.observeEscape()
+    check r.sup.observeEscape()
+    check r.sup.recoveryPlugins == @["acme-tools.flame"]
+    check r.sup.slot("acme-tools.flame").layers.len == 0
+    check r.sup.slot("acme-tools.flame").suspect
+    check r.sup.waitUntil("answering again", proc(): bool =
+      not r.sup.slot("acme-tools.flame").suspect)
+    check r.sup.enablementOf("acme-tools.flame", "flame.refresh").enabled
+    check r.sup.events.anyIt(it.contains(
+      "acme-tools.flame is answering again; its layers and bindings are back"))
+    let id = r.sup.invoke("acme-tools.flame", "flame.refresh")
+    check id.len > 0
+    check r.sup.waitUntil("refresh done", proc(): bool =
+      r.sup.answers.anyIt(it.id == id and it.kind == "done"))
+    r.sup.shutdown()
+
+  test "the chord does not launder a missed input deadline: pongs do not clear it":
+    # The negative control of the probe above: a plugin that missed an input
+    # deadline is suspect on evidence, and its watchdog still answers pings
+    # (it is not busy; it simply never acknowledges). Only an `ack` may clear
+    # that suspicion, before the chord and after it.
+    var r = newRig("swallow-input", manifest = inputManifest(),
+                   tune = proc(s: Supervisor) =
+                     s.pingIdleMs = 50
+                     s.pingBusyMs = 50)
+    r.sup.inputDeadlineMs = InputDeadlineMs     # the subject: the spec's value
+    r.both()
+    check r.layerUp()
+    check r.press("j").found
+    check r.sup.waitUntil("missed deadline", proc(): bool =
+      r.sup.slot("acme-tools.flame").suspect)
+    check not r.sup.observeEscape()
+    check not r.sup.observeEscape()
+    check r.sup.observeEscape()
+    check r.sup.recoveryPlugins == @["acme-tools.flame"]
+    let pid = r.sup.pidOf("acme-tools.flame")
+    proc pongs(): int =
+      for inst in r.sup.packages["acme-tools"].instances:
+        if not inst.link.isNil and int(inst.link.pid) == pid:
+          return inst.pongs
+    let before = pongs()
+    check r.sup.waitUntil("several pongs after the chord", proc(): bool =
+      pongs() >= before + 3)
+    check r.sup.pidOf("acme-tools.flame") == pid
+    check r.sup.slot("acme-tools.flame").suspect
+    check r.sup.enablementOf("acme-tools.flame", "flame.refresh").reason ==
+      "plugin not responding"
+    check not r.sup.events.anyIt(it.contains("is answering again"))
     r.sup.shutdown()
 
   test "bisect halves the enabled plugins per step":
