@@ -19,9 +19,12 @@ fail() {
 ok() { echo "  ok   $*"; }
 
 work="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/job-lifetime.XXXXXX")"
+# Ends with `rm`, so the EXIT trap does not turn a passing run's status into
+# the failed `kill` of a sampler that already stopped (run 44864106832's
+# lint-bash: "all checks passed", exit 1).
 cleanup() {
-	[ -s "$work/sampler.pid" ] && kill "$(cat "$work/sampler.pid")" 2>/dev/null
-	[ -s "$work/sampler2.pid" ] && kill "$(cat "$work/sampler2.pid")" 2>/dev/null
+	if [ -s "$work/sampler.pid" ]; then kill "$(cat "$work/sampler.pid")" 2>/dev/null || true; fi
+	if [ -s "$work/sampler2.pid" ]; then kill "$(cat "$work/sampler2.pid")" 2>/dev/null || true; fi
 	rm -rf "$work"
 }
 trap cleanup EXIT
@@ -35,7 +38,10 @@ cp "$(command -v bash)" "$work/Runner.Worker"
 	while [ ! -e "$2/stop" ]; do sleep 0.2; done
 ' worker "$root" "$work" &
 worker=$!
-for _ in $(seq 1 50); do [ -s "$work/sampler.pid" ] && break; sleep 0.1; done
+for _ in $(seq 1 50); do
+	[ -s "$work/sampler.pid" ] && break
+	sleep 0.1
+done
 sampler="$(cat "$work/sampler.pid")"
 
 sleep 3
@@ -47,7 +53,10 @@ fi
 
 touch "$work/stop"
 wait "$worker" 2>/dev/null || true
-for _ in $(seq 1 40); do kill -0 "$sampler" 2>/dev/null || break; sleep 0.1; done
+for _ in $(seq 1 40); do
+	kill -0 "$sampler" 2>/dev/null || break
+	sleep 0.1
+done
 if kill -0 "$sampler" 2>/dev/null; then
 	fail "the sampler outlived its Runner.Worker by more than 4 s (pid $sampler)"
 else
@@ -57,7 +66,10 @@ fi
 # No worker ancestor: only the age bound applies, and it is honoured.
 CT_HELPER_MAX_SECONDS=2 nohup bash ci/lib/memory-sampler.sh "$work/samples2.log" 1 >/dev/null 2>&1 &
 echo $! >"$work/sampler2.pid"
-for _ in $(seq 1 60); do kill -0 "$(cat "$work/sampler2.pid")" 2>/dev/null || break; sleep 0.1; done
+for _ in $(seq 1 60); do
+	kill -0 "$(cat "$work/sampler2.pid")" 2>/dev/null || break
+	sleep 0.1
+done
 if kill -0 "$(cat "$work/sampler2.pid")" 2>/dev/null; then
 	fail "with no Runner.Worker, CT_HELPER_MAX_SECONDS=2 did not end the sampler"
 else

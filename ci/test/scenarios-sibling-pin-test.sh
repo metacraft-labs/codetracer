@@ -147,7 +147,7 @@ if sh_ run electron some.yaml >"${scratch}/5.log" 2>&1; then
 	grep -q "DemoVideoScript ${pinned}" "${root}/build/bin/.siblings-dvs" ||
 		fail "5: run did not rebuild dvs from the pin"
 	grep -q "/dvs run some.yaml" "${runs}" || fail "5: dvs did not run"
-	tail -n 1 "${runs}" | grep -q -- "--settle-timeout 15000 --stage-timeout 300000" ||
+	grep -q -- "--settle-timeout 15000 --stage-timeout 300000" <<<"$(tail -n 1 "${runs}")" ||
 		fail "5: run did not pass the lane's limits: $(tail -n 1 "${runs}")"
 else
 	fail "5: run at the pin failed: $(cat "${scratch}/5.log")"
@@ -155,7 +155,7 @@ fi
 
 # 6. CONTROL: a limit given after the scenario comes last, so dvs takes it.
 if sh_ run electron some.yaml --stage-timeout 1000 >"${scratch}/6.log" 2>&1; then
-	tail -n 1 "${runs}" | grep -q -- "--stage-timeout 300000 --stage-timeout 1000$" ||
+	grep -q -- "--stage-timeout 300000 --stage-timeout 1000$" <<<"$(tail -n 1 "${runs}")" ||
 		fail "6: the caller's limit does not come after the lane's: $(tail -n 1 "${runs}")"
 else
 	fail "6: run with a limit failed: $(cat "${scratch}/6.log")"

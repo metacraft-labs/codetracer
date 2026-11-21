@@ -58,7 +58,7 @@ cleanup() {
 	# Stop only the daemon this script started, and only if the PID still
 	# names a runquotad under this script's own directory: never by name.
 	if [ -n "$host_pid" ] && [ -r "/proc/$host_pid/cmdline" ] &&
-		tr '\0' ' ' <"/proc/$host_pid/cmdline" | grep -qF -- "$work/"; then
+		grep -qF -- "$work/" <<<"$(tr '\0' ' ' <"/proc/$host_pid/cmdline")"; then
 		kill "$host_pid" 2>/dev/null || true
 		wait "$host_pid" 2>/dev/null || true
 	fi
@@ -158,8 +158,8 @@ count_daemons() {
 	local n=0 f
 	for f in /proc/[0-9]*/cmdline; do
 		[ -r "$f" ] || continue
-		tr '\0' '\n' <"$f" 2>/dev/null | head -n 1 | grep -q '/runquotad$' || continue
-		tr '\0' ' ' <"$f" 2>/dev/null | grep -qF -- "$work/" && n=$((n + 1))
+		grep -q '/runquotad$' <<<"$(tr '\0' '\n' <"$f" 2>/dev/null | head -n 1)" || continue
+		grep -qF -- "$work/" <<<"$(tr '\0' ' ' <"$f" 2>/dev/null)" && n=$((n + 1))
 	done
 	echo "$n"
 }
@@ -218,7 +218,7 @@ sessions="$(printf '%s' "$leases_json" | { grep -o '"session_id":[0-9]*' || true
 [ "$running" = 2 ] || fail "the host daemon reports $running running leases, expected 2: $leases_json"
 [ "$sessions" = 2 ] || fail "the two leases are from $sessions sessions, expected 2: $leases_json"
 status_json="$(rq status --json)"
-printf '%s' "$status_json" | grep -q '"active_leases":2' ||
+grep -q '"active_leases":2' <<<"$status_json" ||
 	fail "the host daemon's status does not account for both leases: $status_json"
 echo "PASS: both builds hold a lease from the host daemon's one budget ($running running leases, $sessions sessions)"
 
