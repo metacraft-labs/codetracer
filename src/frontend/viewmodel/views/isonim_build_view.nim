@@ -39,6 +39,11 @@ when defined(js):
   import ./isonim_activation
 
 import isonim/core/[signals, computation]
+when defined(ctWasmCore):
+  # The command-frame renderer the WebAssembly core draws through
+  # (`src/frontend/web_core`), imported before the generic procs below.
+  import isonim/web/frame_renderer
+  import ./frame_mock_events
 import isonim/dsl/[ui, components]
 
 when defined(js):

@@ -37,6 +37,11 @@
 ## the static container shell built once via the DSL.
 
 import std/tables
+when defined(ctWasmCore):
+  # The command-frame renderer the WebAssembly core draws through
+  # (`src/frontend/web_core`), imported before the generic procs below.
+  import isonim/web/frame_renderer
+  import ./frame_mock_events
 
 import isonim/core/[signals, computation]
 import isonim/dsl/[ui, components]
@@ -113,11 +118,27 @@ proc wireHeadlessSubmit[R, N](r: R; vm: ReplVM; formEl, inputEl: N) =
   ## test sets before firing "submit".
   # Bound where instantiated: on JS this module also sees WebRenderer's.
   mixin addEventListener
-  r.addEventListener(formEl, "submit", proc() =
-    let value = inputEl.attributes.getOrDefault("value", "")
-    if value.len > 0:
-      vm.submitInput(value)
-      inputEl.attributes["value"] = "")
+  template mockSubmit() =
+    r.addEventListener(formEl, "submit", proc() =
+      let value = inputEl.attributes.getOrDefault("value", "")
+      if value.len > 0:
+        vm.submitInput(value)
+        inputEl.attributes["value"] = "")
+  when defined(ctWasmCore):
+    when N is FrameNode:
+      # The WebAssembly core: the host sends the form's field value with
+      # the submit, and the handler keeps the page from reloading.
+      let field = inputEl
+      r.addEventListener(formEl, "submit", proc(ev: FrameEvent) =
+        ev.preventDefault()
+        ev.stopPropagation()
+        if ev.value.len > 0:
+          vm.submitInput(ev.value)
+          r.setInputValue(field, ""))
+    else:
+      mockSubmit()
+  else:
+    mockSubmit()
 
 proc renderEnabled[R, N](r: R; vm: ReplVM): N =
   ## The input form and the history.

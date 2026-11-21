@@ -54,6 +54,11 @@
 ## advances to the corresponding step.
 
 import std/os
+when defined(ctWasmCore):
+  # The command-frame renderer the WebAssembly core draws through
+  # (`src/frontend/web_core`), imported before the generic procs below.
+  import isonim/web/frame_renderer
+  import ./frame_mock_events
 when defined(js):
   # Enter and Space on a `role="button"` row are its click.
   import ./isonim_activation

@@ -27,18 +27,40 @@
       (async () => {
         try {
           const q = new URLSearchParams(location.search);
+          // Requests sent and not yet answered, by command: for a run that
+          // does not settle, the test names them.
+          const unanswered = new Map();
+          globalThis.ctwUnanswered = () => [...unanswered.values()].map((u) => u.command);
+          // In flight: unanswered and sent within the last 45 s. The engine
+          // answers only the newest of overlapping section requests, so an
+          // older one can stay unanswered for good without anything loading.
+          globalThis.ctwInFlight = () => [...unanswered.values()]
+            .filter((u) => performance.now() - u.at < 45000).length;
           const ws = new WebSocket(`ws://${location.host}/dap`);
           await new Promise((ok, no) => { ws.onopen = ok; ws.onerror = () => no(new Error('the relay refused the socket')); });
           const core = q.get('arm') === 'wasm' ? await globalThis.ctwModule() : globalThis.ctwJsCore;
           const host = globalThis.CtWebCoreHost.startWebCore({
             core,
             mount: document.getElementById('mount'),
+            // Shorter than the in-flight window the test settles on, so a
+            // request the engine dropped is settled before the stop is read.
+            requestTimeoutMs: 30000,
             transport: {
-              send: (text) => ws.send(text),
-              onMessage: (cb) => { ws.onmessage = (ev) => cb(String(ev.data)); },
+              send: (text) => {
+                try { const m = JSON.parse(text); if (m.type === 'request') unanswered.set(m.seq, { command: m.command, at: performance.now() }); } catch (e) {}
+                ws.send(text);
+              },
+              onMessage: (cb) => {
+                ws.onmessage = (ev) => {
+                  const text = String(ev.data);
+                  try { const m = JSON.parse(text); if (m.type === 'response') unanswered.delete(m.request_seq); } catch (e) {}
+                  cb(text);
+                };
+              },
             },
           });
           host.openFolder(q.get('folder'));
+          for (const name of (q.get('extra') || '').split(',').filter(Boolean)) host.mountPane(name);
           globalThis.ctwHost = host;
         } catch (e) {
           globalThis.ctwError = String(e && e.stack || e);

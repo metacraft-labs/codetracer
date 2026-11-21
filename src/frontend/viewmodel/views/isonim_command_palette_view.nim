@@ -42,6 +42,11 @@
 ##   renderer ops inside the effect handle the dynamic content).
 
 import std/strutils
+when defined(ctWasmCore):
+  # The command-frame renderer the WebAssembly core draws through
+  # (`src/frontend/web_core`), imported before the generic procs below.
+  import isonim/web/frame_renderer
+  import ./frame_mock_events
 when defined(js):
   # Enter and Space on a `role="button"` row are its click.
   import ./isonim_activation

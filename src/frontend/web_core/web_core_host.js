@@ -36,6 +36,9 @@
       deliver: c('ctwDeliver', null, ['string']),
       openFolder: c('ctwOpenFolder', null, ['string']),
       attach: c('ctwAttach', null, ['string']),
+      mountPane: c('ctwMountPane', null, ['string']),
+      press: c('ctwPress', 'number', ['string', 'string']),
+      expire: c('ctwExpire', 'number', ['number']),
       phase: c('ctwPhase', 'number'),
       failure: c('ctwFailure', 'string'),
       step: c('ctwStep', null, ['number']),
@@ -51,6 +54,7 @@
       eventLogTotal: c('ctwEventLogTotal', 'number'),
       eventLogCurrent: c('ctwEventLogCurrent', 'number'),
       eventLogRowPx: c('ctwEventLogRowPx', 'number'),
+      calltraceMeasured: c('ctwCalltraceMeasured', null, ['number', 'number', 'number']),
       frameOps: c('isonimFrameOps', 'number'),
       frameReset: c('isonimFrameReset', null),
       frameManifest: c('isonimFrameManifest', null),
@@ -73,7 +77,10 @@
    *   mount      the element the panes are drawn into
    *   transport  {send(text), onMessage(cb)}
    */
-  function startWebCore({ core: raw, mount, transport, pumpMs, rowPx }) {
+  function startWebCore({ core: raw, mount, transport, pumpMs, rowPx, paneRoot, requestTimeoutMs }) {
+    // Where the panes are looked up: the mount, or the whole document for a
+    // host that moves each pane into a place of its own.
+    const panesIn = paneRoot || mount;
     const core = raw && raw.cwrap ? bindWasm(raw) : raw;
     if (!core) throw new Error('web core host: no core');
     let applier = null;
@@ -90,7 +97,21 @@
     };
     const call = (fn) => (...args) => { const v = fn(...args); flush(); return v; };
 
-    root.ctwHostPost = (json) => transport.send(json);
+    // Requests the core sent and the engine has not answered, by seq, with
+    // the time each was sent: after `requestTimeoutMs` (the renderer's DAP
+    // timeout, 30 s, by default) the core settles one as failed.
+    const waiting = new Map();
+    const timeoutMs = requestTimeoutMs || 30000;
+    root.ctwHostPost = (json) => {
+      try { const m = JSON.parse(json); if (m.type === 'request') waiting.set(m.seq, Date.now()); } catch (e) {}
+      transport.send(json);
+    };
+    const expireStale = () => {
+      const now = Date.now();
+      for (const [seq, at] of waiting) {
+        if (now - at >= timeoutMs) { waiting.delete(seq); if (core.expire) { core.expire(seq); flush(); } }
+      }
+    };
     core.frameManifest();
     const manifest = core.frameBytes().slice();
     core.frameReset();
@@ -104,7 +125,10 @@
       },
     });
     call(core.boot)();
-    transport.onMessage(call(core.deliver));
+    transport.onMessage((text) => {
+      try { const m = JSON.parse(text); if (m.type === 'response') waiting.delete(m.request_seq); } catch (e) {}
+      call(core.deliver)(text);
+    });
     // The panes' viewports, measured here: the core cannot read layout. A
     // pane's ViewModel asks for rows only once it knows how many fit.
     const PANES = ['state', 'calltrace', 'event-log'];
@@ -112,7 +136,7 @@
     const measure = () => {
       if (!core.mounted()) return;
       PANES.forEach((name, i) => {
-        const el = mount.querySelector(`[data-pane="${name}"]`);
+        const el = panesIn.querySelector(`[data-pane="${name}"]`);
         if (!el) return;
         const rows = Math.max(1, Math.floor(el.clientHeight / (rowPx || 18)));
         const cols = Math.max(1, Math.floor(el.clientWidth / 8));
@@ -135,19 +159,32 @@
       eventLogTotal: () => core.eventLogTotal(),
       eventLogCurrent: () => core.eventLogCurrent(),
       eventLogRowPx: () => core.eventLogRowPx(),
+      calltraceMeasured: call(core.calltraceMeasured),
     };
     const decorate = () => {
-      if (core.mounted() && root.ctwDecoratePanes) root.ctwDecoratePanes(mount, decorationApi);
+      if (core.mounted() && root.ctwDecoratePanes) root.ctwDecoratePanes(panesIn, decorationApi);
     };
-    const timer = setInterval(() => { call(core.pump)(); measure(); decorate(); }, pumpMs || 16);
+    const timer = setInterval(() => { call(core.pump)(); measure(); decorate(); expireStale(); }, pumpMs || 16);
     root.addEventListener && root.addEventListener('resize', measure);
 
     return {
       openFolder: call(core.openFolder),
       attach: call(core.attach),
+      mountPane: call(core.mountPane),
+      // A pointer press on an element the applier owns: its attributes and
+      // its ancestors' (the nearest first) cross with the operation, so the
+      // core reads them without a read crossing.
+      press: (operation, el) => {
+        const attrs = {};
+        for (let n = el; n && n.nodeType === 1; n = n.parentElement) {
+          for (const a of n.attributes) if (!(a.name in attrs)) attrs[a.name] = a.value;
+          if (n.classList && n.classList.contains('ct-web-core-pane')) break;
+        }
+        return call(core.press)(operation, JSON.stringify(attrs)) !== 0;
+      },
       // A pane's container, for a host that places panes itself (moving it
       // keeps every handle valid: the applier holds the nodes, not paths).
-      paneElement: (name) => mount.querySelector(`[data-pane="${name}"]`),
+      paneElement: (name) => panesIn.querySelector(`[data-pane="${name}"]`),
       step: call(core.step),
       pump: call(core.pump),
       node: applier.node,

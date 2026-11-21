@@ -85,72 +85,12 @@ if [ ! -f "${applier}" ]; then
 fi
 
 out="${CT_WEB_CORE_OUT:-${repo_root}/test-logs/web-core}"
-build_label=debug
-opt_flags=()
-if [ "${CT_WEB_CORE_RELEASE:-0}" = "1" ]; then
-	opt_flags=(-d:release)
-	build_label=release
-fi
-cache_root="$(ct_nim_cache_root "${repo_root}")/web-core-${build_label}"
 rm -rf "${out}"
-mkdir -p "${out}"
-entry="src/frontend/web_core/web_core.nim"
-nim_common=(--hints:off --warnings:off --path:src/frontend/viewmodel -d:ctWasmCore -d:chronicles_enabled=off)
-
-echo "--- building the wasm32 core (${build_label}) ---"
-exports="_main,_ctwBoot,_ctwPump,_ctwDeliver,_ctwOpenFolder,_ctwPhase,_ctwFailure,_ctwStep,_ctwStepping,_ctwPosition,_ctwReadCrossings,_ctwSetViewport,_ctwMounted,_ctwPending"
-exports="${exports},_ctwFullValueOf,_ctwEventLogMetrics,_ctwEventLogSearch,_ctwEventLogTotal,_ctwEventLogCurrent,_ctwEventLogRowPx,_ctwAttach"
-exports="${exports},_isonimFrameBase,_isonimFrameLen,_isonimFrameOps,_isonimFrameReset,_isonimFrameManifest,_isonimFrameDispatch,_isonimFrameForget"
-if ! nim c "${nim_common[@]}" "${opt_flags[@]}" \
-	--cpu:wasm32 --os:linux -d:emscripten \
-	--cc:clang --clang.exe:emcc --clang.linkerexe:emcc \
-	--mm:orc --threads:off \
-	--passL:-sSTACK_SIZE=8388608 \
-	--passL:-sALLOW_MEMORY_GROWTH=1 \
-	--passL:-sEXIT_RUNTIME=0 \
-	--passL:-sMODULARIZE=1 \
-	--passL:-sEXPORT_NAME=ctwModule \
-	--passL:-sENVIRONMENT=web \
-	--passL:"--js-library=${repo_root}/src/frontend/web_core/web_core_library.js" \
-	--passL:"-sEXPORTED_FUNCTIONS=${exports}" \
-	--passL:-sEXPORTED_RUNTIME_METHODS=cwrap,HEAPU8 \
-	--nimcache:"${cache_root}/wasm" \
-	-o:"${out}/core_wasm.js" "${entry}"; then
-	echo "  FAIL: the wasm32 core did not build"
-	exit 1
-fi
-
-echo "--- building the nim js core (${build_label}) ---"
-if ! nim js "${nim_common[@]}" "${opt_flags[@]}" --nimcache:"${cache_root}/js" \
-	-o:"${out}/core_js.raw.js" "${entry}"; then
-	echo "  FAIL: the nim js core did not build"
-	exit 1
-fi
-{
-	echo "(function(){"
-	cat "${out}/core_js.raw.js"
-	echo "})();"
-} >"${out}/core_js.js"
-
-echo "--- building the host's decoration bundle (${build_label}) ---"
-if ! nim js "${nim_common[@]}" "${opt_flags[@]}" --nimcache:"${cache_root}/decorations" \
-	-o:"${out}/decorations.raw.js" src/frontend/web_core/web_core_decorations.nim; then
-	echo "  FAIL: the decoration bundle did not build"
-	exit 1
-fi
-{
-	echo "(function(){"
-	cat "${out}/decorations.raw.js"
-	echo "})();"
-} >"${out}/decorations.js"
-
-cp "${applier}" src/frontend/web_core/web_core_host.js ci/test/web-core-browser/page.html "${out}/"
-echo "WEB-CORE-ARTIFACT build=${build_label}" \
-	"wasm_bytes=$(wc -c <"${out}/core_wasm.wasm" | tr -d ' ')" \
-	"wasm_glue_bytes=$(wc -c <"${out}/core_wasm.js" | tr -d ' ')" \
-	"js_bytes=$(wc -c <"${out}/core_js.raw.js" | tr -d ' ')" \
-	"wasm_gz=$(gzip -9 -c "${out}/core_wasm.wasm" | wc -c | tr -d ' ')" \
-	"js_gz=$(gzip -9 -c "${out}/core_js.raw.js" | wc -c | tr -d ' ')"
+# The core (both builds), the decoration bundle and the host files.
+bash ci/lib/web-core-build.sh "${out}" js
+rc=$?
+[ "${rc}" -eq 0 ] || exit "${rc}"
+cp ci/test/web-core-browser/page.html "${out}/"
 
 failures=0
 for engine in ${CT_WEB_CORE_ENGINES:-chromium firefox}; do

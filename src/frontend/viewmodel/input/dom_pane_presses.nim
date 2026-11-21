@@ -40,6 +40,12 @@ from ../../../common/key_names import kpNative
 proc closestWith(element: JsObject; selector: cstring): JsObject {.importjs:
   "((e, s) => (e && e.closest) ? e.closest(s) : null)(#, #)".}
 
+when defined(ctWasmPanes):
+  proc wasmPaneHosts(element: JsObject): bool {.importjs:
+    "((e) => !!(e && e.closest && e.closest('.ct-web-core-pane')) && !!globalThis.ctwPanelsHost)(#)".}
+  proc wasmPanePress(operation: cstring; element: JsObject): bool {.importjs:
+    "globalThis.ctwPanelsHost.press(#, #)".}
+
 proc readerOf*(element: JsObject): AttributeReader =
   ## `name` on `element`, or on its nearest ancestor that carries it (a call's
   ## text reads its row's `data-call-index`).
@@ -112,6 +118,11 @@ proc installPanePresses*(vms: proc(): PaneVMs) =
     closureScope:
       let op = operation
       registerElementOperation(op, proc(p: ElementPress): bool =
+        when defined(ctWasmPanes):
+          # A press on a pane the WebAssembly core draws is the core's
+          # (`web_core/web_core_host.js`'s `press`), on its ViewModels.
+          if wasmPaneHosts(p.element):
+            return wasmPanePress(cstring(op), p.element)
         performPanePress(vms(), op, readerOf(p.element)))
   for pane in MenuPanes:
     closureScope:

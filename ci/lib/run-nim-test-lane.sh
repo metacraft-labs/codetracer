@@ -410,7 +410,12 @@ if [ "${backend}" = "wasm" ]; then
 	# shellcheck source=ci/lib/wasm-dev-profile.sh
 	# shellcheck disable=SC1091 # resolved at runtime from $repo_root
 	source "${repo_root}/ci/lib/wasm-dev-profile.sh"
-	if ct_wasm_dev_profile "${cache_root}/wasm-objects"; then
+	# ONE object cache per developer, not per checkout: a module's object is
+	# keyed on its preprocessed source and flags (`wasm-cc.sh`), so a second
+	# checkout of the same revisions — a worktree, a mirror — reuses every
+	# object the first compiled. CT_WASM_OBJ_CACHE_DIR names another place.
+	wasm_obj_cache="${CT_WASM_OBJ_CACHE_DIR:-${XDG_CACHE_HOME:-${HOME}/.cache}/codetracer/wasm-objects}"
+	if ct_wasm_dev_profile "${wasm_obj_cache}"; then
 		wasm_cc="${CT_WASM_CC_FLAGS[1]#--clang.exe:}"
 	fi
 fi
