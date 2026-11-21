@@ -84,6 +84,7 @@ else:
 import isonim/core/[computation, owner, signals]
 
 import ../../../common/plugin_model
+import ../../../common/key_names
 import ../../../common/view_vocabulary/vocabulary as view_vocabulary
 import ../../../common/value_presentation/presenter as value_presenter
 import ../../../common/value_presentation/vocabulary as value_vocabulary
@@ -996,8 +997,13 @@ proc localSurface(s: PluginSlot; surface: string): string =
   if surface.startsWith(s.id & "/"): surface[s.id.len + 1 .. ^1] else: surface
 
 proc isReservedKey*(sup: Supervisor; key: string): bool =
-  let k = key.toLowerAscii.strip
-  k in sup.reservedKeys or k in RecoveryChordSpellings
+  ## Compared in canonical names (`key_names.bindingKeyName`), so no
+  ## spelling of the palette key or the recovery chord slips past.
+  let k = bindingKeyName(key)
+  var reserved: seq[string]
+  for r in sup.reservedKeys: reserved.add bindingKeyName(r)
+  for r in RecoveryChordSpellings: reserved.add bindingKeyName(r)
+  k in reserved
 
 proc takeToken(sup: Supervisor; s: PluginSlot): bool =
   let t = sup.now()
@@ -1766,7 +1772,7 @@ proc resolveLayerKey*(sup: Supervisor; key, focusedSurface: string;
   ## (host modal layers rank above every plugin layer).
   if not sup.hostModalOpen.isNil and sup.hostModalOpen():
     return
-  let k = key.toLowerAscii
+  let k = bindingKeyName(key)
   var ctx = hostContext
   for kk, v in sup.contextKeys: ctx[kk] = v
   var order: seq[PluginSlot]
@@ -1803,7 +1809,7 @@ proc resolveStaticKey*(sup: Supervisor; key, focusedSurface: string;
   ## The plugin PASS, between the user pass and the base pass (§11.7.2).
   if not sup.hostModalOpen.isNil and sup.hostModalOpen():
     return
-  let k = key.toLowerAscii
+  let k = bindingKeyName(key)
   var ctx = hostContext
   for kk, v in sup.contextKeys: ctx[kk] = v
   for s in sup.slots.values:
@@ -1815,6 +1821,27 @@ proc resolveStaticKey*(sup: Supervisor; key, focusedSurface: string;
       if not evalWhen(b.whenClause, ctx): continue
       if not sup.enablementOf(s.id, b.op).enabled: continue
       return KeyRoute(found: true, plugin: s.id, op: b.op)
+
+proc claimsKey*(sup: Supervisor; key, focusedSurface: string;
+                hostContext: Table[string, bool] =
+                  initTable[string, bool]()): bool =
+  ## Whether a plugin would take `key` now — a layer that binds it, or the
+  ## plugin pass — asked without routing it and without the strike a
+  ## suspect plugin's layer takes for a key routed through it. A front-end
+  ## that reads an unbound chord as something else (the terminal reads an
+  ## Alt chord it does not bind as the bare key) asks this first.
+  if not sup.hostModalOpen.isNil and sup.hostModalOpen():
+    return false
+  let k = bindingKeyName(key)
+  var ctx = hostContext
+  for kk, v in sup.contextKeys: ctx[kk] = v
+  for s in sup.slots.values:
+    if s.breaker == bsOpen or not s.active or s.suspect: continue
+    for l in s.layers:
+      if not l.window and l.owner != focusedSurface: continue
+      for b in l.bindings:
+        if b.key == k and evalWhen(b.whenClause, ctx): return true
+  sup.resolveStaticKey(key, focusedSurface, hostContext).found
 
 proc routeKey*(sup: Supervisor; route: KeyRoute; key: string): string =
   ## Consume `key` for the plugin `route` names: an `invoke` with the input

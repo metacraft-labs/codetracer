@@ -247,6 +247,34 @@ suite "Extensibility-Model §11 on a real terminal":
     sess.close()
     removeDir(home)
 
+  test "Ctrl+Alt+letter reaches a plugin's binding, and `J` is not `j`":
+    # `metrics` binds `ctrl+alt+k` (a legacy terminal sends `ESC 0x0b`) to its
+    # step and `J` to `metrics.count`. The terminal used to drop the Alt of
+    # an ESC-prefixed control byte it did not bind itself (so the chord
+    # arrived as the `Ctrl+k` chord prefix), and folded every key to lower
+    # case (so the binding `J` took `j` too).
+    let home = newHome()
+    var sess = spawnTui(home)
+    settleOnDebugger(sess, Cols, Rows)
+    sess.command("plugins grant acme-tools.metrics")
+    sess.command("plugins grant acme-tools.flame")
+    check sess.commandShows("plugins", "acme-tools.metrics  running")
+    let start = sess.settledTick()
+    sess.escapeKey()
+    sess.send("\x1b\x0b")
+    check sess.tickMoves(start) != start
+    # `j` first, then `J`, then the tally through the same pipe: the tally
+    # counts the keys that reached the plugin before it, in order.
+    sess.send("j")
+    sleep(200)
+    sess.send("J")
+    sess.command("plugins run acme-tools.metrics metrics.tally")
+    check sess.screenHas("metrics tally 1")
+    sess.send(":quit\r")
+    discard sess.waitExit(initDuration(seconds = 30))
+    sess.close()
+    removeDir(home)
+
   test "--no-extensions starts no plugin process":
     let home = newHome()
     var sess = spawnTui(home, @["--no-extensions"])

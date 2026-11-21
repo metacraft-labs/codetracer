@@ -63,7 +63,12 @@ proc service*(p: SessionPlugins): PluginsService =
       let r = p.sup.resolveStaticKey(key, "")
       if not r.found: return (false, "")
       discard p.sup.routeKey(r, key)
-      (true, ""))
+      (true, ""),
+    claimsKey: proc(key: string): bool = p.sup.claimsKey(key, ""))
+
+# ---------------------------------------------------------------------------
+# A plugin's relayed actions, on the terminal's own routes
+# ---------------------------------------------------------------------------
 
 const PluginMoveCommands* = [
   ("stepForward", ":next"), ("stepIn", ":step"),

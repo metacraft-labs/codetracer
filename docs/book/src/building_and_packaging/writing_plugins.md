@@ -148,11 +148,13 @@ A binding's `when` clause can read your context keys as
 ```
 
 Choose keys the terminal can deliver and the user's keymap leaves free.
-`:keys check` shows how a key arrives and what it is bound to. Two traps, as
-of this writing: a terminal sends Ctrl+Alt+letter as Escape plus a control
-byte, which arrives as Ctrl+letter, so such a binding never fires; and key
-names are compared without case, so a binding of `J` also takes `j`.
-Function keys avoid both.
+`:keys check` shows how a key arrives and what it is bound to. The spelling
+of the modifiers does not matter (`ctrl+alt+k`, `Ctrl+Alt+K`), but a bare
+letter's case does: `J` is Shift+j and does not take `j`. A terminal
+sends Ctrl+Alt+letter as Escape plus a control byte, and that reaches your
+binding, except for the letters whose control byte is another key: a
+terminal sends Ctrl+h, Ctrl+i, Ctrl+j and Ctrl+m as Backspace, Tab and Enter,
+so Ctrl+Alt+h, i, j and m arrive as Alt plus those keys.
 
 ### Modal layers
 

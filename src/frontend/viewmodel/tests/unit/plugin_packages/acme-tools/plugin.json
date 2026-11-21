@@ -55,6 +55,14 @@
           {
             "id": "metrics.stepout",
             "title": "Metrics: Step out"
+          },
+          {
+            "id": "metrics.count",
+            "title": "Metrics: Count"
+          },
+          {
+            "id": "metrics.tally",
+            "title": "Metrics: Tally"
           }
         ],
         "marker": [
@@ -88,6 +96,17 @@
           "command": "metrics.step",
           "scope": "window",
           "when": "plugin.acme-tools.metrics.ready"
+        },
+        {
+          "key": "ctrl+alt+k",
+          "command": "metrics.step",
+          "scope": "window",
+          "when": "plugin.acme-tools.metrics.ready"
+        },
+        {
+          "key": "J",
+          "command": "metrics.count",
+          "scope": "window"
         }
       ],
       "settings": {

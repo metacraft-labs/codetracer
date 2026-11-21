@@ -264,8 +264,10 @@ suite "GPUI: the window's plugins (host/gpui_plugins)":
       p.layerHeld)
     ck p.waitFor("metrics ready", proc(): bool =
       p.sup.enablementOf("acme-tools.metrics", "metrics.step").enabled)
-    ck pluginKeyName("Esc") == "escape"
-    ck pluginKeyName("Ctrl+Alt+M") == "ctrl+alt+m"
+    ck pluginKeyName("Esc") == "Esc"
+    ck pluginKeyName("Ctrl+Alt+M") == "Ctrl+Alt+m"
+    # The key's own case is kept: a binding of `J` does not take `j`.
+    ck pluginKeyName("J") != pluginKeyName("j")
     # §11.7.2: a user row for the key keeps the plugin pass out.
     ck not p.routePluginKey("Ctrl+Alt+M", userBound = true)
     ck p.routePluginKey("Ctrl+Alt+M", userBound = false)
@@ -529,5 +531,5 @@ suite "GPUI: the window's plugins (host/gpui_plugins)":
     ck markers.len == 1 and elementText(markers[0]) == "★"
 
   test "assertion count":
-    ck CHECKS == 152
+    ck CHECKS == 153
     echo "CHECKS: ", CHECKS

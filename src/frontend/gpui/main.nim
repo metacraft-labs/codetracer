@@ -13947,7 +13947,7 @@ proc routeWindowKey(r: GpuiRenderer; key: string; mods: seq[string]) =
   if not gPlugins.isNil and not gPluginRecoveryKey:
     var userBound = false
     for b in gRouter.user.bindings:
-      if b.chords.len == 1 and b.chords[0].toLowerAscii == name.toLowerAscii:
+      if b.chords.len == 1 and b.chords[0] == name:
         userBound = true
     if gPlugins.routePluginKey(name, userBound):
       traceGesture("plugin key " & name)

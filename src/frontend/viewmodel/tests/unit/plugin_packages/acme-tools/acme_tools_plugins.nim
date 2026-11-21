@@ -16,6 +16,10 @@
 ## the same line through its declared `hotspot` marker surface (a `★` in the
 ## gutter's mark column).
 ##
+## `ctrl+alt+k` (what a terminal sends as `ESC 0x0b`) steps like
+## `metrics.step`, and `J` counts (`metrics.count`, read back by
+## `metrics.tally`): the bindings a terminal must deliver as written.
+##
 ## Three more commands relay actions the terminal must carry out on its own
 ## routes: `metrics.jump` goes to the `mul` call of the loaded call trace
 ## (`calltrace.doubleClickEntry`), `metrics.watch` adds the watch `left*9`
@@ -152,7 +156,8 @@ proc setupMetrics(sdk: PluginSdk) =
     p.pushEnablement("metrics.step", true)
     # Every command a key or `:plugins run` reaches is enabled by a pushed
     # value (§11.7.2): one never pushed reads "plugin starting" for ever.
-    for op in ["metrics.jump", "metrics.watch", "metrics.stepout"]:
+    for op in ["metrics.jump", "metrics.watch", "metrics.stepout",
+               "metrics.count", "metrics.tally"]:
       p.pushEnablement(op, true)
     p.pushContext("ready", %true)
     # A per-type visualiser for the value panes (PLAT-12's plugin tier): data,
@@ -190,6 +195,17 @@ proc setupMetrics(sdk: PluginSdk) =
     p.done(req))
   m.onInvoke("metrics.stepout", proc(p: Plugin; args: JsonNode; req: Request) =
     p.relay("debugControls", "stepOut")
+    p.done(req))
+  # `J` (Shift+j) is bound to `metrics.count`; `metrics.tally` reports the
+  # count on the status line. Both go through the one pipe in order, so a
+  # tally run after the keys says how many of them reached the plugin.
+  var count = 0
+  m.onInvoke("metrics.count", proc(p: Plugin; args: JsonNode; req: Request) =
+    inc count
+    p.done(req))
+  m.onInvoke("metrics.tally", proc(p: Plugin; args: JsonNode; req: Request) =
+    p.pushStatus("metrics.status", viewText("metrics.status",
+                                            "metrics tally " & $count))
     p.done(req))
   m.onInvoke("metrics.echo", proc(p: Plugin; args: JsonNode; req: Request) =
     p.answer(req, %*{"key": args{"key"}, "line": p.currentLine}))

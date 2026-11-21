@@ -776,6 +776,11 @@ suite "§11.7.2: the plugin pass and pushed state":
     check route.found
     check route.plugin == "acme-tools.metrics"
     check route.op == "metrics.step"
+    # The modifiers' spelling is folded: the terminal's canonical name for
+    # the chord (what `CSI 109 ; 7 u` decodes to) is the same binding.
+    check r.sup.resolveStaticKey("Ctrl+Alt+m", "").found
+    check r.sup.claimsKey("Ctrl+Alt+m", "")
+    check not r.sup.claimsKey("Ctrl+m", "")
     # Before activation, an operation is disabled with "plugin starting".
     var cold = newRig()
     check cold.sup.enablementOf("acme-tools.metrics", "metrics.step").reason ==

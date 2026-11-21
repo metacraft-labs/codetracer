@@ -63,6 +63,7 @@ SERVICE = "src/frontend/tui/host/plugin_service.nim"
 MAIN = "src/frontend/tui/main.nim"
 IO = "src/frontend/viewmodel/plugin_host/plugin_io.nim"
 CLI = "src/ct/plugins_cli.nim"
+KEYS = "src/common/key_names.nim"
 
 HOST = "src/frontend/viewmodel/tests/unit/test_plugin_process_host.nim"
 PTY = "src/frontend/tui/tests/real_terminal/test_plat81_plugin_processes_pty.nim"
@@ -70,7 +71,7 @@ TLS = "src/frontend/viewmodel/tests/unit/test_plugin_tls.nim"
 CLITEST = "src/ct/plugins_cli_test.nim"
 MOVES = "src/frontend/tui/tests/test_plugin_relayed_moves.nim"
 
-SUBJECTS = [SUP, LINK, SDK, PKG, RUNTIME, SERVICE, MAIN, IO, CLI]
+SUBJECTS = [SUP, LINK, SDK, PKG, RUNTIME, SERVICE, MAIN, IO, CLI, KEYS]
 SUITES = [HOST, PTY, TLS, CLITEST, MOVES]
 IN_BINARY = {RUNTIME, SERVICE, MAIN}
 
@@ -103,6 +104,8 @@ HOOK = "*::a front-end's own route takes a relayed action, and its refusal is th
 
 M_ROUTES = "*::steps, the call trace jump, the watch and the seek move the stop the screen shows"
 M_TAB = "*::while another tab is shown only a plain step runs; the rest is refused"
+M_CASE = "*::the modifiers' spelling is folded, the key's own case is not"
+M_ALT = "*::an Alt chord a plugin binds reaches the plugin pass whole; `J` and `j` are two keys"
 P_MOVES = "*::a plugin's relayed jump, watch and step out are shown at once, with no :next"
 
 ARMS = [
@@ -128,8 +131,8 @@ ARMS = [
              "  if false:")],
      [(HOST, MODAL)],
      "§11.7.3: a plugin layer ranks above the palette and the prompt"),
-    ("M6", [(SUP, "  k in sup.reservedKeys or k in RecoveryChordSpellings",
-             "  k in sup.reservedKeys")],
+    ("M6", [(SUP, "  for r in RecoveryChordSpellings: reserved.add bindingKeyName(r)",
+             "  discard RecoveryChordSpellings")],
      [(HOST, RESERVED)],
      "§11.7.6: a plugin may bind the recovery chord"),
     ("M7", [(SUP, "  if kept.len < RecoveryChordCount:",
@@ -217,6 +220,14 @@ ARMS = [
               "  of pmkOutcome, pmkRelayMove:\n    if false:")],
      [(MOVES, M_TAB)],
      "a plugin's jump classified against its session runs on whichever tab is shown"),
+    ("M18", [(KEYS, "    if c >= '!' and c <= '~':\n      return $c",
+              "    if c >= '!' and c <= '~':\n      return ($c).toLowerAscii")],
+     [(MOVES, M_CASE)],
+     "§11.7.2: a binding's bare letter is folded to lower case, so `J` takes `j`"),
+    ("M19", [(RUNTIME, "      not rt.plugins.claimsKey(rt.lastKey)):",
+              "      true):")],
+     [(MOVES, M_ALT)],
+     "an Alt chord only a plugin binds is read as the bare key (Ctrl+Alt+k arrives as Ctrl+k)"),
     ("M22", [(SERVICE, "      move.outcome.jumpsToCall = true",
               "      move.outcome.jumpsToCall = false")],
      [(MOVES, M_ROUTES)],
