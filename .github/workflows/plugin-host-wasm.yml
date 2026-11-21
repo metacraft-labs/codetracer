@@ -1,0 +1,87 @@
+name: WASM plugin host
+
+# The WebAssembly `ct-plugin-host` (Extensibility-Model.md §11.9) on
+# x86_64-linux and aarch64-darwin:
+#
+# * the engine measurement behind §11.9's engine choice
+#   (src/plugin-host/engine/measure-engines.sh: wasmtime against wasmi);
+# * the host's real-stack suite and the ported ct-lens plugin, run from its
+#   one `.wasm` artifact on each platform (`just test-plugin-host-wasm`).
+#
+# Triggered by hand, or by a push to `ci/plugin-host-wasm`, so a measurement
+# can be taken without touching the main pipeline.
+on:
+  workflow_dispatch:
+  push:
+    branches: [ci/plugin-host-wasm]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  plugin-host-wasm:
+    name: WASM plugin host (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: x86_64-linux
+            runner: '["self-hosted", "linux", "x64"]'
+          - platform: aarch64-darwin
+            runner: '"aarch64-darwin"'
+    runs-on: ${{ fromJSON(matrix.runner) }}
+    # The darwin dev shell alone took 55 minutes on its first realisation
+    # (plugin-transport-darwin.yml).
+    timeout-minutes: 240
+    steps:
+      - name: Mint installation token for cross-repo sibling access
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Evict stale git credentials from this runner's persistent home
+        uses: metacraft-labs/metacraft-github-actions/evict-stale-git-credentials@2c12f82a56d5000bd47c42ad8c25a3596820057c
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Provision dependency siblings from repro.lock
+        uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      - name: Measure the engines
+        run: |
+          mkdir -p test-logs
+          nix develop . --command bash -c '
+            set -euo pipefail
+            CT_ENGINE_TARGET="$RUNNER_TEMP/ct-engine-target" \
+              src/plugin-host/engine/measure-engines.sh \
+              | tee test-logs/plugin-host-wasm-engines-${{ matrix.platform }}.log'
+
+      - name: Keep the logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-host-wasm-${{ matrix.platform }}
+          path: test-logs/plugin-host-wasm-*.log
