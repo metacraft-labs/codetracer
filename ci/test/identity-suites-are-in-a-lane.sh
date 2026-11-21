@@ -26,13 +26,14 @@
 # COLLECTED THEM, and no amount of CI on a branch fixes a suite that no lane
 # names.
 #
-# ## Two lanes, not one
+# ## Every backend's lane, not one
 #
-# `vm-unit` is the C backend and `vm-unit-js` is JavaScript, and the identity
-# layer's whole reason for living in `viewmodel/` is that it must behave
-# identically on both. A suite collected by one lane and not the other is the
+# `vm-unit` is the C backend and `vm-unit-wasm` the web targets' (with
+# `vm-unit-js`, JavaScript, while it is a lane), and the identity layer's whole
+# reason for living in `viewmodel/` is that it must behave identically on
+# them. A suite collected by one lane and not the other is the
 # shape of the M17/J8 defect — a bug invisible on the backend most people
-# compile and fatal on the one that ships — so both are required.
+# compile and fatal on the one that ships — so each is required.
 #
 # ## THE SUITES ARE FOUND BY SUBJECT, NOT BY LOCATION, and the first version of
 # ## this gate was vacuous for exactly that reason
@@ -62,7 +63,14 @@ cd "${repo_root}" || exit 2
 IDENTITY_IMPORT='^import .*identity/(token|session|jwt|issuer|device_grant|rs256_verifier)'
 # ...and looks like a suite rather than a module.
 SUITE_MARKER='std/unittest|std/\[[^]]*unittest'
-REQUIRED_LANES="vm-unit vm-unit-js"
+# The web targets' backend is moving from `nim js` to wasm32 (PLAT-86..88):
+# `vm-unit-wasm` is required now, and `vm-unit-js` for as long as it is a lane,
+# so retiring the JS lane cannot leave the identity layer with one backend.
+REQUIRED_LANES="vm-unit vm-unit-wasm"
+# shellcheck source=ci/lib/test-lane-files.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "${repo_root}/ci/lib/test-lane-files.sh"
+grep -qxF vm-unit-js <<<"$(test_lane_ids)" && REQUIRED_LANES="${REQUIRED_LANES} vm-unit-js"
 
 work="$(mktemp -d)"
 checks=0
@@ -193,7 +201,7 @@ for lane in ${REQUIRED_LANES}; do
 	fi
 done
 if [ "${control_seen}" -eq 0 ]; then
-	ok "...and is collected by NEITHER lane, which is exactly how the two real ones were lost"
+	ok "...and is collected by no required lane, which is exactly how the two real ones were lost"
 else
 	bad "the planted suite WAS collected by ${control_seen} lane(s); this gate's premise is wrong"
 fi
@@ -221,4 +229,4 @@ if [ "${failures}" -gt 0 ]; then
 	echo "RESULT: FAILED — ${failures} check(s)"
 	exit 1
 fi
-echo "RESULT: OK — every identity suite is collected by both unit lanes"
+echo "RESULT: OK — every identity suite is collected by every required unit lane"
