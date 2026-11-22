@@ -716,6 +716,10 @@ proc startInstance(sup: Supervisor; inst: Instance) =
   inst.startedMs = sup.now()
   inst.lastPingMs = inst.startedMs
   sup.note("start " & inst.label & " pid " & $inst.link.pid)
+  if inst.link.launchNote.len > 0:
+    # The host's own departure from §11.8 (on Node: no usable `setpriv`, so
+    # no PR_SET_PDEATHSIG). Logged, never a fault: no plugin caused it.
+    sup.note(inst.label & ": " & inst.link.launchNote)
   inst.sendTo(hostHello(sup.version, sup.frontEnd, sup.platform))
 
 proc sendActivate(sup: Supervisor; s: PluginSlot) =
