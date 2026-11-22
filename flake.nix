@@ -443,12 +443,21 @@
     # for the monitor the Nix package ships (`ct-io-mon` in
     # nix/packages/default.nix: `ct test run`'s read-set capture). Move them
     # with `repro lock update`.
+    #
+    # Both are ALSO reprobuild dependencies, and the push gate compiles the
+    # pinned reprobuild against THESE pins in develop mode, so neither may be
+    # behind the revision the pinned reprobuild's own flake.lock locks
+    # (`nim-shm-queue-src` / `nim-shm-gset-src`). Moving reprobuild means
+    # checking them too: reprobuild 2f7cb5db52 calls `insertShardIndex`, which
+    # nim-shm-gset first has at fc0c74478d, and the bump that left this input
+    # at 0b2896a blocked every push. scripts/test-reprobuild-dependency-pins.sh
+    # (`just test-reprobuild-dependency-pins`) enforces it.
     nim-shm-queue = {
       url = "github:metacraft-labs/nim-shm-queue/0d6049997d77421b6e4748f819657cf6042e9508";
       flake = false;
     };
     nim-shm-gset = {
-      url = "github:metacraft-labs/nim-shm-gset/0b2896adc65d0d62c0ee84af1356c909da2975d0";
+      url = "github:metacraft-labs/nim-shm-gset/fc0c74478d945161574a9fc49389c8fd65f09d2e";
       flake = false;
     };
 

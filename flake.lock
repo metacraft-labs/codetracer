@@ -8262,17 +8262,17 @@
     "nim-shm-gset": {
       "flake": false,
       "locked": {
-        "lastModified": 1794430864,
-        "narHash": "sha256-h6GbBG2O+abwn464tyjs2+8rReh3wEKysPuaXY0oUgc=",
+        "lastModified": 1795227072,
+        "narHash": "sha256-Ql1yZxI9fwN/uemPtX9BJDUTcZheB4ObRYU0Sfy82Co=",
         "owner": "metacraft-labs",
         "repo": "nim-shm-gset",
-        "rev": "0b2896adc65d0d62c0ee84af1356c909da2975d0",
+        "rev": "fc0c74478d945161574a9fc49389c8fd65f09d2e",
         "type": "github"
       },
       "original": {
         "owner": "metacraft-labs",
         "repo": "nim-shm-gset",
-        "rev": "0b2896adc65d0d62c0ee84af1356c909da2975d0",
+        "rev": "fc0c74478d945161574a9fc49389c8fd65f09d2e",
         "type": "github"
       }
     },
