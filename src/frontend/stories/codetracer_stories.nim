@@ -748,7 +748,7 @@ func agentHarborSection(): CodeTracerStorySection =
             "Items arrive, are walked with Next and Previous, answered with and without auto-switch, answered elsewhere, and arrive while a page is read"),
       panel("InboxQuestion", "Inbox: Question", "agent-harbor-inbox-item", "question", "agent-harbor-inbox-item",
             "A blocked question: the banner, the question, a text answer"),
-      panel("InboxQuestionSingle", "Inbox: Single-Choice Question", "agent-harbor-inbox-item", "question-single", "agent-harbor-inbox-item"),
+      panel("InboxQuestionSingle", "Inbox: Single-Choice Question", "agent-harbor-inbox-item", "question-single", "agent-harbor-inbox-item-presses"),
       panel("InboxQuestionMulti", "Inbox: Multiple-Choice Question", "agent-harbor-inbox-item", "question-multi", "agent-harbor-inbox-item"),
       panel("InboxQuestionConfirmation", "Inbox: Confirmation", "agent-harbor-inbox-item", "question-confirmation", "agent-harbor-inbox-item"),
       panel("InboxQuestionNoOptions", "Inbox: Question Without Options", "agent-harbor-inbox-item", "question-no-options", "agent-harbor-inbox-item"),

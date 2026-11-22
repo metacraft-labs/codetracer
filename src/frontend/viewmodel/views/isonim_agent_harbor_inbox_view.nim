@@ -62,6 +62,7 @@ import nim_agents/agent_harbor/fleet_records
 import nim_agents_isonim_viewmodels/agent_harbor/[inbox_vm, inbox_item_vm]
 import ./agent_harbor_changes_inbox_words
 import ./agent_harbor_dropdown_view
+import ../input/element_operations
 from ../keymap/scope_path import InboxPanelScope
 
 export signals, computation, components, inbox_vm, inbox_item_vm,
@@ -168,18 +169,23 @@ proc renderToggle[R, N](r: R; page: InboxItemVM; o: AnswerOption;
   ## One option of a single choice: a toggle of the omnibox composer's
   ## choice row (`.ah-composer-toggle`, the VCS panel's mode toggles; the
   ## design system has no radio button), the chosen one pressed, its
-  ## description after its label.
+  ## description after its label. Its press is routed: the toggle carries
+  ## `inbox.choose-option` and the procedure that performs it is bound to it
+  ## (`element_operations.bindOperation`), so the view holds no press
+  ## handler (Input-Routing-And-Keymaps.md §5.1).
   let id = o.id
   result = ui(r):
     button(class = "ah-composer-toggle ah-choice" & (if checked: " active" else: ""),
            role = "radio", `aria-checked` = (if checked: "true" else: "false"),
-           `data-ah-choice` = id, onclick = proc() = page.toggleChoice(id)):
+           `data-ah-choice` = id):
       span(class = "ah-choice-label"):
         text o.label
       if o.description.len > 0:
         span(class = "ah-choice-description"):
           text o.description
   r.setFlag(result, "disabled", disabled)
+  r.bindOperation(result, InboxChooseOptionOperation,
+                  proc(press: PressInfo) = page.toggleChoice(id))
 
 proc renderChoices[R, N](r: R; page: InboxItemVM; options: seq[AnswerOption];
                          single, disabled: bool): N =

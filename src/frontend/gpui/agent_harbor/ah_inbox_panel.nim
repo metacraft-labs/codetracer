@@ -138,6 +138,14 @@ proc choicePress(page: InboxItemVM; id: string): proc() =
   ## other iteration's).
   result = proc() = page.toggleChoice(id)
 
+proc pressChoice(r: GpuiRenderer; el: GpuiElement; page: InboxItemVM; id: string) =
+  ## The one press a choice takes, whichever control draws it (a single
+  ## choice's toggle, one of several's checkbox line): choosing it. One
+  ## place for both, so the drawings cannot disagree on what a press does,
+  ## and the one site the pointer keymap will take over when the panel's
+  ## presses are routed.
+  r.addEventListener(el, "click", choicePress(page, id))
+
 proc choicesItems(options: seq[AnswerOption]): seq[FlowItem] =
   ## The single choice's toggles as a wrapping row measures them: each
   ## toggle, its description after its label.
@@ -173,7 +181,7 @@ proc drawChoices(r: GpuiRenderer; c: PageCtx; options: seq[AnswerOption];
                                 pairs = [("margin-left", "6px")]))
       r.tag(t, "choice", o.id)
       r.tag(t, "checked", $checked)
-      if not disabled: r.addEventListener(t, "click", choicePress(page, o.id))
+      if not disabled: r.pressChoice(t, page, o.id)
       items[i].el = t
     result = r.flowLines(items, c.avail, ChoiceGapPx, ControlPx, ChoiceGapPx)
     r.setStyle(result, "flex-shrink", "0")
@@ -198,7 +206,7 @@ proc drawChoices(r: GpuiRenderer; c: PageCtx; options: seq[AnswerOption];
     r.appendChild(line, label)
     if o.description.len > 0:
       r.appendChild(line, r.text(o.description, CaptionPx, c.p.textCaption))
-    if not disabled: r.addEventListener(line, "click", choicePress(page, o.id))
+    if not disabled: r.pressChoice(line, page, o.id)
     r.appendChild(result, line)
 
 proc drawDraft(r: GpuiRenderer; c: PageCtx; draft: Draft; disabled: bool): GpuiElement =

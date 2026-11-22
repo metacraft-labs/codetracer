@@ -129,6 +129,8 @@ const
   NextTitle* = "Next: the item at the top of the inbox"
   InboxNextOperation* = "inbox.next"
   InboxPreviousOperation* = "inbox.previous"
+  InboxChooseOptionOperation* = "inbox.choose-option"
+    ## The operation a single choice's toggle carries: choose that option.
   AutoSwitchOn* = "Auto-switch: on"
   AutoSwitchOff* = "Auto-switch: off"
   AutoOn* = "Auto: on"

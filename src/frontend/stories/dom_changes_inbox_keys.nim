@@ -23,6 +23,12 @@
 ## the web's first frame and GPUI's agree
 ## (`test_ctf_p1b_gpui_capture_matches_web_layout`).
 ##
+## Presses on the elements that carry their operation (the dropdowns'
+## `dropdown.toggle` / `dropdown.choose`, a single choice's
+## `inbox.choose-option`) go through the page's one pointer listener and the
+## base keymap's pointer rows (`installBaseElementRouting`), which run the
+## procedure bound to the element pressed (`element_operations`).
+##
 ## Refuses to own: what an operation does (`agent_harbor_changes_inbox_words`)
 ## and which operation a key runs (the router).
 
@@ -36,6 +42,7 @@ import ../viewmodel/views/agent_harbor_changes_inbox_words
 import ../viewmodel/keymap/[base_keymaps, context_keys, keymap_router, scope_path,
                             editing_keymap]
 import ../../common/key_event_names
+from ../viewmodel/input/dom_pane_presses import installBaseElementRouting
 
 var shownChanges: proc(): ChangesVM
 var shownInbox: proc(): InboxVM
@@ -157,6 +164,10 @@ proc onPanelKey(ev: JsObject) =
     keepKeyboardItemInView()
 
 proc installKeys() =
+  ## The panels' key listener, once per window, and the routing of the
+  ## presses their elements carry (`installBaseElementRouting` keeps a
+  ## router the page already has).
+  installBaseElementRouting()
   if not keysInstalled:
     keysInstalled = true
     {.emit: ["window.addEventListener('keydown', ", onPanelKey, ", true);"].}

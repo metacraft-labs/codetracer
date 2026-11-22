@@ -1867,6 +1867,53 @@ export const plays = {
     expect(panel.querySelectorAll(".ah-item-page, .ah-item-head").length).toBeGreaterThan(0);
     expect(itemPageProblems(panel)).toEqual([]);
   },
+  // A single choice and the priority dropdown, pressed: their presses are
+  // routed (each element carries its operation, `data-ct-operation`, and
+  // the page's one pointer listener runs the procedure bound to it), so a
+  // press that reached no procedure leaves the drawing as it was. The
+  // trigger opens its menu of design-system rows and closes it again; a
+  // toggle chooses its option and the first one is chosen back. The story
+  // ends as it began (the captures shoot it as the play leaves it).
+  "agent-harbor-inbox-item-presses": async (context) => {
+    await plays["agent-harbor-inbox-item"](context);
+    const panel = context.canvasElement.querySelector(inboxItemPanel);
+    const trigger = panel.querySelector(".ah-item-head .ah-dropdown-trigger");
+    expect(trigger).toBeTruthy();
+    expect(trigger.getAttribute("data-ct-operation")).toBe("dropdown.toggle");
+    const rows = () => [...panel.querySelectorAll(".ah-item-head .ah-dropdown-item")];
+    expect(rows().length).toBe(0);
+    trigger.click();
+    await twoFrames();
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(rows().length).toBe(4);
+    for (const row of rows()) {
+      expect(row.classList.contains("ct-menu-item")).toBe(true);
+      expect(row.getAttribute("data-ct-operation")).toBe("dropdown.choose");
+    }
+    trigger.click();
+    await twoFrames();
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(rows().length).toBe(0);
+    const toggles = () => [...panel.querySelectorAll(".ah-choices-single .ah-choice")];
+    const chosen = () => toggles().filter((t) => t.getAttribute("aria-checked") === "true")
+      .map((t) => t.getAttribute("data-ah-choice"));
+    expect(toggles().length).toBeGreaterThan(1);
+    for (const t of toggles()) expect(t.getAttribute("data-ct-operation")).toBe("inbox.choose-option");
+    const before = chosen();
+    const first = toggles()[0].getAttribute("data-ah-choice");
+    const other = toggles().find((t) => !before.includes(t.getAttribute("data-ah-choice")) &&
+                                       t.getAttribute("data-ah-choice") !== first);
+    expect(other).toBeTruthy();
+    const otherId = other.getAttribute("data-ah-choice");
+    other.click();
+    await twoFrames();
+    expect(chosen()).toEqual([otherId]);
+    // Back as the story began: its constructor's choice, or none.
+    const back = before.length > 0 ? before[0] : otherId;
+    panel.querySelector(`.ah-choices-single .ah-choice[data-ah-choice="${back}"]`).click();
+    await twoFrames();
+    expect(chosen()).toEqual(before);
+  },
   // The inbox's playback: the playback bar's check, then the inbox's own.
   "agent-harbor-inbox-playback": async (context) => {
     await plays["agent-harbor-playback"](context);

@@ -21,26 +21,42 @@
 ## keeps it the same way): nothing a viewmodel or a story records. Picking a
 ## row closes the menu and hands its id to `pick`, which calls the
 ## viewmodel; the dropdown decides nothing about what a choice does.
+##
+## Presses are routed (Input-Routing-And-Keymaps.md §5.1, the
+## `input-routing-gate`): the trigger carries `dropdown.toggle` and each row
+## `dropdown.choose` (`data-ct-operation`), and the procedure that performs
+## each is bound to its element (`element_operations.bindOperation`: the
+## dropdown holds its state in the closures it draws with). The view holds no
+## press handler: the page's one pointer listener resolves a press through
+## the pointer keymap and runs the bound procedure, so a user's row for the
+## press takes it over.
 
 import isonim/core/[signals, computation]
 import isonim/dsl/[ui, components]
+
+import ../input/element_operations
 
 export signals, computation, components
 
 const
   DropdownArrow* = "\xE2\x96\xBE"
     ## ▾ after the value, as the terminal's closed select draws it.
+  DropdownToggleOperation* = "dropdown.toggle"
+    ## The operation the trigger carries: open or close its menu.
+  DropdownChooseOperation* = "dropdown.choose"
+    ## The operation a menu row carries: choose its value.
 
 type
   DropdownChoice* = object
     ## One row of the menu: the id handed to `pick`, the words it shows.
     id*, label*: string
 
-proc pickPress(open: Signal[bool]; pick: proc(id: string); id: string): proc() =
-  ## A row's press: a proc of its own so each closure owns its id (a closure
-  ## made in a Nim loop body shares the body's variables with every other
-  ## iteration's, https://nim-lang.org/docs/manual.html#closures-creating-closures-in-loops).
-  result = proc() =
+proc pickPress(open: Signal[bool]; pick: proc(id: string); id: string): ElementRun =
+  ## A row's `dropdown.choose`: a proc of its own so each closure owns its id
+  ## (a closure made in a Nim loop body shares the body's variables with
+  ## every other iteration's,
+  ## https://nim-lang.org/docs/manual.html#closures-creating-closures-in-loops).
+  result = proc(press: PressInfo) =
     open.val = false
     if pick != nil: pick(id)
 
@@ -56,8 +72,7 @@ proc renderAgentHarborDropdown*[R, N](r: R; shown: string; choices: seq[Dropdown
   result = ui(r):
     span(class = "ah-dropdown"):
       button(ref = trigger, class = "ah-dropdown-trigger " & cls, title = title,
-             `aria-haspopup` = "listbox", `data-ah-dropdown` = shown,
-             onclick = proc() = open.val = not open.val):
+             `aria-haspopup` = "listbox", `data-ah-dropdown` = shown):
         # Cut, where its row is narrower than it, by the views' one rule
         # (`ah_cut_text`, `data-ah-cut`), never by CSS's ellipsis.
         span(`data-ah-cut` = "line", class = "ah-dropdown-value", title = shown):
@@ -65,6 +80,8 @@ proc renderAgentHarborDropdown*[R, N](r: R; shown: string; choices: seq[Dropdown
         span(class = "ah-dropdown-arrow", `aria-hidden` = "true"):
           text DropdownArrow
       span(ref = menuHost, class = "ah-dropdown-menu-host")
+  r.bindOperation(trigger, DropdownToggleOperation,
+                  proc(press: PressInfo) = open.val = not open.val)
   createRenderEffect proc() =
     let isOpen = open.val
     r.clearChildren(menuHost)
@@ -75,9 +92,8 @@ proc renderAgentHarborDropdown*[R, N](r: R; shown: string; choices: seq[Dropdown
       tdiv(ref = menu, class = "ah-dropdown-menu", role = "listbox")
     r.appendChild(menuHost, m)
     for choice in choices:
-      # Plain values and a press made before the DSL, which wraps an event
-      # handler in a closure of its own (a closure may not capture the
-      # loop's borrowed item).
+      # Plain values and the row's procedure made before the DSL (a closure
+      # may not capture the loop's borrowed item).
       let id = choice.id
       let label = choice.label
       let on = id == current
@@ -85,7 +101,8 @@ proc renderAgentHarborDropdown*[R, N](r: R; shown: string; choices: seq[Dropdown
       let row = ui(r):
         tdiv(class = "ah-dropdown-item ct-menu-item" & (if on: " ct-menu-item--active" else: ""),
              role = "option", `aria-selected` = (if on: "true" else: "false"),
-             `data-ah-dropdown-item` = id, onclick = press):
+             `data-ah-dropdown-item` = id):
           span(class = "ct-menu-item-label"):
             text label
+      r.bindOperation(row, DropdownChooseOperation, press)
       r.appendChild(menu, row)
