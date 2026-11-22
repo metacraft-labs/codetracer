@@ -1363,6 +1363,11 @@ proc editWindowRoutesKey(key: string; mods: seq[string]): bool
   ## PLAT-68 (Mode-Transitions §8.1): FORWARD-DECLARED; defined with the
   ## router's section beside `routeWindowKey`.
 
+proc editDismissalRoutes(key: string; mods: seq[string];
+                         operation: string): bool
+  ## Input-Routing-And-Keymaps §6: FORWARD-DECLARED; defined beside
+  ## `editWindowRoutesKey`.
+
 proc editKey(key: string; mods: seq[string]) =
   ## One key of an EDIT window's editor pane: its `keydown` listener's body,
   ## and what `--window-ops`' `key:` dispatches in an edit window (the editor
@@ -1391,8 +1396,9 @@ proc editKey(key: string; mods: seq[string]) =
   # scope path in Edit mode — instead of reaching the document as nothing.
   if editKeyInert(canonicalKeyOfGpui(key, mods)):
     return
-  # PLAT-47: `Esc` cancels a layout gesture in flight, and is not typed.
-  if key.toLowerAscii in ["escape", "esc"] and cancelWindowGesture():
+  # PLAT-47: the key the router resolves to `layout.cancel-drag` (`Esc`, or
+  # the user's rebinding) cancels a layout gesture in flight, and is not typed.
+  if editDismissalRoutes(key, mods, "layout.cancel-drag"):
     return
   block:
     let started = epochTime()
@@ -6921,16 +6927,12 @@ proc filesFieldKey(key: string; mods: seq[string]): bool =
 
 proc editOverlayKey(key: string; mods: seq[string]): bool =
   ## An Edit window's key before its editor: the Files pane's open name field
-  ## or question, then `Esc` on an open right-click menu (which the window
-  ## draws over the editor, with no top bar of its own to route it).
+  ## or question, then the key that closes an open right-click menu (which
+  ## the window draws over the editor): `Esc`, or whatever the user bound
+  ## `context-menu.close` to, asked of the router.
   if filesFieldKey(key, mods):
     return true
-  if gCtxMenu.open and key.toLowerAscii in ["escape", "esc"]:
-    var r: GpuiRenderer
-    gCtxMenu.close()
-    drawTopBar(r)
-    return true
-  false
+  editDismissalRoutes(key, mods, "context-menu.close")
 
 proc leaveFilesField(r: GpuiRenderer) =
   ## A press elsewhere while the name field or the question is open:
@@ -12632,13 +12634,18 @@ proc syncOverlayLayers() =
   elif gFind.open and findAt < 0:
     discard gRouter.pushLayer(FindTable, gFind.owner, "FIND")
   let menuOpen = not gMenu.isNil and gMenu.isOpen
+  # A layout gesture in flight pushes its own layer (`Escape` ->
+  # `layout.cancel-drag`), as the terminal's does.
+  let gesture = gGestures.active or gGestures.revealing
   if not gCtxMenu.open: want(ContextMenuTable, "MENU", false)
+  if not gesture: want(LayoutGestureTable, "", false)
   if not menuOpen: want(MenuTable, "", false)
   if not gContent.open: want(ContentViewTable, "", false)
   if not palette: want(PaletteTable, "PALETTE", false)
   want(PaletteTable, "PALETTE", palette)
   want(ContextMenuTable, "MENU", gCtxMenu.open)
   want(MenuTable, "", menuOpen)
+  want(LayoutGestureTable, "", gesture)
   want(ContentViewTable, "", gContent.open)
   syncVideoPlayerLayers()
 
@@ -13776,6 +13783,35 @@ proc editWindowRoutesKey(key: string; mods: seq[string]): bool =
   # its own (the terminal's SEARCH mode leaves on any other key too).
   gFindBrowsing = false
   false
+
+proc editDismissalRoutes(key: string; mods: seq[string];
+                         operation: string): bool =
+  ## An Edit window's key on a transient surface — an open right-click menu
+  ## (`context-menu.close`), a layout gesture in flight
+  ## (`layout.cancel-drag`): when the router, with that surface's layer
+  ## pushed (`syncOverlayLayers`), resolves the key to the surface's
+  ## dismissal `operation`, the key runs through the router and is taken
+  ## (Input-Routing-And-Keymaps §6). So `Esc` closes it, and so does the key
+  ## a user bound the operation to in `keybindings.json`, as in a replay
+  ## window. Any other key is the caller's.
+  if openArm.isNil:
+    return false
+  let live = case operation
+             of "context-menu.close": gCtxMenu.open
+             of "layout.cancel-drag": gGestures.active or gGestures.revealing
+             else: false
+  let name = canonicalKeyOfGpui(key, mods)
+  if not live or name.len == 0:
+    return false
+  syncOverlayLayers()
+  var probe = gRouter
+  let res = probe.route(windowSessionFacts(), windowScopePath(), nmNormal,
+                        name, int64(epochTime() * 1000))
+  if res.kind != erOperation or res.operation != operation:
+    return false
+  var r: GpuiRenderer
+  routeWindowKey(r, key, mods)
+  true
 
 proc editKeyInert(name: string): bool =
   ## An EDIT window's key, asked of the shared router without effect (its

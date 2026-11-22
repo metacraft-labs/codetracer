@@ -98,11 +98,16 @@ LIT = r'(?:(?:c|cstring)?"(?:%s)"|cstring\(\s*"(?:%s)"\s*\))' % (KEY, KEY)
 OF_ARM = re.compile(r'^\s*of\s+%s\s*(?:,\s*%s\s*)*(?::|,?\s*$)' % (LIT, LIT))
 CASE = re.compile(r'^\s*(?:(?:let|var)\s.*=\s*)?case\s+(.+?)\s*$')
 KEYISH = re.compile(r'(?i)(^|[\s.(])(key|keyname|keyof|token|chord|lowerkey|name|lower|k)\b|\.key\b|keyOf\(|keyCode')
+# A call chain between the key-shaped name and the comparison — `.toLowerAscii`,
+# `.toLowerAscii()`, `.to(cstring)`, `.strip` — is still the key: the GPUI Edit
+# window compared `key.toLowerAscii in ["escape", "esc"]` unseen until
+# 2026-11-22. Each link is a field or a call with flat arguments.
+CHAIN = r'(?:\.\w+(?:\([^()]*\))?)*'
 COMPARE = re.compile(
-    r'(?:\bkey\w*|\bname|\.key(?:\.to\(cstring\))?|keyOf\([^)]*\))\s*(?:==|!=)\s*%s'
+    r'(?:\bkey\w*|\bname|\.key|keyOf\([^)]*\))%s\s*(?:==|!=)\s*%s'
     r'|%s\s*(?:==|!=)\s*(?:\bkey\w*|\.key\b|\$\w+\.key\b)'
-    r'|(?:\bkey\w*|\.key)\s+(?:in|notin)\s+\[\s*%s'
-    r'|\bkeyCode\s*(?:==|!=)|\.which\s*(?:==|!=)' % (LIT, LIT, LIT))
+    r'|(?:\bkey\w*|\.key)%s\s+(?:in|notin)\s+\[\s*%s'
+    r'|\bkeyCode\s*(?:==|!=)|\.which\s*(?:==|!=)' % (CHAIN, LIT, LIT, CHAIN, LIT))
 LISTEN = re.compile(r'''["']key(?:down|up|press)["']''')
 CLICK = re.compile(r'''\bon(?:click|dblclick|contextmenu|auxclick)\s*=|["'](?:click|dblclick|contextmenu|auxclick)["']''')
 PRESS_DOWN = re.compile(r'''["'](?:mousedown|pointerdown|auxdown)["']|\bon(?:mousedown|pointerdown)\s*=''')
