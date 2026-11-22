@@ -1,0 +1,48 @@
+// A multi-process recording's session tab with its process switcher
+// (isonim_agent_harbor_process_switcher_view.nim; P2c study §2.6, D25,
+// D76-D83). The tab is CodeTracer's own active session tab
+// (session_tabs.styl); the switcher inside it is the recording switcher an
+// initiative's tab draws (`.ah-rec-*`, agent_harbor.styl), unchanged.
+
+// The story: the caption bar at the top, an empty working area under it.
+.ah-ps-story
+  height: 100vh
+  display: flex
+  flex-direction: column
+
+  #menu
+    flex: 0 0 auto
+
+.ah-ps-window
+  flex: 1 1 0
+  background: colors-ui-surface-base-canvas
+
+// The bar takes the caption bar's whole free row in the story (there is no
+// toolbar or omnibox beside it, so it does not tuck under one: it starts
+// 8px in, not at the window's edge).
+.session-tab-bar.ah-ps-bar
+  flex: 1 1 auto
+  margin-left: 0.25rem
+
+// A plain tab keeps CodeTracer's 10em but gives up its room first, down to
+// its 6em: the recording's tab does not shrink, and is held to the bar's
+// width less one narrowest plain tab, past which its name is cut.
+.ah-ps-bar .session-tab:not(.ah-ps-tab)
+  flex-shrink: 1
+
+// The recording's tab holds its name and the switcher: it sizes to them,
+// and only its name gives up room (cut at its end) when the bar is narrow.
+.session-tab.ah-ps-tab
+  flex: 0 0 auto
+  max-width: calc(100% - 6.5em)
+  min-width: 6em
+  gap: 0.5rem
+
+  .session-tab-label
+    flex: 0 1 auto
+
+// The buttons keep their size: the name is cut before a button shrinks.
+.ah-ps-processes
+  display: inline-flex
+  align-items: center
+  flex: 0 0 auto

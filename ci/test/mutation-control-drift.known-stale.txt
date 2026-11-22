@@ -312,8 +312,8 @@ src/frontend/tui/tests/plat59-visual-replay-mutation-control.sha256	src/frontend
 # Re-grade the arms whose needles sit in them. The omnibox composer
 # (`feat(agent-harbor): prototype the omnibox as the agent composer`) moved
 # overlay_rows.nim and scope_path.nim again (the composer scope and its keys).
-src/frontend/tui/tests/plat59-visual-replay-mutation-control.sha256	src/frontend/viewmodel/keymap/overlay_rows.nim	092a2a5123f4201bd27d7756c774dcbc3f2e80b14ea515064b4c6e5c5d97584e	ec2309f149cc496f508ecb1cdb40edaea695e1ed3f970db63de0ec7cefb8ddea
-src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/viewmodel/keymap/scope_path.nim	b6c5ae61a3b680c3360ebbc53a196fdcc68d5b62f76f02d10ca37d6bd383eef2	9c35d60b6e8973828d3d328da17498d4f1e23160669023651723c91cf6b900e9
+src/frontend/tui/tests/plat59-visual-replay-mutation-control.sha256	src/frontend/viewmodel/keymap/overlay_rows.nim	092a2a5123f4201bd27d7756c774dcbc3f2e80b14ea515064b4c6e5c5d97584e	697ac82c87f47623bfafce8ff99fa696b5b575a9b96627f514eb4a4265e78b0a
+src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/viewmodel/keymap/scope_path.nim	b6c5ae61a3b680c3360ebbc53a196fdcc68d5b62f76f02d10ca37d6bd383eef2	c4cb289d0388968e22c295616065863cfd317f04edc9c3ee17b862d46258d412
 ci/test/plat70c-find-mutation-control.sha256	src/frontend/gpui/tests/test_plat70c_gpui_plan.nim	f515428c73dfef1c26b6a13cdbf981173574ed2443d97f1af2f8bfc3ff08df46	439e490ce6982ba70abafbf6234d187d3a7256681f195f84a0c4dc27bbc00160
 ci/test/plat70i-fit-mutation-control.sha256	src/frontend/gpui/tests/test_plat70i_gpui_plan.nim	4395029ac42ca514af2c77c888a5390b8cac36768b1e49af2df7bad09bb99e8e	964dd53312219d2dc4a5719f3ae76977abe5d3d01017df8a56d7eaf50c22c583
 src/frontend/gpui/tests/plat44-editing-mutation-control.sha256	src/frontend/gpui/tests/test_plat44_shipped_writes.nim	14c295c7ffd34d78bde88f7bd2f490d2e5341bfd6fb7a0e39f48fea4b67e9428	d8a3c61dbbca27ff692fa95d83c5b7c19a33aff49bebced1662fc1e70c71a7f0
@@ -413,8 +413,8 @@ src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/gpui/t
 # The omnibox composer moved overlay_rows.nim (the composer scope's key rows) and,
 # above, test_plat64_reachability.nim (its press-only operations); it re-counted
 # test_gpui_window_frame.nim (one more scanned GPUI source). Re-grade those arms.
-src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend/viewmodel/keymap/overlay_rows.nim	29d13621166a061d890ce4e32b6f11947812f0926f5f1929385f4b3209618834	ec2309f149cc496f508ecb1cdb40edaea695e1ed3f970db63de0ec7cefb8ddea
-src/frontend/gpui/tests/plat37-window-mutation-control.sha256	src/frontend/gpui/tests/test_gpui_window_frame.nim	40f5de09b1e97db5d711bbbc47ea609c1b675e2f73e2a80c8adb382d3f709677	8a5a679bc5ad75cec8832652fc8860ca60b906a85664159f9234889434589af5
+src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend/viewmodel/keymap/overlay_rows.nim	29d13621166a061d890ce4e32b6f11947812f0926f5f1929385f4b3209618834	697ac82c87f47623bfafce8ff99fa696b5b575a9b96627f514eb4a4265e78b0a
+src/frontend/gpui/tests/plat37-window-mutation-control.sha256	src/frontend/gpui/tests/test_gpui_window_frame.nim	40f5de09b1e97db5d711bbbc47ea609c1b675e2f73e2a80c8adb382d3f709677	a6b553fc95f1b24afd8ecc0604384f06041c21b2596d724ecc45a131d987146c
 # The status line keeps a message a late answer did not write (`fix(tui): a terminal's late answer
 # no longer replaces a message on the status line`) moved src/frontend/tui/main.nim.
 # Re-grade the arms whose needles sit in it.

@@ -361,11 +361,22 @@ const controlCenterExports = [
   "ControlCenterPlayback",
 ];
 const gazeExports = ["StatusGazeOff", "StatusGazeTracking", "StatusGazePaused"];
+// A multi-process recording's session tab with its process switcher (CTF-P2c
+// step 5), in the family `agent-harbor-process-switcher`, at the panel,
+// sidebar and laptop sizes.
+const processSwitcherExports = ["ProcessSwitcher", "ProcessSwitcherCorrelation",
+                                "ProcessSwitcherMany", "ProcessSwitcherLoading"];
 for (const name of controlCenterExports) {
   const view = `agent-harbor-${kebab(name)}`;
   agentHarborViews[view] = `codetracer-agent-harbor--${kebab(name)}`;
   views[view] = { storyId: agentHarborViews[view], brief: agentHarborBrief,
                   sizes: ["panel", "sidebar", "laptop", "wide"], themes: agentHarborThemes };
+}
+for (const name of processSwitcherExports) {
+  const view = `agent-harbor-${kebab(name)}`;
+  agentHarborViews[view] = `codetracer-agent-harbor--${kebab(name)}`;
+  views[view] = { storyId: agentHarborViews[view], brief: agentHarborBrief,
+                  sizes: ["panel", "sidebar", "laptop"], themes: agentHarborThemes };
 }
 for (const name of gazeExports) {
   const view = `agent-harbor-${kebab(name)}`;
@@ -409,6 +420,7 @@ const viewFamilies = {
   "agent-harbor-suggested-actions": suggestedActionsExports.map((name) => `agent-harbor-${kebab(name)}`),
   "agent-harbor-control-center": controlCenterExports.map((name) => `agent-harbor-${kebab(name)}`),
   "agent-harbor-status-gaze": gazeExports.map((name) => `agent-harbor-${kebab(name)}`),
+  "agent-harbor-process-switcher": processSwitcherExports.map((name) => `agent-harbor-${kebab(name)}`),
   "agent-harbor-pie": pieExports.map((name) => `agent-harbor-${kebab(name)}`),
   // CTF-P3: the Changes panel's stories, and the Inbox's (the panel and an
   // item's page; `--moments` with `agent-harbor-playback` for its playback).

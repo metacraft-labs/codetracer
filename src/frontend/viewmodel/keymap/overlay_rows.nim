@@ -105,6 +105,26 @@ const
     # (P2c study D65).
     BaseRow(chords: "Ctrl+Alt+Y", operation: "gaze.toggle-pause", table: GlobalTable),
 
+    # --- A multi-process recording's process switcher (P2c study D82): the
+    # next and previous process anywhere in the window, the same under every
+    # base. `Ctrl+PageDown` / `Ctrl+PageUp` move between session tabs (CUA),
+    # so Alt moves inside the tab. Measured free in every base's rows, every
+    # binding set, the desktop's shortcut presets, the terminal's decoder
+    # (`CSI 6;7~` / `CSI 5;7~`) and GPUI's host, which routes every key
+    # through this router. The digits pick a process while the switcher has
+    # the focus.
+    BaseRow(chords: "Ctrl+Alt+PageDown", operation: "process-switcher.next", table: GlobalTable),
+    BaseRow(chords: "Ctrl+Alt+PageUp", operation: "process-switcher.previous", table: GlobalTable),
+    BaseRow(chords: "1", operation: "process-switcher.select(1)", table: ProcessSwitcherTable),
+    BaseRow(chords: "2", operation: "process-switcher.select(2)", table: ProcessSwitcherTable),
+    BaseRow(chords: "3", operation: "process-switcher.select(3)", table: ProcessSwitcherTable),
+    BaseRow(chords: "4", operation: "process-switcher.select(4)", table: ProcessSwitcherTable),
+    BaseRow(chords: "5", operation: "process-switcher.select(5)", table: ProcessSwitcherTable),
+    BaseRow(chords: "6", operation: "process-switcher.select(6)", table: ProcessSwitcherTable),
+    BaseRow(chords: "7", operation: "process-switcher.select(7)", table: ProcessSwitcherTable),
+    BaseRow(chords: "8", operation: "process-switcher.select(8)", table: ProcessSwitcherTable),
+    BaseRow(chords: "9", operation: "process-switcher.select(9)", table: ProcessSwitcherTable),
+
     # --- The omnibox's result commands: `Enter` opens the selected row,
     # `Down` / `Up` move the selection, `Tab` inserts a completion (the
     # launcher's sigil rule), the same under every base.
