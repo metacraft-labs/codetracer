@@ -14,18 +14,20 @@ license = "MIT"
 crate-type = ["staticlib", "rlib"]
 path = "src/lib.rs"
 
+# The two measurement programs live in src/measure/, not src/bin/: the
+# repository's .gitignore ignores every `bin/` directory.
 [[bin]]
 # The engine measurement behind Extensibility-Model.md §11.9's choice:
 # instantiation time, the per-call cost of a deadline (epoch versus fuel),
 # memory per instance, on whichever engines this build carries.
 name = "ct-wasm-engine-bench"
-path = "src/bin/bench.rs"
+path = "src/measure/bench.rs"
 
 [[bin]]
 # The smallest program that loads a module and calls it: its stripped size is
 # the engine's binary-size cost, measured once per engine feature.
 name = "ct-wasm-engine-probe"
-path = "src/bin/probe.rs"
+path = "src/measure/probe.rs"
 
 [features]
 default = ["wasmtime", "wasmi"]
