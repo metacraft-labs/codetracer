@@ -156,6 +156,20 @@ test-build-once-shared-runquota-daemon:
 test-flake-pin-alignment:
   bash scripts/test-flake-pin-alignment.sh
 
+# Assert every sibling `repro.lock` shares with the pinned `reprobuild` (same
+# repository as a root input of that reprobuild's flake.lock or an entry of its
+# repro.lock) is pinned here at reprobuild's revision or a descendant of it.
+# The pre-push gate compiles reprobuild against THIS repo's pins in develop
+# mode, so a reprobuild bump that leaves one behind (nim-shm-gset at the 0.2.31
+# bump: `undeclared routine: 'insertShardIndex'`) blocks every push. Reads both
+# repos' locks and asks the sibling checkouts about ancestry; no toolchain,
+# under a second.
+# Skips LOUDLY when a checkout or revision is missing;
+# CT_REPROBUILD_DEPENDENCY_PINS_STRICT=1 makes that a failure.
+# See the header of scripts/test-reprobuild-dependency-pins.sh.
+test-reprobuild-dependency-pins:
+  bash scripts/test-reprobuild-dependency-pins.sh
+
 # Assert every package name `repro.nim`'s `uses:` list declares (every `when`
 # branch; also `buildDeps:` / `nativeBuildDeps:` / `runtimeDeps:`) resolves
 # against the `reprobuild-packages` catalog this flake pins, by reprobuild's
@@ -1387,6 +1401,7 @@ test:
     test-plat37-shim-gate \
     test-gpui-shim-staging \
     test-flake-pin-alignment \
+    test-reprobuild-dependency-pins \
     test-reprobuild-catalog-coverage \
     test-dev-env-flake-metadata \
     test-flake-lock-node-dates \

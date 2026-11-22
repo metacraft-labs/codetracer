@@ -2351,6 +2351,20 @@ package codeTracer:
       extraEnvValue = GateEnv)
     target("gate-flake-pin-alignment", gateFlakePinAlignment)
 
+    # Its sibling contract suite: this repo's repro.lock pins of reprobuild's
+    # own dependencies may not be behind the pinned reprobuild's. Same input
+    # reasoning: the suite builds its own throwaway repos and fixture locks and
+    # never reads this repo's flake.lock / repro.lock.
+    let gateReprobuildDependencyPins = ctShell(
+      actionIdValue = "codetracer.gate.reprobuild-dependency-pins",
+      commandValue = "bash ci/test/reprobuild-dependency-pins-test.sh",
+      extraInputsValue = @[
+        "ci/test/reprobuild-dependency-pins-test.sh",
+        "scripts/test-reprobuild-dependency-pins.sh"],
+      cacheableValue = true,
+      extraEnvValue = GateEnv)
+    target("gate-reprobuild-dependency-pins", gateReprobuildDependencyPins)
+
     # The real tree's two locks agree on every sibling both pin. A GATE over
     # the real files, so they are its inputs: a lock bump re-runs it.
     let gateReproLockAgreement = ctShell(
@@ -2557,6 +2571,7 @@ package codeTracer:
 
     let ctGateTestActions = @[
       gateFlakePinAlignment,
+      gateReprobuildDependencyPins,
       gatePythonVersionAlignment,
       gateRequireRuntimeAssets,
       gateTestLaneReport,

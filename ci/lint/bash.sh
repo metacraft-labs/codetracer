@@ -290,6 +290,12 @@ lint_step "contract suite: existence is not freshness" \
 lint_step "shellcheck: flake pin alignment guard" \
 	shellcheck scripts/test-flake-pin-alignment.sh
 
+# scripts/test-reprobuild-dependency-pins.sh is the static guard that this
+# repo's repro.lock pins of reprobuild's own dependencies are not behind the
+# pinned reprobuild's. Same reason: under scripts/, out of the glob's reach.
+lint_step "shellcheck: reprobuild dependency pins guard" \
+	shellcheck scripts/test-reprobuild-dependency-pins.sh
+
 # scripts/test-reprobuild-catalog-coverage.sh is the static guard on the pair
 # `repro.nim` `uses:` list / pinned `reprobuild-packages` catalog. Same reason:
 # it is under scripts/, which the glob does not reach.
@@ -458,6 +464,13 @@ lint_step "shellcheck: toolchain resolver" \
 # that defect is invisible to shellcheck and to every happy-path run.
 lint_step "contract suite: flake pin alignment guard" \
 	bash ci/test/flake-pin-alignment-test.sh
+
+# Same reasoning for its sibling guard: pure bash, git and python3 over
+# throwaway repos, and what it asserts is that a BEHIND pin is named with its
+# remedy while a missing python3, an unparseable lock or a missing checkout is
+# never reported as one.
+lint_step "contract suite: reprobuild dependency pins guard" \
+	bash ci/test/reprobuild-dependency-pins-test.sh
 
 # The real tree's two locks: every sibling both pin, pinned at one revision.
 # `repro.lock` once lagged `flake.lock` by an `isonim-tui` the code needed
