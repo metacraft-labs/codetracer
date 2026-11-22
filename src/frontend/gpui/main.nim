@@ -113,6 +113,7 @@ from ../../ct/trace/ctfs_sources import readCtfsMetaDat
 from ../viewmodel/platform/displayed_product import sessionDocumentTitle
 import ./window_clicks
 import ./window_pointer
+import ./element_reuse   # a redraw keeps the elements that did not move
 import ./window_preflight               # refuse by kind when no window can open
 import ./list_scrubber
 import ../viewmodel/views/debug_control_marks
@@ -1253,7 +1254,8 @@ proc drawBuildPane(r: GpuiRenderer)
   ## clicks, before `windowPointer`).
 
 proc drawEditorBody(r: GpuiRenderer; pane: GpuiElement;
-                    sticky: seq[tuple[line: int; text: string; top: int]] = @[])
+                    sticky: seq[tuple[line: int; text: string; top: int]] = @[];
+                    firstRowInsetPx = 0)
   ## PLAT-70: forward-declared; defined with the window's editor helpers.
 
 var
@@ -1833,14 +1835,18 @@ proc applyTextFaces*(r: GpuiRenderer; node: GpuiElement): int {.discardable.} =
   ## exists against — which is why `test_plat35_text_faces.nim` asserts the
   ## number against an independent count of the elements carrying a metric
   ## rather than merely asserting the walk returned.
+  ##
+  ## The subtree is read in one call (`snapshotTree`), and a face is written
+  ## only to an element that does not carry it yet (`setStyleOnce`): this
+  ## runs after every redraw, and a write to an element whose face did not
+  ## move would mark it changed in the shim and cost it its cached plan.
   if node.isNil:
     return 0
-  let family = fontFamilyForMetric(getAttribute(node, TextMetricAttribute))
-  if family.len > 0:
-    r.setStyle(node, "font-family", family)
-    result = 1
-  for i in 0 ..< childCount(node):
-    result += applyTextFaces(r, nthChild(node, i))
+  for n in snapshotTree(node):
+    let family = fontFamilyForMetric(n.attr(TextMetricAttribute))
+    if family.len > 0:
+      r.setStyleOnce(n.id, "font-family", family)
+      inc result
 
 proc editorTopInsetPx(): int =
   ## Where the editor's first drawn row starts below its pane's top. At the
@@ -2890,7 +2896,8 @@ proc drawFindWidget(r: GpuiRenderer; pane: GpuiElement; d: EditingDocument) =
   r.appendChild(pane, w)
 
 proc drawEditorBody(r: GpuiRenderer; pane: GpuiElement;
-                    sticky: seq[tuple[line: int; text: string; top: int]] = @[]) =
+                    sticky: seq[tuple[line: int; text: string; top: int]] = @[];
+                    firstRowInsetPx = 0) =
   ## The editor's rows and bar from `gEditorSurface`, at the window's width
   ## and the followed horizontal view — every draw of the editor's body.
   followEditorView()
@@ -2914,7 +2921,8 @@ proc drawEditorBody(r: GpuiRenderer; pane: GpuiElement;
   discard renderEditor(r, pane, sourcePaneView(GpuiMedium).root,
                        gEditorSurface, gEditorViewportPx, gEditorView.leftCol,
                        gEditorView.contentCols, editorCaretMark(),
-                       gLayoutSettings.overflowMarkers, sticky)
+                       gLayoutSettings.overflowMarkers, sticky,
+                       firstRowInsetPx)
   if gFind.open and gFind.owner == "editor:" & gEditorSurface.path:
     # OQ-F7: the folder window's widget over its arm's document.
     if not openArm.isNil and gEditorSurface.productMode == pmEdit:
@@ -6420,7 +6428,8 @@ proc redrawReplayEditor(r: GpuiRenderer) =
   # The flow's values are on the surface already (`editor_surface.
   # flowValuesByLine`, the rule the terminal draws too).
   gEditorSurface = withDebugDocument(surface)
-  r.setStyle(editor, "padding-top", $max(0, editorTopInsetPx()) & "px")
+  # Set only when it moved: every write marks the pane changed in the shim.
+  r.setStyleOnce(editor, "padding-top", $max(0, editorTopInsetPx()) & "px")
   editorLoopZones = loopZonesOf(gEditorSurface)
   block:
     let i = gGeom.tabsNodeOfPane($paneEditor)
@@ -6436,16 +6445,9 @@ proc redrawReplayEditor(r: GpuiRenderer) =
                             elif gSourceService.fileLines.hasKey(gEditorSurface.path):
                               gSourceService.fileLines[gEditorSurface.path].len
                             else: -1))
-  drawEditorBody(r, editor, sticky)
   # A negative inset starts the rows above the editor's top: the first row
   # is pulled up by it, the pane's clip cutting off what is above.
-  let inset = editorTopInsetPx()
-  if inset < 0:
-    for k in 0 ..< childCount(editor):
-      let child = nthChild(editor, k)
-      if getAttribute(child, EditorRowAttribute).len > 0:
-        r.setStyle(child, "margin-top", $inset & "px")
-        break
+  drawEditorBody(r, editor, sticky, firstRowInsetPx = editorTopInsetPx())
   noteEditorTab(r, editorTabLabel(surface.path, false))
   # The rows just drawn take the design's faces here, whoever asked for the
   # redraw: a divider's resize redraws the editor through `syncEditorViewport`,
@@ -6458,6 +6460,10 @@ proc redrawReplayEditor(r: GpuiRenderer) =
     if row.pointer == eptExecution and row.held:
       gSession.session.store.updateCodeStateLine(row.line, row.text.strip())
 
+var gRefreshCosts: seq[tuple[ms: float; reused, built: int]]
+  ## Each `refreshReplayWindow`'s time and what its pools reused and built,
+  ## for `--frame-report`'s `refreshes`: the front-end's own cost of a step.
+
 proc refreshReplayWindow(r: GpuiRenderer) =
   ## After the debugger moved: the source window, the stop's panes, every
   ## live leaf drawn again from its ViewModel (the call trace with its whole
@@ -6465,6 +6471,13 @@ proc refreshReplayWindow(r: GpuiRenderer) =
   ## availability moved too).
   if gSession.isNil:
     return
+  let refreshStart = epochTime()
+  let reuseBefore = reuseTotals()
+  defer:
+    let after = reuseTotals()
+    gRefreshCosts.add (ms: (epochTime() - refreshStart) * 1000,
+                       reused: after.reused - reuseBefore.reused,
+                       built: after.built - reuseBefore.built)
   # PLAT-50: a move takes the editor back to the debugger's file.
   gViewedFile = ""
   if not gSourceService.isNil:
@@ -14625,6 +14638,14 @@ proc writeFrameReport(path: string; loadStart, loadEnd: string;
                        elapsedMs >= int(deadlineMs) - 500,
   }
   doc["keyHandlerMs"] = %handlerMs
+  # The front-end's side of each step: the redraw after the debugger moved,
+  # and what the panes' pools kept (`element_reuse`). `fullRedraw` names the
+  # control (`CODETRACER_GPUI_FULL_REDRAW`).
+  doc["fullRedraw"] = %fullRedraw
+  var refreshes = newJArray()
+  for c in gRefreshCosts:
+    refreshes.add %*{"ms": c.ms, "reused": c.reused, "built": c.built}
+  doc["refreshes"] = refreshes
   if not openArm.isNil:
     doc["documentLines"] = %openArm.doc.state.doc.countLines
     doc["keysApplied"] = %openArm.keys
@@ -16114,10 +16135,36 @@ proc reportWindowPlan(cmd: GpuiCommand; outcome: LeafRenderOutcome;
   let root = r.createElement("div")
   paintWindowChrome(root)
   gHoverScriptBaseMs = int64(epochTime() * 1000.0)
+  # `CODETRACER_GPUI_CHURN_REPORT=<path>`: what each op built, per pane
+  # (`element_reuse.churnSince`), for the suite that holds a step to the
+  # elements it moved.
+  let churnPath = getEnv("CODETRACER_GPUI_CHURN_REPORT")
+  var churn = newJArray()
   for op in cmd.windowOps:
+    let mark = if churnPath.len > 0: idWatermark() else: 0'u64
+    let before = reuseTotals()
     let failure = runWindowOp(r, op)
     if failure.len > 0:
       stderr.writeLine("codetracer-gpui: --window-ops: " & failure)
+      return 1
+    if churnPath.len > 0:
+      var panes: seq[(string, GpuiElement)]
+      for id, el in gPanes: panes.add (id, el)
+      let c = churnSince(root, mark, panes)
+      let t = reuseTotals()
+      var byPane = newJObject()
+      for p in c.panes:
+        byPane[p.pane] = %*{"fresh": p.fresh, "replaced": p.replaced,
+                            "total": p.total}
+      churn.add %*{"op": op, "fresh": c.fresh, "total": c.total,
+                   "reused": t.reused - before.reused,
+                   "built": t.built - before.built, "panes": byPane,
+                   "outside": c.outside, "outsideRoots": %c.outsideRoots}
+  if churnPath.len > 0:
+    try:
+      writeFile(churnPath, churn.pretty & "\n")
+    except IOError as e:
+      stderr.writeLine("codetracer-gpui: CODETRACER_GPUI_CHURN_REPORT: " & e.msg)
       return 1
   if not r.verifyRenderPlan(root):
     stderr.writeLine("codetracer-gpui: the window's render plan did not verify")

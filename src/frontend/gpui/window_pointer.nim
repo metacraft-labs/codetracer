@@ -11,6 +11,7 @@ import isonim_gpui/renderer
 
 import ../../common/pointer_shape
 import ./window_clicks
+import ./element_reuse
 
 export pointer_shape
 
@@ -105,14 +106,17 @@ proc stampPointerShapes*(r: GpuiRenderer; nodes: openArray[SnapshotNode]) =
   ## `window_clicks.wireWindowClicks` recorded the rows it wired: this runs
   ## after every redraw, over every element of the window, and asking the
   ## shim for each of the names above one call at a time cost about 40 ms a
-  ## redraw. Only the elements styled here take a handle.
+  ## redraw. Only the elements written here take a handle, and an element
+  ## already stamped and styled as the walk would stamp it is not written.
   for n in nodes:
     let target = hitTargetOf(n)
     if target.kind != hkNone:
-      let el = elementOf(n.id)
-      if el.isNil:
-        continue
       let kindName = $target.kind
       if n.attr(PointerStampAttribute) != kindName:
+        let el = elementOf(n.id)
+        if el.isNil:
+          continue
         r.setAttribute(el, PointerStampAttribute, kindName)
-      r.setStyle(el, "cursor", pointerShapeOf(target).cssName)
+      # Written only when it moved (`setStyleOnce`): this walk runs over the
+      # whole window after every redraw.
+      r.setStyleOnce(n.id, "cursor", pointerShapeOf(target).cssName)
