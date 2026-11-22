@@ -329,7 +329,31 @@ function Ensure-Nargo {
   $env:CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER = $resolvedLink.Source
   Write-Host "nargo bootstrap will link with $($resolvedLink.Source) ($($verdict.reason))"
 
-  Push-Location $sourceDir
+  # BUILD FROM A SHORT PATH. The trace writer's build script has Nim compile
+  # C through MSVC, and Nim hands cl.exe sources relative to a nimcache deep
+  # in cargo's OUT_DIR, e.g. ..\..\..\..\..\..\nargo\cache\source\<rev>\noir\
+  # .codetracer-deps\...\crossing_state.c. cl.exe is not long-path aware, so
+  # once that cwd plus the relative path pass 260 characters, it fails with
+  # "C1083: Cannot open source file". That happened in windows-nargo run
+  # 44954823072 under C:\Users\runner\AppData\Local\codetracer\windows-diy.
+  # `subst` maps a free drive letter to the source's parent for the build, so
+  # both paths start at X:\noir. It needs no administrator rights and is
+  # removed afterwards.
+  $buildDir = $sourceDir
+  $substDrive = $null
+  $freeLetter = [char[]](90..68) | Where-Object { -not (Test-Path -LiteralPath "$($_):\") } | Select-Object -First 1
+  if ($freeLetter) {
+    & subst.exe "$($freeLetter):" $cacheRoot
+    if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath "$($freeLetter):\noir")) {
+      $substDrive = "$($freeLetter):"
+      $buildDir = "$substDrive\noir"
+      Write-Host "nargo bootstrap builds from $buildDir (subst of $cacheRoot), to keep cl.exe's paths under MAX_PATH"
+    }
+  }
+  if (-not $substDrive) {
+    Write-Host "::warning::nargo bootstrap could not map a short drive with subst; building from '$sourceDir', where cl.exe may hit MAX_PATH"
+  }
+  Push-Location $buildDir
   try {
     & $rustupExe toolchain install nightly --profile minimal
     if ($LASTEXITCODE -ne 0) {
@@ -337,10 +361,13 @@ function Ensure-Nargo {
     }
     & $cargoExe +nightly build --release -p nargo_cli --bin nargo
     if ($LASTEXITCODE -ne 0) {
-      throw "Failed to build nargo from '$sourceDir'."
+      throw "Failed to build nargo from '$buildDir'."
     }
   } finally {
     Pop-Location
+    if ($substDrive) {
+      & subst.exe $substDrive /D | Out-Null
+    }
   }
 
   $builtNargoCandidates = @(
