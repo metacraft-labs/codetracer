@@ -29,6 +29,8 @@ import std/strutils
 
 import nim_agents_isonim_viewmodels/agent_harbor/result_commands_vm
 
+import ../editor/find_match
+
 export result_commands_vm
 
 const
@@ -110,16 +112,14 @@ proc emptyProvidersLine*(vm: ResultCommandsVM): string =
   if names.len == 0: "" else: "No matches in " & names.join(", ")
 
 proc spansIn*(shown, needle: string): seq[(int, int)] =
-  ## Every place `needle` stands in `shown` (ASCII case ignored, as the
-  ## query matches), as `(start, length)` byte spans: what a cut matched line
-  ## draws bold (every match in view, P2c study D62).
-  if needle.len == 0: return
-  let hay = shown.toLowerAscii
-  let n = needle.toLowerAscii
-  var at = hay.find(n)
-  while at >= 0:
-    result.add (at, needle.len)
-    at = hay.find(n, at + needle.len)
+  ## Every place `needle` stands in `shown` (case ignored, as the query
+  ## matches), as `(start, length)` byte spans: what a cut matched line
+  ## draws bold (every match in view, P2c study D62). The editor's one
+  ## matcher finds them (`find_match.matchesOf`, a literal, case-insensitive
+  ## match; Find-And-Incremental-Search FS-1), so a result row bolds what a
+  ## find for the same text would highlight.
+  for m in matchesOf(shown, needle, MatchOptions(caseSensitive: false)):
+    result.add (m.a, m.b - m.a)
 
 proc matchedSpan*(row: ResultRow; query: string): (int, int) =
   ## Where the query matched a row's title first, as byte offsets
