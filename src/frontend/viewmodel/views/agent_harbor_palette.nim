@@ -262,91 +262,68 @@ proc timelineInk*(p: AhPalette; role: string): string =
 
 # ---------------------------------------------------------------------------
 # The progress pie's inks (`nim_agents_isonim_viewmodels/agent_harbor/
-# progress_pie`): one disc in two shades of its state's colour
+# progress_pie`): a ring in its state's ink, filled by a wedge of that ink
 # ---------------------------------------------------------------------------
 #
-# A pie is drawn in three inks, resolved here once for every front end:
+# A pie is drawn in one ink, its state role's full ink, on the ground it
+# sits on, resolved here once for every front end:
 #
-# - the WEDGE (the share done) in the state role's full ink, from twelve
-#   o'clock clockwise;
-# - the REST of the disc in the same ink mixed toward the ground the pie
-#   sits on -- the "subtle difference in the colour";
-# - a 1 px EDGE in the full ink, so the disc's outline reads at 0 %.
+# - a 1 px EDGE ring (`PieEdgePx`) in the full ink, the pie's outline;
+# - inside it, past a gap of the ground (`pieRingGapPx`), a disc whose
+#   WEDGE (the share done, from twelve o'clock clockwise) is filled in the
+#   same full ink and whose REST is left as the ground, untinted.
+#
+# So 0 % is an empty ring and 100 % a full disc inside the ring, and a share
+# reads as ink against the ground (3.3:1 or more), not as one shade of the
+# ink against another: at 9 to 12 px a wedge 1.5:1 against a tinted rest
+# made 0, 16, 84 and 100 % read as one solid dot. The state is told by the
+# ink alone.
 #
 # The rules, measured on every ground a pie sits on in both modes:
 #
-# - the wedge and the edge hold `PieInkFloor` (3.3:1) against the ground:
-#   WCAG 2.2 SC 1.4.11's 3:1 for a graphical object
+# - the ink (the edge and the wedge) holds `PieInkFloor` (3.3:1) against the
+#   ground: WCAG 2.2 SC 1.4.11's 3:1 for a graphical object
 #   (https://www.w3.org/TR/WCAG22/#non-text-contrast) with a margin, because
 #   the 1 px edge is antialiased and an ink at 3.0-3.15:1 drew edge pixels
 #   at 2.7-2.9:1;
-# - any two roles' full inks on one ground differ by at least
-#   `PieRoleDeltaE` (20) in CIEDE2000 (`deltaE2000`) -- every pair, idle and
-#   ended among them, in every front end: the terminal has no shape to tell
-#   two inks apart by, and two warm hues 1.5:1 apart still read alike at
-#   10-12 px;
-# - any two roles' REST colours differ by at least `PieRestDeltaE` (15), so
-#   two pies at 0 % (a rest disc and its edge) are told apart too. Idle draws
-#   no rest disc (it is hollow: its rest is the ground), so the rule is over
-#   the other five;
+# - any two roles' inks on one ground differ by at least `PieRoleDeltaE`
+#   (20) in CIEDE2000 (`deltaE2000`) -- every pair, idle and ended among
+#   them, in every front end: the ink is all that tells two states apart;
 # - warning and error, the two warm roles, also differ in luminance by
 #   `PieWarningErrorContrast` (1.3:1) or more, so a one-cell terminal glyph
 #   does not tell them apart by hue alone;
 # - ended stays a neutral grey, `PieEndedChroma` (12) or less of CIE chroma,
-#   and stands apart from idle by lightness, never by taking a hue;
-# - the wedge stands against the rest at about `PieWedgeTarget` (1.5:1),
-#   inside [`PieWedgeFloor`, `PieWedgeCeiling`] (1.4 to 1.8:1): a subtle
-#   difference, not a second state. The rest is the whole-percent mix of the
-#   ink toward the ground nearest the target inside that band
-#   (`pieRestMix`).
+#   and stands apart from idle by lightness, never by taking a hue.
 #
 # The roles are resolved per ground in `PieRoleOrder` (`roleInkReport`).
 # Each takes, of the inks `inkCandidates` offers (its own ink, its ink moved
 # toward black or white, inks around its hue at other lightness and chroma;
 # for ended, its own grey at other lightness and up to 12 of chroma), the
 # one nearest its own ink in CIEDE2000 that holds the floor, stands 20 from
-# every earlier role's ink and 15 from every earlier rest, and (error) 1.3:1
-# from warning. The ink floor, the 20 between inks and ended's chroma are
-# never given up. Where no candidate holds the rest rule, the one with the
-# largest rest distance is taken; where none holds the warning/error
-# luminance with the others, the one with the most; either is reported, with
-# its best value, in the report. Where a role has no candidate at all, the
-# role before it gives way: the two are chosen together, the pair nearest
-# their own inks (Light's active tab: idle moves darker so ended, a grey
-# lighter than it, holds 3.3:1 and stands 20 from it).
+# every earlier role's ink, and (error) 1.3:1 from warning. The ink floor,
+# the 20 between inks and ended's chroma are never given up. Where no
+# candidate holds the warning/error luminance with the others, the one with
+# the most is taken and reported, with its best value. Where a role has no
+# candidate at all, the role before it gives way: the two are chosen
+# together, the pair nearest their own inks (Light's active tab: idle moves
+# darker so ended, a grey lighter than it, holds 3.3:1 and stands 20 from
+# it).
 #
 # Every adjustment is made here, per ground, never per front end, so the web
 # stylesheet (`agent_harbor_pie_inks.styl`, written from `pieStylesheet`),
 # GPUI and the terminal draw one pie in the same inks.
 #
-# An IDLE pie is hollow: its rest is the ground itself, so only the edge and
-# the wedge show (the ring the idle mark has always been), and its wedge is
-# drawn INSIDE the ring with the ground between them, so even a whole idle
-# pie is a ring around a disc and never the solid disc an ended one is (a
-# cue beside the colour, not instead of it). Its
-# wedge stands against the ground at 3.3:1 or more, which the ceiling does
-# not apply to.
-#
-# A pie with NO KNOWN PROGRESS draws no rest and no wedge: its edge ring and
-# a centred dot of the full ink a quarter of its diameter across, so it never
-# reads as 0 % (the rest disc and its edge) or as done.
+# A pie with NO KNOWN PROGRESS draws no wedge: its edge ring and a centred
+# dot of the full ink a quarter of its diameter across, so it never reads as
+# 0 % (the empty ring) or as done.
 
 const
   PieInkFloor* = 3.3
-    ## The least contrast of a pie's wedge and edge against its ground.
-  PieWedgeFloor* = 1.4
-    ## The least contrast of the wedge against the rest of the disc.
-  PieWedgeCeiling* = 1.8
-    ## The most contrast of the wedge against the rest (not for idle:
-    ## hollow).
-  PieWedgeTarget* = 1.5
-    ## The contrast of the wedge against the rest that the mix aims at.
+    ## The least contrast of a pie's ink (its wedge and edge) on its ground.
   PieStepPercent* = 5
     ## The step a role's ink is moved toward black or white by.
   PieRoleDeltaE* = 20.0
     ## Any two roles' inks on one ground differ by at least this in CIEDE2000.
-  PieRestDeltaE* = 15.0
-    ## Any two roles' rest colours (idle has none) differ by at least this.
   PieWarningErrorContrast* = 1.3
     ## The least luminance contrast of warning's and error's inks.
   PieEndedChroma* = 12.0
@@ -369,12 +346,11 @@ type
     pgMenu = "menu"
 
   PieInks* = object
-    ## The three inks of one pie on one ground, as `#rrggbb`.
-    wedge*, rest*, edge*: string
+    ## The inks of one pie on one ground, as `#rrggbb`: the wedge and the
+    ## edge are the role's full ink; the rest of the disc is `ground`.
+    wedge*, edge*: string
     ground*: string
-      ## The ground they were resolved for.
-    restMixPercent*: int
-      ## How far `rest` was mixed toward the ground (100: hollow).
+      ## The ground they were resolved for, which the rest is left as.
 
 proc pieGroundColour*(p: AhPalette; ground: PieGround): string =
   ## The colour of a pie's ground in `p`'s mode.
@@ -559,63 +535,40 @@ proc inkCandidates*(base: string; role: PieRole): seq[string] =
         let ink = labInk(l.float, c * cos(degToRad(h)), c * sin(degToRad(h)))
         if ink.len > 0: result.add ink
 
-proc pieRestMix*(ink, ground: string): int =
-  ## The rest of a pie in `ink` on `ground`: the whole percentage, 0 to 100,
-  ## of the mix toward the ground whose contrast against the ink is nearest
-  ## `PieWedgeTarget` inside [`PieWedgeFloor`, `PieWedgeCeiling`]; 100 (the
-  ## ground) when no mix is inside. The contrast rises with the mix (the mix
-  ## moves the ink's luminance toward the ground's), so the band's start is
-  ## found by bisection and the band is walked from there.
-  var lo = 0
-  var hi = 101
-  while lo < hi:
-    let m = (lo + hi) div 2
-    if inkContrast(ink, mixInk(ink, ground, m)) >= PieWedgeFloor: hi = m else: lo = m + 1
-  result = 100
-  var gap = Inf
-  for mix in lo .. 100:
-    let c = inkContrast(ink, mixInk(ink, ground, mix))
-    if c > PieWedgeCeiling: break
-    if c >= PieWedgeFloor and abs(c - PieWedgeTarget) < gap:
-      result = mix
-      gap = abs(c - PieWedgeTarget)
-
 type
   RoleShortfall* = object
     ## A soft rule a role's ink could not meet on a ground, and the best
     ## value it reached.
     role*: PieRole
-    rule*: string     ## "rest" (`PieRestDeltaE`) or "warning-error"
+    rule*: string     ## "warning-error" (`PieWarningErrorContrast`)
     best*: float
 
   RoleInkReport* = object
-    ## How a ground's role inks were resolved: the inks and their rests, the
-    ## soft rules a role fell short of (`shortOf`, each with its best value),
-    ## the hard rules nothing met (`unmet`: the role keeps its own ink), and
-    ## the roles that gave way to a later one (`gaveWay`).
+    ## How a ground's role inks were resolved: the inks, the soft rules a
+    ## role fell short of (`shortOf`, each with its best value), the hard
+    ## rules nothing met (`unmet`: the role keeps its own ink), and the roles
+    ## that gave way to a later one (`gaveWay`).
     inks*: array[PieRole, string]
-    rests*: array[PieRole, string]
     shortOf*: seq[RoleShortfall]
     unmet*: seq[PieRole]
     gaveWay*: seq[PieRole]
 
   InkPick = object
-    ink, rest: string
-    tier: int         ## 0 every rule; 1 short of warning/error; 2 of rest
+    ink: string
+    tier: int         ## 0 every rule; 1 short of warning/error
     score: float      ## within a tier, lower is better
-    best: float       ## the rest distance or the luminance contrast reached
+    best: float       ## the luminance contrast reached
 
 var roleInkMemo: seq[(string, RoleInkReport)]
   ## `roleInkReport` is a pure function of its inputs and costs a search;
   ## its answers are kept, keyed by the palette's role inks and the ground.
 
 proc inkPicks(p: AhPalette; ground: string; role: PieRole; earlier: openArray[PieRole];
-              inks, rests: array[PieRole, string]): seq[InkPick] =
+              inks: array[PieRole, string]): seq[InkPick] =
   ## Every ink `role` may take on `ground` against the `earlier` roles'
-  ## `inks` and `rests`, best first: those that hold the hard rules (the ink
-  ## floor, 20 from every earlier ink, ended's chroma), by tier, then nearest
-  ## the role's own ink (tier 0), the most warning/error contrast (tier 1),
-  ## or the largest rest distance (tier 2).
+  ## `inks`, best first: those that hold the hard rules (the ink floor, 20
+  ## from every earlier ink, ended's chroma), by tier, then nearest the
+  ## role's own ink (tier 0) or the most warning/error contrast (tier 1).
   let base = p.roleInk(role)
   for ink in inkCandidates(base, role):
     if inkContrast(ink, ground) < PieInkFloor: continue
@@ -626,23 +579,16 @@ proc inkPicks(p: AhPalette; ground: string; role: PieRole; earlier: openArray[Pi
         apart = false
         break
     if not apart: continue
-    let rest = if role == prIdle: ground else: mixInk(ink, ground, pieRestMix(ink, ground))
-    var restApart = Inf
-    if role != prIdle:
-      for other in earlier:
-        if other != prIdle: restApart = min(restApart, deltaE2000(rest, rests[other]))
     let lum = if role == prError and prWarning in earlier: inkContrast(ink, inks[prWarning])
               else: Inf
-    if restApart < PieRestDeltaE:
-      result.add InkPick(ink: ink, rest: rest, tier: 2, score: -restApart, best: restApart)
-    elif lum < PieWarningErrorContrast:
-      result.add InkPick(ink: ink, rest: rest, tier: 1, score: -lum, best: lum)
+    if lum < PieWarningErrorContrast:
+      result.add InkPick(ink: ink, tier: 1, score: -lum, best: lum)
     else:
-      result.add InkPick(ink: ink, rest: rest, tier: 0, score: deltaE2000(ink, base))
+      result.add InkPick(ink: ink, tier: 0, score: deltaE2000(ink, base))
   result.sort(proc (a, b: InkPick): int = cmp((a.tier, a.score), (b.tier, b.score)))
 
 proc roleInkReport*(p: AhPalette; ground: string): RoleInkReport =
-  ## Every role's full ink and rest on `ground` (see the section's header).
+  ## Every role's full ink on `ground` (see the section's header).
   var key = ground
   for role in PieRole: key.add "|" & p.roleInk(role)
   for (k, v) in roleInkMemo:
@@ -650,33 +596,27 @@ proc roleInkReport*(p: AhPalette; ground: string): RoleInkReport =
   var earlier: seq[PieRole]
   proc take(r: var RoleInkReport; role: PieRole; pick: InkPick) =
     r.inks[role] = pick.ink
-    r.rests[role] = pick.rest
-    case pick.tier
-    of 1: r.shortOf.add RoleShortfall(role: role, rule: "warning-error", best: pick.best)
-    of 2: r.shortOf.add RoleShortfall(role: role, rule: "rest", best: pick.best)
-    else: discard
+    if pick.tier == 1:
+      r.shortOf.add RoleShortfall(role: role, rule: "warning-error", best: pick.best)
   for k, role in PieRoleOrder:
-    let picks = p.inkPicks(ground, role, earlier, result.inks, result.rests)
+    let picks = p.inkPicks(ground, role, earlier, result.inks)
     if picks.len > 0:
       result.take(role, picks[0])
     elif k > 0:
       # The role before gives way: the two are chosen together, of the
       # previous role's picks against the roles before it and this role's
-      # against all but the previous one, the pair that stands 20 apart (15
-      # between rests when both draw one) at the best tier, nearest their
-      # own inks.
+      # against all but the previous one, the pair that stands 20 apart at
+      # the best tier, nearest their own inks.
       let prev = PieRoleOrder[k - 1]
       let before = earlier[0 ..< earlier.len - 1]
-      let prevPicks = p.inkPicks(ground, prev, before, result.inks, result.rests)
-      let mine = p.inkPicks(ground, role, before, result.inks, result.rests)
+      let prevPicks = p.inkPicks(ground, prev, before, result.inks)
+      let mine = p.inkPicks(ground, role, before, result.inks)
       var best = (99, Inf, -1, -1)
       for i, a in prevPicks:
         if a.tier > best[0]: break
         for j, b in mine:
           if max(a.tier, b.tier) > best[0]: break
           if deltaE2000(a.ink, b.ink) < PieRoleDeltaE: continue
-          if prev != prIdle and role != prIdle and
-             deltaE2000(a.rest, b.rest) < PieRestDeltaE: continue
           let cost = deltaE2000(a.ink, p.roleInk(prev)) + deltaE2000(b.ink, p.roleInk(role))
           if (max(a.tier, b.tier), cost) < (best[0], best[1]):
             best = (max(a.tier, b.tier), cost, i, j)
@@ -691,11 +631,9 @@ proc roleInkReport*(p: AhPalette; ground: string): RoleInkReport =
         result.gaveWay.add prev
       else:
         result.inks[role] = p.roleInk(role)
-        result.rests[role] = ground
         result.unmet.add role
     else:
       result.inks[role] = p.roleInk(role)
-      result.rests[role] = ground
       result.unmet.add role
     earlier.add role
   roleInkMemo.add (key, result)
@@ -706,15 +644,10 @@ proc roleInks*(p: AhPalette; ground: string): array[PieRole, string] =
 
 proc pieInks*(p: AhPalette; role: PieRole; ground: string): PieInks =
   ## The inks of a `role` pie on `ground` (`#rrggbb`), meeting the rules
-  ## (see the section's header).
+  ## (see the section's header): the wedge and the edge in the role's ink,
+  ## the rest left as the ground.
   let ink = p.roleInks(ground)[role]
-  result = PieInks(wedge: ink, edge: ink, ground: ground)
-  if role == prIdle:
-    result.rest = ground
-    result.restMixPercent = 100
-    return
-  result.restMixPercent = pieRestMix(ink, ground)
-  result.rest = mixInk(ink, ground, result.restMixPercent)
+  PieInks(wedge: ink, edge: ink, ground: ground)
 
 proc readableInk*(p: AhPalette; ground: string; floor = StoryTextFloor): string =
   ## The quietest of the text roles (caption, label, body) that holds
@@ -730,26 +663,39 @@ proc pieInks*(p: AhPalette; role: PieRole; ground: PieGround): PieInks =
 
 type
   PieShape* = enum
-    ## How a pie is drawn, whatever its inks.
-    psDisc = "disc"       ## the rest disc, the wedge over it, the edge
-    psHollow = "hollow"   ## idle: the edge ring, the wedge inside it
+    ## How a pie is drawn, whatever its role and inks.
+    psRing = "ring"       ## the edge ring, the wedge filled inside it
     psUnknown = "unknown" ## no known progress: the edge ring and a dot
 
 proc pieShapeOf*(pie: ProgressPie): PieShape =
-  ## No known progress outranks the role: an idle pie with none is the ring
-  ## and the dot too.
-  if not pie.known: psUnknown
-  elif pie.role == prIdle: psHollow
-  else: psDisc
+  ## Every role is a ring with its wedge inside; no known progress draws
+  ## the ring and a dot instead.
+  if pie.known: psRing else: psUnknown
 
 const
-  PieHollowInsetFraction* = 1.0 / 6.0
-    ## A hollow pie's wedge starts this share of the diameter inside the
-    ## edge (2 px of a 12 px pie): the edge, then the ground, then the wedge.
+  PieEdgePx* = 1
+    ## The edge ring's width.
+  PieRingGapStepPx* = 12
+    ## The ground between the ring and the wedge's disc is one whole pixel
+    ## for every this many pixels of diameter (`pieRingGapPx`).
   PieDotFraction* = 1.0 / 4.0
     ## An unknown pie's dot: this share of the diameter, centred -- a quarter,
-    ## so at native size it stays well short of a hollow pie's inner disc
-    ## (two thirds of the diameter) and the two never read alike.
+    ## so at native size it stays well short of the wedge's disc (8 px of a
+    ## 12 px pie) and a whole pie and an unknown one never read alike.
+
+proc pieRingGapPx*(sizePx: int): int =
+  ## The ground between a `sizePx` pie's ring and its wedge's disc, in whole
+  ## pixels so neither edge is smeared over a half pixel: 1 px from 12 px up
+  ## (2 px from 24 px), none under 12 px, where every pixel of the disc is
+  ## needed for a small share to read -- measured with the pie's own
+  ## geometry, a 16 % wedge covers 6 whole pixels at 12 px with the 1 px
+  ## gap and at 10 px with none, against 3 at 10 px with it.
+  max(0, sizePx div PieRingGapStepPx)
+
+proc pieWedgeInsetPx*(sizePx: int): int =
+  ## Where the wedge's disc starts inside a `sizePx` pie's box: past the
+  ## edge ring and the gap (2 px of a 12 px pie: an 8 px disc).
+  PieEdgePx + pieRingGapPx(sizePx)
 
 proc pieStopPercent*(pie: ProgressPie): string =
   ## Where a pie's wedge ends, as a CSS percentage of the turn (`16%`,
@@ -764,9 +710,10 @@ proc pieStopPercent*(pie: ProgressPie): string =
 proc pieConicGradient*(inks: PieInks; pie: ProgressPie): string =
   ## The pie's disc as a two-stop conic gradient (CSS Images Level 4 §3.3,
   ## https://www.w3.org/TR/css-images-4/#conic-gradients): the wedge from
-  ## twelve o'clock clockwise to the share done, hard against the rest.
+  ## twelve o'clock clockwise to the share done, hard against the rest,
+  ## which is the ground itself (no tint): 0 % is the ground alone.
   let stop = pie.pieStopPercent
-  "conic-gradient(" & inks.wedge & " 0 " & stop & ", " & inks.rest & " " & stop & " 100%)"
+  "conic-gradient(" & inks.wedge & " 0 " & stop & ", " & inks.ground & " " & stop & " 100%)"
 
 proc pieStylesheet*(): string =
   ## The web's pie inks (`styles/components/agent_harbor_pie_inks.styl`):
@@ -779,8 +726,8 @@ proc pieStylesheet*(): string =
   let light = ahPalette(dmLight)
   result = "// GENERATED from `viewmodel/views/agent_harbor_palette.nim` " &
     "`pieStylesheet`; do not edit.\n" &
-    "// The progress pie's inks per ground and role (`pieInks`): the wedge, the\n" &
-    "// rest of the disc and the edge, each `by-mode(<Dark>, <Light>)`.\n"
+    "// The progress pie's inks per ground and role (`pieInks`): the wedge and\n" &
+    "// the edge, each `by-mode(<Dark>, <Light>)`; the rest is the ground.\n"
   # The story's bands: a ground whose colour an earlier ground already has
   # in a mode is not shown in that mode (the earlier band names it), and
   # each band shows the title of the mode it is drawn in.
@@ -806,5 +753,4 @@ proc pieStylesheet*(): string =
       let l = light.pieInks(role, ground)
       result.add "\n.ah-pie-on-" & $ground & ".ah-pie-" & $role & "\n"
       result.add "  --ah-pie-wedge: by-mode(" & d.wedge & ", " & l.wedge & ")\n"
-      result.add "  --ah-pie-rest: by-mode(" & d.rest & ", " & l.rest & ")\n"
       result.add "  --ah-pie-edge: by-mode(" & d.edge & ", " & l.edge & ")\n"
