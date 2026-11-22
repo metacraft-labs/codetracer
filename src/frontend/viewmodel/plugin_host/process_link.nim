@@ -125,6 +125,10 @@ type
     stderrSink*: proc(data: string)
       ## Every byte of stderr, for the plugin log. May be nil.
     readEof*: bool
+    bytesRead*: int
+      ## Every protocol byte read from the child so far. The supervisor's
+      ## liveness check reads it: a process that is still delivering a frame
+      ## is answering, even when its `pong` is queued behind that frame.
     oversize*: bool
       ## The process sent a frame larger than the cap.
     writeFailed*: bool
@@ -293,7 +297,9 @@ when defined(js):
     let stdoutStream = jsField(child, "stdout")
     let stderrStream = jsField(child, "stderr")
     jsOnData(stdoutStream, "data", proc(d: JsObject) =
-      link.reader.feed(toNimString(d)))
+      let s = toNimString(d)
+      link.bytesRead += s.len
+      link.reader.feed(s))
     jsOn(stdoutStream, "end", proc() = link.readEof = true)
     jsOnData(stderrStream, "data", proc(d: JsObject) =
       let data = toNimString(d)
@@ -523,7 +529,9 @@ else:
       if link.stderrTail.len > MaxStderrKeep:
         link.stderrTail = link.stderrTail[^MaxStderrKeep .. ^1], errEof)
     var eof = false
-    drainFd(p.fromChild, proc(d: string) = link.reader.feed(d), eof)
+    drainFd(p.fromChild, proc(d: string) =
+      link.bytesRead += d.len
+      link.reader.feed(d), eof)
     if eof: p.readEof = true
     var frame: string
     while result.len < maxFrames:

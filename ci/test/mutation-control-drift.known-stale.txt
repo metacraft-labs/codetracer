@@ -703,10 +703,10 @@ src/frontend/viewmodel/tests/unit/plat4-layout-mutation-control.sha256	src/front
 # activates reaches it: the supervisor, the host suite and the real-terminal
 # suite moved under plat81's record, and the supervisor under its Node twin's
 # (plat81-node-plugin-host). Both owe a re-grade for these bytes.
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/supervisor.nim	9c5739a3e43b891145fb03985c8d59531341c4bc0fd40d5f612789cdf476b6e0	7286dd722f653bf8c74b8be62a7de5e19b226bd053e0d92263d2a422235d23a1
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_plugin_process_host.nim	25a46e3c835516db9e2260705fe51667c06efe3317a7afec196b152333b3071e	8a53dcb516b8f5653e8a70da10f5c6ca1de1e6924db73366a035002efde7b5ca
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/tui/tests/real_terminal/test_plat81_plugin_processes_pty.nim	656dd8f478424c872f60f3a72b0d8fc37bf2f7d67b509bbbbcf8e6a41984831a	e11cf030c0ee3bd29888a5eb9d55f8b69dd08654a679476a3db493a8343d5d64
-src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/viewmodel/plugin_host/supervisor.nim	9c5739a3e43b891145fb03985c8d59531341c4bc0fd40d5f612789cdf476b6e0	7286dd722f653bf8c74b8be62a7de5e19b226bd053e0d92263d2a422235d23a1
+src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/supervisor.nim	9c5739a3e43b891145fb03985c8d59531341c4bc0fd40d5f612789cdf476b6e0	3a67104ba2bbeb8d683f17e6520dea3c172f3eeb2152ea98f5b63f7e132047d1
+src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_plugin_process_host.nim	25a46e3c835516db9e2260705fe51667c06efe3317a7afec196b152333b3071e	960212477385b4f7276bb48b701693108e70669c8d350be32fef294e504916a7
+src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/tui/tests/real_terminal/test_plat81_plugin_processes_pty.nim	656dd8f478424c872f60f3a72b0d8fc37bf2f7d67b509bbbbcf8e6a41984831a	0ebf845f3cc918c19bb7d54afc90ec4013a641fa0e8334fa904cc6e403c4f57f
+src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/viewmodel/plugin_host/supervisor.nim	9c5739a3e43b891145fb03985c8d59531341c4bc0fd40d5f612789cdf476b6e0	3a67104ba2bbeb8d683f17e6520dea3c172f3eeb2152ea98f5b63f7e132047d1
 
 # 2026-11-21, the find decisions (Find-And-Incremental-Search.md OQ-F5 – OQ-F7):
 # regular expressions and Find in Selection in the editor core's matcher, the
@@ -785,7 +785,7 @@ src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/viewmo
 src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/viewmodel/viewmodels/event_log_vm.nim	75c008b2da091f77fed96996db91d7ad8cd44393c2e1c06705bb8444c5f7f32b	826bdadedb493db77e782fa39cb37ff64eab510e256a7e28b1ab33d7719c5e9a
 src/frontend/tui/tests/plat70b-table-mutation-control.sha256	src/frontend/viewmodel/viewmodels/event_log_vm.nim	75c008b2da091f77fed96996db91d7ad8cd44393c2e1c06705bb8444c5f7f32b	826bdadedb493db77e782fa39cb37ff64eab510e256a7e28b1ab33d7719c5e9a
 src/frontend/viewmodel/tests/unit/hsf-sdk-mutation-control.sha256	src/frontend/viewmodel/viewmodels/event_log_vm.nim	75c008b2da091f77fed96996db91d7ad8cd44393c2e1c06705bb8444c5f7f32b	826bdadedb493db77e782fa39cb37ff64eab510e256a7e28b1ab33d7719c5e9a
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/plugin_sdk/codetracer_plugin_sdk.nim	a0c27d2992078e2221c721cd86f40c68f545b6014df880843d59676df9b9ea50	ed10e0226097ad9ff24e969ee8416eb4358578a3943b21b17916ea427bc8f294
+src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/plugin_sdk/codetracer_plugin_sdk.nim	a0c27d2992078e2221c721cd86f40c68f545b6014df880843d59676df9b9ea50	6a299f65789979bdafa88c6ca81cc02f37abc3896448c805ffa8c8a783330100
 src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/common/plugin_model/package.nim	45537e6ad4b07bf40f4a92f9cef0e77a67f0dbab044276cc5d5bf9e60aa129a3	3b63192135a7d255e4d02097d414341a3c368009924ae09249be83861fa14886
 src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/plugin_io.nim	22f2d01676fd1fc37defd8244c0c97352f008deaa9435f9dfd1c029d2b7435df	5cf1d0a87314246b164f4c55245ddb72d364ccbf93b9204617a64989c3cf276f
 
@@ -869,3 +869,14 @@ src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	src/f
 src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	8b5bf3ec316f4f755ae6effeab37b99eacb1e737855ad080024089861c38e77d
 src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	ci/test/input-routing-gate.sh	fde7961da3a00d1c0ae944d76cdc4815a11fc8d50fe694b437d16465d8a6c57b	41704ba73b10ee75c6ecc8a43d113a290e56580921d547d1dcd07f2130cfea7c
 src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	ci/test/input-routing-gate-test.sh	0152bebba1e135527d45e2ad710d6d0266b4654266a20db7333596a70e1d2bca	326bb017ee35e043322e942ee380b9a6e61c4bf4bb9af5c7ed75780edc724244
+
+# 2026-11-22, bytes that arrive after a ping count as the plugin answering (the
+# process link counts protocol bytes read; the supervisor restarts the pong deadline
+# on them), the test package rebuilds by content hash, the terminal suite's command
+# helper confirms each step, and the plugin boundary script's pinned counts move for
+# the TLS name check. plat81 (process, Node twin) owes a re-grade over these bytes
+# together with the SDK rework; plat7/plat8 owe one for the boundary script.
+src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/viewmodel/plugin_host/process_link.nim	92855333df47ca9e0a3bdb7b026ff27a9620efda405af90a379c7fce665fd526	2f60f11cafcf6c5af6320c6a004717dec0e0277cdf49c7439673f02c8bb44513
+src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/process_link.nim	92855333df47ca9e0a3bdb7b026ff27a9620efda405af90a379c7fce665fd526	2f60f11cafcf6c5af6320c6a004717dec0e0277cdf49c7439673f02c8bb44513
+src/frontend/viewmodel/tests/unit/plat7-boundary-mutation-control.sha256	ci/test/plugin-reactive-boundary.sh	6e9f1bda4d55463800d5d327bdc5a960c330d6c63a3f7205ebe6797b705dff86	c8ae759cff230f3e6f1d51b39cb75d93d86a67ec5d2b2de34b26586223d6a9a8
+src/frontend/viewmodel/tests/unit/plat8-io-mutation-control.sha256	ci/test/plugin-reactive-boundary.sh	6e9f1bda4d55463800d5d327bdc5a960c330d6c63a3f7205ebe6797b705dff86	c8ae759cff230f3e6f1d51b39cb75d93d86a67ec5d2b2de34b26586223d6a9a8

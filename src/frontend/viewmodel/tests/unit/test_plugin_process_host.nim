@@ -333,6 +333,30 @@ suite "§11.6, §11.8: faults are attributed, and siblings survive":
     check r.sup.waitUntil("metrics back", proc(): bool = r.active("acme-tools.metrics"))
     r.sup.shutdown()
 
+  test "a pong queued behind a large frame is not a hang":
+    # The frame takes ~2 s to drain, under the frame lock, so the watchdog's
+    # pong waits behind it; the deadline is 300 ms. Bytes arriving are the
+    # plugin answering.
+    var r = newRig("trickle", tune = proc(s: Supervisor) = discard)
+    r.sup.pongDeadlineMs = 300
+    r.sup.pingBusyMs = 50
+    r.sup.pingIdleMs = 50
+    r.both()
+    check r.sup.waitUntil("active", proc(): bool = r.active("acme-tools.flame"))
+    let pids = r.sup.processIds
+    discard r.sup.invoke("acme-tools.flame", "flame.refresh")
+    check r.sup.waitUntil("the whole frame arrived", proc(): bool =
+      r.sup.renderSurface("acme-tools.flame/flame").allText.contains("frame 1999"))
+    check not r.sup.faults.anyIt(it.kind == fkHang)
+    check r.sup.processIds == pids
+    check r.sup.slot("acme-tools.flame").totalStrikes == 0
+    # Silence is still a hang: stopped, it sends nothing, and is restarted.
+    check kill(Pid(pids[0]), SIGSTOP) == 0
+    check r.sup.waitUntil("a stopped process is hung", proc(): bool =
+      r.sup.faults.anyIt(it.kind == fkHang))
+    discard kill(Pid(pids[0]), SIGCONT)
+    r.sup.shutdown()
+
   test "a flood is rate limited and becomes a strike; the sibling is unaffected":
     var r = newRig("flood")
     # The bucket is the subject, not its size: a smaller one is breached on a
