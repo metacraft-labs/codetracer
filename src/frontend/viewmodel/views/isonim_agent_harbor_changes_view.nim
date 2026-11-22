@@ -59,6 +59,7 @@ import nim_agents_isonim_viewmodels/agent_harbor/changes_vm
 import ./agent_harbor_changes_inbox_words
 import ./agent_harbor_changes_code
 import ./isonim_vcs_view
+import ./agent_harbor_dropdown_view
 from ../keymap/scope_path import ChangesPanelScope
 
 export signals, computation, components, changes_vm, agent_harbor_changes_inbox_words
@@ -203,24 +204,22 @@ proc renderTabBar[R, N](r: R; vm: ChangesVM): N =
   for tab in vm.tabs:
     r.appendRendered(bar, renderTab(r, vm, tab))
 
-proc renderOption[R](r: R; value, label: string; selected: bool): auto =
-  let node = ui(r):
-    option(value = value):
-      text label
-  r.setFlag(node, "selected", selected)
-  node
-
 proc renderMilestoneSelector[R, N](r: R; vm: ChangesVM): N =
   ## `All milestones` or one milestone in scope; every tab's counts follow it.
-  mixin inputValue
-  var sel: N
+  ## The design system's dropdown, its trigger showing the chosen milestone
+  ## whole.
+  var host: N
   result = ui(r):
-    tdiv(class = "ah-changes-scope"):
-      select(ref = sel, class = "ah-changes-select", title = "Milestones in scope",
-             onchange = proc() = vm.selectMilestone(r.inputValue(sel)))
+    tdiv(ref = host, class = "ah-changes-scope")
   let chosen = vm.milestone.val
+  var shown = ""
+  var choices: seq[DropdownChoice]
   for (id, label) in vm.milestoneChoices:
-    r.appendRendered(sel, renderOption(r, id, label, id == chosen))
+    choices.add DropdownChoice(id: id, label: label)
+    if id == chosen: shown = label
+  let pick = proc(id: string) = vm.selectMilestone(id)
+  r.appendRendered(host, renderAgentHarborDropdown[R, N](r, shown, choices, chosen, pick,
+    cls = "ah-changes-select", title = "Milestones in scope"))
 
 # ---------------------------------------------------------------------------
 # Spec Changes
@@ -531,19 +530,21 @@ proc renderFileRow[R, N](r: R; vm: ChangesVM; index: int; row: FileRow): N =
                       ("status", $row.file.status)])
   mixin setAttribute
   r.setAttribute(vcsRow, "title", fileRowTitle(row))
+  # Each mark short, with its tooltip; the legend over the files says what
+  # the short ones stand for.
   let marks = ui(r):
     span(class = "ah-file-marks"):
       span(class = "ah-origin-mark ah-origin-" & $row.file.origin,
-           title = originMark(row.file.origin)):
+           title = originMark(row.file.origin), `data-ah-mark` = "origin"):
         text originShort(row.file.origin)
   if row.key:
     let k = ui(r):
-      span(class = "ah-key-mark", title = "A key source file of the plan"):
+      span(class = "ah-key-mark", title = KeyFileTitle, `data-ah-mark` = "key"):
         text KeyFileMark
     r.appendRendered(marks, k)
   if row.file.binary:
     let b = ui(r):
-      span(class = "ah-binary-mark"):
+      span(class = "ah-binary-mark", title = BinaryTitle, `data-ah-mark` = "binary"):
         text BinaryLabel
     r.appendRendered(marks, b)
   r.appendRendered(vcsRow, marks)
@@ -577,36 +578,44 @@ proc renderCode[R, N](r: R; vm: ChangesVM; list: N) =
       span(class = "ah-code-summary", `data-ah-summary` = summary):
         text summary
   if bases.len > 1:
-    var sel: N
-    let s = ui(r):
-      select(ref = sel, class = "ah-changes-select ah-base-select", title = "Show the change against",
-             onchange = proc() = vm.selectBase(r.inputValue(sel)))
     let current = vm.base.val
+    var shown = ""
+    var choices: seq[DropdownChoice]
     for b in bases:
-      r.appendRendered(sel, renderOption(r, b.id, b.label, b.id == current))
-    r.appendRendered(baseRow, s)
+      choices.add DropdownChoice(id: b.id, label: b.label)
+      if b.id == current: shown = b.label
+    let pick = proc(id: string) = vm.selectBase(id)
+    r.appendRendered(baseRow, renderAgentHarborDropdown[R, N](r, shown, choices, current, pick,
+      cls = "ah-changes-select ah-base-select", title = "Show the change against"))
   else:
     let label = ui(r):
       span(class = "ah-base-label"):
         text vm.baseLabel
     r.appendRendered(baseRow, label)
   r.appendRendered(list, head)
+  # What the short marks stand for; hidden while no file is listed (the
+  # files' effect below says).
+  var legend: N
+  let legendNode = ui(r):
+    tdiv(ref = legend, class = "ah-code-legend", `data-ah-legend` = CodeMarksLegend):
+      text CodeMarksLegend
+  r.appendRendered(list, legendNode)
   # The search and the status filter: built once, outside the list's own
   # effect, so typing never rebuilds the field it types into.
   let query = untrack(proc(): string = vm.query.val)
   let current = untrack(proc(): StatusFilter = vm.filter.val)
+  var filters: seq[DropdownChoice]
+  for f in filterChoices(): filters.add DropdownChoice(id: $f, label: $f)
   let toolbar = ui(r):
-    tdiv(class = "ah-code-toolbar"):
+    tdiv(ref = filter, class = "ah-code-toolbar"):
       input(ref = search, class = "ct-input-panel ct-input-search-image ah-code-search",
             `type` = "search", placeholder = SearchFilesPlaceholder, value = query,
             oninput = proc() = vm.setQuery(r.inputValue(search)))
-      select(ref = filter, class = "ah-changes-select ah-status-filter", title = "Status",
-             onchange = proc() =
-               let v = r.inputValue(filter)
-               for f in filterChoices():
-                 if $f == v: vm.setFilter(f))
-  for f in filterChoices():
-    r.appendRendered(filter, renderOption(r, $f, $f, f == current))
+  let pickFilter = proc(id: string) =
+    for f in filterChoices():
+      if $f == id: vm.setFilter(f)
+  r.appendRendered(filter, renderAgentHarborDropdown[R, N](r, $current, filters, $current,
+    pickFilter, cls = "ah-changes-select ah-status-filter", title = "Status"))
   r.appendRendered(list, toolbar)
   let listNode = ui(r):
     tdiv(ref = files, class = "ah-code-files vcs-file-list")
@@ -614,6 +623,8 @@ proc renderCode[R, N](r: R; vm: ChangesVM; list: N) =
   createRenderEffect proc() =
     r.clearChildren(files)
     let notice = vm.filesNotice
+    r.setAttribute(legend, "data-ah-hidden",
+                   if notice.len > 0 or vm.files.len == 0: "true" else: "false")
     if notice.len > 0:
       r.appendRendered(files, renderOverlay(r, notice, "filtered"))
       return

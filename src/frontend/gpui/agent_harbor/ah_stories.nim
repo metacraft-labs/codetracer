@@ -257,29 +257,35 @@ proc resultsKey*(m: AhStoryMount; name: string; keymap = UserKeymap()): string =
 proc changesKey*(m: AhStoryMount; name: string; keymap = UserKeymap()): string =
   ## A key (its canonical name) while a Changes story is shown, ROUTED in the
   ## `changes` scope (`overlay_rows`: `Down` / `Up` the keyboard's item,
-  ## `Enter` opens or closes it, `Right` / `Left` the tabs). Runs the
-  ## operation it resolves to and returns it ("" for none, and for the page
-  ## keys: this host's panel does not scroll).
+  ## `Enter` opens or closes it, `Right` / `Left` the tabs, `PageDown` /
+  ## `PageUp` scroll the tab's content). Runs the operation it resolves to
+  ## and returns it ("" for none, and for a scroll that did not move).
   if m.changesInbox.changes.isNil: return ""
   var router = gpuiRouter(keymap)
   let res = router.route(SessionFacts(), @[element(ekWindow, "window"), pane(ChangesPanelScope)],
                          nmNormal, name, 0)
-  if res.kind != erOperation or not m.changesInbox.changes.runChangesOperation(res.operation):
-    return ""
+  if res.kind != erOperation: return ""
+  if res.operation in ScrollOperations:
+    return (if m.changesInbox.scrollStory(res.operation): res.operation else: "")
+  if not m.changesInbox.changes.runChangesOperation(res.operation): return ""
   res.operation
 
 proc inboxKey*(m: AhStoryMount; name: string; keymap = UserKeymap()): string =
   ## A key while an Inbox or an item's page is shown, ROUTED in the `inbox`
-  ## scope (`]` / `[` Next and Previous, `1`-`4` the item's priority). Runs
-  ## the operation it resolves to and returns it ("" for none).
+  ## scope (`]` / `[` Next and Previous, `1`-`4` the item's priority, the
+  ## arrows and the page keys scroll). Runs the operation it resolves to and
+  ## returns it ("" for none, and for a scroll that did not move).
   let inbox = m.changesInbox.inbox
   let item = m.changesInbox.inboxItem
   if inbox.isNil and item.isNil: return ""
   var router = gpuiRouter(keymap)
   let res = router.route(SessionFacts(), @[element(ekWindow, "window"), pane(InboxPanelScope)],
                          nmNormal, name, 0)
+  if res.kind != erOperation: return ""
+  if res.operation in ScrollOperations:
+    return (if m.changesInbox.scrollStory(res.operation): res.operation else: "")
   let page = if inbox.isNil: item else: inbox.page
-  if res.kind != erOperation or not runInboxOperation(inbox, page, res.operation): return ""
+  if not runInboxOperation(inbox, page, res.operation): return ""
   res.operation
 
 let ActivityScopePath* = @[element(ekWindow, "window"), pane(SessionActivityScope)]
@@ -558,7 +564,11 @@ proc mountAgentHarborStoryGpui*(r: GpuiRenderer; surface, fixture: string;
       r.mountGazeStory(host, m.gaze, p, bodyW, heightPx,
                        GazeStoryStatusItems, gazePresses(keymap, m.gaze))
     of "agent-harbor-changes", "agent-harbor-inbox", "agent-harbor-inbox-item":
-      m.changesInbox = r.mountChangesInboxStory(host, surface, fixture, pb, p, bodyW)
+      # The panel's body: the window less its frame (the header and the 8px
+      # above the body) or less the playback bar, so its regions scroll at
+      # their drawn heights.
+      let bodyH = if frameTitle.len > 0: heightPx - FrameTitlePx - 8 else: heightPx
+      m.changesInbox = r.mountChangesInboxStory(host, surface, fixture, pb, p, bodyW, bodyH)
     of PieStorySurface:
       # Static data, no viewmodel (`agent_harbor_pie_stories`).
       r.drawPieStory(host, fixture, p, bodyW, heightPx)

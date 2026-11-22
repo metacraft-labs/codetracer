@@ -111,7 +111,15 @@ const
   RenamedFromLabel* = "from"
     ## Before a renamed file's old path, under its row.
   KeyFileMark* = "key"
-    ## A file row's mark for one of the plan's key source files.
+    ## A file row's mark for one of the plan's key source files
+    ## (`CodeMarksLegend` says what it stands for).
+  KeyFileTitle* = "A key source file of the plan"
+    ## The key-file mark's tooltip.
+  BinaryTitle* = "A binary file: no lines to show"
+    ## The binary mark's tooltip.
+  CodeMarksLegend* = "C committed \xC2\xB7 U uncommitted \xC2\xB7 key: a key source file"
+    ## Over the Code tab's files: what the file rows' short marks
+    ## (`originShort`, `KeyFileMark`) stand for.
 
   # The Inbox and an item's page
   InboxSectionLabel* = "Inbox"
@@ -237,7 +245,8 @@ proc originMark*(origin: ChangeOrigin): string =
   of coBoth: "committed and uncommitted"
 
 proc originShort*(origin: ChangeOrigin): string =
-  ## The mark's drawn text: `C` committed, `U` uncommitted, `C+U` both.
+  ## The mark's drawn text: `C` committed, `U` uncommitted, `C+U` both
+  ## (`CodeMarksLegend` says so; `originMark` is its tooltip).
   case origin
   of coCommitted: "C"
   of coUncommitted: "U"
@@ -330,6 +339,22 @@ proc stepperTitle*(next: bool): string =
   ## Previous's or Next's tooltip: what it does and its key (N6).
   let key = stepperKey(next)
   (if next: NextTitle else: PreviousTitle) & (if key.len > 0: " (" & key & ")" else: "")
+
+proc itemHintText*(): string =
+  ## The quiet line in the page's place while items wait and none is on
+  ## screen: how to put one there, naming the key the base keymap binds to
+  ## Next in the Inbox's scope (`stepperKey`). Nothing is opened for the
+  ## reader: the line only says how.
+  let key = stepperKey(true)
+  if key.len > 0: "Select an item, or press " & key & " for the one at the top"
+  else: "Select an item"
+
+proc approvalPurposeText*(request: ApprovalRequest): string =
+  ## The line under a queued approval's command or domain: why the agent
+  ## asks, in prose (`In order to load the new queue limit`); "" for no
+  ## reason given.
+  let purpose = approvalPurpose(request)
+  if purpose.len > 0: "In order to " & purpose else: ""
 
 proc confidenceText*(draft: Draft): string =
   ## `confidence high · by the Manager`, the draft's provenance line.

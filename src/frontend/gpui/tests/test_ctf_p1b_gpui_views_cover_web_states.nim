@@ -853,7 +853,8 @@ proc checkStory(m: AhStoryMount; mode = dmDark): seq[string] =
                inboxStoryContext(m.fixture, StoryHostRequests()))
   of "agent-harbor-inbox-item":
     checkItemPage(view, m.changesInbox.inboxItem,
-                  inboxItemStoryContext(m.fixture, StoryHostRequests()))
+                  inboxItemStoryContext(m.fixture, StoryHostRequests()),
+                  parseInt(view.attr("width-px")))
   else: @["this suite has no comparison for surface " & m.surface]
 
 # ---------------------------------------------------------------------------

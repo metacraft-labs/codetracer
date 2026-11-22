@@ -61,6 +61,7 @@ when defined(js):
 import nim_agents/agent_harbor/fleet_records
 import nim_agents_isonim_viewmodels/agent_harbor/[inbox_vm, inbox_item_vm]
 import ./agent_harbor_changes_inbox_words
+import ./agent_harbor_dropdown_view
 from ../keymap/scope_path import InboxPanelScope
 
 export signals, computation, components, inbox_vm, inbox_item_vm,
@@ -139,17 +140,22 @@ proc renderTextField[R, N](r: R; page: InboxItemVM; ctx: AgentHarborInboxItemCon
       text typed
   r.setFlag(result, "disabled", disabled)
 
-proc renderChoice[R, N](r: R; page: InboxItemVM; o: AnswerOption;
-                        single, checked, disabled: bool): N =
-  ## One option: a radio button or a checkbox, its label, its description.
+proc renderCheckbox[R, N](r: R; page: InboxItemVM; o: AnswerOption;
+                          checked, disabled: bool): N =
+  ## One option of several: the design system's checkbox (`.ct-checkmark`,
+  ## `checkmark.styl`, the event log's filter does the same) over a real,
+  ## visually hidden input that takes the press and the keyboard, its label
+  ## and its description.
   let id = o.id
   var box: N
   result = ui(r):
-    label(class = "ah-choice"):
-      input(ref = box, class = "ah-choice-input",
-            `type` = (if single: "radio" else: "checkbox"), name = "ah-item-choice",
-            value = id, onchange = proc() = page.toggleChoice(id))
-      span(class = "ah-choice-label"):
+    label(class = "ct-checkmark-field ah-choice", `data-ah-choice` = id):
+      input(ref = box, class = "ct-checkmark-input ah-choice-input", `type` = "checkbox",
+            name = "ah-item-choice", value = id, onchange = proc() = page.toggleChoice(id))
+      span(class = "ct-checkmark", `data-state` = (if checked: "checked" else: "unchecked"),
+           `aria-hidden` = "true"):
+        discard
+      span(class = "ct-checkmark-label ah-choice-label"):
         text o.label
       if o.description.len > 0:
         span(class = "ah-choice-description"):
@@ -157,16 +163,39 @@ proc renderChoice[R, N](r: R; page: InboxItemVM; o: AnswerOption;
   r.setFlag(box, "checked", checked)
   r.setFlag(box, "disabled", disabled)
 
+proc renderToggle[R, N](r: R; page: InboxItemVM; o: AnswerOption;
+                        checked, disabled: bool): N =
+  ## One option of a single choice: a toggle of the omnibox composer's
+  ## choice row (`.ah-composer-toggle`, the VCS panel's mode toggles; the
+  ## design system has no radio button), the chosen one pressed, its
+  ## description after its label.
+  let id = o.id
+  result = ui(r):
+    button(class = "ah-composer-toggle ah-choice" & (if checked: " active" else: ""),
+           role = "radio", `aria-checked` = (if checked: "true" else: "false"),
+           `data-ah-choice` = id, onclick = proc() = page.toggleChoice(id)):
+      span(class = "ah-choice-label"):
+        text o.label
+      if o.description.len > 0:
+        span(class = "ah-choice-description"):
+          text o.description
+  r.setFlag(result, "disabled", disabled)
+
 proc renderChoices[R, N](r: R; page: InboxItemVM; options: seq[AnswerOption];
                          single, disabled: bool): N =
-  ## Radio buttons (one choice) or checkboxes (several), each with its
-  ## description.
+  ## One choice: a row of toggles, as the composer chooses one of a few;
+  ## several: a column of the design system's checkboxes.
   var host: N
   result = ui(r):
-    tdiv(ref = host, class = "ah-choices", role = (if single: "radiogroup" else: "group"))
+    tdiv(ref = host, class = (if single: "ah-composer-toggles ah-choices ah-choices-single"
+                              else: "ah-choices"),
+         role = (if single: "radiogroup" else: "group"))
   let chosen = page.choices.val
   for o in options:
-    r.appendRendered(host, renderChoice[R, N](r, page, o, single, o.id in chosen, disabled))
+    if single:
+      r.appendRendered(host, renderToggle[R, N](r, page, o, o.id in chosen, disabled))
+    else:
+      r.appendRendered(host, renderCheckbox[R, N](r, page, o, o.id in chosen, disabled))
 
 proc renderDraft[R, N](r: R; page: InboxItemVM; draft: Draft; disabled: bool): N =
   ## A manager's prepared draft: its provenance, rationale and text, and
@@ -220,27 +249,16 @@ proc renderStatusLines[R, N](r: R; page: InboxItemVM; host: N) =
           text phaseText
       r.appendRendered(lines, p)
 
-proc renderPriorityOption[R](r: R; p: InboxPriority): auto =
-  ui(r):
-    option(value = $p):
-      text priorityKeyText(p)
-
 proc renderPriorityMenu[R, N](r: R; page: InboxItemVM): N =
-  ## The session's priority (keys `1`-`4`, or this menu): a write, through
-  ## the viewmodel.
-  mixin inputValue
-  var sel: N
-  result = ui(r):
-    select(ref = sel, class = "ah-changes-select ah-priority-select", title = PriorityLabel,
-           onchange = proc() =
-             let v = r.inputValue(sel)
-             if v.len > 0: discard page.setPriority(parsePriority(v)))
-  let placeholder = ui(r):
-    option(value = ""):
-      text PriorityLabel & "\xE2\x80\xA6"
-  r.appendRendered(sel, placeholder)
+  ## The session's priority (keys `1`-`4`, or this menu): the design
+  ## system's dropdown, its trigger reading `Priority` whole; a choice is a
+  ## write, through the viewmodel.
+  var choices: seq[DropdownChoice]
   for p in priorityChoices():
-    r.appendRendered(sel, renderPriorityOption(r, p))
+    choices.add DropdownChoice(id: $p, label: priorityKeyText(p))
+  let pick = proc(id: string) = discard page.setPriority(parsePriority(id))
+  renderAgentHarborDropdown[R, N](r, PriorityLabel, choices, "", pick,
+    cls = "ah-changes-select ah-priority-select", title = PriorityLabel)
 
 proc renderQuestion[R, N](r: R; page: InboxItemVM; d: InboxItemDetail;
                           ctx: AgentHarborInboxItemContext; host: N) =
@@ -317,15 +335,20 @@ proc renderEndedTurn[R, N](r: R; page: InboxItemVM; d: InboxItemDetail;
   r.appendRendered(host, form)
 
 proc renderApproval[R, N](r: R; page: InboxItemVM; a: ApprovalRequest): N =
-  ## One queued sudo or network approval: `<command> in order to: <reason>`,
-  ## a password field for sudo, Approve / Approve for session / Deny.
+  ## One queued sudo or network approval: the command (or the domain) on a
+  ## line of its own in code style, why the agent asks under it in prose, a
+  ## password field for sudo, Approve / Approve for session / Deny.
   mixin inputValue
   let requestId = a.requestId
+  let purpose = approvalPurposeText(a)
   var actions, password: N
   result = ui(r):
     tdiv(class = "ah-item-approval", `data-ah-approval` = $a.scope):
-      tdiv(class = "ah-item-prose ah-mono"):
-        text approvalSummary(a)
+      code(class = "ah-item-approval-subject", `data-ah-approval-subject` = approvalSubject(a)):
+        text approvalSubject(a)
+      if purpose.len > 0:
+        tdiv(class = "ah-item-prose ah-item-approval-purpose", `data-ah-approval-purpose` = purpose):
+          text purpose
       tdiv(ref = actions, class = "ah-item-actions")
   if a.scope == asSudo:
     let field = ui(r):
@@ -694,7 +717,15 @@ proc renderAgentHarborInboxPanel*[R, N](r: R; vm: InboxVM;
     else:
       renderRows[R, N](r, vm, ctx, list)
     let page = vm.page
-    if page.isNil:
+    if page.isNil and vm.wantsItemHint:
+      # Items wait and none is on screen: the page's place says how to put
+      # one there, quietly; nothing is opened for the reader.
+      let hint = itemHintText()
+      let h = ui(r):
+        tdiv(class = "ah-inbox-hint", `data-ah-hint` = hint):
+          text hint
+      r.appendRendered(pageHost, h)
+    elif page.isNil:
       r.setAttribute(pageHost, "hidden", "hidden")
     else:
       let strip = vm.explanationStrip

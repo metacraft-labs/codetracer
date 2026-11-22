@@ -2186,12 +2186,15 @@ proc mountAgentHarborChanges(container: isonim_dom.Element;
   # on the page.
   var shown: ChangesVM
   routeChangesKeys(proc(): ChangesVM = shown)
-  mountAgentHarborVM(container,
+  result = mountAgentHarborVM(container,
     proc(): ChangesVM =
       shown = createChangesStoryVM(fixture)
       shown,
     proc(host: isonim_dom.Element; vm: ChangesVM) =
       mountAgentHarborChangesPanel(host, vm, changesStoryContext(fixture)))
+  # The first frame shows what the keyboard is on, as GPUI's and the
+  # terminal's do.
+  keepInViewWhenLaidOut(cast[JsObject](container))
 
 proc mountAgentHarborInbox(container: isonim_dom.Element;
                            fixture: string; options = ""): DisposeProc =
@@ -2200,13 +2203,16 @@ proc mountAgentHarborInbox(container: isonim_dom.Element;
   let requests = StoryHostRequests()
   var shown: InboxVM
   routeInboxKeys(proc(): InboxVM = shown, nil)
-  mountAgentHarborVM(container,
+  result = mountAgentHarborVM(container,
     proc(): InboxVM =
       shown = createInboxStoryVM(fixture, pb)
       shown,
     proc(host: isonim_dom.Element; vm: InboxVM) =
       mountAgentHarborInboxPanel(host, vm, inboxStoryContext(fixture, requests)),
     pb, options)
+  # The first frame shows the item on screen, as GPUI's and the terminal's
+  # do.
+  keepInViewWhenLaidOut(cast[JsObject](container))
 
 proc mountAgentHarborInboxItem(container: isonim_dom.Element;
                                fixture: string; options = ""): DisposeProc =

@@ -89,6 +89,8 @@ type
       ## The Code tab: some file is a key source file, some is binary; each
       ## mark then has a column of its own on every row, so the marks of
       ## the rows line up.
+    originSlot: int
+      ## The origin mark's column: its widest word among the files.
 
 proc endArea(c: var AhCanvas; name: string; row, col, width, height: int; bg: string) =
   ## Records an area whose rows were filled as they were drawn (a row's
@@ -488,19 +490,24 @@ proc drawVcsSpans*(c: var AhCanvas; row, col: int; spans: seq[StyledSpan]): int 
     x += c.put(row, x, s.text, c.vcsInk(s.style.role), s.style.bold)
   x - col
 
-const OriginSlot = 3   ## `C`, `U`, `C+U`
+proc originText(p: ChangesPress; origin: ChangeOrigin): string =
+  ## The origin mark's words, short (`C`, `U`, `C+U`): the legend says what
+  ## they stand for.
+  originShort(origin)
+
+proc keyText(p: ChangesPress): string = KeyFileMark
 
 proc marksOf(p: ChangesPress; row: FileRow): seq[(string, string, string, int)] =
   ## The marks the VCS row has no field for, each in its column: (text, ink
   ## role, tooltip, column width); an empty text keeps its column.
-  result.add (originShort(row.file.origin),
+  result.add (p.originText(row.file.origin),
               (if row.file.origin == coCommitted: "label" else: "warning"),
-              originMark(row.file.origin), OriginSlot)
+              originMark(row.file.origin), p.originSlot)
   if p.keySlot:
-    result.add ((if row.key: KeyFileMark else: ""), "info", "A key source file of the plan",
-                widthOf(KeyFileMark))
+    result.add ((if row.key: p.keyText else: ""), "info", KeyFileTitle,
+                widthOf(p.keyText))
   if p.binarySlot:
-    result.add ((if row.file.binary: BinaryLabel else: ""), "label", BinaryLabel,
+    result.add ((if row.file.binary: BinaryLabel else: ""), "label", BinaryTitle,
                 widthOf(BinaryLabel))
 
 proc drawFileDiff(c: var AhCanvas; p: ChangesPress; parent: AhNode; path: string;
@@ -598,9 +605,10 @@ proc drawFileRow(c: var AhCanvas; p: ChangesPress; parent: AhNode; row: FileRow;
       else: c.p.textCaption
     if t.len > 0:
       # The origin right-aligned in its column, the others at its start.
-      let at = if w == OriginSlot: mx + w - widthOf(t) else: mx
+      let at = if role != "info" and t != BinaryLabel: mx + w - widthOf(t) else: mx
       discard c.put(r, at, t, ink)
-      discard c.node(n, r, at, widthOf(t), 1, [("mark-word", t), ("mark-title", title)])
+      discard c.node(n, r, at, widthOf(t), 1, [("mark-word", t), ("mark-title", title),
+                                                 ("tooltip", title)])
     mx += w + 2
   c.target(r, p.col, p.width, 1, proc() = vm.selectFile(path))
   inc r
@@ -653,13 +661,19 @@ proc drawCode(c: var AhCanvas; p: ChangesPress; parent: AhNode; row, bottom: int
     inc r
     discard c.text(parent, r, x, p.width - 2, summary, c.p.textCaption, fact = "code-summary")
   r += 2
+  if vm.filesNotice.len == 0 and vm.files.len > 0:
+    # What the short marks stand for (`.ah-code-legend`), a row apart from
+    # the search under it.
+    r += c.para(parent, r, x, max(1, p.width - 2), CodeMarksLegend, c.p.textCaption,
+                fact = "code-legend")
+    inc r
   # The search field (one row on the field's ground) and the status filter.
   let query = vm.query.val
   var filters: seq[AhMenuChoice]
   for f in filterChoices(): filters.add AhMenuChoice(id: $f, label: $f)
-  var widest = 0
-  for f in filters: widest = max(widest, widthOf(f.label))
-  let filterW = widest + 4
+  # The status filter is the design system's dropdown, as wide as the value
+  # it shows (`drawSelect`); the search takes the rest.
+  let filterW = widthOf($vm.filter.val) + 4
   let searchW = max(8, p.width - 2 - filterW - 1)
   c.area("field", r, x, searchW, 1, p.g.field)
   let shown = if query.len > 0: query else: SearchFilesPlaceholder
@@ -683,6 +697,7 @@ proc drawCode(c: var AhCanvas; p: ChangesPress; parent: AhNode; row, bottom: int
   for f in vm.files:
     if f.key: q.keySlot = true
     if f.file.binary: q.binarySlot = true
+    q.originSlot = max(q.originSlot, widthOf(q.originText(f.file.origin)))
   let p = q
   for f in vm.files:
     let ground = p.g.nextGround(k, previous)
