@@ -46,6 +46,26 @@ check "Give Vulkan a software driver where the host has none" mesa "/run/opengl-
 check "Give the window a cursor theme where the host has none" adwaita-icon-theme "/run/current-system/sw/share/icons/Adwaita/cursors"
 check "Give dbus-run-session a session bus configuration where the host has none" dbus.out "/etc/dbus-1/session.conf"
 
+# nixpkgs' session.conf includes /etc/dbus-1/session.conf for local
+# overrides, so linking it there makes it include itself and the bus refuses
+# to start (run 44940608244, shard 1). The step must write a copy without that
+# include, and check the bus starts on it.
+dbus_at="$(line_of "- name: Give dbus-run-session a session bus configuration where the host has none")"
+# shellcheck disable=SC2016 # the step's own text, not an expansion
+if [ -n "${dbus_at}" ]; then
+	dbus_body="$(sed -n "${dbus_at},\$p" "${wf}" | sed -n '2,/^      - name:/p' | grep -v '^ *#')"
+	if grep -qE 'ln -s[^|]*session\.conf' <<<"${dbus_body}"; then
+		fail "the D-Bus step links nixpkgs' session.conf into /etc, which then includes itself"
+	elif ! grep -qF 'grep -vF "${self}"' <<<"${dbus_body}" ||
+		! grep -qF "self='<include ignore_missing=\"yes\">/etc/dbus-1/session.conf</include>'" <<<"${dbus_body}"; then
+		fail "the D-Bus step does not drop the include of /etc/dbus-1/session.conf from its copy"
+	elif ! grep -qF -- '--config-file=/etc/dbus-1/session.conf' <<<"${dbus_body}"; then
+		fail "the D-Bus step does not check that a bus starts on the configuration it wrote"
+	else
+		ok "the D-Bus configuration is a copy without its self-include, and a bus starts on it"
+	fi
+fi
+
 if [ "${failures}" -gt 0 ]; then
 	echo "gpui-host-provisioning: ${failures} failure(s)"
 	exit 1
