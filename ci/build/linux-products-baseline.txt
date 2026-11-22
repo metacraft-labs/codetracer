@@ -38,6 +38,7 @@ file src/helpers.js
 file index.html
 file subwindow.html
 file bin/session-manager
+file bin/ct-plugin-host
 file config/default_config.yaml
 file config/default_layout.json
 file bin/ct

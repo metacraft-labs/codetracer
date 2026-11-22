@@ -1736,6 +1736,53 @@ package codeTracer:
       codetracerActions.add(ctTest)
       auxiliaryActionIds.add(ctTest.id)
 
+    if fileExists("src/plugin-host/engine/Cargo.toml"):
+      # The WebAssembly plugin host (Extensibility-Model.md §11.9): its engine
+      # layer, wasmi only, as a static library, then `ct-plugin-host` linked
+      # against it, into the build output's `bin/` beside the front-ends that
+      # find it there (src/common/plugin_host_path.nim). The macOS app and the
+      # product parity check (ci/build/linux-products-baseline.txt) take it
+      # from there.
+      let pluginEngineLib =
+        ReproCargoSlot & "/plugin_host_engine_target/release/" &
+          (when defined(windows): "ct_plugin_engine.lib"
+           else: "libct_plugin_engine.a")
+      let pluginEngineBuild = cargo.build(
+        locked = true,
+        release = true,
+        noDefaultFeatures = true,
+        features = "wasmi",
+        manifestPath = "src/plugin-host/engine/Cargo.toml",
+        targetDir = ReproCargoSlot & "/plugin_host_engine_target",
+        actionId = "plugin-host-engine-cargo",
+        after = @[reproCargoTargetSlot],
+        extraInputs = @[
+          "src/plugin-host/engine/Cargo.toml",
+          "src/plugin-host/engine/Cargo.lock",
+          "src/plugin-host/engine/src/lib.rs"
+        ],
+        extraOutputs = @[pluginEngineLib])
+      let pluginHost = nim.c(
+        mm = "orc",
+        threadsOn = true,
+        hintsOff = true,
+        warningsOff = true,
+        defines = @["release", "ctPluginEngineLib=" & pluginEngineLib],
+        nimcache = ctNimCacheRoot & "/ct_plugin_host",
+        paths = CodeTracerNimPaths & @["src/frontend/viewmodel"],
+        output = buildDebugPath("bin/ct-plugin-host" & ExeSuffix),
+        extraInputs = @[pluginEngineLib],
+        after = @[pluginEngineBuild],
+        source = "src/plugin-host/ct_plugin_host.nim")
+      block:
+        const PluginHostBackendCompiler =
+          when defined(macosx): "clang"
+          else: "gcc"
+        appendRegisteredActionToolIdentityRefs(pluginHost.id,
+          [PluginHostBackendCompiler])
+      target("ct-plugin-host", pluginHost)
+      codetracerActions.add(pluginHost)
+
     if hasFrontendInputs and hasDbBackendRecordInput and hasCtInput:
       let codetracer = aggregate("codetracer",
         actions = codetracerActions,
