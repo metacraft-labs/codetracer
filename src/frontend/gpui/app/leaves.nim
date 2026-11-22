@@ -121,6 +121,7 @@ import ../../tui/app/theme/editor_theme
 import ../../styles/generated/design_tokens
 import codetracer_ui_components
 import ../devicon_marks
+import ../element_reuse
 from std/hashes import hash
 
 export shell, editor_surface
@@ -2180,12 +2181,38 @@ proc loopZoneElement(r: GpuiRenderer; z: LoopZone): GpuiElement =
   r.appendChild(track, rest)
   r.appendChild(result, track)
 
+var editorPools: Table[uint64, ElementPool]
+  ## The rows and overlays each editor element drew last time
+  ## (`element_reuse`), by the element's node id: a pool is never shared by
+  ## two editors, so one cannot take the other's rows.
+
+var panePools: Table[(string, uint64), ElementPool]
+  ## The same for the other panes' native drawings, by the drawing's name
+  ## and the node id of the element it draws into.
+
+template openPanePool(name: string; parent: GpuiElement) =
+  ## Begin the pool of the drawing `name` into `parent`, finished when the
+  ## calling procedure returns; `pool` names it (`element_reuse`).
+  let poolKey {.inject.} = (name, nodeId(parent))
+  panePools.mgetOrPut(poolKey, ElementPool()).begin()
+  defer: panePools[poolKey].finish()
+  template pool: untyped {.inject.} = panePools[poolKey]
+
 proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
                    escape: ViewNode; surface: EditorSurface;
                    viewportPx = 0; scrollLeftCols = 0; contentCols = -1;
                    caretMark = -1; overflowMarkers = false;
-                   sticky: seq[tuple[line: int; text: string; top: int]] = @[]): bool =
+                   sticky: seq[tuple[line: int; text: string; top: int]] = @[];
+                   firstRowInsetPx = 0): bool =
   ## Draw the source editor into `parent`. Answers whether it drew ROWS.
+  ##
+  ## A row, a loop control or an overlay drawn last time from the same
+  ## inputs is not drawn again: its element is taken back from the editor's
+  ## pool and appended where a new one would go (`element_reuse`), so a step
+  ## that moves the execution line writes the two rows it moved between and
+  ## leaves the others, and their ids, in place. `firstRowInsetPx`, when
+  ## negative, pulls the first row up by it (a row scrolled partly above the
+  ## editor's top).
   ##
   ## `viewportPx` is the editor pane's INNER width in pixels and
   ## `scrollLeftCols` how far right the code is scrolled — `PLAT35-F3`. The
@@ -2213,6 +2240,10 @@ proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
       GpuiMedium & "'"
     r.appendChild(parent, r.createTextNode(detail))
     return false
+  let poolKey = nodeId(parent)
+  editorPools.mgetOrPut(poolKey, ElementPool()).begin()
+  defer: editorPools[poolKey].finish()
+  template pool: untyped = editorPools[poolKey]
   r.setAttribute(parent, EditorMediumAttribute, surface.medium)
   r.setAttribute(parent, EditorProvenanceAttribute, $surface.provenance)
   r.setAttribute(parent, EditorExecutionAttribute, $surface.executionLine)
@@ -2235,13 +2266,17 @@ proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
     r.setAttribute(parent, EditorSourceStatementAttribute,
                    surface.sourceStatement)
   if surface.notice.len > 0:
-    let note = r.createElement("div")
-    r.setAttribute(note, "data-ct-editor-notice", surface.notice)
-    r.appendChild(note, r.createTextNode(surface.notice))
+    let note = pool.keyed("notice", hash(surface.notice)):
+      let note = r.createElement("div")
+      r.setAttribute(note, "data-ct-editor-notice", surface.notice)
+      r.appendChild(note, r.createTextNode(surface.notice))
+      note
     r.appendChild(parent, note)
   if surface.degradedMessage.len > 0:
-    let msg = r.createElement("div")
-    r.appendChild(msg, r.createTextNode(surface.degradedMessage))
+    let msg = pool.keyed("degraded", hash(surface.degradedMessage)):
+      let msg = r.createElement("div")
+      r.appendChild(msg, r.createTextNode(surface.degradedMessage))
+      msg
     r.appendChild(parent, msg)
   let widest = editorNumberWidth(surface.rows)
   # PLAT-47 B1: the editor's own ground, Monaco's `editor.background`.
@@ -2271,57 +2306,81 @@ proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
     # #353535), 15 px in from the editor's right edge, the pane's height —
     # drawn first, under the rows' inline values as the desktop's is.
     r.setStyle(parent, "position", "relative")
-    let rule = r.createElement("div")
-    r.setAttribute(rule, "data-ct-overview-border", "true")
-    r.setStyle(rule, "position", "absolute")
-    r.setStyle(rule, "left", $(viewportPx - 15) & "px")
-    r.setStyle(rule, "top", $EditorTopPadPx & "px")
-    r.setStyle(rule, "width", "1px")
-    r.setStyle(rule, "height", $(editorPaneHeightPx - EditorTopPadPx) & "px")
-    r.setStyle(rule, "background-color", "#353535")
+    let rule = pool.keyed("rule", hash((viewportPx, editorPaneHeightPx))):
+      let rule = r.createElement("div")
+      r.setAttribute(rule, "data-ct-overview-border", "true")
+      r.setStyle(rule, "position", "absolute")
+      r.setStyle(rule, "left", $(viewportPx - 15) & "px")
+      r.setStyle(rule, "top", $EditorTopPadPx & "px")
+      r.setStyle(rule, "width", "1px")
+      r.setStyle(rule, "height", $(editorPaneHeightPx - EditorTopPadPx) & "px")
+      r.setStyle(rule, "background-color", "#353535")
+      rule
     r.appendChild(parent, rule)
   for i, row in surface.rows:
     for z in editorLoopZones:
       if z.line == row.line:
-        r.appendChild(parent, loopZoneElement(r, z))
+        let zone = pool.keyed("zone:" & $z.line, hash(z)):
+          loopZoneElement(r, z)
+        r.appendChild(parent, zone)
     var selected: seq[tuple[fromColumn, toColumn: int]] = @[]
     for cell in surface.selection:
       if cell.line == row.line: selected.add (cell.fromColumn, cell.toColumn)
     var found: seq[tuple[fromColumn, toColumn: int; current: bool]] = @[]
     for m in surface.findMarks:
       if m.line == row.line: found.add (m.fromColumn, m.toColumn, m.current)
-    let rowEl = renderEditorRow(r, row, runs[i], widest,
-                                scroll.leftCols,
-                                (if row.line == surface.caretLine:
-                                   surface.caretColumn else: 0),
-                                extrasOn(surface, row.line),
-                                selected, found, folds[i], depths[i],
-                                guideCounts[i],
-                                markersView =
-                                  (if overflowMarkers and
-                                      scroll.present: scroll.view
-                                   else: HorizontalView()),
-                                diagnostics = surface.diagnostics)
+    let caretColumn = if row.line == surface.caretLine: surface.caretColumn
+                      else: 0
+    let extras = extrasOn(surface, row.line)
+    let markersView = if overflowMarkers and scroll.present: scroll.view
+                      else: HorizontalView()
+    # The row's draw reads only the diagnostics on its own line.
+    var ownDiagnostics: seq[EditorDiagnostic] = @[]
+    for d in surface.diagnostics:
+      if d.line == row.line: ownDiagnostics.add d
     # PLAT-60: the Low Level Code listing's cross-reference — the line its
     # selected instruction came from — on the hover ground.
-    if surface.crossRefLine > 0 and row.line == surface.crossRefLine:
-      r.setAttribute(rowEl, EditorCrossRefAttribute, "true")
-      r.setStyle(rowEl, "background-color", EditorCrossRefGround)
+    let crossRef = surface.crossRefLine > 0 and row.line == surface.crossRefLine
+    let inset = if i == 0 and firstRowInsetPx < 0: firstRowInsetPx else: 0
+    # Every input of the row's draw: `renderEditorRow` reads nothing else
+    # that can change while the window is open (its colours and sizes are
+    # constants of the build).
+    let digest = hash((row, runs[i], widest, scroll.leftCols, caretColumn,
+                       extras, selected, found, folds[i], depths[i],
+                       guideCounts[i], markersView, ownDiagnostics, crossRef,
+                       inset))
+    let rowEl = pool.keyed("row:" & $row.line, digest):
+      let rowEl = renderEditorRow(r, row, runs[i], widest,
+                                  scroll.leftCols, caretColumn, extras,
+                                  selected, found, folds[i], depths[i],
+                                  guideCounts[i], markersView = markersView,
+                                  diagnostics = ownDiagnostics)
+      if crossRef:
+        r.setAttribute(rowEl, EditorCrossRefAttribute, "true")
+        r.setStyle(rowEl, "background-color", EditorCrossRefGround)
+      if inset < 0:
+        r.setStyle(rowEl, "margin-top", $inset & "px")
+      rowEl
     r.appendChild(parent, rowEl)
   if scroll.present:
-    r.appendChild(parent, renderEditorScrollbar(r, scroll, caretMark))
+    let bar = pool.keyed("hbar", hash((scroll, caretMark,
+                                       editorScrollbarShown))):
+      renderEditorScrollbar(r, scroll, caretMark)
+    r.appendChild(parent, bar)
   if editorPaneHeightPx > 0 and viewportPx > 0:
     # The editor's top inset is ground: a row scrolled partly above the
     # viewport is cut at its top edge, as Monaco's lines are, rather than
     # drawn into the inset.
     r.setStyle(parent, "position", "relative")
-    let inset = r.createElement("div")
-    r.setStyle(inset, "position", "absolute")
-    r.setStyle(inset, "left", "0px")
-    r.setStyle(inset, "top", "0px")
-    r.setStyle(inset, "width", $viewportPx & "px")
-    r.setStyle(inset, "height", $EditorTopPadPx & "px")
-    r.setStyle(inset, "background-color", EditorGround)
+    let inset = pool.keyed("inset", hash(viewportPx)):
+      let inset = r.createElement("div")
+      r.setStyle(inset, "position", "absolute")
+      r.setStyle(inset, "left", "0px")
+      r.setStyle(inset, "top", "0px")
+      r.setStyle(inset, "width", $viewportPx & "px")
+      r.setStyle(inset, "height", $EditorTopPadPx & "px")
+      r.setStyle(inset, "background-color", EditorGround)
+      inset
     r.appendChild(parent, inset)
   if sticky.len > 0:
     # The sticky scope headers, over the top rows, each a full editor row
@@ -2334,26 +2393,29 @@ proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
     # header pushed up shows only its bottom.
     var stickyBottom = 0
     for (_, _, top) in sticky: stickyBottom = max(stickyBottom, top + EditorLinePx)
-    let clip = r.createElement("div")
-    r.setStyle(clip, "position", "absolute")
-    r.setStyle(clip, "left", "0px")
-    r.setStyle(clip, "top", $EditorTopPadPx & "px")
-    r.setStyle(clip, "width", $max(1, viewportPx) & "px")
-    r.setStyle(clip, "height", $max(1, stickyBottom) & "px")
-    r.setStyle(clip, "overflow", "hidden")
-    for k, (line, text, top) in sticky:
-      var context = initialContext(lexer)
-      let runs = if lexer == lxNone: @[] else: tokenRuns(lexer, text, context)
-      let el = renderEditorRow(r, EditorRow(line: line, text: text, held: true),
-                               runs, widest, scrollLeftCols,
-                               stickyHeader = true)
-      r.setAttribute(el, "data-ct-sticky-line", $line)
-      r.setStyle(el, "position", "absolute")
-      r.setStyle(el, "left", "0px")
-      r.setStyle(el, "top", $top & "px")
-      r.setStyle(el, "width", $max(1, viewportPx) & "px")
-      r.setStyle(el, "background-color", EditorGround)
-      r.appendChild(clip, el)
+    let clip = pool.keyed("sticky", hash((sticky, widest, lexer,
+                                          scrollLeftCols, viewportPx))):
+      let clip = r.createElement("div")
+      r.setStyle(clip, "position", "absolute")
+      r.setStyle(clip, "left", "0px")
+      r.setStyle(clip, "top", $EditorTopPadPx & "px")
+      r.setStyle(clip, "width", $max(1, viewportPx) & "px")
+      r.setStyle(clip, "height", $max(1, stickyBottom) & "px")
+      r.setStyle(clip, "overflow", "hidden")
+      for k, (line, text, top) in sticky:
+        var context = initialContext(lexer)
+        let runs = if lexer == lxNone: @[] else: tokenRuns(lexer, text, context)
+        let el = renderEditorRow(r, EditorRow(line: line, text: text, held: true),
+                                 runs, widest, scrollLeftCols,
+                                 stickyHeader = true)
+        r.setAttribute(el, "data-ct-sticky-line", $line)
+        r.setStyle(el, "position", "absolute")
+        r.setStyle(el, "left", "0px")
+        r.setStyle(el, "top", $top & "px")
+        r.setStyle(el, "width", $max(1, viewportPx) & "px")
+        r.setStyle(el, "background-color", EditorGround)
+        r.appendChild(clip, el)
+      clip
     r.appendChild(parent, clip)
   if editorPaneHeightPx > 0 and viewportPx > 0:
     r.setStyle(parent, "position", "relative")
@@ -2365,14 +2427,17 @@ proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
       let y = EditorTopPadPx + int(round(float(surface.executionLine - 1) /
                                          float(surface.totalLineCount) *
                                          float(body)))
-      let mark = r.createElement("div")
-      r.setAttribute(mark, "data-ct-overview-mark", $surface.executionLine)
-      r.setStyle(mark, "position", "absolute")
-      r.setStyle(mark, "left", $(viewportPx - 14) & "px")
-      r.setStyle(mark, "top", $y & "px")
-      r.setStyle(mark, "width", "12px")
-      r.setStyle(mark, "height", "2px")
-      r.setStyle(mark, "background-color", "#b6b9bb")
+      let mark = pool.keyed("overview", hash((surface.executionLine, y,
+                                               viewportPx))):
+        let mark = r.createElement("div")
+        r.setAttribute(mark, "data-ct-overview-mark", $surface.executionLine)
+        r.setStyle(mark, "position", "absolute")
+        r.setStyle(mark, "left", $(viewportPx - 14) & "px")
+        r.setStyle(mark, "top", $y & "px")
+        r.setStyle(mark, "width", "12px")
+        r.setStyle(mark, "height", "2px")
+        r.setStyle(mark, "background-color", "#b6b9bb")
+        mark
       r.appendChild(parent, mark)
     # Scrolled, Monaco's shadow under the top edge (`.scroll-decoration`,
     # 6 px from #161616 to the ground) — or, under sticky headers, the
@@ -2395,21 +2460,27 @@ proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
                    @[0.225, 0.475, 0.225, 0.075]
                  else: @[0.95, 0.7, 0.325, 0.075, 0.025]
       for i, alpha in alphas:
-        let band = r.createElement("div")
-        r.setAttribute(band, "data-ct-scroll-shadow", $i)
-        r.setStyle(band, "position", "absolute")
-        r.setStyle(band, "left", $left & "px")
-        r.setStyle(band, "top", $(EditorTopPadPx + max(0, below) + i) & "px")
-        r.setStyle(band, "width", $max(1, width) & "px")
-        r.setStyle(band, "height", "1px")
-        r.setStyle(band, "background-color",
-                   "#000000" & toHex(int(round(alpha * 255)), 2).toLowerAscii)
+        let band = pool.keyed("shadow:" & $i, hash((left, below, width,
+                                                    alpha))):
+          let band = r.createElement("div")
+          r.setAttribute(band, "data-ct-scroll-shadow", $i)
+          r.setStyle(band, "position", "absolute")
+          r.setStyle(band, "left", $left & "px")
+          r.setStyle(band, "top", $(EditorTopPadPx + max(0, below) + i) & "px")
+          r.setStyle(band, "width", $max(1, width) & "px")
+          r.setStyle(band, "height", "1px")
+          r.setStyle(band, "background-color",
+                     "#000000" & toHex(int(round(alpha * 255)), 2).toLowerAscii)
+          band
         r.appendChild(parent, band)
   # M73: the vertical scrubber LAST, over the sticky headers and the
   # shadow, as Monaco's slider is over its sticky widget.
   if vscroll.present and viewportPx > EditorVScrollbarPx:
     r.setStyle(parent, "position", "relative")
-    r.appendChild(parent, renderEditorVScrollbar(r, vscroll, viewportPx))
+    let bar = pool.keyed("vbar", hash((vscroll, viewportPx,
+                                       editorScrollbarShown))):
+      renderEditorVScrollbar(r, vscroll, viewportPx)
+    r.appendChild(parent, bar)
   surface.rows.len > 0
 
 const
@@ -2689,38 +2760,43 @@ proc renderCallTrace*(r: GpuiRenderer; parent: GpuiElement;
     r.setStyle(pane, "position", "relative")
     r.setStyle(pane, "height", "100%")
     r.setStyle(pane, "overflow", "hidden")
+  # The search field, the connectors and each row are kept from the last
+  # draw when they are drawn from the same inputs (`element_reuse`).
+  openPanePool("calltrace", parent)
   # The search field.
-  let field = r.createElement("div")
-  r.setAttribute(field, CallSearchAttribute, "true")
-  r.setStyle(field, "display", "flex")
-  r.setStyle(field, "items", "center")
-  r.setStyle(field, "flex-shrink", "0")
-  r.setStyle(field, "height", $CallSearchPx & "px")
-  r.setStyle(field, "margin-left", "4px")
-  r.setStyle(field, "margin-right", "4px")
-  r.setStyle(field, "padding-left", "7px")
-  r.setStyle(field, "rounded", "6px")
-  r.setStyle(field, "border-width", "1px")
-  r.setStyle(field, "border-color", DesignTokenHex[dtColorsUiBorderSecondary][dmDark])
-  r.setStyle(field, "background-color", DesignTokenHex[dtColorsUiSurfaceBasePanel][dmDark])
-  r.setStyle(field, "font-family", WindowFontFamily)
-  r.setStyle(field, "font-size", "14px")
-  r.setStyle(field, "white-space", "nowrap")
-  r.setStyle(field, "overflow", "hidden")
   let query = vm.searchQuery.val
-  # `.ct-input-search-image`: the magnifier at 0.5em, the text from 1.875em.
-  let glass = r.createElement("img")
-  r.setAttribute(glass, "src", stateIconPath("search", SearchGlassSvg,
-    DesignTokenHex[dtColorsUiIconPrimarySubtle][dmDark]))
-  r.setStyle(glass, "width", "14px")
-  r.setStyle(glass, "height", "14px")
-  r.setStyle(glass, "flex-shrink", "0")
-  r.appendChild(field, glass)
-  let text = r.createElement("div")
-  r.setStyle(text, "padding-left", "5px")
-  r.setStyle(text, "color", DesignTokenHex[dtColorsUiTextPrimaryLabel][dmDark])
-  r.appendChild(text, r.createTextNode(if query.len > 0: query else: "Search"))
-  r.appendChild(field, text)
+  let field = pool.keyed("search", hash(query)):
+    let field = r.createElement("div")
+    r.setAttribute(field, CallSearchAttribute, "true")
+    r.setStyle(field, "display", "flex")
+    r.setStyle(field, "items", "center")
+    r.setStyle(field, "flex-shrink", "0")
+    r.setStyle(field, "height", $CallSearchPx & "px")
+    r.setStyle(field, "margin-left", "4px")
+    r.setStyle(field, "margin-right", "4px")
+    r.setStyle(field, "padding-left", "7px")
+    r.setStyle(field, "rounded", "6px")
+    r.setStyle(field, "border-width", "1px")
+    r.setStyle(field, "border-color", DesignTokenHex[dtColorsUiBorderSecondary][dmDark])
+    r.setStyle(field, "background-color", DesignTokenHex[dtColorsUiSurfaceBasePanel][dmDark])
+    r.setStyle(field, "font-family", WindowFontFamily)
+    r.setStyle(field, "font-size", "14px")
+    r.setStyle(field, "white-space", "nowrap")
+    r.setStyle(field, "overflow", "hidden")
+    # `.ct-input-search-image`: the magnifier at 0.5em, the text from 1.875em.
+    let glass = r.createElement("img")
+    r.setAttribute(glass, "src", stateIconPath("search", SearchGlassSvg,
+      DesignTokenHex[dtColorsUiIconPrimarySubtle][dmDark]))
+    r.setStyle(glass, "width", "14px")
+    r.setStyle(glass, "height", "14px")
+    r.setStyle(glass, "flex-shrink", "0")
+    r.appendChild(field, glass)
+    let text = r.createElement("div")
+    r.setStyle(text, "padding-left", "5px")
+    r.setStyle(text, "color", DesignTokenHex[dtColorsUiTextPrimaryLabel][dmDark])
+    r.appendChild(text, r.createTextNode(if query.len > 0: query else: "Search"))
+    r.appendChild(field, text)
+    field
   r.appendChild(pane, field)
 
   let list = r.createElement("div")
@@ -2773,150 +2849,44 @@ proc renderCallTrace*(r: GpuiRenderer; parent: GpuiElement;
       # cover it, as they do on the desktop.
       for (a, b) in [(y0, y1)]:
         if b > a:
-          let v = r.createElement("div")
-          r.setAttribute(v, "data-ct-call-connector", "v")
-          r.setStyle(v, "position", "absolute")
-          r.setStyle(v, "left", $x & "px")
-          r.setStyle(v, "top", $a & "px")
-          r.setStyle(v, "width", "2px")
-          r.setStyle(v, "height", $(b - a) & "px")
-          r.setStyle(v, "background-color", CallConnectorColour)
+          let v = pool.keyed("v:" & $k, hash((x, a, b))):
+            let v = r.createElement("div")
+            r.setAttribute(v, "data-ct-call-connector", "v")
+            r.setStyle(v, "position", "absolute")
+            r.setStyle(v, "left", $x & "px")
+            r.setStyle(v, "top", $a & "px")
+            r.setStyle(v, "width", "2px")
+            r.setStyle(v, "height", $(b - a) & "px")
+            r.setStyle(v, "background-color", CallConnectorColour)
+            v
           r.appendChild(list, v)
       if k < rows.high:
         let nx = CallToggleLeftPx + 7 + max(rows[k + 1].depth, 0) * CallIndentPx
         if nx != x:
-          let h = r.createElement("div")
-          r.setAttribute(h, "data-ct-call-connector", "h")
-          r.setStyle(h, "position", "absolute")
-          r.setStyle(h, "left", $min(x, nx) & "px")
-          r.setStyle(h, "top", $foot & "px")
-          r.setStyle(h, "width", $(abs(nx - x) + 1) & "px")
-          r.setStyle(h, "height", "2px")
-          r.setStyle(h, "background-color", CallConnectorColour)
+          let h = pool.keyed("h:" & $k, hash((x, nx, foot))):
+            let h = r.createElement("div")
+            r.setAttribute(h, "data-ct-call-connector", "h")
+            r.setStyle(h, "position", "absolute")
+            r.setStyle(h, "left", $min(x, nx) & "px")
+            r.setStyle(h, "top", $foot & "px")
+            r.setStyle(h, "width", $(abs(nx - x) + 1) & "px")
+            r.setStyle(h, "height", "2px")
+            r.setStyle(h, "background-color", CallConnectorColour)
+            h
           r.appendChild(list, h)
   callCuts = @[]
   for k, row in rows:
-    let el = r.createElement("div")
-    r.setAttribute(el, CallRowAttribute, $row.index)
-    r.setAttribute(el, CallToggleAttribute, $row.toggle)
-    let selected = crfSelected in row.flags
-    r.setAttribute(el, CallSelectedAttribute,
-                   (if selected: "true" else: "false"))
-    r.setStyle(el, "display", "flex")
-    r.setStyle(el, "white-space", "nowrap")
-    r.setStyle(el, "overflow", "hidden")
-    r.setStyle(el, "flex-shrink", "0")
-    r.setStyle(el, "height", $(callRowTopPx(slotOf[k] + 1) -
-                               callRowTopPx(slotOf[k])) & "px")
-    r.setStyle(el, "items", "center")
-    r.setStyle(el, "padding-left", $(CallToggleLeftPx + row.depth * CallIndentPx) & "px")
-    # ONE ROUNDING PER RUN OF TEXT, not one per span. GPUI rounds every text
-    # element's width up to a whole logical pixel, so a row built as one
-    # element per coloured segment accumulates that rounding segment by
-    # segment and drifts right of where the browser puts the same text —
-    # measured at +2.55 device px across this pane, growing left to right.
-    # The renderer draws each maximal run of adjacent plain spans as a single
-    # piece of text (`isonim_gpui/renderer`), which rounds the run once.
-    #
-    # The row is NOT fusable end to end, and does not need to be: the toggle
-    # icon, the 8 px spacer and the `=>` in the interface face each keep
-    # their own element, so their spacing and their face are preserved
-    # exactly. Only the text spans between them fuse. The `(` carrying
-    # `.call-args`' 5 px fuses WITH its neighbours: the row declares
-    # `white-space: nowrap` and no `text-overflow`, so the renderer carries
-    # a span's own horizontal padding as an inset of the run (the
-    # `inlineTextRunsAttribute` rule) and the 5 px is kept exactly. Nor does fusing cost per-span identity — it happens in the render
-    # plan's CONSUMER, so every segment, with its `data-call-part` and its
-    # `data-call-arg`, is still in the plan for hit-testing to resolve.
-    r.setAttribute(el, InlineTextRunsAttribute, "1")
-    if selected:
-      r.setStyle(el, "background", CallSelectedBackground)
-    var afterIndex = false
     # PLAT-70 Part B (§5.1): THE ROW IS ONE CELL — its text after the toggle,
     # fitted to the pane in characters of the code face; a cut row keeps
-    # its parts up to `keep` characters, then `…`.
+    # its parts up to `keep` characters, then `…`. Fitted, and a cut row
+    # reported for the hover, whether or not the row is drawn again.
     let textX = callTextLeftPx(row.depth)
     let full = row.callRowText
     # (No width yet — a plan drawn before the window laid out — fits all.)
     let fitted = if callTracePaneWidthPx <= 0: fitCell(full, high(int) div 2)
                  else: fitCell(full, cellsInPx(layoutW - textX))
     let keep = if fitted.truncated: fitted.text.runeLen - 1 else: high(int)
-    var used = 0
-    var lastColour = CallTextColour
-    for seg in row.callRowSegments(indent = false):
-      if seg.kind != csToggle and used >= keep:
-        break
-      if seg.kind == csToggle:
-        let icon = r.createElement("div")
-        r.setAttribute(icon, CallPartAttribute, $seg.kind)
-        r.setStyle(icon, "width", "14px")
-        r.setStyle(icon, "height", "14px")
-        r.setStyle(icon, "flex-shrink", "0")
-        r.setStyle(icon, "display", "flex")
-        r.setStyle(icon, "items", "center")
-        r.setStyle(icon, "justify", "center")
-        let kind = case row.toggle
-                   of crtExpanded: "collapse"
-                   of crtCollapsed: "expand"
-                   of crtLeaf: "dot"
-        let img = r.createElement("img")
-        r.setAttribute(img, "src", callIconPath(kind &
-                                                (if selected: "-active" else: "")))
-        let side = if row.toggle == crtLeaf: 4 else: 14
-        r.setStyle(img, "width", $side & "px")
-        r.setStyle(img, "height", $side & "px")
-        r.appendChild(icon, img)
-        r.appendChild(el, icon)
-        let gap = r.createElement("div")
-        r.setStyle(gap, "width", "8px")
-        r.setStyle(gap, "flex-shrink", "0")
-        r.appendChild(el, gap)
-        continue
-      if seg.kind == csPunct and seg.text == " " and not afterIndex:
-        # The toggle's own space: the gap above stands for it.
-        continue
-      let piece = r.createElement("span")
-      r.setAttribute(piece, CallPartAttribute, $seg.kind)
-      # PLAT-50 (K23): an argument's parts name it, for its right-click menu.
-      if seg.arg > 0:
-        r.setAttribute(piece, CallArgAttribute, $(seg.arg - 1))
-      r.setStyle(piece, "flex-shrink", "0")
-      if seg.kind == csPunct and seg.text == "(" and afterIndex and seg.arg == 0:
-        # `.call-args { margin-left: 0.3125em }`.
-        r.setStyle(piece, "padding-left", "5px")
-      if seg.kind == csReturnArrow:
-        # `.return-arrow`: `=>` in the interface face, 5 px after the `)`
-        # and the value directly after it — no spaces in the code face.
-        r.setStyle(piece, "font-family", WindowFontFamily)
-        r.setStyle(piece, "padding-left", "5px")
-        r.setStyle(piece, "padding-right", "4px")
-        r.setStyle(piece, "color", CallReturnColour)
-        let arrow = seg.text.strip()
-        let shown = arrow.runeSubstr(0, max(0, keep - used))
-        used += seg.text.runeLen
-        r.appendChild(piece, r.createTextNode(shown))
-        r.appendChild(el, piece)
-        lastColour = CallReturnColour
-        continue
-      lastColour =
-        case seg.kind
-        of csPunct, csArgName, csArgValue: CallArgsColour
-        of csReturnArrow, csReturnValue: CallReturnColour
-        else: CallTextColour
-      r.setStyle(piece, "color", lastColour)
-      let shown = seg.text.runeSubstr(0, max(0, keep - used))
-      used += seg.text.runeLen
-      r.appendChild(piece, r.createTextNode(shown))
-      r.appendChild(el, piece)
-      if seg.kind == csIndex: afterIndex = true
     if fitted.truncated:
-      let mark = r.createElement("span")
-      r.setAttribute(mark, CallPartAttribute, "ellipsis")
-      r.setStyle(mark, "flex-shrink", "0")
-      r.setStyle(mark, "color", lastColour)
-      r.appendChild(mark, r.createTextNode(Ellipsis))
-      r.appendChild(el, mark)
-      r.setAttribute(el, TableCutAttribute, "call")
       let rowTop = 8 + CallRowsTopPx + callRowTopPx(slotOf[k])
       callCuts.add CutCell(row: rowTop,
                            height: callRowTopPx(slotOf[k] + 1) -
@@ -2926,6 +2896,121 @@ proc renderCallTrace*(r: GpuiRenderer; parent: GpuiElement;
                            ellipsisCol: textX - hLeft + pxOfText(keep) + 5,
                            ellipsisWidth: pxOfText(2),
                            key: $row.index, column: "call", full: full)
+    let rowPx = callRowTopPx(slotOf[k] + 1) - callRowTopPx(slotOf[k])
+    let el = pool.keyed("call:" & $row.index,
+                        hash((row, rowPx, fitted, keep))):
+      let el = r.createElement("div")
+      r.setAttribute(el, CallRowAttribute, $row.index)
+      r.setAttribute(el, CallToggleAttribute, $row.toggle)
+      let selected = crfSelected in row.flags
+      r.setAttribute(el, CallSelectedAttribute,
+                     (if selected: "true" else: "false"))
+      r.setStyle(el, "display", "flex")
+      r.setStyle(el, "white-space", "nowrap")
+      r.setStyle(el, "overflow", "hidden")
+      r.setStyle(el, "flex-shrink", "0")
+      r.setStyle(el, "height", $rowPx & "px")
+      r.setStyle(el, "items", "center")
+      r.setStyle(el, "padding-left", $(CallToggleLeftPx + row.depth * CallIndentPx) & "px")
+      # ONE ROUNDING PER RUN OF TEXT, not one per span. GPUI rounds every text
+      # element's width up to a whole logical pixel, so a row built as one
+      # element per coloured segment accumulates that rounding segment by
+      # segment and drifts right of where the browser puts the same text —
+      # measured at +2.55 device px across this pane, growing left to right.
+      # The renderer draws each maximal run of adjacent plain spans as a single
+      # piece of text (`isonim_gpui/renderer`), which rounds the run once.
+      #
+      # The row is NOT fusable end to end, and does not need to be: the toggle
+      # icon, the 8 px spacer and the `=>` in the interface face each keep
+      # their own element, so their spacing and their face are preserved
+      # exactly. Only the text spans between them fuse. The `(` carrying
+      # `.call-args`' 5 px fuses WITH its neighbours: the row declares
+      # `white-space: nowrap` and no `text-overflow`, so the renderer carries
+      # a span's own horizontal padding as an inset of the run (the
+      # `inlineTextRunsAttribute` rule) and the 5 px is kept exactly. Nor does fusing cost per-span identity — it happens in the render
+      # plan's CONSUMER, so every segment, with its `data-call-part` and its
+      # `data-call-arg`, is still in the plan for hit-testing to resolve.
+      r.setAttribute(el, InlineTextRunsAttribute, "1")
+      if selected:
+        r.setStyle(el, "background", CallSelectedBackground)
+      var afterIndex = false
+      var used = 0
+      var lastColour = CallTextColour
+      for seg in row.callRowSegments(indent = false):
+        if seg.kind != csToggle and used >= keep:
+          break
+        if seg.kind == csToggle:
+          let icon = r.createElement("div")
+          r.setAttribute(icon, CallPartAttribute, $seg.kind)
+          r.setStyle(icon, "width", "14px")
+          r.setStyle(icon, "height", "14px")
+          r.setStyle(icon, "flex-shrink", "0")
+          r.setStyle(icon, "display", "flex")
+          r.setStyle(icon, "items", "center")
+          r.setStyle(icon, "justify", "center")
+          let kind = case row.toggle
+                     of crtExpanded: "collapse"
+                     of crtCollapsed: "expand"
+                     of crtLeaf: "dot"
+          let img = r.createElement("img")
+          r.setAttribute(img, "src", callIconPath(kind &
+                                                  (if selected: "-active" else: "")))
+          let side = if row.toggle == crtLeaf: 4 else: 14
+          r.setStyle(img, "width", $side & "px")
+          r.setStyle(img, "height", $side & "px")
+          r.appendChild(icon, img)
+          r.appendChild(el, icon)
+          let gap = r.createElement("div")
+          r.setStyle(gap, "width", "8px")
+          r.setStyle(gap, "flex-shrink", "0")
+          r.appendChild(el, gap)
+          continue
+        if seg.kind == csPunct and seg.text == " " and not afterIndex:
+          # The toggle's own space: the gap above stands for it.
+          continue
+        let piece = r.createElement("span")
+        r.setAttribute(piece, CallPartAttribute, $seg.kind)
+        # PLAT-50 (K23): an argument's parts name it, for its right-click menu.
+        if seg.arg > 0:
+          r.setAttribute(piece, CallArgAttribute, $(seg.arg - 1))
+        r.setStyle(piece, "flex-shrink", "0")
+        if seg.kind == csPunct and seg.text == "(" and afterIndex and seg.arg == 0:
+          # `.call-args { margin-left: 0.3125em }`.
+          r.setStyle(piece, "padding-left", "5px")
+        if seg.kind == csReturnArrow:
+          # `.return-arrow`: `=>` in the interface face, 5 px after the `)`
+          # and the value directly after it — no spaces in the code face.
+          r.setStyle(piece, "font-family", WindowFontFamily)
+          r.setStyle(piece, "padding-left", "5px")
+          r.setStyle(piece, "padding-right", "4px")
+          r.setStyle(piece, "color", CallReturnColour)
+          let arrow = seg.text.strip()
+          let shown = arrow.runeSubstr(0, max(0, keep - used))
+          used += seg.text.runeLen
+          r.appendChild(piece, r.createTextNode(shown))
+          r.appendChild(el, piece)
+          lastColour = CallReturnColour
+          continue
+        lastColour =
+          case seg.kind
+          of csPunct, csArgName, csArgValue: CallArgsColour
+          of csReturnArrow, csReturnValue: CallReturnColour
+          else: CallTextColour
+        r.setStyle(piece, "color", lastColour)
+        let shown = seg.text.runeSubstr(0, max(0, keep - used))
+        used += seg.text.runeLen
+        r.appendChild(piece, r.createTextNode(shown))
+        r.appendChild(el, piece)
+        if seg.kind == csIndex: afterIndex = true
+      if fitted.truncated:
+        let mark = r.createElement("span")
+        r.setAttribute(mark, CallPartAttribute, "ellipsis")
+        r.setStyle(mark, "flex-shrink", "0")
+        r.setStyle(mark, "color", lastColour)
+        r.appendChild(mark, r.createTextNode(Ellipsis))
+        r.appendChild(el, mark)
+        r.setAttribute(el, TableCutAttribute, "call")
+      el
     r.appendChild(list, el)
     for j, text in detailLines.getOrDefault(k):
       let at = slotOf[k] + 1 + j
@@ -3434,6 +3519,9 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
   if vm.isNil:
     return false
   let rows = stateRows(vm, budget)
+  # The head, the code line and each value's row are kept from the last
+  # draw when they are drawn from the same inputs (`element_reuse`).
+  openPanePool("state", parent)
   let body = r.createElement("div")
   r.setAttribute(body, "data-ct-state", "desktop")
   r.setStyle(body, "display", "flex")
@@ -3443,13 +3531,6 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
   r.setStyle(body, "font-family", MonoFontFamily)
 
   # The tabs and the watch field.
-  let head = r.createElement("div")
-  r.setStyle(head, "display", "flex")
-  r.setStyle(head, "items", "center")
-  r.setStyle(head, "flex-shrink", "0")
-  r.setStyle(head, "height", "26px")
-  r.setStyle(head, "padding-left", $StateInsetPx & "px")
-  r.setStyle(head, "gap", "6px")
   # ONE LIST, NO TABS (Variable-State-Pane.md § Decisions, 2026-10-24). The
   # head offers "Hide watches from other processes" only when some watch was
   # added in another process (or while it is on).
@@ -3459,48 +3540,57 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
       if origin.len > 0 and origin != vm.recordingId:
         otherProcess = true
         break
-  if otherProcess:
-    let hide = vm.hideOtherProcessWatches.val
-    let t = stateText(r, (if hide: "◉ " else: "○ ") &
-                         "Hide watches from other processes",
-                      StateEmptyColour, 12, mono = false)
-    r.setAttribute(t, StateControlAttribute, "hide-other-process-watches:" &
-                                             (if hide: "off" else: "on"))
-    r.appendChild(head, t)
-  # The watch field: a press opens the omnibox on `:watch ` (the window's
-  # one text field), as this pane's watch row did.
-  let field = r.createElement("div")
-  r.setAttribute(field, StateAddWatchAttribute, "true")
-  r.setStyle(field, "display", "flex")
-  r.setStyle(field, "items", "center")
-  r.setStyle(field, "flex-shrink", "1")
-  r.setStyle(field, "flex-grow", "1")
-  r.setStyle(field, "max-width", $StateWatchFieldPx & "px")
-  r.setStyle(field, "margin-right", "11px")
-  r.setStyle(field, "height", "26px")
-  r.setStyle(field, "padding-left", "11px")
-  r.setStyle(field, "padding-right", "12px")
-  r.setStyle(field, "rounded", "6px")
-  r.setStyle(field, "border-width", "1px")
-  r.setStyle(field, "border-color", StateControlBorder)
-  r.setStyle(field, "background-color", DesignTokenHex[dtColorsUiSurfaceBasePanel][dmDark])
-  r.setStyle(field, "overflow", "hidden")
-  let ph = stateText(r, "Enter a watch expression",
-                     DesignTokenHex[dtColorsUiTextPrimaryLabel][dmDark], 14,
-                     mono = false)
-  # Clipped at the CONTENT edge, as an `input` clips its text — the field's
-  # own `overflow` clips at its padding edge, 12 px further right.
-  let clip = r.createElement("div")
-  r.setStyle(clip, "display", "flex")
-  r.setStyle(clip, "items", "center")
-  r.setStyle(clip, "flex-grow", "1")
-  r.setStyle(clip, "flex-shrink", "1")
-  r.setStyle(clip, "min-width", "0px")
-  r.setStyle(clip, "height", "100%")
-  r.setStyle(clip, "overflow", "hidden")
-  r.appendChild(clip, ph)
-  r.appendChild(field, clip)
-  r.appendChild(head, field)
+  let hide = vm.hideOtherProcessWatches.val
+  let head = pool.keyed("head", hash((otherProcess, hide))):
+    let head = r.createElement("div")
+    r.setStyle(head, "display", "flex")
+    r.setStyle(head, "items", "center")
+    r.setStyle(head, "flex-shrink", "0")
+    r.setStyle(head, "height", "26px")
+    r.setStyle(head, "padding-left", $StateInsetPx & "px")
+    r.setStyle(head, "gap", "6px")
+    if otherProcess:
+      let t = stateText(r, (if hide: "◉ " else: "○ ") &
+                           "Hide watches from other processes",
+                        StateEmptyColour, 12, mono = false)
+      r.setAttribute(t, StateControlAttribute, "hide-other-process-watches:" &
+                                               (if hide: "off" else: "on"))
+      r.appendChild(head, t)
+    # The watch field: a press opens the omnibox on `:watch ` (the window's
+    # one text field), as this pane's watch row did.
+    let field = r.createElement("div")
+    r.setAttribute(field, StateAddWatchAttribute, "true")
+    r.setStyle(field, "display", "flex")
+    r.setStyle(field, "items", "center")
+    r.setStyle(field, "flex-shrink", "1")
+    r.setStyle(field, "flex-grow", "1")
+    r.setStyle(field, "max-width", $StateWatchFieldPx & "px")
+    r.setStyle(field, "margin-right", "11px")
+    r.setStyle(field, "height", "26px")
+    r.setStyle(field, "padding-left", "11px")
+    r.setStyle(field, "padding-right", "12px")
+    r.setStyle(field, "rounded", "6px")
+    r.setStyle(field, "border-width", "1px")
+    r.setStyle(field, "border-color", StateControlBorder)
+    r.setStyle(field, "background-color", DesignTokenHex[dtColorsUiSurfaceBasePanel][dmDark])
+    r.setStyle(field, "overflow", "hidden")
+    let ph = stateText(r, "Enter a watch expression",
+                       DesignTokenHex[dtColorsUiTextPrimaryLabel][dmDark], 14,
+                       mono = false)
+    # Clipped at the CONTENT edge, as an `input` clips its text — the field's
+    # own `overflow` clips at its padding edge, 12 px further right.
+    let clip = r.createElement("div")
+    r.setStyle(clip, "display", "flex")
+    r.setStyle(clip, "items", "center")
+    r.setStyle(clip, "flex-grow", "1")
+    r.setStyle(clip, "flex-shrink", "1")
+    r.setStyle(clip, "min-width", "0px")
+    r.setStyle(clip, "height", "100%")
+    r.setStyle(clip, "overflow", "hidden")
+    r.appendChild(clip, ph)
+    r.appendChild(field, clip)
+    r.appendChild(head, field)
+    head
   r.appendChild(body, head)
 
   # The stop's code line.
@@ -3509,31 +3599,33 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
   let (number, source) =
     if sep < 0: ("", formatted)
     else: (formatted[0 ..< sep], formatted[sep + CodeStateLineSeparator.len .. ^1])
-  let code = r.createElement("div")
-  r.setAttribute(code, "data-ct-code-state-line", formatted)
-  r.setStyle(code, "display", "flex")
-  r.setStyle(code, "items", "center")
-  r.setStyle(code, "flex-shrink", "0")
-  r.setStyle(code, "height", $StateValueRowPx & "px")
-  r.setStyle(code, "margin-top", "8px")
-  r.setStyle(code, "padding-left", $StateInsetPx & "px")
-  r.setStyle(code, "white-space", "nowrap")
-  r.setStyle(code, "overflow", "hidden")
-  r.setStyle(code, "background-color", StateCodeLineGround)
-  if vm.hasCodeState.val:
-    let arrow = r.createElement("img")
-    r.setAttribute(arrow, "src", executionMarkPath())
-    r.setStyle(arrow, "width", "7px")
-    r.setStyle(arrow, "height", "10px")
-    r.setStyle(arrow, "flex-shrink", "0")
-    r.appendChild(code, arrow)
-    let n = stateText(r, number, DesignTokenHex[dtColorsUiTextPrimaryLabel][dmDark],
-                      14, GutterNumberWeight)
-    r.setStyle(n, "padding-left", "6px")
-    r.appendChild(code, n)
-    let src = stateText(r, source, DesignTokenHex[dtColorsUiTextPrimaryBody][dmDark])
-    r.setStyle(src, "padding-left", "12px")
-    r.appendChild(code, src)
+  let code = pool.keyed("code", hash((formatted, vm.hasCodeState.val))):
+    let code = r.createElement("div")
+    r.setAttribute(code, "data-ct-code-state-line", formatted)
+    r.setStyle(code, "display", "flex")
+    r.setStyle(code, "items", "center")
+    r.setStyle(code, "flex-shrink", "0")
+    r.setStyle(code, "height", $StateValueRowPx & "px")
+    r.setStyle(code, "margin-top", "8px")
+    r.setStyle(code, "padding-left", $StateInsetPx & "px")
+    r.setStyle(code, "white-space", "nowrap")
+    r.setStyle(code, "overflow", "hidden")
+    r.setStyle(code, "background-color", StateCodeLineGround)
+    if vm.hasCodeState.val:
+      let arrow = r.createElement("img")
+      r.setAttribute(arrow, "src", executionMarkPath())
+      r.setStyle(arrow, "width", "7px")
+      r.setStyle(arrow, "height", "10px")
+      r.setStyle(arrow, "flex-shrink", "0")
+      r.appendChild(code, arrow)
+      let n = stateText(r, number, DesignTokenHex[dtColorsUiTextPrimaryLabel][dmDark],
+                        14, GutterNumberWeight)
+      r.setStyle(n, "padding-left", "6px")
+      r.appendChild(code, n)
+      let src = stateText(r, source, DesignTokenHex[dtColorsUiTextPrimaryBody][dmDark])
+      r.setStyle(src, "padding-left", "12px")
+      r.appendChild(code, src)
+    code
   r.appendChild(body, code)
 
   let table = r.createElement("div")
@@ -3601,69 +3693,12 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
   template slotTop(): int =
     StateRowsTopPx + slot * StateValueRowPx - stateScroll.top
   for i, row in rows:
-    let el = r.createElement("div")
-    r.setAttribute(el, StateRowAttribute, $i)
-    r.setAttribute(el, StateDepthAttribute, $row.depth)
+    # What the row shows, worked out whether or not it is drawn again: its
+    # cut value is reported for the hover on every draw.
     # PLAT-70 Part E: with the keyboard cursor on a hop of the row's chain,
     # the hop is the selected row, not the variable.
-    r.setAttribute(el, StateSelectedAttribute,
-                   (if row.selected and vm.selectedHop.val < 0: "true"
-                    else: "false"))
-    r.setAttribute(el, ViewKindAttribute, vocabularyName(pkTree))
-    r.setAttribute(el, ViewIdAttribute, row.path)
-    r.setStyle(el, "display", "flex")
-    r.setStyle(el, "items", "center")
-    r.setStyle(el, "flex-shrink", "0")
-    r.setStyle(el, "height", $StateValueRowPx & "px")
-    # A row takes its natural width so a long value reaches past the pane
-    # (`items: start` on the scroll box), but never less than the pane's: a
-    # press anywhere on a row's line is that row's, as on the desktop. A row
-    # only as wide as its text took no press right of its last control.
-    if paneW > StateInsetPx:
-      r.setStyle(el, "min-width", $(paneW - StateInsetPx) & "px")
-    r.setStyle(el, "white-space", "nowrap")
-    r.setStyle(el, "overflow", "hidden")
-    r.setStyle(el, "gap", "8px")
-    if row.depth > 0:
-      r.setStyle(el, "padding-left", $(row.depth * StateRowIndentPx) & "px")
-    # The name: the caret of a compound value, then `name:` in indigo.
-    let name = r.createElement("div")
-    r.setAttribute(name, StateColumnAttribute, StateNameColumn)
-    r.setStyle(name, "display", "flex")
-    r.setStyle(name, "items", "center")
-    r.setStyle(name, "flex-shrink", "0")
-    if row.hasChildren:
-      # `.caret-collapse` / `.caret-expand`: the desktop's chevrons
-      # (`SHARED_OPEN_FA_ICON`, `SHARED_CLOSE_FA_ICON`) in an 8 px box.
-      let box = r.createElement("div")
-      r.setStyle(box, "display", "flex")
-      r.setStyle(box, "items", "center")
-      r.setStyle(box, "justify", "center")
-      r.setStyle(box, "width", "8px")
-      r.setStyle(box, "height", "8px")
-      r.setStyle(box, "flex-shrink", "0")
-      let caret = r.createElement("img")
-      r.setAttribute(caret, "src", stateIconPath(
-        if row.expanded: "caret-open" else: "caret-closed",
-        if row.expanded: FileTreeOpenSvg else: FileTreeClosedSvg, "#dddddd"))
-      r.setStyle(caret, "width", if row.expanded: "8px" else: "5px")
-      r.setStyle(caret, "height", if row.expanded: "5px" else: "8px")
-      r.appendChild(box, caret)
-      r.appendChild(name, box)
-      let gap = r.createElement("div")
-      r.setStyle(gap, "width", "7px")
-      r.setStyle(gap, "flex-shrink", "0")
-      r.appendChild(name, gap)
-    r.appendChild(name, stateText(r, row.name & ":", StateNameColour))
-    # `name:value` with nothing between (`.value-name` then `.value-view`).
-    let pair = r.createElement("div")
-    r.setStyle(pair, "display", "flex")
-    r.setStyle(pair, "items", "center")
-    r.setStyle(pair, "flex-shrink", "0")
-    r.appendChild(pair, name)
-    r.appendChild(el, pair)
+    let selectedRow = row.selected and vm.selectedHop.val < 0
     let changed = vm.isChanged(row.path)
-    r.setAttribute(el, StateChangedAttribute, (if changed: "true" else: "false"))
     # The value's cells: the pane less the row's indent, the caret, the
     # `name:`, the type, the controls and the gaps between them.
     let watchControl = row.isWatch
@@ -3692,14 +3727,7 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
                                                      statePresenters())
                        else: p.root.text),
                       p.truncated)
-    # One line, as the desktop's `white-space: nowrap` collapses a value's
-    # newlines and runs of space; in the warning tier (`.value-expanded-text`),
-    # the changed accent when the step changed it.
-    let value = stateText(r, oneLine(fitted.text),
-                          if changed: StateChangedColour else: StateValueTextColour)
-    r.setAttribute(value, StateColumnAttribute, StateValueColumn)
     if fitted.truncated:
-      r.setAttribute(value, TableCutAttribute, StateValueColumn)
       let drawn = fitted.text.runeLen
       stateCuts.add CutCell(row: slotTop(), height: StateValueRowPx,
                             col: valueX, width: pxOfText(drawn),
@@ -3707,24 +3735,97 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
                             ellipsisWidth: pxOfText(1),
                             key: row.path, column: StateValueColumn,
                             full: fitted.full)
-    r.appendChild(pair, value)
-    if row.typeName.len > 0:
-      r.appendChild(el, stateText(r, row.typeName, StateTypeColour))
     let historyOpen = row.path in vm.expandedHistories.val
     let originOpen = row.path in vm.originHops.val
-    r.appendChild(el, stateIconButton(r, "history:" & row.path, "history",
-                                      HistoryToggleSvg, historyOpen))
     let summary = vm.originSummaryFor(row.name)
     let icon = if summary.isSome:
                  iconClassForTerminator(summary.get.terminatorKind).replace(
                    "ct-origin-icon-", "")
                else: "question"
-    r.appendChild(el, stateIconButton(r, "origin:" & row.path, icon,
-                                      originIconSvg(icon), originOpen))
-    if row.isWatch:
-      let c = stateText(r, "×", StateEmptyColour, mono = false)
-      r.setAttribute(c, StateControlAttribute, "unwatch:" & row.name)
-      r.appendChild(el, c)
+    let digest = hash((i, row.path, row.name, row.typeName, row.depth,
+                       row.hasChildren, row.expanded, row.isWatch,
+                       selectedRow, changed, paneW, fitted.text,
+                       fitted.truncated, historyOpen, originOpen, icon))
+    let el = pool.keyed("value:" & row.path, digest):
+      let el = r.createElement("div")
+      r.setAttribute(el, StateRowAttribute, $i)
+      r.setAttribute(el, StateDepthAttribute, $row.depth)
+      r.setAttribute(el, StateSelectedAttribute,
+                     (if selectedRow: "true" else: "false"))
+      r.setAttribute(el, ViewKindAttribute, vocabularyName(pkTree))
+      r.setAttribute(el, ViewIdAttribute, row.path)
+      r.setStyle(el, "display", "flex")
+      r.setStyle(el, "items", "center")
+      r.setStyle(el, "flex-shrink", "0")
+      r.setStyle(el, "height", $StateValueRowPx & "px")
+      # A row takes its natural width so a long value reaches past the pane
+      # (`items: start` on the scroll box), but never less than the pane's: a
+      # press anywhere on a row's line is that row's, as on the desktop. A row
+      # only as wide as its text took no press right of its last control.
+      if paneW > StateInsetPx:
+        r.setStyle(el, "min-width", $(paneW - StateInsetPx) & "px")
+      r.setStyle(el, "white-space", "nowrap")
+      r.setStyle(el, "overflow", "hidden")
+      r.setStyle(el, "gap", "8px")
+      if row.depth > 0:
+        r.setStyle(el, "padding-left", $(row.depth * StateRowIndentPx) & "px")
+      # The name: the caret of a compound value, then `name:` in indigo.
+      let name = r.createElement("div")
+      r.setAttribute(name, StateColumnAttribute, StateNameColumn)
+      r.setStyle(name, "display", "flex")
+      r.setStyle(name, "items", "center")
+      r.setStyle(name, "flex-shrink", "0")
+      if row.hasChildren:
+        # `.caret-collapse` / `.caret-expand`: the desktop's chevrons
+        # (`SHARED_OPEN_FA_ICON`, `SHARED_CLOSE_FA_ICON`) in an 8 px box.
+        let box = r.createElement("div")
+        r.setStyle(box, "display", "flex")
+        r.setStyle(box, "items", "center")
+        r.setStyle(box, "justify", "center")
+        r.setStyle(box, "width", "8px")
+        r.setStyle(box, "height", "8px")
+        r.setStyle(box, "flex-shrink", "0")
+        let caret = r.createElement("img")
+        r.setAttribute(caret, "src", stateIconPath(
+          if row.expanded: "caret-open" else: "caret-closed",
+          if row.expanded: FileTreeOpenSvg else: FileTreeClosedSvg, "#dddddd"))
+        r.setStyle(caret, "width", if row.expanded: "8px" else: "5px")
+        r.setStyle(caret, "height", if row.expanded: "5px" else: "8px")
+        r.appendChild(box, caret)
+        r.appendChild(name, box)
+        let gap = r.createElement("div")
+        r.setStyle(gap, "width", "7px")
+        r.setStyle(gap, "flex-shrink", "0")
+        r.appendChild(name, gap)
+      r.appendChild(name, stateText(r, row.name & ":", StateNameColour))
+      # `name:value` with nothing between (`.value-name` then `.value-view`).
+      let pair = r.createElement("div")
+      r.setStyle(pair, "display", "flex")
+      r.setStyle(pair, "items", "center")
+      r.setStyle(pair, "flex-shrink", "0")
+      r.appendChild(pair, name)
+      r.appendChild(el, pair)
+      r.setAttribute(el, StateChangedAttribute, (if changed: "true" else: "false"))
+      # One line, as the desktop's `white-space: nowrap` collapses a value's
+      # newlines and runs of space; in the warning tier
+      # (`.value-expanded-text`), the changed accent when the step changed it.
+      let value = stateText(r, oneLine(fitted.text),
+                            if changed: StateChangedColour else: StateValueTextColour)
+      r.setAttribute(value, StateColumnAttribute, StateValueColumn)
+      if fitted.truncated:
+        r.setAttribute(value, TableCutAttribute, StateValueColumn)
+      r.appendChild(pair, value)
+      if row.typeName.len > 0:
+        r.appendChild(el, stateText(r, row.typeName, StateTypeColour))
+      r.appendChild(el, stateIconButton(r, "history:" & row.path, "history",
+                                        HistoryToggleSvg, historyOpen))
+      r.appendChild(el, stateIconButton(r, "origin:" & row.path, icon,
+                                        originIconSvg(icon), originOpen))
+      if row.isWatch:
+        let c = stateText(r, "×", StateEmptyColour, mono = false)
+        r.setAttribute(c, StateControlAttribute, "unwatch:" & row.name)
+        r.appendChild(el, c)
+      el
     r.appendChild(scroller, el)
     inc slot
     # The full value under the row, wrapped in the value's column (§5.3).
@@ -4175,6 +4276,7 @@ proc renderFileTree*(r: GpuiRenderer; parent: GpuiElement;
   var rows: seq[tuple[node: FilesystemEntryNode; path: string; depth: int;
                       open: bool]] = @[]
   fileTreeRows(vm, root, "fileTree", 0, rows)
+  openPanePool("fileTree", parent)
   let tree = r.createElement("div")
   r.setAttribute(tree, ViewIdAttribute, "fileTree.view")
   r.setStyle(tree, "display", "flex")
@@ -4239,77 +4341,85 @@ proc renderFileTree*(r: GpuiRenderer; parent: GpuiElement;
       of ftlEntry: discard
       r.appendChild(rootMark, el)
       continue
-    let el = r.createElement("div")
-    r.setAttribute(el, ViewKindAttribute, vocabularyName(pkTree))
-    r.setAttribute(el, ViewIdAttribute, row.path)
-    r.setStyle(el, "display", "flex")
-    r.setStyle(el, "items", "center")
-    r.setStyle(el, "flex-shrink", "0")
-    r.setStyle(el, "height", $FileTreeRowPx & "px")
-    r.setStyle(el, "white-space", "nowrap")
-    r.setStyle(el, "position", "relative")
-    let indent = row.depth * FileTreeIndentPx
-    let folder = row.node.children.len > 0
-    proc place(child: GpuiElement; left, top, w, h: int) =
-      # In a positioned box of its own: the shim places a `div`, not an `img`.
-      let slot = r.createElement("div")
-      r.setStyle(slot, "position", "absolute")
-      r.setStyle(slot, "left", $(indent + left) & "px")
-      r.setStyle(slot, "top", $top & "px")
-      r.setStyle(slot, "width", $w & "px")
-      r.setStyle(slot, "height", $h & "px")
-      r.setStyle(child, "width", $w & "px")
-      r.setStyle(child, "height", $h & "px")
-      r.appendChild(slot, child)
-      r.appendChild(el, slot)
-    if folder:
-      let tw = r.createElement("img")
-      r.setAttribute(tw, "src", stateIconPath(
-        if row.open: "tree-open" else: "tree-closed",
-        if row.open: FileTreeOpenSvg else: FileTreeClosedSvg, "#999999"))
-      if row.open: place(tw, FileTreeTwistyLeft, 10, 8, 4)
-      else: place(tw, FileTreeTwistyLeft + 2, 8, 4, 8)
-      let icon = r.createElement("img")
-      r.setAttribute(icon, "src", stateIconPath("tree-folder", FileTreeFolderSvg,
-                                                "#cccccc"))
-      place(icon, FileTreeIconLeft, 4, 16, 16)
-    else:
-      let mark = deviconSvgFor(row.node.text)
-      let icon = r.createElement("img")
-      if mark.len > 0:
-        r.setAttribute(icon, "data-ct-file-icon", row.node.text)
-        let ink = if mark == deviconSvgFor("x.py"): DeviconPythonColour
-                  else: DesignTokenHex[dtColorsUiTextPrimaryLabel][dmDark]
-        r.setAttribute(icon, "src", stateIconPath(
-          "devicon-" & $hash(mark), mark, ink))
-        place(icon, FileTreeIconLeft + 1, 4, 14, 15)
-      else:
-        r.setAttribute(icon, "src", stateIconPath("tree-file", FileTreeFileSvg,
+    # An entry drawn last time from the same inputs is kept
+    # (`element_reuse`).
+    let renaming = edit.kind == fneRename and row.node.path.len > 0 and
+                   row.node.path == edit.path
+    let digest = hash((row.path, row.depth, row.open, row.node.children.len > 0,
+                       row.node.text, renaming,
+                       (if renaming: vm.nameEditDraft else: "")))
+    let el = pool.keyed("entry:" & row.path, digest):
+      let el = r.createElement("div")
+      r.setAttribute(el, ViewKindAttribute, vocabularyName(pkTree))
+      r.setAttribute(el, ViewIdAttribute, row.path)
+      r.setStyle(el, "display", "flex")
+      r.setStyle(el, "items", "center")
+      r.setStyle(el, "flex-shrink", "0")
+      r.setStyle(el, "height", $FileTreeRowPx & "px")
+      r.setStyle(el, "white-space", "nowrap")
+      r.setStyle(el, "position", "relative")
+      let indent = row.depth * FileTreeIndentPx
+      let folder = row.node.children.len > 0
+      proc place(child: GpuiElement; left, top, w, h: int) =
+        # In a positioned box of its own: the shim places a `div`, not an `img`.
+        let slot = r.createElement("div")
+        r.setStyle(slot, "position", "absolute")
+        r.setStyle(slot, "left", $(indent + left) & "px")
+        r.setStyle(slot, "top", $top & "px")
+        r.setStyle(slot, "width", $w & "px")
+        r.setStyle(slot, "height", $h & "px")
+        r.setStyle(child, "width", $w & "px")
+        r.setStyle(child, "height", $h & "px")
+        r.appendChild(slot, child)
+        r.appendChild(el, slot)
+      if folder:
+        let tw = r.createElement("img")
+        r.setAttribute(tw, "src", stateIconPath(
+          if row.open: "tree-open" else: "tree-closed",
+          if row.open: FileTreeOpenSvg else: FileTreeClosedSvg, "#999999"))
+        if row.open: place(tw, FileTreeTwistyLeft, 10, 8, 4)
+        else: place(tw, FileTreeTwistyLeft + 2, 8, 4, 8)
+        let icon = r.createElement("img")
+        r.setAttribute(icon, "src", stateIconPath("tree-folder", FileTreeFolderSvg,
                                                   "#cccccc"))
-        place(icon, FileTreeIconLeft + 1, 4, 16, 16)
-    let label = r.createElement("div")
-    r.setStyle(label, "font-family", WindowFontFamily)
-    r.setStyle(label, "color", DesignTokenHex[dtColorsUiTextPrimaryBody][dmDark])
-    r.setStyle(label, "position", "absolute")
-    r.setStyle(label, "left", $(indent + FileTreeTextLeft + (if folder: 0 else: 1)) & "px")
-    r.setStyle(label, "top", "0px")
-    r.setStyle(label, "line-height", "24px")
-    r.setStyle(label, "white-space", "nowrap")
-    if edit.kind == fneRename and row.node.path.len > 0 and
-       row.node.path == edit.path:
-      # Rename's field in place of the label, holding the name typed so far.
-      r.setAttribute(label, FilesFieldAttribute, "rename")
-      r.setAttribute(label, FilesFieldTextAttribute, vm.nameEditDraft)
-      r.setStyle(label, "border-width", "1px")
-      r.setStyle(label, "border-color",
-                 DesignTokenHex[dtColorsUiBorderAction][dmDark])
-      r.setStyle(label, "line-height", "22px")
-      r.setStyle(label, "padding-left", "4px")
-      r.setStyle(label, "padding-right", "4px")
-      r.appendChild(label, r.createTextNode(fieldText()))
-    else:
-      r.appendChild(label, r.createTextNode(row.node.text))
-    r.appendChild(el, label)
+        place(icon, FileTreeIconLeft, 4, 16, 16)
+      else:
+        let mark = deviconSvgFor(row.node.text)
+        let icon = r.createElement("img")
+        if mark.len > 0:
+          r.setAttribute(icon, "data-ct-file-icon", row.node.text)
+          let ink = if mark == deviconSvgFor("x.py"): DeviconPythonColour
+                    else: DesignTokenHex[dtColorsUiTextPrimaryLabel][dmDark]
+          r.setAttribute(icon, "src", stateIconPath(
+            "devicon-" & $hash(mark), mark, ink))
+          place(icon, FileTreeIconLeft + 1, 4, 14, 15)
+        else:
+          r.setAttribute(icon, "src", stateIconPath("tree-file", FileTreeFileSvg,
+                                                    "#cccccc"))
+          place(icon, FileTreeIconLeft + 1, 4, 16, 16)
+      let label = r.createElement("div")
+      r.setStyle(label, "font-family", WindowFontFamily)
+      r.setStyle(label, "color", DesignTokenHex[dtColorsUiTextPrimaryBody][dmDark])
+      r.setStyle(label, "position", "absolute")
+      r.setStyle(label, "left", $(indent + FileTreeTextLeft + (if folder: 0 else: 1)) & "px")
+      r.setStyle(label, "top", "0px")
+      r.setStyle(label, "line-height", "24px")
+      r.setStyle(label, "white-space", "nowrap")
+      if renaming:
+        # Rename's field in place of the label, holding the name typed so far.
+        r.setAttribute(label, FilesFieldAttribute, "rename")
+        r.setAttribute(label, FilesFieldTextAttribute, vm.nameEditDraft)
+        r.setStyle(label, "border-width", "1px")
+        r.setStyle(label, "border-color",
+                   DesignTokenHex[dtColorsUiBorderAction][dmDark])
+        r.setStyle(label, "line-height", "22px")
+        r.setStyle(label, "padding-left", "4px")
+        r.setStyle(label, "padding-right", "4px")
+        r.appendChild(label, r.createTextNode(fieldText()))
+      else:
+        r.appendChild(label, r.createTextNode(row.node.text))
+      r.appendChild(el, label)
+      el
     r.appendChild(rootMark, el)
   r.appendChild(tree, rootMark)
   r.appendChild(parent, tree)
@@ -4405,45 +4515,9 @@ proc eventSeparatorAt*(c: EventLogColumns; paneW, x, y: int):
     if x >= edge - EventSeparatorPx and x < edge + 2:
       return (true, cols[k].col, cols[k].x - shift, edge)
 
-proc renderEventLog*(r: GpuiRenderer; parent: GpuiElement; vm: EventLogVM;
-                     pv: var PaneView): bool =
-  ## **THE EVENT LOG AS THE DESKTOP DRAWS IT** (`ui/event_log.nim`'s dense
-  ## table, `components/event_log.styl`; measured 2026-10-17): the toolbar —
-  ## the menu button, the find field, the column picker — then the header in
-  ## the code face's bold, then one row per event: the tick over its progress
-  ## bar (the event's share of the recording), the event's number, its kind's
-  ## cell and its text (`eventLogText`, `stdout: …`), the current event on
-  ## the editor's selection ground; and the pager at the pane's foot,
-  ## `Rows [first] to last of total`. Drawn from `EventLogVM`, with the
-  ## vocabulary table's own attributes (`data-view-id`, `data-row-index`,
-  ## `data-column-index`), so a press does what it did.
-  if vm.isNil or pv.report.len > 0:
-    return false
-  let rows = vm.eventRows.val
-  let shown = vm.columns.val.visibleColumns
-  let order = vm.order()
-  let start = vm.store.eventLog.loadedStart.val
-  let maxTicks = max(1'u64, vm.store.eventLog.maxRRTicks.val)
-  # The current event: the one the user selected, else the last at or
-  # before the debugger's tick (`currentIndex`, or the rows read when the
-  # engine named none) — the desktop's `.event-selected`.
-  # The selected row: the one the user selected, else the desktop's — the
-  # first event at or after the debugger's tick, or the last event when every
-  # one is before it.
-  # The selected row: the one the user selected, else the table's first —
-  # the desktop's DataTables starts with its first row `.event-selected`
-  # (measured on both a past and a future window).
-  var current = 0
-  let sel = vm.selectedRow.val
-  if sel.isSome: current = sel.get
-
-  let pane = r.createElement("div")
-  r.setStyle(pane, "display", "flex")
-  r.setStyle(pane, "flex-direction", "column")
-  r.setStyle(pane, "flex-grow", "1")
-  r.setStyle(pane, "height", "100%")
-
-  # The toolbar.
+proc drawEventToolbar(r: GpuiRenderer): GpuiElement =
+  ## The event log's toolbar: the menu button, the find field, the column
+  ## picker. It draws from nothing that moves.
   let bar = r.createElement("div")
   r.setAttribute(bar, "data-ct-event-toolbar", "true")
   r.setStyle(bar, "display", "flex")
@@ -4489,6 +4563,53 @@ proc renderEventLog*(r: GpuiRenderer; parent: GpuiElement; vm: EventLogVM;
   r.setStyle(columns, "color", DesignTokenHex[dtColorsUiTextPrimaryBodySubtle][dmDark])
   r.appendChild(columns, r.createTextNode("Columns +"))
   r.appendChild(bar, columns)
+  bar
+
+proc renderEventLog*(r: GpuiRenderer; parent: GpuiElement; vm: EventLogVM;
+                     pv: var PaneView): bool =
+  ## **THE EVENT LOG AS THE DESKTOP DRAWS IT** (`ui/event_log.nim`'s dense
+  ## table, `components/event_log.styl`; measured 2026-10-17): the toolbar —
+  ## the menu button, the find field, the column picker — then the header in
+  ## the code face's bold, then one row per event: the tick over its progress
+  ## bar (the event's share of the recording), the event's number, its kind's
+  ## cell and its text (`eventLogText`, `stdout: …`), the current event on
+  ## the editor's selection ground; and the pager at the pane's foot,
+  ## `Rows [first] to last of total`. Drawn from `EventLogVM`, with the
+  ## vocabulary table's own attributes (`data-view-id`, `data-row-index`,
+  ## `data-column-index`), so a press does what it did.
+  if vm.isNil or pv.report.len > 0:
+    return false
+  let rows = vm.eventRows.val
+  let shown = vm.columns.val.visibleColumns
+  let order = vm.order()
+  let start = vm.store.eventLog.loadedStart.val
+  let maxTicks = max(1'u64, vm.store.eventLog.maxRRTicks.val)
+  # The current event: the one the user selected, else the last at or
+  # before the debugger's tick (`currentIndex`, or the rows read when the
+  # engine named none) — the desktop's `.event-selected`.
+  # The selected row: the one the user selected, else the desktop's — the
+  # first event at or after the debugger's tick, or the last event when every
+  # one is before it.
+  # The selected row: the one the user selected, else the table's first —
+  # the desktop's DataTables starts with its first row `.event-selected`
+  # (measured on both a past and a future window).
+  var current = 0
+  let sel = vm.selectedRow.val
+  if sel.isSome: current = sel.get
+  # The toolbar, the header, each row and the pager are kept from the last
+  # draw when they are drawn from the same inputs (`element_reuse`); the
+  # containers that hold them are built anew, a few elements a draw.
+  openPanePool("eventLog", parent)
+
+  let pane = r.createElement("div")
+  r.setStyle(pane, "display", "flex")
+  r.setStyle(pane, "flex-direction", "column")
+  r.setStyle(pane, "flex-grow", "1")
+  r.setStyle(pane, "height", "100%")
+
+  # The toolbar.
+  let bar = pool.keyed("toolbar", hash(0)):
+    drawEventToolbar(r)
   r.appendChild(pane, bar)
 
   # The table: the header, then the rows.
@@ -4500,13 +4621,6 @@ proc renderEventLog*(r: GpuiRenderer; parent: GpuiElement; vm: EventLogVM;
   r.setStyle(table, "flex-shrink", "1")
   r.setStyle(table, "overflow", "hidden")
   r.setStyle(table, "font-family", MonoFontFamily)
-  let head = r.createElement("div")
-  r.setAttribute(head, EventLogHeaderAttribute, "true")
-  r.setStyle(head, "display", "flex")
-  r.setStyle(head, "flex-shrink", "0")
-  r.setStyle(head, "height", $EventHeaderPx & "px")
-  r.setStyle(head, "font-weight", "600")
-  r.setStyle(head, "color", DesignTokenHex[dtColorsUiTextPrimaryBody][dmDark])
   # PLAT-70 Part I (Horizontal-Overflow.md §5.5): the columns' widths from
   # what the drawn rows hold — each column's widest cell — by the shared
   # solver; in SCROLL the header and the rows move together by the view.
@@ -4533,7 +4647,6 @@ proc renderEventLog*(r: GpuiRenderer; parent: GpuiElement; vm: EventLogVM;
       r.setStyle(el, "min-width", $fitPx.contentUnits & "px")
     if hLeft > 0:
       r.setStyle(el, "margin-left", $(-hLeft) & "px")
-  slide(head)
   proc widthOf(col: EventLogColumn): int =
     for (c, _, w) in layout:
       if c == col: return w
@@ -4551,31 +4664,49 @@ proc renderEventLog*(r: GpuiRenderer; parent: GpuiElement; vm: EventLogVM;
     0
   let barPx = max(10, widthOf(elcTick) - 20)
   eventCuts = @[]
-  for ci, col in shown:
-    let c = eventCell(r, drawnWidthOf(col), eventCellPad(col))
-    r.setAttribute(c, "data-column-index", $ci)
-    if col == elcIndex:
-      r.setStyle(c, "justify", "center")
-    let title = if col == elcKind: "" else: eventLogColumnTitle(col)
-    r.appendChild(c, r.createTextNode(title &
-      (if order != RecordedEventOrder and order.column == col:
-         (if order.ascending: " ▲" else: " ▼")
-       else: "")))
-    if ci < shown.high:
-      # PLAT-70 Part B (§5.2): the separator's grip at the cell's right edge
-      # — a drag on it resizes the column (`main.pressEventSeparator`). AFTER
-      # the title: the header's first child is its title, which the window's
-      # click targets read (`window_clicks`, `gcpEventHeader`).
-      r.setStyle(c, "position", "relative")
-      let grip = r.createElement("div")
-      r.setAttribute(grip, EventSeparatorAttribute, $col)
-      r.setStyle(grip, "position", "absolute")
-      r.setStyle(grip, "left", $(widthOf(col) - EventSeparatorPx) & "px")
-      r.setStyle(grip, "top", "0px")
-      r.setStyle(grip, "width", $EventSeparatorPx & "px")
-      r.setStyle(grip, "height", $EventHeaderPx & "px")
-      r.appendChild(c, grip)
-    r.appendChild(head, c)
+  # Every width a cell is drawn at, for the digests below.
+  var drawnWidths, widths, lefts: seq[int]
+  for col in shown:
+    drawnWidths.add drawnWidthOf(col)
+    widths.add widthOf(col)
+    lefts.add widthOfX(col)
+  let slideDigest = hash((scrolls, fitPx.contentUnits, hLeft))
+  let head = pool.keyed("header", hash((shown, drawnWidths, widths, order,
+                                        slideDigest))):
+    let head = r.createElement("div")
+    r.setAttribute(head, EventLogHeaderAttribute, "true")
+    r.setStyle(head, "display", "flex")
+    r.setStyle(head, "flex-shrink", "0")
+    r.setStyle(head, "height", $EventHeaderPx & "px")
+    r.setStyle(head, "font-weight", "600")
+    r.setStyle(head, "color", DesignTokenHex[dtColorsUiTextPrimaryBody][dmDark])
+    slide(head)
+    for ci, col in shown:
+      let c = eventCell(r, drawnWidthOf(col), eventCellPad(col))
+      r.setAttribute(c, "data-column-index", $ci)
+      if col == elcIndex:
+        r.setStyle(c, "justify", "center")
+      let title = if col == elcKind: "" else: eventLogColumnTitle(col)
+      r.appendChild(c, r.createTextNode(title &
+        (if order != RecordedEventOrder and order.column == col:
+           (if order.ascending: " ▲" else: " ▼")
+         else: "")))
+      if ci < shown.high:
+        # PLAT-70 Part B (§5.2): the separator's grip at the cell's right edge
+        # — a drag on it resizes the column (`main.pressEventSeparator`). AFTER
+        # the title: the header's first child is its title, which the window's
+        # click targets read (`window_clicks`, `gcpEventHeader`).
+        r.setStyle(c, "position", "relative")
+        let grip = r.createElement("div")
+        r.setAttribute(grip, EventSeparatorAttribute, $col)
+        r.setStyle(grip, "position", "absolute")
+        r.setStyle(grip, "left", $(widthOf(col) - EventSeparatorPx) & "px")
+        r.setStyle(grip, "top", "0px")
+        r.setStyle(grip, "width", $EventSeparatorPx & "px")
+        r.setStyle(grip, "height", $EventHeaderPx & "px")
+        r.appendChild(c, grip)
+      r.appendChild(head, c)
+    head
   r.appendChild(table, head)
   let bodyRows = max(1, int(float(eventLogPaneHeightPx - EventRowsTopPx -
                                   EventFooterPx) / EventRowPitch))
@@ -4583,77 +4714,93 @@ proc renderEventLog*(r: GpuiRenderer; parent: GpuiElement; vm: EventLogVM;
   var line = 0
   for i, ev in rows:
     let rowTop = EventRowsTopPx + eventRowTopPx(line)
-    let row = r.createElement("div")
-    r.setAttribute(row, "data-row-index", $i)
-    r.setStyle(row, "display", "flex")
-    r.setStyle(row, "flex-shrink", "0")
-    r.setStyle(row, "height", $(eventRowTopPx(line + 1) - eventRowTopPx(line)) & "px")
-    r.setStyle(row, "color", DesignTokenHex[dtColorsUiTextPrimaryBody][dmDark])
-    slide(row)
-    if i == current:
-      r.setAttribute(row, "data-ct-event-current", "true")
-      r.setStyle(row, "background-color", EventSelectedGround)
-    if ev.rrTicks > eventLogNowTicks:
-      r.setAttribute(row, "data-ct-event-future", "true")
-      r.setStyle(row, "opacity", "0.5")
+    let rowPx = eventRowTopPx(line + 1) - eventRowTopPx(line)
+    # PLAT-70 Part B (§5.1): each cell's text fitted to its column's
+    # characters; a cut one ends in `…` and is reported for the hover and the
+    # `…` click. Worked out whether or not the row is drawn again: the cut
+    # cells are the window's to read on every draw.
+    var fits = newSeq[FittedCell](shown.len)
     for ci, col in shown:
-      case col
-      of elcTick:
-        let c = eventCell(r, widthOf(elcTick), 8)
-        r.setAttribute(c, "data-column-index", $ci)
-        r.setStyle(c, "flex-direction", "column")
-        r.setStyle(c, "items", "start")
-        let t = r.createElement("div")
-        r.setStyle(t, "height", "21px")
-        r.setStyle(t, "line-height", "20px")
-        r.setStyle(t, "font-size", "13.6px")
-        r.appendChild(t, r.createTextNode($ev.rrTicks))
-        r.appendChild(c, t)
-        let track = r.createElement("div")
-        r.setStyle(track, "display", "flex")
-        r.setStyle(track, "width", $barPx & "px")
-        r.setStyle(track, "height", "3px")
-        r.setStyle(track, "background-color", EventBarTrack)
-        let fill = r.createElement("div")
-        let share = min(1.0, float(ev.rrTicks) / float(maxTicks))
-        r.setStyle(fill, "width", $int(round(share * float(barPx))) & "px")
-        r.setStyle(fill, "height", "3px")
-        r.setStyle(fill, "background-color", EventBarFill)
-        r.appendChild(track, fill)
-        r.appendChild(c, track)
-        r.appendChild(row, c)
-      else:
-        let c = eventCell(r, drawnWidthOf(col), eventCellPad(col))
-        r.setAttribute(c, "data-column-index", $ci)
-        if col == elcIndex:
-          # `dt-type-num`, centred in its column.
-          r.setStyle(c, "justify", "center")
-        # PLAT-70 Part B (§5.1): the cell's text fitted to its column's
-        # characters; a cut one ends in `…` and is reported for the hover and
-        # the `…` click.
-        let full = eventCellTextOf(ev, col)
-        let cellX = widthOfX(col)
-        let room = widthOf(col) - eventCellPad(col)
-        # PLAT-71 (§9.2): the location loses its middle, a number is never
-        # cut silently, the output loses its end.
-        let kind = cutKindOf(EventLogTablePane, $col)
-        let fitted = if eventLogPaneWidthPx <= 0: fitCell(full, high(int) div 2)
-                     else: fitCellAs(full, cellsInPx(room), kind)
-        if fitted.truncated:
-          r.setAttribute(c, TableCutAttribute, $col)
-          let drawn = if fitted.midMarker > 0:
-                        fitted.text[0 ..< fitted.midMarker].runeLen + 1
-                      else: fitted.text.runeLen
-          let textX = cellX + eventCellPad(col)
-          eventCuts.add CutCell(row: rowTop,
-                                height: eventRowTopPx(line + 1) -
-                                        eventRowTopPx(line),
-                                col: cellX - hLeft, width: widthOf(col),
-                                ellipsisCol: textX - hLeft + pxOfText(drawn - 1),
-                                ellipsisWidth: pxOfText(1),
-                                key: $ev.eventIndex, column: $col, full: full)
-        r.appendChild(c, r.createTextNode(fitted.text))
-        r.appendChild(row, c)
+      if col == elcTick: continue
+      let full = eventCellTextOf(ev, col)
+      let cellX = widthOfX(col)
+      let room = widthOf(col) - eventCellPad(col)
+      # PLAT-71 (§9.2): the location loses its middle, a number is never
+      # cut silently, the output loses its end.
+      let kind = cutKindOf(EventLogTablePane, $col)
+      let fitted = if eventLogPaneWidthPx <= 0: fitCell(full, high(int) div 2)
+                   else: fitCellAs(full, cellsInPx(room), kind)
+      fits[ci] = fitted
+      if fitted.truncated:
+        let drawn = if fitted.midMarker > 0:
+                      fitted.text[0 ..< fitted.midMarker].runeLen + 1
+                    else: fitted.text.runeLen
+        let textX = cellX + eventCellPad(col)
+        eventCuts.add CutCell(row: rowTop, height: rowPx,
+                              col: cellX - hLeft, width: widthOf(col),
+                              ellipsisCol: textX - hLeft + pxOfText(drawn - 1),
+                              ellipsisWidth: pxOfText(1),
+                              key: $ev.eventIndex, column: $col, full: full)
+    let isCurrent = i == current
+    let isFuture = ev.rrTicks > eventLogNowTicks
+    var fitTexts: seq[(string, bool)]
+    for f in fits: fitTexts.add (f.text, f.truncated)
+    # The row's position is not in its digest: a kept row that moved (the
+    # log scrolled) has its `data-row-index` set in place below, and its
+    # listener reads the index when it fires (`window_clicks.wireOne`).
+    let digest = hash((ev, isCurrent, isFuture, shown, drawnWidths, widths,
+                       fitTexts, barPx, maxTicks, rowPx, slideDigest))
+    let row = pool.keyed("event:" & $ev.eventIndex, digest):
+      let row = r.createElement("div")
+      r.setStyle(row, "display", "flex")
+      r.setStyle(row, "flex-shrink", "0")
+      r.setStyle(row, "height", $rowPx & "px")
+      r.setStyle(row, "color", DesignTokenHex[dtColorsUiTextPrimaryBody][dmDark])
+      slide(row)
+      if isCurrent:
+        r.setAttribute(row, "data-ct-event-current", "true")
+        r.setStyle(row, "background-color", EventSelectedGround)
+      if isFuture:
+        r.setAttribute(row, "data-ct-event-future", "true")
+        r.setStyle(row, "opacity", "0.5")
+      for ci, col in shown:
+        case col
+        of elcTick:
+          let c = eventCell(r, widthOf(elcTick), 8)
+          r.setAttribute(c, "data-column-index", $ci)
+          r.setStyle(c, "flex-direction", "column")
+          r.setStyle(c, "items", "start")
+          let t = r.createElement("div")
+          r.setStyle(t, "height", "21px")
+          r.setStyle(t, "line-height", "20px")
+          r.setStyle(t, "font-size", "13.6px")
+          r.appendChild(t, r.createTextNode($ev.rrTicks))
+          r.appendChild(c, t)
+          let track = r.createElement("div")
+          r.setStyle(track, "display", "flex")
+          r.setStyle(track, "width", $barPx & "px")
+          r.setStyle(track, "height", "3px")
+          r.setStyle(track, "background-color", EventBarTrack)
+          let fill = r.createElement("div")
+          let share = min(1.0, float(ev.rrTicks) / float(maxTicks))
+          r.setStyle(fill, "width", $int(round(share * float(barPx))) & "px")
+          r.setStyle(fill, "height", "3px")
+          r.setStyle(fill, "background-color", EventBarFill)
+          r.appendChild(track, fill)
+          r.appendChild(c, track)
+          r.appendChild(row, c)
+        else:
+          let c = eventCell(r, drawnWidthOf(col), eventCellPad(col))
+          r.setAttribute(c, "data-column-index", $ci)
+          if col == elcIndex:
+            # `dt-type-num`, centred in its column.
+            r.setStyle(c, "justify", "center")
+          if fits[ci].truncated:
+            r.setAttribute(c, TableCutAttribute, $col)
+          r.appendChild(c, r.createTextNode(fits[ci].text))
+          r.appendChild(row, c)
+      row
+    r.setAttributeOnce(row, "data-row-index", $i)
     r.appendChild(table, row)
     inc line
     # The event's full text under its row (§5.3), in its column.
@@ -4694,25 +4841,27 @@ proc renderEventLog*(r: GpuiRenderer; parent: GpuiElement; vm: EventLogVM;
   r.setStyle(spring, "flex-grow", "1")
   r.appendChild(pane, spring)
   let total = eventLogTotalOf(start, rows.len, vm.totalEventCount.val)
-  let foot = r.createElement("div")
-  r.setAttribute(foot, EventLogFooterAttribute, "true")
-  r.setAttribute(foot, EventLogTotalAttribute, $total)
-  r.setStyle(foot, "display", "flex")
-  r.setStyle(foot, "items", "center")
-  r.setStyle(foot, "flex-shrink", "0")
-  r.setStyle(foot, "height", $EventFooterPx & "px")
-  r.setStyle(foot, "padding-left", "8px")
-  r.setStyle(foot, "gap", "3px")
-  r.setStyle(foot, "font-family", WindowFontFamily)
-  r.setStyle(foot, "font-size", "12px")
-  r.setStyle(foot, "color", DesignTokenHex[dtColorsUiTextPrimaryBody][dmDark])
-  r.appendChild(foot, r.createTextNode("Rows"))
-  let firstBox = eventField(r, 54, 20)
-  r.setStyle(firstBox, "padding-left", "6px")
-  r.appendChild(firstBox, r.createTextNode($(if rows.len > 0: start + 1 else: 0)))
-  r.appendChild(foot, firstBox)
-  r.appendChild(foot, r.createTextNode("to " & $(start + rows.len) & " of " &
-                                       $total))
+  let foot = pool.keyed("pager", hash((total, start, rows.len))):
+    let foot = r.createElement("div")
+    r.setAttribute(foot, EventLogFooterAttribute, "true")
+    r.setAttribute(foot, EventLogTotalAttribute, $total)
+    r.setStyle(foot, "display", "flex")
+    r.setStyle(foot, "items", "center")
+    r.setStyle(foot, "flex-shrink", "0")
+    r.setStyle(foot, "height", $EventFooterPx & "px")
+    r.setStyle(foot, "padding-left", "8px")
+    r.setStyle(foot, "gap", "3px")
+    r.setStyle(foot, "font-family", WindowFontFamily)
+    r.setStyle(foot, "font-size", "12px")
+    r.setStyle(foot, "color", DesignTokenHex[dtColorsUiTextPrimaryBody][dmDark])
+    r.appendChild(foot, r.createTextNode("Rows"))
+    let firstBox = eventField(r, 54, 20)
+    r.setStyle(firstBox, "padding-left", "6px")
+    r.appendChild(firstBox, r.createTextNode($(if rows.len > 0: start + 1 else: 0)))
+    r.appendChild(foot, firstBox)
+    r.appendChild(foot, r.createTextNode("to " & $(start + rows.len) & " of " &
+                                         $total))
+    foot
   r.appendChild(pane, foot)
   r.appendChild(parent, pane)
   true
