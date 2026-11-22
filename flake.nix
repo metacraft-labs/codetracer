@@ -467,7 +467,7 @@
     # from 8b8faa8). Move this input and repro.lock's nim-cli-spec
     # (`repro lock update`) in the change that moves `io-mon` past efe6dc5.
     nim-cli-spec = {
-      url = "github:metacraft-labs/nim-cli-spec/c6a8806136e9d3c98875df16502841c3b627e9b4";
+      url = "github:metacraft-labs/nim-cli-spec/5380e20c8866e49e000e8070f692f54d303b5658";
       flake = false;
     };
 
