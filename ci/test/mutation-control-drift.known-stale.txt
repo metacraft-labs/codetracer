@@ -276,7 +276,7 @@ src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/fronten
 src/frontend/tui/tests/plat70b-table-mutation-control.sha256	src/frontend/tui/app/views/shell.nim	2ffb13fa4541be85cde288716f6194d877ab06069ee57f2b4386f3edc9e7afae	df5ac6b9934a2c537ba95bde700e1484fd5193a037a88c60135c5bb0982933ea
 src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	src/frontend/tui/app/tui_app.nim	5e29fc96fe73c25b52f244228fa9880cac9205a1607f7214b733c6c0dcd3e647	8347f6dd5e98fae5b047d60a282bfbd85d0f6bb70c34ba82a2149356942971f3
 src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/viewmodel/views/isonim_low_level_code_view.nim	efdc4537b69d3f243da39f93f2ac218aab72ec4af8e61bd94990fad61fe178b2	4639999928ec77f6ba9cddee0bd6dd5a96770405721896505ff4679c94536dea
-src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/viewmodel/views/isonim_state_view.nim	afe19051c4d4f5f4622cf774a9c8af2a892c5bfb162561b65a6e7d23fa08ef25	8e1de68d24e6d9f91cc832493a6f249b0c1ad837817abec409035700ec589076
+src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/viewmodel/views/isonim_state_view.nim	afe19051c4d4f5f4622cf774a9c8af2a892c5bfb162561b65a6e7d23fa08ef25	06380e7b2269a990f491704e429bcb6ce32f627c6d5f9df6327765f9ff58a5a4
 
 # The Test Results pane leaves a running test's duration empty
 # (test_results_vm.rowDuration, with one added check in the PLAT-53 unit test),
@@ -676,7 +676,7 @@ src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/headle
 ci/test/plat70i-fit-mutation-control.sha256	src/frontend/viewmodel/views/isonim_event_log_view.nim	db9c4c6924195d6630347f931128a1d0a9d7c22f5b784749911716d1d5ac556a	356970eb9bfa553f52f5c2077cdcf54e54d4b86ee3da638e63f0c8f05a311f96
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/viewmodel/views/isonim_event_log_view.nim	db9c4c6924195d6630347f931128a1d0a9d7c22f5b784749911716d1d5ac556a	356970eb9bfa553f52f5c2077cdcf54e54d4b86ee3da638e63f0c8f05a311f96
 src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/viewmodel/views/isonim_event_log_view.nim	db9c4c6924195d6630347f931128a1d0a9d7c22f5b784749911716d1d5ac556a	356970eb9bfa553f52f5c2077cdcf54e54d4b86ee3da638e63f0c8f05a311f96
-src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/viewmodel/views/isonim_state_view.nim	2bf5cf331cabc68c9a48c2f6a055ae5e8f473d9992dced21a86f1848e346aa34	8e1de68d24e6d9f91cc832493a6f249b0c1ad837817abec409035700ec589076
+src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/viewmodel/views/isonim_state_view.nim	2bf5cf331cabc68c9a48c2f6a055ae5e8f473d9992dced21a86f1848e346aa34	06380e7b2269a990f491704e429bcb6ce32f627c6d5f9df6327765f9ff58a5a4
 src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend/viewmodel/views/isonim_event_log_view.nim	db9c4c6924195d6630347f931128a1d0a9d7c22f5b784749911716d1d5ac556a	356970eb9bfa553f52f5c2077cdcf54e54d4b86ee3da638e63f0c8f05a311f96
 src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	f79e6d078f444915a1d74da920345a8a260a98a862fb302a89debb93d4218c0a	290d520a6c43b39b02486ce29a7e6e8b3834bc1c1bd67c9c04f5b3a026b7cbe3
 # src/frontend/tui/app/runtime.nim, ci/lib/test-lane-files.sh, ci/test/vm-unit-wasm-parity.sh: moved by the ct-lens package (lane rows) and the
@@ -759,8 +759,8 @@ src/frontend/tui/tests/plat57-find-in-files-mutation-control.sha256	src/frontend
 src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend/viewmodel/input/dom_pane_presses.nim	c81194a315115893a9bacf18b75fb8c4ee3c1264d558dc3f97ea9ff10cf8a12a	2c3e2736fa6bf7b9f86296c0fcce26e018cc7047185cb4204872eeb2b63186a0
 src/frontend/tui/tests/plat70d-grep-mutation-control.sha256	src/frontend/viewmodel/views/isonim_search_results_view.nim	f46ce588770cdc9b283d2d8cd33333962f15391bc9343b3207b3f55f243c531d	f0ad78aa5b0d77803be89e2fad8df7c27cf849ae20b3a5bb1fd7ea864cba826d
 src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/run-nim-test-lane.sh	3faa671c35896f38d4e764ee8cdf379953e6adeec265a186ab966956f4f79811	3466f2374fa109b34c6326f47f0bccff13a5591911f251156bc5a4255f010916
-src/frontend/viewmodel/tests/unit/plat18-marshalling-mutation-control.sha256	src/frontend/viewmodel/views/isonim_state_view.nim	68a33a4b16b1e15562812871ca34f0a159dd99b2d46ea6044ca8a32aad31ceca	8e1de68d24e6d9f91cc832493a6f249b0c1ad837817abec409035700ec589076
-src/frontend/viewmodel/tests/unit/plat18-marshalling-mutation-control.sha256	src/frontend/viewmodel/views/isonim_calltrace_view.nim	c996fd7c21e2c4571a7fdf84a475c3bb9b8fcb1767536f1ef0b1d0c07a9bfe04	3a398cb37f521bf15de6e524138eb911d9faced298286d92b7bee80ebe226247
+src/frontend/viewmodel/tests/unit/plat18-marshalling-mutation-control.sha256	src/frontend/viewmodel/views/isonim_state_view.nim	68a33a4b16b1e15562812871ca34f0a159dd99b2d46ea6044ca8a32aad31ceca	06380e7b2269a990f491704e429bcb6ce32f627c6d5f9df6327765f9ff58a5a4
+src/frontend/viewmodel/tests/unit/plat18-marshalling-mutation-control.sha256	src/frontend/viewmodel/views/isonim_calltrace_view.nim	c996fd7c21e2c4571a7fdf84a475c3bb9b8fcb1767536f1ef0b1d0c07a9bfe04	2697620b8aa813e868301bf028930639c30e3a78c839bd446a597c13dec886fc
 
 # 2026-11-21, the GPUI plugin harness (gpui-plugins, 10/10 KILLED at 467102fb217 plus the
 # footer fix) was graded before plugin_processes.nim and leaves.nim moved on agents; it
@@ -882,3 +882,9 @@ src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/front
 src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/process_link.nim	92855333df47ca9e0a3bdb7b026ff27a9620efda405af90a379c7fce665fd526	2f60f11cafcf6c5af6320c6a004717dec0e0277cdf49c7439673f02c8bb44513
 src/frontend/viewmodel/tests/unit/plat7-boundary-mutation-control.sha256	ci/test/plugin-reactive-boundary.sh	6e9f1bda4d55463800d5d327bdc5a960c330d6c63a3f7205ebe6797b705dff86	c8ae759cff230f3e6f1d51b39cb75d93d86a67ec5d2b2de34b26586223d6a9a8
 src/frontend/viewmodel/tests/unit/plat8-io-mutation-control.sha256	ci/test/plugin-reactive-boundary.sh	6e9f1bda4d55463800d5d327bdc5a960c330d6c63a3f7205ebe6797b705dff86	c8ae759cff230f3e6f1d51b39cb75d93d86a67ec5d2b2de34b26586223d6a9a8
+
+# 2026-11-22: -d:ctPlat18Slice removed from the two views; the slice, its probe and the
+# plat18-marshalling harness build -d:ctWasmCore (plat18-marshalling is re-graded for it;
+# plat70f owes a re-grade for the state view's comment-only change).
+src/frontend/viewmodel/tests/unit/plat18-marshalling-mutation-control.sha256	src/frontend/viewmodel/tests/manual/plat18_marshalling_probe.nim	ea6ca25922a41dee1b6474a6d3f3c13644d9a44f2d219df8ea2060b5f968880d	2d5aaed15ece9c997a392ce081cd4f19b95baa2f2e0ce6a6460d5d90eceec134
+src/frontend/viewmodel/tests/unit/plat18-marshalling-mutation-control.sha256	ci/test/plat18-electron-slice.sh	0f543c736c46517893431918cf6ec722b17970d63856948d551d5afaeff5fce3	351031a09dbcce39bbe91557046ecb904c7fa5d64a277dfa331c2cb1cb55396f

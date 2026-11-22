@@ -232,7 +232,7 @@ class Arm:
     expect: str = "verdict-fails"   # "verdict-fails" | "script-fails"
 
 
-# THE PROBE IS COMPILED WITH `-d:ctPlat18Slice`, which is what brings the
+# THE PROBE IS COMPILED WITH `-d:ctWasmCore`, which is what brings the
 # wire/meter cross-check into it. Without the define the probe measures the
 # meter alone and six of the nine arms below have nothing to break.
 G_PROBE = Grader("probe", PROBE)
@@ -1294,12 +1294,12 @@ def run_grader(g: Grader) -> RunResult:
     cache = CACHE_ROOT / "probe"
     deps_cache = CACHE_ROOT / "probe-deps"
     artifact = CACHE_ROOT / "probe.bin"
-    # `-d:ctPlat18Slice` is what brings the wire/meter cross-check in, and
+    # `-d:ctWasmCore` is what brings the wire/meter cross-check in, and
     # `--mm:orc` is named rather than defaulted (§12b: a measurement names its
     # memory manager, and so does the run that grades one). ONE flag list for
     # both passes below, so the pass that is checked and the pass that is run
     # resolve their imports from the same command line.
-    flags = ["--hints:off", "--warnings:off", "--mm:orc", "-d:ctPlat18Slice",
+    flags = ["--hints:off", "--warnings:off", "--mm:orc", "-d:ctWasmCore",
              "--path:src/frontend/viewmodel"]
     # ISONIM_SRC IS THE MUTATED TREE'S, whatever the caller's was. It is the
     # only lever there is: config.nims adds it after the sibling, and is read
