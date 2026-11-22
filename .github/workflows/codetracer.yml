@@ -3418,6 +3418,16 @@ jobs:
         if: ${{ !cancelled() }}
         run: nix develop .#devShells.x86_64-linux.default --command just test-vm-unit-wasm
 
+      - name: The JavaScript ViewModel lane runs what ships under nim js
+        if: ${{ !cancelled() }}
+        # The panes' ViewModels run in the WebAssembly core; `vm-unit-js`
+        # keeps the suites whose subject a `nim js` bundle still compiles (the
+        # renderer shell, the main process, the VS Code host and panel,
+        # BlockTracer's Embed SDK). This builds those bundles' module graphs
+        # and fails when the lane's list of unshipped suites disagrees with
+        # them in either direction.
+        run: nix develop .#devShells.x86_64-linux.default --command bash -c 'source scripts/detect-siblings.sh && just test-vm-unit-js-scope'
+
       - name: PLAT-17 gate — the WASM lane's counts EQUAL native's
         if: ${{ !cancelled() }}
         # The step above only says the wasm lane is green, and
