@@ -238,6 +238,30 @@ func gazeStories(): seq[CodeTracerStory] =
            "the key that resumes it"),
   ]
 
+func processSwitcherStories(): seq[CodeTracerStory] =
+  ## A multi-process recording's session tab with its process switcher
+  ## (`agent-harbor-process-switcher`, CTF-P2c step 5, study §2.6 and D25):
+  ## the recording switcher's numbered buttons for its processes, over the
+  ## invented `envelope-flow` recording
+  ## (`stories/agent_harbor_process_switcher_stories.nim`).
+  const surface = "agent-harbor-process-switcher"
+  func ps(exportName, name, fixture, description: string): CodeTracerStory =
+    story(exportName, name, "view", surface, fixture,
+          "agent-harbor-process-switcher-" & fixture, description)
+  @[
+    ps("ProcessSwitcher", "Process Switcher", "three",
+       "A multi-process recording's tab with its processes 1 2 3; each button's " &
+         "tooltip names the process, its pid and binary"),
+    ps("ProcessSwitcherCorrelation", "Process Switcher: Correlation Marker", "correlation",
+       "A correlation marker at the front end leads to the back end: process 2 is " &
+         "ringed until the reader goes there"),
+    ps("ProcessSwitcherMany", "Process Switcher: Many Processes", "many",
+       "Eight processes: five buttons and +3, which carries the failed worker's " &
+         "error severity"),
+    ps("ProcessSwitcherLoading", "Process Switcher: Loading and Missing", "loading-and-missing",
+       "The back end's trace still loading, the worker's missing from the bundle"),
+  ]
+
 func agentHarborSection(): CodeTracerStorySection =
   ## CodeTracer as an Agent Harbor front-end: the prototypes of the panels
   ## that show an Agent Harbor fleet, over the viewmodels of
@@ -251,7 +275,8 @@ func agentHarborSection(): CodeTracerStorySection =
   ## INV-C-31, INV-P2-38 (its result commands and search);
   ## INV-C-38 (an agent's suggested UI actions, CTF-P2c step 3);
   ## INV-C-37 (the control center) and INV-C-40 (the gaze mark), CTF-P2c
-  ## step 4.
+  ## step 4; INV-C-33's multi-process half (the process switcher), CTF-P2c
+  ## step 5.
   CodeTracerStorySection(
     title: "CodeTracer/Agent Harbor",
     group: "Agent Harbor",
@@ -787,7 +812,7 @@ func agentHarborSection(): CodeTracerStorySection =
       panel("InboxAnswerFailed", "Inbox: Answer Failed", "agent-harbor-inbox-item", "answer-failed", "agent-harbor-inbox-item",
             "The scripted source refused the answer"),
     ] & sessionActivityStories() & suggestedActionsStories() & controlCenterStories() &
-      gazeStories() & @[
+      gazeStories() & processSwitcherStories() & @[
       # The progress pie on its own (agent_harbor_pie_stories.nim): every
       # role at each share and with no known progress, on every ground it
       # sits on. No panel, tab or line draws it yet.

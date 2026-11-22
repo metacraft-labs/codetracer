@@ -159,9 +159,15 @@ const
     ## The scope the Agent Harbor Inbox's keys are routed in (the Inbox panel
     ## and an inbox item's page, `agent_harbor_changes_inbox_words`). A
     ## prototype drawn in story hosts, no pane of the layout yet.
+  ProcessSwitcherScope* = "processSwitcher"
+    ## The scope a multi-process recording's process switcher routes its
+    ## number keys and presses in (the recording switcher's buttons inside
+    ## the session tab, `agent_harbor_process_switcher_words`). A prototype
+    ## drawn in story hosts and no pane of the layout, as the composer.
   NonPaneScopes* = [TopBarScope, BreakpointConditionScope, StoryPlaybackScope,
                     SessionActivityScope, ComposerScope, ResultsScope,
-                    ControlCenterScope, ChangesPanelScope, InboxPanelScope]
+                    ControlCenterScope, ChangesPanelScope, InboxPanelScope,
+                    ProcessSwitcherScope]
     ## The scopes a press names in `paneKind` that are not panes.
 
 func element*(kind: ElementKind; id: string; paneKind = ""): ScopeElement =

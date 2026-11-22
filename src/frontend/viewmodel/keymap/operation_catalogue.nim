@@ -108,6 +108,9 @@ const
   ControlCenterTable* = PaneTablePrefix & "controlCenter"
     ## The control center's keys (`agent_harbor_control_center_words`), while
     ## it has the focus outside its launch form.
+  ProcessSwitcherTable* = PaneTablePrefix & "processSwitcher"
+    ## A multi-process recording's process switcher's keys
+    ## (`agent_harbor_process_switcher_words`), while it has the focus.
   ResultsTable* = PaneTablePrefix & "results"
     ## The omnibox's result commands' keys (`agent_harbor_results_words`),
     ## while their field or their sheet has the focus.
@@ -668,6 +671,16 @@ const
     # that pauses and resumes gaze tracking (Eye-Tracking-Context "Privacy
     # and control"), and a press on the mark.
     op("gaze.toggle-pause", GlobalTable, "Gaze: Pause or Resume Tracking"),
+    # A multi-process recording's process switcher
+    # (`agent_harbor_process_switcher_words`, P2c study D82): the next and
+    # previous process anywhere in the window, and a process by its number
+    # while the switcher has the focus or by a press on its button. Following
+    # a correlation marker is the marker's own jump (Correlation-Markers.md
+    # §5.3), not an operation of the switcher.
+    op("process-switcher.next", GlobalTable, "Process Switcher: Next Process"),
+    op("process-switcher.previous", GlobalTable, "Process Switcher: Previous Process"),
+    op("process-switcher.select", ProcessSwitcherTable,
+       "Process Switcher: Show Process by Number", oaNumber),
     # The omnibox composer (`agent_harbor_composer_words`): send, move the
     # destination, and what a press on its chips, rows and Recent does.
     op("composer.send", ComposerTable, "Composer: Send"),

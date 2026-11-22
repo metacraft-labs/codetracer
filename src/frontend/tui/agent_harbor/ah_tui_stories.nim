@@ -47,6 +47,8 @@ import ./ah_tui_changes_panel
 import ./ah_tui_inbox_panel
 import ../../stories/agent_harbor_changes_inbox_stories
 import isonim/core/owner
+import ./ah_tui_process_switcher
+import ../../stories/agent_harbor_process_switcher_stories
 import ../app/views/agent_activity_pane
 import ../app/layout/cells
 import ../../viewmodel/agent_harbor_activity_cards
@@ -62,7 +64,8 @@ import ../../../common/key_names
 
 export agent_harbor_stories, codetracer_stories, emit_storybook_stories, ah_tui_canvas,
   ah_tui_composer, ah_tui_results, ah_tui_control_center, ah_tui_gaze_mark,
-  ah_tui_changes_panel, ah_tui_inbox_panel, agent_harbor_changes_inbox_stories
+  ah_tui_changes_panel, ah_tui_inbox_panel, agent_harbor_changes_inbox_stories,
+  ah_tui_process_switcher
 
 const
   TuiAgentHarborSurfaces* = [
@@ -82,6 +85,7 @@ const
     "agent-harbor-changes",
     "agent-harbor-inbox",
     "agent-harbor-inbox-item",
+    "agent-harbor-process-switcher",
   ]
     ## Every surface of the Agent Harbor section this module draws.
   TuiChangesInboxSurfaces* = ["agent-harbor-changes", "agent-harbor-inbox",
@@ -114,6 +118,9 @@ proc sizesOf*(surface: string): seq[(string, int, int)] =
   if surface == "agent-harbor-control-center":
     result.add TuiPanelSize
     result.add TuiWideSize
+  if surface == "agent-harbor-process-switcher":
+    # The recording's tab sits in whatever window holds the recording.
+    result.add TuiPanelSize
 
 type
   AhTuiMount* = ref object
@@ -154,6 +161,8 @@ type
       ## The spinner of a submitting action turns (`idle`); off in every
       ## test and capture, so a capture never moves.
     lastSpin: float
+    processes*: ProcessSwitcherVM
+      ## A multi-process recording's process switcher (its stories only).
     cards*: ActivityAgainstCards
       ## The comparison story's cards (`agent_harbor_activity_cards`); unset
       ## for any other story.
@@ -331,6 +340,37 @@ proc gazeKey*(m: AhTuiMount; token: string): bool =
   m.draw()
   true
 
+let ProcessSwitcherScopePath = @[element(ekWindow, "window"), pane(ProcessSwitcherScope)]
+  ## Where the process switcher's number keys and presses resolve; its next
+  ## and previous keys are window rows, found from here too.
+
+proc pressProcessSwitcher*(m: AhTuiMount; operation, target: string): bool {.discardable.} =
+  ## A press on a process's button, resolved in the `processSwitcher` scope;
+  ## drawn again.
+  if m.isNil or m.processes.isNil: return false
+  let outcome = resolveElementPress(routerResolver(m.router, SessionFacts()),
+                                    ProcessSwitcherScopePath, ButtonElementKind,
+                                    operation, {}, "Click")
+  m.lastOperation = outcome.operation
+  if not m.processes.runProcessSwitcherPress(outcome.operation, target): return false
+  m.draw()
+  true
+
+proc processSwitcherKey*(m: AhTuiMount; token: string): bool =
+  ## A key while the process switcher story is shown, ROUTED in its scope
+  ## (the digits pick a process; `Ctrl+Alt+PageDown` / `PageUp`, window
+  ## rows, step through them); drawn again when it moved the switcher.
+  if m.processes.isNil: return false
+  let name = keyName(token)
+  if name.len == 0: return false
+  let res = m.router.route(SessionFacts(), ProcessSwitcherScopePath, nmNormal, name, 0)
+  m.lastOperation = if res.kind == erOperation: res.operation else: ""
+  if res.kind != erOperation or
+     not m.processes.runProcessSwitcherOperation(res.operation, res.argument):
+    return false
+  m.draw()
+  true
+
 let ResultsScopePath = @[element(ekWindow, "window"), pane(ResultsScope)]
   ## Where the results' keys and presses resolve.
 
@@ -453,6 +493,13 @@ proc draw*(m: AhTuiMount) =
     let mount = m
     c.drawGazeStory(m.gaze, top, 0, m.cols, h, GazeStoryStatusItemsTui, proc(operation: string) =
       discard mount.pressGaze(operation))
+  of ProcessSwitcherSurface:
+    let mount = m
+    c.drawProcessSwitcherStory(m.processes, top, 0, m.cols, h, OtherTabTitle,
+                               processChord(ProcessNextOperation),
+                               processChord(ProcessPreviousOperation),
+                               RecordingSwitcherSlot, proc(operation, target: string) =
+      discard mount.pressProcessSwitcher(operation, target))
   of PieStorySurface: c.drawPieStory(m.fixture, top, 0, m.cols, h)
   of "agent-harbor-session-activity":
     let mount = m
@@ -585,6 +632,7 @@ proc mountAgentHarborStoryTui*(surface, fixture: string; cols, rows: int;
       else:
         m.inboxItem = createInboxItemStoryVM(fixture)
         m.inboxItem.setVisible(true)
+  of ProcessSwitcherSurface: result.processes = createProcessSwitcherStoryVM(fixture)
   else: discard
   if not pb.isNil: pb.openAtMoment(moment)
   result.draw()
@@ -749,6 +797,7 @@ proc dispose*(m: AhTuiMount) =
   if m.suggestion != nil: m.suggestion.dispose()
   if m.center != nil: m.center.dispose()
   if m.gaze != nil: m.gaze.dispose()
+  if m.processes != nil: m.processes.dispose()
 
 proc rowsOf*(m: AhTuiMount): seq[StyledRow] =
   ## The screen as styled rows, for `styledRowsTree`.
@@ -776,7 +825,7 @@ proc handleInput*(m: AhTuiMount; token: string): bool =
   if not ok:
     return m.playbackKey(token) or m.activityKey(token) or m.composerKey(token) or
            m.resultsKey(token) or m.controlCenterKey(token) or m.gazeKey(token) or
-           m.changesKey(token) or m.inboxKey(token)
+           m.changesKey(token) or m.inboxKey(token) or m.processSwitcherKey(token)
   if (button and 64) != 0:
     # The wheel: SGR reports a notch up as button 64, down as 65
     # (https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h2-Mouse-Tracking).

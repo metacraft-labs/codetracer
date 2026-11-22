@@ -11,7 +11,10 @@
 ## caption bar's small square controls: the active one raised like the
 ## active session tab, a loading one quiet, a failed one in the error text
 ## colour, a missing one in the warning colour; each tooltip names the
-## recording, its revision and its origin.
+## recording, its revision and its origin. A recording a correlation marker
+## leads to (a multi-process recording's process, P2c study D25, D81) is
+## ringed (`ah-rec-ringed`) until the reader follows it, and so is `+N` when
+## it hides that recording.
 
 import isonim/core/[signals, computation]
 import isonim/dsl/[ui, components]
@@ -47,7 +50,8 @@ proc renderRecordingButton[R](r: R; rb: RecordingButton;
   let res = ui(r):
     button(ref = node,
            class = "ah-rec-button ah-rec-" & $rb.state &
-                   (if rb.active: " ah-rec-active" else: ""),
+                   (if rb.active: " ah-rec-active" else: "") &
+                   (if rb.ringed: " ah-rec-ringed" else: ""),
            title = rb.tooltip,
            onclick = proc() = invokeSelect(onSelect, id)):
       text $rb.number & stateSuffix(rb.state)
@@ -73,7 +77,8 @@ proc renderRecordingSwitcher*[R, N](r: R; buttons: RecordingButtons;
     let hidden = hiddenRecordings(buttons.hiddenStates)
     let more = ui(r):
       span(class = "ah-rec-more" &
-                   (if hidden.severity != hsNone: " ah-att-" & $hidden.severity else: ""),
+                   (if hidden.severity != hsNone: " ah-att-" & $hidden.severity else: "") &
+                   (if buttons.hiddenRinged: " ah-rec-ringed" else: ""),
            title = chipTitle(hidden, "recording", "recordings")):
         text "+" & $buttons.hidden
     r.appendRendered(host, more)
