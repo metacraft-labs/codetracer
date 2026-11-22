@@ -7263,18 +7263,16 @@ jobs:
             # the lock, as for the trace-format pair above.
             codetracer-native-backend=9fcfc0adfd81894bf82fc75efee21146caa1b59d
             codetracer-visual-replay=d1bf6605a818b192ab03b8f7b187858e3d3804d5
-            # nim-entrypoints BY COMMIT, for
-            # src/ct_test/cs_m14_ct_test_collects_through_entry_test.nim only: its
-            # fixtures compile against nim-entrypoints' tests entry (`--run-exact`),
-            # which the revision repro.lock records predates. The same suite also
-            # needs reprobuild's libs/ct_test_unittest_parallel with the tests
-            # entry (reprobuild 72fc7fb8b or later). reprobuild cannot be listed
-            # here at that commit: a sibling that is also a flake input must be
-            # cloned at the rev flake.lock locks (ci/test/sibling-input-branch-test.sh),
-            # so the suite needs codetracer's reprobuild
-            # pin moved to one that carries the shim's tests entry, and then
-            # `reprobuild` added here at that rev.
+            # nim-entrypoints and reprobuild BY COMMIT, for
+            # src/ct_test/cs_m14_ct_test_collects_through_entry_test.nim: its
+            # fixtures compile against nim-entrypoints' tests entry (`--run-exact`)
+            # and against reprobuild's libs/ct_test_unittest_parallel with the
+            # tests entry (reprobuild 72fc7fb8b or later). Both are the revisions
+            # repro.lock records; reprobuild is also a flake input, so it is cloned
+            # at the rev flake.lock locks (ci/test/sibling-input-branch-test.sh).
+            # Move these lines with the lock.
             nim-entrypoints=d7edafaa9df1c7ae77d469754a463d4a512ec928
+            reprobuild=2f7cb5db5289fa1e9e060281ebe8c095bf9669e9
 
       - name: Allow direnv in the cloned recorder siblings
         # scripts/build-siblings.sh runs every sibling build as
