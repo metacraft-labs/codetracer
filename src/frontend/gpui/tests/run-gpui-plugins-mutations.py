@@ -46,6 +46,8 @@ MOVE = S + "a plugin's relayed step arrives as the window's own control"
 LEAF = S + "a contributed leaf draws its plugin's view through the GPUI binding"
 KEYS = S + ("keys: the layer takes Escape, the user's row beats the plugin "
             "pass, the chord recovers")
+HOLDER = S + ("a plugin killed while it holds the keyboard: its layer goes at "
+              "once, the next key is the window's")
 
 ARMS = [
     ("G1", [(DOOR, '  if k == "esc": "escape" else: k', "  k")],
@@ -94,6 +96,15 @@ ARMS = [
               "  if statusNote.len == 0 and not p.isNil:\n    let items = p.statusText")],
      [(SUITE, KEYS)],
      "a note on the footer hides the plugins' status items"),
+    ("G11", [(DOOR, "    if s.isNil or s.breaker != bsOpen: continue",
+              "    if s.isNil: continue")],
+     [(SUITE, HOLDER)],
+     "§11.7.5: a re-enabled plugin still offers its fault's Re-enable"),
+    ("G12", [(DOOR, "    p.consentPaletteEntries(GpuiPluginsTargetPrefix) & p.faultEntries",
+              "    p.consentPaletteEntries(GpuiPluginsTargetPrefix)")],
+     [(SUITE, HOLDER)],
+     "§11.7.5: a stopped plugin's Re-enable, Disable and Show log are not in "
+     "the omnibar"),
 ]
 
 

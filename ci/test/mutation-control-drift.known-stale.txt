@@ -718,12 +718,6 @@ src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/run
 src/frontend/viewmodel/tests/unit/plat18-marshalling-mutation-control.sha256	src/frontend/viewmodel/views/isonim_state_view.nim	68a33a4b16b1e15562812871ca34f0a159dd99b2d46ea6044ca8a32aad31ceca	06380e7b2269a990f491704e429bcb6ce32f627c6d5f9df6327765f9ff58a5a4
 src/frontend/viewmodel/tests/unit/plat18-marshalling-mutation-control.sha256	src/frontend/viewmodel/views/isonim_calltrace_view.nim	c996fd7c21e2c4571a7fdf84a475c3bb9b8fcb1767536f1ef0b1d0c07a9bfe04	2697620b8aa813e868301bf028930639c30e3a78c839bd446a597c13dec886fc
 
-# 2026-11-21, the GPUI plugin harness (gpui-plugins, 10/10 KILLED at 467102fb217 plus the
-# footer fix) was graded before plugin_processes.nim and leaves.nim moved on agents; it
-# owes a re-grade.
-src/frontend/gpui/tests/gpui-plugins-mutation-control.sha256	src/frontend/tui/host/plugin_processes.nim	bdde0ab70f86f9e4479f68422e98de3e46fa3cc99095722b8dccc431f8dd6677	e7c1a24b0eca583538cbea93d8b96a12484c27e35adde4303fd6d66f7e6c6a83
-src/frontend/gpui/tests/gpui-plugins-mutation-control.sha256	src/frontend/gpui/app/leaves.nim	efe5e20ddafa3f7518b3aa5050f7a00b17a70339f2d89ec98e56a0c5507ec8f9	81035208b60626b645f9c4cc57a589f74f763e222ac040f3ed62e33a14199a67
-
 # 2026-11-21, the terminal binding's Variables reader reads the column layout
 # (a fold glyph, then name, type and value), for the project-definitions port.
 src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/termassert/ct_tui_screen.nim	255a2526134d381474f695d7fd979d939f84bcbce60d0cffb1893725869e1816	6de7b081797168b30f90b8958bcfd5d6f155ef87a3b492941050638f6440d690

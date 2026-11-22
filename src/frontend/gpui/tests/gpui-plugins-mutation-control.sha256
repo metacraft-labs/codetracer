@@ -2,7 +2,7 @@
 # subjects AND the suites the arms are graded by.
 # Refreshed with --record-control-hashes, gated by the
 # needle scan.
-f39815e6d6f9a5f84db10f5ea766ff65c912aaf4d6df03e9d23a9eeda203fb2d  src/frontend/gpui/host/gpui_plugins.nim
-bdde0ab70f86f9e4479f68422e98de3e46fa3cc99095722b8dccc431f8dd6677  src/frontend/tui/host/plugin_processes.nim
-efe5e20ddafa3f7518b3aa5050f7a00b17a70339f2d89ec98e56a0c5507ec8f9  src/frontend/gpui/app/leaves.nim
-60be21bf153211a7e8b3c25e9ede4b8e8fbc068a58eef44d6b44ed284ca8751e  src/frontend/gpui/tests/test_gpui_plugins_host.nim
+84fc4ffcab20ef9931af0c031fcc994151752757a160412b33848b28f7d3269c  src/frontend/gpui/host/gpui_plugins.nim
+e7c1a24b0eca583538cbea93d8b96a12484c27e35adde4303fd6d66f7e6c6a83  src/frontend/tui/host/plugin_processes.nim
+81035208b60626b645f9c4cc57a589f74f763e222ac040f3ed62e33a14199a67  src/frontend/gpui/app/leaves.nim
+490c94d7a4f6defaa05147ad6bec5526edce0f930d21cbc93cbab3d5121ef2ee  src/frontend/gpui/tests/test_gpui_plugins_host.nim
