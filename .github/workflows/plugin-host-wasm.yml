@@ -120,6 +120,12 @@ jobs:
             shasum -a 256 "$CT_LENS_WASM_MODULE" \
               | tee -a test-logs/plugin-host-wasm-ct-lens-x86_64-linux.log'
 
+      - name: The packaged host (nix, as the release bundles carry it)
+        run: |
+          out="$(nix build --no-link --print-out-paths '.?submodules=1#ct-plugin-host')"
+          ls -l "$out/bin/ct-plugin-host" | tee test-logs/plugin-host-wasm-nix-x86_64-linux.log
+          "$out/bin/ct-plugin-host" --help 2>&1 | tee -a test-logs/plugin-host-wasm-nix-x86_64-linux.log
+
       - name: Keep the logs
         if: always()
         uses: actions/upload-artifact@v4
@@ -247,6 +253,12 @@ jobs:
               | tee test-logs/plugin-host-wasm-ct-lens-aarch64-darwin.log
             shasum -a 256 "$CT_LENS_WASM_MODULE" \
               | tee -a test-logs/plugin-host-wasm-ct-lens-aarch64-darwin.log'
+
+      - name: The packaged host (nix, as the release bundles carry it)
+        run: |
+          out="$(nix build --no-link --print-out-paths '.?submodules=1#ct-plugin-host')"
+          ls -l "$out/bin/ct-plugin-host" | tee test-logs/plugin-host-wasm-nix-aarch64-darwin.log
+          "$out/bin/ct-plugin-host" --help 2>&1 | tee -a test-logs/plugin-host-wasm-nix-aarch64-darwin.log
 
       - name: Keep the logs
         if: always()

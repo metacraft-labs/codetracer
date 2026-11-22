@@ -441,6 +441,14 @@ const composerChecks = {
   "agent-harbor-composer-gaze-paused": composerCheck(async (el) => {
     expect(chipStates(el)["gaze-paused"]).toBe("note");
   }),
+  // Tracking, the gaze on nothing the window can attach: a quiet note, never
+  // cited (P2c study D67).
+  "agent-harbor-composer-gaze-nothing": composerCheck(async (el) => {
+    expect(chipStates(el)["gaze-nothing"]).toBe("note");
+    expect(el.querySelector('.ah-composer-chip[data-ah-target="gaze-nothing"]').textContent)
+      .toBe("Looked at nothing in view");
+    expect(el.querySelector(".ah-composer-cites")?.textContent ?? "").not.toContain("nothing");
+  }),
   "agent-harbor-composer-long-names": composerCheck(async (el) => {
     await composedTo(el, "session");
     expect(el.querySelectorAll(".ah-chip-cited").length).toBe(4);
@@ -1068,7 +1076,152 @@ async function toggleRoundTrip(panel, id, labelAfter) {
     `the label ${before} again`);
 }
 
+// --- The control center and the gaze mark (CTF-P2c step 4) ---------------
+//
+// The control center: launching on the left, the Initiatives panel and the
+// sessions waiting for the operator on the right, one column under 720px
+// (`data-ah-columns`); every fact is the view's own (`centerFacts`).
+const centerOf = (el) => el.querySelector(".ah-control-center");
+const waitingIds = (center) => [...center.querySelectorAll(".ah-cc-waiting-row")]
+  .map((r) => r.getAttribute("data-ah-waiting-session"));
+const waitingTitles = (center) => [...center.querySelectorAll(".ah-cc-waiting-row")]
+  .map((r) => r.getAttribute("data-ah-waiting-title"));
+const pressedModes = (center) => [...center.querySelectorAll(".ah-cc-modes .ah-composer-toggle")]
+  .map((b) => [b.textContent, b.getAttribute("aria-pressed")]);
+
+function centerCheck(assert) {
+  return async ({ canvasElement }) => {
+    const center = await waitFor(canvasElement, ".ah-control-center");
+    // One column, launching first, below 720px; two columns otherwise.
+    const columns = center.getBoundingClientRect().width < 720 ? "one" : "two";
+    expect(center.getAttribute("data-ah-columns")).toBe(columns);
+    const launch = center.querySelector(".ah-cc-launch");
+    const overview = center.querySelector(".ah-cc-overview");
+    const [l, o] = [launch.getBoundingClientRect(), overview.getBoundingClientRect()];
+    if (columns === "one") expect(o.top).toBeGreaterThanOrEqual(l.bottom - 1);
+    else expect(o.left).toBeGreaterThanOrEqual(l.right - 1);
+    expect(launch.getAttribute("data-ct-pane")).toBe("composer");
+    expect(center.getAttribute("data-ct-pane")).toBe("controlCenter");
+    // Each column opens with a panel's head band, the Initiatives panel's
+    // own (study D73), so the heads line up.
+    expect(center.querySelector(".ah-cc-launch .ah-fleet-head .ah-fleet-title")?.textContent).toBe("Launch");
+    // The waiting rows carry their operation and no dot of their own.
+    for (const row of center.querySelectorAll(".ah-cc-waiting-row")) {
+      expect(row.getAttribute("data-ct-operation")).toBe("control-center.open-session");
+      expect(row.querySelector(".ah-fleet-dot, .ah-tab-mark, .ah-pie")).toBeNull();
+      expect(row.getAttribute("aria-label")).toContain(row.getAttribute("data-ah-waiting-words"));
+    }
+    await assert(center, canvasElement);
+  };
+}
+
+const gazeHost = (el) => el.querySelector(".ah-gaze-host");
+function gazeCheck(assert) {
+  return async ({ canvasElement }) => {
+    await waitFor(canvasElement, "#status .status-right .ah-gaze-host");
+    await assert(gazeHost(canvasElement), canvasElement);
+  };
+}
+
+const centerChecks = {
+  "agent-harbor-control-center-populated": centerCheck(async (center) => {
+    expect(center.getAttribute("data-ah-cc-state")).toBe("asReady");
+    expect(pressedModes(center)).toEqual([["New task", "true"], ["New initiative", "false"]]);
+    // The Initiatives panel, the same view, with the project's four initiatives.
+    const panel = center.querySelector(".ah-cc-initiatives .agent-harbor-initiatives");
+    expect(panel).toBeTruthy();
+    expect(panel.querySelectorAll(".ah-initiative-row").length).toBe(4);
+    // In inbox order: the two questions, the longest waiting first, then the
+    // ended turn.
+    expect(waitingTitles(center)).toEqual([
+      "Make calculate_damage safe for masses above u32",
+      "Fix the negative-field test that times out on macOS",
+      "Write the 0.4 changelog"]);
+    // What waits for the operator comes first, then the initiatives (D73).
+    const waiting = center.querySelector(".ah-cc-waiting");
+    expect(waiting.querySelector(".ah-fleet-title").textContent).toBe("Waiting for you");
+    expect(waiting.querySelector(".ah-cc-waiting-count").textContent).toBe("3 sessions");
+    expect(waiting.getBoundingClientRect().top)
+      .toBeLessThan(center.querySelector(".ah-cc-initiatives").getBoundingClientRect().top);
+    expect([...center.querySelectorAll(".ah-cc-recent-row")].map((r) => r.getAttribute("data-ah-recent-launch")))
+      .toEqual(["Asteroid fields generated from seeds, end to end",
+                "Make the regeneration cap configurable per ship"]);
+    // The empty field's send line asks for the instruction, beside a
+    // disabled Launch. (Presses and keys are the routing test's,
+    // test_ctf_p2c_control_center_operations: a play check that pressed
+    // here would leave its marks in the story's captures.)
+    expect(center.querySelector(".ah-cc-send .ah-composer-send-hint").textContent)
+      .toBe("Type the instruction to launch");
+    expect(center.querySelector(".ah-cc-send .ah-composer-send-button").disabled).toBe(true);
+  }),
+  "agent-harbor-control-center-empty": centerCheck(async (center) => {
+    expect(center.getAttribute("data-ah-cc-empty")).toBe("true");
+    expect(center.querySelector(".ah-cc-empty-line")?.textContent).toBe("No initiatives yet.");
+    expect(getComputedStyle(center.querySelector(".ah-cc-initiatives")).display).toBe("none");
+    expect(center.querySelector('.ah-cc-form [data-ah-field="Repository"]')).toBeTruthy();
+  }),
+  "agent-harbor-control-center-launching": centerCheck(async (center) => {
+    // The form is ready for the next launch, the answer under it (D74).
+    expect(center.querySelector('.ah-cc-form [data-ah-field="Repository"]')).toBeTruthy();
+    expect(center.querySelector(".ah-cc-send .ah-composer-send-button").disabled).toBe(true);
+    expect(center.querySelector(".ah-cc-recent-row")?.getAttribute("data-ah-recent-launch"))
+      .toBe("Add a test for a hit on an empty shield");
+    const notice = center.querySelector(".ah-cc-notice-line");
+    expect(notice?.textContent).toBe("Started on hub-a \u00b7 executor ws-ada \u00b7 session 8c1a13");
+    expect(center.getAttribute("data-ah-cc-launch-for")).toBe("Shield model hardening");
+    // The new session, queued, under its initiative in the Initiatives panel.
+    const row = [...center.querySelectorAll(".ah-initiative-row")]
+      .find((r) => r.textContent.includes("Shield model hardening"));
+    expect(row?.textContent).toContain("Add a test for a hit on an empty shield");
+    expect(waitingIds(center)).not.toContain("5c1a3e70-7b2d-4c11-9a0e-3f6d2b8c1a13");
+  }),
+  "agent-harbor-control-center-loading": centerCheck(async (center) => {
+    expect(center.getAttribute("data-ah-cc-state")).toBe("asLoading");
+    expect(center.querySelector(".ah-cc-waiting").children.length).toBe(0);
+    expect(center.querySelector('.ah-cc-form [data-ah-field="Repository"]')).toBeTruthy();
+  }),
+  "agent-harbor-control-center-error": centerCheck(async (center) => {
+    expect(center.getAttribute("data-ah-cc-state")).toBe("asError");
+    expect(center.querySelector(".ah-cc-initiatives").textContent).toContain("Could not load the initiatives");
+    expect(center.querySelector(".ah-cc-waiting").children.length).toBe(0);
+  }),
+  "agent-harbor-status-gaze-off": gazeCheck(async (host) => {
+    expect(host.getAttribute("data-ah-gaze")).toBe("off");
+    expect(host.querySelector(".ah-gaze-mark")).toBeNull();
+  }),
+  "agent-harbor-status-gaze-tracking": gazeCheck(async (host) => {
+    const mark = host.querySelector(".ah-gaze-mark");
+    expect(mark.querySelector(".ah-gaze-text").textContent).toBe("Gaze");
+    expect(mark.getAttribute("title")).toContain("Ctrl+Alt+Y pauses it.");
+    expect(mark.getAttribute("data-ct-operation")).toBe("gaze.toggle-pause");
+    expect(mark.querySelector("svg")).toBeTruthy();
+    // The pause key pauses it, and again resumes it: the story ends as it
+    // began.
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", code: "KeyY", ctrlKey: true, altKey: true }));
+    await waitUntil(() => host.getAttribute("data-ah-gaze") === "paused", "paused by the key");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "y", code: "KeyY", ctrlKey: true, altKey: true }));
+    await waitUntil(() => host.getAttribute("data-ah-gaze") === "tracking", "resumed by the key");
+  }),
+  "agent-harbor-status-gaze-paused": gazeCheck(async (host) => {
+    const mark = host.querySelector(".ah-gaze-mark");
+    expect(mark.querySelector(".ah-gaze-text").textContent).toBe("Gaze paused");
+    expect(mark.classList.contains("ah-gaze-paused")).toBe(true);
+    expect(mark.getAttribute("title")).toContain("Ctrl+Alt+Y resumes it.");
+    expect(mark.querySelectorAll("svg path").length).toBe(2);   // struck through
+  }),
+  // L7: the control center itself, under the caption tabs.
+  "layout-l7-control-center": async ({ canvasElement }) => {
+    const center = await waitFor(canvasElement, ".ah-control-center", 30000);
+    expect(center.closest(".ah-control-center-tab")).toBeTruthy();
+    expect(center.querySelectorAll(".ah-cc-waiting-row").length).toBe(3);
+    // The stand-ins are gone: no Initiative Progress panel, no docked session list.
+    expect(canvasElement.querySelector(".agent-harbor-progress")).toBeNull();
+    expect(canvasElement.querySelector(".ah-session-list")).toBeNull();
+  },
+};
+
 export const plays = {
+  ...centerChecks,
   ...composerChecks,
   ...resultsChecks,
   "agent-harbor-fleet-snapshot": fleetCheck(async (el) => {

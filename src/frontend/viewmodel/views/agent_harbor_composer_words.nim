@@ -250,11 +250,18 @@ proc showsSendLine*(vm: OmniboxComposerVM): bool =
   ## sending, the rows' own actions take its place.
   vm.phase == cpComposing or vm.phase == cpSending
 
+const EmptyInstructionHint* = "Type the instruction to launch"
+  ## The send line's hint over an empty field: shown only where a send line
+  ## stands under an empty field (the control center's launch form; the
+  ## composer's sheet shows `Recent` instead).
+
 proc sendHint*(vm: OmniboxComposerVM): tuple[hint, more: string; blocked: bool] =
   ## The send line's hint and its `· N more` count (never cut: a part of its
   ## own after the cut hint), and whether a problem blocks sending.
   if vm.phase == cpSending:
     return ((if vm.draft.awaitingRoute: "Sends when routed" else: "Sending\xE2\x80\xA6"), "", false)
+  if vm.phase == cpComposing and vm.text.strip.len == 0:
+    return (EmptyInstructionHint, "", false)
   let problems = vm.problems
   let reason = vm.sendDisabledReason
   if reason.len == 0: return ("Enter", "", false)

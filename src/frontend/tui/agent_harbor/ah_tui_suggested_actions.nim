@@ -18,8 +18,16 @@
 ## the caption ink, one CodeTracer cannot perform in the caption-subtle
 ## role (D57), its reason under it in the caption ink; then ` Approve ` (CodeTracer's primary button: the on-action text on
 ## the action ground; disabled, the disabled text on the controls' ground)
-## and ` Dismiss ` (the body ink on the controls' ground), and, when
-## Approve cannot be pressed, why.
+## and ` Dismiss ` (the body ink on the panel's ground), and, when
+## Approve cannot be pressed, why; then one row of the block's own ground.
+##
+## That last row is the web's padding under its buttons (`.ah-suggested`,
+## `padding: 0.5rem`), and the terminal needs it for more than looks:
+## Dismiss is drawn on the panel's ground, which is the timeline's, so a
+## Dismiss on the block's last row would touch the timeline's ground under
+## a block that follows the last line -- two areas on one ground, which
+## CodeTracer-TUI §3.4 forbids (codetracer-pm
+## issues/2026-11-21-suggested-actions-tui-stories-fail-the-no-box-borders-test.md).
 ##
 ## Presses are routed: each row, Approve and Dismiss carry their operation
 ## and target (`operation`, `target` facts) and a press hands both to the
@@ -39,6 +47,7 @@ export agent_harbor_suggested_actions_words
 
 const
   BoxCells = 4    ## `[x] `
+  FootRows = 1    ## the block's own ground under its buttons
 
 proc blockGround*(c: AhCanvas): string =
   ## The block's ground: a step off the panel in both modes, as the web's
@@ -65,12 +74,13 @@ proc rowLines(row: SuggestedActionRow; width: int): (seq[string], seq[string]) =
 
 proc blockRows*(vm: SuggestedActionsVM; width: int): int =
   ## The rows the block takes at `width` cells: the label, the reason, each
-  ## action with its reason, the buttons, and a blank row above the buttons.
+  ## action with its reason, a blank row above the buttons, the buttons, and
+  ## the block's own ground under them (`FootRows`).
   result = 1 + wrapCells(vm.reasonText, max(1, width - 2)).len
   for row in vm.rows:
     let (words, why) = rowLines(row, width)
     result += words.len + why.len
-  result += 2
+  result += 2 + FootRows
 
 proc pressOf(press: ActivityPress; operation, target: string): proc() =
   result = proc() =
@@ -79,15 +89,17 @@ proc pressOf(press: ActivityPress; operation, target: string): proc() =
 proc drawSuggestedActions*(c: var AhCanvas; parent: AhNode; vm: SuggestedActionsVM;
                            row, col, width, height: int; press: ActivityPress) =
   ## The block at (`row`, `col`), `width` × `height` cells. What does not fit
-  ## the height is left out from the bottom up, the buttons last.
+  ## the height is left out from the bottom up, the buttons and the row of
+  ## the block's ground under them last (that row is kept whenever the
+  ## block has three rows, so a button never touches the ground below it).
   let ground = c.blockGround
   c.area("suggested-actions", row, col, width, height, ground)
   let host = c.node(parent, row, col, width, height, vm.blockFacts)
   let bottom = row + height
   let inner = max(1, width - 2)
   var r = row
-  # The buttons' row is the block's last.
-  let buttonsRow = bottom - 1
+  # The buttons' row is the block's last but its foot row.
+  let buttonsRow = if height >= 3: bottom - 1 - FootRows else: bottom - 1
   discard c.put(r, col + 1, elide(SuggestedActionsLabel, inner), c.p.textLabel, bold = true)
   discard c.node(host, r, col + 1, widthOf(SuggestedActionsLabel), 1,
                  [("suggested-label", SuggestedActionsLabel)])

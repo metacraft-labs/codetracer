@@ -69,8 +69,10 @@ else
 	OUT="${CTF_P1B_WEB_OUT:-${root}/build/ctf-p1b/web}"
 	RECORD="${root}/src/tests/visual/agent-harbor-web-regions.json"
 	views=(--view agent-harbor-session-tabs --view agent-harbor-fleet --view agent-harbor-session-activity --view agent-harbor-composer
-		--view agent-harbor-results --view agent-harbor-changes --view agent-harbor-inbox --view agent-harbor-suggested-actions --view agent-harbor-pie)
-	panelViews=(--view agent-harbor-session-activity --view agent-harbor-suggested-actions)
+		--view agent-harbor-results --view agent-harbor-changes --view agent-harbor-inbox --view agent-harbor-suggested-actions --view agent-harbor-pie
+		--view agent-harbor-control-center --view agent-harbor-status-gaze)
+	panelViews=(--view agent-harbor-session-activity --view agent-harbor-suggested-actions
+		--view agent-harbor-control-center)
 	milestone=CTF-P1b
 	reader=test_ctf_p1b_gpui_capture_matches_web_layout.nim
 	what="each region of each Agent Harbor story"
@@ -100,7 +102,8 @@ for size in laptop sidebar; do
 		--out "${OUT}" --regions "${DECL}"
 done
 # The session activity timeline is a panel, so its stories are also taken
-# at the brief's `panel` size (760x640), which the other families are not.
+# at the brief's `panel` size (760x640), which the other families are not;
+# so are the control center's, which fills whatever window holds it.
 node tools/visual-review/capture-storybook.mjs --no-build --font-render-hinting none \
 	"${panelViews[@]}" \
 	--size panel --theme dark --theme light \

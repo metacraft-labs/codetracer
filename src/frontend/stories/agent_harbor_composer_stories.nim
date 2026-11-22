@@ -30,7 +30,7 @@ const
     "context-edited", "add-context", "sending", "sent", "sent-again",
     "send-failed", "route-failed", "stop", "ui-done", "ui-refused",
     "ui-partial", "launch", "launch-invalid", "launch-scheduled", "launched",
-    "new-initiative", "new-initiative-invalid", "gaze", "gaze-paused",
+    "new-initiative", "new-initiative-invalid", "gaze", "gaze-paused", "gaze-nothing",
     "long-names"]
     ## Every fixture an `agent-harbor-composer` story may name.
   ComposerPlanDate* = "2026-11-17"
@@ -276,6 +276,13 @@ proc createComposerStoryVM*(fixture: string): OmniboxComposerVM =
   of "gaze-paused":
     result = newStoryComposer(router, targets())
     result.setGaze(gsPaused)
+    result.typeIn(WhyBelowZero)
+  of "gaze-nothing":
+    # Tracking, but the gaze rested on nothing the window can attach (the
+    # operator looked at the caption bar while typing): the quiet note,
+    # never cited (P2c study D67).
+    result = newStoryComposer(router, targets())
+    result.setGaze(gsTracking, gazeNothingChip())
     result.typeIn(WhyBelowZero)
   of "long-names":
     router.decide("Also test a hit on an empty shield when the regeneration cap is " &

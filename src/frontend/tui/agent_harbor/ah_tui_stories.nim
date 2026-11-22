@@ -39,6 +39,10 @@ import ./ah_tui_results
 import ../../stories/agent_harbor_results_stories
 import ./ah_tui_session_activity
 import ../../stories/agent_harbor_suggested_actions_stories
+import ./ah_tui_control_center
+import ../../stories/agent_harbor_control_center_stories
+import ./ah_tui_gaze_mark
+import ../../stories/agent_harbor_gaze_stories
 import ./ah_tui_changes_panel
 import ./ah_tui_inbox_panel
 import ../../stories/agent_harbor_changes_inbox_stories
@@ -57,8 +61,8 @@ import ../../viewmodel/keymap/[base_keymaps, context_keys, editing_keymap,
 import ../../../common/key_names
 
 export agent_harbor_stories, codetracer_stories, emit_storybook_stories, ah_tui_canvas,
-  ah_tui_composer, ah_tui_results, ah_tui_changes_panel, ah_tui_inbox_panel,
-  agent_harbor_changes_inbox_stories
+  ah_tui_composer, ah_tui_results, ah_tui_control_center, ah_tui_gaze_mark,
+  ah_tui_changes_panel, ah_tui_inbox_panel, agent_harbor_changes_inbox_stories
 
 const
   TuiAgentHarborSurfaces* = [
@@ -72,6 +76,8 @@ const
     "agent-harbor-results",
     "agent-harbor-session-activity",
     "agent-harbor-suggested-actions",
+    "agent-harbor-control-center",
+    "agent-harbor-status-gaze",
     "agent-harbor-pie",
     "agent-harbor-changes",
     "agent-harbor-inbox",
@@ -91,14 +97,23 @@ const
     ## The brief's panel 760×640: the session activity timeline, the Changes
     ## panel, the Inbox and an inbox item's page are panels, so their stories
     ## are also captured at this size (`sizesOf`).
+  TuiWideSize* = ("wide", 240, 67)
+    ## The brief's wide 1920×1080 (at 8×16 px a cell, 67 whole rows): the
+    ## control center fills a window, so its stories are captured at a
+    ## desktop monitor's size too.
 
 proc sizesOf*(surface: string): seq[(string, int, int)] =
   ## The named sizes a story of `surface` is captured at: laptop and sidebar,
-  ## and panel for the session activity timeline and CTF-P3's surfaces.
+  ## panel for the session activity timeline and CTF-P3's surfaces, and
+  ## panel and wide for the control center, which fills whatever window
+  ## holds it.
   result = @TuiSizes
   if surface in ["agent-harbor-session-activity", "agent-harbor-suggested-actions"] or
      surface in TuiChangesInboxSurfaces:
     result.add TuiPanelSize
+  if surface == "agent-harbor-control-center":
+    result.add TuiPanelSize
+    result.add TuiWideSize
 
 type
   AhTuiMount* = ref object
@@ -118,6 +133,10 @@ type
     suggestion*: SuggestedActionsVM
       ## The suggested-actions block at the timeline's end (its stories
       ## only).
+    center*: ControlCenterVM
+      ## The control center (its stories only).
+    gaze*: GazeStatusVM
+      ## The status line's gaze mark (its stories only).
     changes*: ChangesVM
     inbox*: InboxVM
     inboxItem*: InboxItemVM
@@ -250,6 +269,68 @@ proc composerKey*(m: AhTuiMount; token: string): bool =
   m.draw()
   true
 
+let ControlCenterScopePath = @[element(ekWindow, "window"), pane(ControlCenterScope)]
+  ## Where the control center's keys and presses resolve.
+let ControlCenterFormScopePath = @[element(ekWindow, "window"), pane(ControlCenterScope),
+                                   pane(ComposerScope)]
+  ## Where a press on its launch form (the composer's) resolves.
+
+proc pressControlCenter*(m: AhTuiMount; operation, target: string): bool {.discardable.} =
+  ## **A PRESS ON THE CONTROL CENTER** (Input-Routing-And-Keymaps.md §5.1):
+  ## resolved by the story host's router in the scope the element is in (its
+  ## launch form's in the composer's) -- a user's row for the press first --
+  ## else the operation the element carries, run on the control center on
+  ## the element's target; drawn again.
+  if m.isNil or m.center.isNil: return false
+  let path = if operation in ComposerPressOperations: ControlCenterFormScopePath
+             else: ControlCenterScopePath
+  let outcome = resolveElementPress(routerResolver(m.router, SessionFacts()), path,
+                                    ButtonElementKind, operation, {}, "Click")
+  m.lastOperation = outcome.operation
+  if not m.center.runControlCenterPress(outcome.operation, target): return false
+  m.draw()
+  true
+
+proc controlCenterKey*(m: AhTuiMount; token: string): bool =
+  ## A key while the control center is shown, ROUTED in its scope (`Down` /
+  ## `Up` walk the waiting sessions, `Enter` opens one); drawn again when it
+  ## ran one of its operations.
+  if m.center.isNil: return false
+  let name = keyName(token)
+  if name.len == 0: return false
+  let res = m.router.route(SessionFacts(), ControlCenterScopePath, nmNormal, name, 0)
+  m.lastOperation = if res.kind == erOperation: res.operation else: ""
+  if res.kind != erOperation or not m.center.runControlCenterOperation(res.operation):
+    return false
+  m.draw()
+  true
+
+let WindowScopePath = @[element(ekWindow, "window")]
+  ## Where a window-level key (the gaze pause key) resolves.
+
+proc pressGaze*(m: AhTuiMount; operation: string): bool {.discardable.} =
+  ## A press on the gaze mark, resolved at the window's scope; drawn again.
+  if m.isNil or m.gaze.isNil: return false
+  let outcome = resolveElementPress(routerResolver(m.router, SessionFacts()),
+                                    WindowScopePath, ButtonElementKind, operation, {},
+                                    "Click")
+  m.lastOperation = outcome.operation
+  if not m.gaze.runGazeOperation(outcome.operation): return false
+  m.draw()
+  true
+
+proc gazeKey*(m: AhTuiMount; token: string): bool =
+  ## A key while the gaze story is shown, ROUTED at the window's scope (the
+  ## pause key); drawn again when it moved the mark.
+  if m.gaze.isNil: return false
+  let name = keyName(token)
+  if name.len == 0: return false
+  let res = m.router.route(SessionFacts(), WindowScopePath, nmNormal, name, 0)
+  m.lastOperation = if res.kind == erOperation: res.operation else: ""
+  if res.kind != erOperation or not m.gaze.runGazeOperation(res.operation): return false
+  m.draw()
+  true
+
 let ResultsScopePath = @[element(ekWindow, "window"), pane(ResultsScope)]
   ## Where the results' keys and presses resolve.
 
@@ -364,6 +445,14 @@ proc draw*(m: AhTuiMount) =
     let press: ActivityPress = proc(operation, target: string) =
       discard mount.pressActivity(operation, target)
     c.drawSessionActivity(m.timeline, top, 0, m.cols, h, press, m.suggestion)
+  of "agent-harbor-control-center":
+    let mount = m
+    c.drawControlCenter(m.center, top, 0, m.cols, h, proc(operation, target: string) =
+      discard mount.pressControlCenter(operation, target))
+  of "agent-harbor-status-gaze":
+    let mount = m
+    c.drawGazeStory(m.gaze, top, 0, m.cols, h, GazeStoryStatusItemsTui, proc(operation: string) =
+      discard mount.pressGaze(operation))
   of PieStorySurface: c.drawPieStory(m.fixture, top, 0, m.cols, h)
   of "agent-harbor-session-activity":
     let mount = m
@@ -475,6 +564,8 @@ proc mountAgentHarborStoryTui*(surface, fixture: string; cols, rows: int;
     let story = createSuggestedActionsStory(fixture)
     result.timeline = story.timeline
     result.suggestion = story.suggestion
+  of "agent-harbor-control-center": result.center = createControlCenterStoryVM(fixture, pb)
+  of "agent-harbor-status-gaze": result.gaze = createGazeStoryVM(fixture, gazePauseChord())
   of "agent-harbor-changes", "agent-harbor-inbox", "agent-harbor-inbox-item":
     # Built inside a reactive root, as the web and GPUI mounts build them,
     # so what a constructor registers for its cleanup (the Inbox playback's
@@ -656,6 +747,8 @@ proc dispose*(m: AhTuiMount) =
   if m.composer != nil: m.composer.dispose()
   if m.results != nil: m.results.dispose()
   if m.suggestion != nil: m.suggestion.dispose()
+  if m.center != nil: m.center.dispose()
+  if m.gaze != nil: m.gaze.dispose()
 
 proc rowsOf*(m: AhTuiMount): seq[StyledRow] =
   ## The screen as styled rows, for `styledRowsTree`.
@@ -682,7 +775,8 @@ proc handleInput*(m: AhTuiMount; token: string): bool =
   let (ok, button, row, col, press) = decodeSgrMouse(token)
   if not ok:
     return m.playbackKey(token) or m.activityKey(token) or m.composerKey(token) or
-           m.resultsKey(token) or m.changesKey(token) or m.inboxKey(token)
+           m.resultsKey(token) or m.controlCenterKey(token) or m.gazeKey(token) or
+           m.changesKey(token) or m.inboxKey(token)
   if (button and 64) != 0:
     # The wheel: SGR reports a notch up as button 64, down as 65
     # (https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h2-Mouse-Tracking).

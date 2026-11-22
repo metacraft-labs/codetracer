@@ -29,6 +29,11 @@
 ##     with its info file, and on macOS, whose trash is `~/.Trash` and has no
 ##     info files, into that directory under a temporary `HOME`;
 ##   * a press elsewhere (the editor) cancels an open field;
+##   * the Edit window's transient surfaces close through the router
+##     (Input-Routing-And-Keymaps.md §6): `Escape`, or the key the user's
+##     `keybindings.json` binds to `context-menu.close`, closes the open
+##     right-click menu, and `Escape`, or the key bound to
+##     `layout.cancel-drag`, cancels a tab drag in flight;
 ##   * a folder tab opened from a replay window's Welcome screen lists the
 ##     same tree, and its menu acts on the disk too.
 ##
@@ -45,7 +50,7 @@ import ./gpui_child_env
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 64
+const ExpectedAssertions = 77
 
 var countedAssertions = 0
 
@@ -64,8 +69,11 @@ let bin = repo / "build/bin/codetracer-gpui"
 let shimDir = getEnv("ISONIM_GPUI_SHIM_DIR",
                    repo.parentDir / "isonim-gpui/rust/target/debug")
 
-proc run(args: seq[string]; dataHome: string; trace: var string): JsonNode =
-  ## The shipped binary's plan for `args`, its gesture trace in `trace`.
+proc run(args: seq[string]; dataHome: string; trace: var string;
+         keybindings: string; geometry: var JsonNode): JsonNode =
+  ## The shipped binary's plan for `args`, its gesture trace in `trace`, the
+  ## geometry the window drew in `geometry`. `keybindings` is the user's
+  ## `keybindings.json` for the run (none when empty).
   if not fileExists(bin):
     raise newException(IOError, "prerequisite missing: " & bin &
                        " (just build-gpui)")
@@ -85,6 +93,10 @@ proc run(args: seq[string]; dataHome: string; trace: var string): JsonNode =
     env["HOME"] = dataHome
   env["CODETRACER_HOME"] = state / "ct-home"
   env["CODETRACER_KEYBINDINGS"] = state / "keybindings.json"
+  if keybindings.len > 0:
+    writeFile(state / "keybindings.json", keybindings)
+  let geomFile = state / "geometry.json"
+  env["CODETRACER_GPUI_GEOMETRY_OUT"] = geomFile
   env["CODETRACER_GPUI_GESTURE_TRACE"] = "1"
   let errFile = genTempPath("files-edit-gpui-", ".err")
   let p = startProcess("/bin/sh",
@@ -94,6 +106,7 @@ proc run(args: seq[string]; dataHome: string; trace: var string): JsonNode =
   let rc = p.waitForExit()
   p.close()
   trace = if fileExists(errFile): readFile(errFile) else: ""
+  geometry = if fileExists(geomFile): parseFile(geomFile) else: newJNull()
   removeFile(errFile)
   removeDir(state)
   if rc != 0:
@@ -108,6 +121,21 @@ proc run(args: seq[string]; dataHome: string; trace: var string): JsonNode =
         except OSError: discard
     for c in n{"children"}.getElems: sweep(c)
   sweep(result)
+
+proc run(args: seq[string]; dataHome: string; trace: var string): JsonNode =
+  var g: JsonNode
+  run(args, dataHome, trace, "", g)
+
+proc editWindow(project, dataHome, ops: string; trace: var string;
+                keybindings: string; geometry: var JsonNode): JsonNode =
+  ## The Edit window over `project` after `ops`, under the user's
+  ## `keybindings`, with the geometry it drew.
+  var args = @["--edit", "--report-window-plan", "--width=" & $W,
+               "--height=" & $H]
+  if ops.len > 0:
+    args.add "--window-ops=" & ops
+  args.add project
+  run(args, dataHome, trace, keybindings, geometry)
 
 proc editWindow(project, dataHome, ops: string; trace: var string): JsonNode =
   ## The Edit window over `project` after `ops`.
@@ -434,6 +462,68 @@ suite "GPUI Edit mode: the Files menu acts on the disk":
     ck not fileExists(project / "src" / "other.py")
     ck t.contains("files: cancelled")
     ck left.textOf.contains("def util():")
+    removeDir(project)
+    removeDir(data)
+
+suite "GPUI Edit mode: transient surfaces close through the router":
+  # Input-Routing-And-Keymaps.md §6 and §9 IR-1: what closes the Edit
+  # window's right-click menu, and what cancels a layout gesture in flight,
+  # is the router's answer — the surface's pushed layer binds `Escape` to its
+  # dismissal operation — and not a key name compared in the window. The
+  # proof that it is the router's is a REBINDING: a key the user binds to the
+  # operation in `keybindings.json` does it too.
+
+  test "the right-click menu closes on Escape and on the key bound to context-menu.close":
+    let project = newProject()
+    let data = createTempDir("files-edit-gpui-data-", "")
+    let readme = editWindow(project, data, "").rowId("README.md")
+    let opened = "click:file:" & readme & ":right"
+    const Rebound = """[{"key":"f9","command":"context-menu.close"}]"""
+    var t = ""
+    var g: JsonNode
+    ck editWindow(project, data, opened, t, Rebound, g).menuEntries.len == 4
+    ck editWindow(project, data, opened & ",key:escape", t, Rebound,
+                  g).menuEntries.len == 0
+    let closed = editWindow(project, data, opened & ",key:f9", t, Rebound, g)
+    checkpoint("trace: " & t)
+    ck closed.menuEntries.len == 0
+    # The key the menu took did not reach the document under it.
+    ck not closed.tabsText.contains("●")
+    removeDir(project)
+    removeDir(data)
+
+  test "a tab drag is cancelled by Escape and by the key bound to layout.cancel-drag":
+    let project = newProject()
+    let data = createTempDir("files-edit-gpui-data-", "")
+    const Rebound = """[{"key":"f9","command":"layout.cancel-drag"}]"""
+    var t = ""
+    var g: JsonNode
+    discard editWindow(project, data, "", t, Rebound, g)
+    # A tab of a pane other than the editor, aimed from the geometry the
+    # Edit window drew; held and moved across the window, it is a drag.
+    var tab = newJNull()
+    for n in g{"nodes"}.getElems:
+      if n{"kind"}.getStr == "tabs" and
+         "editor" notin n["panes"].to(seq[string]) and n["tabs"].len > 0:
+        tab = n["tabs"][0]
+        break
+    checkpoint("geometry: " & $g)
+    ck tab.kind == JArray
+    let (x, y) = (tab[0].getInt + tab[2].getInt div 2,
+                  tab[1].getInt + tab[3].getInt div 2)
+    let drag = "press:" & $x & ":" & $y & ",move:" & $(x + 60) & ":" &
+               $(y + 200) & ",move:900:500"
+    let held = editWindow(project, data, drag, t, Rebound, g)
+    ck held.nodesWith("data-ct-drag-ghost").len == 1
+    ck "gesture gesture cancelled" notin t
+    for cancel in ["key:escape", "key:f9"]:
+      let cancelled = editWindow(project, data, drag & "," & cancel, t,
+                                 Rebound, g)
+      checkpoint(cancel & " trace: " & t)
+      ck cancelled.nodesWith("data-ct-drag-ghost").len == 0
+      ck "gesture gesture cancelled" in t
+      # The key was the gesture's: the document was not typed into.
+      ck not cancelled.tabsText.contains("●")
     removeDir(project)
     removeDir(data)
 

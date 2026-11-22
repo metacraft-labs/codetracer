@@ -32,6 +32,10 @@ import ../../stories/agent_harbor_results_stories
 import ./ah_session_activity
 import ./ah_suggested_actions
 import ../../stories/agent_harbor_suggested_actions_stories
+import ./ah_control_center
+import ../../stories/agent_harbor_control_center_stories
+import ./ah_gaze_mark
+import ../../stories/agent_harbor_gaze_stories
 import ../agent_activity_leaf
 import ../window_geometry
 import ../../viewmodel/agent_harbor_activity_cards
@@ -45,6 +49,7 @@ import ../../viewmodel/keymap/[base_keymaps, context_keys, editing_keymap,
 import ../../../common/key_names
 
 export agent_harbor_stories, ah_theme, ah_playback_bar, user_keymap, ah_composer,
+  ah_control_center, ah_gaze_mark,
   ah_results, ah_changes_inbox_stories, ah_pie
 
 const
@@ -59,6 +64,8 @@ const
     "agent-harbor-results",
     "agent-harbor-session-activity",
     "agent-harbor-suggested-actions",
+    "agent-harbor-control-center",
+    "agent-harbor-status-gaze",
     "agent-harbor-changes",
     "agent-harbor-inbox",
     "agent-harbor-inbox-item",
@@ -89,6 +96,10 @@ type
     timeline*: SessionTimelineVM
     suggestion*: SuggestedActionsVM
       ## The suggested-actions block at the timeline's end (its stories only).
+    center*: ControlCenterVM
+      ## The control center (its stories only).
+    gaze*: GazeStatusVM
+      ## The status line's gaze mark (its stories only).
     cards*: ActivityAgainstCards
       ## The comparison story's cards (`agent_harbor_activity_cards`): its
       ## store, the events both halves were fed, and today's Agent Activity
@@ -162,6 +173,59 @@ proc composerKey*(m: AhStoryMount; name: string; keymap = UserKeymap()): string 
   let res = router.route(SessionFacts(), ComposerScopePath, nmNormal, name, 0)
   if res.kind != erOperation or not m.composer.runComposerOperation(res.operation):
     return ""
+  res.operation
+
+let ControlCenterScopePath = @[element(ekWindow, "window"), pane(ControlCenterScope)]
+  ## Where the control center's keys and presses resolve; its launch form's
+  ## (the composer's) resolve in the composer's scope inside it.
+let ControlCenterFormScopePath = @[element(ekWindow, "window"), pane(ControlCenterScope),
+                                   pane(ComposerScope)]
+
+proc controlCenterPresses*(keymap: UserKeymap; vm: ControlCenterVM): ControlCenterPress =
+  ## **THE STORY HOST'S ROUTE FOR A PRESS ON THE CONTROL CENTER**
+  ## (Input-Routing-And-Keymaps.md §5.1): resolved by the window's router --
+  ## a user's row for the press first, else the operation the element
+  ## carries -- in the scope the element is in (its launch form's in the
+  ## composer's), and run on the control center (`runControlCenterPress`).
+  let resolve = routerResolver(gpuiRouter(keymap), SessionFacts())
+  result = proc(operation, target: string) =
+    let path = if operation in ComposerPressOperations: ControlCenterFormScopePath
+               else: ControlCenterScopePath
+    let outcome = resolveElementPress(resolve, path, ButtonElementKind,
+                                      operation, {}, "Click")
+    discard vm.runControlCenterPress(outcome.operation, target)
+
+proc controlCenterKey*(m: AhStoryMount; name: string; keymap = UserKeymap()): string =
+  ## A key while the control center is shown, ROUTED in its scope (`Down` /
+  ## `Up` walk the waiting sessions, `Enter` opens one). Runs the operation it
+  ## resolves to and returns it ("" for none).
+  if m.center.isNil: return ""
+  var router = gpuiRouter(keymap)
+  let res = router.route(SessionFacts(), ControlCenterScopePath, nmNormal, name, 0)
+  if res.kind != erOperation or not m.center.runControlCenterOperation(res.operation):
+    return ""
+  res.operation
+
+let WindowScopePath = @[element(ekWindow, "window")]
+  ## Where a window-level key (the gaze pause key) resolves.
+
+proc gazePresses*(keymap: UserKeymap; vm: GazeStatusVM): GazePress =
+  ## The route for a press on the gaze mark: resolved at the window's scope,
+  ## a user's row first, and run on the mark (`runGazeOperation`).
+  let resolve = routerResolver(gpuiRouter(keymap), SessionFacts())
+  result = proc(operation: string) =
+    let outcome = resolveElementPress(resolve, WindowScopePath, ButtonElementKind,
+                                      operation, {}, "Click")
+    discard vm.runGazeOperation(outcome.operation)
+
+proc gazeKey*(m: AhStoryMount; name: string; keymap = UserKeymap()): string =
+  ## A key while the gaze story is shown, ROUTED at the window's scope (the
+  ## pause key, `Ctrl+Alt+Y`). Runs the operation it resolves to and returns
+  ## it ("" for none).
+  if m.gaze.isNil: return ""
+  var router = gpuiRouter(keymap)
+  let res = router.route(SessionFacts(), WindowScopePath, nmNormal, name, 0)
+  if res.kind != erOperation or not m.gaze.runGazeOperation(res.operation): return ""
   res.operation
 
 let ResultsScopePath = @[element(ekWindow, "window"), pane(ResultsScope)]
@@ -485,6 +549,14 @@ proc mountAgentHarborStoryGpui*(r: GpuiRenderer; surface, fixture: string;
       let press = suggestedActivityPresses(keymap, m.timeline, m.suggestion, copy)
       r.mountSessionActivity(host, m.timeline, p, bodyW, bodyH, press,
                              r.suggestionTail(p, m.suggestion, press))
+    of "agent-harbor-control-center":
+      m.center = createControlCenterStoryVM(fixture, pb)
+      r.mountControlCenter(host, m.center, p, bodyW, heightPx,
+                           controlCenterPresses(keymap, m.center))
+    of "agent-harbor-status-gaze":
+      m.gaze = createGazeStoryVM(fixture, gazePauseChord())
+      r.mountGazeStory(host, m.gaze, p, bodyW, heightPx,
+                       GazeStoryStatusItems, gazePresses(keymap, m.gaze))
     of "agent-harbor-changes", "agent-harbor-inbox", "agent-harbor-inbox-item":
       m.changesInbox = r.mountChangesInboxStory(host, surface, fixture, pb, p, bodyW)
     of PieStorySurface:
@@ -510,6 +582,8 @@ proc mountAgentHarborStoryGpui*(r: GpuiRenderer; surface, fixture: string;
   let results = m.results
   let timeline = m.timeline
   let suggestion = m.suggestion
+  let center = m.center
+  let gaze = m.gaze
   let cards = m.cards
   let changesInbox = m.changesInbox
   let playback = m.playback
@@ -523,6 +597,8 @@ proc mountAgentHarborStoryGpui*(r: GpuiRenderer; surface, fixture: string;
     if composer != nil: composer.dispose()
     if results != nil: results.dispose()
     if suggestion != nil: suggestion.dispose()
+    if center != nil: center.dispose()
+    if gaze != nil: gaze.dispose()
     if timeline != nil: timeline.dispose()
     if cards.cards != nil:
       cards.cards.dispose()

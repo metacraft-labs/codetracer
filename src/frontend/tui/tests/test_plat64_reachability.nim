@@ -73,6 +73,11 @@ const
     # The suggested-actions block's presses (`agent_harbor_suggested_actions_words`,
     # P2c study D59): presses only in this step, in the story hosts' timeline.
     "suggested-actions.approve", "suggested-actions.dismiss", "suggested-actions.toggle",
+    # The control center's presses (`agent_harbor_control_center_words`, P2c
+    # study D64-D70): its mode, the initiative a launch is for, and a waiting
+    # session's row, pressed in the story hosts; its keys walk the rows.
+    "control-center.launch-for", "control-center.new-initiative",
+    "control-center.new-task", "control-center.open-session",
   ]
 
 proc bound(): HashSet[string] =

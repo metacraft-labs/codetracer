@@ -337,7 +337,7 @@ proc drawLines(c: var AhCanvas; parent: AhNode; row, col, cells: int;
   if fact.len > 0:
     discard c.node(parent, row, col, min(cells, widest), lines.len, [(fact, full)])
 
-proc putMarked(c: var AhCanvas; row, col: int; s, fg, bg, mark: string; bold = false) =
+proc putMarked*(c: var AhCanvas; row, col: int; s, fg, bg, mark: string; bold = false) =
   ## `s` underlined in `mark`'s own colour (SGR 58), the terminal's mark of
   ## a chosen control: the focused initiative's underline (TUI §3.4).
   var at = col
@@ -918,7 +918,7 @@ proc showsSendFooter(vm: OmniboxComposerVM): bool =
   ## and never with nothing typed (`Recent` instead).
   vm.showsSendLine and not vm.isEmptyField
 
-proc drawSendLine(c: var AhCanvas; ink: Inks; press: ComposerPress; vm: OmniboxComposerVM;
+proc drawSendLine*(c: var AhCanvas; ink: Inks; press: ComposerPress; vm: OmniboxComposerVM;
                   host: AhNode;
                   row, left, width: int) =
   ## The hint (the reason it cannot send, in the error role), the count of
@@ -950,6 +950,25 @@ proc drawSendLine(c: var AhCanvas; ink: Inks; press: ComposerPress; vm: OmniboxC
   discard c.put(row, bcol, button, fg, bg = bg)
   let b = c.node(send, row, bcol, bw, 1, [("action", "send"), ("button", label)])
   c.pressable(b, press, ComposerSendOperation, "")
+
+proc drawLaunchForm*(c: var AhCanvas; vm: OmniboxComposerVM; host: AhNode;
+                     row, col, width, maxRows: int; press: ComposerPress = nil): int =
+  ## The launch or initiative form's fields at (`row`, `col`), `width`
+  ## cells, without the sheet's form title (a host that draws the form
+  ## outside the sheet, the control center, has a heading of its own); at
+  ## most `maxRows`, whole fields only. The same blocks the sheet draws
+  ## (`formBlocks`), on the band's inks, so the host draws them on the band's
+  ## ground. Returns the rows drawn.
+  let lay = Layout(left: col, width: width, narrow: width < 60, ink: inksFor(c),
+                   press: press)
+  let blocks = formBlocks(vm, host, lay)
+  var at = row
+  for i, b in blocks:
+    if i < 2: continue           # the sheet's form title, and the blank under it
+    if at + b.rows > row + maxRows: break
+    b.draw(c, at)
+    at += b.rows
+  at - row
 
 proc drawComposer*(c: var AhCanvas; vm: OmniboxComposerVM; row, col, width, height: int;
                    press: ComposerPress = nil) =

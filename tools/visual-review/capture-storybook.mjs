@@ -189,6 +189,7 @@ const composerExports = [
   "ComposerNewInitiativeInvalid",
   "ComposerGaze",
   "ComposerGazePaused",
+  "ComposerGazeNothing",
   "ComposerLongNames",
 ];
 for (const name of composerExports) {
@@ -346,6 +347,32 @@ for (const name of suggestedActionsExports) {
 for (const [name, storyId] of Object.entries(agentHarborViews)) {
   views[name] = { storyId, brief: agentHarborBrief, sizes: agentHarborSizes, themes: agentHarborThemes };
 }
+// The control center (CTF-P2c step 4): a tab that fills the window, so it
+// is captured at a window's sizes as well as a panel's and a sidebar's (its
+// one-column state), in the family `agent-harbor-control-center`; and the
+// status line's gaze mark, in `agent-harbor-status-gaze`, at the laptop and
+// sidebar sizes.
+const controlCenterExports = [
+  "ControlCenter",
+  "ControlCenterEmpty",
+  "ControlCenterLaunching",
+  "ControlCenterLoading",
+  "ControlCenterError",
+  "ControlCenterPlayback",
+];
+const gazeExports = ["StatusGazeOff", "StatusGazeTracking", "StatusGazePaused"];
+for (const name of controlCenterExports) {
+  const view = `agent-harbor-${kebab(name)}`;
+  agentHarborViews[view] = `codetracer-agent-harbor--${kebab(name)}`;
+  views[view] = { storyId: agentHarborViews[view], brief: agentHarborBrief,
+                  sizes: ["panel", "sidebar", "laptop", "wide"], themes: agentHarborThemes };
+}
+for (const name of gazeExports) {
+  const view = `agent-harbor-${kebab(name)}`;
+  agentHarborViews[view] = `codetracer-agent-harbor--${kebab(name)}`;
+  views[view] = { storyId: agentHarborViews[view], brief: agentHarborBrief,
+                  sizes: ["sidebar", "laptop"], themes: agentHarborThemes };
+}
 // The agentic surfaces in whole windows (the `agentic-window` layouts of
 // the Layouts section): a window is reviewed at a laptop's and a desktop
 // monitor's size, in both themes. One view per story, named after its id
@@ -380,6 +407,8 @@ const viewFamilies = {
   "agent-harbor-composer": composerExports.map((name) => `agent-harbor-${kebab(name)}`),
   "agent-harbor-results": resultsExports.map((name) => `agent-harbor-${kebab(name)}`),
   "agent-harbor-suggested-actions": suggestedActionsExports.map((name) => `agent-harbor-${kebab(name)}`),
+  "agent-harbor-control-center": controlCenterExports.map((name) => `agent-harbor-${kebab(name)}`),
+  "agent-harbor-status-gaze": gazeExports.map((name) => `agent-harbor-${kebab(name)}`),
   "agent-harbor-pie": pieExports.map((name) => `agent-harbor-${kebab(name)}`),
   // CTF-P3: the Changes panel's stories, and the Inbox's (the panel and an
   // item's page; `--moments` with `agent-harbor-playback` for its playback).

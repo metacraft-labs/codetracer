@@ -781,7 +781,7 @@ jobs:
             # the pin below is that node's rev.
             io-mon=6a6713e53f4cf1d863a8d94e3353ecd0581da85f
             nim-shm-queue=0d6049997d77421b6e4748f819657cf6042e9508
-            nim-shm-gset=0b2896adc65d0d62c0ee84af1356c909da2975d0
+            nim-shm-gset=fc0c74478d945161574a9fc49389c8fd65f09d2e
             nim-stackable-hooks=07319306758cf608e664fe9e64ab7e0bed5ca186
             # Pinned to flake.lock's revs. See "THE FLAKE-INPUT THREE" above
             # before changing any of these. isonim-tui is in codetracer's

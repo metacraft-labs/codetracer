@@ -109,6 +109,15 @@
     "head counts only inside its page (`within`): GPUI tags the session activity",
     "timeline's lines with `data-ah-item-kind` too.",
     "",
+    "The control center (CTF-P2c step 4) adds its two columns (`cc-launch`,",
+    "`cc-overview`; one under the other at the sidebar size), the first waiting",
+    "session's row, compared in pixels too, and the first recent launch; its",
+    "Initiatives panel is the panel's own, so the initiative and session-line",
+    "regions above match inside it. Its `surface` is the control center's root.",
+    "The status line's gaze mark (`gaze-mark`) is compared in pixels on its",
+    "width and height: an eye and two words; its `surface` is the story's window",
+    "(`.ah-gaze-story`).",
+    "",
     "The progress pie's story (`Pie Indicator: Every State`): its `surface`",
     "is the story's whole window (`.ah-pie-story`); `pie-first` is the first pie",
     "drawn (the window band's needs-input row at 0 %) and `pie-band-menu` the last",
@@ -122,7 +131,7 @@
   "regions": [
     {
       "name": "surface",
-      "web": ".ah-tab-caption, .ah-session-list, .agent-harbor-initiatives, .agent-harbor-progress, .agent-harbor-fleet, .agent-harbor-activity, .ah-composer-story, .agent-harbor-changes, .agent-harbor-inbox, .agent-harbor-inbox-item, .ah-pie-story",
+      "web": ".ah-tab-caption, .ah-session-list, .agent-harbor-initiatives, .agent-harbor-progress, .agent-harbor-fleet, .agent-harbor-activity, .ah-composer-story, .agent-harbor-changes, .agent-harbor-inbox, .agent-harbor-inbox-item, .ah-control-center, .ah-gaze-story, .ah-pie-story",
       "gpui": {
         "data-ah-surface": ""
       }
@@ -830,6 +839,51 @@
       },
       "px": [
         "y",
+        "h"
+      ]
+    },
+    {
+      "name": "cc-launch",
+      "web": ".ah-cc-launch",
+      "gpui": {
+        "data-ah-cc-launch": ""
+      }
+    },
+    {
+      "name": "cc-overview",
+      "web": ".ah-cc-overview",
+      "gpui": {
+        "data-ah-cc-overview": ""
+      }
+    },
+    {
+      "name": "cc-waiting-row-first",
+      "web": ".ah-cc-waiting-row",
+      "gpui": {
+        "data-ah-waiting-session": ""
+      },
+      "pick": "first",
+      "px": [
+        "y",
+        "h"
+      ]
+    },
+    {
+      "name": "cc-recent-row-first",
+      "web": ".ah-cc-recent-row",
+      "gpui": {
+        "data-ah-recent-launch": ""
+      },
+      "pick": "first"
+    },
+    {
+      "name": "gaze-mark",
+      "web": ".ah-gaze-mark",
+      "gpui": {
+        "data-ah-gaze-mark": ""
+      },
+      "px": [
+        "w",
         "h"
       ]
     },

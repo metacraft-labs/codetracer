@@ -1,0 +1,12 @@
+{
+  "C1": "clicks.len == 2 and clicks[^1].index == 7",
+  "E1": "nodeId(moved) != old",
+  "E2": "builds == 1",
+  "E3": "not alive(old)",
+  "E4": "nodeId(third) == nodeId(a)",
+  "L1": "kept.plan == rebuilt.plan",
+  "L2": "kept.plan == rebuilt.plan",
+  "L3": "CHECKS == ExpectedAssertions",
+  "L4": "kept.plan == rebuilt.plan",
+  "M1": "margin.startsWith(\"-\")"
+}

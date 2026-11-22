@@ -26,8 +26,8 @@ export agent_harbor_playback
 # fixture, and its constructor below takes the story's `AhPlayback` (built by
 # the host over its clock): the viewmodel is built over the playback's source
 # and nothing else feeds it. Each surface plays the scenario that shows it
-# changing: the sessions, the fleet and the Initiatives panel follow the
-# sessions of `front-ends`; the initiative bar (its recordings) and the
+# changing: the sessions, the fleet, the Initiatives panel and the control
+# center follow the sessions of `front-ends`; the initiative bar (its recordings) and the
 # Initiative Progress panel (its milestones) follow `initiative-run`.
 
 const playbackFixtures* = [
@@ -39,11 +39,13 @@ const playbackFixtures* = [
   ("agent-harbor-fleet", "playback-front-ends"),
   ("agent-harbor-session-activity", "playback-session-run"),
   ("agent-harbor-session-activity", "playback-session-run+expanded"),
-  ("agent-harbor-inbox", "playback-inbox-run")]
+  ("agent-harbor-inbox", "playback-inbox-run"),
+  ("agent-harbor-control-center", "playback-front-ends")]
   ## Every playback story's surface and fixture.
 
 const surfacesWithoutPlayback* = ["agent-harbor-composer", "agent-harbor-results",
-                                  "agent-harbor-suggested-actions", "agent-harbor-pie",
+                                  "agent-harbor-suggested-actions",
+                                  "agent-harbor-status-gaze", "agent-harbor-pie",
                                   "agent-harbor-changes", "agent-harbor-inbox-item"]
   ## The surfaces the story hosts draw that have no playback story, each
   ## with its reason. A playback replays what a server feeds a surface over
@@ -53,7 +55,9 @@ const surfacesWithoutPlayback* = ["agent-harbor-composer", "agent-harbor-results
   ## its result commands (`agent_harbor_results_stories.nim`), whose rows
   ## answer what the operator typed; so does the suggested-actions block
   ## (`agent_harbor_suggested_actions_stories.nim`), whose states after the
-  ## one the agent's request opens are each the operator's press. The
+  ## one the agent's request opens are each the operator's press; so does the
+  ## status line's gaze mark (`agent_harbor_gaze_stories.nim`), whose state
+  ## is the operator's (the pause key) or the gaze provider's. The
   ## progress pie's story is a fixed table of every state and share
   ## (`agent_harbor_pie_stories.nim`) with no viewmodel at all; the pie
   ## changes over time only where a panel, tab or line draws it. The

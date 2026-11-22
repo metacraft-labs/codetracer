@@ -1736,6 +1736,53 @@ package codeTracer:
       codetracerActions.add(ctTest)
       auxiliaryActionIds.add(ctTest.id)
 
+    if fileExists("src/plugin-host/engine/Cargo.toml"):
+      # The WebAssembly plugin host (Extensibility-Model.md §11.9): its engine
+      # layer, wasmi only, as a static library, then `ct-plugin-host` linked
+      # against it, into the build output's `bin/` beside the front-ends that
+      # find it there (src/common/plugin_host_path.nim). The macOS app and the
+      # product parity check (ci/build/linux-products-baseline.txt) take it
+      # from there.
+      let pluginEngineLib =
+        ReproCargoSlot & "/plugin_host_engine_target/release/" &
+          (when defined(windows): "ct_plugin_engine.lib"
+           else: "libct_plugin_engine.a")
+      let pluginEngineBuild = cargo.build(
+        locked = true,
+        release = true,
+        noDefaultFeatures = true,
+        features = "wasmi",
+        manifestPath = "src/plugin-host/engine/Cargo.toml",
+        targetDir = ReproCargoSlot & "/plugin_host_engine_target",
+        actionId = "plugin-host-engine-cargo",
+        after = @[reproCargoTargetSlot],
+        extraInputs = @[
+          "src/plugin-host/engine/Cargo.toml",
+          "src/plugin-host/engine/Cargo.lock",
+          "src/plugin-host/engine/src/lib.rs"
+        ],
+        extraOutputs = @[pluginEngineLib])
+      let pluginHost = nim.c(
+        mm = "orc",
+        threadsOn = true,
+        hintsOff = true,
+        warningsOff = true,
+        defines = @["release", "ctPluginEngineLib=" & pluginEngineLib],
+        nimcache = ctNimCacheRoot & "/ct_plugin_host",
+        paths = CodeTracerNimPaths & @["src/frontend/viewmodel"],
+        output = buildDebugPath("bin/ct-plugin-host" & ExeSuffix),
+        extraInputs = @[pluginEngineLib],
+        after = @[pluginEngineBuild],
+        source = "src/plugin-host/ct_plugin_host.nim")
+      block:
+        const PluginHostBackendCompiler =
+          when defined(macosx): "clang"
+          else: "gcc"
+        appendRegisteredActionToolIdentityRefs(pluginHost.id,
+          [PluginHostBackendCompiler])
+      target("ct-plugin-host", pluginHost)
+      codetracerActions.add(pluginHost)
+
     if hasFrontendInputs and hasDbBackendRecordInput and hasCtInput:
       let codetracer = aggregate("codetracer",
         actions = codetracerActions,
@@ -2304,6 +2351,20 @@ package codeTracer:
       extraEnvValue = GateEnv)
     target("gate-flake-pin-alignment", gateFlakePinAlignment)
 
+    # Its sibling contract suite: this repo's repro.lock pins of reprobuild's
+    # own dependencies may not be behind the pinned reprobuild's. Same input
+    # reasoning: the suite builds its own throwaway repos and fixture locks and
+    # never reads this repo's flake.lock / repro.lock.
+    let gateReprobuildDependencyPins = ctShell(
+      actionIdValue = "codetracer.gate.reprobuild-dependency-pins",
+      commandValue = "bash ci/test/reprobuild-dependency-pins-test.sh",
+      extraInputsValue = @[
+        "ci/test/reprobuild-dependency-pins-test.sh",
+        "scripts/test-reprobuild-dependency-pins.sh"],
+      cacheableValue = true,
+      extraEnvValue = GateEnv)
+    target("gate-reprobuild-dependency-pins", gateReprobuildDependencyPins)
+
     # The real tree's two locks agree on every sibling both pin. A GATE over
     # the real files, so they are its inputs: a lock bump re-runs it.
     let gateReproLockAgreement = ctShell(
@@ -2510,6 +2571,7 @@ package codeTracer:
 
     let ctGateTestActions = @[
       gateFlakePinAlignment,
+      gateReprobuildDependencyPins,
       gatePythonVersionAlignment,
       gateRequireRuntimeAssets,
       gateTestLaneReport,

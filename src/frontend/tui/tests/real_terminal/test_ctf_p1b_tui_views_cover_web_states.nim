@@ -99,6 +99,7 @@ import ../../agent_harbor/ah_tui_results
 import ../../agent_harbor/ah_tui_pie
 import ../../agent_harbor/ah_tui_session_activity
 import ../../agent_harbor/ah_tui_suggested_actions
+import ../../agent_harbor/[ah_tui_control_center, ah_tui_gaze_mark]
 import ../ctf_p3_tui_cover
 import ../../../viewmodel/agent_harbor_activity_cards
 import nim_agents/agent_harbor/fleet_records
@@ -942,6 +943,47 @@ proc checkSuggestion(view: AhNode; vm: SuggestedActionsVM): seq[string] =
   result.expect("disabled", b.values("action-disabled"), vm.rows.mapIt($it.disabled))
   result.expect("buttons", b.values("suggested-button"), @["approve", "dismiss"])
 
+proc checkControlCenter(view: AhNode; panels: seq[AhNode]; vm: ControlCenterVM): seq[string] =
+  ## The control center against its viewmodel (CTF-P2c step 4): its state,
+  ## mode and the initiative a launch is for; the Initiatives panel it draws
+  ## (the panel's own comparison, `checkInitiatives`, over the control
+  ## center's `InitiativesVM`), or `No initiatives yet.` with an empty fleet;
+  ## the waiting sessions in inbox order; the recent launches; the notice.
+  result.expect("state", view.attr("cc-state"), $vm.state)
+  result.expect("mode", view.attr("cc-mode"), $vm.mode)
+  result.expect("launch for", view.attr("cc-launch-for"), vm.launchForTitle)
+  result.expect("notice", view.attr("cc-notice"), vm.launchNotice.line)
+  result.expect("recent", view.values("recent-launch"), vm.recent.mapIt(it.text))
+  if vm.isEmptyFleet:
+    result.expect("empty line", view.values("cc-empty-line"), @[NoInitiativesWords])
+    result.expect("panel", panels.len, 0)
+  else:
+    if panels.len != 1:
+      result.add "the Initiatives panel is drawn " & $panels.len & " times"
+    else:
+      result.add checkInitiatives(panels[0], vm.initiatives)
+  if vm.state != asReady:
+    result.expect("waiting", view.values("waiting-session").len, 0)
+    return
+  result.expect("waiting", view.values("waiting-session"), vm.waiting.mapIt(it.item.id))
+  result.expect("waiting words", view.values("waiting-words"), vm.waiting.mapIt(it.words))
+
+proc checkGazeMark(view: AhNode; vm: GazeStatusVM): seq[string] =
+  ## The status line's gaze mark against its viewmodel (CTF-P2c step 4):
+  ## none when off; while tracking or paused, one mark with the state's words
+  ## and the tooltip naming the pause key.
+  result.expect("gaze", view.attr("gaze"), $vm.state.val)
+  let marks = view.all("gaze-mark")
+  if not vm.shown:
+    result.expect("mark", marks.len, 0)
+    return
+  if marks.len != 1:
+    result.add "the mark is drawn " & $marks.len & " times"
+    return
+  result.expect("mark state", marks[0].attr("gaze-mark"), $vm.state.val)
+  result.expect("mark words", marks[0].attr("accessible-name"), vm.text)
+  result.expect("tooltip", marks[0].attr("tooltip"), vm.tooltip)
+
 proc contrastRatio(a, b: string): float
 
 proc checkPieStory(m: AhTuiMount): seq[string] =
@@ -1002,6 +1044,12 @@ proc checkStory(m: AhTuiMount): seq[string] =
   of "agent-harbor-results": checkResults(view, m.results)
   of "agent-harbor-suggested-actions":
     checkTimeline(view, m.timeline, m.suggestion) & checkSuggestion(view, m.suggestion)
+  of "agent-harbor-control-center":
+    # The Initiatives panel is drawn beside the control center's own nodes,
+    # under the screen's root, inside its overview.
+    checkControlCenter(view, m.canvas.root.all("surface").filterIt(
+      it.attr("surface") == "agent-harbor-initiatives"), m.center)
+  of "agent-harbor-status-gaze": checkGazeMark(view, m.gaze)
   of PieStorySurface: checkPieStory(m)
   of "agent-harbor-session-activity":
     var problems = checkTimeline(view, m.timeline)

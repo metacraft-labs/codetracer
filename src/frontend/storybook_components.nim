@@ -124,6 +124,10 @@ import stories/dom_results_presses
 import stories/agent_harbor_results_stories
 import stories/dom_suggested_actions_presses
 import stories/agent_harbor_suggested_actions_stories
+import stories/[dom_control_center_presses, agent_harbor_control_center_stories,
+                dom_gaze_presses, agent_harbor_gaze_stories]
+import viewmodel/views/[isonim_agent_harbor_control_center_view,
+                        isonim_agent_harbor_gaze_mark_view]
 import viewmodel/views/isonim_agent_harbor_results_view
 import viewmodel/views/isonim_agent_harbor_pie_view
 import viewmodel/views/isonim_agent_harbor_session_activity_view
@@ -2135,6 +2139,45 @@ proc mountAgentHarborSuggestedActions(container: isonim_dom.Element;
     if rootDisposer != nil: rootDisposer()
     container.innerHTML = ""
 
+var shownCenter: ControlCenterVM
+  ## The control center on the page (StoryBook shows one story at a time):
+  ## its presses and keys act on it (`stories/dom_control_center_presses`).
+
+proc mountControlCenterIn(container: isonim_dom.Element; fixture: string;
+                          options = ""): DisposeProc =
+  ## The control center over the viewmodel `createControlCenterStoryVM`
+  ## builds for `fixture`, filling `container`. Its presses and keys are
+  ## routed: the control center's own, and its launch form's (the
+  ## composer's, `stories/dom_composer_presses`), on the control center on
+  ## the page.
+  let pb = hostPlayback(ControlCenterSurfaceName, fixture)
+  routeControlCenterPresses(proc(): ControlCenterVM = shownCenter)
+  routeComposerPresses(proc(): OmniboxComposerVM =
+    if shownCenter.isNil: nil else: shownCenter.composer)
+  let dispose = mountAgentHarborVM(container,
+    proc(): ControlCenterVM =
+      shownCenter = createControlCenterStoryVM(fixture, pb)
+      shownCenter,
+    proc(host: isonim_dom.Element; vm: ControlCenterVM) =
+      mountAgentHarborControlCenter(host, vm), pb, options)
+  return proc() =
+    shownCenter = nil
+    dispose()
+
+proc mountAgentHarborControlCenterStory(container: isonim_dom.Element;
+                                        fixture: string; options = ""): DisposeProc =
+  ## The control center as a tab that fills the window
+  ## (`.ah-control-center-story`): the whole canvas, less the playback bar's
+  ## row under a playback story.
+  let story = createHost(container, "div", "ah-control-center-story")
+  isonim_dom.setAttribute(story, cstring"class", cstring(
+    "ah-control-center-story" &
+      (if isPlaybackStory(ControlCenterSurfaceName, fixture): " ah-story-above-playback" else: "")))
+  let dispose = mountControlCenterIn(story, fixture, options)
+  return proc() =
+    dispose()
+    container.innerHTML = ""
+
 proc mountAgentHarborChanges(container: isonim_dom.Element;
                              fixture: string; options = ""): DisposeProc =
   ## The Changes panel over the viewmodel `createChangesStoryVM` builds for
@@ -2236,6 +2279,45 @@ proc statusBarHost(container: isonim_dom.Element; id: string): isonim_dom.Elemen
   result = isonim_dom.getElementById(isonim_dom.document, cstring(id))
   doAssert not isonim_dom.isNodeNil(isonim_dom.Node(result)),
     "the status bar has no #" & id
+
+proc prependIn(parent: isonim_dom.Element; selector: cstring;
+               child: isonim_dom.Element): bool {.importjs: """
+  (function (p, s, c) {
+    var at = p.querySelector(s);
+    if (!at) return false;
+    at.insertBefore(c, at.firstChild);
+    return true;
+  })(#, #, #)""".}
+
+var shownGaze: GazeStatusVM
+  ## The gaze mark on the page: its press and the pause key act on it.
+
+proc mountAgentHarborStatusGaze(container: isonim_dom.Element;
+                                fixture: string): DisposeProc =
+  ## The window's status line (`renderStoryStatusBar`, the production status
+  ## view at the story's stopped location) with the gaze mark at the start of
+  ## its right-hand zone, under an empty working area; the mark's tooltip
+  ## names the key the base keymap binds to the pause (`gazePauseChord`).
+  let story = createHost(container, "div", "ah-gaze-story")
+  isonim_dom.setAttribute(story, cstring"class", cstring"ah-gaze-story")
+  let work = createHost(story, "div", "ah-gaze-window")
+  isonim_dom.setAttribute(work, cstring"class", cstring"ah-gaze-window")
+  let status = renderStoryStatusBar(WebRenderer(), story, false, replayReadyToast = false)
+  let host = isonim_dom.createElement(isonim_dom.document, cstring"span")
+  isonim_dom.setAttribute(host, cstring"class", cstring"ah-gaze-status-host")
+  doAssert prependIn(status, cstring".status-right", host),
+    "the status bar has no right-hand zone"
+  routeGazePresses(proc(): GazeStatusVM = shownGaze)
+  let dispose = mountAgentHarborVM(host,
+    proc(): GazeStatusVM =
+      shownGaze = createGazeStoryVM(fixture, gazePauseChord())
+      shownGaze,
+    proc(h: isonim_dom.Element; vm: GazeStatusVM) =
+      mountAgentHarborGazeMark(h, vm))
+  return proc() =
+    shownGaze = nil
+    dispose()
+    container.innerHTML = ""
 
 proc storyMenuShellModel(active: bool): MenuShellModel =
   ## The caption bar's menu: "Open File" and a Debug menu, open (`active`)
@@ -2853,11 +2935,12 @@ proc mountAgenticWindow(container: isonim_dom.Element; moment: string): DisposeP
   of "initiatives-popup":
     mountDebugPanels(row, disposers)
   of "control-center":
-    disposers.add mountLayoutInitiatives(stack(row, "Initiatives", "1.3 1 0"), moment)
-    let side = column(row, "1 1 0")
-    disposers.add mountLayoutProgress(stack(side, "Initiative Progress", "1 1 0"),
-                                      moment, ShieldInitiative)
-    disposers.add mountLayoutSessionList(stack(side, "Sessions", "1 1 0"), moment, tsmDocked)
+    # The control center itself (CTF-P2c step 4), the tab the caption bar
+    # shows active, filling the session area: the story `ControlCenter`,
+    # over the same moment of the project.
+    let tab = createHost(row, "div", "ah-control-center-tab")
+    isonim_dom.setAttribute(tab, cstring"class", cstring"ah-control-center-tab")
+    disposers.add mountControlCenterIn(tab, "populated")
   of "agent-delivers-review":
     disposers.add mountLayoutActivity(stack(row, "Agent Activity", "0 0 30%"), moment)
     let review = column(row, "1 1 0")
@@ -2971,6 +3054,8 @@ proc mountCodeTracerStory*(container: isonim_dom.Element;
     of "agent-harbor-session-list": mountAgentHarborSessionList(container, f, o)
     of "agent-harbor-composer": mountAgentHarborComposerStory(container, f)
     of "agent-harbor-results": mountAgentHarborResultsStory(container, f)
+    of "agent-harbor-control-center": mountAgentHarborControlCenterStory(container, f, o)
+    of "agent-harbor-status-gaze": mountAgentHarborStatusGaze(container, f)
     of "agent-harbor-pie": mountAgentHarborPie(container, f)
     of "debug-shell": mountDebugShell(container, f)
     of "debug-controls": mountDebugControls(container, f)

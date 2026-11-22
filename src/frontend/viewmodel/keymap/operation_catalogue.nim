@@ -105,6 +105,9 @@ const
   ComposerTable* = PaneTablePrefix & "composer"
     ## The omnibox composer's keys (`agent_harbor_composer_words`), while
     ## its field or its sheet has the focus.
+  ControlCenterTable* = PaneTablePrefix & "controlCenter"
+    ## The control center's keys (`agent_harbor_control_center_words`), while
+    ## it has the focus outside its launch form.
   ResultsTable* = PaneTablePrefix & "results"
     ## The omnibox's result commands' keys (`agent_harbor_results_words`),
     ## while their field or their sheet has the focus.
@@ -646,6 +649,25 @@ const
        "Suggested Actions: Check or Uncheck", oaTarget),
     op("suggested-actions.approve", SessionActivityTable, "Suggested Actions: Approve"),
     op("suggested-actions.dismiss", SessionActivityTable, "Suggested Actions: Dismiss"),
+    # The control center (`agent_harbor_control_center_words`): the launch
+    # form's mode and initiative (presses), and the waiting sessions (keys
+    # and presses).
+    op("control-center.new-task", ControlCenterTable, "Control Center: New Task"),
+    op("control-center.new-initiative", ControlCenterTable,
+       "Control Center: New Initiative"),
+    op("control-center.launch-for", ControlCenterTable,
+       "Control Center: Launch For an Initiative", oaTarget),
+    op("control-center.open-session", ControlCenterTable,
+       "Control Center: Open a Waiting Session", oaTarget),
+    op("control-center.next", ControlCenterTable, "Control Center: Next Waiting Session"),
+    op("control-center.previous", ControlCenterTable,
+       "Control Center: Previous Waiting Session"),
+    op("control-center.open", ControlCenterTable,
+       "Control Center: Open the Focused Session"),
+    # The status line's gaze mark (`agent_harbor_gaze_words`): the one key
+    # that pauses and resumes gaze tracking (Eye-Tracking-Context "Privacy
+    # and control"), and a press on the mark.
+    op("gaze.toggle-pause", GlobalTable, "Gaze: Pause or Resume Tracking"),
     # The omnibox composer (`agent_harbor_composer_words`): send, move the
     # destination, and what a press on its chips, rows and Recent does.
     op("composer.send", ComposerTable, "Composer: Send"),

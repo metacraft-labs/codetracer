@@ -89,6 +89,22 @@ const
     BaseRow(chords: "Down", operation: "composer.next-destination", table: ComposerTable),
     BaseRow(chords: "Up", operation: "composer.previous-destination", table: ComposerTable),
 
+    # --- The control center: `Down` / `Up` walk the sessions waiting for the
+    # operator and `Enter` opens the one they are on, the same under every
+    # base, as a list pane's arrows are. Its launch form is the composer's,
+    # whose keys are above.
+    BaseRow(chords: "Down", operation: "control-center.next", table: ControlCenterTable),
+    BaseRow(chords: "Up", operation: "control-center.previous", table: ControlCenterTable),
+    BaseRow(chords: "Enter", operation: "control-center.open", table: ControlCenterTable),
+
+    # --- The gaze mark: one key pauses and resumes gaze tracking anywhere in
+    # the window, the same under every base (Eye-Tracking-Context "Privacy
+    # and control"). `Ctrl+Alt+Y` (the eye): measured free in every base's
+    # rows and in every binding set and desktop preset, where `Ctrl+Alt+G`
+    # is the chorded stepping set's Continue and `F9` toggles a breakpoint
+    # (P2c study D65).
+    BaseRow(chords: "Ctrl+Alt+Y", operation: "gaze.toggle-pause", table: GlobalTable),
+
     # --- The omnibox's result commands: `Enter` opens the selected row,
     # `Down` / `Up` move the selection, `Tab` inserts a completion (the
     # launcher's sigil rule), the same under every base.
