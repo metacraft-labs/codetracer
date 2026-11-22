@@ -371,21 +371,15 @@ func markFor*(points: openArray[EditorPoint]; path: string;
   ## A DISABLED breakpoint does NOT beat an armed one on the same line, because
   ## a line carrying both is a line that stops.
   ##
-  ## **THE FULL RANKING IS armed breakpoint > TRACEPOINT > disabled breakpoint**,
-  ## and the headline above does not say where a tracepoint sits relative to a
-  ## disabled breakpoint — which is exactly the case the two media disagree on.
-  ## Measured 2026-09-16: a line carrying a TRACEPOINT and a DISABLED breakpoint
-  ## renders `○` in the terminal (`app/source_binding.marksForFile` emits
-  ## tracepoints first and then breakpoints of either kind, and
-  ## `views/source_pane.markFor` takes the LAST) and `emTracepoint` here.
-  ## Neither answer is obviously wrong — a disabled breakpoint does nothing, a
-  ## tracepoint records — and **nothing in this repository asserts that the two
-  ## agree, because today they do not.** The remedy is one cross-front-end case
-  ## driving ONE `seq[EditorPoint]` through both media and requiring the same
-  ## mark, and it needs the `tui` lane, which cannot be compiled where this was
-  ## written. Until then this module is the second implementation it was
-  ## written to prevent, which is worth saying in the header rather than only
-  ## in a milestone.
+  ## **THE FULL RANKING IS armed breakpoint > TRACEPOINT > disabled breakpoint**:
+  ## a tracepoint records, and a disabled breakpoint does nothing. Until
+  ## 2026-11-21 the terminal had its own spelling of this rule
+  ## (`app/source_binding.marksForFile` emitted tracepoints and then
+  ## breakpoints of either kind, and `views/source_pane.markFor` took the last),
+  ## and on a line carrying a tracepoint and a disabled breakpoint it drew `○`
+  ## where this answers `emTracepoint`. It reads its marks from this function
+  ## now, and `test_editor_mark_agreement.nim` drives one set of points through
+  ## both front-ends and requires the same mark on every line.
   result = emNone
   var sawTracepoint = false
   var sawDisabled = false

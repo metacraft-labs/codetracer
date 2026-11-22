@@ -28,7 +28,8 @@
 ## ## WHAT PLAT-38 CHANGED HERE, AND WHY IT IS NOT COSMETIC
 ##
 ## PLAT-21 filed three gaps against the renderer and this module carried an
-## escape for each. All three are gone:
+## escape for each. All three are gone (and the fourth, `PLAT21-VG4`, filed
+## against the vocabulary, went when `Image` gained its `picture`):
 ##
 ##   * `PLAT21-VG1` — *a key cannot be delivered*. The renderer's listener ABI
 ##     was `proc()`: no event object, no key. The only channel that could say
@@ -88,6 +89,7 @@ import isonim_gpui/renderer
 import isonim_gpui/bindings
 
 import ../../common/view_vocabulary
+import ../../common/png
 import ./fact_reader
 import ./graphemes
 
@@ -107,6 +109,9 @@ const
     ## this name, which is how the retirement of `vockey:` is checked from a
     ## RUN rather than from a grep alone.
 
+  PictureErrorAttribute* = "data-picture-error"
+    ## Set on an `Image`'s element when its picture did not decode, to why.
+
   DisabledFactName* = "disabled"
     ## The `nodeFacts` field whose plain attribute name isonim-gpui used to
     ## destroy (`PLAT21-VG2`). The gap is repaired; the constant stays because
@@ -115,19 +120,6 @@ const
     ## two would drift.
 
 type
-  GpuiEscapeKind* = enum
-    ## Which filed gap a taken escape belongs to. An enum rather than a string
-    ## so a census over it is total and a fifth escape cannot appear unnamed.
-    ##
-    ## **THREE MEMBERS WERE REMOVED BY PLAT-38** — `gekKeyInEventName`
-    ## (`PLAT21-VG1`), `gekDisabledAttribute` (`PLAT21-VG2`) and
-    ## `gekModalWithoutFocus` (`PLAT21-VG3`). Removing them rather than leaving
-    ## them unused is deliberate: `gpuiEscapeGapId` is exhaustive over this
-    ## enum, so a member with no remaining call site would compile forever and
-    ## an escape kind nothing can produce is a register entry nothing can
-    ## retire.
-    gekImageWithoutPayload   ## PLAT21-VG4
-
   GpuiEscape* = object
     ## ONE escape, RECORDED WHERE IT WAS TAKEN.
     ##
@@ -136,7 +128,12 @@ type
     ## moment it takes the escape, so the census the suite asserts is taken
     ## from a run (Verification-Harness-Traps §7a: a register nobody can make
     ## disagree with the code is a register nobody is checking).
-    kind*: GpuiEscapeKind
+    gapId*: string
+      ## The filed gap this escape is (`gpui_gaps.FiledGpuiGaps`). A string
+      ## rather than an enum since 2026-11-21: the last kind, `PLAT21-VG4`
+      ## (`Image` had no payload), was retired, the binding takes no escape
+      ## today, and an enum cannot be empty. The census stays total the other
+      ## way round — the suite asserts every recorded id is a filed gap.
     entry*: ViewKind
     nodeId*: string
     detail*: string
@@ -177,12 +174,6 @@ type
       ## the Rust-side element store, is read through `renderer.lastEvent`
       ## rather than from this field, because a field this module writes is a
       ## surface the case built (§4a).
-
-func gpuiEscapeGapId*(k: GpuiEscapeKind): string =
-  ## Which filed gap each escape kind is. Exhaustive: a second escape kind
-  ## cannot compile without being filed.
-  case k
-  of gekImageWithoutPayload: "PLAT21-VG4"
 
 # ---------------------------------------------------------------------------
 # The renderer's shape, completed
@@ -318,9 +309,12 @@ func keyFromGpuiEvent*(ev: GpuiEvent): KeyPress =
 # Rendering
 # ---------------------------------------------------------------------------
 
-proc recordEscape(b: GpuiBinding; kind: GpuiEscapeKind; v: ViewNode;
-                  detail: string) =
-  b.escapes.add GpuiEscape(kind: kind, entry: v.kind, nodeId: v.id,
+proc recordEscape*(b: GpuiBinding; gapId: string; v: ViewNode;
+                   detail: string) =
+  ## THE ONE DOOR an escape goes through: the rendering code calls it at the
+  ## moment it takes one, naming the filed gap. Nothing calls it today — the
+  ## binding takes no escape — and the census still runs on every render.
+  b.escapes.add GpuiEscape(gapId: gapId, entry: v.kind, nodeId: v.id,
                            detail: detail)
 
 proc applyFacts(b: GpuiBinding; el: GpuiElement; v: ViewNode) =
@@ -434,15 +428,31 @@ proc renderNode(b: GpuiBinding; v: ViewNode): GpuiElement =
     if v.label.len > 0:
       r.appendChild(el, r.createTextNode(v.label))
   of pkImage:
-    # PLAT21-VG4. `img` is one of exactly two tags that reach a dedicated Rust
-    # element kind, and the entry has no payload to give it — so the one
-    # renderer that could draw the picture gets the alt text, the same as the
-    # terminal fallback.
-    b.recordEscape(gekImageWithoutPayload, v,
-      "emitted <img> with alt text and no source; ViewNode carries " &
-      "mediaType and mediaBytes and no bytes")
+    # `img` is one of exactly two tags that reach a dedicated Rust element
+    # kind, and the entry's `picture` is what it draws: decoded here and handed
+    # over as RGBA pixels, which the shim reports on the plan as
+    # `data-gpui-image=<w>x<h>`. Until 2026-11-21 the entry had no payload and
+    # this arm drew the alt text and recorded `PLAT21-VG4`. The alt text stays
+    # as the element's text: it is the placeholder the shim draws when there
+    # is no picture, and the text equivalent when there is one.
     r.setAttribute(el, "alt", v.alt)
     r.appendChild(el, r.createTextNode(v.alt))
+    if v.picture.len > 0:
+      let drawn =
+        try:
+          let decoded = decodePng(v.picture)
+          var pixels = newString(decoded.rgba.len)
+          if decoded.rgba.len > 0:
+            copyMem(addr pixels[0], unsafeAddr decoded.rgba[0], decoded.rgba.len)
+          if r.setImageRgba(el, pixels, decoded.width, decoded.height): ""
+          else: "the shim refused " & $decoded.width & "x" & $decoded.height &
+               " pixels"
+        except CatchableError as e:
+          e.msg
+      if drawn.len > 0:
+        # A picture that does not decode is drawn as its alt text, and says
+        # why on the element rather than quietly.
+        r.setAttribute(el, PictureErrorAttribute, drawn)
   of pkInput:
     r.appendChild(el, r.createTextNode(v.text))
   of pkSelect, pkList, pkMenu, pkTabs:
@@ -693,8 +703,10 @@ proc escapedEntries*(b: GpuiBinding): seq[ViewKind] =
         result.add k
         break
 
-proc escapeKinds*(b: GpuiBinding): set[GpuiEscapeKind] =
-  for e in b.escapes: result.incl e.kind
+proc escapeGapIds*(b: GpuiBinding): seq[string] =
+  ## The filed gaps this rendering's escapes name, in the order first taken.
+  for e in b.escapes:
+    if e.gapId notin result: result.add e.gapId
 
 proc planJson*(b: GpuiBinding): string =
   b.renderer.renderPlanJson(b.root)

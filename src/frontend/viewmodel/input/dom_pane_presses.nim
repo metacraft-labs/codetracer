@@ -42,9 +42,11 @@ proc closestWith(element: JsObject; selector: cstring): JsObject {.importjs:
 
 when defined(ctWasmPanes):
   proc wasmPaneHosts(element: JsObject): bool {.importjs:
-    "((e) => !!(e && e.closest && e.closest('.ct-web-core-pane')) && !!globalThis.ctwPanelsHost)(#)".}
+    "((e) => !!globalThis.ctwPanels && !!globalThis.ctwPanels.owns && globalThis.ctwPanels.owns(e))(#)".}
+    ## Whether a WebAssembly core draws the pane `element` is in — each tab's
+    ## own core (`web_core/web_core_panels.js`).
   proc wasmPanePress(operation: cstring; element: JsObject): bool {.importjs:
-    "globalThis.ctwPanelsHost.press(#, #)".}
+    "globalThis.ctwPanels.press(#, #)".}
 
 proc readerOf*(element: JsObject): AttributeReader =
   ## `name` on `element`, or on its nearest ancestor that carries it (a call's

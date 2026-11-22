@@ -91,3 +91,53 @@ suite "an Event Log that follows the stop":
       check sent.len >= 1
       check sent.len >= 1 and sent[^1]["sortAscending"].getBool == false
       dispose()
+
+proc windowOf(events: int; indexAtTick: int): JsonNode =
+  var rows = newJArray()
+  for i in 0 ..< events:
+    rows.add %*{"kind": "Write", "content": "event " & $i, "eventIndex": i,
+                "directLocationRRTicks": 100 + i}
+  %*{"type": "response", "command": "ct/event-load", "success": true,
+     "body": {"events": rows, "total": events, "indexAtTick": indexAtTick}}
+
+suite "answers that arrive out of order":
+
+  test "an answer to a superseded request does not replace the newer one's":
+    # A pane measured before the entry stop asks twice: before the stop and
+    # at it. The engine answers the second first; the first answer, which
+    # carries no events, lands last and must not empty the log.
+    createRoot proc(dispose: proc()) =
+      let mock = newMockBackendService()
+      mock.deferResponses = true
+      let store = createReplayDataStore(mock.toBackendService())
+      let vm = createEventLogVM(store)
+      vm.followStop()
+      vm.setViewport(Viewport(rows: 5, firstRow: 0))
+      drainPlatformCallbacks()
+      store.updateDebuggerPosition(120'u64, "/src/main.py", 3)
+      drainPlatformCallbacks()
+      check mock.eventLoads.len == 2
+      check mock.pendingDeferredCount == 2
+      mock.settleDeferredAt(1, windowOf(6, 2))
+      check store.eventLog.rows.val.len == 6
+      mock.settleDeferredAt(0, windowOf(0, -1))
+      check store.eventLog.rows.val.len == 6
+      check store.eventLog.currentIndex.val == 2
+      dispose()
+
+  test "answers in order are both applied, the newest last":
+    createRoot proc(dispose: proc()) =
+      let mock = newMockBackendService()
+      mock.deferResponses = true
+      let store = createReplayDataStore(mock.toBackendService())
+      let vm = createEventLogVM(store)
+      vm.followStop()
+      vm.setViewport(Viewport(rows: 5, firstRow: 0))
+      drainPlatformCallbacks()
+      store.updateDebuggerPosition(120'u64, "/src/main.py", 3)
+      drainPlatformCallbacks()
+      mock.settleDeferredAt(0, windowOf(0, -1))
+      mock.settleDeferredAt(0, windowOf(6, 2))
+      check store.eventLog.rows.val.len == 6
+      check store.eventLog.currentIndex.val == 2
+      dispose()

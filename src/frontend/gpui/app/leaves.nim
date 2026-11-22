@@ -3131,6 +3131,24 @@ type
     isWatch*: bool     ## a watched expression's row (top level only)
     watchInvalid*: bool ## the stop cannot answer this watch; `value` says why
 
+var stateVisualisers*: seq[Visualiser] = @[]
+  ## The visualiser tier the Variables pane renders values with: the open
+  ## checkout's project definitions (`.codetracer/visualisers.toml`, the
+  ## recorded program's own visualiser function, and the project's sandboxed
+  ## visualiser once granted), set by the window for the session on screen.
+  ## Empty is the built-in presenters alone.
+
+var stateVisualisersOf*: proc(vm: StateVM): seq[Visualiser] = nil
+  ## How the window answers `stateVisualisers` for a ViewModel: asked once per
+  ## `stateRows`, which every drawing and every keyboard read of the pane goes
+  ## through, so the tier follows the session on screen. Nil keeps the tier
+  ## as it is (the suites set `stateVisualisers` directly).
+
+proc statePresenters*(): PresenterSet =
+  ## The presenters every value of the Variables pane goes through — the row,
+  ## its cut and its detail — so the three cannot render one value two ways.
+  withVisualisers(stateVisualisers)
+
 proc appendStateRows(v: Variable; path: string; depth: int;
                      budget: Budget; expanded: HashSet[string];
                      selected: string; acc: var seq[StateRow]) =
@@ -3146,7 +3164,7 @@ proc appendStateRows(v: Variable; path: string; depth: int;
   ## (which is the durable answer, and would move two more harnesses').
   let rendered =
     if v.presented.isNil: v.value
-    else: presentText(v.presented, budget)
+    else: present(v.presented, budget, presenters = statePresenters()).root.text
   acc.add StateRow(path: path, name: v.name, value: rendered,
                    typeName: v.typeName, presented: v.presented,
                    whole: v.value, depth: depth,
@@ -3169,6 +3187,8 @@ proc stateRows*(vm: StateVM; budget: Budget): seq[StateRow] =
   result = @[]
   if vm.isNil:
     return
+  if not stateVisualisersOf.isNil:
+    stateVisualisers = stateVisualisersOf(vm)
   let expanded = vm.expandedPaths.val
   let selected = vm.selectedPath.val
   let vars = vm.currentVariables.val
@@ -3271,6 +3291,7 @@ proc stateIconButton(r: GpuiRenderer; attr, iconName, svg: string;
 var statePaneSizePx*: tuple[w, h: int] = (0, 0)
   ## The state pane body's size, set by the window: its scrollbars are drawn
   ## from it (`stateScrollbars`).
+
 var stateFitContentPx* = 0
   ## PLAT-70 Part I: the rows' width while they SCROLL (the widest floor), 0
   ## while they fit the pane.
@@ -3665,9 +3686,10 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
       else:
         var b = budget
         if paneW > 0: b.cells = max(1, cells)
-        let p = present(row.presented, b)
+        let p = present(row.presented, b, presenters = statePresenters())
         presentedCell(oneLine(p.root.text),
-                      (if p.truncated: fullValueText(row.presented, row.whole)
+                      (if p.truncated: fullValueText(row.presented, row.whole,
+                                                     statePresenters())
                        else: p.root.text),
                       p.truncated)
     # One line, as the desktop's `white-space: nowrap` collapses a value's
@@ -3707,7 +3729,7 @@ proc renderState*(r: GpuiRenderer; parent: GpuiElement; vm: StateVM;
     inc slot
     # The full value under the row, wrapped in the value's column (§5.3).
     if tableDetail.isOpen(StateDetailPane, row.path):
-      let full = fullValueText(row.presented, row.whole)
+      let full = fullValueText(row.presented, row.whole, statePresenters())
       for line in detailView(full, max(1, cells), bodyRows,
                              tableCopyChord).lines:
         let d = r.createElement("div")

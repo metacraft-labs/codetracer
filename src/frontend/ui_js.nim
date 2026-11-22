@@ -2622,6 +2622,10 @@ proc wireSessionViewModelHooks(vms: SessionViewModels; dapRef: DapApi) =
   let sessionVM = vms.vm
   if sessionVM.isNil:
     return
+  when defined(ctWasmPanes):
+    # The tab's WebAssembly panes run over this tab's own connection to the
+    # engine (`web_core/renderer_transport.nim`), one core per tab.
+    installWasmPaneTransport(dapRef, toJs(sessionVM))
   # The process tree's click handler rotates the ViewModel's active
   # recording; this bridge is what makes that rotation visible in
   # the backend. Requests are routed to a recording purely by the
@@ -2852,11 +2856,6 @@ proc configureSessionMiddleware(session: ReplaySession; withDebugger = true;
 
   dapRef.ipc = data.ipc
 
-  when defined(ctWasmPanes):
-    # The WebAssembly panes share the first tab's connection to the engine
-    # (`web_core/renderer_transport.nim`).
-    if firstSession:
-      installWasmPaneTransport(dapRef)
 
   dapRef.on(DapCapabilities, proc(kind: CtEventKind, body: JsObject) =
     # The replay engine is selected at launch, after initialize. Remember

@@ -21,7 +21,9 @@
 #   emcc   `vm-unit-wasm`  with CT_WASM_CC=emcc: the wasm lane as it was
 #                          before the profile, for the record
 #
-# CT_P18_LANE_ARMS chooses which run (default `js wasm native`).
+# CT_P18_LANE_ARMS chooses which run (default `js wasm native`, or `wasm
+# native` once `vm-unit-js` is no longer a lane: the `js` arm is then refused
+# by name rather than run against a lane that is gone).
 #
 # ## SCENARIOS — TWO, BECAUSE A DEVELOPER PAYS BOTH
 #
@@ -79,7 +81,14 @@ for tool in nim emcc node; do
 	fi
 done
 
-read -r -a arms <<<"${CT_P18_LANE_ARMS:-js wasm native}"
+# shellcheck source=ci/lib/test-lane-files.sh
+# shellcheck disable=SC1091 # resolved at runtime from the checkout root
+source "${repo_root}/ci/lib/test-lane-files.sh"
+js_lane_exists=0
+grep -qxF vm-unit-js <<<"$(test_lane_ids)" && js_lane_exists=1
+default_arms="wasm native"
+[ "${js_lane_exists}" -eq 1 ] && default_arms="js wasm native"
+read -r -a arms <<<"${CT_P18_LANE_ARMS:-${default_arms}}"
 # Arms run in the FIRST repetition only — a reference measured once beside
 # the arms the ratio is about (e.g. `native emcc`), when hours matter.
 read -r -a once_arms <<<"${CT_P18_LANE_ONCE_ARMS:-}"
@@ -91,7 +100,13 @@ edit_file="src/frontend/viewmodel/store/types.nim"
 
 lane_of() {
 	case "$1" in
-	js) echo vm-unit-js ;;
+	js)
+		[ "${js_lane_exists}" -eq 1 ] || {
+			echo "ERROR: the js arm measures vm-unit-js, which is no longer a lane" >&2
+			return 1
+		}
+		echo vm-unit-js
+		;;
 	wasm | emcc) echo vm-unit-wasm ;;
 	native) echo vm-unit ;;
 	*) return 1 ;;

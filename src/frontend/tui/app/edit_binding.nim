@@ -828,9 +828,9 @@ proc marksForFile*(points: openArray[SourcePoint];
                    path: string): seq[(int, GutterMark)] =
   ## The gutter marks on `path`.
   ##
-  ## THE SAME ORDER RULE `source_binding.marksForFile` STATES — tracepoints
-  ## first, breakpoints second, so a line carrying both shows `●`. It is a
-  ## second call site of one rule rather than a second rule: this overload
+  ## `source_binding.marksForFile`'s answer — one mark per line, by the
+  ## shared ranking `editor_rows.markFor`. It is a second call site of one
+  ## rule rather than a second rule: this overload
   ## exists only because `source_binding`'s is not visible through this
   ## module's re-exports under the same name without ambiguity, and it
   ## delegates.

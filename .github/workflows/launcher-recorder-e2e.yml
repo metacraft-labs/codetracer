@@ -779,7 +779,7 @@ jobs:
             # d91a98626 moved io-mon and nim-shm-gset.
             # runquota is locked as a `follows` of reprobuild's `runquota-src`;
             # the pin below is that node's rev.
-            io-mon=5839ebac3fcc51d2532205e0c1aceccca40261ce
+            io-mon=6a6713e53f4cf1d863a8d94e3353ecd0581da85f
             nim-shm-queue=0d6049997d77421b6e4748f819657cf6042e9508
             nim-shm-gset=0b2896adc65d0d62c0ee84af1356c909da2975d0
             nim-stackable-hooks=07319306758cf608e664fe9e64ab7e0bed5ca186
@@ -790,7 +790,7 @@ jobs:
             # carry it. They do now; going bare is a separate change.
             isonim=530cfa8154dc8dea1b87f804082f04f56f31754e
             isonim-tui=8e43ce06f7f078530c7a8585c210ad7648fa0051
-            runquota=aad94ad19f8cdb7aadc88e88b830d47caaabed92
+            runquota=814b991861f64ad0e524c696fc1251ff1fbb6c67
             # Required by scripts/require-siblings.sh (`ct` links its reference
             # library). SHA, not bare: this workflow is also called from recorder
             # repos, whose repro.lock need not pin it. It is a flake input, so the

@@ -95,7 +95,30 @@ proc main() {.async.} =
   await settle()
   drainPlatformCallbacks()
   ck not reply.isNil
+  ck responseSucceeded(reply)
   ck responseBody(reply){"marker"}.getInt(0) == 1234
+
+  echo "[Suite] a refusal"
+  echo "  case: reaches the core as a failed response, with the engine's message"
+  sentPackets.setLen(0)
+  var refused: JsonNode = nil
+  onComplete(backend.send("ct/load-locals", %*{"rrTicks": 9}),
+    onSuccess = proc(r: JsonNode) = refused = r,
+    onError = proc(m: string) = discard)
+  let refusedSeq = sentPackets[0]["seq"].to(int)
+  let refusal = JsObject{}
+  refusal["type"] = cstring"response"
+  refusal["request_seq"] = refusedSeq
+  refusal["success"] = false
+  refusal["command"] = cstring"ct/load-locals"
+  refusal["message"] = cstring"no replay for this tab"
+  refusal["body"] = JsObject{}
+  deliverDapResponse(dapApi, dapApi, refusal)
+  await settle()
+  drainPlatformCallbacks()
+  ck not refused.isNil
+  ck not responseSucceeded(refused)
+  ck refused{"message"}.getStr == "no replay for this tab"
 
   echo "[Suite] an event"
   echo "  case: reaches the core under its DAP name, and moves an attached session"
@@ -113,6 +136,71 @@ proc main() {.async.} =
   drainPlatformCallbacks()
   ck session.position.line == 17
   ck session.position.file == "/src/main.py"
+
+  echo "[Suite] two tabs"
+  echo "  case: each tab's panes are its own core's, over its own connection"
+  # The panes' host (`web_core_panels.js`) as the renderer loads it, over a
+  # stand-in core and core host that record which transport each core was
+  # booted with and which presses reached it — the wasm module itself is
+  # `web-core-browser.sh`'s subject, not this suite's.
+  let dapA = DapApi(ipc: recordingIpc(), seq: 0, sessionId: 1)
+  let dapB = DapApi(ipc: recordingIpc(), seq: 0, sessionId: 2)
+  let tabA = JsObject{}
+  let tabB = JsObject{}
+  installWasmPaneTransport(dapA, tabA)
+  installWasmPaneTransport(dapB, tabB)
+  installWasmPaneTransport(dapA, tabA)   # a tab whose ViewModels are replaced
+  var sameTransport, distinctTransports, firstIsDefault: bool
+  {.emit: [sameTransport, " = ", tabA, ".ctwTransport === ", dapA, ".ctwTransport;",
+           distinctTransports, " = ", tabA, ".ctwTransport !== ", tabB, ".ctwTransport;",
+           firstIsDefault, " = globalThis.ctwRendererTransport === ", tabA, ".ctwTransport;"].}
+  ck sameTransport
+  ck distinctTransports
+  ck firstIsDefault
+  {.emit: """
+  globalThis.__ctwBoots = [];
+  globalThis.ctwModule = async () => ({});
+  globalThis.CtWebCoreHost = { startWebCore(opts) {
+    const panes = {};
+    const h = { transport: opts.transport, presses: [],
+      attach() {}, mountPane(n) {},
+      paneElement(n) {
+        if (!panes[n]) { panes[n] = document.createElement('div');
+          panes[n].className = 'ct-web-core-pane'; opts.mount.appendChild(panes[n]); }
+        return panes[n]; },
+      press(op, el) { h.presses.push(op); return true; } };
+    globalThis.__ctwBoots.push(h);
+    return h; } };
+  require(globalThis.ctRepoRoot + '/src/frontend/web_core/web_core_panels.js');
+  """.}
+  var hostA1, hostA2, hostB: JsObject
+  {.emit: """
+  `hostA1` = document.createElement('div'); `hostA2` = document.createElement('div');
+  `hostB` = document.createElement('div');
+  document.body.append(`hostA1`, `hostA2`, `hostB`);
+  globalThis.ctwPanels.mount('state', `hostA1`, `tabA`);
+  globalThis.ctwPanels.mount('calltrace', `hostA2`, `tabA`);
+  globalThis.ctwPanels.mount('state', `hostB`, `tabB`);
+  """.}
+  await settle()
+  await settle()
+  var boots, aBootedOnA, bBootedOnB, placed, routed: bool
+  {.emit: """
+  const b = globalThis.__ctwBoots;
+  `boots` = b.length === 2;
+  `aBootedOnA` = b.length === 2 && b[0].transport === `tabA`.ctwTransport;
+  `bBootedOnB` = b.length === 2 && b[1].transport === `tabB`.ctwTransport;
+  `placed` = !!`hostA1`.firstChild && !!`hostA2`.firstChild && !!`hostB`.firstChild &&
+             `hostA1`.firstChild !== `hostB`.firstChild;
+  const pb = `hostB`.firstChild;
+  `routed` = globalThis.ctwPanels.owns(pb) && globalThis.ctwPanels.press('expand', pb) &&
+             b.length === 2 && b[1].presses.length === 1 && b[0].presses.length === 0;
+  """.}
+  ck boots
+  ck aBootedOnA
+  ck bBootedOnB
+  ck placed
+  ck routed
 
   if failedChecks > 0:
     {.emit: "process.exitCode = 1;".}

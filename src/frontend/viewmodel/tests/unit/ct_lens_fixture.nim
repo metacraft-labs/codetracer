@@ -13,8 +13,10 @@
 
 import std/[hashes, json, os, osproc, strutils]
 
+import wasm_host_fixture
+export wasm_host_fixture.pluginHostBin, wasm_host_fixture.RepoRoot
+
 const
-  RepoRoot* = currentSourcePath.parentDir.parentDir.parentDir.parentDir.parentDir.parentDir
   LensSrcDir* = RepoRoot / "src" / "plugins" / "ct-lens"
   LensSdkDir* = RepoRoot / "src" / "plugin_sdk"
   LensComponent* = "ct-lens@0.1.0"
@@ -65,6 +67,22 @@ proc installLens*(root: string; manifest = ""): string =
   copyFileWithPermissions(exe, result / "bin" / LensExecutable)
   writeFile(result / "plugin.json",
     if manifest.len > 0: manifest else: readFile(LensSrcDir / "plugin.json"))
+
+proc installLensWasm*(root: string): string =
+  ## The WebAssembly port of `ct-lens.watch` (`ct_lens_watch_wasm.nim`,
+  ## `wasm/plugin.json`), installed under `root` as the component `ct-lens`:
+  ## `plugin.json` and one `plugin.wasm`, the artifact every platform runs.
+  ## `CT_LENS_WASM_MODULE` names a module built elsewhere — on another
+  ## platform, to show that one artifact serves both.
+  let given = getEnv("CT_LENS_WASM_MODULE", "")
+  let module = if given.len > 0: given else: buildWasmModule(LensSrcDir / "ct_lens_watch_wasm.nim",
+    "ct-lens-watch", @["--path:" & LensSrcDir],
+    @[LensSrcDir / "lens_watch.nim",
+      RepoRoot / "src/frontend/viewmodel/viewmodels/value_changes.nim"])
+  result = root / LensComponent
+  createDir(result)
+  copyFile(module, result / "plugin.wasm")
+  writeFile(result / "plugin.json", readFile(LensSrcDir / "wasm" / "plugin.json"))
 
 proc lensManifest*(): JsonNode =
   parseJson(readFile(LensSrcDir / "plugin.json"))

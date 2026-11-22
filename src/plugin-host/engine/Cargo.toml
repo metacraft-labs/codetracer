@@ -1,0 +1,48 @@
+[package]
+name = "ct-plugin-engine"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "The WebAssembly engine behind ct-plugin-host: one store per plugin, a memory limit and a per-call deadline, behind a small C ABI"
+license = "MIT"
+
+# Its own workspace: this crate is built on its own (`just build-plugin-host`)
+# and must not be pulled into, or pull in, any other crate's lock.
+[workspace]
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+path = "src/lib.rs"
+
+[[bin]]
+# The engine measurement behind Extensibility-Model.md §11.9's choice:
+# instantiation time, the per-call cost of a deadline (epoch versus fuel),
+# memory per instance, on whichever engines this build carries.
+name = "ct-wasm-engine-bench"
+path = "src/bin/bench.rs"
+
+[[bin]]
+# The smallest program that loads a module and calls it: its stripped size is
+# the engine's binary-size cost, measured once per engine feature.
+name = "ct-wasm-engine-probe"
+path = "src/bin/probe.rs"
+
+[features]
+default = ["wasmtime", "wasmi"]
+wasmtime = ["dep:wasmtime"]
+wasmi = ["dep:wasmi"]
+
+[dependencies]
+anyhow = "1"
+wat = "1"
+# Cranelift only: no Winch, no component model, no WASI crates, no cache,
+# no profiling. The host supplies every import itself (src/lib.rs).
+wasmtime = { version = "=48.0.10", optional = true, default-features = false, features = ["cranelift", "runtime", "std", "parallel-compilation", "pooling-allocator"] }
+wasmi = { version = "=2.0.2", optional = true }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+panic = "abort"
+strip = "symbols"

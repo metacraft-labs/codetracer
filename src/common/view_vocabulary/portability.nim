@@ -50,11 +50,13 @@
 ##                        value itself" — this is that defect arriving in a
 ##                        view instead of a value.
 ##
-##   pvStructural         two nodes sharing an `id`, or a table row whose
-##                        length disagrees with its columns. Neither is
-##                        medium-specific; both make a binding on SOME medium
+##   pvStructural         two nodes sharing an `id`, a table row whose
+##                        length disagrees with its columns, or an `Image`
+##                        whose picture is not PNG. None is
+##                        medium-specific; each makes a binding on SOME medium
 ##                        impossible (a focus manager needs to name the focused
-##                        node; no medium's table draws a ragged row), which is
+##                        node; no medium's table draws a ragged row; a medium that draws decodes one
+##                        picture format), which is
 ##                        the same question asked structurally.
 ##
 ## ## THE BOUND ON THE MARKUP RULE, STATED RATHER THAN PRETENDED AWAY
@@ -181,6 +183,11 @@ proc checkPortable*(root: ViewNode): PortabilityReport =
       result.violations.add violation(pvActuationOnReading, n,
         vocabularyName(n.kind) &
         " is a reading and cannot be actuated; use a Button")
+
+    if n.kind == pkImage and not n.pictureIsPng:
+      result.violations.add violation(pvStructural, n,
+        "Image '" & n.mediaType & "' carries a picture that is not PNG; " &
+        "the vocabulary's picture is PNG bytes on every medium")
 
     if n.kind == pkImage and n.alt.len == 0:
       result.violations.add violation(pvNoTextEquivalent, n,

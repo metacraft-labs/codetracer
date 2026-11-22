@@ -72,6 +72,7 @@ SURF = "src/common/value_presentation/surfaces.nim"
 TB = "src/frontend/view_vocabulary/terminal_binding.nim"
 KPS = "src/frontend/view_vocabulary/keyboard_pane_scripts.nim"
 APG = "src/frontend/tests/apg_keyboard_oracle.nim"
+VOC = "src/common/view_vocabulary/vocabulary.nim"
 
 # --- the suites the arms are graded against (§16c) ---------------------------
 SUITE_GPUI = "src/frontend/gpui/tests/test_gpui_vocabulary_binding.nim"
@@ -80,7 +81,7 @@ SUITE_VOCAB = "src/common/view_vocabulary_test.nim"
 SUITE_CHROME = "src/frontend/tests/keyboard_panes_chromium_test.nim"
 FIXTURE = "src/frontend/tests/fixtures/keyboard_panes_calc.json"
 
-TOUCHED = [GB, FR, PV, GAPS, MAP, SURF, TB,
+TOUCHED = [GB, FR, PV, GAPS, MAP, SURF, TB, VOC,
            KPS, APG, FIXTURE,
            SUITE_GPUI, SUITE_CROSS, SUITE_VOCAB, SUITE_CHROME]
 
@@ -176,19 +177,20 @@ ARMS = [
         "the mapping-table case is satisfied by the substring `div`."),
 
     Arm("G2", GB,
-        "    b.recordEscape(gekImageWithoutPayload, v,",
-        "    discard (gekImageWithoutPayload, v,",
+        '          if r.setImageRgba(el, pixels, decoded.width, decoded.height): ""',
+        '          if true: ""',
         SUITE_GPUI,
-        "every entry needing an escape is a filed gap, and every filed gap is taken",
+        "the picture is drawn as pixels, at the picture's own size",
         "  for f in nodeFacts(v):",
         "  for f in nodeFacts(v):  # ctl",
-        "RE-AIMED 2026-09-23 at the one escape the binding still takes: "
-        "`gekDisabledAttribute` (PLAT21-VG2) was closed and has no call site. "
-        "A SILENT ESCAPE — the exact state PLAT-21's gate exists against. The "
-        "binding still takes the escape; it just stops saying so. Note that "
-        "the ENTRY census does not move (the same twelve entries are named by "
-        "the key-transport gap), which is why the gate case asserts the set of "
-        "escape KINDS as well as the set of entries."),
+        "RE-AIMED 2026-11-21: the escape it used to silence (PLAT21-VG4, "
+        "`Image` had no payload) is retired, because the entry carries a "
+        "`picture` now. The arm is the retirement's own claim: the picture is "
+        "decoded and its pixels never reach the shim, so the `img` element "
+        "draws its alt text exactly as it did while the gap was filed — and "
+        "nothing reports an error, because the decode succeeded. Only the "
+        "shim's own `data-gpui-image` attribute, written on the Rust side when "
+        "it accepts pixels, can tell."),
 
     Arm("G3", GB,
         "    b.renderer.setAttribute(el, factAttributeName(f.field), f.value)",
@@ -325,13 +327,65 @@ ARMS = [
         '      entries: @[pkImage],\n      subject: gsVocabulary,',
         '      entries: @[],\n      subject: gsVocabulary,',
         SUITE_VOCAB,
-        "every filed gap names entries and carries its measurement",
-        "  FiledGpuiGaps*: seq[GpuiGap] = @[",
-        "  FiledGpuiGaps*: seq[GpuiGap] = @[  ## ctl",
+        "the retired gaps are a register too, and the shrink is an identity",
+        "  RetiredGpuiGaps*: seq[RetiredGpuiGap] = @[",
+        "  RetiredGpuiGaps*: seq[RetiredGpuiGap] = @[  ## ctl",
         "A GAP THAT NAMES NO ENTRY. The gate counts ENTRIES, so a register row "
         "with an empty `entries` list satisfies 'each is a named, filed "
         "defect' for free — §4's empty set, inside the instrument that "
-        "answers the milestone's verification gate."),
+        "answers the milestone's verification gate. RE-AIMED 2026-11-21: the "
+        "row moved to `RetiredGpuiGaps` when `Image` gained its picture, and "
+        "a retired row that forgot its entries is the same loss one register "
+        "over — the shrink identity could no longer say what was retired."),
+
+    Arm("G15", MAP,
+        '    "a", "code", "pre", "img", "svg"]',
+        '    "small", "code", "pre", "img", "svg"]',
+        SUITE_GPUI,
+        "the pass-through tags are exactly the ones the plan gives a kind of their own",
+        "func gpuiPassesThrough*(tag: string): bool = tag in GpuiPassThroughTags",
+        "func gpuiPassesThrough*(tag: string): bool = tag in GpuiPassThroughTags  # ctl",
+        "THE TWO WRONG ENTRIES PLAT-21 RECORDED AS ITS RESIDUE 1, put back: "
+        "`small` listed (the plan classifies it `Div`) and `a` missing (the "
+        "plan classifies it `TextContainer`). The count stays sixteen, so a "
+        "length assertion cannot see it; only reading every tag's kind off "
+        "the plan the Rust side builds can."),
+
+    Arm("G16", GB,
+        "        r.setAttribute(el, PictureErrorAttribute, drawn)",
+        "        discard drawn",
+        SUITE_GPUI,
+        "the picture is drawn as pixels, at the picture's own size",
+        "    if v.picture.len > 0:",
+        "    if v.picture.len > 0:  # ctl",
+        "A PICTURE THAT DOES NOT DECODE IS DRAWN AS ITS ALT TEXT IN SILENCE. "
+        "The element looks exactly like one with no picture, and the only "
+        "thing that says the value carried bytes nobody could draw is gone."),
+
+    Arm("G17", VOC,
+        "  v.picture.len == 0 or v.picture.startsWith(PngSignature)",
+        "  true",
+        SUITE_VOCAB,
+        "an Image's picture is PNG bytes, and anything else is refused",
+        "func pictureIsPng*(v: ViewNode): bool =",
+        "func pictureIsPng*(v: ViewNode): bool =  # ctl",
+        "THE PICTURE'S FORMAT STOPS BEING CHECKED. A JPEG's bytes under the "
+        "PNG field are then portable, and the first medium to find out is a "
+        "renderer's decoder, on the user's screen."),
+
+    Arm("G18", GB,
+        "  b.escapes.add GpuiEscape(gapId: gapId, entry: v.kind, nodeId: v.id,\n"
+        "                           detail: detail)",
+        "  discard (gapId, v, detail)",
+        SUITE_GPUI,
+        "every entry needing an escape is a filed gap, and every filed gap is taken",
+        "proc escapeGapIds*(b: GpuiBinding): seq[string] =",
+        "proc escapeGapIds*(b: GpuiBinding): seq[string] =  # ctl",
+        "THE CENSUS GOES DEAD. With every gap retired the census answers "
+        "EMPTY, which is also what a binding that never records anything "
+        "answers — so the gate case plants an escape through the one door and "
+        "requires it counted. This arm closes the door, and an escape taken "
+        "in future would then be invisible to the gate it exists for."),
 
     Arm("G13", MAP,
         '  of pkTable: m(msPartial, "table / tr / td — none is in tagMap, and each " &',

@@ -37,6 +37,7 @@ else:
   import std/os
 
 import ../../../common/plugin_model
+import ../../../common/plugin_host_path
 import ../../../ct/launch/[grant_store, plugin_components]
 import ../../viewmodel/session_vm
 import ../../viewmodel/plugin_host/[host, supervisor]
@@ -131,6 +132,12 @@ proc openSessionPlugins*(session: SessionViewModel; sessionId: string;
   result = SessionPlugins()
   let p = result
   p.sup = newSupervisor(frontEnd, "1.0.0", extensionsEnabled)
+  # §11.9: the WASM packages' host, beside this binary or under the
+  # installation prefix (`plugin_host_path`).
+  when defined(js):
+    p.sup.wasmHost = findPluginHost("", getEnv("CODETRACER_PREFIX", ""))
+  else:
+    p.sup.wasmHost = findPluginHost()
   p.host = newPluginHost(semver(1, 0, 0), frontEnd = surfaces,
                          extensionsEnabled = extensionsEnabled)
   p.launcherRoot = launcherRoot
@@ -318,18 +325,29 @@ proc statusText*(p: SessionPlugins): string =
 proc grantScreen*(p: SessionPlugins; id: string): string =
   ## §11.3's grant screen: what the plugin may do, said plainly, and for a
   ## native package that it runs a program with your authority and every
-  ## plugin that program hosts.
+  ## plugin that program hosts. A WASM package's screen says it reaches only
+  ## what it is granted (§11.9).
   let s = p.sup.slot(id)
   if s.isNil: return "no plugin '" & id & "' is installed"
   let pkg = p.sup.packages[s.package]
   var lines: seq[string]
   lines.add "Plugin " & id & " (package " & pkg.name & ")"
   lines.add ""
-  lines.add "This package runs the native program " & pkg.executable &
-    " with your full authority: it can read and write your files, run other " &
-    "programs and use the network, whatever it says it needs. CodeTracer " &
-    "decides only what it sends the program, not what the program does."
-  lines.add "The program hosts: " & pkg.plugins.join(", ")
+  if pkg.wasm:
+    # §11.9: the module runs inside CodeTracer's own host, which offers it
+    # nothing but the grants below.
+    lines.add "This package is a WebAssembly module (" &
+      pkg.executable.extractFilename & ") that CodeTracer runs in its own " &
+      "plugin host, each plugin in an instance of its own. It can reach " &
+      "nothing beyond what is listed below: no file, program or network " &
+      "connection you have not granted."
+    lines.add "The module holds: " & pkg.plugins.join(", ")
+  else:
+    lines.add "This package runs the native program " & pkg.executable &
+      " with your full authority: it can read and write your files, run other " &
+      "programs and use the network, whatever it says it needs. CodeTracer " &
+      "decides only what it sends the program, not what the program does."
+    lines.add "The program hosts: " & pkg.plugins.join(", ")
   lines.add ""
   lines.add describeGrants(id, s.spec.parsed.manifest.grants)
   if s.spec.capturesWindowInput:

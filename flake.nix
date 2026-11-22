@@ -467,7 +467,7 @@
     # from 8b8faa8). Move this input and repro.lock's nim-cli-spec
     # (`repro lock update`) in the change that moves `io-mon` past efe6dc5.
     nim-cli-spec = {
-      url = "github:metacraft-labs/nim-cli-spec/c6a8806136e9d3c98875df16502841c3b627e9b4";
+      url = "github:metacraft-labs/nim-cli-spec/5380e20c8866e49e000e8070f692f54d303b5658";
       flake = false;
     };
 
@@ -545,7 +545,7 @@
     # 2026-09-30) and have never been promoted to `dev`, whose tip has not
     # moved since 2026-09-29.
     reprobuild-packages = {
-      url = "github:metacraft-labs/reprobuild-packages/56ffd673bc0f43ab266de53fd5e2e7f656e37431";
+      url = "github:metacraft-labs/reprobuild-packages/92100803eb827ff21d0cc48b7474fb0a65057cbd";
       flake = false;
     };
 

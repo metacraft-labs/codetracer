@@ -417,8 +417,8 @@ suite "PLAT-38: the escape census, retaken from a run, in both directions":
     # …and ONLY THEN the absence.
     ck isRetired("PLAT21-VG1")
     ck "PLAT21-VG1" notin filedGapIds()
-    ck gekImageWithoutPayload in b.escapeKinds()
-    ck b.escapeKinds() == {gekImageWithoutPayload}
+    ck b.escapeGapIds().len == 0
+    ck "PLAT21-VG1" notin b.escapeGapIds()
     # The retirement row carries the evidence it was conditioned on, so a
     # reader is not left to infer it from a green run.
     ck retiredGapById("PLAT21-VG1").evidence.contains("element store")
@@ -478,23 +478,23 @@ suite "PLAT-38: the escape census, retaken from a run, in both directions":
                  taken.mapIt(vocabularyName(it)).join(", "))
       checkpoint("entries named by FiledGpuiGaps: " &
                  filed.mapIt(vocabularyName(it)).join(", "))
-    ck taken.len > 0                   # the §4 floor
+    ck b.readGpuiFacts().len > 0       # the §4 floor: the view rendered
     ck taken == filed
-    ck taken == @[pkImage]
-    # THE IDENTITY OVER THE ENTRIES THAT NEED NOTHING. Fifteen of sixteen,
+    ck taken.len == 0
+    # THE IDENTITY OVER THE ENTRIES THAT NEED NOTHING. All sixteen,
     # asserted as a set so a future escape reddens here rather than growing
     # the register quietly — and the shrink is asserted against the union, so
     # a gap that vanished from both registers cannot pass.
     var clean: seq[ViewKind] = @[]
     for k in ViewKind:
       if gapsFor(k).len == 0: clean.add k
-    ck clean.len == 15
+    ck clean.len == 16
     ck pkModal in clean
     var ever = everFiledGapIds()
     ever.sort()
     ck ever == @["PLAT21-VG1", "PLAT21-VG2", "PLAT21-VG3", "PLAT21-VG4"]
-    ck RetiredGpuiGaps.len == 3
-    ck FiledGpuiGaps.len == 1
+    ck RetiredGpuiGaps.len == 4
+    ck FiledGpuiGaps.len == 0
 
 # ---------------------------------------------------------------------------
 # THE POPULATION, AND THE SOURCE SCAN — laws, not cases in the floor

@@ -1702,8 +1702,18 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
       let storeRef = store
       let start = w.start
       let searched = query.len > 0 or kinds.len > 0
+      let asked = key
       onComplete(future,
         proc(response: JsonNode) =
+          # AN ANSWER TO A SUPERSEDED REQUEST IS DROPPED. Answers can arrive
+          # in another order than their requests left, and every answer
+          # replaces the store's window, so an older one landing last put
+          # back rows the pane no longer asks for — or none at all. A pane
+          # that follows the stop and is measured before the entry stop
+          # asks twice in quick succession (before the stop, and at it).
+          # Only the newest request's answer describes what it now shows.
+          if asked != lastKey:
+            return
           # BOTH PROJECTIONS OF THE SAME ANSWER. The response carries
           # `events` and `markers`; the rows go through the store rather
           # than into `vm.eventRows` directly, so this effect is one

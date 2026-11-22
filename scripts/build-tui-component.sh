@@ -63,6 +63,13 @@
 #   --tui-bin PATH   The built TUI binary to publish as `bin/<bin-name>`.
 #                    Default: $CODETRACER_TUI_BIN, else <repo>/build/bin/
 #                    codetracer-tui.
+#   --plugin-host PATH
+#                    The `ct-plugin-host` (WASM plugin host, Extensibility-Model
+#                    §11.9) to publish beside it as `bin/ct-plugin-host`, where
+#                    the TUI looks for it. Default: $CODETRACER_PLUGIN_HOST_BIN,
+#                    else <repo>/build/bin/ct-plugin-host. An explicit path that
+#                    does not exist is an error; a missing default is a warning
+#                    (the bundle then runs native plugin packages only).
 #   --link           Publish the binary as a symlink (default).
 #   --copy           Publish it as a real file copy.  Use for packaging where
 #                    the bundle must stand on its own.
@@ -80,11 +87,14 @@ CAPS_SRC="$ROOT_DIR/packaging/codetracer-tui.caps"
 
 OUT_ROOT="${CODETRACER_COMPONENT_OUT_ROOT:-$ROOT_DIR/build-tui-component}"
 TUI_BIN="${CODETRACER_TUI_BIN:-}"
+PLUGIN_HOST_BIN="${CODETRACER_PLUGIN_HOST_BIN:-}"
+PLUGIN_HOST_EXPLICIT=0
+[[ -n $PLUGIN_HOST_BIN ]] && PLUGIN_HOST_EXPLICIT=1
 PUBLISH_MODE="link"
 PRINT_PATH_ONLY=0
 
 usage() {
-	sed -n '14,72p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+	sed -n '14,80p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 while [[ $# -gt 0 ]]; do
@@ -111,6 +121,20 @@ while [[ $# -gt 0 ]]; do
 		;;
 	--tui-bin=*)
 		TUI_BIN="${1#*=}"
+		shift
+		;;
+	--plugin-host)
+		[[ $# -ge 2 ]] || {
+			echo "error: --plugin-host requires a path" >&2
+			exit 2
+		}
+		PLUGIN_HOST_BIN="$2"
+		PLUGIN_HOST_EXPLICIT=1
+		shift 2
+		;;
+	--plugin-host=*)
+		PLUGIN_HOST_BIN="${1#*=}"
+		PLUGIN_HOST_EXPLICIT=1
 		shift
 		;;
 	--link)
@@ -275,6 +299,29 @@ if [[ ! -x $BIN_FILE ]]; then
 	exit 1
 fi
 
+# The WASM plugin host, beside the binary: that is where the TUI looks
+# (src/common/plugin_host_path.nim), so a component needs no environment.
+if [[ -z $PLUGIN_HOST_BIN ]]; then
+	PLUGIN_HOST_BIN="$ROOT_DIR/build/bin/ct-plugin-host$EXE_SUFFIX"
+fi
+HOST_FILE="$BUNDLE_DIR/bin/ct-plugin-host$EXE_SUFFIX"
+if [[ -x $PLUGIN_HOST_BIN ]]; then
+	PLUGIN_HOST_BIN="$(cd "$(dirname "$PLUGIN_HOST_BIN")" && pwd)/$(basename "$PLUGIN_HOST_BIN")"
+	case "$PUBLISH_MODE" in
+	link) ln -sfn "$PLUGIN_HOST_BIN" "$HOST_FILE" ;;
+	copy)
+		cp "$PLUGIN_HOST_BIN" "$HOST_FILE"
+		chmod +x "$HOST_FILE"
+		;;
+	esac
+elif [[ $PLUGIN_HOST_EXPLICIT -eq 1 ]]; then
+	echo "error: the WASM plugin host is not at $PLUGIN_HOST_BIN" >&2
+	echo "  Build it with:  just build-plugin-host" >&2
+	exit 1
+else
+	echo "warning: no ct-plugin-host at $PLUGIN_HOST_BIN; this bundle runs native plugin packages only (just build-plugin-host)" >&2
+fi
+
 if [[ $PRINT_PATH_ONLY -eq 1 ]]; then
 	echo "$BUNDLE_DIR"
 	exit 0
@@ -284,6 +331,7 @@ log "codetracer-tui component bundle ready:"
 log "  bundle:       $BUNDLE_DIR"
 log "  capabilities: $BUNDLE_DIR/capabilities  (verbatim copy of packaging/codetracer-tui.caps)"
 log "  binary:       $BIN_FILE  ($PUBLISH_MODE -> $TUI_BIN)"
+[[ -e $HOST_FILE ]] && log "  plugin host:  $HOST_FILE  ($PUBLISH_MODE -> $PLUGIN_HOST_BIN)"
 log ""
 log "Point the launcher at it with:"
 log "  export CODETRACER_COMPONENTS_ROOT=$OUT_ROOT"

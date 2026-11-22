@@ -96,6 +96,7 @@ SURFACE = "src/frontend/view_vocabulary/editor_surface.nim"
 LEAVES = "src/frontend/gpui/app/leaves.nim"
 HAPP = "src/frontend/headless_app/headless_app.nim"
 UISEL = "src/ct/ui_selection.nim"
+SB = "src/frontend/tui/app/source_binding.nim"
 
 # --- the suites the arms are graded against ---------------------------------
 # §16c: these are NOT mutation subjects and they are in TOUCHED anyway, because
@@ -104,8 +105,10 @@ UISEL = "src/ct/ui_selection.nim"
 # subjects only.
 SUITE_EDIT = "src/frontend/gpui/tests/test_gpui_editing_surface.nim"
 SUITE_UISEL = "src/ct/ui_selection_test.nim"
+SUITE_MARK = "src/frontend/tui/tests/test_editor_mark_agreement.nim"
 
-TOUCHED = [ROWS, SURFACE, LEAVES, HAPP, UISEL, SUITE_EDIT, SUITE_UISEL]
+TOUCHED = [ROWS, SURFACE, LEAVES, HAPP, UISEL, SB, SUITE_EDIT, SUITE_UISEL,
+           SUITE_MARK]
 
 CONTROL_HASHES = HARNESS_DIR / "plat22-mutation-control.sha256"
 BECAUSE_FILE = HARNESS_DIR / "plat22-mutation-because.json"
@@ -117,10 +120,12 @@ def _tui_link_flags() -> list[str]:
     """The `--passL:` flags the lane gives a suite that links isonim-tui.
 
     Read from the file `scripts/build-tui-grammars.sh` writes and
-    `ci/lib/test-lane-files.sh` reads, never copied — §14. No suite of THIS
-    harness links isonim-tui today, and the function is here anyway so that the
-    day one does, the flags arrive from the same place rather than from a
-    literal somebody pastes. PLAT-20's harness learned that the expensive way.
+    `ci/lib/test-lane-files.sh` reads, never copied — §14. One suite of this
+    harness links isonim-tui (`test_editor_mark_agreement.nim`, the `tui`
+    lane's), and it also needs the lane's grammar archive define, which
+    `SUITE_CMD` adds beside these: without it the link names isonim-tui's own
+    archive, which nothing here builds. PLAT-20's harness learned the
+    flags-from-one-place lesson the expensive way.
     """
     path = REPO / "build" / "grammars" / "tui-link-flags.txt"
     if not path.exists():
@@ -134,6 +139,12 @@ SUITE_CMD = {
     # `test_gpui_shell_split.nim` asserts from inside.
     SUITE_EDIT: ["--path:src/frontend/viewmodel"],
     SUITE_UISEL: ["--mm:refc"],
+    # The `tui` lane's suite that renders the same points through both
+    # front-ends: isonim-tui's painter AND the GPUI shim.
+    SUITE_MARK: ["--path:src/frontend/viewmodel",
+                 "-d:isonimTuiGrammarArchive=" +
+                 str(REPO / "build" / "grammars" /
+                     "libcodetracer_tui_grammars.a")] + _tui_link_flags(),
 }
 
 
@@ -167,6 +178,8 @@ CTL = {
            "proc activatePane*(slot: HeadlessSessionSlot; kind: PaneKind): bool =  ## ctl"),
     UISEL: ("func gapMessage(command: string; frontEnd: UiFrontEnd; gap: string): string =",
             "func gapMessage(command: string; frontEnd: UiFrontEnd; gap: string): string =  ## ctl"),
+    SB: ("proc columnMarksForFile*(points: openArray[SourcePoint];",
+         "proc columnMarksForFile*(points: openArray[SourcePoint];  ## ctl"),
 }
 
 
@@ -187,6 +200,41 @@ ARMS = [
         "writing both divs and letting CSS decide — and a third front-end was "
         "about to pick a third. The precedence is a ranking here so a medium "
         "cannot get it wrong by drawing in a different order."),
+
+    Arm("E15", ROWS,
+        "    elif sawTracepoint: emTracepoint\n    elif sawDisabled: emBreakpointDisabled",
+        "    elif sawDisabled: emBreakpointDisabled\n    elif sawTracepoint: emTracepoint",
+        SUITE_MARK,
+        "the GPUI window draws the ranking's mark on every line",
+        CTL[ROWS][0], CTL[ROWS][1],
+        "THE CASE THE TWO FRONT-ENDS DISAGREED ON, decided the other way: a "
+        "disabled breakpoint outranks a tracepoint. Both front-ends read this "
+        "function now, so they still AGREE with each other under the arm — "
+        "the agreement case stays green — and only the table written in the "
+        "suite, independent of `markFor`, can see the ranking move (§22)."),
+
+    Arm("E16", SB,
+        "  of emTracepoint: gmTracepoint",
+        "  of emTracepoint: gmBreakpointDisabled",
+        SUITE_MARK,
+        "the terminal draws the ranking's mark on every line",
+        CTL[SB][0], CTL[SB][1],
+        "THE TERMINAL'S GLYPH FOR THE SHARED MARK IS WRONG: a tracepoint is "
+        "painted `○`. The GPUI window is untouched, so this is the arm that "
+        "proves the terminal half is read off the PAINTED pane rather than off "
+        "the shared function."),
+
+    Arm("E17", SB,
+        "    if p.path == path and p.line > 0 and p.line notin lines:",
+        "    if p.path == path and p.line > 0:",
+        SUITE_MARK,
+        "the two front-ends agree on every line, including the one they disagreed on",
+        CTL[SB][0], CTL[SB][1],
+        "A LINE CARRYING THREE POINTS IS EMITTED THREE TIMES. Every mark is "
+        "the same mark, so the pane's last-wins read draws the right glyph "
+        "and both drawing cases stay green; only the one-mark-per-line "
+        "assertion sees the binding go back to emitting one entry per point, "
+        "which is the shape the old order rule needed."),
 
     Arm("E11", SURFACE,
         "  if points.len == 0:\n    result.support[ecLineStatus] = esDegraded\n\n  let values = inlineValuesOf(state, budget)",

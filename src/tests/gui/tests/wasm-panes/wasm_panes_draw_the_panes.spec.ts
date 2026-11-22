@@ -50,7 +50,7 @@ test.describe("the WebAssembly panes", () => {
       const out: Record<string, boolean> = {};
       for (const name of ["calltrace", "state", "event-log"]) {
         const el = document.querySelector(`.ct-web-core-pane[data-pane="${name}"]`);
-        out[name] = !!el && !el.closest("#ctw-panes-staging");
+        out[name] = !!el && !el.closest(".ctw-panes-staging");
       }
       return out;
     });
@@ -61,6 +61,9 @@ test.describe("the WebAssembly panes", () => {
 
     const decorated = await ctPage.locator('.ct-web-core-pane[data-ctw-decorated="1"]').count();
     expect(decorated).toBeGreaterThanOrEqual(2);
+    // The editor pane stays the page's own (Monaco), open beside the core's
+    // panes, and shows the stop's file.
+    await expect.poll(async () => ctPage.locator(".monaco-editor").count(), { timeout: 30_000 }).toBeGreaterThan(0);
     const error = await ctPage.evaluate(() => (globalThis as any).ctwPanelsError ?? null);
     expect(error).toBeNull();
   });

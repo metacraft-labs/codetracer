@@ -305,6 +305,10 @@ when defined(server):
     server.use(cstring"/libs/codetracer-design-system",
                cached("/libs/codetracer-design-system", designSystemRoot))
     server.use(cstring"/ui.js", cached("/ui.js", userInterfacePath))
+    # The WebAssembly panes' core and host files (`just build-wasm-panes`),
+    # beside `ui.js`; a renderer built with -d:ctWasmPanes loads them from
+    # here. Absent on every other build, and then nothing asks for them.
+    server.use(cstring"/wasm-panes/", cached("/wasm-panes/", codetracerExeDir & cstring"/wasm-panes/"))
     # BIND THE ADDRESS, AND REPORT THE ONE ACTUALLY BOUND.
     #
     # `server.listen(port, cb)` with no host argument binds 0.0.0.0. This line

@@ -79,6 +79,12 @@
 #      invisible from either repo's own manifest, so it keeps being missed.
 #      See the assertion's own comment for the two failure modes already paid
 #      for (absent half -> build.rs error; stale half -> link error).
+#   3c. A private sibling (UNLOCKED_SIBLINGS: repro.lock is public and cannot
+#      pin it) has one home for its revision -- flake.lock for a flake input,
+#      ci/toolchain.pin's PRIVATE_SIBLING_<NAME> otherwise -- and every copy a
+#      workflow writes (a `siblings:` or `extra-siblings:` literal, a
+#      `|| '<sha>'` fallback, a branch ref, an `RR_BACKEND_REF:` literal)
+#      equals it. Step 1e; falsified by its own one-character controls.
 #   4. Every workflow step that runs `./non-nix-build/build.sh` is preceded, in
 #      its own job, by a step that provisions `codetracer-trace-format`.
 #   5. Every workflow step that runs `ci/setup-rr-backend.sh` sets
@@ -275,7 +281,12 @@ echo "siblings: entries pin a reproducible revision"
 # `regen-golden` recipes and golden-image tests do, and the gate runs neither),
 # so it was a clone with no consumer, not a pin to convert. Converted by
 # deletion, together with its declaration in the test lock.
-readonly BRANCH_TIP_CEILING=10
+#
+# 10 -> 9 (2026-11-22): the visual-replay gate's
+# `codetracer-native-test-programs=dev` names ci/toolchain.pin's
+# PRIVATE_SIBLING_CODETRACER_NATIVE_TEST_PROGRAMS instead (1e: a private
+# sibling with a home is not cloned at a branch).
+readonly BRANCH_TIP_CEILING=9
 
 # Classify one sibling entry's ref text. Factored out of the scanner so it can
 # be exercised directly by the self-test below: a detector that silently stops
@@ -295,13 +306,28 @@ classify_ref() { # $1 = the text after the first '=' ('' for a bare entry)
 	esac
 }
 
+# The literal an expression ref falls back to: `${{ x || '<sha>' }}` -> <sha>.
+# Only a quoted literal after the last `||` counts; anything else (another
+# expression, no fallback) prints nothing.
+expr_fallback() { # $1 = the ref text
+	sed -nE "s/^.*\|\|[[:space:]]*'([^']*)'[[:space:]]*\}\}[[:space:]]*$/\1/p" <<<"$1"
+}
+
 sibling_blocks=0
 bad_entries=()
 entry_count=0
 branch_tip_entries=()
 # Every `name=<40-hex>` entry seen, as `<file>:<line>:<name>=<sha>`, for the
-# flake.lock-agreement assertion below.
+# flake.lock-agreement assertion (1d) and the private-sibling one (1e) below.
+# An expression ref's quoted 40-hex `|| '<sha>'` fallback is recorded here too:
+# it is the revision every push and schedule run clones, so it is as much a
+# copy of the pin as a literal is (cross-repo-tests.yml and mcr-dap-flow.yml
+# name codetracer-native-backend that way).
 sha_entries=()
+# Every branch-ref entry, literal or an expression's `|| '<branch>'` fallback,
+# as `<file>:<line>:<name>=<ref>`, for 1e: a private sibling whose revision
+# has a home must not be cloned at a branch instead.
+branch_entries=()
 # Per-block record of which repos each `siblings:` block provisions, used by
 # the matched-pair assertion further down. One space-delimited entry per block.
 declare -a BLOCK_REPOS=()
@@ -360,7 +386,15 @@ for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 					# the lock path -- fine when that was the intent, and a
 					# silent surprise when the author meant to pin something.
 					case "$ref" in
-					*'||'*) ;;
+					*'||'*)
+						# A branch fallback (`|| 'dev'`) is recorded for 1e
+						# only; the branch-tip ceiling counts literal entries.
+						fallback="$(expr_fallback "$ref")"
+						case "$(classify_ref "$fallback")" in
+						sha) sha_entries+=("$wf_name:$line_no:${stripped%%=*}=$fallback") ;;
+						branch) branch_entries+=("$wf_name:$line_no:${stripped%%=*}=$fallback") ;;
+						esac
+						;;
 					*)
 						bad_entries+=("$wf_name:$line_no: '$stripped' (expression ref with no || fallback evaluates to empty on push)")
 						;;
@@ -368,6 +402,7 @@ for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 					;;
 				branch)
 					branch_tip_entries+=("$wf_name:$line_no: '$stripped'")
+					branch_entries+=("$wf_name:$line_no:$stripped")
 					;;
 				esac
 				continue
@@ -1563,6 +1598,209 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 1e. A private sibling's revision has ONE home, and every copy equals it.
+#
+# repro.lock is public, so it cannot pin the siblings in UNLOCKED_SIBLINGS
+# (bbf7dbed4a6), and 1c makes a lane name each of them with an explicit
+# `=<rev>`. That moved the revision out of one lock and into hand-kept copies:
+# at d11479e6b8 it was written in flake.lock, in ci/toolchain.pin's
+# PRIVATE_SIBLING_* lines and in eighteen workflow literals, and the copies
+# agreed only because a chore (c79359560f) had moved them together by hand. 1c
+# checks that an entry carries a revision, not which one. The next move
+# proved it: 932a8b8aaf re-pinned codetracer-native-backend in flake.lock at
+# 9fcfc0a and the workflows kept cloning 1c8efb8, five literal lines and two
+# `|| '<sha>'` fallbacks (codetracer-pm issue
+# 2026-11-22-private-sibling-revisions-are-hand-kept-copies-nothing-checks-agree).
+#
+# So each such sibling has exactly one home:
+#
+#   * a root flake input        -> flake.lock's locked.rev, and ci/toolchain.pin
+#     (native-backend,             must not carry a second copy of it (1d says
+#      native-recorder,            the same of the `siblings:` SHA entries of
+#      visual-replay)              FLAKE_PINNED_SIBLINGS);
+#   * anything else             -> ci/toolchain.pin's PRIVATE_SIBLING_<NAME>
+#                                  (upper case, '-' -> '_'), which every
+#                                  `<name>=<40-hex>` entry, literal or
+#                                  `|| '<sha>'` fallback, must equal.
+#
+# A branch ref (`=dev`) for a sibling with a home is a copy that follows a
+# different fact and fails too, and a PRIVATE_SIBLING_* line that names no
+# UNLOCKED_SIBLINGS member is a home with no tenant. A workflow that reads the
+# pin through an expression (tui-tests.yml's `steps.private_pins` output)
+# carries no copy, so there is nothing to compare.
+#
+# private_sibling_pin_mismatches is a function so the falsifying controls
+# below can run it over a mutated copy of the real entries.
+# ---------------------------------------------------------------------------
+readonly TOOLCHAIN_PIN="$REPO_ROOT/ci/toolchain.pin"
+
+private_pin_key() { # $1 = sibling name -> its ci/toolchain.pin key
+	local key="${1//-/_}"
+	printf 'PRIVATE_SIBLING_%s\n' "${key^^}"
+}
+
+# $1 = a ci/toolchain.pin; $2.. = `<file>:<line>:<name>=<ref>` records.
+# Prints one line per disagreement; prints nothing when every copy agrees.
+private_sibling_pin_mismatches() {
+	local pin_file="$1" rec entry name ref key want where
+	shift
+	if [ ! -r "$pin_file" ]; then
+		printf 'cannot read %s\n' "$pin_file"
+		return 0
+	fi
+	local -A pin_rev=()
+	while IFS='=' read -r key want; do
+		# Two lines for one key are two homes: the workflows that read the
+		# pin with `sed -n` get both, and zgui.yml's loop keeps the last.
+		[ -z "${pin_rev[$key]+set}" ] ||
+			printf 'ci/toolchain.pin: %s appears more than once (%s and %s)\n' "$key" "${pin_rev[$key]}" "$want"
+		pin_rev[$key]="$want"
+	done < <(grep -E '^PRIVATE_SIBLING_[A-Z0-9_]+=' "$pin_file")
+
+	local -A is_flake_home=()
+	for name in "${!UNLOCKED_SIBLINGS[@]}"; do
+		key="$(private_pin_key "$name")"
+		want="$(flake_rev "$name")"
+		if [ -n "$want" ]; then
+			is_flake_home[$name]="$want"
+			[ -z "${pin_rev[$key]+set}" ] ||
+				printf 'ci/toolchain.pin: %s=%s is a second copy of a revision flake.lock locks (%s); delete the line\n' "$key" "${pin_rev[$key]}" "$name"
+		fi
+	done
+	for key in "${!pin_rev[@]}"; do
+		want="${pin_rev[$key]}"
+		if [ "${#want}" -ne 40 ] || [ -n "${want//[0-9a-f]/}" ]; then
+			printf 'ci/toolchain.pin: %s=%s is not a 40-hex commit\n' "$key" "$want"
+		fi
+		local tenant=""
+		for name in "${!UNLOCKED_SIBLINGS[@]}"; do
+			[ "$(private_pin_key "$name")" = "$key" ] && tenant="$name"
+		done
+		[ -n "$tenant" ] ||
+			printf 'ci/toolchain.pin: %s names no sibling in UNLOCKED_SIBLINGS\n' "$key"
+	done
+
+	for rec in "$@"; do
+		entry="${rec#*:}"
+		entry="${entry#*:}"
+		name="${entry%%=*}"
+		ref="${entry#*=}"
+		[ -n "${UNLOCKED_SIBLINGS[$name]:-}" ] || continue
+		where="${rec%%:*}:$(cut -d: -f2 <<<"$rec")"
+		want="${is_flake_home[$name]:-}"
+		if [ -n "$want" ]; then
+			# 1d says the same of a `siblings:` SHA entry; this also covers
+			# branch refs and the `extra-siblings:` blocks 1d does not scan.
+			[ "$ref" = "$want" ] ||
+				printf '%s: %s, but flake.lock locks %s at %s\n' "$where" "$entry" "$name" "$want"
+			continue
+		fi
+		key="$(private_pin_key "$name")"
+		want="${pin_rev[$key]:-}"
+		if [ -z "$want" ]; then
+			printf '%s: %s, but ci/toolchain.pin has no %s line to be its home\n' "$where" "$entry" "$key"
+		elif [ "$ref" != "$want" ]; then
+			printf '%s: %s, but ci/toolchain.pin has %s=%s\n' "$where" "$entry" "$key" "$want"
+		fi
+	done
+}
+
+# The `extra-siblings:` blocks feed setup-db-backend-siblings' `siblings:`
+# input (1c), but the scanner above reads only `siblings:` blocks, so collect
+# their pinned entries here: codetracer.yml's test-ui-tests job names
+# codetracer-native-test-programs in one.
+extra_sibling_records=()
+while IFS= read -r rec; do
+	[ -n "$rec" ] || continue
+	entry="${rec#*:}"
+	entry="${entry#*:}"
+	ref="${entry#*=}"
+	case "$(classify_ref "$ref")" in
+	sha | branch) extra_sibling_records+=("$rec") ;;
+	expr)
+		fallback="$(expr_fallback "$ref")"
+		case "$(classify_ref "$fallback")" in
+		sha | branch) extra_sibling_records+=("${rec%%=*}=$fallback") ;;
+		esac
+		;;
+	esac
+done < <(
+	for wf in "${SIBLING_SOURCE_FILES[@]}"; do
+		case "$wf" in
+		"$ACTIONS_DIR"/*) wf_name="${wf#"$ACTIONS_DIR"/}" ;;
+		*) wf_name="${wf##*/}" ;;
+		esac
+		awk -v wf="$wf_name" '
+			/^[[:space:]]*extra-siblings: *\|/ { match($0, /^[[:space:]]*/); key = RLENGTH; inb = 1; next }
+			inb {
+				if ($0 ~ /^[[:space:]]*$/) { inb = 0; next }
+				match($0, /^[[:space:]]*/); if (RLENGTH <= key) { inb = 0; next }
+				line = $0; sub(/#.*/, "", line); gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+				if (line ~ /=./) print wf ":" NR ":" line
+			}' "$wf"
+	done
+)
+private_pin_records=("${sha_entries[@]}" "${branch_entries[@]}" "${extra_sibling_records[@]}")
+private_pin_checked=0
+for rec in "${private_pin_records[@]}"; do
+	entry="${rec#*:}"
+	entry="${entry#*:}"
+	name="${entry%%=*}"
+	[ -n "${UNLOCKED_SIBLINGS[$name]:-}" ] && [ -z "$(flake_rev "$name")" ] &&
+		private_pin_checked=$((private_pin_checked + 1))
+done
+mapfile -t private_pin_mismatch_lines < <(private_sibling_pin_mismatches "$TOOLCHAIN_PIN" "${private_pin_records[@]}")
+
+# Falsifying controls. Take the location of a real workflow entry of a
+# ci/toolchain.pin-homed sibling and give it the home's revision changed by one
+# character: that must be reported with its file, line and both revisions. The
+# same entry at `=dev` must be reported too, and at the home's own revision it
+# must not be. Built from the home rather than from the entry, so a real
+# mismatch in that entry cannot mask or fake the control. Without these, a
+# parse that silently found no ci/toolchain.pin homes reads as agreement.
+private_pin_control_failures=()
+control_rec=""
+control_want=""
+for rec in "${private_pin_records[@]}"; do
+	entry="${rec#*:}"
+	entry="${entry#*:}"
+	name="${entry%%=*}"
+	if [ -n "${UNLOCKED_SIBLINGS[$name]:-}" ] && [ -z "$(flake_rev "$name")" ]; then
+		control_want="$(sed -n "s/^$(private_pin_key "$name")=//p" "$TOOLCHAIN_PIN" | head -n 1)"
+		if [ "${#control_want}" -eq 40 ]; then
+			control_rec="${rec%%=*}"
+			break
+		fi
+	fi
+done
+if [ -z "$control_rec" ]; then
+	private_pin_control_failures+=("no workflow names a sibling that has a ci/toolchain.pin PRIVATE_SIBLING_* home, so the controls have nothing to mutate")
+else
+	case "${control_want:0:1}" in 0) control_flip=1 ;; *) control_flip=0 ;; esac
+	control_moved="${control_flip}${control_want:1}"
+	control_where="${control_rec%%:*}:$(cut -d: -f2 <<<"$control_rec")"
+	control_out="$(private_sibling_pin_mismatches "$TOOLCHAIN_PIN" "$control_rec=$control_moved")"
+	[[ $control_out == *"$control_where: "*"$control_moved"*"$control_want"* ]] ||
+		private_pin_control_failures+=("control: '${control_rec#*:*:}=$control_moved' at $control_where was not reported with its location and both revisions (got: ${control_out:-<nothing>})")
+	control_out="$(private_sibling_pin_mismatches "$TOOLCHAIN_PIN" "$control_rec=dev")"
+	[[ $control_out == *"$control_where: "* ]] ||
+		private_pin_control_failures+=("control: '${control_rec#*:*:}=dev' at $control_where was not reported (got: ${control_out:-<nothing>})")
+	control_out="$(private_sibling_pin_mismatches "$TOOLCHAIN_PIN" "$control_rec=$control_want" | grep -F "$control_where: " || true)"
+	[ -z "$control_out" ] ||
+		private_pin_control_failures+=("control: the home's own revision at $control_where was reported: $control_out")
+fi
+
+if [ "${#private_pin_control_failures[@]}" -eq 0 ] && [ "${#private_pin_mismatch_lines[@]}" -eq 0 ]; then
+	ok "every private sibling's revision has one home and all $private_pin_checked ci/toolchain.pin-homed workflow copies equal it"
+else
+	fail "every private sibling's revision has one home and every workflow copy equals it" \
+		"a lane that clones a private sibling at a revision other than its home builds" \
+		"against a different tree than the lane beside it; set each entry to the home's" \
+		"revision (flake.lock for a flake input, ci/toolchain.pin's PRIVATE_SIBLING_* otherwise)" \
+		"${private_pin_mismatch_lines[@]}" "${private_pin_control_failures[@]}"
+fi
+
+# ---------------------------------------------------------------------------
 # 1b. MATCHED PAIR: codetracer-trace-format implies codetracer-trace-format-nim.
 #
 # These two repos are the two halves of one FFI boundary and are only ever
@@ -2185,7 +2423,8 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 3. Every `ci/setup-rr-backend.sh` step overrides the ref explicitly.
+# 3. Every `ci/setup-rr-backend.sh` step overrides the ref explicitly, and a
+#    literal override equals flake.lock's codetracer-native-backend revision.
 # ---------------------------------------------------------------------------
 echo
 echo "rr-backend setup overrides the ref explicitly"
@@ -2213,6 +2452,17 @@ for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 			rr_ref="${stripped_line#RR_BACKEND_REF:}"
 			rr_ref="${rr_ref#"${rr_ref%%[![:space:]]*}"}"
 			[ -n "$rr_ref" ] && step_has_override=1
+			# The override is one more copy of codetracer-native-backend's
+			# revision, whose home is flake.lock (1e): a literal must equal it.
+			# It trailed flake.lock's 9fcfc0a at 1c8efb8 after 932a8b8aaf
+			# with nothing noticing. An expression supplies no copy here.
+			case "$(classify_ref "$rr_ref")" in
+			sha | branch)
+				rr_want="$(flake_rev codetracer-native-backend)"
+				[ "$rr_ref" = "$rr_want" ] ||
+					rr_missing+=("$wf_name:$line_no: RR_BACKEND_REF: $rr_ref, but flake.lock locks codetracer-native-backend at ${rr_want:-<none>}")
+				;;
+			esac
 			;;
 		esac
 		case "$stripped_line" in
@@ -2232,12 +2482,14 @@ for wf in "${SIBLING_SOURCE_FILES[@]}"; do
 done
 
 if [ "${#rr_missing[@]}" -eq 0 ]; then
-	ok "all $rr_sites ci/setup-rr-backend.sh call sites set RR_BACKEND_REF"
+	ok "all $rr_sites ci/setup-rr-backend.sh call sites set RR_BACKEND_REF, at flake.lock's codetracer-native-backend revision"
 else
-	fail "all ci/setup-rr-backend.sh call sites set RR_BACKEND_REF" \
+	fail "all ci/setup-rr-backend.sh call sites set RR_BACKEND_REF, at flake.lock's codetracer-native-backend revision" \
 		"without it the script resolves the revision from the workspace lock via" \
 		"scripts/resolve-sibling-rev.sh, which exits 3 with 'cannot locate the" \
-		"manifest repo locks/ tree' on a runner -- there is no .repro/manifests there" \
+		"manifest repo locks/ tree' on a runner -- there is no .repro/manifests there;" \
+		"a literal other than flake.lock's revision builds a different native-backend" \
+		"than the Nix lane and the siblings: entries" \
 		"${rr_missing[@]}"
 fi
 
@@ -3228,7 +3480,9 @@ echo
 # 51 -> 52 (2026-11-18): no sibling listed as deliberately unlocked (private, or
 # not declarable) is pinned by the public repro.lock.
 # 52 -> 53 (2026-11-20): no workflow names such a sibling bare (run 44612896066).
-readonly EXPECTED_ASSERTIONS=53
+# 53 -> 54 (2026-11-22): every copy of a private sibling's revision equals its
+# one home, flake.lock or ci/toolchain.pin (1e).
+readonly EXPECTED_ASSERTIONS=54
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))
