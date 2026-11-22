@@ -241,8 +241,11 @@ proc drawSpecCard(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: Chan
   if card.open: r.appendChild(result, r.insetBar(p.borderAction, BarPx))
   let avail = widthPx - 2 * InsetPx
   let isPath = card.tier == stSpec or card.title == card.path
+  # The keyboard's card: its fold glyph in the action border colour, bold.
   let fold = r.text(if card.open: "\xE2\x96\xBE" else: "\xE2\x96\xB8", CaptionPx,
-                    p.textCaption, shrink = false, pairs = [("width", $FoldPx & "px")])
+                    if card.focused: p.borderAction else: p.textCaption,
+                    bold = card.focused, shrink = false, pairs = [("width", $FoldPx & "px")])
+  r.tag(result, "focused", $card.focused)
   let title = if isPath: r.pathText(card.title, BodyPx, p.textBody)
               else: r.text(card.title, BodyPx, p.textBody)
   r.setStyle(title, "line-height", $ShortLinePx & "px")
@@ -463,6 +466,10 @@ proc drawVcsRow(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: Change
   r.tag(result, "key-file", $row.key)
   r.tag(result, "file-status", $row.file.status)
   r.tag(result, "file-selected", $vcs.selected)
+  r.tag(result, "focused", $row.focused)
+  if row.focused:
+    # The keyboard's file: an inset bar in the action border colour.
+    r.appendChild(result, r.insetBar(p.borderAction, BarPx))
   r.tag(result, "tooltip", fileRowTitle(row))
   let letter = vcsStatusLabel(vcs.status)
   let status = r.text(letter, 11, ink.vcsStatusInk(vcs.status), bold = true, shrink = false,

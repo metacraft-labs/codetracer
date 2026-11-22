@@ -1,0 +1,56 @@
+ Changes  ⚲ ✕
+ CHANGES
+ Relay backpressure: bound the relay queues
+                              9 files +18 −5
+  Specs 10   Tests 5   Details 6   Code 9
+  All milestones                          ▾
+ REQUIREMENTS (3)
+ ▸ RELAY-AREQ2 Bounded queues     ● modified
+ ▸ RELAY-AREQ4 Shed the oldest fra…  ● added
+▎▾ RELAY-AREQ5 Tell th…  operator-distilled
+▎  ● staged
+▎  specs/Relay-Backpressure.md
+▎   Summary   Diff
+▎
+▎   Approve & Apply   Discard
+▎   Request Changes
+▎
+ GOVERNANCE (2)
+ ▸ AGENTS.md                      ● modified
+▎▾ .ah/autonomy.md  operator-distilled
+▎  ● staged
+▎   Summary   Diff
+▎
+▎   Approve & Apply   Discard
+▎   Request Changes
+▎
+ SPECS (5)
+ ▸ specs/Relay-Backpressure.md
+   ● approved 2027-01-12 by Dana Reyes (fee…
+ ▸ specs/Relay-Glossary.md       ● editorial
+ ▸ specs/Relay-Metrics.md          ● pending
+ ▸ specs/Relay-Ports.md            ● pending
+ ▸ specs/Relay-Retention.md
+   ● approved 2027-01-13 by Sam Okafor (rel…
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             

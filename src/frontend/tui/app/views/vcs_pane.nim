@@ -148,6 +148,29 @@ proc paintLine(g: var StyledGrid; row, col, width: int;
     g.paint(row, col + used, rule, fillStyle)
     result.add StyledSpan(text: rule, style: fillStyle)
 
+proc reviewFileSpans*(f: VcsReviewLine;
+                      glyphs = DefaultGlyphs): seq[StyledSpan] =
+  ## PLAT-54: ONE changed file of a review as the pane draws it — the
+  ## selection mark, the state letter in its colour, the name, `+a` and `-r`
+  ## when non-zero, and the coverage. The pane's Changed Files rows are these
+  ## spans, and so are the rows of every other view that shows a changeset
+  ## as the VCS panel does (CTF-P3: the Agent Harbor Changes panel's Code
+  ## tab, `agent_harbor/ah_tui_changes_panel.nim`), so the two cannot draw
+  ## a file differently.
+  result = @[StyledSpan(text: (if f.selected: glyphs.glyph(grOverflowRight)
+                               else: " "),
+                        style: VcsBranchStyle),
+             StyledSpan(text: f.status, style: statusStyle(f.status)),
+             StyledSpan(text: " " & f.name, style: VcsPathStyle)]
+  if f.additions > 0:
+    result.add StyledSpan(text: " +" & $f.additions,
+                          style: CellStyle(role: srChromeSuccess))
+  if f.deletions > 0:
+    result.add StyledSpan(text: " -" & $f.deletions,
+                          style: CellStyle(role: srChromeError))
+  if f.coverage.len > 0:
+    result.add StyledSpan(text: "  " & f.coverage, style: VcsHashStyle)
+
 type
   VcsLine = object
     ## One row of the pane before it is painted (M71: the pane lists them
@@ -176,20 +199,7 @@ proc vcsLines(model: VcsPaneModel;
     if model.reviewFiles.len == 0:
       line @[StyledSpan(text: " " & model.cleanText, style: VcsMessageStyle)]
     for f in model.reviewFiles:
-      var spans = @[StyledSpan(text: (if f.selected: glyphs.glyph(grOverflowRight)
-                                     else: " "),
-                               style: VcsBranchStyle),
-                    StyledSpan(text: f.status, style: statusStyle(f.status)),
-                    StyledSpan(text: " " & f.name, style: VcsPathStyle)]
-      if f.additions > 0:
-        spans.add StyledSpan(text: " +" & $f.additions,
-                             style: CellStyle(role: srChromeSuccess))
-      if f.deletions > 0:
-        spans.add StyledSpan(text: " -" & $f.deletions,
-                             style: CellStyle(role: srChromeError))
-      if f.coverage.len > 0:
-        spans.add StyledSpan(text: "  " & f.coverage, style: VcsHashStyle)
-      line spans
+      line reviewFileSpans(f, glyphs)
     return
   if model.isRepo and model.branch.len > 0:
     line @[StyledSpan(text: BranchMarker & model.branch,

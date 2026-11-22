@@ -1,0 +1,40 @@
+ Inbox  ⚲ ✕
+ INBOX  this server                                                      3 waiting · 3 blocked
+  ←   →     Auto: off
+ ● Migrate the cache schema                                             urgent   warm 3:12  1m
+   asks for permission  ● with the Manager
+   Urgent: the migration holds a write lock until you decide.
+ ● Re-run the nightly benchmarks                                                      high  6m
+   budget approval                                                                       Open
+   Asks to spend past its daily budget.
+ ● Port the route cache                                           high, raised   warm 3:00  4m
+   needs your answer  ● needs you
+   Raised: its model cache is warm for three more minutes.
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               

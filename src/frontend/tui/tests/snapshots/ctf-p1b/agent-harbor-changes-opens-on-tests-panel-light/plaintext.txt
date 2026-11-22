@@ -1,0 +1,40 @@
+ Changes  ⚲ ✕
+ CHANGES  Relay backpressure: bound the relay queues                              1 file +2 −1
+  Spec Changes 0   Tests 2   Implementation Details 1   Code 1
+  All milestones                              ▾
+ RB-M2: REPORT QUEUE DEPTH AND SLOW STATIONS (2)
+ test_depth_metric_reports_each_queue                                                ● failing
+ Every queue reports its depth.
+ tests/test_metrics.py
+ test_slow_station_is_told_to_slow_down                                              ● pending
+ A station that falls behind gets a slow-down frame.
+ tests/test_flow.py
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               

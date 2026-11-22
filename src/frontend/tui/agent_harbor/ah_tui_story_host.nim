@@ -21,7 +21,7 @@
 ##
 ##   ah_tui_story_host --story=<storybook id> [--theme=dark|light]
 ##                     [--moment=<name>] [--cols=<n>] [--rows=<n>]
-##                     [--list] [--captures [--moments]]
+##                     [--animation=on|off] [--list] [--captures [--moments]]
 ##
 ## A playback story (`stories/agent_harbor_playback.nim`) plays on IsoNim's
 ## `RealClock`, its playback bar on the last row (`ah_tui_playback_bar.nim`);
@@ -30,6 +30,10 @@
 ## runtime's idle hook pumps the clock and repaints when it moved.
 ## `--moment` opens it at one of its named moments (`storyMomentNames`) (an unknown
 ## name, or a story that is not a playback story, is a usage error, 2).
+##
+## `--animation=on` turns the spinner a CTF-P3 story shows for a submitting
+## action (CodeTracer-TUI §3.4, "Animation where it informs"); it is off by
+## default, so a test or a capture reads the first frame and never moves.
 ##
 ## `--list` prints every story id of the section and exits; `--captures`
 ## prints the capture name of every story, size and theme
@@ -62,7 +66,7 @@ const
 type
   StoryArgs = object
     story, theme, moment: string
-    list, captures, moments: bool
+    list, captures, moments, animate: bool
     rest: seq[string]
       ## The snapshot runtime's flags (`--cols`, `--rows`, `--test-ipc`, …).
 
@@ -72,6 +76,8 @@ proc parseStoryArgs(args: openArray[string]): StoryArgs =
     if arg.startsWith("--story="): result.story = arg["--story=".len .. ^1]
     elif arg.startsWith("--theme="): result.theme = arg["--theme=".len .. ^1]
     elif arg.startsWith("--moment="): result.moment = arg["--moment=".len .. ^1]
+    elif arg == "--animation=on": result.animate = true
+    elif arg == "--animation=off": result.animate = false
     elif arg == "--list": result.list = true
     elif arg == "--captures": result.captures = true
     elif arg == "--moments": result.moments = true
@@ -127,6 +133,7 @@ when isMainModule:
       if mount.isNil or mount.cols != cols or mount.rows != rows:
         if not mount.isNil: mount.dispose()
         mount = mountStory(story, cols, rows, mode, moment = a.moment)
+        mount.animate = a.animate
       styledRowsTree(r, mount.rowsOf)
     let input = proc(token: string): bool =
       if mount.isNil: return false

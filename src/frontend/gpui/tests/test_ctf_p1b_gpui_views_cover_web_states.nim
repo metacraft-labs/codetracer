@@ -78,9 +78,9 @@ const
     ## CTF-P2b's 21 of the session activity timeline. A floor, so a
     ## declaration that silently lost its stories cannot pass by rendering
     ## nothing.
-  MinimumChangesInboxStories = 59
-    ## The Changes panel's and the Inbox's stories at CTF-P3's landing (23
-    ## Changes, 12 Inbox, 24 item pages), counted apart: a floor on the
+  MinimumChangesInboxStories = 62
+    ## The Changes panel's and the Inbox's stories (25 Changes, 13 Inbox,
+    ## 24 item pages, the three keyboard stories among them), counted apart: a floor on the
     ## whole section would let these be lost while other stories were
     ## added.
 

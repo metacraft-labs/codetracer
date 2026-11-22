@@ -1,0 +1,56 @@
+ Inbox  ⚲ ✕
+ INBOX  this server
+  ←   →     Auto: off
+                                             
+         Nothing is waiting for you.
+                                             
+ ● ASKS FOR PERMISSION          Priority… ▾
+                                             
+ Run `psql -f migrations/0042_cache.sql`
+ against the staging database?
+                                             
+  Allow once   Allow always   Reject once
+  Reject always
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             

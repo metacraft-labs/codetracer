@@ -1,0 +1,40 @@
+ Inbox  ⚲ ✕
+ ● ASKS FOR PERMISSION                                                            Priority… ▾
+                                                                                               
+                                                                                               
+ systemctl restart relay in order to: load the new queue limit
+                                                                                               
+  Password                 Approve   Approve for session   Deny
+                                                                                               
+                                                                                               
+ chown relay /var/lib/relay in order to: let the relay write its shed log
+                                                                                               
+  Password                 Approve   Approve for session   Deny
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               

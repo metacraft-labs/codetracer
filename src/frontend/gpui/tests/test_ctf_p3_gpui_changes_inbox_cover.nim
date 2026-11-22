@@ -37,6 +37,7 @@ from isonim_gpui/bindings import gpui_reset_tree
 
 import ../agent_harbor/ah_changes_inbox_stories
 import ./ctf_p3_gpui_cover
+import ../agent_harbor/ah_stories
 
 const
   Widths = [("laptop", 1432), ("panel", 752), ("sidebar", 352)]
@@ -215,6 +216,35 @@ suite "CTF-P3: the comparison can fail (positive controls)":
     ck checkItemPage(view, page, ctx).join("; ").contains("Continue: drawn false")
     page.dispose()
 
+suite "CTF-P3: the keys (the catalogue's changes.* and inbox.*) in the GPUI story host":
+  # The GPUI story host's own mount (`ah_stories.mountAgentHarborStoryGpui`):
+  # a key's canonical name, routed in the panel's scope, runs the
+  # operation the base keymap binds to it, and the view redraws to show it.
+  test "Down, Enter and Right on the Changes panel; ] and 1 on the Inbox":
+    gpui_reset_tree()
+    let c = r.mountAgentHarborStoryGpui("agent-harbor-changes", "populated", 1440, 900)
+    defer: c.dispose()
+    let keys = c.changesInbox.changes.focusables
+    ck c.changesKey("Down") == "changes.focus-next"
+    ck c.changesInbox.changes.focus.val == keys[0]
+    var focused: seq[string]
+    for e in c.view.all("card"):
+      if e.fact("focused") == "true": focused.add e.fact("card")
+    ck focused == @[keys[0]]
+    ck c.changesKey("Enter") == "changes.toggle"
+    ck c.changesInbox.changes.specCards[0].open
+    ck c.changesKey("Right") == "changes.next-tab"
+    ck c.changesInbox.changes.activeTab.val == rtTests
+    ck c.changesKey("PageDown") == ""
+    gpui_reset_tree()
+    let i = r.mountAgentHarborStoryGpui("agent-harbor-inbox", "prev-next", 1440, 900)
+    defer: i.dispose()
+    let before = i.changesInbox.inbox.positionText
+    ck i.inboxKey("]") == "inbox.next"
+    ck i.changesInbox.inbox.positionText != before
+    ck i.inboxKey("[") == "inbox.previous"
+    ck i.inboxKey("1") == "inbox.priority-1"
+
 suite "CTF-P3: assertion count":
   test "every assertion ran":
-    check countedAssertions == 28
+    check countedAssertions == 40

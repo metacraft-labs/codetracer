@@ -1,0 +1,56 @@
+ Inbox  ⚲ ✕
+ INBOX  this server
+  5 waiting · 4 blocked · 1 feedback request
+  ←   →     Auto: off
+ ● Migrate the cac…   urgent   warm 3:12  1m
+   asks for permission
+   Urgent: the migration holds a write lock
+   until you decide.
+ ● Port the…    high, raised   warm 3:00  4m
+   needs your answer
+   Raised: its model cache is warm for three
+   more minutes.
+ ○ Tidy the upload client's…   expiring  21m
+   waiting for your next instruction
+   Waiting longest of the normal items.
+ ● Benchmark the cache             cold  10m
+   asks you to sign in
+   Blocked until someone signs in.
+▎● Write the release notes          low  50m
+▎  asks for feedback   Needs Follow-up
+▎  Low priority; draft ready.
+ 5 of 5 · Low priority; draft ready.
+                                             
+ ● ASKS FOR FEEDBACK  Write…    Priority… ▾
+                                             
+ Which changes belong in the highlights?
+                                             
+ ATTACHMENTS
+ draft-notes.md (text)
+                                             
+ ▎ DRAFT  confidence high · by release-mana…
+ ▎ These three changed behaviour users see.
+ ▎ The route cache, the schema migration and
+ ▎ the logging clean-up.
+ ▎  Send draft
+                                             
+  Your response
+                                             
+                                             
+                                             
+  Submit
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             
+                                             

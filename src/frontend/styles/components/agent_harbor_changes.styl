@@ -451,6 +451,13 @@ AH_STATE_DOT = 0.4375rem
   flex-direction: column
   min-width: 0
   overflow-x: auto
+  // Its unbroken lines are no part of the list's intrinsic width: without
+  // this, each layout the cut texts force (`ah_cut_text`, one per row
+  // measured) sized every row of a long file list again, and the Code tab
+  // with 300 files and one open took about 50 s to mount at 360px (2 s
+  // with it). The hunks still take the row's width and scroll inside it.
+  // https://developer.mozilla.org/en-US/docs/Web/CSS/contain
+  contain: inline-size
   font-family: "SpaceMono", monospace
   font-size: ah-rem(type-ui-size-caption-md)
   line-height: ah-rem(type-ui-lineheight-caption-md)
@@ -714,3 +721,12 @@ AH_STATE_DOT = 0.4375rem
 .ah-file-diff-note
   font-size: ah-rem(type-ui-size-caption-md)
   color: colors-ui-text-primary-caption
+
+// The keyboard's item (`ChangesVM.focus`): its fold glyph, or the file's
+// row, marked in the action colour; the open card's inset bar stays.
+.ah-card-focused > .ah-spec-card-head .ah-fold
+  color: colors-ui-border-action
+  font-weight: 700
+
+.ah-code-file-focused > .vcs-file-item
+  box-shadow: inset 0.125rem 0 0 colors-ui-border-action

@@ -1,0 +1,40 @@
+ Inbox  ⚲ ✕
+ INBOX  this server                                                    40 waiting · 40 blocked
+  ←   →     Auto: off
+▎● Invented session 31                                                                     1h
+▎  needs your answer
+▎  Waiting 62 minutes.
+ ● Invented session 32                                                                     1h
+   needs your answer
+   Waiting 64 minutes.
+ ○ Invented session 33                                                                     1h
+   waiting for your next instruction
+   Waiting 66 minutes.
+ ● Invented session 34                                                                     1h
+   needs your answer
+   Waiting 68 minutes.
+ ● Port the route cache's eviction policy to the new storage layer and keep the old one…   1h
+   needs your answer
+   Waiting 70 minutes.
+ ○ Invented session 36                                                                     1h
+   waiting for your next instruction
+   Waiting 72 minutes.
+ ● Invented session 37                                                                     1h
+   needs your answer
+   Waiting 74 minutes.
+ ● Invented session 38                                                                     1h
+   needs your answer
+   Waiting 76 minutes.
+ ○ Invented session 39                                                                     1h
+   waiting for your next instruction                                                          █
+   Waiting 78 minutes.                                                                        █
+ ● Port the route cache's eviction policy to the new storage layer and keep the old one…   1h █
+   needs your answer                                                                          █
+   Waiting 80 minutes.                                                                        █
+ 31 of 40 · Waiting 62 minutes.                                                               █
+                                                                                              █
+ ● NEEDS YOUR ANSWER  Invented session 31                                        Priority… ▾  █
+                                                                                              █
+ ● Agent has stopped and is waiting for your answer                                           █
+                                                                                              ▆
+ Invented question 31: keep going as planned?

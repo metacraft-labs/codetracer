@@ -100,6 +100,7 @@ import ../../agent_harbor/ah_tui_pie
 import ../../agent_harbor/ah_tui_session_activity
 import ../../agent_harbor/ah_tui_suggested_actions
 import ../../agent_harbor/[ah_tui_control_center, ah_tui_gaze_mark]
+import ../ctf_p3_tui_cover
 import ../../../viewmodel/agent_harbor_activity_cards
 import nim_agents/agent_harbor/fleet_records
 import nim_agents_isonim_viewmodels/agent_harbor/[fleet_vm, session_tabs_vm,
@@ -108,7 +109,7 @@ from ../../../viewmodel/views/agent_harbor_words import tabLabelOf, filterCount,
   countsText, activityLineIsError, countsFloor, danglesBeforeEllipsis
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling.
-const ExpectedAssertions = 164
+const ExpectedAssertions = 167
 
 const CountsLeast = 8
   ## The least room a tree node's counts give up to before its title is
@@ -127,6 +128,12 @@ const
     ## The section's stories at CTF-P2a's landing (9 fleet, 11 session tabs,
     ## 10 session list, 12 initiative tabs, 8 initiatives, 9 progress), and
     ## CTF-P2b's 21 of the session activity timeline.
+  MinimumChangesInboxStories = 62
+    ## CTF-P3's stories (25 Changes, 13 Inbox, 24 item pages, the three
+    ## keyboard stories among them), counted
+    ## apart: a floor on the three surfaces' own, so P3's stories cannot
+    ## stand in for another surface's or another's for P3's (as the GPUI
+    ## suite counts them).
 
 var countedAssertions = 0
 template ck(cond: untyped) =
@@ -1053,6 +1060,10 @@ proc checkStory(m: AhTuiMount): seq[string] =
       if feed.isNil: problems.add "the cards half is not drawn"
       problems.add m.cards.againstCardsProblems(m.timeline, m.cards.timelineSource)
     problems
+  of "agent-harbor-changes", "agent-harbor-inbox", "agent-harbor-inbox-item":
+    # CTF-P3: the comparisons of `ctf_p3_tui_cover` (the viewmodel, the
+    # texts against their cells, the Code tab's rows against the VCS pane's).
+    checkChangesInbox(m)
   else: @["this suite has no comparison for surface " & m.surface]
 
 # ---------------------------------------------------------------------------
@@ -1415,6 +1426,14 @@ proc styleProblems(m: AhTuiMount; look: LookOf): seq[string] =
         if bar.rune != FocusBar or bar.fg != p.action:
           result.add "the focused line " & e.attr("line") & " has no " & FocusBar &
                      " in the action ink at its first cell"
+  of "agent-harbor-changes", "agent-harbor-inbox", "agent-harbor-inbox-item":
+    # CTF-P3 (`ctf_p3_tui_cover.changesInboxStyleProblems`): the state words'
+    # role colours, the active tab's and the item on screen's grounds, the
+    # inset bars, Previous / Next's ink, and the Code tab's rows in the VCS
+    # pane's inks, read through the same look.
+    result.add changesInboxStyleProblems(m, proc(row, col: int): P3Cell =
+      let l = look(row, col)
+      P3Cell(rune: l.rune, fg: l.fg, bg: l.bg))
   else: discard
 
 # ---------------------------------------------------------------------------
@@ -1508,6 +1527,10 @@ suite "CTF-P1b: the stories come from their one declaration":
     for story in section.stories: ids.incl storybookId(section, story)
     ck ids.len == section.stories.len
     ck "codetracer-agent-harbor--initiative-tabs-popup" in ids
+    var changesInbox = 0
+    for story in section.stories:
+      if story.surface in TuiChangesInboxSurfaces: inc changesInbox
+    ck changesInbox >= MinimumChangesInboxStories
 
 suite "CTF-P1b: every Agent Harbor story has a terminal rendering":
   test "test_ctf_p1b_tui_views_cover_web_states":
@@ -2217,6 +2240,87 @@ suite "CTF-P2b: the story host routes the timeline's presses and keys on a real 
     ck sess.screenContents() != before
     sess.send("q")
     sess.close()
+
+suite "CTF-P3: keys and scrolling on a real terminal":
+  # The Changes panel's and the Inbox's keys (the catalogue's `changes.*`
+  # and `inbox.*`, `overlay_rows`) sent to the story host in a real pty, one
+  # at a time: after each, the terminal shows what the in-process drawing
+  # shows after the same keys, cell for cell. Each scenario's last screen is
+  # a scrolled state (with `CTF_P1B_TUI_OUT`, written as
+  # `<capture id>-scrolled`, beside the first-frame captures).
+  test "the keys scroll and open, and what is past the foot comes to the screen":
+    let scenarios = @[
+      ("agent-harbor-changes", "code-long", "sidebar", 45, 56,
+       @["\e[6~", "\e[6~", "\e[6~"]),
+      ("agent-harbor-changes", "spec-changes", "panel", 95, 40,
+       @["\e[6~", "\e[B", "\e[B", "\r"]),
+      ("agent-harbor-changes", "implementation", "sidebar", 45, 56, @["\e[6~"]),
+      ("agent-harbor-inbox", "long", "sidebar", 45, 56, @["\e[6~", "\e[6~"]),
+      ("agent-harbor-inbox-item", "unfamiliar", "sidebar", 45, 56, @["\e[6~"])]
+    var failures: seq[string]
+    var shown = 0
+    for (surface, fixture, size, cols, rows, keys) in scenarios:
+      let story = storyOf(surface, fixture)
+      let id = storybookId(section, story)
+      for mode in Modes:
+        let m = mountStory(story, cols, rows, mode)
+        var sess = spawnStory(id, cols, rows, mode)
+        var first = true
+        for key in keys:
+          var before: seq[string]
+          for r in 0 ..< m.rows: before.add m.canvas.grid.rowText(r)
+          let moved = m.handleInput(key)
+          sess.send(key)
+          if moved:
+            # The terminal has drawn the key's frame once it shows every row
+            # the key changed in the drawing (the last non-blank row alone
+            # can read the same before and after a scroll).
+            var needles: seq[string]
+            for r in 0 ..< m.rows:
+              let t = m.canvas.grid.rowText(r)
+              if t != before[r] and t.strip.len > 0: needles.add t.strip
+            if needles.len == 0:
+              for r in countdown(m.rows - 1, 0):
+                let t = m.canvas.grid.rowText(r).strip
+                if t.len > 0 and needles.len == 0: needles.add t
+            for needle in needles:
+              try: sess.waitForText(needle, initDuration(seconds = 10))
+              except CatchableError: discard
+          if first:
+            # Each scenario opens with `PageDown`: where a region holds more
+            # than it shows, it must have moved that region's window, or
+            # nothing past the foot was reached (a terminal that agrees with
+            # a drawing that never scrolled proves nothing). A story that
+            # fits at its size has nothing to scroll.
+            first = false
+            var overflows, scrolled = false
+            for region in m.p3.regions:
+              if region.content > region.height: overflows = true
+              if region.top > 0: scrolled = true
+            if overflows and not scrolled:
+              failures.add id & " @ " & size & "/" & themeOf(mode) &
+                           ": the first page key scrolled no region"
+        let problems = checkStory(m) & screenProblems(sess, m) &
+                       changesInboxStyleProblems(m, proc(row, col: int): P3Cell =
+                         let l = terminalLook(addr sess)(row, col)
+                         P3Cell(rune: l.rune, fg: l.fg, bg: l.bg))
+        if problems.len > 0:
+          failures.add id & " @ " & size & "/" & themeOf(mode) & " after " & $keys.len &
+                       " keys: " & problems.join("; ")
+        else: inc shown
+        if captureOut.len > 0:
+          let p = ahPalette(mode)
+          let capture = captureIdOf(id, size, themeOf(mode)) & "-scrolled"
+          createDir(captureOut)
+          writeFile(captureOut / (capture & ".svg"),
+                    renderColourSvg(sess.screen, defaultFg = p.textBody, defaultBg = p.ground))
+          writeFile(captureOut / (capture & ".txt"), renderPlain(sess.screen))
+        sess.send("q")
+        sess.close()
+        m.dispose()
+    if failures.len > 0: echo "  " & failures.join("\n  ")
+    ck failures.len == 0
+    ck shown == scenarios.len * Modes.len
 
 suite "CTF-P1b: the terminal views share the viewmodels, not the web views":
   test "no terminal Agent Harbor view imports a web view or the web renderer":

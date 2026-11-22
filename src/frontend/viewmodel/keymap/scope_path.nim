@@ -151,9 +151,17 @@ const
     ## initiative, `agent_harbor_control_center_words`). A prototype drawn in
     ## story hosts and no pane of the layout, as the composer; its launch
     ## form is the composer's, in the `composer` scope inside it.
+  ChangesPanelScope* = "changes"
+    ## The scope the Agent Harbor Changes panel's keys are routed in (a
+    ## session's change in four tabs, `agent_harbor_changes_inbox_words`). A
+    ## prototype drawn in story hosts, no pane of the layout yet.
+  InboxPanelScope* = "inbox"
+    ## The scope the Agent Harbor Inbox's keys are routed in (the Inbox panel
+    ## and an inbox item's page, `agent_harbor_changes_inbox_words`). A
+    ## prototype drawn in story hosts, no pane of the layout yet.
   NonPaneScopes* = [TopBarScope, BreakpointConditionScope, StoryPlaybackScope,
                     SessionActivityScope, ComposerScope, ResultsScope,
-                    ControlCenterScope]
+                    ControlCenterScope, ChangesPanelScope, InboxPanelScope]
     ## The scopes a press names in `paneKind` that are not panes.
 
 func element*(kind: ElementKind; id: string; paneKind = ""): ScopeElement =

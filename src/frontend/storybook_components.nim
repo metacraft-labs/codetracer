@@ -117,6 +117,7 @@ import viewmodel/views/[isonim_agent_harbor_session_tabs_view,
                         isonim_agent_harbor_playback_view]
 import stories/dom_playback_presses
 import stories/dom_composer_presses
+import stories/dom_changes_inbox_keys
 import stories/agent_harbor_composer_stories
 import viewmodel/views/isonim_agent_harbor_composer_view
 import stories/dom_results_presses
@@ -2181,8 +2182,14 @@ proc mountAgentHarborChanges(container: isonim_dom.Element;
                              fixture: string; options = ""): DisposeProc =
   ## The Changes panel over the viewmodel `createChangesStoryVM` builds for
   ## the story's fixture (`stories/agent_harbor_changes_inbox_stories.nim`).
+  # Its keys are routed (`stories/dom_changes_inbox_keys`), on the panel
+  # on the page.
+  var shown: ChangesVM
+  routeChangesKeys(proc(): ChangesVM = shown)
   mountAgentHarborVM(container,
-    proc(): ChangesVM = createChangesStoryVM(fixture),
+    proc(): ChangesVM =
+      shown = createChangesStoryVM(fixture)
+      shown,
     proc(host: isonim_dom.Element; vm: ChangesVM) =
       mountAgentHarborChangesPanel(host, vm, changesStoryContext(fixture)))
 
@@ -2191,8 +2198,12 @@ proc mountAgentHarborInbox(container: isonim_dom.Element;
   ## The Inbox panel; its playback story gets the host's playback chrome.
   let pb = hostPlayback("agent-harbor-inbox", fixture)
   let requests = StoryHostRequests()
+  var shown: InboxVM
+  routeInboxKeys(proc(): InboxVM = shown, nil)
   mountAgentHarborVM(container,
-    proc(): InboxVM = createInboxStoryVM(fixture, pb),
+    proc(): InboxVM =
+      shown = createInboxStoryVM(fixture, pb)
+      shown,
     proc(host: isonim_dom.Element; vm: InboxVM) =
       mountAgentHarborInboxPanel(host, vm, inboxStoryContext(fixture, requests)),
     pb, options)
@@ -2201,8 +2212,12 @@ proc mountAgentHarborInboxItem(container: isonim_dom.Element;
                                fixture: string; options = ""): DisposeProc =
   ## One inbox item's page, as its session tab shows it.
   let requests = StoryHostRequests()
+  var shown: InboxItemVM
+  routeInboxKeys(nil, proc(): InboxItemVM = shown)
   mountAgentHarborVM(container,
-    proc(): InboxItemVM = createInboxItemStoryVM(fixture),
+    proc(): InboxItemVM =
+      shown = createInboxItemStoryVM(fixture)
+      shown,
     proc(host: isonim_dom.Element; page: InboxItemVM) =
       mountAgentHarborInboxItemPage(host, page, inboxItemStoryContext(fixture, requests)))
 

@@ -1,0 +1,40 @@
+ Changes  ⚲ ✕
+ CHANGES  Relay backpressure: bound the relay queues                            9 files +18 −5
+  Spec Changes 8   Tests 5   Implementation Details 6   Code 9
+  All milestones                              ▾
+ REQUIREMENTS (2)
+ ▸ RELAY-AREQ2 Bounded queues                                                       ● modified
+ ▸ RELAY-AREQ4 Shed the oldest frame                                                   ● added
+ GOVERNANCE (1)
+ ▸ AGENTS.md                                                                        ● modified
+ SPECS (5)
+▎▾ specs/Relay-Backpressure.md       ● approved 2027-01-12 by Dana Reyes (feedback fb-relay-1)
+▎  SECTIONS  RELAY-AREQ2 Bounded queues; RELAY-AREQ4 Shed the oldest frame
+▎  COMMITS  a1b2c3d e4f5a6b
+▎   Summary   Diff
+▎  Bound every relay queue at 256 frames and drop the oldest frame when one is full.
+▎
+▎   Undo / Revert   Request Changes
+▎  ⠋ Reverting…
+▎
+ ▸ specs/Relay-Glossary.md                                                         ● editorial
+ ▸ specs/Relay-Metrics.md                                                            ● pending
+ ▸ specs/Relay-Ports.md                                                              ● pending
+ ▸ specs/Relay-Retention.md     ● approved 2027-01-13 by Sam Okafor (relayed by relay-manager)
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               
+                                                                                               

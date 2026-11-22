@@ -101,7 +101,11 @@ import ../replay_ops
 # RE-COUNTED 2026-11-21: 1002 → 1020, by the same route -- CTF-P2c step 4
 # added two non-test files under `src/frontend/gpui/agent_harbor/`
 # (`ah_control_center.nim`, `ah_gaze_mark.nim`), 2 x 9 assertions.
-const ExpectedAssertions = 1029
+# RE-COUNTED 2026-11-22: 1020 + 9 (CTF-P1d's `ah_pie.nim`) = 1029 at the
+# merge with agents, and 1029 → 1038 by the same route for the non-test GPUI
+# file agents added after it (`host/gpui_plugins.nim`, `467102fb2`), 1 x 9
+# assertions in the registry scan.
+const ExpectedAssertions = 1038
   ## 2026-11-21 (the merge of CTF-P2c step 4 and the progress pie): 1002 ->
   ## 1029. Step 4 added two scanned source files (1020) and the pie one
   ## (1011); the merged tree scans all three, at 1 + 8 = 9 per file.
