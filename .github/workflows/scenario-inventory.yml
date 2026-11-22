@@ -33,9 +33,13 @@ on:
     branches-ignore: [agents]
   workflow_dispatch:
 
+# A push is checked as itself: `agents` takes several pushes an hour, and a
+# group per branch with cancel-in-progress cancelled every run before a runner
+# picked it up (the first five runs on agents, 2026-11-22), so no push was
+# ever checked. A pull request's newer commit still replaces its older run.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
