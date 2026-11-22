@@ -164,14 +164,14 @@ EOF
 import codetracer_embed
 export asyncdispatch except waitFor, runForever
 
-# NINE UNADMITTED MODULES AND ONE ADMITTED ONE. This is check 20's subject: the
+# TEN UNADMITTED MODULES AND ONE ADMITTED ONE. This is check 20's subject: the
 # SDK module that reaches the operating system SO THAT A PLUGIN NEED NOT, which
 # makes it the file guaranteed to carry unadmitted imports. The count matches
 # `ALLOWLIST_CONTROL_UNADMITTED` in the gate, and `std/strutils` is the
 # admitted import the control's negative half needs.
 import std/strutils
-import std/[asyncdispatch, asyncfile, asyncnet, nativesockets, net, os,
-            osproc, posix, strtabs]
+import std/[asyncdispatch, asyncfile, asyncnet, nativesockets, net, openssl,
+            os, osproc, posix, strtabs]
 
 const
   PluginDeniedSyncIo*: array[3,
@@ -186,8 +186,11 @@ proc spawnProcess*(name: string) =
 
 # Check 22's POSITIVE subject: the SDK legitimately binds a C constant, so the
 # scan has something to find. `plugin_api.nim` beside it carries no pragma at
-# all and is the same control's NEGATIVE subject.
+# all and is the same control's NEGATIVE subject. The `dynlib` binding is the
+# TLS name check's, so the subject carries the same three pragma names as the
+# real SDK and `FFI_CONTROL_EXPECTED` matches both.
 let O_NOFOLLOW_CT {.importc: "O_NOFOLLOW", header: "<fcntl.h>".}: cint
+proc SSL_set1_host(ssl: SslPtr; hostname: cstring): cint {.cdecl, dynlib: DLLSSLName, importc.}
 EOF
 
 	# Check 23's other table, generated from the same sweep the gate reads.
@@ -1342,8 +1345,8 @@ import codetracer_embed
 # 22 lose their subject and fire alongside check 14, and a case that trips three
 # checks is a case that has stopped saying which one it is about.
 import std/strutils
-import std/[asyncdispatch, asyncfile, asyncnet, nativesockets, net, os,
-            osproc, posix, strtabs]
+import std/[asyncdispatch, asyncfile, asyncnet, nativesockets, net, openssl,
+            os, osproc, posix, strtabs]
 
 const
   PluginDeniedSyncIo*: array[0,
@@ -1351,6 +1354,7 @@ const
   ]
 
 let O_NOFOLLOW_CT {.importc: "O_NOFOLLOW", header: "<fcntl.h>".}: cint
+proc SSL_set1_host(ssl: SslPtr; hostname: cstring): cint {.cdecl, dynlib: DLLSSLName, importc.}
 EOF
 assert_fires "${t}" "sync-io-set-nonempty" \
 	"an empty denied-sync-io table is a finding rather than a vacuous pass" \
@@ -1606,7 +1610,7 @@ sed -i '0,/array\[3, tuple/s//array[4, tuple/' \
 	"${t}/${COMMON}/plugin_model/source_admission.nim"
 assert_fires "${t}" "allow-list-scan-discriminates" \
 	"admitting an operating-system module moves the control's pinned count, and the gate says by how much" \
-	"expected 9"
+	"expected 10"
 
 # ---------------------------------------------------------------------------
 # THE FOREIGN-FUNCTION PRAGMA — checks 21 and 22
@@ -1693,10 +1697,10 @@ assert_fires "${t}" "ffi-pragma-set-nonempty" \
 	"no pragma parsed"
 
 t="$(make_tree ffi-control-loses-its-subject)"
-sed -i '/O_NOFOLLOW_CT/d' "${t}/${VM}/plugin_host/plugin_io.nim"
+sed -i '/O_NOFOLLOW_CT/d; /SSL_set1_host/d' "${t}/${VM}/plugin_host/plugin_io.nim"
 assert_fires "${t}" "ffi-scan-reads-pragmas" \
 	"the FFI control says so when its positive subject is gone, rather than reporting a clean scan" \
-	"expected 2"
+	"expected 3"
 
 t="$(make_tree ffi-control-loses-its-span-bound)"
 cat >>"${t}/${VM}/plugin_host/plugin_api.nim" <<'EOF'
