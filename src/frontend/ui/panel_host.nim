@@ -155,10 +155,11 @@ proc unrender(m: PanelMount) =
     m.disposeRoot = nil
 
 when defined(ctWasmPanes):
-  proc ctwMountPanel(pane: cstring; host: dom_api.Element)
-      {.importjs: "globalThis.ctwPanels.mount(#, #)".}
+  proc ctwMount(pane: cstring; host: dom_api.Element; session: SessionViewModel)
+      {.importjs: "globalThis.ctwPanels.mount(#, #, #)".}
     ## `-d:ctWasmPanes`: every pane this host mounts is the WebAssembly
-    ## core's (`web_core/web_core_panels.js`), placed here.
+    ## core's (`web_core/web_core_panels.js`), placed here — the core of the
+    ## tab `session` is, over that tab's own connection to the engine.
 
 proc render(m: PanelMount; session: SessionViewModel) =
   ## Render `m`'s pane into its host over `session`, in a root of its own,
@@ -180,7 +181,7 @@ proc render(m: PanelMount; session: SessionViewModel) =
       when defined(ctWasmPanes):
         # The WebAssembly core draws this pane (`web_core/web_core_panels.js`)
         # over this tab's own connection to the engine.
-        ctwMountPanel(cstring"calltrace", host)
+        ctwMount(cstring"calltrace", host, session)
       else:
         let panel = renderCalltracePanel[WebRenderer, dom_api.Element](
           r, session.calltraceVM)
@@ -189,63 +190,63 @@ proc render(m: PanelMount; session: SessionViewModel) =
       when defined(ctWasmPanes):
         # The WebAssembly core draws this pane (`web_core/web_core_panels.js`)
         # over this tab's own connection to the engine.
-        ctwMountPanel(cstring"state", host)
+        ctwMount(cstring"state", host, session)
       else:
         let panel = renderStatePanel[WebRenderer, dom_api.Element](
           r, session.stateVM)
         dom_api.appendChild(node, dom_api.Node(panel))
     of Content.LowLevelCode:
       when defined(ctWasmPanes):
-        ctwMountPanel(cstring"low-level-code", host)
+        ctwMount(cstring"low-level-code", host, session)
       else:
         let panel = renderLowLevelCodePanel[WebRenderer, dom_api.Element](
           r, session.lowLevelCodeVM)
         dom_api.appendChild(node, dom_api.Node(panel))
     of Content.PointList:
       when defined(ctWasmPanes):
-        ctwMountPanel(cstring"point-list", host)
+        ctwMount(cstring"point-list", host, session)
       else:
         let panel = renderPointListPanel[WebRenderer, dom_api.Element](
           r, session.pointListVM)
         dom_api.appendChild(node, dom_api.Node(panel))
     of Content.StepList:
       when defined(ctWasmPanes):
-        ctwMountPanel(cstring"step-list", host)
+        ctwMount(cstring"step-list", host, session)
       else:
         let panel = renderStepListPanel[WebRenderer, dom_api.Element](
           r, session.stepListVM)
         dom_api.appendChild(node, dom_api.Node(panel))
     of Content.Build:
       when defined(ctWasmPanes):
-        ctwMountPanel(cstring"build", host)
+        ctwMount(cstring"build", host, session)
       else:
         let panel = renderBuildPanel[WebRenderer, dom_api.Element](
           r, session.buildVM)
         dom_api.appendChild(node, dom_api.Node(panel))
     of Content.BuildErrors:
       when defined(ctWasmPanes):
-        ctwMountPanel(cstring"errors", host)
+        ctwMount(cstring"errors", host, session)
       else:
         let panel = renderErrorsPanel[WebRenderer, dom_api.Element](
           r, session.errorsVM)
         dom_api.appendChild(node, dom_api.Node(panel))
     of Content.SearchResults:
       when defined(ctWasmPanes):
-        ctwMountPanel(cstring"search-results", host)
+        ctwMount(cstring"search-results", host, session)
       else:
         let panel = renderSearchResultsPanel[WebRenderer, dom_api.Element](
           r, session.searchResultsVM)
         dom_api.appendChild(node, dom_api.Node(panel))
     of Content.TraceLog:
       when defined(ctWasmPanes):
-        ctwMountPanel(cstring"trace-log", host)
+        ctwMount(cstring"trace-log", host, session)
       else:
         let panel = renderTraceLogPanel[WebRenderer, dom_api.Element](
           r, session.traceLogVM)
         dom_api.appendChild(node, dom_api.Node(panel))
     of Content.TerminalOutput:
       when defined(ctWasmPanes):
-        ctwMountPanel(cstring"terminal-output", host)
+        ctwMount(cstring"terminal-output", host, session)
       else:
         let panel = renderTerminalOutputPanel[WebRenderer, dom_api.Element](
           r, session.terminalOutputVM)
@@ -255,35 +256,35 @@ proc render(m: PanelMount; session: SessionViewModel) =
       when defined(ctWasmPanes):
         # The WebAssembly core draws this pane (`web_core/web_core_panels.js`)
         # over this tab's own connection to the engine.
-        ctwMountPanel(cstring"event-log", host)
+        ctwMount(cstring"event-log", host, session)
       else:
         let panel = renderEventLogPanel[WebRenderer, dom_api.Element](
           r, session.eventLogVM)
         dom_api.appendChild(node, dom_api.Node(panel))
     of Content.Scratchpad:
       when defined(ctWasmPanes):
-        ctwMountPanel(cstring"scratchpad", host)
+        ctwMount(cstring"scratchpad", host, session)
       else:
         let panel = renderScratchpadPanel[WebRenderer, dom_api.Element](
           r, session.scratchpadVM)
         dom_api.appendChild(node, dom_api.Node(panel))
     of Content.Repl:
       when defined(ctWasmPanes):
-        ctwMountPanel(cstring"repl", host)
+        ctwMount(cstring"repl", host, session)
       else:
         let panel = renderReplPanel[WebRenderer, dom_api.Element](
           r, session.replVM)
         dom_api.appendChild(node, dom_api.Node(panel))
     of Content.Filesystem:
       when defined(ctWasmPanes):
-        ctwMountPanel(cstring"filesystem", host)
+        ctwMount(cstring"filesystem", host, session)
       else:
         let panel = renderFilesystemPanel[WebRenderer, dom_api.Element](
           r, session.fileTreeVM)
         dom_api.appendChild(node, dom_api.Node(panel))
     of Content.CommandPalette:
       when defined(ctWasmPanes):
-        ctwMountPanel(cstring"command-palette", host)
+        ctwMount(cstring"command-palette", host, session)
       else:
         let panel = renderCommandPalettePanel[WebRenderer, dom_api.Element](
           r, session.commandPaletteVM)

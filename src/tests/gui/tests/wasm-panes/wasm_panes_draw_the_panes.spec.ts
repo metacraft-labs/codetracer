@@ -50,7 +50,7 @@ test.describe("the WebAssembly panes", () => {
       const out: Record<string, boolean> = {};
       for (const name of ["calltrace", "state", "event-log"]) {
         const el = document.querySelector(`.ct-web-core-pane[data-pane="${name}"]`);
-        out[name] = !!el && !el.closest("#ctw-panes-staging");
+        out[name] = !!el && !el.closest(".ctw-panes-staging");
       }
       return out;
     });

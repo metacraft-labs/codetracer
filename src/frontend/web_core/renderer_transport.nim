@@ -83,12 +83,22 @@ proc newWasmPaneTransport*(dap: DapApi): JsObject =
     listeners.add cb
   transport
 
-when defined(ctWasmPanes):
-  proc installWasmPaneTransport*(dap: DapApi) =
-    ## Publish this tab's transport for the wasm panes' host
-    ## (`globalThis.ctwRendererTransport`).
-    {.emit: ["globalThis.ctwRendererTransport = ", newWasmPaneTransport(dap), ";"].}
+proc installWasmPaneTransport*(dap: DapApi; session: JsObject) =
+  ## Publish the transport of the tab `dap` serves on its
+  ## `SessionViewModel` (`session.ctwTransport`), which the panes' host
+  ## boots that tab's core over; the first tab's is also
+  ## `globalThis.ctwRendererTransport`. ONE transport per `DapApi`, kept on
+  ## it: a tab whose ViewModels are replaced keeps its connection, and a
+  ## second transport would subscribe its events twice.
+  var t: JsObject
+  {.emit: [t, " = ", dap, ".ctwTransport || null;"].}
+  if t.isUndef:
+    t = newWasmPaneTransport(dap)
+    {.emit: [dap, ".ctwTransport = ", t, ";"].}
+  {.emit: [session, ".ctwTransport = ", t, ";",
+           "if (!globalThis.ctwRendererTransport) globalThis.ctwRendererTransport = ", t, ";"].}
 
+when defined(ctWasmPanes):
   # The panes' host and the core load beside `ui.js`, from `wasm-panes/`
   # (`just build-wasm-panes`). A mount the panel host asks for before they
   # have loaded is queued and replayed once `web_core_panels.js` is in.
@@ -96,13 +106,13 @@ when defined(ctWasmPanes):
 (function () {
   if (typeof document === 'undefined') return;
   var queued = [];
-  globalThis.ctwPanels = { mount: function (n, e) { queued.push([n, e]); } };
+  globalThis.ctwPanels = { mount: function (n, e, t) { queued.push([n, e, t]); } };
   var files = ['frame_applier.js', 'web_core_host.js', 'decorations.js',
                'core_wasm.js', 'web_core_panels.js'];
   var i = 0;
   var next = function () {
     if (i >= files.length) {
-      queued.forEach(function (q) { globalThis.ctwPanels.mount(q[0], q[1]); });
+      queued.forEach(function (q) { globalThis.ctwPanels.mount(q[0], q[1], q[2]); });
       return;
     }
     var s = document.createElement('script');
