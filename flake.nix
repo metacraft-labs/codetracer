@@ -448,7 +448,7 @@
       flake = false;
     };
     nim-shm-gset = {
-      url = "github:metacraft-labs/nim-shm-gset/0b2896adc65d0d62c0ee84af1356c909da2975d0";
+      url = "github:metacraft-labs/nim-shm-gset/fc0c74478d945161574a9fc49389c8fd65f09d2e";
       flake = false;
     };
 
