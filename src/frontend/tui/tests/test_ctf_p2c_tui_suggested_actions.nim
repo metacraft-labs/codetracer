@@ -49,6 +49,26 @@ suite "CTF-P2c: the terminal suggested-actions block":
         check m.view.all("suggested-button").mapIt(it.attr("suggested-button")) == @["approve", "dismiss"]
         m.dispose()
 
+  test "the buttons sit inside the block, its own ground under them":
+    # Dismiss is drawn on the panel's ground, the timeline's (a quiet
+    # button, a step off the block's). On the block's last row it touched
+    # the timeline's ground under a block that follows the last line: two
+    # areas on one ground, which CodeTracer-TUI §3.4 forbids (codetracer-pm
+    # issues/2026-11-21-suggested-actions-tui-stories-fail-the-no-box-borders-test.md).
+    # The block keeps an inset row of its own ground under its buttons, as
+    # the web's block pads its buttons off its edge.
+    for fixture in ["one", "several", "partial", "unsupported"]:
+      for (cols, rows) in [(95, 40), (45, 56), (180, 56)]:
+        for mode in [dmDark, dmLight]:
+          let m = mount(fixture, cols, rows, mode)
+          let blk = m.view.first("suggestion-phase")
+          let ground = m.canvas.bgAt(blk.row, blk.col)
+          for b in m.view.all("suggested-button"):
+            check b.row + 1 < blk.row + blk.height
+            for x in b.col ..< b.col + b.width:
+              check m.canvas.bgAt(b.row + 1, x) == ground
+          m.dispose()
+
   test "an unchecked action is dimmer than a checked one; a disabled one carries no press":
     for mode in [dmDark, dmLight]:
       let m = mount("partial", mode = mode)
