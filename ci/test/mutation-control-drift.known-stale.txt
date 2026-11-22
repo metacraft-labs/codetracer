@@ -710,7 +710,7 @@ src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/viewmo
 src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/viewmodel/views/isonim_event_log_view.nim	db9c4c6924195d6630347f931128a1d0a9d7c22f5b784749911716d1d5ac556a	356970eb9bfa553f52f5c2077cdcf54e54d4b86ee3da638e63f0c8f05a311f96
 src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/viewmodel/views/isonim_state_view.nim	2bf5cf331cabc68c9a48c2f6a055ae5e8f473d9992dced21a86f1848e346aa34	8e1de68d24e6d9f91cc832493a6f249b0c1ad837817abec409035700ec589076
 src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend/viewmodel/views/isonim_event_log_view.nim	db9c4c6924195d6630347f931128a1d0a9d7c22f5b784749911716d1d5ac556a	356970eb9bfa553f52f5c2077cdcf54e54d4b86ee3da638e63f0c8f05a311f96
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	f79e6d078f444915a1d74da920345a8a260a98a862fb302a89debb93d4218c0a	92e2e4095b1a78f691f4ca4fc87366492242f29565cd20337402aea06f51cea9
+src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	f79e6d078f444915a1d74da920345a8a260a98a862fb302a89debb93d4218c0a	5822e01ac3b11a01c05ceab22d69ead390720aaccece810fc16594286844b894
 # src/frontend/tui/app/runtime.nim, ci/lib/test-lane-files.sh, ci/test/vm-unit-wasm-parity.sh: moved by the ct-lens package (lane rows) and the
 # plugin status-item fix. Re-grade the harnesses named.
 src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/test/vm-unit-wasm-parity.sh	0d513a0222f93bb9ebd4ba839d2e6f83766ccd7c996ad386228719573c5eb3df	3cf7bf184200cef001990beb031fa23909bf7bf1d17c9061605566bd3f67583d

@@ -272,3 +272,56 @@ what the host received. `src/frontend/tui/tests/real_terminal/test_ct_lens_plugi
 installs it for the shipped terminal and drives it over a pty on a real
 recording. Both wait on state rather than time: plugins answer later than the
 key that asked, by design.
+
+## Building a WebAssembly plugin
+
+The same SDK builds a plugin to WebAssembly. A WASM package carries one
+`plugin.wasm` that every platform runs, and CodeTracer's own `ct-plugin-host`
+loads it: one host process per session for every WASM package installed, each
+plugin in an instance of its own. A plugin that loops, runs past its deadline or
+exhausts its memory loses its instance and nothing else; the host and the other
+plugins keep running, and the fault names the plugin.
+
+`ct-lens.watch` is built this way from the same `lens_watch.nim` the native
+package uses (`src/plugins/ct-lens/ct_lens_watch_wasm.nim`):
+
+```bash
+src/plugin_sdk/build-wasm-plugin.sh src/plugins/ct-lens/ct_lens_watch_wasm.nim \
+  build/plugins/ct-lens@0.1.0/plugin.wasm --path:src/plugins/ct-lens
+cp src/plugins/ct-lens/wasm/plugin.json build/plugins/ct-lens@0.1.0/
+```
+
+Its `plugin.json` names the module instead of an executable:
+
+```json
+{
+  "package": "ct-lens",
+  "host": { "kind": "wasm", "module": "plugin.wasm" },
+  "plugins": [ { "id": "ct-lens.watch", "capabilities": ["trace"], "...": "..." } ]
+}
+```
+
+What changes for the author:
+
+- **Grants are what the plugin uses, possibly none.** A native plugin must
+  declare `process`, because it runs with your authority. A WASM plugin
+  reaches only what the host's imports offer, so it declares only `fs:read`,
+  `fs:write`, `socket:local`, `socket:remote`, `process` or `trace` when it
+  needs them.
+- **I/O goes through the host.** `import wasm_io` and call `p.readPath`,
+  `p.writePath`, `p.runProcess`, `p.connectTcp` or `p.connectUnixSocket`; each
+  returns a `Future`, and a refused request completes with `ioRefused` and
+  the reason. The module can import nothing else: a module that imports
+  anything outside the host's list is refused when it is activated, and the
+  refusal names the import.
+- **No threads, no signals.** The host answers liveness pings itself, and an
+  overrun is cut off by the engine, so a WASM plugin needs neither.
+- **`run` returns.** The host calls into the module with each message, so
+  the top level builds the SDK, adds the plugins and calls `sdk.run()` as a
+  native plugin does, and the call returns at once.
+
+Build `ct-plugin-host` itself with `just build-plugin-host`.
+
+To publish a WASM package, publish one archive,
+`<name>-<version>-any.tar.gz`: `ct install` takes the platform's archive when
+there is one and the shared `-any` archive otherwise.

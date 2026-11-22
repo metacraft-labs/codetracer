@@ -1,0 +1,76 @@
+{
+  "package": "ct-lens",
+  "host": {
+    "kind": "wasm",
+    "module": "plugin.wasm"
+  },
+  "plugins": [
+    {
+      "id": "ct-lens.watch",
+      "displayName": "Changed values",
+      "version": "0.1.0",
+      "requires": {
+        "core": ">=1.0.0 <2.0.0"
+      },
+      "capabilities": [
+        "trace"
+      ],
+      "activation": [
+        {
+          "event": "trace-opened"
+        }
+      ],
+      "contributes": {
+        "pane": [
+          {
+            "id": "changes",
+            "title": "Changed values",
+            "views": [
+              "Tree",
+              "Table",
+              "Text"
+            ]
+          }
+        ],
+        "command": [
+          {
+            "id": "watch.add-changed",
+            "title": "Changed values: Watch what this step changed"
+          }
+        ],
+        "statusItem": [
+          {
+            "id": "watch.status",
+            "title": "Changed values",
+            "views": [
+              "Text"
+            ]
+          }
+        ],
+        "viewModel": [
+          {
+            "id": "visualisers",
+            "version": "1.0.0"
+          }
+        ]
+      },
+      "keybindings": [
+        {
+          "key": "f7",
+          "command": "watch.add-changed",
+          "scope": "window",
+          "when": "plugin.ct-lens.watch.hasChanges"
+        }
+      ],
+      "settings": {
+        "type": "object",
+        "properties": {
+          "nested": {
+            "type": "boolean",
+            "default": false
+          }
+        }
+      }
+    }
+  ]
+}

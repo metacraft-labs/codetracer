@@ -24,6 +24,15 @@
 ## * The repository is real (`ct_lens_fixture.makeHistoryRepo`): three
 ##   commits, made by the suite.
 ##
+## ## THE WEBASSEMBLY PORT (`-d:ctLensWasm`)
+##
+## Built with `-d:ctLensWasm`, the same file runs the `ct-lens.watch` suite
+## against the plugin's WebAssembly build instead (`ct_lens_watch_wasm.nim`,
+## one `plugin.wasm`), hosted by the real `ct-plugin-host`
+## (Extensibility-Model.md §11.9): the same cases, the same assertions, no
+## line changed between the two runs. The history and jump suites need the
+## native package and are not compiled in.
+##
 ## ## TIME
 ##
 ## The host is loaded (load above 100). Every wait is on STATE, with a
@@ -43,6 +52,7 @@ import plugin_host/[protocol, supervisor]
 import ct_lens_fixture
 
 const Ceiling = 120_000
+const LensWasm = defined(ctLensWasm)
 
 proc waitUntil(sup: Supervisor; what: string; cond: proc(): bool;
                ceilingMs = Ceiling): bool {.discardable.} =
@@ -82,7 +92,7 @@ proc newRig(history: JsonNode = nil; watch: JsonNode = nil;
   let root = lensScratchRoot() / ("rig-" & $getpid() & "-" & $rigCount)
   removeDir(root)
   createDir(root)
-  result.dir = installLens(root)
+  result.dir = when LensWasm: installLensWasm(root) else: installLens(root)
   result.repo = root / "repo"
   result.file = makeHistoryRepo(result.repo)
   let mock = newMockBackendService(autoRespond = true)
@@ -93,6 +103,8 @@ proc newRig(history: JsonNode = nil; watch: JsonNode = nil;
     session.initializePanelViewModels()
   result.session = session
   let sup = newSupervisor("tui", "1.0.0", true)
+  when LensWasm:
+    sup.wasmHost = pluginHostBin()
   # Widened: liveness is not the subject of these cases (see the header).
   sup.pongDeadlineMs = 20_000
   sup.busyHangMs = 30_000
@@ -112,10 +124,15 @@ proc newRig(history: JsonNode = nil; watch: JsonNode = nil;
   result.sup = sup
 
 proc both(r: Rig) =
-  r.sup.activate("ct-lens.history")
-  r.sup.activate("ct-lens.watch")
-  doAssert r.sup.waitUntil("both active", proc(): bool =
-    r.sup.slot("ct-lens.history").active and r.sup.slot("ct-lens.watch").active)
+  when LensWasm:
+    r.sup.activate("ct-lens.watch")
+    doAssert r.sup.waitUntil("watch active", proc(): bool =
+      r.sup.slot("ct-lens.watch").active)
+  else:
+    r.sup.activate("ct-lens.history")
+    r.sup.activate("ct-lens.watch")
+    doAssert r.sup.waitUntil("both active", proc(): bool =
+      r.sup.slot("ct-lens.history").active and r.sup.slot("ct-lens.watch").active)
 
 proc stopAt(r: Rig; file: string; line: int; first = 0; last = 0;
             function = "") =
@@ -191,133 +208,135 @@ proc slowGit(r: Rig; sleepSeconds: int; never = false): string =
 
 proc pidAlive(pid: int): bool = pid > 0 and kill(Pid(pid), 0) == 0
 
-suite "ct-lens: one package, two plugins, one process":
+when not LensWasm:
+  suite "ct-lens: one package, two plugins, one process":
 
-  test "both plugins activate in one process and contribute their panes and status items":
-    var r = newRig()
-    r.both()
-    check r.sup.pidOf("ct-lens.history") > 0
-    check r.sup.pidOf("ct-lens.history") == r.sup.pidOf("ct-lens.watch")
-    check r.sup.waitUntil("both panes", proc(): bool =
-      "Line history" in r.pane("ct-lens.history/history") and
-      "Changed at this step" in r.pane("ct-lens.watch/changes"))
-    check r.sup.waitUntil("both status items", proc(): bool =
-      r.status("history.status").len > 0 and r.status("watch.status").len > 0)
-    r.sup.shutdown()
+    test "both plugins activate in one process and contribute their panes and status items":
+      var r = newRig()
+      r.both()
+      check r.sup.pidOf("ct-lens.history") > 0
+      check r.sup.pidOf("ct-lens.history") == r.sup.pidOf("ct-lens.watch")
+      check r.sup.waitUntil("both panes", proc(): bool =
+        "Line history" in r.pane("ct-lens.history/history") and
+        "Changed at this step" in r.pane("ct-lens.watch/changes"))
+      check r.sup.waitUntil("both status items", proc(): bool =
+        r.status("history.status").len > 0 and r.status("watch.status").len > 0)
+      r.sup.shutdown()
 
-  test "disabling one plugin leaves the other working in the same process":
-    var r = newRig()
-    r.both()
-    let pid = r.sup.pidOf("ct-lens.history")
-    r.sup.setEnabled("ct-lens.watch", false)
-    check r.sup.waitUntil("watch inactive", proc(): bool =
-      not r.sup.slot("ct-lens.watch").active)
-    r.stopAt(r.file, 5, 4, 6, "apply")
-    check r.sup.waitUntil("history still follows the debugger", proc(): bool =
-      "multiply instead of adding" in r.pane("ct-lens.history/history"))
-    check r.sup.pidOf("ct-lens.history") == pid
-    check r.status("watch.status").len == 0
-    r.sup.shutdown()
+    test "disabling one plugin leaves the other working in the same process":
+      var r = newRig()
+      r.both()
+      let pid = r.sup.pidOf("ct-lens.history")
+      r.sup.setEnabled("ct-lens.watch", false)
+      check r.sup.waitUntil("watch inactive", proc(): bool =
+        not r.sup.slot("ct-lens.watch").active)
+      r.stopAt(r.file, 5, 4, 6, "apply")
+      check r.sup.waitUntil("history still follows the debugger", proc(): bool =
+        "multiply instead of adding" in r.pane("ct-lens.history/history"))
+      check r.sup.pidOf("ct-lens.history") == pid
+      check r.status("watch.status").len == 0
+      r.sup.shutdown()
 
-suite "ct-lens.history: git, as a child process of the plugin":
+when not LensWasm:
+  suite "ct-lens.history: git, as a child process of the plugin":
 
-  test "the commits that changed the function the debugger stopped in, newest first":
-    var r = newRig()
-    r.both()
-    r.stopAt(r.file, 5, 4, 6, "apply")
-    let want = expectedHistory(r.repo, r.file, 4, 6)
-    check want.len == 2
-    check r.sup.waitUntil("history of apply", proc(): bool =
-      "multiply instead of adding" in r.pane("ct-lens.history/history"))
-    let text = r.pane("ct-lens.history/history")
-    check "History of apply (calc.py:4-6)" in text
-    for w in want:
-      check w.split(' ')[0] in text
-    check "other returns two" notin text
-    check text.find("multiply instead of adding") < text.find("create the calculator")
-    # The status item is a frame of its own, after the pane's: waited for.
-    check r.sup.waitUntil("the status item", proc(): bool =
-      r.status("history.status").startsWith("history: " & want[0].split(' ')[0]) and
-      "(2 commits)" in r.status("history.status"))
-    # Another function: another range, another answer.
-    r.stopAt(r.file, 10, 9, 10, "other")
-    check r.sup.waitUntil("history of other", proc(): bool =
-      "other returns two" in r.pane("ct-lens.history/history"))
-    check "multiply instead of adding" notin r.pane("ct-lens.history/history")
-    r.sup.shutdown()
+    test "the commits that changed the function the debugger stopped in, newest first":
+      var r = newRig()
+      r.both()
+      r.stopAt(r.file, 5, 4, 6, "apply")
+      let want = expectedHistory(r.repo, r.file, 4, 6)
+      check want.len == 2
+      check r.sup.waitUntil("history of apply", proc(): bool =
+        "multiply instead of adding" in r.pane("ct-lens.history/history"))
+      let text = r.pane("ct-lens.history/history")
+      check "History of apply (calc.py:4-6)" in text
+      for w in want:
+        check w.split(' ')[0] in text
+      check "other returns two" notin text
+      check text.find("multiply instead of adding") < text.find("create the calculator")
+      # The status item is a frame of its own, after the pane's: waited for.
+      check r.sup.waitUntil("the status item", proc(): bool =
+        r.status("history.status").startsWith("history: " & want[0].split(' ')[0]) and
+        "(2 commits)" in r.status("history.status"))
+      # Another function: another range, another answer.
+      r.stopAt(r.file, 10, 9, 10, "other")
+      check r.sup.waitUntil("history of other", proc(): bool =
+        "other returns two" in r.pane("ct-lens.history/history"))
+      check "multiply instead of adding" notin r.pane("ct-lens.history/history")
+      r.sup.shutdown()
 
-  test "a stop without a function range asks about its line alone":
-    var r = newRig()
-    r.both()
-    r.stopAt(r.file, 1)
-    check r.sup.waitUntil("history of line 1", proc(): bool =
-      "History of calc.py:1" in r.pane("ct-lens.history/history") and
-      "create the calculator" in r.pane("ct-lens.history/history"))
-    check "multiply" notin r.pane("ct-lens.history/history")
-    r.sup.shutdown()
+    test "a stop without a function range asks about its line alone":
+      var r = newRig()
+      r.both()
+      r.stopAt(r.file, 1)
+      check r.sup.waitUntil("history of line 1", proc(): bool =
+        "History of calc.py:1" in r.pane("ct-lens.history/history") and
+        "create the calculator" in r.pane("ct-lens.history/history"))
+      check "multiply" notin r.pane("ct-lens.history/history")
+      r.sup.shutdown()
 
-  test "git's own refusal is shown, not an empty history":
-    var r = newRig()
-    r.both()
-    let loose = r.dir.parentDir / "loose"
-    createDir(loose)
-    writeFile(loose / "x.py", "x = 1\n")
-    r.stopAt(loose / "x.py", 1)
-    check r.sup.waitUntil("not a repository", proc(): bool =
-      "not a git repository" in r.pane("ct-lens.history/history").toLowerAscii)
-    check r.sup.waitUntil("unavailable", proc(): bool =
-      r.status("history.status") == "history: unavailable")
-    r.sup.shutdown()
+    test "git's own refusal is shown, not an empty history":
+      var r = newRig()
+      r.both()
+      let loose = r.dir.parentDir / "loose"
+      createDir(loose)
+      writeFile(loose / "x.py", "x = 1\n")
+      r.stopAt(loose / "x.py", 1)
+      check r.sup.waitUntil("not a repository", proc(): bool =
+        "not a git repository" in r.pane("ct-lens.history/history").toLowerAscii)
+      check r.sup.waitUntil("unavailable", proc(): bool =
+        r.status("history.status") == "history: unavailable")
+      r.sup.shutdown()
 
-  test "a git that cannot be started is named":
-    var r = newRig(history = %*{"git": "/nonexistent/ct-lens-git"})
-    r.both()
-    r.stopAt(r.file, 5, 4, 6, "apply")
-    check r.sup.waitUntil("could not run", proc(): bool =
-      "could not run /nonexistent/ct-lens-git" in r.pane("ct-lens.history/history"))
-    r.sup.shutdown()
+    test "a git that cannot be started is named":
+      var r = newRig(history = %*{"git": "/nonexistent/ct-lens-git"})
+      r.both()
+      r.stopAt(r.file, 5, 4, 6, "apply")
+      check r.sup.waitUntil("could not run", proc(): bool =
+        "could not run /nonexistent/ct-lens-git" in r.pane("ct-lens.history/history"))
+      r.sup.shutdown()
 
-  test "a slow git does not hold the sibling plugin":
-    var r = newRig()
-    let slow = r.slowGit(8)
-    r.sup.configure("ct-lens.history", true, %*{"git": slow})
-    r.both()
-    r.stopAt(r.file, 5, 4, 6, "apply")
-    check r.sup.waitUntil("asking git", proc(): bool =
-      "asking git" in r.pane("ct-lens.history/history"))
-    # While git sleeps, the sibling answers a command and follows a step.
-    r.stopAt(r.file, 5, 4, 6, "apply")
-    r.locals({"total": "1"})
-    check r.sup.waitUntil("watch follows while git runs", proc(): bool =
-      "Changed at this step" in r.pane("ct-lens.watch/changes") and
-      "waiting for the locals" notin r.pane("ct-lens.watch/changes"))
-    check "asking git" in r.pane("ct-lens.history/history")
-    let id = r.sup.invoke("ct-lens.watch", "watch.add-changed")
-    check id.len > 0
-    check r.sup.waitUntil("watch answered", proc(): bool =
-      r.sup.takeAnswers(id).len > 0)
-    check "asking git" in r.pane("ct-lens.history/history")
-    # And git's answer still arrives.
-    check r.sup.waitUntil("slow history", proc(): bool =
-      "multiply instead of adding" in r.pane("ct-lens.history/history"))
-    check r.sup.faults.len == 0
-    r.sup.shutdown()
+    test "a slow git does not hold the sibling plugin":
+      var r = newRig()
+      let slow = r.slowGit(8)
+      r.sup.configure("ct-lens.history", true, %*{"git": slow})
+      r.both()
+      r.stopAt(r.file, 5, 4, 6, "apply")
+      check r.sup.waitUntil("asking git", proc(): bool =
+        "asking git" in r.pane("ct-lens.history/history"))
+      # While git sleeps, the sibling answers a command and follows a step.
+      r.stopAt(r.file, 5, 4, 6, "apply")
+      r.locals({"total": "1"})
+      check r.sup.waitUntil("watch follows while git runs", proc(): bool =
+        "Changed at this step" in r.pane("ct-lens.watch/changes") and
+        "waiting for the locals" notin r.pane("ct-lens.watch/changes"))
+      check "asking git" in r.pane("ct-lens.history/history")
+      let id = r.sup.invoke("ct-lens.watch", "watch.add-changed")
+      check id.len > 0
+      check r.sup.waitUntil("watch answered", proc(): bool =
+        r.sup.takeAnswers(id).len > 0)
+      check "asking git" in r.pane("ct-lens.history/history")
+      # And git's answer still arrives.
+      check r.sup.waitUntil("slow history", proc(): bool =
+        "multiply instead of adding" in r.pane("ct-lens.history/history"))
+      check r.sup.faults.len == 0
+      r.sup.shutdown()
 
-  test "a git past its deadline is killed and the history says so":
-    var r = newRig()
-    let slow = r.slowGit(600, never = true)
-    r.sup.configure("ct-lens.history", true, %*{"git": slow, "timeoutMs": 300})
-    r.both()
-    r.stopAt(r.file, 5, 4, 6, "apply")
-    check r.sup.waitUntil("deadline", proc(): bool =
-      "did not answer within 300 ms" in r.pane("ct-lens.history/history"))
-    # The program the plugin started is gone (killed and reaped), not left
-    # running past the deadline it was given.
-    check r.sup.waitUntil("pid written", proc(): bool =
-      fileExists(slow & ".pid") and readFile(slow & ".pid").strip.len > 0)
-    let pid = parseInt(readFile(slow & ".pid").strip)
-    check r.sup.waitUntil("killed", proc(): bool = not pidAlive(pid))
-    r.sup.shutdown()
+    test "a git past its deadline is killed and the history says so":
+      var r = newRig()
+      let slow = r.slowGit(600, never = true)
+      r.sup.configure("ct-lens.history", true, %*{"git": slow, "timeoutMs": 300})
+      r.both()
+      r.stopAt(r.file, 5, 4, 6, "apply")
+      check r.sup.waitUntil("deadline", proc(): bool =
+        "did not answer within 300 ms" in r.pane("ct-lens.history/history"))
+      # The program the plugin started is gone (killed and reaped), not left
+      # running past the deadline it was given.
+      check r.sup.waitUntil("pid written", proc(): bool =
+        fileExists(slow & ".pid") and readFile(slow & ".pid").strip.len > 0)
+      let pid = parseInt(readFile(slow & ".pid").strip)
+      check r.sup.waitUntil("killed", proc(): bool = not pidAlive(pid))
+      r.sup.shutdown()
 
 suite "ct-lens.watch: the core change set, turned into watches":
 
@@ -397,74 +416,75 @@ suite "ct-lens.watch: the core change set, turned into watches":
       not r.sup.pluginVisualisers.anyIt(it.typeMatch == "NoneType"))
     r.sup.shutdown()
 
-suite "ct-lens.jump: a modal layer, and the input defences against its own code":
+when not LensWasm:
+  suite "ct-lens.jump: a modal layer, and the input defences against its own code":
 
-  test "its key opens a mode that lists the calls; a digit jumps through the calltrace":
-    var r = newRig()
-    r.openJump()
-    check r.sup.topLayerLabel == "JUMP MODE (ct-lens.jump)"
-    check "ct-lens.jump" in r.sup.topLayerLabel
-    check r.sup.waitUntil("the choices on the status line", proc(): bool =
-      "jump: 1 evaluate" in r.status("jump.status") and
-      "3 add" in r.status("jump.status"))
-    r.mock.clearReceivedCommands()
-    let route = r.sup.resolveLayerKey("2", "")
-    check route.found and route.plugin == "ct-lens.jump" and route.op == "jump.pick"
-    discard r.sup.routeKey(route, "2")
-    check r.sup.waitUntil("the jump reached the backend", proc(): bool =
-      r.mock.findCommand("ct/calltrace-jump").isSome)
-    let sent = r.mock.findCommand("ct/calltrace-jump").get
-    # "2" is the second call after the current one: apply_op, at line 30.
-    check sent.args{"line"}.getInt(0) == 30
-    check r.sup.waitUntil("the mode closed", proc(): bool =
-      r.sup.topLayerLabel.len == 0)
-    r.sup.shutdown()
+    test "its key opens a mode that lists the calls; a digit jumps through the calltrace":
+      var r = newRig()
+      r.openJump()
+      check r.sup.topLayerLabel == "JUMP MODE (ct-lens.jump)"
+      check "ct-lens.jump" in r.sup.topLayerLabel
+      check r.sup.waitUntil("the choices on the status line", proc(): bool =
+        "jump: 1 evaluate" in r.status("jump.status") and
+        "3 add" in r.status("jump.status"))
+      r.mock.clearReceivedCommands()
+      let route = r.sup.resolveLayerKey("2", "")
+      check route.found and route.plugin == "ct-lens.jump" and route.op == "jump.pick"
+      discard r.sup.routeKey(route, "2")
+      check r.sup.waitUntil("the jump reached the backend", proc(): bool =
+        r.mock.findCommand("ct/calltrace-jump").isSome)
+      let sent = r.mock.findCommand("ct/calltrace-jump").get
+      # "2" is the second call after the current one: apply_op, at line 30.
+      check sent.args{"line"}.getInt(0) == 30
+      check r.sup.waitUntil("the mode closed", proc(): bool =
+        r.sup.topLayerLabel.len == 0)
+      r.sup.shutdown()
 
-  test "a mode plugin runs in a process of its own, apart from its siblings":
-    var r = newRig()
-    r.both()
-    r.openJump()
-    let jump = r.sup.pidOf("ct-lens.jump")
-    check jump > 0
-    check jump != r.sup.pidOf("ct-lens.history")
-    check r.sup.pidOf("ct-lens.history") == r.sup.pidOf("ct-lens.watch")
-    r.sup.shutdown()
+    test "a mode plugin runs in a process of its own, apart from its siblings":
+      var r = newRig()
+      r.both()
+      r.openJump()
+      let jump = r.sup.pidOf("ct-lens.jump")
+      check jump > 0
+      check jump != r.sup.pidOf("ct-lens.history")
+      check r.sup.pidOf("ct-lens.history") == r.sup.pidOf("ct-lens.watch")
+      r.sup.shutdown()
 
-  test "stopped while it holds the keyboard, it loses the keyboard; its siblings keep running":
-    # The real thresholds: the input deadline is the subject here. The
-    # plugin is stopped with SIGSTOP, as a debugger attaching to it or the
-    # machine swapping it out would stop it — nothing in its code changes.
-    var r = newRig(tune = proc(s: Supervisor) =
-      s.inputDeadlineMs = 500)
-    r.both()
-    r.openJump()
-    let pid = r.sup.pidOf("ct-lens.jump")
-    let siblings = r.sup.pidOf("ct-lens.history")
-    check kill(Pid(pid), SIGSTOP) == 0
-    let route = r.sup.resolveLayerKey("1", "")
-    check route.found and route.plugin == "ct-lens.jump"
-    discard r.sup.routeKey(route, "1")
-    check r.sup.waitUntil("the missed deadline", proc(): bool =
-      "went to ct-lens.jump, which did not answer" in r.sup.statusLine)
-    # Transparent now: the next digit is not the plugin's.
-    check r.sup.waitUntil("transparent", proc(): bool =
-      not r.sup.resolveLayerKey("1", "").found)
-    check r.sup.waitUntil("its layer is gone", proc(): bool =
-      r.sup.topLayerLabel.len == 0)
-    discard kill(Pid(pid), SIGCONT)
-    check r.sup.pidOf("ct-lens.history") == siblings
-    r.stopAt(r.file, 5, 4, 6, "apply")
-    check r.sup.waitUntil("history still answers", proc(): bool =
-      "multiply instead of adding" in r.pane("ct-lens.history/history"))
-    r.sup.shutdown()
+    test "stopped while it holds the keyboard, it loses the keyboard; its siblings keep running":
+      # The real thresholds: the input deadline is the subject here. The
+      # plugin is stopped with SIGSTOP, as a debugger attaching to it or the
+      # machine swapping it out would stop it — nothing in its code changes.
+      var r = newRig(tune = proc(s: Supervisor) =
+        s.inputDeadlineMs = 500)
+      r.both()
+      r.openJump()
+      let pid = r.sup.pidOf("ct-lens.jump")
+      let siblings = r.sup.pidOf("ct-lens.history")
+      check kill(Pid(pid), SIGSTOP) == 0
+      let route = r.sup.resolveLayerKey("1", "")
+      check route.found and route.plugin == "ct-lens.jump"
+      discard r.sup.routeKey(route, "1")
+      check r.sup.waitUntil("the missed deadline", proc(): bool =
+        "went to ct-lens.jump, which did not answer" in r.sup.statusLine)
+      # Transparent now: the next digit is not the plugin's.
+      check r.sup.waitUntil("transparent", proc(): bool =
+        not r.sup.resolveLayerKey("1", "").found)
+      check r.sup.waitUntil("its layer is gone", proc(): bool =
+        r.sup.topLayerLabel.len == 0)
+      discard kill(Pid(pid), SIGCONT)
+      check r.sup.pidOf("ct-lens.history") == siblings
+      r.stopAt(r.file, 5, 4, 6, "apply")
+      check r.sup.waitUntil("history still answers", proc(): bool =
+        "multiply instead of adding" in r.pane("ct-lens.history/history"))
+      r.sup.shutdown()
 
-  test "three Escapes take the keyboard back from its mode":
-    var r = newRig()
-    r.openJump()
-    check r.sup.observeEscape() == false
-    check r.sup.observeEscape() == false
-    check r.sup.observeEscape()
-    check r.sup.topLayerLabel.len == 0
-    check "ct-lens.jump" in r.sup.recoveryPlugins
-    check not r.sup.resolveLayerKey("1", "").found
-    r.sup.shutdown()
+    test "three Escapes take the keyboard back from its mode":
+      var r = newRig()
+      r.openJump()
+      check r.sup.observeEscape() == false
+      check r.sup.observeEscape() == false
+      check r.sup.observeEscape()
+      check r.sup.topLayerLabel.len == 0
+      check "ct-lens.jump" in r.sup.recoveryPlugins
+      check not r.sup.resolveLayerKey("1", "").found
+      r.sup.shutdown()

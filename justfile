@@ -5352,8 +5352,8 @@ test-plugin-tls:
 build-plugin-host engine="wasmi":
   bash src/plugin-host/build.sh --engine {{engine}} --out build/bin
 
-# The WASM host's real-stack suite (it builds its plugin modules with
-# src/plugin_sdk/build-wasm-plugin.sh).
+# The WASM host's real-stack suite and ct-lens.watch run from its .wasm
+# (both build their modules with src/plugin_sdk/build-wasm-plugin.sh).
 test-plugin-host-wasm: build-plugin-host
   #!/usr/bin/env bash
   set -euo pipefail
@@ -5363,6 +5363,9 @@ test-plugin-host-wasm: build-plugin-host
   nim c -r --hints:off --warnings:off --mm:orc --path:src/frontend/viewmodel \
     --nimcache:build/nimcache/test_plugin_host_wasm -o:build/bin/test_plugin_host_wasm \
     src/frontend/viewmodel/tests/unit/test_plugin_host_wasm.nim
+  nim c -r --hints:off --warnings:off --mm:orc -d:ctLensWasm --path:src/frontend/viewmodel \
+    --nimcache:build/nimcache/test_ct_lens_wasm -o:build/bin/test_ct_lens_wasm \
+    src/frontend/viewmodel/tests/unit/test_ct_lens_plugins.nim
 
 test-identity-device-grant-compile:
   #!/usr/bin/env bash
