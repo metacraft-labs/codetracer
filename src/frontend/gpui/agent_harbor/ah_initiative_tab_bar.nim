@@ -41,7 +41,7 @@ const
   CompactRecordingsMarginPx = 4 ## `.ah-bar-compact .ah-tab-recordings` margin-left
   InactiveTabMaxPx = 256      ## an inactive tab's `max-width: 16rem`
   InitiativeTabMaxPx = 384    ## the active one's (24rem): it holds its recordings
-  RecordingButtonGapPx = 2
+  RecordingButtonGapPx* = 2
   PopupWidthPx = 384          ## `.ah-initiative-popup`: 24rem, at most 80vw
   ElsewhereMenuPx = 608       ## `.ah-elsewhere-menu`: 38rem, at most 100vw - 1rem
   BarGapPx = 4
@@ -173,8 +173,41 @@ proc initiativeTabMinWidth(vm: InitiativeTabStripVM; tab: StripTab): float =
     if tab.active: result += recordingsWidth(vm, vm.recordingButtonsOf(tab.id))
   result = max(result, float(TabMinPx))
 
-proc drawRecordingButton(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM;
-                         initiativeId: string; rb: RecordingButton): GpuiElement =
+proc ringInk*(p: AhPalette): string =
+  ## The ring's ink, the web's `by-mode(colors-brand-400, colors-brand-700)`:
+  ## the ring is the only mark of its state, so it holds 3:1 (WCAG 2.2
+  ## SC 1.4.11) against the active tab's fill it sits on as well as its halo.
+  ## The action border (brand/500) does not: 2.5:1 on Dark's fill, 2.8:1 on
+  ## Light's halo. The palette has neither step; each is the other mode's
+  ## `surface/action/primary-hover` (brand/700 in Dark, brand/400 in Light).
+  let other = if p.mode == dmDark: dmLight else: dmDark
+  DesignTokenHex[dtColorsUiSurfaceActionPrimaryHover][other]
+
+proc recordingRing(r: GpuiRenderer; p: AhPalette): GpuiElement =
+  ## The quiet ring a correlation marker puts around a recording button
+  ## (`.ah-rec-ringed`: 1px in `ringInk` over a 1px halo of the
+  ## window's ground, just outside the button's own outline; P2c study D81),
+  ## drawn over the button.
+  result = r.createElement("div")
+  r.styles(result, [("position", "absolute"), ("left", "-2px"), ("top", "-2px"),
+                    ("right", "-2px"), ("bottom", "-2px"), ("rounded", "5px"),
+                    ("border-width", "1px"), ("border-color", ringInk(p))])
+  r.tag(result, "recording-ring", "true")
+  let halo = r.createElement("div")
+  r.styles(halo, [("position", "absolute"), ("left", "0px"), ("top", "0px"),
+                  ("right", "0px"), ("bottom", "0px"), ("rounded", "4px"),
+                  ("border-width", "1px"),
+                  ("border-color", DesignTokenHex[dtColorsUiSurfaceBaseCanvas][p.mode])])
+  r.tag(halo, "recording-ring-halo", "true")
+  r.appendChild(result, halo)
+
+proc drawRecordingButton*(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM;
+                          initiativeId: string; rb: RecordingButton;
+                          onSelect: proc(id: string) = nil): GpuiElement =
+  ## A numbered button. A press selects the recording in `vm`'s initiative,
+  ## or, given `onSelect` (a multi-process recording's process switcher,
+  ## `ah_process_switcher`), reports its id there. A ringed one carries the
+  ## ring (`recordingRing`).
   let id = rb.id
   result = r.box(pairs = [("height", "18px"), ("min-width", "18px"), ("items", "center"),
                           ("justify", "center"), ("padding-left", "4px"),
@@ -211,9 +244,52 @@ proc drawRecordingButton(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM
   r.styles(result, [("border-width", "1px"), ("border-color", border)])
   r.appendChild(result, r.text($rb.number & stateSuffix(rb.state), CaptionPx, colour,
                                shrink = false, tabular = true))
+  if rb.ringed:
+    r.setStyle(result, "position", "relative")
+    # Clear of its neighbours, 2px away, as the web's `.ah-rec-ringed`.
+    r.styles(result, [("margin-left", "2px"), ("margin-right", "2px")])
+    r.tag(result, "recording-ringed", "true")
+    r.appendChild(result, r.recordingRing(p))
   let target = vm
-  r.addEventListener(result, "click",
-                     proc() = discard target.selectRecording(initiativeId, id))
+  let select = onSelect
+  r.addEventListener(result, "click", proc() =
+    if select != nil: select(id)
+    else: discard target.selectRecording(initiativeId, id))
+
+proc drawRecordingsMore*(r: GpuiRenderer; p: AhPalette; buttons: RecordingButtons): GpuiElement =
+  ## The recordings that did not fit: a count in a recording button's
+  ## outline (`.ah-rec-more`: the label role, outlined `by-mode(border-primary,
+  ## text-primary-caption)` so it shows on the active tab's fill in Light
+  ## too). The web draws that outline as an inset shadow, inside its 4px
+  ## padding; a GPUI border takes room, so the padding is 3px and the box is
+  ## the web's width. It takes the most severe state of what it hides: a
+  ## failed recording gives it the failure mark and the error colour, a
+  ## missing one the warning mark (`.ah-rec-more.ah-att-*`). When it hides
+  ## the ringed recording it carries the ring.
+  let h = hiddenRecordings(buttons.hiddenStates)
+  let moreBorder = if p.mode == dmDark: p.borderPrimary else: p.textCaption
+  result = r.box(pairs = [("height", "18px"), ("items", "center"),
+                          ("gap", "4px"),
+                          ("padding-left", "3px"), ("padding-right", "3px"),
+                          ("rounded", "4px"), ("border-width", "1px"),
+                          ("border-color", moreBorder), ("flex-shrink", "0")])
+  case h.severity
+  of hsFailed: r.appendChild(result, r.mark(p.markOf(saFailed)))
+  of hsNeedsInput: r.appendChild(result, r.mark(p.markOf(saNeedsInput)))
+  of hsNone: discard
+  let ink = if h.severity == hsFailed: p.textError else: p.textLabel
+  let words = r.text("+" & $buttons.hidden, CaptionPx, ink, shrink = false)
+  r.tag(words, "ink", ink)
+  r.appendChild(result, words)
+  r.tag(result, "recordings-hidden", $buttons.hidden)
+  r.tag(result, "recordings-hidden-severity", $h.severity)
+  r.tag(result, "tooltip", chipTitle(h, "recording", "recordings"))
+  if buttons.hiddenRinged:
+    r.setStyle(result, "position", "relative")
+    # Clear of its neighbours, 2px away, as the web's `.ah-rec-ringed`.
+    r.styles(result, [("margin-left", "2px"), ("margin-right", "2px")])
+    r.tag(result, "recordings-hidden-ringed", "true")
+    r.appendChild(result, r.recordingRing(p))
 
 proc drawBarTab(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM;
                 tab: StripTab; widthPx, minPx, basisPx: float): GpuiElement =
@@ -284,34 +360,8 @@ proc drawBarTab(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM;
         r.tag(switcher, "recordings", $buttons.buttons.len)
         for rb in buttons.buttons: r.appendChild(switcher, r.drawRecordingButton(p, vm, id, rb))
         if buttons.hidden > 0:
-          # The recordings that did not fit: a count in a recording
-          # button's outline (`.ah-rec-more`: the label role, outlined
-          # `by-mode(border-primary, text-primary-caption)` so it shows on
-          # the active tab's fill in Light too). The web draws that outline
-          # as an inset shadow, inside its 4px padding; a GPUI border takes
-          # room, so the padding is 3px and the box is the web's width.
-          # It takes the most severe state of what it hides: a failed
-          # recording gives it the failure mark and the error colour, a
-          # missing one the warning mark (`.ah-rec-more.ah-att-*`).
-          let h = hiddenRecordings(buttons.hiddenStates)
-          let moreBorder = if p.mode == dmDark: p.borderPrimary else: p.textCaption
-          let more = r.box(pairs = [("height", "18px"), ("items", "center"),
-                                    ("gap", "4px"),
-                                    ("padding-left", "3px"), ("padding-right", "3px"),
-                                    ("rounded", "4px"), ("border-width", "1px"),
-                                    ("border-color", moreBorder), ("flex-shrink", "0")])
-          case h.severity
-          of hsFailed: r.appendChild(more, r.mark(p.markOf(saFailed)))
-          of hsNeedsInput: r.appendChild(more, r.mark(p.markOf(saNeedsInput)))
-          of hsNone: discard
-          let ink = if h.severity == hsFailed: p.textError else: p.textLabel
-          let words = r.text("+" & $buttons.hidden, CaptionPx, ink, shrink = false)
-          r.tag(words, "ink", ink)
-          r.appendChild(more, words)
-          r.tag(more, "recordings-hidden", $buttons.hidden)
-          r.tag(more, "recordings-hidden-severity", $h.severity)
-          r.tag(more, "tooltip", chipTitle(h, "recording", "recordings"))
-          r.appendChild(switcher, more)
+          # The recordings that did not fit (`drawRecordingsMore`).
+          r.appendChild(switcher, r.drawRecordingsMore(p, buttons))
         r.appendChild(result, switcher)
   elif tab.session.originShort.len > 0:
     r.appendChild(result, r.text(tab.session.originShort, CaptionPx, p.textCaption, shrink = false))

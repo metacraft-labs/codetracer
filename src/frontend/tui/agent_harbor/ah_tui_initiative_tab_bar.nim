@@ -39,7 +39,7 @@ const
 proc keyOf(tab: StripTab): string =
   if tab.kind == stkInitiative: initiativeKey(tab.id) else: sessionKey(tab.id)
 
-proc buttonLabel(rb: RecordingButton): string =
+proc buttonLabel*(rb: RecordingButton): string =
   ## A recording button as the terminal draws it: three cells, a space, the
   ## number and its state's mark in the cell after it (`␣1␣`, `␣2…`, `␣3✕`,
   ## `␣4?`; the web's `2 …` without its space), so the active tab keeps
@@ -47,12 +47,12 @@ proc buttonLabel(rb: RecordingButton): string =
   let suffix = stateSuffix(rb.state).strip
   " " & $rb.number & (if suffix.len > 0: suffix else: " ")
 
-const RecordingGap = 1
+const RecordingGap* = 1
   ## Between two recording buttons, and before `+N`: a cell of the tab's own
   ## ground, so each button is a ground of its own (the web's and GPUI's
   ## separate squares) and a failed one's `✕` never stands in the gap.
 
-proc recordingsCells(buttons: RecordingButtons): int =
+proc recordingsCells*(buttons: RecordingButtons): int =
   ## The switcher's width: a cell before it, its buttons `RecordingGap`
   ## apart, and `+N`.
   if buttons.buttons.len == 0: return 0
@@ -86,10 +86,15 @@ proc tabMinCellsOf(vm: InitiativeTabStripVM; tab: StripTab): int =
     if tab.active: result += recordingsCells(vm.recordingButtonsOf(tab.id))
   result = max(result, TabMinCells)
 
-proc drawRecordingButton(c: var AhCanvas; parent: AhNode; vm: InitiativeTabStripVM;
-                         initiativeId: string; rb: RecordingButton; row, col: int): int =
+proc drawRecordingButton*(c: var AhCanvas; parent: AhNode; vm: InitiativeTabStripVM;
+                          initiativeId: string; rb: RecordingButton; row, col: int;
+                          onSelect: proc(id: string) = nil): int =
   ## A numbered button: its ground says it is a control; the active one is
-  ## the action role's, a failed or missing one's number is in its role.
+  ## the action role's, a failed or missing one's number is in its role. A
+  ## ringed one (a correlation marker leads to it, P2c study D81) has its
+  ## number underlined in the action role. A press selects the recording in
+  ## `vm`'s initiative, or, given `onSelect` (a multi-process recording's
+  ## process switcher, `ah_tui_process_switcher`), reports its id there.
   let id = rb.id
   let label = buttonLabel(rb)
   let w = widthOf(label)
@@ -104,12 +109,46 @@ proc drawRecordingButton(c: var AhCanvas; parent: AhNode; vm: InitiativeTabStrip
     bg = if c.p.mode == dmDark: c.p.action else: c.p.borderAction
     fg = c.p.onAction
   discard c.put(row, col, label, fg, bg = bg)
+  if rb.ringed:
+    c.grid.paint(row, col + 1, $rb.number, CellStyle(fg: fg, bg: bg, underline: true,
+                                                    underlineColor: c.p.borderAction))
   discard c.node(parent, row, col, w, 1,
                  [("recording", $rb.number), ("recording-state", $rb.state),
                   ("recording-active", $rb.active), ("recording-label", label),
-                  ("tooltip", rb.tooltip)])
+                  ("recording-ringed", $rb.ringed), ("tooltip", rb.tooltip)])
   let target = vm
-  c.target(row, col, w, 1, proc() = discard target.selectRecording(initiativeId, id))
+  if onSelect != nil:
+    c.target(row, col, w, 1, proc() = onSelect(id))
+  else:
+    c.target(row, col, w, 1, proc() = discard target.selectRecording(initiativeId, id))
+  w
+
+proc drawRecordingsMore*(c: var AhCanvas; parent: AhNode; buttons: RecordingButtons;
+                         row, at: int): int =
+  ## The recordings' `+N` from `at`, a chip on its own ground. It takes the
+  ## most severe state of those it hides: a failed one gives it the error
+  ## mark and colour, a missing one the warning mark; when it hides the
+  ## ringed recording, its count is underlined in the action role (D81).
+  ## Returns the cells drawn.
+  let h = hiddenRecordings(buttons.hiddenStates)
+  let markCells = if h.severity != hsNone: 2 else: 0
+  let more = " +" & $buttons.hidden & " "
+  let w = widthOf(more) + markCells
+  c.fill(row, at, w, 1, c.tone.chip)
+  let moreNode = c.node(parent, row, at, w, 1,
+                        [("recordings-hidden", $buttons.hidden),
+                         ("recordings-hidden-severity", $h.severity),
+                         ("recordings-hidden-ringed", $buttons.hiddenRinged),
+                         ("tooltip", chipTitle(h, "recording", "recordings"))])
+  if h.severity != hsNone:
+    discard c.mark(moreNode, row, at + 1,
+                   c.p.markOf(if h.severity == hsFailed: saFailed else: saNeedsInput))
+  let ink = if h.severity == hsFailed: c.p.textError else: c.p.textLabel
+  discard c.put(row, at + markCells, more, ink, bg = c.tone.chip)
+  if buttons.hiddenRinged:
+    c.grid.paint(row, at + markCells + 1, "+" & $buttons.hidden,
+                 CellStyle(fg: ink, bg: c.tone.chip, underline: true,
+                           underlineColor: c.p.borderAction))
   w
 
 proc drawBarTab(c: var AhCanvas; parent: AhNode; vm: InitiativeTabStripVM;
@@ -149,25 +188,9 @@ proc drawBarTab(c: var AhCanvas; parent: AhNode; vm: InitiativeTabStripVM;
         if i > 0: at += RecordingGap
         at += c.drawRecordingButton(switcher, vm, id, rb, row, at)
       if buttons.hidden > 0:
-        # The recordings' `+N` takes the most severe state of those it
-        # hides: a failed one gives it the error mark and colour, a missing
-        # one the warning mark.
+        # The recordings' `+N` (`drawRecordingsMore`).
         at += RecordingGap
-        let h = hiddenRecordings(buttons.hiddenStates)
-        let markCells = if h.severity != hsNone: 2 else: 0
-        let more = " +" & $buttons.hidden & " "
-        let w = widthOf(more) + markCells
-        c.fill(row, at, w, 1, c.tone.chip)
-        let moreNode = c.node(switcher, row, at, w, 1,
-                              [("recordings-hidden", $buttons.hidden),
-                               ("recordings-hidden-severity", $h.severity),
-                               ("tooltip", chipTitle(h, "recording", "recordings"))])
-        if h.severity != hsNone:
-          discard c.mark(moreNode, row, at + 1,
-                         c.p.markOf(if h.severity == hsFailed: saFailed else: saNeedsInput))
-        discard c.put(row, at + markCells, more,
-                      if h.severity == hsFailed: c.p.textError else: c.p.textLabel,
-                      bg = c.tone.chip)
+        at += c.drawRecordingsMore(switcher, buttons, row, at)
     right = progressCol - 1
     nextAt = progressCol
   elif tab.session.originShort.len > 0:
