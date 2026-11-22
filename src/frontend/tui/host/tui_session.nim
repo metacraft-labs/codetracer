@@ -91,9 +91,9 @@ import ../app/source_binding
 import ../app/timeline_binding
 import ../app/variables_binding
 import ../app/syntax/highlighter   # lexerContexts: the window's entry state
-import ./native_host
-import ./project_definitions_host   # the checkout's .codetracer/, per session
-import ./session_driver
+import ../../host/native_host
+import ../../host/project_definitions_host   # the checkout's .codetracer/, per session
+import ../../host/session_driver
 
 export native_host
 

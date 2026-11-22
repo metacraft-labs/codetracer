@@ -19,8 +19,8 @@
 import std/posix
 
 import ../app/file_io_producer
-import ./edit_host
-import ./native_host
+import ../../host/edit_host
+import ../../host/native_host
 
 type
   FileMsg = object

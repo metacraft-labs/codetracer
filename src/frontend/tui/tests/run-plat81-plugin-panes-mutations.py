@@ -40,7 +40,7 @@ from plat71_mutation_engine import Harness  # noqa: E402
 
 PROJECT = "src/frontend/tui/app/layout/project.nim"
 MODEL = "src/frontend/headless_app/layout_model.nim"
-PANES = "src/frontend/tui/host/plugin_panes.nim"
+PANES = "src/frontend/host/plugin_panes.nim"
 SHELL = "src/frontend/tui/app/views/shell.nim"
 INTERACTION = "src/frontend/headless_app/layout_interaction.nim"
 RUNTIME = "src/frontend/tui/app/runtime.nim"

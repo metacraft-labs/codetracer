@@ -93,8 +93,8 @@ import ../app/runtime
 import ../app/tui_app
 import ../app/theme/capabilities
 import ../host/headless
-import ../host/native_host   # `HandshakeEnvVar`
-import ../host/session_driver   # `runDebugControl`, the terminal's controls
+import ../../host/native_host   # `HandshakeEnvVar`
+import ../../host/session_driver   # `runDebugControl`, the terminal's controls
 import ../host/terminal_driver
 import ../host/tui_session
 import ../../viewmodel/backend/stdio_backend

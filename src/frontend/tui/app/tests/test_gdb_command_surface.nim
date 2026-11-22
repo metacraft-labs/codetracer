@@ -163,6 +163,10 @@ const
   ]
 
   ExpectedAppModules = 134
+    ## 2026-11-23: 135 → 134. `app/build_session.nim` moved to
+    ## `src/frontend/headless_app/` (the native host modules the terminal and
+    ## the GPUI window share), and `tests/test_contributed_pane_layout.nim`
+    ## had landed without re-counting, so the constant reads 134 again.
     ## 2026-11-20: 133 → 134, `views/tooltip.nim` (the tooltip moved out of
     ## `views/shell.nim` into a module of its own).
     ## 2026-11-20: 132 → 133, `capability_note.nim` (`538fb3072`, a

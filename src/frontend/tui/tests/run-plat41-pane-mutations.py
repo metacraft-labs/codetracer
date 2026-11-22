@@ -47,7 +47,7 @@ TIMEOUT = 3600
 VIEWS = "src/frontend/view_vocabulary/pane_views.nim"
 FLOWVM = "src/frontend/viewmodel/viewmodels/flow_vm.nim"
 STORE = "src/frontend/viewmodel/store/replay_data_store.nim"
-HOST = "src/frontend/tui/host/native_host.nim"
+HOST = "src/frontend/host/native_host.nim"
 APP = "src/frontend/headless_app/headless_app.nim"
 PATHS = "src/common/trace_source_paths.nim"
 

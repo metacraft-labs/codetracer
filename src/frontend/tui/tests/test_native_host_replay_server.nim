@@ -20,7 +20,7 @@
 
 import std/[os, unittest]
 
-import ../host/native_host
+import ../../host/native_host
 import ../../../common/replay_server_path
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling

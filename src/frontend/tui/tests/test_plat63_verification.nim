@@ -54,7 +54,7 @@ import ../app/views/shell
 import ../app/views/verification_pane
 import ../host/verification_source
 import ../../viewmodel/viewmodels/project_actions
-from ../host/edit_host import readProjectFile, TuiHostError
+from ../../host/edit_host import readProjectFile, TuiHostError
 import ./fixtures/plat63_verno_projects
 import ../../viewmodel/views/isonim_verification_view
 import ../../../common/view_vocabulary

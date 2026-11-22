@@ -1,6 +1,6 @@
 ## host/gpui_plugins.nim — the GPUI window's door to its session's plugins
 ## (Extensibility-Model.md §11): the native plugin processes the session runs
-## beside it, through the front-end-agnostic `tui/host/plugin_processes` the
+## beside it, through the front-end-agnostic `host/plugin_processes` the
 ## terminal uses too. Renderer-free: `main.nim` draws what this answers.
 ##
 ## What the window takes from here, and why each is here rather than there:
@@ -34,8 +34,8 @@
 
 import std/[json, options, os, sets, strutils]
 
-import ../../tui/host/plugin_processes
-import ../../tui/host/plugin_panes   # a plugin pane's view events, its decorations and markers
+import ../../host/plugin_processes
+import ../../host/plugin_panes   # a plugin pane's view events, its decorations and markers
 import ../../viewmodel/plugin_host/supervisor
 import headless_app/layout_model   # where *Show pane* places a plugin's pane
 import ../../viewmodel/session_vm

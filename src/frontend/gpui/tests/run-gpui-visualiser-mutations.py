@@ -4,7 +4,7 @@
 The window renders the Variables pane through the open checkout's project
 definitions (`.codetracer/visualisers.toml`, the recorded program's own
 visualiser function, the project's granted sandboxed visualiser), read per
-session by `tui/host/project_definitions_host` — the module the terminal
+session by `host/project_definitions_host` — the module the terminal
 session reads them through. Each arm plants ONE defect in the window's wiring
 or in the pane's presenters, REBUILDS the shipped binary (every subject is
 compiled into it), runs `test_gpui_project_visualisers.nim`, and requires RED
@@ -45,7 +45,7 @@ TIMEOUT = 3600
 
 LEAVES = "src/frontend/gpui/app/leaves.nim"
 MAIN = "src/frontend/gpui/main.nim"
-DEFS = "src/frontend/tui/host/project_definitions_host.nim"
+DEFS = "src/frontend/host/project_definitions_host.nim"
 
 SUITE = "src/frontend/gpui/tests/test_gpui_project_visualisers.nim"
 

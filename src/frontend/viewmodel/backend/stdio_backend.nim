@@ -25,7 +25,7 @@
 ## no clock, and that is a defect a terminal front-end cannot survive.  CTUI-11
 ## measured the first half of it and closed it: ``replay-server`` exits 2 and
 ## writes no DAP at all for a folder it cannot open, so
-## ``src/frontend/tui/host/native_host.traceFolderProblem`` now ``stat``s for
+## ``src/frontend/host/native_host.traceFolderProblem`` now ``stat``s for
 ## the three trace shapes BEFORE the tty is claimed.  CTUI-14 measured the other
 ## half, on a folder that passes every one of those ``stat``s:
 ##

@@ -237,7 +237,7 @@ assert_fires "${t}" "consumer-facade-only" \
 # rule in this repository — this one, and the TUI's own
 # `src/frontend/tui/tests/test_tui_facade_boundary.nim` — was evadable by one
 # pair of quotation marks. It was demonstrated rather than theorised: planting
-# `import "tui/host/native_host"` in the real `src/frontend/tui/app/tui_app.nim`
+# `import "host/native_host"` in the real `src/frontend/tui/app/tui_app.nim`
 # compiled, reached the host layer, and left BOTH guards green, while six other
 # spellings of the same import went red by name.
 #

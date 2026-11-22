@@ -116,7 +116,7 @@ RUNTIME = "src/frontend/tui/app/runtime.nim"
 TUISESSION = "src/frontend/tui/host/tui_session.nim"
 HSESSION = "src/frontend/viewmodel/headless_session.nim"
 STORE = "src/frontend/viewmodel/store/replay_data_store.nim"
-NATIVEHOST = "src/frontend/tui/host/native_host.nim"
+NATIVEHOST = "src/frontend/host/native_host.nim"
 PANEVIEWS = "src/frontend/view_vocabulary/pane_views.nim"
 MOUSE = "src/frontend/tui/app/input/mouse.nim"
 BINDING = "src/frontend/tui/app/layout/binding.nim"
@@ -154,7 +154,7 @@ DAPHANDLER = "src/db-backend/src/dap_handler.rs"
 # the origin wait from `tui_session` / GPUI's main into the host both share
 # (`session_driver`).
 SDKBP = "src/frontend/viewmodel/sdk/breakpoints.nim"
-SESSDRIVER = "src/frontend/tui/host/session_driver.nim"
+SESSDRIVER = "src/frontend/host/session_driver.nim"
 # ADDED 2026-10-24: GPUI's Edit mode draws the opened folder's Files tree and
 # its menu acts on the disk; the name field's keys are read beside the model.
 FILETREEMENU = "src/frontend/headless_app/file_tree_menu.nim"

@@ -1,7 +1,7 @@
-## LAYER RULE — `src/frontend/tui/app/` is the SDK-CONSUMING half of the TUI.
-## See `app/cli.nim`'s header for the rule.
+## LAYER RULE — `src/frontend/headless_app/` consumes the Embed SDK facade
+## (it carries a `.sdk-consumer` marker), like `src/frontend/tui/app/`.
 ##
-## app/build_session.nim — PLAT-16. `:build` and `:run`, their verdicts, and
+## headless_app/build_session.nim — PLAT-16. `:build` and `:run`, their verdicts, and
 ## the cancellation the specification makes a requirement rather than a nicety.
 ##
 ## ## THE VERDICT STATES ARE NOT RE-SPECIFIED HERE

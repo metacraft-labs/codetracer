@@ -33,7 +33,7 @@ import isonim/viewmodel
 
 import headless_session
 import viewmodels/[state_vm, calltrace_vm, event_log_vm]
-import ../../tui/host/[native_host, session_driver]
+import ../../host/[native_host, session_driver]
 import ../../gpui/host/gpui_host
 import ../../view_vocabulary/[pane_views, editor_surface]
 import ../../view_vocabulary/web_binding as wbind

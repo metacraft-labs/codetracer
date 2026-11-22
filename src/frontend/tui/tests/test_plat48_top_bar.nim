@@ -48,7 +48,7 @@ import ../app/layout/profile
 import ../app/theme/capabilities
 import ../app/theme/roles
 import ../host/control_icons
-import ../host/edit_host
+import ../../host/edit_host
 import ../host/tui_session
 from backend/stdio_backend import toBackendService
 import ../../../common/terminal_graphics/[raster, path_raster]

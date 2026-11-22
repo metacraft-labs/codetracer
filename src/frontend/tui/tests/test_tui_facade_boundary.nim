@@ -26,7 +26,7 @@
 ## and getting it wrong is how the first version of this file could be evaded.
 ## `config.nims` puts `src/frontend` on the Nim module path, so
 ##
-##     import tui/host/native_host
+##     import tui/host/tui_session
 ##
 ## written inside `app/tui_app.nim` compiles, reaches the host layer, and names
 ## nothing on any forbidden-spec list. An importer-relative rule does not see
@@ -38,10 +38,10 @@
 ## `config.nims`, `ci/lib/test-lane-files.sh` and any future `--path` can all
 ## extend without telling this file — `specSpellings` enumerates the ancestors
 ## of each host module, bounded by the tree being scanned, and that set is
-## exhaustive over roots by construction. `native_host`, `host/native_host`,
-## `tui/host/native_host`, `frontend/tui/host/native_host` and
-## `src/frontend/tui/host/native_host` are all reported by the same rule, and
-## `../host/native_host` is caught by resolving it against the importer.
+## exhaustive over roots by construction. `tui_session`, `host/tui_session`,
+## `tui/host/tui_session`, `frontend/tui/host/tui_session` and
+## `src/frontend/tui/host/tui_session` are all reported by the same rule, and
+## `../host/tui_session` is caught by resolving it against the importer.
 ##
 ## The same treatment is applied to the two product modules the facade
 ## withholds, whose files this repository does have: every spelling that
@@ -57,7 +57,7 @@
 ##
 ## The rule above is exhaustive over module-path ROOTS. Being exhaustive over
 ## roots is not the same as being exhaustive over LEXICAL forms, and several
-## forms used to escape. `import "tui/host/native_host"` is legal Nim, resolves
+## forms used to escape. `import "tui/host/tui_session"` is legal Nim, resolves
 ## through a `--path` root exactly as the bare spelling does, and was NOT
 ## reported, because `importSpecs` yielded the spec with its quotation marks
 ## still on — so it matched no host spelling and resolved to no file. Planted in
@@ -301,12 +301,12 @@
 ##     be there;
 ##   * copies `app/` to a temporary tree, plants `import std/osproc` in one
 ##     module, and requires the same checker to report exactly that;
-##   * plants an `import ../host/native_host` and requires that to be reported
+##   * plants an `import ../host/tui_session` and requires that to be reported
 ##     too, because the host edge is a different rule from the spec list;
-##   * plants an `import tui/host/native_host` — the `src/frontend`-relative
+##   * plants an `import tui/host/tui_session` — the `src/frontend`-relative
 ##     spelling that an importer-relative rule cannot see, and the evasion this
 ##     file was found to be open to — and requires that to be reported as well;
-##   * plants an `import "tui/host/native_host"` — the SAME import with
+##   * plants an `import "tui/host/tui_session"` — the SAME import with
 ##     quotation marks round it, which is a different rule again: not a
 ##     spelling the resolver has to know, but a lexical form the extractor has
 ##     to normalise before any rule sees it — and requires that to be reported
@@ -316,17 +316,17 @@
 ##     normalisation is most easily got wrong. Strip the `r` of a raw string
 ##     literal whenever a quote follows it and the CLOSING quote qualifies too,
 ##     so every quoted spec ending in `r` silently loses its last letter.
-##     `native_host` ends in `t`, so no amount of running that arm would show
+##     `tui_session` ends in `t`, so no amount of running that arm would show
 ##     it; `src/frontend/viewmodel` alone holds 21 modules that would be hit
 ##     (`request_tracker`, `front_end_adapter`, `reducer`, `sync_publisher`,
 ##     `noir_anchor_producer`, …);
-##   * plants a `when not defined(js): import tui/host/native_host`, the SIXTH
+##   * plants a `when not defined(js): import tui/host/tui_session`, the SIXTH
 ##     arm — the form the comments in this file and in `nim_imports` already
 ##     read as covered, because the MULTI-LINE `when defined(js):` spelling was
 ##     covered and has had a contract case since it was written. They are
 ##     different code paths: the multi-line form puts `import` at the start of
 ##     its own line and the one-liner does not;
-##   * plants an `import codetracer_embed; import tui/host/native_host`, the
+##   * plants an `import codetracer_embed; import tui/host/tui_session`, the
 ##     SEVENTH, with the PERMITTED import first on purpose. A split that kept
 ##     only the tail would still report the violation and look right, so the arm
 ##     also asserts the edge for `codetracer_embed` — the difference between
@@ -358,7 +358,7 @@ import std/[algorithm, os, sequtils, strutils, unittest]
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling, and inside a `const` block the declaration is invisible to it.
-const ExpectedAssertions = 95
+const ExpectedAssertions = 104
 
 const
   ForbiddenSpecs = [
@@ -433,13 +433,13 @@ proc stripComment(line: string; openedBlockComment: var bool): string =
   ## literals.
   ##
   ## Nim requires only the BASENAME of a module path to be a valid identifier,
-  ## so `import "h#d/../tui/host/native_host"` compiles and imports the host
+  ## so `import "h#d/../tui/host/tui_session"` compiles and imports the host
   ## module. Cut at the first `#` regardless of quoting and that statement
   ## becomes `import "h`, which names nothing: the host layer is reached and no
   ## rule ever sees it.
   ##
   ## BLOCK COMMENTS ARE REMOVED, NOT TREATED AS A LINE COMMENT.
-  ## `import #[c]# tui/host/native_host` and `import tui/host/native_host #[c]#`
+  ## `import #[c]# tui/host/tui_session` and `import tui/host/tui_session #[c]#`
   ## both compile (nim 2.2.8), and cutting at the first `#` loses the spec of
   ## the first one outright. They nest (`#[ #[x]# ]#`) so this counts depth, and
   ## `##[ … ]##` opens one too.
@@ -487,7 +487,7 @@ proc stripComment(line: string; openedBlockComment: var bool): string =
 
 proc resumesAfterBlockComment(line: string): bool =
   ## True when a block comment CLOSES on this line and an import statement
-  ## follows it: a closing bracket-hash followed by `import tui/host/native_host`
+  ## follows it: a closing bracket-hash followed by `import tui/host/tui_session`
   ## IS an import, and `stripComment` — which starts every line outside any
   ## comment — cuts it at the `#` and yields `]`, so the statement would vanish.
   ## Refused, not parsed.
@@ -567,7 +567,7 @@ proc isConditionalLine(t: string): bool =
 proc stripConditionalPrefix(t: string): string =
   ## A ONE-LINE `when` / `elif` / `else`, reduced to the statement it carries.
   ##
-  ## `when not defined(js): import tui/host/native_host` is idiomatic Nim,
+  ## `when not defined(js): import tui/host/tui_session` is idiomatic Nim,
   ## compiles, and is ONE LINE — so the indented-continuation handling in
   ## `importSpecs`, which covers the multi-line spelling of the same thing,
   ## never sees it. At HEAD the line did not start with `import`, so it was
@@ -707,9 +707,9 @@ proc conditionalImportUnread(rawLine, line: string): bool =
   ## split or the quote parity inside the literal:
   ##
   ## .. code-block:: nim
-  ##    when '#' == '#': import tui/host/native_host
-  ##    when ';' == ';': import tui/host/native_host
-  ##    when '"' == 'x': import tui/host/native_host
+  ##    when '#' == '#': import tui/host/tui_session
+  ##    when ';' == ';': import tui/host/tui_session
+  ##    when '"' == 'x': import tui/host/tui_session
   ##
   ## Every one of them was a silent MISS. Rather than teach three scans about
   ## character literals — which would then have to know that the numeric suffix
@@ -965,7 +965,7 @@ proc resolveWithin(spec, importer, tree: string; roots: seq[string]): string =
   ## The importer's own directory first — Nim's relative rule, and how every
   ## intra-tree import in `src/frontend/tui/` is written today — then every
   ## module-path root that could reach the tree. Both are needed: dropping the
-  ## second is exactly the hole that let `import tui/host/native_host` compile
+  ## second is exactly the hole that let `import tui/host/tui_session` compile
   ## with this suite green.
   for base in @[importer.parentDir] & roots:
     let candidate = normalizedPath(base / (spec & ".nim"))
@@ -991,9 +991,18 @@ proc forbiddenFileSpecs(scanRoot: string; files: seq[string]): seq[string] =
           result.add(s)
 
 proc scanAppTree*(appDir, tuiTree, hostDir, scanRoot: string;
-                  facadeWithheld: seq[string] = @[]): ScanResult =
+                  facadeWithheld: seq[string] = @[];
+                  sharedHostDir = ""): ScanResult =
   ## Walk `appDir`, following only edges that stay inside `tuiTree`, and report
   ## every forbidden edge.
+  ##
+  ## `sharedHostDir` is the host layer BOTH native front-ends use
+  ## (`src/frontend/host/`: opening a recording, editing a project, running a
+  ## build, a session's project definitions). It holds the same capabilities
+  ## as `tui/host/` and is outside `tuiTree`, so it is graded by every
+  ## ancestor spelling of its modules AND by resolving a relative spec against
+  ## the importer with no tree bound — `../../host/<m>` from `app/` names no
+  ## module of `tui/` and still reaches the capability.
   ##
   ## Takes its roots as parameters rather than deriving them, which is what
   ## makes the mutation arms possible: the same code that grades this repository
@@ -1003,12 +1012,13 @@ proc scanAppTree*(appDir, tuiTree, hostDir, scanRoot: string;
   # Every spelling that lands under `host/`, computed once. This is the rule
   # that replaced "the spec is written relative to the importer".
   var hostSpecs: seq[string] = @[]
-  if hostDir.len > 0:
-    for path in walkDirRec(hostDir):
-      if path.endsWith(".nim"):
-        for s in specSpellings(path, scanRoot):
-          if s notin hostSpecs:
-            hostSpecs.add(s)
+  for dir in [hostDir, sharedHostDir]:
+    if dir.len > 0 and dirExists(dir):
+      for path in walkDirRec(dir):
+        if path.endsWith(".nim"):
+          for s in specSpellings(path, scanRoot):
+            if s notin hostSpecs:
+              hostSpecs.add(s)
   let withheldSpecs = forbiddenFileSpecs(scanRoot, facadeWithheld)
   let roots = searchRoots(tuiTree, scanRoot)
 
@@ -1046,8 +1056,11 @@ proc scanAppTree*(appDir, tuiTree, hostDir, scanRoot: string;
       # is one of the ancestor-relative names of a host module, or it resolves
       # against the importer to a file under `host/`.
       let resolved = resolveWithin(spec, file, tuiTree, roots)
-      let hitsHost = hostDir.len > 0 and
-        (spec in hostSpecs or (resolved.len > 0 and resolved.isUnder(hostDir)))
+      let besideImporter = normalizedPath(file.parentDir / (spec & ".nim"))
+      let hitsShared = sharedHostDir.len > 0 and fileExists(besideImporter) and
+        besideImporter.isUnder(sharedHostDir)
+      let hitsHost = hitsShared or (hostDir.len > 0 and
+        (spec in hostSpecs or (resolved.len > 0 and resolved.isUnder(hostDir))))
       if hitsHost:
         if not reported:
           result.violations.add(Violation(
@@ -1076,7 +1089,7 @@ type MutantTree = object
   ## A throwaway copy of the TUI's two layers, laid out exactly as the
   ## repository lays them out.
   ##
-  ## The layout is not cosmetic. `tui/host/native_host` is only a spelling of
+  ## The layout is not cosmetic. `tui/host/tui_session` is only a spelling of
   ## the host module when a `src/frontend` exists above it for a module-path
   ## root to sit on, so a flat `<tmp>/{app,host}` could not host the third
   ## mutation arm at all — and an arm that cannot express the evasion is not an
@@ -1085,23 +1098,29 @@ type MutantTree = object
   tuiTree*: string
   appDir*: string
   hostDir*: string
+  sharedHostDir*: string
 
-proc newMutantTree(appDir, hostDir, tag: string): MutantTree =
+proc newMutantTree(appDir, hostDir, tag: string;
+                   sharedHostDir = ""): MutantTree =
   let tmp = getTempDir() / ("ctui0-facade-" & tag & "-" & $getCurrentProcessId())
   removeDir(tmp)
   result = MutantTree(
     root: tmp,
     tuiTree: normalizedPath(tmp / "src" / "frontend" / "tui"),
     appDir: normalizedPath(tmp / "src" / "frontend" / "tui" / "app"),
-    hostDir: normalizedPath(tmp / "src" / "frontend" / "tui" / "host"))
+    hostDir: normalizedPath(tmp / "src" / "frontend" / "tui" / "host"),
+    sharedHostDir: normalizedPath(tmp / "src" / "frontend" / "host"))
   copyTree(appDir, result.appDir)
   copyTree(hostDir, result.hostDir)
+  if sharedHostDir.len > 0:
+    copyTree(sharedHostDir, result.sharedHostDir)
 
 proc scanMutant(m: MutantTree): ScanResult =
   ## Grade the mutant with the SAME checker that grades this repository.
   ## Named apart from the suite's `scan` value so method-call syntax cannot
   ## resolve to a shadowing local.
-  scanAppTree(m.appDir, m.tuiTree, m.hostDir, m.root)
+  scanAppTree(m.appDir, m.tuiTree, m.hostDir, m.root,
+              sharedHostDir = m.sharedHostDir)
 
 suite "CTUI-0: the app/ layer stays inside the Embed SDK facade":
 
@@ -1109,6 +1128,7 @@ suite "CTUI-0: the app/ layer stays inside the Embed SDK facade":
   let tuiTree = normalizedPath(root / "src" / "frontend" / "tui")
   let appDir = normalizedPath(tuiTree / "app")
   let hostDir = normalizedPath(tuiTree / "host")
+  let sharedHostDir = normalizedPath(root / "src" / "frontend" / "host")
 
   # The two modules `codetracer_embed` deliberately withholds, named as FILES
   # so that every spelling resolving to them is a violation rather than only
@@ -1118,7 +1138,8 @@ suite "CTUI-0: the app/ layer stays inside the Embed SDK facade":
     normalizedPath(root / "src" / "frontend" / "viewmodel" / "backend" /
                    "stdio_backend.nim")]
 
-  let scan = scanAppTree(appDir, tuiTree, hostDir, root, facadeWithheld)
+  let scan = scanAppTree(appDir, tuiTree, hostDir, root, facadeWithheld,
+                         sharedHostDir)
 
   test "the walk reached the app/ tree":
     # THE POSITIVE CONTROL, and it comes first because everything after it is
@@ -1160,31 +1181,31 @@ suite "CTUI-0: the app/ layer stays inside the Embed SDK facade":
     # tree does not contain, so without this the extractor could lose the
     # handling again and every other assertion in this file would stay green.
     const quotedForms = """
-import "tui/host/native_host"
-import "tui/host/native_host" as nh
-from "tui/host/native_host" import HostThing
-from "tui/host/native_host" as nh2 import HostThing
-include "tui/host/native_host"
-import "tui/host/native_host" except HostThing
-import codetracer_embed, "tui/host/native_host"
-import "tui/host"/[native_host, other_host]
-import "tui"/host/native_host
-import tui/"host"/native_host
-import r"tui/host/native_host"
+import "tui/host/tui_session"
+import "tui/host/tui_session" as nh
+from "tui/host/tui_session" import HostThing
+from "tui/host/tui_session" as nh2 import HostThing
+include "tui/host/tui_session"
+import "tui/host/tui_session" except HostThing
+import codetracer_embed, "tui/host/tui_session"
+import "tui/host"/[tui_session, other_host]
+import "tui"/host/tui_session
+import tui/"host"/tui_session
+import r"tui/host/tui_session"
 import
-  "tui/host/native_host"
-import "tui/host/native_host"as nh3
-import "tui/host/native_host"except HostThing
-from "tui/host/native_host"as nh4 import HostThing
-import tui / host / native_host
-import "tui" / "host" / "native_host"
+  "tui/host/tui_session"
+import "tui/host/tui_session"as nh3
+import "tui/host/tui_session"except HostThing
+from "tui/host/tui_session"as nh4 import HostThing
+import tui / host / tui_session
+import "tui" / "host" / "tui_session"
 import "tui/host/session_recorder"
-import "h#d/../tui/host/native_host"
-import "tui/host/[native_host]"
+import "h#d/../tui/host/tui_session"
+import "tui/host/[tui_session]"
 """
     # `import """a/b"""` cannot be written inside a triple-quoted literal — the
     # three quotes would close it — so it is assembled from its pieces.
-    let tripleQuoted = "import " & repeat('"', 3) & "tui/host/native_host" &
+    let tripleQuoted = "import " & repeat('"', 3) & "tui/host/tui_session" &
                        repeat('"', 3) & "\n"
     let probeDir = getTempDir() / ("ctui0-quoted-" & $getCurrentProcessId())
     removeDir(probeDir)
@@ -1195,7 +1216,7 @@ import "tui/host/[native_host]"
     checkpoint("specs read from the quoted probe: " & quoted.join(", "))
     # Eighteen lines name the host module exactly; the last three deliberately
     # name something else.
-    ck quoted.count("tui/host/native_host") == 18
+    ck quoted.count("tui/host/tui_session") == 18
     # The bracket list was expanded even though its prefix was a string literal.
     ck "tui/host/other_host" in quoted
     # And the unquoted neighbour on a mixed line survived the split.
@@ -1210,11 +1231,11 @@ import "tui/host/[native_host]"
     # BASENAME of a module path to be a valid identifier, so this compiles and
     # imports the host module; a comment-stripper that cut at the first `#`
     # yielded `h` and reported nothing at all.
-    ck "h#d/../tui/host/native_host" in quoted
+    ck "h#d/../tui/host/tui_session" in quoted
     # `import "a/[b]"` is NOT a bracket list: inside quotes the brackets are
     # part of a filename, and that spelling does not compile. Expanding it would
     # invent a module nobody imported, so it stays whole.
-    ck "tui/host/[native_host]" in quoted
+    ck "tui/host/[tui_session]" in quoted
     # The two properties the rules downstream depend on: no spec still carries
     # the syntax it was written with, and none carries the whitespace nim allows
     # around the `/` separator.
@@ -1228,20 +1249,20 @@ import "tui/host/[native_host]"
     # directory component — `import "a[b/../../src/…/codetracer_embed"` builds
     # — because nim requires only the basename to be a valid identifier.)
     let unbalanced = probeDir / "unbalanced.nim"
-    writeFile(unbalanced, "import \"a[b/../tui/host/native_host\"\n" &
+    writeFile(unbalanced, "import \"a[b/../tui/host/tui_session\"\n" &
                           "import tui/host/other_host\n")
     let afterBracket = importSpecs(unbalanced)
     checkpoint("specs read past the unbalanced bracket: " & afterBracket.join(", "))
-    ck afterBracket == @["a[b/../tui/host/native_host", "tui/host/other_host"]
+    ck afterBracket == @["a[b/../tui/host/tui_session", "tui/host/other_host"]
     removeDir(probeDir)
 
   test "a spec written with string escapes is refused, not guessed at":
     # THE ONE FORM THIS EXTRACTOR WILL NOT READ, AND IT SAYS SO.
-    # `import "tui\x2Fhost\x2Fnative_host"` compiles and imports the host
+    # `import "tui\x2Fhost\x2Ftui_session"` compiles and imports the host
     # module: `\x2F` is a Nim escape for `/`. Decoding that here would mean
     # implementing Nim's escape rules — which differ between `"..."`, `r"..."`
     # and `"""..."""` — twice, here and in awk, where being subtly wrong is a
-    # MISS. Emitting the raw text is worse still: `tui\x2Fhost\x2Fnative_host`
+    # MISS. Emitting the raw text is worse still: `tui\x2Fhost\x2Ftui_session`
     # equals no host spelling and resolves to no file, so the import passes in
     # silence. So it raises, and this suite goes red naming the statement.
     #
@@ -1251,8 +1272,8 @@ import "tui/host/[native_host]"
     let probeDir = getTempDir() / ("ctui0-escaped-" & $getCurrentProcessId())
     removeDir(probeDir)
     createDir(probeDir)
-    for spec in ["\"tui\\x2Fhost\\x2Fnative_host\"",
-                 "\"tui\\47host\\47native_host\""]:
+    for spec in ["\"tui\\x2Fhost\\x2Ftui_session\"",
+                 "\"tui\\47host\\47tui_session\""]:
       let probe = probeDir / "probe.nim"
       writeFile(probe, "import " & spec & "\n")
       var raised = false
@@ -1284,27 +1305,27 @@ import "tui/host/[native_host]"
     # is idiomatic Nim, this repository's own multi-line spelling of it WAS
     # handled, and the comments claiming so made the one-liner read as covered.
     const statementForms = """
-import tui/host/native_host; import codetracer_embed
-import codetracer_embed; import tui/host/native_host
-echo 1; import tui/host/native_host
-when not defined(js): import tui/host/native_host
+import tui/host/tui_session; import codetracer_embed
+import codetracer_embed; import tui/host/tui_session
+echo 1; import tui/host/tui_session
+when not defined(js): import tui/host/tui_session
 when defined(js):
   discard
-elif true: import tui/host/native_host
+elif true: import tui/host/tui_session
 when defined(js):
   discard
-else: import tui/host/native_host
-when(true):import tui/host/native_host
-when true: import codetracer_embed; import tui/host/native_host
-when {1: 2}.len > 0: import tui/host/native_host
-when "a;b" == "a;b": import tui/host/native_host
-when (let x = 1; x > 0): import tui/host/native_host
-when true: from tui/host/native_host import HostThing
-when true: include tui/host/native_host
-when true: (when true: import tui/host/native_host)
-import tui/host/native_host;
-import #[ which one? ]# tui/host/native_host
-import tui/host/native_host #[ trailing ]#
+else: import tui/host/tui_session
+when(true):import tui/host/tui_session
+when true: import codetracer_embed; import tui/host/tui_session
+when {1: 2}.len > 0: import tui/host/tui_session
+when "a;b" == "a;b": import tui/host/tui_session
+when (let x = 1; x > 0): import tui/host/tui_session
+when true: from tui/host/tui_session import HostThing
+when true: include tui/host/tui_session
+when true: (when true: import tui/host/tui_session)
+import tui/host/tui_session;
+import #[ which one? ]# tui/host/tui_session
+import tui/host/tui_session #[ trailing ]#
 """
     let probeDir = getTempDir() / ("ctui0-statements-" & $getCurrentProcessId())
     removeDir(probeDir)
@@ -1317,7 +1338,7 @@ import tui/host/native_host #[ trailing ]#
     # beside it, on the far side of a `;`, and those three are what prove the
     # split kept BOTH statements rather than only the one a tail-or-head rule
     # would keep.
-    ck specs.count("tui/host/native_host") == 17
+    ck specs.count("tui/host/tui_session") == 17
     ck specs.count("codetracer_embed") == 3
     # The separator never survives into a spec. `a;importb` is what the whole
     # line looked like at HEAD: one module nobody has, so both imports lost.
@@ -1327,8 +1348,8 @@ import tui/host/native_host #[ trailing ]#
     # change that starts reporting imports nobody wrote, and a guard that
     # reports a commented-out line is one people switch off.
     let commented = probeDir / "commented.nim"
-    writeFile(commented, "# when true: import tui/host/native_host\n" &
-                         "# import a; import tui/host/native_host\n" &
+    writeFile(commented, "# when true: import tui/host/tui_session\n" &
+                         "# import a; import tui/host/tui_session\n" &
                          "import codetracer_embed\n")
     ck importSpecs(commented) == @["codetracer_embed"]
     removeDir(probeDir)
@@ -1350,11 +1371,11 @@ import tui/host/native_host #[ trailing ]#
     # POSITIVE CONTROL FIRST: the comment that closes on its own line is
     # removed, and the import behind it is read normally.
     let sameLine = probeDir / "same_line.nim"
-    writeFile(sameLine, "import #[ which one? ]# tui/host/native_host\n" &
+    writeFile(sameLine, "import #[ which one? ]# tui/host/tui_session\n" &
                         "import tui/host/other_host #[ nested #[x]# ]#\n")
     let read = importSpecs(sameLine)
     checkpoint("specs read past same-line block comments: " & read.join(", "))
-    ck read == @["tui/host/native_host", "tui/host/other_host"]
+    ck read == @["tui/host/tui_session", "tui/host/other_host"]
 
     # `runs into` — the comment opens on the import's own line.
     # `resumes after` — the comment opened earlier and the import follows its
@@ -1363,9 +1384,9 @@ import tui/host/native_host #[ trailing ]#
     # is not fastidiousness: this file is itself one of the 998 the extractor
     # walks, and a literal `]` `#` `import` here would be indistinguishable
     # from the thing it describes — the refusal would fire on this very file.
-    let resumesAfter = "#[ a comment\n]" & "#import tui/host/native_host\n"
+    let resumesAfter = "#[ a comment\n]" & "#import tui/host/tui_session\n"
     for (tag, source) in [
-      ("runs-into", "import tui/host/native_host #[ why this one\nand not the other ]#\n"),
+      ("runs-into", "import tui/host/tui_session #[ why this one\nand not the other ]#\n"),
       ("resumes-after", resumesAfter)]:
       let probe = probeDir / (tag & ".nim")
       writeFile(probe, source)
@@ -1401,9 +1422,9 @@ import tui/host/native_host #[ trailing ]#
     let probeDir = getTempDir() / ("ctui0-selfcheck-" & $getCurrentProcessId())
     removeDir(probeDir)
     createDir(probeDir)
-    for source in ["when '#' == '#': import tui/host/native_host\n",
-                   "when ';' == ';': import tui/host/native_host\n",
-                   "when '\"' == 'x': import tui/host/native_host\n"]:
+    for source in ["when '#' == '#': import tui/host/tui_session\n",
+                   "when ';' == ';': import tui/host/tui_session\n",
+                   "when '\"' == 'x': import tui/host/tui_session\n"]:
       let probe = probeDir / "probe.nim"
       writeFile(probe, source)
       var raised = false
@@ -1424,8 +1445,8 @@ import tui/host/native_host #[ trailing ]#
     # conditional the extractor reads correctly.
     let quiet = probeDir / "quiet.nim"
     writeFile(quiet, "when '#' == '#': echo 1\n" &
-                     "when not defined(js): import tui/host/native_host\n")
-    ck importSpecs(quiet) == @["tui/host/native_host"]
+                     "when not defined(js): import tui/host/tui_session\n")
+    ck importSpecs(quiet) == @["tui/host/tui_session"]
     removeDir(probeDir)
 
   test "no app/ module reaches the host layer or a host capability":
@@ -1471,14 +1492,14 @@ import tui/host/native_host #[ trailing ]#
             hostSpecs.add(s)
     checkpoint("host spellings: " & hostSpecs.join(", "))
     # Bare, for a `--path` pointing at `host/` itself.
-    ck "native_host" in hostSpecs
+    ck "tui_session" in hostSpecs
     # Relative to `src/frontend/tui/`.
-    ck "host/native_host" in hostSpecs
+    ck "host/tui_session" in hostSpecs
     # Relative to `src/frontend`, which `config.nims` puts on the module path.
     # THIS IS THE ONE THE FIRST VERSION OF THIS FILE COULD NOT SEE.
-    ck "tui/host/native_host" in hostSpecs
+    ck "tui/host/tui_session" in hostSpecs
     # And relative to the checkout, for a `--path:.`.
-    ck "src/frontend/tui/host/native_host" in hostSpecs
+    ck "src/frontend/tui/host/tui_session" in hostSpecs
 
   test "MUTATION: a planted 'import std/osproc' in app/ is detected":
     # THE ARM THAT PROVES THE DETECTOR DETECTS. A green run of the tests above
@@ -1509,7 +1530,7 @@ import tui/host/native_host #[ trailing ]#
 
   test "MUTATION: a planted importer-relative host import is detected":
     # A DIFFERENT RULE, so it needs its own arm: the spec list would not catch
-    # `../host/native_host`, which names no forbidden module at all — it is
+    # `../host/tui_session`, which names no forbidden module at all — it is
     # caught by resolving the spec against the importer, and only an arm that
     # plants it can show that half works.
     let m = newMutantTree(appDir, hostDir, "host-edge")
@@ -1522,17 +1543,17 @@ import tui/host/native_host #[ trailing ]#
 
     let victim = normalizedPath(m.appDir / "cli.nim")
     ck fileExists(victim)
-    writeFile(victim, readFile(victim) & "\nimport ../host/native_host\n")
+    writeFile(victim, readFile(victim) & "\nimport ../host/tui_session\n")
 
     let mutated = m.scanMutant()
-    checkpoint("violations after planting '../host/native_host': " &
+    checkpoint("violations after planting '../host/tui_session': " &
                describe(mutated.violations))
     ck mutated.violations.len == 1
     ck mutated.violations.anyIt(it.reason.contains("host layer"))
     ck mutated.violations.anyIt(it.file == victim)
     removeDir(m.root)
 
-  test "MUTATION: a planted 'import tui/host/native_host' is detected":
+  test "MUTATION: a planted 'import tui/host/tui_session' is detected":
     # THE EVASION THIS FILE WAS FOUND TO BE OPEN TO, and therefore the arm that
     # matters most here. `config.nims` puts `src/frontend` on the module path,
     # so this spelling COMPILES from `app/tui_app.nim`, reaches the host layer,
@@ -1550,22 +1571,22 @@ import tui/host/native_host #[ trailing ]#
 
     let victim = normalizedPath(m.appDir / "tui_app.nim")
     ck fileExists(victim)
-    writeFile(victim, readFile(victim) & "\nimport tui/host/native_host\n")
+    writeFile(victim, readFile(victim) & "\nimport tui/host/tui_session\n")
 
     let mutated = m.scanMutant()
-    checkpoint("violations after planting 'tui/host/native_host': " &
+    checkpoint("violations after planting 'tui/host/tui_session': " &
                describe(mutated.violations))
     ck mutated.violations.len == 1
     ck mutated.violations.anyIt(it.reason.contains("host layer"))
     ck mutated.violations.anyIt(it.file == victim)
     removeDir(m.root)
 
-  test "MUTATION: a planted 'import \"tui/host/native_host\"' is detected":
+  test "MUTATION: a planted 'import \"tui/host/tui_session\"' is detected":
     # THE SAME IMPORT AS THE ARM ABOVE, IN QUOTATION MARKS — and it was a
     # separate evasion, not a variant of that one. The arm above is about which
     # module-path root the spec is written against, and the ancestor rule
     # answers it. This one is about the LEXER underneath every rule: the spec
-    # arrived as `"tui/host/native_host"`, with the quotes still attached, so it
+    # arrived as `"tui/host/tui_session"`, with the quotes still attached, so it
     # equalled no host spelling and resolved to no file, and the checker had
     # nothing to report. Planted in the real `app/tui_app.nim` it compiled and
     # left this suite AND `ci/test/sdk-facade-boundary.sh` green while six other
@@ -1585,10 +1606,10 @@ import tui/host/native_host #[ trailing ]#
 
     let victim = normalizedPath(m.appDir / "tui_app.nim")
     ck fileExists(victim)
-    writeFile(victim, readFile(victim) & "\nimport \"tui/host/native_host\"\n")
+    writeFile(victim, readFile(victim) & "\nimport \"tui/host/tui_session\"\n")
 
     let mutated = m.scanMutant()
-    checkpoint("violations after planting 'import \"tui/host/native_host\"': " &
+    checkpoint("violations after planting 'import \"tui/host/tui_session\"': " &
                describe(mutated.violations))
     ck mutated.violations.len == 1
     ck mutated.violations.anyIt(it.reason.contains("host layer"))
@@ -1610,7 +1631,7 @@ import tui/host/native_host #[ trailing ]#
     # `docs/book-isonim/src/ssr.nim`'s `"../../../../isonim-docs/src/ssr"` came
     # back as `.../src/ss`.
     #
-    # `native_host` ends in `t`, so the arm above stays green through all of
+    # `tui_session` ends in `t`, so the arm above stays green through all of
     # that. This one cannot: its victim module is named for the letter. The host
     # module is CREATED in the mutant tree because this repository has no
     # `r`-final host module today — the arm has to be able to express the
@@ -1645,7 +1666,7 @@ const SessionRecorderVersion* = 1
     ck mutated.violations.anyIt(it.spec == "tui/host/session_recorder")
     removeDir(m.root)
 
-  test "MUTATION: a planted one-line 'when …: import tui/host/native_host' is detected":
+  test "MUTATION: a planted one-line 'when …: import tui/host/tui_session' is detected":
     # THE ARM FOR THE FORM THE COMMENTS ALREADY CLAIMED WAS COVERED. The
     # multi-line `when defined(js):` spelling WAS handled — the contract suite
     # over the repo-wide guard has carried a case for it since it was written —
@@ -1667,7 +1688,7 @@ const SessionRecorderVersion* = 1
     let victim = normalizedPath(m.appDir / "tui_app.nim")
     ck fileExists(victim)
     writeFile(victim, readFile(victim) &
-              "\nwhen not defined(js): import tui/host/native_host\n")
+              "\nwhen not defined(js): import tui/host/tui_session\n")
 
     let mutated = m.scanMutant()
     checkpoint("violations after planting the one-line 'when': " &
@@ -1678,14 +1699,14 @@ const SessionRecorderVersion* = 1
     # By name, because the condition must have been discarded and the STATEMENT
     # kept: a rule that cut at the wrong colon would report a spec with the
     # tail of `defined(js)` still attached, and that resolves to nothing.
-    ck mutated.violations.anyIt(it.spec == "tui/host/native_host")
+    ck mutated.violations.anyIt(it.spec == "tui/host/tui_session")
     removeDir(m.root)
 
   test "MUTATION: a planted ';'-separated host import is detected":
     # THE OTHER HALF OF "A LINE IS NOT A STATEMENT", and a separate arm because
     # it fails differently. The one-liner above was skipped for not starting
     # with `import`; this line DOES start with `import`, is read, and yields a
-    # single spec of `codetracer_embed;importtui/host/native_host` — a module
+    # single spec of `codetracer_embed;importtui/host/tui_session` — a module
     # nobody has. So BOTH imports vanish, and the permitted one vanishing is
     # what makes this shape worse than a plain miss: the file appears to import
     # nothing at all.
@@ -1704,7 +1725,7 @@ const SessionRecorderVersion* = 1
     let victim = normalizedPath(m.appDir / "cli.nim")
     ck fileExists(victim)
     writeFile(victim, readFile(victim) &
-              "\nimport codetracer_embed; import tui/host/native_host\n")
+              "\nimport codetracer_embed; import tui/host/tui_session\n")
 
     let mutated = m.scanMutant()
     checkpoint("violations after planting the ';'-separated import: " &
@@ -1712,10 +1733,49 @@ const SessionRecorderVersion* = 1
     ck mutated.violations.len == 1
     ck mutated.violations.anyIt(it.reason.contains("host layer"))
     ck mutated.violations.anyIt(it.file == victim)
-    ck mutated.violations.anyIt(it.spec == "tui/host/native_host")
+    ck mutated.violations.anyIt(it.spec == "tui/host/tui_session")
     # The statement in FRONT of the `;` was read as well, and reading it is the
     # difference between "one import was hidden" and "the line was lost".
     ck mutated.edges.anyIt(it.file == victim and it.spec == "codetracer_embed")
+    removeDir(m.root)
+
+  test "the shared host directory holds capabilities and app/ reaches none of it":
+    # The positive twin for `src/frontend/host/`: it exists, it holds the
+    # modules both native front-ends open a recording through, and those reach
+    # the capabilities `app/` may not — so the clean scan above is a statement
+    # about a real layer.
+    ck dirExists(sharedHostDir)
+    ck fileExists(sharedHostDir / "native_host.nim")
+    var sharedSpecs: seq[string] = @[]
+    for path in walkDirRec(sharedHostDir):
+      if path.endsWith(".nim"):
+        sharedSpecs.add(importSpecs(path))
+    ck "std/osproc" in sharedSpecs or "osproc" in sharedSpecs
+    ck not scan.violations.anyIt(it.reason.contains("host layer"))
+
+  test "MUTATION: a planted import of the shared host layer is detected":
+    # Two spellings of one module in `src/frontend/host/`: relative to the
+    # importer (no module of `tui/` is named) and relative to `src/frontend`,
+    # which `config.nims` puts on the module path.
+    let m = newMutantTree(appDir, hostDir, "shared-host", sharedHostDir)
+    let control = m.scanMutant()
+    if control.violations.len > 0:
+      checkpoint("control copy was not clean: " & describe(control.violations))
+    ck control.violations.len == 0
+    let victim = normalizedPath(m.appDir / "cli.nim")
+    let original = readFile(victim)
+    writeFile(victim, original & "\nimport ../../host/native_host\n")
+    let relative = m.scanMutant()
+    checkpoint("after planting '../../host/native_host': " &
+               describe(relative.violations))
+    ck relative.violations.len == 1
+    ck relative.violations.anyIt(it.reason.contains("host layer"))
+    writeFile(victim, original & "\nimport host/native_host\n")
+    let rooted = m.scanMutant()
+    checkpoint("after planting 'host/native_host': " &
+               describe(rooted.violations))
+    ck rooted.violations.len == 1
+    ck rooted.violations.anyIt(it.file == victim)
     removeDir(m.root)
 
   test "assertion count":

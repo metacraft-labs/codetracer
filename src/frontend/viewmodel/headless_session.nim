@@ -197,7 +197,7 @@ proc newHeadlessDebugSession*(
   ## and then STAYS ON the backend for the rest of the session.  The default is
   ## the zero value — unbounded, exactly what every caller had before — and
   ## both native front-ends pass one through
-  ## `src/frontend/tui/host/native_host.openLocalTrace`: the terminal because
+  ## `src/frontend/host/native_host.openLocalTrace`: the terminal because
   ## it holds a terminal it would otherwise never give back, and the GPUI
   ## window (`gpui/host/gpui_host.openGpuiTrace`) because without it a silent
   ## engine left the process blocked for ever with nothing on stdout or

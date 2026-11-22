@@ -36,7 +36,7 @@
 ##
 ## A run is a step machine the caller drives: on the C backend the host's
 ## event loop calls `pump` (the descriptor of `rg`'s output is read with
-## `O_NONBLOCK`, as `tui/host/build_runner.nim` measured it must be; the
+## `O_NONBLOCK`, as `host/build_runner.nim` measured it must be; the
 ## walker visits a bounded number of files per call), on the JS backend
 ## node's events and a zero-delay timer drive it. `FindInFilesService.search`
 ## cancels the run in flight before it starts the next one — the process is
@@ -570,7 +570,7 @@ elif not defined(wasm32):
     run.engine = fieRipgrep
     run.fd = run.process.outputHandle
     when defined(posix):
-      # `O_NONBLOCK`, as `tui/host/build_runner.nim` measured: a `Stream`
+      # `O_NONBLOCK`, as `host/build_runner.nim` measured: a `Stream`
       # read bounded by a byte count still blocks on a silent child.
       let flags = fcntl(run.fd, F_GETFL, 0)
       if flags != -1:

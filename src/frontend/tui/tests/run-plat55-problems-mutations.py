@@ -3,7 +3,7 @@
 the GPUI window (codetracer-pm `spec/Planned-Features/Build-Output-Pane.md`
 §3.3, `Edit-Mode-Toolbar.md` §11): the words and the list every front-end
 draws (moved into `errors_vm`), the one rule from a build's lines to its rows
-(`build_diagnostics`), the native reader of a build (`tui/host/build_problems`),
+(`build_diagnostics`), the native reader of a build (`host/build_problems`),
 the terminal's painter, runtime, host source, layout and loop, the GPUI leaf
 and window, the shared Edit-mode footer, the vocabulary view, and the
 desktop's Build component.
@@ -59,7 +59,7 @@ TIMEOUT = 3600
 # Subjects.
 VM = "src/frontend/viewmodel/viewmodels/errors_vm.nim"
 RULE = "src/frontend/viewmodel/viewmodels/build_diagnostics.nim"
-READER = "src/frontend/tui/host/build_problems.nim"
+READER = "src/frontend/host/build_problems.nim"
 SOURCE = "src/frontend/tui/host/problems_source.nim"
 TUI_PANE = "src/frontend/tui/app/views/problems_pane.nim"
 RUNTIME = "src/frontend/tui/app/runtime.nim"

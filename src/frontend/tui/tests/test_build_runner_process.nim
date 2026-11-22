@@ -64,8 +64,8 @@
 
 import std/[monotimes, os, strutils, times, unittest]
 
-import ../app/build_session
-import ../host/build_runner
+import ../../headless_app/build_session
+import ../../host/build_runner
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.

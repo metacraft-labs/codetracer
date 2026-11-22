@@ -72,16 +72,16 @@ import ./app/runtime
 import ./app/clipboard_read
 import ./app/tui_app
 import ./app/capability_note
-import ./host/build_runner
+import ../host/build_runner
 import ./host/capabilities
-import ./host/edit_host
+import ../host/edit_host
 import ./host/edit_services
 import ./host/headless
 import ./host/highlight_worker
 import ./host/file_worker
 import ./host/key_journal
 import ./host/layout_store
-import ./host/native_host
+import ../host/native_host
 import ./app/views/low_level_code_pane   # PLAT-60: `LowLevelAct`
 import ./app/views/visual_replay_panes   # PLAT-59: `VisualAct`
 import ./host/pane_server
@@ -105,7 +105,7 @@ from ../viewmodel/viewmodels/test_results_vm import TraceOpenPolicy,
   TestTabPlacement, TestTabPlacementKind, placeTestRecording, testTabOf,
   noteTestTab, forgetTestTab   # Test-Results-Pane.md §9
 import ./host/build_output_source   # PLAT-56
-import ./host/plugin_processes      # Extensibility-Model.md §11: plugins
+import ../host/plugin_processes      # Extensibility-Model.md §11: plugins
 import ./host/plugin_service
 import ../viewmodel/plugin_host/supervisor as plugin_supervisor
 import ../../common/value_presentation/presenter as value_presenter

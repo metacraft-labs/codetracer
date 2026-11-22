@@ -41,14 +41,14 @@ import codetracer_embed
 
 import ../app/runtime
 import ../app/tui_app
-import ../app/build_session
+import ../../headless_app/build_session
 import ../app/edit_binding
 import ../app/theme/capabilities
 import ../app/views/shell
 import ../app/views/problems_pane
 import ../host/problems_source
-import ../host/build_runner
-from ../host/edit_host import readProjectFile, TuiHostError
+import ../../host/build_runner
+from ../../host/edit_host import readProjectFile, TuiHostError
 import ./fixtures/plat55_noir_build
 import ../../../common/view_vocabulary
 from ../../view_vocabulary/pane_views import problemsPaneView,

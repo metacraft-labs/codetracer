@@ -33,7 +33,7 @@ import ../app/tui_app
 import ../app/views/build_output
 import ../../viewmodel/store/types
 import ../../viewmodel/viewmodels/build_auto_reveal
-import ./build_problems
+import ../../host/build_problems
 import ./problems_source
 
 type

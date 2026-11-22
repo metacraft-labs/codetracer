@@ -34,9 +34,9 @@ import codetracer_embed
 import ../app/edit_binding
 import ../app/runtime
 import ../app/theme/capabilities
-import ../host/edit_host
+import ../../host/edit_host
 import ../host/file_worker
-import ../host/native_host
+import ../../host/native_host
 
 var CHECKS = 0
 template ck(cond: untyped) =

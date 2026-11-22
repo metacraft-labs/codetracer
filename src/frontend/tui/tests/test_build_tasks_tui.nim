@@ -34,7 +34,7 @@ import codetracer_embed
 
 import ../app/runtime
 import ../app/tui_app
-import ../app/build_session
+import ../../headless_app/build_session
 import ../app/edit_binding
 import ../app/theme/capabilities
 import ../app/views/shell
@@ -42,8 +42,8 @@ import ../app/views/edit_pane
 import ../app/views/build_output
 import ../host/problems_source
 import ../host/build_output_source
-import ../host/build_runner
-from ../host/edit_host import readProjectFile, TuiHostError
+import ../../host/build_runner
+from ../../host/edit_host import readProjectFile, TuiHostError
 import ../../viewmodel/tests/unit/build_fixtures/plat56_c_build
 import ../../viewmodel/tests/unit/build_fixtures/plat56_gcc_quotes
 import ../../headless_app/layout_model

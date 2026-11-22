@@ -36,7 +36,7 @@
 
 import codetracer_embed
 
-import ../build_session
+import ../../../headless_app/build_session
 import ../layout/profile
 import ../layout/project
 import ./styled_row

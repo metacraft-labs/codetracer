@@ -53,7 +53,7 @@ import ../app/theme/capabilities
 import ../app/layout/profile
 import ../app/layout/project
 import ../app/views/shell
-import ../host/native_host
+import ../../host/native_host
 import ../host/tui_session
 import ./fixtures/fixture_provider
 import ../../gpui/app/pane_names

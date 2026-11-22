@@ -49,7 +49,7 @@ import ../app/theme/capabilities
 import ../app/views/shell
 import ../app/views/constraints_pane
 import ../host/constraints_source
-from ../host/edit_host import readProjectFile, writeProjectFile, TuiHostError
+from ../../host/edit_host import readProjectFile, writeProjectFile, TuiHostError
 import ./fixtures/plat62_noir_circuit
 import ../../../common/view_vocabulary
 import ../../viewmodel/viewmodels/constraints_vm

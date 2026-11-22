@@ -54,7 +54,7 @@ import headless_app/layout_model
 import headless_app/headless_app
 import ../../view_vocabulary/pane_views
 import ../../../common/value_presentation
-import ../host/native_host
+import ../../host/native_host
 import ../../../tests/visual/screen_oracle/pane_grammar
 import ./fixtures/fixture_provider
 

@@ -6,7 +6,7 @@
 ## The desktop's Build component (`ui/build.nim`'s `appendBuild`) reads each
 ## line of a build's output in order and publishes a Problems row for the
 ## lines that name a location. The terminal and the GPUI window run their
-## builds natively (`tui/host/build_runner`), and their Problems panes must
+## builds natively (`host/build_runner`), and their Problems panes must
 ## list exactly the rows the desktop lists for the same output, so the rule is
 ## here, and the desktop calls it too:
 ##

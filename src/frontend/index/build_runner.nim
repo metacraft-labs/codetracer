@@ -6,7 +6,7 @@
 ## was refused, and ■ Stop stopped nothing. Now the renderer asks for a build
 ## (`CODETRACER::build-start` — a task's or a typed command, and the directory
 ## it runs in) and the main process runs it as the terminal's runner does
-## (`tui/host/build_runner`): through the shell, stdout and stderr on two
+## (`host/build_runner`): through the shell, stdout and stderr on two
 ## pipes, each delivered LINE BY LINE (a write that ends mid-line waits for
 ## the rest, so the renderer's reader never sees half a line as a line), and
 ## the exit code with whether the user stopped it.

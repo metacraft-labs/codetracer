@@ -17,8 +17,8 @@ import viewmodels/[calltrace_vm, debug_controls_vm, event_log_vm, flow_vm,
 from ../../viewmodel/sync/action_relay import applyAction
 import ../../viewmodel/plugin_host/supervisor
 import ../app/[runtime, tui_app]
-import ./plugin_processes
-import ./plugin_panes
+import ../../host/plugin_processes
+import ../../host/plugin_panes
 
 # ---------------------------------------------------------------------------
 # The runtime's door

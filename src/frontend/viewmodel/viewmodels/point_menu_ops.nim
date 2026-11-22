@@ -27,7 +27,7 @@
 ## `replay_data_store`'s (`setTracepointsEnabled`, `deleteTracepoint`,
 ## `enabledTracepointSpecs`), the engine requests are `headless_session`'s,
 ## and the native hosts' one performer over both is
-## `tui/host/session_driver.performPointMenuOp`.
+## `host/session_driver.performPointMenuOp`.
 ##
 ## Pure; compiles on C, JS and wasm32.
 

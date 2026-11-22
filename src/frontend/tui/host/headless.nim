@@ -59,7 +59,7 @@ import ../app/tui_app
 import ../app/theme/image_capability
 import ./capabilities
 import ./image_probe
-import ./native_host
+import ../../host/native_host
 import ./resize
 import ./terminal_driver
 import ./tui_session

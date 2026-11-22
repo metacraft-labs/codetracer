@@ -136,8 +136,8 @@ EVLOGVIEW = "src/frontend/tui/app/views/event_log.nim"
 TUISESSION = "src/frontend/tui/host/tui_session.nim"
 # The native hosts' shared driver (`ad7805dbd`): what follows a call-trace
 # click or toggle, for the terminal and GPUI alike.
-SESSDRIVER = "src/frontend/tui/host/session_driver.nim"
-NATIVEHOST = "src/frontend/tui/host/native_host.nim"
+SESSDRIVER = "src/frontend/host/session_driver.nim"
+NATIVEHOST = "src/frontend/host/native_host.nim"
 GPUILEAVES = "src/frontend/gpui/app/leaves.nim"
 # `window_gestures.nim` left the subjects 2026-11-14: since `24a718a9f2` a
 # label click is a press of the label (`layout.toggle-docked-pane`, decided in

@@ -1,4 +1,5 @@
-## LAYER RULE — `src/frontend/tui/host/` is the NATIVE HOST half of the TUI.
+## LAYER RULE — `src/frontend/host/` is the NATIVE HOST layer both native
+## front-ends share.
 ## See `host/native_host.nim`'s header.
 ##
 ## host/build_runner.nim — PLAT-16. The process behind `:build` and `:run`, and
@@ -76,7 +77,7 @@
 
 import std/[osproc, posix, strutils, times]
 
-import ../app/build_session
+import ../headless_app/build_session
 import ./native_host
 
 export TuiHostError

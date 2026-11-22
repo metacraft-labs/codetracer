@@ -1,7 +1,7 @@
 ## gpui/problems_leaf.nim — PLAT-55. The GPUI window's **Problems** pane, drawn
 ## natively from the window's `ErrorsVM` (the model the desktop's panel and
 ## the terminal's pane draw), which the window's builds feed
-## (`tui/host/build_problems`).
+## (`host/build_problems`).
 ##
 ## What the desktop's panel draws, in its order and words
 ## (`viewmodel/views/isonim_errors_view.nim`, Build-Output-Pane.md §3.3): a

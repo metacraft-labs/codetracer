@@ -1,4 +1,5 @@
-## LAYER RULE — `src/frontend/tui/host/` is the NATIVE HOST half of the TUI.
+## LAYER RULE — `src/frontend/host/` is the NATIVE HOST layer both native
+## front-ends share.
 ## See `host/native_host.nim`'s header for the rule and what it buys.
 ##
 ## host/edit_host.nim — PLAT-16. THE FILESYSTEM SIDE OF EDIT MODE.

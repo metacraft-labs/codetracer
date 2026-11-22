@@ -27,7 +27,7 @@ import ../app/runtime
 import ../app/tui_app
 import ../app/views/problems_pane
 import ../../viewmodel/store/types
-import ./build_problems
+import ../../host/build_problems
 
 export build_problems
 

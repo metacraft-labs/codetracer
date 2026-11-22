@@ -137,9 +137,9 @@ from ../viewmodel/store/types import StopLocation
 import ./host/trace_nimcache   # a `ct record` recording's own nimcache
 import ./host/certificate_indicator
 import ./design_font_metrics
-import ../tui/host/native_host   # `loadStopPanes`, the terminal's own producer
-import ../tui/host/session_driver   # HSF-S1: what follows a control or a click, shared with the terminal
-import ../tui/host/project_definitions_host   # the checkout's .codetracer/, per session
+import ../host/native_host   # `loadStopPanes`, the terminal's own producer
+import ../host/session_driver   # HSF-S1: what follows a control or a click, shared with the terminal
+import ../host/project_definitions_host   # the checkout's .codetracer/, per session
 import ../styles/generated/design_tokens
 
 # PLAT-34. The editing core, through the sanctioned facade: `editSurfaceFor`
@@ -192,9 +192,9 @@ import ./build_output_leaf     # PLAT-56: Build Output, drawn natively
 # PLAT-55: the window's builds (`:build`, the terminal's runner) and the
 # shared reader that fills its Problems pane — PLAT-56's Build Output reads
 # the same `BuildSession`.
-import ../tui/app/build_session
-import ../tui/host/build_runner
-import ../tui/host/build_problems
+import ../headless_app/build_session
+import ../host/build_runner
+import ../host/build_problems
 import ./requests_leaf         # PLAT-58: the Requests pane, drawn natively
 import ../viewmodel/host/native_requests_host   # PLAT-58: its host
 import ./constraints_leaf      # PLAT-62: the Constraints pane, drawn natively
@@ -1517,7 +1517,7 @@ var
     ## replay, the project of the Edit window, a folder tab's folder.
   gProblems: BuildProblems = nil
     ## PLAT-55: the WINDOW's Problems ViewModel and the reader that fills it
-    ## from the window's builds (`tui/host/build_problems`), shared by every
+    ## from the window's builds (`host/build_problems`), shared by every
     ## tab: a build is of the working tree.
   gProblemsPane = initGProblemsPane()
   gLowLevel = initGLowLevelPane()
@@ -1541,7 +1541,7 @@ var
     ## PLAT-56: where the footer's build indicator is drawn (empty when none).
   gBuild: RunningBuild = nil
     ## PLAT-55: the window's `:build` in flight, or the last one (the
-    ## terminal's runner, `tui/host/build_runner`).
+    ## terminal's runner, `host/build_runner`).
   gBuildRoot = ""
     ## PLAT-55: where a `:build` runs — the window's project, as for the
     ## terminal's `:build` (the Edit window's folder, a folder tab's, a

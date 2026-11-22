@@ -52,7 +52,7 @@ TIMEOUT = 3600
 
 SESSION = "src/frontend/viewmodel/headless_session.nim"
 STORE = "src/frontend/viewmodel/store/replay_data_store.nim"
-HOST = "src/frontend/tui/host/native_host.nim"
+HOST = "src/frontend/host/native_host.nim"
 TUI = "src/frontend/tui/host/tui_session.nim"
 SHELL = "src/frontend/tui/app/views/shell.nim"
 POINTVM = "src/frontend/viewmodel/viewmodels/point_list_vm.nim"

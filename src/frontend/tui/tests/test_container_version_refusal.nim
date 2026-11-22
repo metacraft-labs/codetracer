@@ -49,7 +49,7 @@ import std/[json, os, posix, strutils, unittest]
 import ../app/cli
 import ../app/theme/capabilities
 import ../host/headless
-import ../host/native_host   # `HandshakeEnvVar`, this case's own bound
+import ../../host/native_host   # `HandshakeEnvVar`, this case's own bound
 import ../host/terminal_driver
 import ../../viewmodel/backend/stdio_backend
 

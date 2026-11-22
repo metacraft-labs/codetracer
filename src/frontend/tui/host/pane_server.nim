@@ -63,12 +63,12 @@ import ../app/views/variables
 import ../app/views/shell
 from ../app/views/low_level_code_pane import LowLevelAct, LowLevelActResult   # HSF-E11
 from ../../viewmodel/viewmodels/low_level_code_vm import LowLevelCodeTitle
-import ./native_host
+import ../../host/native_host
 import ./tui_session
 import ./visual_replay_host
-import ./build_runner
+import ../../host/build_runner
 import ./build_output_source
-import ./edit_host
+import ../../host/edit_host
 import ./edit_services
 import ./problems_source
 import ./test_results_source

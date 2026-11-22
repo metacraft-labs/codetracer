@@ -8,7 +8,7 @@
 
 import std/[os, strutils, times, unittest]
 
-import ../host/native_host
+import ../../host/native_host
 import ../../../ct/trace/trace_kind   # TestOracleOutputError
 
 var counter = 0
