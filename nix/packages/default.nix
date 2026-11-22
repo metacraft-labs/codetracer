@@ -135,6 +135,7 @@
             "helpers.ts"
             "lsp.nim"
             "lsp"
+            "plugin-host"
             "public"
             "shell-integrations"
             "tools"
@@ -1742,6 +1743,9 @@
             resources-derivation
             db-backend
             backend-manager
+            # The WASM plugin host: the prefix's `bin/ct-plugin-host`, which
+            # the desktop's main process and `ct host` resolve (§11.9).
+            ct-plugin-host
             ctRemote
             codetracer-electron
             node-modules-derivation
@@ -2223,6 +2227,9 @@
 
 
             cp ./ct $out/bin/
+            # The WASM plugin host, under the prefix the desktop's main process
+            # and `ct host` resolve it from (`$CODETRACER_PREFIX/bin`).
+            cp ${ct-plugin-host}/bin/ct-plugin-host $out/bin/
 
             # Codetracer web
             cp -L ${codetracer-electron}/views/server_index.ejs $out/views
@@ -2309,6 +2316,57 @@
               --set CODETRACER_PREFIX ${runtimeDeps.outPath}
           '';
 
+        };
+
+        # ------------------------------------------------------------------
+        # The WebAssembly plugin host (Extensibility-Model.md §11.9): the
+        # engine layer (src/plugin-host/engine, Rust, wasmi only) as a static
+        # library, and `ct-plugin-host` linked against it. Every front-end that
+        # runs plugins finds it beside its own binary or under
+        # `$CODETRACER_PREFIX/bin` (src/common/plugin_host_path.nim), so the
+        # terminal, its component and the `codetracer` package each carry a
+        # copy in their `bin/`.
+        ct-plugin-host = stdenv.mkDerivation {
+          name = "ct-plugin-host";
+          pname = "ct-plugin-host";
+
+          inherit src;
+
+          nativeBuildInputs = [
+            nim-codetracer
+            pkgs.cargo
+            pkgs.rustc
+            pkgs.rustPlatform.cargoSetupHook
+          ];
+
+          # The engine crate is its own Cargo workspace with its own lock.
+          cargoRoot = "src/plugin-host/engine";
+          cargoDeps = pkgs.rustPlatform.importCargoLock {
+            lockFile = ../../src/plugin-host/engine/Cargo.lock;
+          };
+
+          buildPhase = prepareIsonimSiblings + ''
+            engine_target="$PWD/engine-target"
+            ( cd src/plugin-host/engine &&
+              cargo build --release --offline --lib \
+                --no-default-features --features wasmi \
+                --target-dir "$engine_target" )
+            ${nim-codetracer.out}/bin/nim2 \
+              ${isonimNimPaths} \
+              --threads:on --mm:orc -d:release --hints:off --warnings:off \
+              "-d:ctPluginEngineLib=$engine_target/release/libct_plugin_engine.a" \
+              --path:src/frontend/viewmodel \
+              --nimcache:nimcache \
+              --out:ct-plugin-host \
+              c ./src/plugin-host/ct_plugin_host.nim
+          '';
+
+          installPhase = ''
+            mkdir -p $out/bin
+            cp ./ct-plugin-host $out/bin/
+          '';
+
+          meta.mainProgram = "ct-plugin-host";
         };
 
         # ------------------------------------------------------------------
@@ -2424,6 +2482,8 @@
           installPhase = ''
             mkdir -p $out/bin $out/share/codetracer-tui
             cp ./codetracer-tui $out/bin/
+            # Beside the binary, where the terminal looks for it (§11.9).
+            cp ${ct-plugin-host}/bin/ct-plugin-host $out/bin/
             # The capability file travels WITH the binary, verbatim.  A
             # packager that had only the binary could not declare it to the
             # launcher, and one that re-typed the declaration would ship a
@@ -2453,6 +2513,7 @@
             bash ./scripts/build-tui-component.sh \
               --out-root $out/components \
               --tui-bin ${codetracer-tui}/bin/codetracer-tui \
+              --plugin-host ${ct-plugin-host}/bin/ct-plugin-host \
               --copy
 
             # A launcher pointed at $out/components finds exactly one component

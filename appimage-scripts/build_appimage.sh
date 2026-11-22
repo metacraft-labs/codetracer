@@ -150,6 +150,9 @@ bash "${ROOT_PATH}"/appimage-scripts/build_db_backend.sh
 # Build/setup backend-manager
 bash "${ROOT_PATH}"/appimage-scripts/build_backend_manager.sh
 
+# The WASM plugin host
+bash "${ROOT_PATH}"/appimage-scripts/build_plugin_host.sh
+
 # Noir
 cp -L "$(which nargo)" "${APP_DIR}/bin/nargo"
 chmod +x "${APP_DIR}/bin/nargo"
@@ -409,6 +412,7 @@ PATCHELF_BINARIES=(
 	"${APP_DIR}"/bin/db-backend-record
 	"${APP_DIR}"/bin/ct-test
 	"${APP_DIR}"/bin/session-manager
+	"${APP_DIR}"/bin/ct-plugin-host
 	"${APP_DIR}"/bin/nargo
 	"${APP_DIR}"/bin/wazero
 	"${APP_DIR}"/bin/ctags
