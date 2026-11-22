@@ -80,8 +80,9 @@ const
                 "\xE2\x97\x95", "\xE2\x97\x8F"]
     ## The progress pie in quarters (`pieGlyph`): ○ ◔ ◑ ◕ ●, the Geometric
     ## Shapes block's circles (U+25CB, U+25D4, U+25D1, U+25D5, U+25CF;
-    ## https://www.unicode.org/charts/PDF/U25A0.pdf). Unicode has no
-    ## eighth-circle pies.
+    ## https://www.unicode.org/charts/PDF/U25A0.pdf). Each is the shape the
+    ## GUI hosts draw: a ring filled by a wedge from twelve o'clock, empty at
+    ## 0 % and a full disc at 100 %. Unicode has no eighth-circle pies.
   PieUnknownGlyph* = "\xE2\x97\x8C"
     ## ◌ (U+25CC, dotted circle): no known progress on the extended screen,
     ## so it never reads as 0 % (○); the glyph table's extended set has it

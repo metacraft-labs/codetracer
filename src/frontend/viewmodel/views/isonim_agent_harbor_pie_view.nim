@@ -3,12 +3,14 @@
 ## its colour and its progress by a wedge of the same colour.
 ##
 ## - `pieIndicator`: one pie, a `span.ah-pie` drawn by the stylesheet
-##   (`styles/components/agent_harbor_pie.styl`) as a two-stop conic gradient
-##   over the disc (CSS Images Level 4 §3.3,
+##   (`styles/components/agent_harbor_pie.styl`) as a ring with the wedge
+##   inside it: a 1px inset edge in the role's ink, and inside it, past a
+##   gap of the ground (the padding, `pieWedgeInsetPx`), a disc painted as a
+##   two-stop conic gradient (CSS Images Level 4 §3.3,
 ##   https://www.w3.org/TR/css-images-4/#conic-gradients): the wedge in the
-##   role's ink from twelve o'clock clockwise to the share done
-##   (`--ah-pie-p`), hard against the rest of the disc, with a 1px inset
-##   edge. The inks are custom properties per ground and role
+##   same ink from twelve o'clock clockwise to the share done
+##   (`--ah-pie-p`), hard against a transparent rest, so the rest is the
+##   ground. The inks are custom properties per ground and role
 ##   (`agent_harbor_pie_inks.styl`, written from the palette's `pieInks`), so
 ##   the web draws the inks GPUI and the terminal draw. It is an image with
 ##   the pie's words as its accessible name (`role="img"`, `aria-label`).
@@ -33,8 +35,8 @@ const
 
 proc pieClass*(pie: ProgressPie; ground: PieGround): string =
   ## The pie's classes: its role and its ground pick its inks, its shape
-  ## (`pieShapeOf`) how it is drawn: `ah-pie-disc`, `ah-pie-hollow` (idle:
-  ## the wedge inside the ring) or `ah-pie-unknown` (the ring and a dot).
+  ## (`pieShapeOf`) how it is drawn: `ah-pie-ring` (the wedge inside the
+  ## ring) or `ah-pie-unknown` (the ring and a dot).
   "ah-pie ah-pie-" & $pie.role & " ah-pie-on-" & $ground & " ah-pie-" & $pie.pieShapeOf
 
 proc pieColumnClass*(column: int): string =
@@ -52,9 +54,10 @@ proc remOf(px: int): string =
   result.add "rem"
 
 proc pieStyle*(pie: ProgressPie; sizePx: int): string =
-  ## The pie's size (in rem) and where its wedge ends.
-  "width: " & remOf(sizePx) & "; height: " & remOf(sizePx) & "; --ah-pie-p: " &
-    pie.pieStopPercent & ";"
+  ## The pie's size, where its wedge's disc starts inside the ring (the
+  ## padding, `pieWedgeInsetPx`), both in rem, and where its wedge ends.
+  "width: " & remOf(sizePx) & "; height: " & remOf(sizePx) & "; padding: " &
+    remOf(pieWedgeInsetPx(sizePx)) & "; --ah-pie-p: " & pie.pieStopPercent & ";"
 
 proc pieIndicator*[R, N](r: R; pie: ProgressPie; ground: PieGround;
                          sizePx = PieStorySizePx): N =
