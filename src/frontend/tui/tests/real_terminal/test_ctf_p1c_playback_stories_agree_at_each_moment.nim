@@ -123,13 +123,15 @@ import term_assert
 
 import ../../testing/dual_snap
 import ../../agent_harbor/ah_tui_stories
+import ../../../stories/agent_harbor_control_center_stories
 import ../../agent_harbor/[ah_tui_playback_bar, ah_tui_canvas]
 import ../../../gpui/agent_harbor/ah_stories
 import ../../../gpui/agent_harbor/ah_playback_bar
 import ../../../viewmodel/views/[isonim_agent_harbor_session_tabs_view,
   isonim_agent_harbor_initiatives_view, isonim_agent_harbor_initiative_tabs_view,
   isonim_agent_harbor_fleet_view, isonim_agent_harbor_playback_view,
-  isonim_agent_harbor_session_activity_view, isonim_agent_harbor_inbox_view]
+  isonim_agent_harbor_session_activity_view, isonim_agent_harbor_inbox_view,
+  isonim_agent_harbor_control_center_view]
 import ../../../viewmodel/input/element_press
 import ../../../viewmodel/keymap/[base_keymaps, context_keys, editing_keymap,
                                   keymap_router, scope_path]
@@ -275,6 +277,13 @@ proc drawnFacts[N](view: N; surface: string): seq[string] =
     for s in view.all("strip"): result.add "strip " & s.attr("strip")
     for k in view.all("item-kind"): result.add "page " & k.attr("item-kind")
     for ph in view.all("phase-text"): result.add "answer " & ph.attr("phase-text")
+  of "agent-harbor-control-center":
+    # CTF-P2c step 4: the Initiatives panel it holds, read as that panel is,
+    # then the sessions waiting on the operator, in their order.
+    result.add drawnFacts(view, "agent-harbor-initiatives")
+    for w in view.all("waiting-session"):
+      result.add "waiting " & w.attr("waiting-title") & " | " & w.attr("waiting-state") &
+                 " | " & w.attr("waiting-words")
   of "agent-harbor-session-activity":
     result.add "status " & view.attr("session-status")
     for n in view.all("notice"): result.add "notice " & n.attr("notice")
@@ -404,6 +413,15 @@ proc webFacts(view: MockNode; surface: string): seq[string] =
       result.add timelineLineFacts(l.a("data-ah-line-kind"), l.a("data-ah-text"),
                                    l.a("data-ah-role"), l.a("data-ah-expanded"),
                                    l.a("data-ah-state"))
+  of "agent-harbor-control-center":
+    # As `drawnFacts`: the Initiatives panel, then the waiting sessions,
+    # read off the facts each waiting row carries (`waitingFacts`).
+    let a = proc(n: MockNode; name: string): string =
+      if n.attributes.hasKey(name): n.attributes[name] else: ""
+    result.add webFacts(view, "agent-harbor-initiatives")
+    for w in view.byClass("ah-cc-waiting-row"):
+      result.add "waiting " & w.a("data-ah-waiting-title") & " | " &
+                 w.a("data-ah-waiting-state") & " | " & w.a("data-ah-waiting-words")
   of "agent-harbor-inbox":
     let a = proc(n: MockNode; name: string): string =
       if n.attributes.hasKey(name): n.attributes[name] else: ""
@@ -496,6 +514,12 @@ proc mountWeb(story: CodeTracerStory; clock: ClockBase; moment = "";
       m.view = renderAgentHarborInboxPanel[MockRenderer, MockNode](r, vm,
                                                                     inboxStoryContext(story.fixture))
       if vm.showPages: vm.setPagesVisible(true)
+      disposeVm = proc() = vm.dispose()
+    of "agent-harbor-control-center":
+      # `storybook_components`' control-center mount: the tab over the
+      # story's viewmodel, laid out at the laptop width (two columns).
+      let vm = createControlCenterStoryVM(story.fixture, pb)
+      m.view = renderAgentHarborControlCenter[MockRenderer, MockNode](r, vm)
       disposeVm = proc() = vm.dispose()
     else: raise newException(ValueError, "no web view for " & story.surface)
     m.bar = renderAgentHarborPlaybackBar[MockRenderer, MockNode](r, pb)
@@ -776,6 +800,7 @@ const
   Progress = "agent-harbor-initiative-progress"
   Activity = "agent-harbor-session-activity"
   Inbox = "agent-harbor-inbox"
+  Center = "agent-harbor-control-center"
 
 let MomentChanges: seq[tuple[moment: string; surfaces: seq[string]]] = @[
   # front-ends: a session's state moves its tab, its row in the list and in
@@ -785,17 +810,19 @@ let MomentChanges: seq[tuple[moment: string; surfaces: seq[string]]] = @[
   # Initiatives row and the list's group header (`n/m`); the config session
   # logs a line at the same moment, which its fleet row shows. The
   # importer's removal moves the Initiatives header's count of sessions in
-  # no initiative.
-  ("new-session", @[Strip, List, Fleet, Panel]),
-  ("port-asks", @[Strip, List, Fleet, Panel]),
-  ("bench-asks", @[Strip, List, Fleet, Panel]),
-  ("port-answered", @[Strip, List, Fleet, Panel]),
-  ("migration-fails", @[Strip, List, Fleet, Panel]),
-  ("config-answered", @[Strip, List, Fleet]),
-  ("milestone-done", @[List, Fleet, Panel]),
+  # no initiative. The control center (CTF-P2c step 4) shows the same
+  # Initiatives panel and the sessions waiting on the operator, so every
+  # moment but the importer's end, which moves neither, changes it.
+  ("new-session", @[Strip, List, Fleet, Panel, Center]),
+  ("port-asks", @[Strip, List, Fleet, Panel, Center]),
+  ("bench-asks", @[Strip, List, Fleet, Panel, Center]),
+  ("port-answered", @[Strip, List, Fleet, Panel, Center]),
+  ("migration-fails", @[Strip, List, Fleet, Panel, Center]),
+  ("config-answered", @[Strip, List, Fleet, Center]),
+  ("milestone-done", @[List, Fleet, Panel, Center]),
   ("importer-ends", @[Strip, List, Fleet]),
-  ("port-completes", @[Strip, List, Fleet, Panel]),
-  ("importer-removed", @[Strip, List, Fleet, Panel]),
+  ("port-completes", @[Strip, List, Fleet, Panel, Center]),
+  ("importer-removed", @[Strip, List, Fleet, Panel, Center]),
   # initiative-run: milestones move the bar's n/m and the progress panel;
   # recordings move the bar's recording buttons; the session's end ends the
   # initiative's tab.
