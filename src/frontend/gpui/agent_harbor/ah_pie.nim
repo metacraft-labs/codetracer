@@ -3,19 +3,23 @@
 ## (`nim_agents_isonim_viewmodels/agent_harbor/progress_pie`).
 ##
 ## `drawPie` draws one pie as the web's `span.ah-pie` is drawn
-## (`isonim_agent_harbor_pie_view.pieIndicator`), from the same style
-## string: a round element whose `background-image` is the palette's
-## two-stop conic gradient (`pieConicGradient`: the wedge from twelve
-## o'clock clockwise to the share done, hard against the rest of the disc),
-## which isonim-gpui paints as a sector over a disc, and over it a 1px ring
-## in the edge's ink (the web's inset box-shadow). The inks are the
-## palette's `pieInks` for the ground the pie sits on, the ones the web's
-## stylesheet and the terminal use.
+## (`isonim_agent_harbor_pie_view.pieIndicator`): a ring in the role's ink
+## with the wedge filled inside it. The wedge's disc is a round element
+## inset past the 1px ring and a gap of the ground (`pieWedgeInsetPx`),
+## whose `background-image` is the palette's two-stop conic gradient
+## (`pieConicGradient`: the wedge from twelve o'clock clockwise to the share
+## done, hard against the rest, which is the ground), which isonim-gpui
+## paints as a sector over a disc; over it all a 1px ring in the edge's ink
+## (the web's inset box-shadow). The inks are the palette's `pieInks` for
+## the ground the pie sits on, the ones the web's stylesheet and the
+## terminal use.
 ##
 ## Facts for a reader of the render plan: `data-ah-pie` (the role),
-## `data-ah-pie-fraction` (the share done, or `unknown`), `data-ah-pie-label`
-## and the `aria-label` (the pie's words), and the inks it was drawn in on
-## its ground (`data-ah-pie-wedge`, `-rest`, `-edge`, `-ground`).
+## `data-ah-pie-shape`, `data-ah-pie-fraction` (the share done, or
+## `unknown`), `data-ah-pie-label` and the `aria-label` (the pie's words),
+## the inks it was drawn in on its ground (`data-ah-pie-wedge`, `-edge`,
+## `-ground`), and on a ring's inset disc the gradient it is painted with
+## (`data-ah-pie-disc`).
 ##
 ## `drawPieStory` draws the story `Pie Indicator: Every State` on the grid
 ## `stories/agent_harbor_pie_stories` states.
@@ -34,10 +38,10 @@ proc pieFractionFact*(pie: ProgressPie): string =
 proc drawPie*(r: GpuiRenderer; p: AhPalette; pie: ProgressPie; ground: string;
               sizePx = PieStorySizePx): GpuiElement =
   ## One pie on `ground` (`#rrggbb`), `sizePx` across, in its shape
-  ## (`pieShapeOf`): a disc (the rest disc with the wedge as a two-stop conic
-  ## gradient), hollow (idle: the gradient on a disc inset inside the ring,
-  ## the ground between), or unknown (the ring and a centred dot, no rest).
-  ## The edge ring is drawn over all three, as the web's inset box-shadow.
+  ## (`pieShapeOf`): a ring (the gradient on a disc inset inside the ring,
+  ## the ground between, the rest the ground) or unknown (the ring and a
+  ## centred dot). The edge ring is drawn over both, as the web's inset
+  ## box-shadow.
   let inks = p.pieInks(pie.role, ground)
   let shape = pie.pieShapeOf
   result = r.createElement("div")
@@ -55,12 +59,13 @@ proc drawPie*(r: GpuiRenderer; p: AhPalette; pie: ProgressPie; ground: string;
                       ("left", pxOf(inset)), ("width", pxOf(side)),
                       ("height", pxOf(side)), ("border-radius", "50%")])
   case shape
-  of psDisc:
-    r.setStyle(result, "background-image", inks.pieConicGradient(pie))
-  of psHollow:
-    let inset = round(sizePx.float * PieHollowInsetFraction)
+  of psRing:
+    let inset = pieWedgeInsetPx(sizePx).float
     let disc = r.layer(inset, sizePx.float - 2.0 * inset)
-    r.setStyle(disc, "background-image", inks.pieConicGradient(pie))
+    let paint = inks.pieConicGradient(pie)
+    r.setStyle(disc, "background-image", paint)
+    # What the wedge's disc is painted with, for a reader of the tree.
+    r.tag(disc, "pie-disc", paint)
     r.appendChild(result, disc)
   of psUnknown:
     # Snapped to whole pixels, as the browser lays out the web's dot: a
@@ -84,7 +89,6 @@ proc drawPie*(r: GpuiRenderer; p: AhPalette; pie: ProgressPie; ground: string;
   r.tag(result, "pie-fraction", pie.pieFractionFact)
   r.tag(result, "pie-label", pie.label)
   r.tag(result, "pie-wedge", inks.wedge)
-  r.tag(result, "pie-rest", inks.rest)
   r.tag(result, "pie-edge", inks.edge)
   r.tag(result, "pie-ground", ground)
 
