@@ -5,7 +5,7 @@
    asks for feedback   Needs Follow-up
    Low priority; the agent keeps working.
                                                                                                
-                                                                                               
+                       Select an item, or press ] for the one at the top
                                                                                                
                                                                                                
                                                                                                

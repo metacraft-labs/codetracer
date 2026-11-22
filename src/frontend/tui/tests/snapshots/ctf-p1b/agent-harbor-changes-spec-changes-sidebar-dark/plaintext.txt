@@ -3,7 +3,7 @@
  Relay backpressure: bound the relay queues
                               9 files +18 −5
   Specs 8   Tests 5   Details 6   Code 9
-  All milestones                          ▾
+  All milestones ▾
  REQUIREMENTS (2)
 ▎▾ RELAY-AREQ2 Bounded queues     ● modified
 ▎  specs/Relay-Backpressure.md

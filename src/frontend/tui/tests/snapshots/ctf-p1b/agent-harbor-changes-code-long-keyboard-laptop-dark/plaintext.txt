@@ -14,7 +14,7 @@
   M src/relay/stations/region-0/site-84/adapters/telemetry/frames/decoder_84.py +2 -1                                                                                            C
   M src/relay/stations/region-1/site-85/adapters/telemetry/frames/decoder_85.py +2 -1                                                                                            C
   M src/relay/stations/region-2/site-86/adapters/telemetry/frames/decoder_86.py +2 -1                                                                                            C
-  M src/relay/stations/region-3/site-87/adapters/telemetry/frames/decoder_87.py +2 -1                                                                                            C ▆
+  M src/relay/stations/region-3/site-87/adapters/telemetry/frames/decoder_87.py +2 -1                                                                                            C ▄
   M src/relay/stations/region-4/site-88/adapters/telemetry/frames/decoder_88.py +2 -1                                                                                            C █
   M src/relay/stations/region-5/site-89/adapters/telemetry/frames/decoder_89.py +2 -1                                                                                            C █
   M src/relay/stations/region-6/site-90/adapters/telemetry/frames/decoder_90.py +2 -1                                                                                            C █
@@ -23,7 +23,7 @@
   M src/relay/stations/region-2/site-93/adapters/telemetry/frames/decoder_93.py +2 -1                                                                                            C █
   M src/relay/stations/region-3/site-94/adapters/telemetry/frames/decoder_94.py +2 -1                                                                                            C █
   M src/relay/stations/region-4/site-95/adapters/telemetry/frames/decoder_95.py +2 -1                                                                                            C █
-  M src/relay/stations/region-5/site-96/adapters/telemetry/frames/decoder_96.py +2 -1                                                                                            C ▆
+  M src/relay/stations/region-5/site-96/adapters/telemetry/frames/decoder_96.py +2 -1                                                                                            C ▄
   M src/relay/stations/region-6/site-97/adapters/telemetry/frames/decoder_97.py +2 -1                                                                                            C
   M src/relay/stations/region-0/site-98/adapters/telemetry/frames/decoder_98.py +2 -1                                                                                            C
   M src/relay/stations/region-1/site-99/adapters/telemetry/frames/decoder_99.py +2 -1                                                                                            C

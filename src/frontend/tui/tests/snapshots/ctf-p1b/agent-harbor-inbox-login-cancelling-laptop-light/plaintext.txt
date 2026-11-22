@@ -1,9 +1,9 @@
  Inbox  ⚲ ✕
- ● ASKS YOU TO SIGN IN  Benchmark the cache                                                                                                                            Priority… ▾
+                                           ● ASKS YOU TO SIGN IN  Benchmark the cache                                         Priority ▾
                                                                                                                                                                                     
- Example Cloud
- Sign in to read the benchmark bucket.
- Cancelling sign-in…
+                                           Example Cloud
+                                           Sign in to read the benchmark bucket.
+                                           Cancelling sign-in…
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     

@@ -22,7 +22,7 @@
  1 of 5 · Urgent: the migration holds a
  write lock until you decide.
                                              
- ● ASKS FOR PERMISSION  Migr…   Priority… ▾
+ ● ASKS FOR PERMISSION  Migra…   Priority ▾
                                              
  Run `psql -f migrations/0042_cache.sql`
  against the staging database?

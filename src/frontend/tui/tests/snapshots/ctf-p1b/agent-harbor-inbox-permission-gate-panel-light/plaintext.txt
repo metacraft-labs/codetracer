@@ -1,5 +1,5 @@
  Inbox  ⚲ ✕
- ● ASKS FOR PERMISSION  Migrate the cache schema                                  Priority… ▾
+ ● ASKS FOR PERMISSION  Migrate the cache schema                                   Priority ▾
                                                                                                
  Run `psql -f migrations/0042_cache.sql` against the staging database?
                                                                                                

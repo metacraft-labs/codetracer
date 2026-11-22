@@ -3,7 +3,7 @@
  Relay backpressure: bound the relay queues
                               9 files +18 −5
   Specs 8   Tests 5   Details 6   Code 9
-  All milestones                          ▾
+  All milestones ▾
  RB-M2: REPORT QUEUE DEPTH AND SLOW STA… (2)
  test_depth_metric_reports_each_…  ● failing
  Every queue reports its depth.

@@ -1,11 +1,11 @@
  Inbox  ⚲ ✕
- ● NEEDS YOUR ANSWER  Port the route cache                                                                                                                             Priority… ▾
+                                           ● NEEDS YOUR ANSWER  Port the route cache                                          Priority ▾
                                                                                                                                                                                     
- ● Agent has stopped and is waiting for your answer
+                                           ● Agent has stopped and is waiting for your answer
                                                                                                                                                                                     
- Delete the old cache tables now?
+                                           Delete the old cache tables now?
                                                                                                                                                                                     
-  Approve   Reject
+                                            Approve   Reject
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     

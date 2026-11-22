@@ -1,7 +1,7 @@
  Inbox  ⚲ ✕
- ● ASKS YOU TO SIGN IN  Benchmark the cache                                                                                                                            Priority… ▾
+                                           ● ASKS YOU TO SIGN IN  Benchmark the cache                                         Priority ▾
                                                                                                                                                                                     
- No pending login requests.
+                                           No pending login requests.
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     

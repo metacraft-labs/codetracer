@@ -1,14 +1,14 @@
  Inbox  ⚲ ✕
- ● NEEDS YOUR ANSWER  Port t…   Priority… ▾
+ ● NEEDS YOUR ANSWER  Port th…   Priority ▾
                                              
  ● Agent is waiting for an answer
                                              
  Which storage layer should the cache use?
                                              
- ( ) SQLite
- ( ) RocksDB
+  SQLite   RocksDB
                                              
   Submit
+                                             
                                              
                                              
                                              

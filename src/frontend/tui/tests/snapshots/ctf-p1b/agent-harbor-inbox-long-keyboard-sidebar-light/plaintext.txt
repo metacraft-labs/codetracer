@@ -41,7 +41,7 @@
    Waiting 80 minutes.                      █
  31 of 40 · Waiting 62 minutes.             █
                                             █
- ● NEEDS YOUR ANSWER  Inven…   Priority… ▾  █
+ ● NEEDS YOUR ANSWER  Invent…   Priority ▾  █
                                             █
  ● Agent has stopped and is waiting for     █
    your answer                              █

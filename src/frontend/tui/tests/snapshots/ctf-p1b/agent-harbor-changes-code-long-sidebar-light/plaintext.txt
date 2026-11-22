@@ -6,12 +6,15 @@
                                             █
  Since main     300 files changed +600 −300 █
                                             █
-  Search files…                 All      ▾  █
+ C committed · U uncommitted ·              █
+ key: a key source file                     █
                                             █
-  M src/…/frames/decoder_1.py +2 -1       C █
-  M src/…/frames/decoder_2.py +2 -1       C █
-  M src/…/frames/decoder_3.py +2 -1       C █
-  M src/…/frames/decoder_4.py +2 -1       C ▄
+  Search files…                      All ▾  █
+                                            █
+  M src/…/frames/decoder_1.py +2 -1       C ▄
+  M src/…/frames/decoder_2.py +2 -1       C
+  M src/…/frames/decoder_3.py +2 -1       C
+  M src/…/frames/decoder_4.py +2 -1       C
   M src/…/frames/decoder_5.py +2 -1       C
   M src/…/frames/decoder_6.py +2 -1       C
   M src/…/frames/decoder_7.py +2 -1       C
@@ -51,6 +54,3 @@
   M src/…/frames/decoder_41.py +2 -1      C
   M src/…/frames/decoder_42.py +2 -1      C
   M src/…/frames/decoder_43.py +2 -1      C
-  M src/…/frames/decoder_44.py +2 -1      C
-  M src/…/frames/decoder_45.py +2 -1      C
-  M src/…/frames/decoder_46.py +2 -1      C
