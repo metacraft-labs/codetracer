@@ -46,12 +46,17 @@ type
     csNoSuchExport = 5
     csBadArguments = 6
 
-  WasmEngine* = ref object
+  WasmEngine* = object
+    ## A plain value: the engine is shared by every worker thread of the
+    ## host, read-only after `declareImports`, and a `ref` would have its
+    ## count touched from several threads at once.
     raw: CEngine
     kind*: EngineKind
     mode*: DeadlineMode
 
-  WasmModule* = ref object
+  WasmModule* = object
+    ## A plain value, shared by every instance of a package's module on
+    ## whichever thread runs them (the engines' modules are thread-safe).
     raw: CModule
 
   WasmInstance* = ref object
@@ -102,7 +107,7 @@ proc newWasmEngine*(kind: EngineKind; mode: DeadlineMode;
                        errText(err))
   WasmEngine(raw: raw, kind: kind, mode: mode)
 
-proc addImport*(e: WasmEngine; module, name, signature: string): int =
+proc addImport*(e: var WasmEngine; module, name, signature: string): int =
   ## Declare one import every instance may call; `signature` is
   ## `"<params>:<results>"` over `i` (i32) and `I` (i64). Returns its id, the
   ## number the callback is called with.
@@ -151,12 +156,14 @@ proc release*(i: WasmInstance) =
     cte_instance_free(i.raw)
     i.raw = CInstance(nil)
 
-proc release*(m: WasmModule) =
-  if not m.isNil and not m.raw.isNil:
+proc isLoaded*(m: WasmModule): bool = not m.raw.isNil
+
+proc release*(m: var WasmModule) =
+  if not m.raw.isNil:
     cte_module_free(m.raw)
     m.raw = CModule(nil)
 
-proc release*(e: WasmEngine) =
-  if not e.isNil and not e.raw.isNil:
+proc release*(e: var WasmEngine) =
+  if not e.raw.isNil:
     cte_engine_free(e.raw)
     e.raw = CEngine(nil)

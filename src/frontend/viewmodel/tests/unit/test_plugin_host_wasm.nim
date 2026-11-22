@@ -28,13 +28,27 @@
 ##    neighbour is not restarted again.
 ## 4. A module importing anything the host does not offer is refused at
 ##    activation, naming the import.
+## 6. A plugin looping until its deadline holds up nobody: each instance runs
+##    on a worker thread of its own, so its neighbour answers in well under
+##    100 ms while it loops (the median of five queries asked during the loop,
+##    every one answered before the loop was cut off).
+## 7. A release layout finds its host with no environment: the TUI component
+##    `scripts/build-tui-component.sh --copy` lays out carries
+##    `bin/ct-plugin-host` beside the front-end, and a program in that `bin/`
+##    resolves it through the resolver every front-end uses
+##    (`plugin_host_path`), with `CODETRACER_PLUGIN_HOST` and
+##    `CODETRACER_PREFIX` unset; the host it names then runs a plugin. The
+##    one stand-in: the component's binary is `wasm_plugins/plugin_host_probe`,
+##    which links that same resolver and prints its answer, in place of the
+##    25 MB terminal binary — the subject is the layout and the lookup, and
+##    the terminal makes exactly that call.
 ## 5. The terminal's grant screen for a WASM package says what it is — a
 ##    module in CodeTracer's host reaching only its grants — not the native
 ##    package's "full authority" (the terminal's real `openSessionPlugins`
 ##    over a real component directory; the session is the mock backend's,
 ##    as `test_ct_lens_plugins` uses it: the replay is not the subject).
 
-import std/[json, os, posix, sequtils, strutils, tables, unittest]
+import std/[algorithm, json, os, osproc, posix, sequtils, streams, strtabs, strutils, tables, unittest]
 
 import isonim/core/owner
 import codetracer_embed
@@ -348,3 +362,91 @@ suite "ct-plugin-host: many packages in one process, each plugin in its own inst
     check "full authority" notin screen
     check "wasm-reader.files" in screen
     check "fs:read" in screen
+
+  test "a plugin looping until its deadline does not hold up its neighbour":
+    let root = newRoot()
+    let faults = installWasmPackage(root, "wasm-faults", wasmPackage("wasm-faults", @[
+      wasmPlugin("wasm-faults.spin", ["spin.run"], ["spin.status"]),
+      wasmPlugin("wasm-faults.hog", ["hog.run"], ["hog.status"])]),
+      testModule("wasm-faults"))
+    let steady = installWasmPackage(root, "wasm-steady", wasmPackage("wasm-steady", @[
+      wasmPlugin("wasm-steady.echo", [], ["echo.status"]),
+      wasmPlugin("wasm-steady.busy", ["busy.run"], ["busy.status"])]),
+      testModule("wasm-steady"))
+    # A long deadline, so the loop is still running while echo is asked.
+    let sup = newWasmSupervisor(root, deadlineMs = 8_000)
+    sup.add(faults)
+    sup.add(steady)
+    sup.activate("wasm-faults.spin")
+    sup.activate("wasm-steady.echo")
+    check sup.waitUntil("both active", proc(): bool =
+      sup.slot("wasm-faults.spin").active and sup.slot("wasm-steady.echo").active)
+    check sup.pidOf("wasm-faults.spin") == sup.pidOf("wasm-steady.echo")
+    discard sup.ask("wasm-steady.echo", "echo", %*{"n": 0})
+    check sup.invoke("wasm-faults.spin", "spin.run").len > 0
+    # The loop is running: the watchdog names it.
+    let inst = sup.slot("wasm-faults.spin").hostInstance
+    check sup.waitUntil("the watchdog names spin", proc(): bool =
+      inst.busy == "wasm-faults.spin")
+    var times: seq[int64]
+    for k in 1 .. 5:
+      let t0 = monotonicMs()
+      let a = sup.ask("wasm-steady.echo", "echo", %*{"n": k})
+      times.add monotonicMs() - t0
+      check a{"value"}{"echo"}{"n"}.getInt == k
+      # Answered while spin was still looping.
+      check sup.faultOf("wasm-faults.spin").len == 0
+    times.sort()
+    echo "    echo while spin loops (ms): ", times
+    check times[2] < 100
+    check sup.waitUntil("spin cut off at its deadline", proc(): bool =
+      sup.faultOf("wasm-faults.spin").len > 0)
+    check sup.faultOf("wasm-steady.echo").len == 0
+    sup.shutdown()
+
+  test "a release-layout component finds its ct-plugin-host with no environment":
+    let root = newRoot()
+    let probeOut = root / "plugin-host-probe"
+    let nim = getCurrentCompilerExe()
+    let (cout, ccode) = execCmdEx(quoteShellCommand([nim, "c", "--hints:off",
+      "--warnings:off", "--nimcache:" & root / "nc-probe", "-o:" & probeOut,
+      RepoRoot / "src/frontend/viewmodel/tests/unit/wasm_plugins/plugin_host_probe.nim"]))
+    check ccode == 0
+    if ccode != 0: checkpoint cout
+    let comps = root / "components"
+    let (bout, bcode) = execCmdEx(quoteShellCommand(["bash",
+      RepoRoot / "scripts/build-tui-component.sh", "--out-root", comps,
+      "--tui-bin", probeOut, "--plugin-host", pluginHostBin(), "--copy",
+      "--print-path"]))
+    check bcode == 0
+    let bundle = bout.strip.splitLines[^1]
+    checkpoint bout
+    let hostInBundle = bundle / "bin" / "ct-plugin-host"
+    check fileExists(hostInBundle)
+    # A copy, so the bundle stands alone.
+    check getFileInfo(hostInBundle, followSymlink = false).kind == pcFile
+    let probeInBundle = bundle / "bin" / "codetracer-tui"
+    let run = startProcess(probeInBundle, workingDir = root,
+      env = (block:
+        var e = newStringTable(modeCaseSensitive)
+        for k, v in envPairs():
+          if k notin ["CODETRACER_PLUGIN_HOST", "CODETRACER_PREFIX"]: e[k] = v
+        e),
+      options = {poStdErrToStdOut})
+    let found = run.outputStream.readAll().strip
+    discard run.waitForExit()
+    run.close()
+    check found == hostInBundle
+    # And the host it found runs a plugin.
+    let pkgDir = installWasmPackage(root, "wasm-steady", wasmPackage("wasm-steady", @[
+      wasmPlugin("wasm-steady.echo", [], ["echo.status"]),
+      wasmPlugin("wasm-steady.busy", ["busy.run"], ["busy.status"])]),
+      testModule("wasm-steady"))
+    let sup = newWasmSupervisor(root)
+    sup.wasmHost = found
+    sup.add(pkgDir)
+    sup.activate("wasm-steady.echo")
+    check sup.waitUntil("echo active from the bundle's host", proc(): bool =
+      sup.slot("wasm-steady.echo").active)
+    check sup.ask("wasm-steady.echo", "echo", %*{"n": 7}){"value"}{"echo"}{"n"}.getInt == 7
+    sup.shutdown()

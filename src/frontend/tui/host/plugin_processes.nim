@@ -37,6 +37,7 @@ else:
   import std/os
 
 import ../../../common/plugin_model
+import ../../../common/plugin_host_path
 import ../../../ct/launch/[grant_store, plugin_components]
 import ../../viewmodel/session_vm
 import ../../viewmodel/plugin_host/[host, supervisor]
@@ -131,13 +132,12 @@ proc openSessionPlugins*(session: SessionViewModel; sessionId: string;
   result = SessionPlugins()
   let p = result
   p.sup = newSupervisor(frontEnd, "1.0.0", extensionsEnabled)
-  # §11.9: the WASM packages' host, shipped beside this binary.
+  # §11.9: the WASM packages' host, beside this binary or under the
+  # installation prefix (`plugin_host_path`).
   when defined(js):
-    p.sup.wasmHost = getEnv("CODETRACER_PLUGIN_HOST", "")
+    p.sup.wasmHost = findPluginHost("", getEnv("CODETRACER_PREFIX", ""))
   else:
-    p.sup.wasmHost = getEnv("CODETRACER_PLUGIN_HOST",
-      if fileExists(getAppDir() / "ct-plugin-host"): getAppDir() / "ct-plugin-host"
-      else: "")
+    p.sup.wasmHost = findPluginHost()
   p.host = newPluginHost(semver(1, 0, 0), frontEnd = surfaces,
                          extensionsEnabled = extensionsEnabled)
   p.launcherRoot = launcherRoot
