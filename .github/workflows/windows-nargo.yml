@@ -36,10 +36,12 @@ jobs:
   windows-nargo:
     name: nargo builds and compiles a program (Windows)
     runs-on: [self-hosted, windows, x64]
-    # A cold build compiles nargo from source after env.ps1's other steps.
-    # That alone ran past 75 minutes in codetracer run 44940608244. A warm
-    # cache restores nargo and takes minutes.
-    timeout-minutes: 180
+    # Bounded for a cold build that must still save its cache: nargo's own
+    # compile took 71 min in run 44954823072, after env.ps1's other steps,
+    # and a run that times out saves nothing. A warm cache restores nargo and
+    # takes minutes. This job runs nightly or when its own files change, so a
+    # generous bound costs little.
+    timeout-minutes: 330
     steps:
       - name: Ensure Git and Git Bash are on PATH
         shell: powershell
@@ -121,8 +123,19 @@ jobs:
         # from NARGO_DIR.
         id: nargo
         shell: pwsh
+        # Only what the NARGO step needs: Rust, Nim (prebuilt, since the source
+        # bootstrap spent 20 min failing before falling back to it in run
+        # 44954823072) and GCC. The rest of env.ps1's root is 12 GB and about
+        # 45 min (LLVM, GO, VLANG, FPC, GNAT, LDC, ...) that nargo never uses;
+        # leaving it out is what keeps later cold runs short, rather than
+        # caching it.
         env:
           WINDOWS_DIY_ENSURE_TTD: "false"
+          NIM_WINDOWS_SOURCE_MODE: prebuilt
+          # env.ps1's allowlist: only these steps run, and it also leaves out
+          # codetracer's own node-packages install, which a WINDOWS_DIY_SKIP_*
+          # list would still run.
+          WINDOWS_DIY_ONLY: "GCC,ZSTD,ZLIB,RUST,NIM,NARGO"
         run: |
           $ErrorActionPreference = "Stop"
           $started = Get-Date
