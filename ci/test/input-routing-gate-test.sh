@@ -28,11 +28,13 @@ make_tree() {
 	echo "${t}"
 }
 
+# expect_red NAME CHECK [FILE]: the gate reddens on CHECK — in FILE when one is
+# named, so a case is not satisfied by a site elsewhere in the copied tree.
 expect_red() {
-	local name="$1" check="$2" out rc
+	local name="$1" check="$2" file="${3:-}" out rc
 	out="$(bash "${gate}" "${work}/${name}" 2>&1)"
 	rc=$?
-	if [ "${rc}" -ne 0 ] && grep -qF "FAIL  [${check}]" <<<"${out}"; then
+	if [ "${rc}" -ne 0 ] && grep -qF "FAIL  [${check}] ${file}" <<<"${out}"; then
 		pass=$((pass + 1))
 		echo "  ok   ${name}: reddens on ${check}"
 	else
@@ -59,20 +61,41 @@ proc planted(key: string) =
   of "Enter": discard
   else: discard
 NIM
-expect_red case case
+expect_red case case src/frontend/tui/app/views/planted.nim
 
 t="$(make_tree compare)"
 cat >>"${t}/src/frontend/gpui/planted.nim" <<'NIM'
 proc planted(key: string): bool = key == "Esc"
 NIM
-expect_red compare compare
+expect_red compare compare src/frontend/gpui/planted.nim
+
+# A call chain between the key-shaped name and the comparison: the GPUI Edit
+# window compared `key.toLowerAscii in ["escape", "esc"]` unseen until
+# 2026-11-22. Each spelling in its own file, so each is counted on its own.
+t="$(make_tree compare-call-chain)"
+cat >>"${t}/src/frontend/gpui/planted.nim" <<'NIM'
+proc planted(key: string): bool = key.toLowerAscii in ["escape", "esc"]
+NIM
+expect_red compare-call-chain compare src/frontend/gpui/planted.nim
+
+t="$(make_tree compare-call-chain-eq)"
+cat >>"${t}/src/frontend/gpui/planted.nim" <<'NIM'
+proc planted(key: string): bool = key.toLowerAscii() == "escape"
+NIM
+expect_red compare-call-chain-eq compare src/frontend/gpui/planted.nim
+
+t="$(make_tree compare-call-chain-member)"
+cat >>"${t}/src/frontend/ui/planted.nim" <<'NIM'
+proc planted(ev: KeyEvent): bool = ev.key.toLowerAscii.strip notin ["enter"]
+NIM
+expect_red compare-call-chain-member compare src/frontend/ui/planted.nim
 
 t="$(make_tree listen)"
 cat >>"${t}/src/frontend/viewmodel/views/planted.nim" <<'NIM'
 proc planted(el: Node) =
   el.addEventListener("keydown", proc(ev: Event) = discard)
 NIM
-expect_red listen listen
+expect_red listen listen src/frontend/viewmodel/views/planted.nim
 
 t="$(make_tree click)"
 cat >>"${t}/src/frontend/viewmodel/views/isonim_point_list_view.nim" <<'NIM'
@@ -81,19 +104,19 @@ proc planted[R, N](r: R; vm: PointListVM): N =
     tdiv(onclick = proc() = vm.selectPoint(some(0))):
       discard
 NIM
-expect_red click click
+expect_red click click src/frontend/viewmodel/views/isonim_point_list_view.nim
 
 t="$(make_tree compare-cstring)"
 cat >>"${t}/src/frontend/ui/planted.nim" <<'NIM'
 proc planted(e: JsObject): bool = e.key.to(cstring) == cstring"Enter"
 NIM
-expect_red compare-cstring compare
+expect_red compare-cstring compare src/frontend/ui/planted.nim
 
 t="$(make_tree compare-cstring-call)"
 cat >>"${t}/src/frontend/ui/planted.nim" <<'NIM'
 proc planted(key: cstring): bool = key == cstring("Escape")
 NIM
-expect_red compare-cstring-call compare
+expect_red compare-cstring-call compare src/frontend/ui/planted.nim
 
 t="$(make_tree case-cstring)"
 cat >>"${t}/src/frontend/ui/planted.nim" <<'NIM'
@@ -102,7 +125,7 @@ proc planted(key: cstring) =
   of cstring"Enter": discard
   else: discard
 NIM
-expect_red case-cstring case
+expect_red case-cstring case src/frontend/ui/planted.nim
 
 # A press-DOWN handler carrying behaviour: the `click` check's twin.
 t="$(make_tree press)"
@@ -110,7 +133,7 @@ cat >>"${t}/src/frontend/ui/planted.nim" <<'NIM'
 proc planted(el: Element; vm: PointListVM) =
   el.addEventListener(cstring"mousedown", proc(ev: Event) = vm.selectPoint(some(0)))
 NIM
-expect_red press press
+expect_red press press src/frontend/ui/planted.nim
 
 t="$(make_tree press-dsl)"
 cat >>"${t}/src/frontend/viewmodel/views/isonim_point_list_view.nim" <<'NIM'
@@ -119,14 +142,14 @@ proc planted[R, N](r: R; vm: PointListVM): N =
     tdiv(onmousedown = proc() = vm.selectPoint(some(0))):
       discard
 NIM
-expect_red press-dsl press
+expect_red press-dsl press src/frontend/viewmodel/views/isonim_point_list_view.nim
 
 t="$(make_tree press-pointerdown)"
 cat >>"${t}/src/frontend/gpui/planted.nim" <<'NIM'
 proc planted(r: GpuiRenderer; el: GpuiElement; vm: PointListVM) =
   r.addEventListener(el, "pointerdown", proc() = vm.selectPoint(some(0)))
 NIM
-expect_red press-pointerdown press
+expect_red press-pointerdown press src/frontend/gpui/planted.nim
 
 # A reason outside the closed set is no reason.
 t="$(make_tree press-bad-reason)"
@@ -134,7 +157,7 @@ cat >>"${t}/src/frontend/ui/planted.nim" <<'NIM'
 proc planted(el: Element; vm: PointListVM) =
   el.addEventListener(cstring"mousedown", proc(ev: Event) = vm.selectPoint(some(0)))  # ir1-gate: convenient
 NIM
-expect_red press-bad-reason press
+expect_red press-bad-reason press src/frontend/ui/planted.nim
 
 # The legal press-down listeners stay legal: a GPUI listener that only
 # reports the element pressed to the router, and a drag's start.
@@ -159,7 +182,7 @@ cat >>"${t}/src/frontend/viewmodel/views/isonim_low_level_code_view.nim" <<'NIM'
 proc planted(row: Node) =
   row.addEventListener("contextmenu", proc(ev: Event) = discard)
 NIM
-expect_red menu click
+expect_red menu click src/frontend/viewmodel/views/isonim_low_level_code_view.nim
 
 t="$(make_tree stale)"
 echo "src/frontend/ui/key_chords_gone.nim case 3" >>"${t}/ci/test/input-routing-gate-ledger.txt"
