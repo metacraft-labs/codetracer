@@ -414,7 +414,9 @@ src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/gpui/t
 # above, test_plat64_reachability.nim (its press-only operations); it re-counted
 # test_gpui_window_frame.nim (one more scanned GPUI source). Re-grade those arms.
 src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend/viewmodel/keymap/overlay_rows.nim	29d13621166a061d890ce4e32b6f11947812f0926f5f1929385f4b3209618834	ec2309f149cc496f508ecb1cdb40edaea695e1ed3f970db63de0ec7cefb8ddea
-src/frontend/gpui/tests/plat37-window-mutation-control.sha256	src/frontend/gpui/tests/test_gpui_window_frame.nim	40f5de09b1e97db5d711bbbc47ea609c1b675e2f73e2a80c8adb382d3f709677	8a5a679bc5ad75cec8832652fc8860ca60b906a85664159f9234889434589af5
+# test_gpui_window_frame.nim moved again: its assertion pin was re-counted 1038 -> 1047 for the
+# scanned element_reuse.nim. Only ExpectedAssertions and its history comment changed.
+src/frontend/gpui/tests/plat37-window-mutation-control.sha256	src/frontend/gpui/tests/test_gpui_window_frame.nim	40f5de09b1e97db5d711bbbc47ea609c1b675e2f73e2a80c8adb382d3f709677	ad6e0f6a5ea0eaa5345365f5a5b3a7b192e8008118b5d8b697a0bf78ec7f289f
 # The status line keeps a message a late answer did not write (`fix(tui): a terminal's late answer
 # no longer replaces a message on the status line`) moved src/frontend/tui/main.nim.
 # Re-grade the arms whose needles sit in it.
