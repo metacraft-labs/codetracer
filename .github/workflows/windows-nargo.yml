@@ -142,12 +142,29 @@ jobs:
           . ./env.ps1
           $elapsed = [int]((Get-Date) - $started).TotalMinutes
           Write-Host "env.ps1 (nargo cache hit: ${{ steps.nargo_cache.outputs.cache-hit == 'true' }}) took $elapsed min"
-          $nargo = (Get-Command nargo -ErrorAction SilentlyContinue).Source
-          if (-not $nargo -and $env:NARGO_DIR) { $nargo = Join-Path $env:NARGO_DIR "nargo.exe" }
-          if (-not $nargo -or -not (Test-Path -LiteralPath $nargo)) { throw "env.ps1 produced no nargo (NARGO_DIR='$env:NARGO_DIR')" }
-          Write-Host "nargo: $nargo"
-          & $nargo --version
-          if ($LASTEXITCODE -ne 0) { throw "nargo --version exited $LASTEXITCODE" }
+          # env.ps1's `nargo` shim is a bash script without an extension (for
+          # Git Bash users), so PowerShell cannot start it: run nargo.exe
+          # directly, then the shim through Git Bash, the way a developer's
+          # shell calls it.
+          if (-not $env:NARGO_DIR) { throw "env.ps1 set no NARGO_DIR" }
+          $exe = Join-Path $env:NARGO_DIR "nargo.exe"
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw "env.ps1 produced no nargo.exe (NARGO_DIR='$env:NARGO_DIR')" }
+          Write-Host "nargo: $exe"
+          & $exe --version
+          if ($LASTEXITCODE -ne 0) { throw "nargo.exe --version exited $LASTEXITCODE" }
+          $nargoCmd = $exe
+          $nargoPre = @()
+          $shim = if ($env:WINDOWS_DIY_SHIMS_DIR) { Join-Path $env:WINDOWS_DIY_SHIMS_DIR "nargo" }
+          if ($shim -and (Test-Path -LiteralPath $shim -PathType Leaf)) {
+            $bash = if ($env:WINDOWS_DIY_GIT_BASH_BIN) { Join-Path $env:WINDOWS_DIY_GIT_BASH_BIN "bash.exe" } else { "C:\PortableGit\bin\bash.exe" }
+            if (-not (Test-Path -LiteralPath $bash -PathType Leaf)) { throw "the nargo shim exists but Git Bash ($bash) does not" }
+            $shimArg = $shim -replace '\\', '/'
+            Write-Host "nargo shim: $shim, through $bash"
+            & $bash $shimArg --version
+            if ($LASTEXITCODE -ne 0) { throw "the nargo shim's --version exited $LASTEXITCODE" }
+            $nargoCmd = $bash
+            $nargoPre = @($shimArg)
+          }
           $proj = Join-Path $env:RUNNER_TEMP ("nargo-smoke-" + [Guid]::NewGuid().ToString('N'))
           New-Item -ItemType Directory -Force -Path (Join-Path $proj "src") | Out-Null
           Set-Content -LiteralPath (Join-Path $proj "Nargo.toml") -Encoding ASCII -Value @(
@@ -156,7 +173,7 @@ jobs:
             'fn main(x: Field, y: pub Field) {', '    assert(x != y);', '}')
           Push-Location -LiteralPath $proj
           try {
-            & $nargo compile
+            & $nargoCmd @nargoPre compile
             if ($LASTEXITCODE -ne 0) { throw "nargo compile exited $LASTEXITCODE" }
           } finally { Pop-Location }
           if (-not (Test-Path -LiteralPath (Join-Path $proj "target/smoke.json"))) { throw "nargo compile wrote no target/smoke.json" }
