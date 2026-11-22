@@ -276,3 +276,16 @@ AH_CC_GAP = 0.25rem          // between the columns: the layout's splitter
   flex: 1 1 0
   min-width: 0
   min-height: 0
+
+// The waiting list's count, in its head band where a panel has its summary
+// and set as one (`.ah-fleet-summary`, agent_harbor.styl). It is not that
+// class: the tab's panel summary is the Initiatives panel's own, and a
+// reader of the tab finds that one (the playback test reads the first).
+.ah-cc-waiting-count
+  flex: 0 1 auto
+  order: 4
+  margin-left: auto
+  min-width: 0
+  font-size: ah-rem(type-ui-size-caption-md)
+  color: colors-ui-text-primary-caption
+  white-space: nowrap

@@ -116,7 +116,7 @@ const DrawnTextFacts = [
   "label", "title", "summary", "headline", "executive-summary", "status", "meta",
   "progress", "source", "counts", "detail", "age", "activity", "origin", "more",
   "inbox-position", "elsewhere-label", "frame-title", "caveat", "failure", "error",
-  "button"]
+  "button", "waiting-count"]
   ## The `data-ah-*` facts that name a text the element draws. The checks
   ## below compare these facts with the viewmodel; `drawnTextProblems` holds
   ## every one of them to the text actually drawn under its element, so a

@@ -150,7 +150,7 @@ proc themeOf(mode: DesignMode): string = (if mode == dmDark: "dark" else: "light
 const DrawnTextFacts = [
   "label", "title", "summary", "headline", "status", "meta", "progress", "source",
   "counts", "detail", "age", "activity", "origin", "inbox-position", "elsewhere-label",
-  "frame-title", "caveat", "failure", "error", "error-title"]
+  "frame-title", "caveat", "failure", "error", "error-title", "waiting-count"]
   ## The facts that name a text the node draws on its one row.
 
 proc elidedMatch*(drawn, value: string): bool =

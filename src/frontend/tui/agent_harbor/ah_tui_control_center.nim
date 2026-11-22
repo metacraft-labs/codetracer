@@ -45,6 +45,12 @@ export agent_harbor_control_center_words
 const
   LaunchMinCells* = 40
 
+proc renameFact(n: AhNode; name, to: string) =
+  ## Every `name` fact in `n`'s tree renamed `to`.
+  for i in 0 ..< n.facts.len:
+    if n.facts[i][0] == name: n.facts[i][0] = to
+  for ch in n.children: renameFact(ch, name, to)
+
 proc pressOf(press: ControlCenterPress; operation, target: string): proc() =
   result = proc() =
     if press != nil: press(operation, target)
@@ -120,6 +126,9 @@ proc drawLaunch(c: var AhCanvas; parent: AhNode; vm: ControlCenterVM;
   # The head band every panel of the tab has (the Initiatives panel's own),
   # so the columns' heads line up.
   var r = row + c.drawSectionHeader(host, row, col, width, LaunchHeading, "", "")
+  # The head band's summary place (empty here) is not the tab's summary: the
+  # tab's is the Initiatives panel's own, which a reader of the tab finds.
+  renameFact(host.children[^1], "summary", "launch-summary")
   var modes: seq[(string, string, string, bool)]
   for (_, label, operation, on) in vm.modeChoices: modes.add (label, operation, "", on)
   let modesNode = c.node(host, r, left, inner, 1, [("cc-modes", $vm.mode)])
@@ -242,6 +251,9 @@ proc drawWaiting(c: var AhCanvas; host: AhNode; vm: ControlCenterVM;
   let section = c.node(host, top, col, width, height, [("waiting-section", $rows.len)])
   var r = top + c.drawSectionHeader(section, top, col, width, WaitingHeading, "",
                                     waitingCountText(rows.len))
+  # The count sits where a panel has its summary, but the tab's summary is
+  # the Initiatives panel's own: a reader of the tab finds that one.
+  renameFact(section, "summary", "waiting-count")
   if rows.len == 0:
     discard c.text(section, r, col + 1, inner, NothingWaitingWords, c.p.textCaption)
   let focused = vm.focused.val
@@ -304,7 +316,14 @@ proc drawOverview(c: var AhCanvas; parent: AhNode; vm: ControlCenterVM;
     discard c.text(host, panelTop + headRows + 1, col + 1, inner, NoInitiativesWords,
                    c.p.textCaption, fact = "cc-empty-line")
   else:
+    # The panel's own drawing (D64), whose drawer hangs its node at the
+    # canvas's root; it is moved under the overview, so the panel is part of
+    # the control center's tree, as the web's is part of its tab.
+    let before = c.root.children.len
     c.drawInitiativesPanel(vm.initiatives, panelTop, col, width, panelH)
+    while c.root.children.len > before:
+      host.children.add c.root.children[before]
+      c.root.children.delete(before)
   total
 
 proc drawControlCenter*(c: var AhCanvas; vm: ControlCenterVM; row, col, width, height: int;
