@@ -202,7 +202,11 @@ LOCK_NOIR=f09f459714b839a5952b59e09ce0546a936c797e
 # UNLOCKED_SIBLINGS). A lane that needs one names it with an explicit
 # revision. Where flake.lock pins the repo (native-backend, native-recorder,
 # visual-replay) the lane takes flake.lock's revision; those below have no
-# flake input, so their revision lives here.
+# flake input, so their revision lives here. Each line is the ONE home of that
+# revision: every `<name>=<sha>` a workflow writes for it, literal or
+# `|| '<sha>'` fallback, must equal it, and a sibling flake.lock pins must not
+# appear here (ci/test/sibling-provisioning-test.sh, 1e). Move a revision here
+# and in the workflows together.
 #
 # The revisions codetracer's repro.lock last pinned before bbf7dbed4a6 dropped
 # them (3b0524226ed), with which run 44384977215's TUI and visual-replay-tools
@@ -210,5 +214,10 @@ LOCK_NOIR=f09f459714b839a5952b59e09ce0546a936c797e
 # plugin package is published as (plugin_distribution_e2e_test.nim).
 PRIVATE_SIBLING_CODETRACER_LAUNCHER=88e7667f1ab2a9248ad63f445d1e6ad74d632411
 PRIVATE_SIBLING_CODETRACER_SNAPSHOT_CODECS=3e503da83b73e805f30096d4baa45c18d138f6d3
+# The native fixtures (`c/sudoku_solver`, `gl/gl_scene`) the desktop's native
+# Low Level Code capture and the visual-replay gate run: the revision
+# codetracer's repro.lock pinned before bbf7dbed4a6 (dev plus the commit that
+# declares the package; the fixtures are dev's).
+PRIVATE_SIBLING_CODETRACER_NATIVE_TEST_PROGRAMS=0d0d64e2ebe2cb261284778fa7959bb7cf761604
 # isonim-zgui, which only the zgui lane (.github/workflows/zgui.yml) clones.
 PRIVATE_SIBLING_ISONIM_ZGUI=328155b7086fa6a2921287c1aec8ff5d305aa645
