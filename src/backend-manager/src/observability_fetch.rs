@@ -1127,6 +1127,10 @@ fn header_values<'a>(headers: &'a str, name: &str) -> Vec<&'a str> {
         .collect()
 }
 
+/// The spare capacity [`RawBody::fill`] reserves in its buffer before each
+/// read, so that one read can take up to this many bytes.
+const READ_CHUNK: usize = 64 * 1024;
+
 /// Bytes read from the connection and not yet consumed.
 struct RawBody<'r, R> {
     src: &'r mut R,
@@ -1150,12 +1154,20 @@ impl<R: tokio::io::AsyncRead + Unpin> RawBody<'_, R> {
             self.buf.drain(..self.pos);
             self.pos = 0;
         }
-        let mut tmp = [0u8; 64 * 1024];
-        let n = tokio::time::timeout(READ_IDLE_TIMEOUT, self.src.read(&mut tmp))
+        // Read straight into the heap buffer's spare capacity.  The bytes
+        // must not pass through a stack array here: an array held across
+        // the `.await` becomes part of this future, and of every future
+        // that awaits it, up to `main`'s.  A 64 KiB one did, and in a debug
+        // build, which gives each such temporary its own stack slot, it
+        // pushed the main thread past the 1 MiB stack Windows gives it, so
+        // every subcommand overflowed at startup (`record-web` among them)
+        // whether or not it ever fetched anything.
+        // `tests/record_web_constrained_stack_test.rs` guards this.
+        self.buf.reserve(READ_CHUNK);
+        let n = tokio::time::timeout(READ_IDLE_TIMEOUT, self.src.read_buf(&mut self.buf))
             .await
             .map_err(|_| format!("the gateway's body stalled for {READ_IDLE_TIMEOUT:?}"))?
             .map_err(|e| format!("read body: {e}"))?;
-        self.buf.extend_from_slice(&tmp[..n]);
         // Cooperative yield so a long download does not starve other tasks.
         self.reads = self.reads.wrapping_add(1);
         if self.reads.is_multiple_of(16) {
