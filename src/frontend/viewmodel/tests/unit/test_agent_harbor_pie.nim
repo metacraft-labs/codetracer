@@ -1,22 +1,22 @@
 ## The progress pie's inks and its web spelling: `agent_harbor_palette`'s
 ## `pieInks` on every ground a pie sits on, in both colour modes, against the
 ## pie's contrast floors; the web stylesheet that carries those inks, held
-## equal to what the palette resolves; the wedge's stop and gradient
-## spellings every front end shares; the web view's classes; and the story's
-## data.
+## equal to what the palette resolves; the pie's shape (a ring in the role's
+## ink, the wedge filled inside it in the same ink, the rest the ground) and
+## its geometry at native size; the wedge's stop and gradient spellings
+## every front end shares; the web view's classes; and the story's data.
 ##
-## The rules (the wedge and the edge 3.3:1 on the ground, WCAG 2.2 SC
-## 1.4.11's 3:1, https://www.w3.org/TR/WCAG22/#non-text-contrast, with a
-## margin for the antialiased edge; the wedge against the rest of the disc
-## between 1.4:1 and 1.8:1, nearest 1.5:1; two roles' inks CIEDE2000 20
-## apart and their rests 15; warning and error 1.3:1 apart in luminance;
-## ended a grey of chroma 12 or less) are measured here with this file's own
-## WCAG contrast measure and the stated thresholds, not the palette's
-## constants, so a wrong formula or a moved constant in the palette cannot
-## pass its own check.
+## The rules (the ink, the wedge's and the edge's, 3.3:1 on the ground, WCAG
+## 2.2 SC 1.4.11's 3:1, https://www.w3.org/TR/WCAG22/#non-text-contrast,
+## with a margin for the antialiased edge; two roles' inks CIEDE2000 20
+## apart; warning and error 1.3:1 apart in luminance; ended a grey of chroma
+## 12 or less) are measured here with this file's own WCAG contrast measure
+## and the stated thresholds, not the palette's constants, so a wrong formula
+## or a moved constant in the palette cannot pass its own check.
 ##
 ## No mocks: the palette, the stylesheet and the story data are the
-## production ones; nothing is drawn.
+## production ones; nothing is drawn (the wedge's pixels are counted from the
+## pie's own geometry, `pieWedgeInsetPx`, by supersampling).
 
 import std/[math, sequtils, strutils, tables, unittest]
 import isonim/testing/mock_dom
@@ -48,23 +48,19 @@ suite "the pie's inks hold the floors":
           let at = $mode & " " & $ground & " " & $role
           checkpoint at & ": " & $inks
           check inks.ground == g
+          # One ink: the wedge is the edge's full ink, never a mix of it.
           check inks.edge == inks.wedge
+          check inks.wedge == p.roleInks(g)[role]
           check ratio(inks.wedge, g) >= 3.3
           check ratio(inks.edge, g) >= 3.3
-          if role == prIdle:
-            # Hollow: the rest of the disc is the ground itself.
-            check inks.rest == g
-          else:
-            check ratio(inks.wedge, inks.rest) >= 1.4
-            check ratio(inks.wedge, inks.rest) <= 1.8
           inc checked
     check checked == 2 * (ord(high(PieGround)) + 1) * (ord(high(PieRole)) + 1)
 
   test "a role's own ink is kept wherever it meets every rule":
     # Against the roles resolved before it (`PieRoleOrder`): 3.3:1 on the
-    # ground, 20 from their inks, its rest 15 from theirs, error 1.3:1 from
-    # warning, ended a grey. A role that later gave way to the next one
-    # (`gaveWay`) is the exception, checked below.
+    # ground, 20 from their inks, error 1.3:1 from warning, ended a grey. A
+    # role that later gave way to the next one (`gaveWay`) is the exception,
+    # checked below.
     for mode in [dmDark, dmLight]:
       let p = ahPalette(mode)
       for ground in PieGround:
@@ -73,13 +69,9 @@ suite "the pie's inks hold the floors":
         var earlier: seq[PieRole]
         for role in PieRoleOrder:
           let own = p.roleInk(role)
-          let ownRest = mixInk(own, g, pieRestMix(own, g))
           var meets = ratio(own, g) >= 3.3
           for other in earlier:
-            let o = p.pieInks(other, ground)
-            if deltaE2000(own, o.wedge) < 20.0: meets = false
-            if role != prIdle and other != prIdle and deltaE2000(ownRest, o.rest) < 15.0:
-              meets = false
+            if deltaE2000(own, p.pieInks(other, ground).wedge) < 20.0: meets = false
           if role == prError and ratio(own, p.pieInks(prWarning, ground).wedge) < 1.3:
             meets = false
           if role == prEnded and inkChroma(own) > 12.0: meets = false
@@ -101,9 +93,6 @@ suite "the pie's inks hold the floors":
     check ratio(p.iconWarning, p.iconError) < 1.3
     check p.pieInks(prError, pgPanel).wedge != p.iconError
     check ratio(p.pieInks(prError, pgPanel).wedge, p.iconWarning) >= 1.3
-    # The rest is a whole-percent mix toward the panel.
-    let w = p.pieInks(prWarning, pgPanel)
-    check w.rest == mixInk(p.iconWarning, p.panel, w.restMixPercent)
 
   test "Light's warning on the active tab is darkened to hold 3.3:1":
     let p = ahPalette(dmLight)
@@ -117,31 +106,6 @@ suite "the pie's inks hold the floors":
     check mixInk("#102030", "#102030", 55) == "#102030"
     check mixInk("#ff0000", "#0000ff", 0) == "#ff0000"
     check mixInk("#ff0000", "#0000ff", 100) == "#0000ff"
-
-suite "the wedge is subtle, near its target":
-  test "every role but idle on every ground: the mix nearest 1.5:1 inside [1.4, 1.8]":
-    for mode in [dmDark, dmLight]:
-      let p = ahPalette(mode)
-      var least = Inf
-      var most = 0.0
-      for ground in PieGround:
-        let g = p.pieGroundColour(ground)
-        for role in PieRole:
-          if role == prIdle: continue
-          let inks = p.pieInks(role, ground)
-          let c = ratio(inks.wedge, inks.rest)
-          checkpoint $mode & " " & $ground & " " & $role & ": " & $c
-          check c >= 1.4 and c <= 1.8
-          least = min(least, c)
-          most = max(most, c)
-          # No whole-percent mix inside the band is nearer the target.
-          for mix in 0 .. 100:
-            let other = ratio(inks.wedge, mixInk(inks.wedge, g, mix))
-            if other >= 1.4 and other <= 1.8:
-              check abs(c - 1.5) <= abs(other - 1.5) + 1e-9
-      echo "    ", mode, ": wedge against rest ", formatFloat(least, ffDecimal, 2),
-        " to ", formatFloat(most, ffDecimal, 2), ":1"
-      check most - least < 0.1
 
 suite "two roles are told apart on every ground":
   test "the CIEDE2000 formula reproduces Sharma's published test pairs":
@@ -175,25 +139,6 @@ suite "two roles are told apart on every ground":
               worst = (de, $ground & " " & $a & "/" & $b & " dE " &
                 formatFloat(de, ffDecimal, 1) & ", " & formatFloat(ratio(x, y), ffDecimal, 2) & ":1")
       echo "    ", mode, ": nearest pair ", worst[1]
-
-  test "two rests stand apart: CIEDE2000 15 for every pair but idle's":
-    # Two pies at 0 % are their rests and their edges; idle draws no rest
-    # disc (it is hollow).
-    for mode in [dmDark, dmLight]:
-      let p = ahPalette(mode)
-      var worst = (Inf, "")
-      for ground in PieGround:
-        for a in PieRole:
-          for b in PieRole:
-            if ord(b) <= ord(a) or prIdle in [a, b]: continue
-            let (x, y) = (p.pieInks(a, ground).rest, p.pieInks(b, ground).rest)
-            let de = deltaE2000(x, y)
-            checkpoint $mode & " " & $ground & " " & $a & "/" & $b & " rests: dE " & $de
-            check de >= 15.0
-            if de < worst[0]:
-              worst = (de, $ground & " " & $a & "/" & $b & " dE " &
-                formatFloat(de, ffDecimal, 1) & ", " & formatFloat(ratio(x, y), ffDecimal, 2) & ":1")
-      echo "    ", mode, ": nearest rests ", worst[1]
 
   test "warning and error differ in luminance too: 1.3:1 on every ground":
     for mode in [dmDark, dmLight]:
@@ -247,12 +192,11 @@ suite "two roles are told apart on every ground":
       check ratio(inks[prWarning], inks[prError]) >= 1.3
 
 suite "the pie's shapes":
-  test "unknown outranks the role; idle is hollow; the rest are discs":
-    check pieShapeOf(pieOf(saRunning, 0, 0)) == psUnknown
-    check pieShapeOf(pieOf(saIdle, 0, 0)) == psUnknown
-    check pieShapeOf(pieOf(saIdle, 0, 50)) == psHollow
-    check pieShapeOf(pieOf(saRunning, 0, 50)) == psDisc
-    check pieShapeOf(pieOf(saEnded, 50, 50)) == psDisc
+  test "every role is a ring with its wedge inside; unknown outranks the role":
+    for state in PieStoryStates:
+      check pieShapeOf(pieOf(state, 0, 0)) == psUnknown
+      for done in PieStoryDone:
+        check pieShapeOf(pieOf(state, done, PieStoryTotal)) == psRing
 
   test "the web draws 0 % and unknown differently":
     let r = MockRenderer()
@@ -265,8 +209,43 @@ suite "the pie's shapes":
       check unknown.children[0].attributes["class"] == "ah-pie-dot"
       check zero.children.len == 0
       check zero.attributes["aria-label"] != unknown.attributes["aria-label"]
-    check "ah-pie-hollow" in pieIndicator[MockRenderer, MockNode](
-      r, pieOf(saIdle, 50, 50), pgPanel).attributes["class"]
+    check "ah-pie-ring" in pieIndicator[MockRenderer, MockNode](
+      r, pieOf(saEnded, 50, 50), pgPanel).attributes["class"]
+
+  test "the web leaves the rest of every pie as the ground, inside a gap":
+    # Every role at every share is a ring: the class that paints the wedge on
+    # the content box (inset by the padding past the ring and the gap), and
+    # the gradient's rest transparent, so a 0 % pie inside its ring is the
+    # ground and nothing else. No rest ink is written for any role.
+    let r = MockRenderer()
+    for state in PieStoryStates:
+      for done in PieStoryDone:
+        let pie = pieOf(state, done, PieStoryTotal)
+        let n = pieIndicator[MockRenderer, MockNode](r, pie, pgPanel)
+        checkpoint $state & " " & $done
+        check "ah-pie-ring" in n.attributes["class"]
+        check n.children.len == 0
+        check "padding: 0.125rem;" in n.attributes["style"]
+    check ".ah-pie\n" in PieSheet
+    let rule = PieSheet[PieSheet.find(".ah-pie\n") ..< PieSheet.find("\n\n", PieSheet.find(".ah-pie\n"))]
+    check "  background: conic-gradient(var(--ah-pie-wedge) 0 var(--ah-pie-p), " &
+      "transparent var(--ah-pie-p) 100%)\n" in rule & "\n"
+    # After the shorthand, which would reset it to the border box.
+    check rule.find("  background-clip: content-box") > rule.find("  background: ")
+    check "--ah-pie-rest" notin PieInksSheet
+    check "--ah-pie-rest" notin PieSheet
+
+  test "GPUI's gradient leaves the rest as the ground":
+    # The spelling GPUI paints (`pieConicGradient`): the rest stop is the
+    # ground itself on every ground, in both modes.
+    for mode in [dmDark, dmLight]:
+      let p = ahPalette(mode)
+      for ground in PieGround:
+        for role in PieRole:
+          let inks = p.pieInks(role, ground)
+          checkpoint $mode & " " & $ground & " " & $role
+          check inks.pieConicGradient(pieOf(saRunning, 0, 50)) ==
+            "conic-gradient(" & inks.wedge & " 0 0%, " & p.pieGroundColour(ground) & " 0% 100%)"
 
   test "the web's bands carry the title of each mode":
     let r = MockRenderer()
@@ -289,14 +268,50 @@ suite "the pie's shapes":
     check ".ah-pie-band-selected-row\n  background: by-mode(#3c3c3c, #c8c2b5)\n" in PieInksSheet
     check "display: by-mode(none, block)" in PieInksSheet
 
-  test "the unknown dot is well short of a hollow pie's inner disc":
-    # At native size (12 px): the dot a quarter (3 px), the inner disc two
-    # thirds (8 px), so a whole idle pie and an unknown one never read alike.
+  test "the unknown dot is well short of the wedge's disc":
+    # At native size (12 px): the dot a quarter (3 px), the wedge's disc
+    # 8 px, so a whole pie and an unknown one never read alike.
     let dot = 12.0 * PieDotFraction
-    let inner = 12.0 * (1.0 - 2.0 * PieHollowInsetFraction)
+    let inner = float(12 - 2 * pieWedgeInsetPx(12))
     check dot <= 3.0
     check inner >= 8.0
     check dot * 2.0 < inner
+
+  test "the ring, the gap and the wedge's disc on whole pixels":
+    # 1 px of ring; 1 px of ground from 12 px up, none under it.
+    check PieEdgePx == 1
+    check [pieRingGapPx(9), pieRingGapPx(10), pieRingGapPx(11)] == [0, 0, 0]
+    check [pieRingGapPx(12), pieRingGapPx(16), pieRingGapPx(24)] == [1, 1, 2]
+    check pieWedgeInsetPx(12) == 2
+    check pieWedgeInsetPx(10) == 1
+
+  test "a 16 % wedge reads at native size: at least 6 whole pixels of ink":
+    # The wedge's own geometry, sampled 16 x 16 per pixel: a pixel counts
+    # when the wedge covers 90 % of it (the capture test's full-ink pixel).
+    # At the pie's native sizes (10 px in tabs and menus, 12 px on lines,
+    # 16 px on the caption) a 16 % share is at least `WedgePixels` such pixels; with the
+    # 1 px gap kept at 10 px it would be 3.
+    const WedgePixels = 6
+    proc wholePixels(sizePx: int; share: float): int =
+      let c = sizePx.float / 2.0
+      let radius = c - pieWedgeInsetPx(sizePx).float
+      for py in 0 ..< sizePx:
+        for px in 0 ..< sizePx:
+          var inside = 0
+          for sy in 0 ..< 16:
+            for sx in 0 ..< 16:
+              let x = px.float + (sx.float + 0.5) / 16.0 - c
+              let y = py.float + (sy.float + 0.5) / 16.0 - c
+              if x * x + y * y > radius * radius: continue
+              var a = arctan2(x, -y)          # clockwise from twelve o'clock
+              if a < 0: a += 2.0 * PI
+              if a < share * 2.0 * PI: inc inside
+          if inside.float / 256.0 >= 0.9: inc result
+    for size in [10, 12, 16]:
+      let n = wholePixels(size, 0.16)
+      echo "    ", size, " px: a 16 % wedge covers ", n, " whole pixels"
+      check n >= WedgePixels
+    check wholePixels(12, 0.0) == 0
 
 suite "the story's words are readable":
   test "4.5:1 on every ground, in both modes":
@@ -337,17 +352,19 @@ suite "the wedge's spelling":
     let p = ahPalette(dmDark)
     let inks = p.pieInks(prSuccess, pgPanel)
     check inks.pieConicGradient(pieOf(saRunning, 8, 50)) ==
-      "conic-gradient(" & inks.wedge & " 0 16%, " & inks.rest & " 16% 100%)"
+      "conic-gradient(" & inks.wedge & " 0 16%, " & inks.ground & " 16% 100%)"
 
   test "the web view names the role, the ground and an unknown share":
     let known = pieOf(saNeedsInput, 8, 50)
-    check pieClass(known, pgMenu) == "ah-pie ah-pie-warning ah-pie-on-menu ah-pie-disc"
+    check pieClass(known, pgMenu) == "ah-pie ah-pie-warning ah-pie-on-menu ah-pie-ring"
     check pieClass(pieOf(saIdle, 0, 0), pgPanel) ==
       "ah-pie ah-pie-idle ah-pie-on-panel ah-pie-unknown"
     check pieClass(pieOf(saIdle, 1, 2), pgPanel) ==
-      "ah-pie ah-pie-idle ah-pie-on-panel ah-pie-hollow"
-    check pieStyle(known, 12) == "width: 0.75rem; height: 0.75rem; --ah-pie-p: 16%;"
-    check pieStyle(known, 10) == "width: 0.625rem; height: 0.625rem; --ah-pie-p: 16%;"
+      "ah-pie ah-pie-idle ah-pie-on-panel ah-pie-ring"
+    check pieStyle(known, 12) ==
+      "width: 0.75rem; height: 0.75rem; padding: 0.125rem; --ah-pie-p: 16%;"
+    check pieStyle(known, 10) ==
+      "width: 0.625rem; height: 0.625rem; padding: 0.0625rem; --ah-pie-p: 16%;"
 
 suite "the story's data":
   test "each distinct ground once per theme, named by every ground it is":

@@ -1,6 +1,6 @@
 // GENERATED from `viewmodel/views/agent_harbor_palette.nim` `pieStylesheet`; do not edit.
-// The progress pie's inks per ground and role (`pieInks`): the wedge, the
-// rest of the disc and the edge, each `by-mode(<Dark>, <Light>)`.
+// The progress pie's inks per ground and role (`pieInks`): the wedge and
+// the edge, each `by-mode(<Dark>, <Light>)`; the rest is the ground.
 
 .ah-pie-band .ah-pie-title-dark
   display: by-mode(block, none)
@@ -18,32 +18,26 @@
 
 .ah-pie-on-window.ah-pie-warning
   --ah-pie-wedge: by-mode(#fdba74, #e8570c)
-  --ah-pie-rest: by-mode(#ce9961, #ee8f5c)
   --ah-pie-edge: by-mode(#fdba74, #e8570c)
 
 .ah-pie-on-window.ah-pie-success
   --ah-pie-wedge: by-mode(#4ade80, #159b46)
-  --ah-pie-rest: by-mode(#40b56b, #60b97f)
   --ah-pie-edge: by-mode(#4ade80, #159b46)
 
 .ah-pie-on-window.ah-pie-info
   --ah-pie-wedge: by-mode(#93c5fd, #2563eb)
-  --ah-pie-rest: by-mode(#7aa1ce, #5886ed)
   --ah-pie-edge: by-mode(#93c5fd, #2563eb)
 
 .ah-pie-on-window.ah-pie-error
   --ah-pie-wedge: by-mode(#e89595, #dc153d)
-  --ah-pie-rest: by-mode(#b97979, #e6627b)
   --ah-pie-edge: by-mode(#e89595, #dc153d)
 
 .ah-pie-on-window.ah-pie-idle
   --ah-pie-wedge: by-mode(#dddddd, #353430)
-  --ah-pie-rest: by-mode(#1b1b1b, #f8f6f2)
   --ah-pie-edge: by-mode(#dddddd, #353430)
 
 .ah-pie-on-window.ah-pie-ended
   --ah-pie-wedge: by-mode(#919191, #716d63)
-  --ah-pie-rest: by-mode(#747474, #8d8a81)
   --ah-pie-edge: by-mode(#919191, #716d63)
 
 .ah-pie-band-panel
@@ -53,32 +47,26 @@
 
 .ah-pie-on-panel.ah-pie-warning
   --ah-pie-wedge: by-mode(#fdba74, #d34f0b)
-  --ah-pie-rest: by-mode(#cc9863, #da8254)
   --ah-pie-edge: by-mode(#fdba74, #d34f0b)
 
 .ah-pie-on-panel.ah-pie-success
   --ah-pie-wedge: by-mode(#4ade80, #138b3f)
-  --ah-pie-rest: by-mode(#42b46c, #57a771)
   --ah-pie-edge: by-mode(#4ade80, #138b3f)
 
 .ah-pie-on-panel.ah-pie-info
   --ah-pie-wedge: by-mode(#93c5fd, #2563eb)
-  --ah-pie-rest: by-mode(#7aa1cc, #5b87e7)
   --ah-pie-edge: by-mode(#93c5fd, #2563eb)
 
 .ah-pie-on-panel.ah-pie-error
   --ah-pie-wedge: by-mode(#e89595, #c20933)
-  --ah-pie-rest: by-mode(#b87a7a, #ce536c)
   --ah-pie-edge: by-mode(#e89595, #c20933)
 
 .ah-pie-on-panel.ah-pie-idle
   --ah-pie-wedge: by-mode(#dddddd, #353430)
-  --ah-pie-rest: by-mode(#282828, #e6e2db)
   --ah-pie-edge: by-mode(#dddddd, #353430)
 
 .ah-pie-on-panel.ah-pie-ended
   --ah-pie-wedge: by-mode(#919191, #716d63)
-  --ah-pie-rest: by-mode(#737373, #8e8a81)
   --ah-pie-edge: by-mode(#919191, #716d63)
 
 .ah-pie-band-active-tab
@@ -88,32 +76,26 @@
 
 .ah-pie-on-active-tab.ah-pie-warning
   --ah-pie-wedge: by-mode(#fdba74, #973401)
-  --ah-pie-rest: by-mode(#cb9965, #a25f38)
   --ah-pie-edge: by-mode(#fdba74, #973401)
 
 .ah-pie-on-active-tab.ah-pie-success
   --ah-pie-wedge: by-mode(#4ade80, #00631a)
-  --ah-pie-rest: by-mode(#46b46e, #3e7d47)
   --ah-pie-edge: by-mode(#4ade80, #00631a)
 
 .ah-pie-on-active-tab.ah-pie-info
   --ah-pie-wedge: by-mode(#93c5fd, #024cc0)
-  --ah-pie-rest: by-mode(#7ca0c9, #4470b4)
   --ah-pie-edge: by-mode(#93c5fd, #024cc0)
 
 .ah-pie-on-active-tab.ah-pie-error
   --ah-pie-wedge: by-mode(#e89595, #82062e)
-  --ah-pie-rest: by-mode(#b67b7b, #933d53)
   --ah-pie-edge: by-mode(#e89595, #82062e)
 
 .ah-pie-on-active-tab.ah-pie-idle
   --ah-pie-wedge: by-mode(#dddddd, #151515)
-  --ah-pie-rest: by-mode(#3c3c3c, #b5ae9f)
   --ah-pie-edge: by-mode(#dddddd, #151515)
 
 .ah-pie-on-active-tab.ah-pie-ended
   --ah-pie-wedge: by-mode(#919191, #55524c)
-  --ah-pie-rest: by-mode(#737373, #716d64)
   --ah-pie-edge: by-mode(#919191, #55524c)
 
 .ah-pie-band-selected-row
@@ -123,32 +105,26 @@
 
 .ah-pie-on-selected-row.ah-pie-warning
   --ah-pie-wedge: by-mode(#fdba74, #b13c00)
-  --ah-pie-rest: by-mode(#cb9965, #b96c41)
   --ah-pie-edge: by-mode(#fdba74, #b13c00)
 
 .ah-pie-on-selected-row.ah-pie-success
   --ah-pie-wedge: by-mode(#4ade80, #007420)
-  --ah-pie-rest: by-mode(#46b46e, #448f53)
   --ah-pie-edge: by-mode(#4ade80, #007420)
 
 .ah-pie-on-selected-row.ah-pie-info
   --ah-pie-wedge: by-mode(#93c5fd, #165ada)
-  --ah-pie-rest: by-mode(#7ca0c9, #547ecd)
   --ah-pie-edge: by-mode(#93c5fd, #165ada)
 
 .ah-pie-on-selected-row.ah-pie-error
   --ah-pie-wedge: by-mode(#e89595, #a31235)
-  --ah-pie-rest: by-mode(#b67b7b, #af4c5f)
   --ah-pie-edge: by-mode(#e89595, #a31235)
 
 .ah-pie-on-selected-row.ah-pie-idle
   --ah-pie-wedge: by-mode(#dddddd, #1b1a18)
-  --ah-pie-rest: by-mode(#3c3c3c, #c8c2b5)
   --ah-pie-edge: by-mode(#dddddd, #1b1a18)
 
 .ah-pie-on-selected-row.ah-pie-ended
   --ah-pie-wedge: by-mode(#919191, #5a5751)
-  --ah-pie-rest: by-mode(#737373, #76726a)
   --ah-pie-edge: by-mode(#919191, #5a5751)
 
 .ah-pie-band-menu
@@ -158,30 +134,24 @@
 
 .ah-pie-on-menu.ah-pie-warning
   --ah-pie-wedge: by-mode(#fdba74, #c94600)
-  --ah-pie-rest: by-mode(#ce9963, #cf7a49)
   --ah-pie-edge: by-mode(#fdba74, #c94600)
 
 .ah-pie-on-menu.ah-pie-success
   --ah-pie-wedge: by-mode(#4ade80, #0f843a)
-  --ah-pie-rest: by-mode(#42b46b, #529f6a)
   --ah-pie-edge: by-mode(#4ade80, #0f843a)
 
 .ah-pie-on-menu.ah-pie-info
   --ah-pie-wedge: by-mode(#93c5fd, #2563eb)
-  --ah-pie-rest: by-mode(#7aa0cc, #5f88e1)
   --ah-pie-edge: by-mode(#93c5fd, #2563eb)
 
 .ah-pie-on-menu.ah-pie-error
   --ah-pie-wedge: by-mode(#e89595, #ba003a)
-  --ah-pie-rest: by-mode(#b97a7a, #c64f70)
   --ah-pie-edge: by-mode(#e89595, #ba003a)
 
 .ah-pie-on-menu.ah-pie-idle
   --ah-pie-wedge: by-mode(#dddddd, #353430)
-  --ah-pie-rest: by-mode(#262626, #dbd6cc)
   --ah-pie-edge: by-mode(#dddddd, #353430)
 
 .ah-pie-on-menu.ah-pie-ended
   --ah-pie-wedge: by-mode(#919191, #716d63)
-  --ah-pie-rest: by-mode(#737373, #8f8a80)
   --ah-pie-edge: by-mode(#919191, #716d63)
