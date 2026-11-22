@@ -1,0 +1,117 @@
+name: Re-solve the Apple Silicon lock
+
+# locks/arm64-macosx.lock is the solve `just build-once` binds on an arm64
+# Mac, and nothing keeps its dependency revisions in step with repro.lock:
+# every hook and gate is keyed on repro.lock alone. When the two disagree,
+# scripts/check-platform-lock-pins.sh refuses the macOS build, and the fix is
+# a re-solve on an arm64 darwin host with every dependency checked out at the
+# revision repro.lock pins.
+#
+# This job is that re-solve on a CI macOS runner, so it needs no Mac of your
+# own. It clones repro.lock's develop set beside the checkout at the locked
+# revisions, runs
+#
+#   repro lock refresh . --lock locks/arm64-macosx.lock --platform=arm64-macosx --write
+#
+# with the flake's Reprobuild, checks the result against repro.lock, and
+# uploads the new file and its diff as the `arm64-macosx-lock` artifact. It
+# does not commit: download the artifact, review the diff, and commit it.
+#
+# Push any branch named `ci/darwin-lock/<anything>` to run it from that
+# branch, or dispatch it once the file is on the default branch.
+
+on:
+  push:
+    branches: ['ci/darwin-lock/**']
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  resolve:
+    name: re-solve locks/arm64-macosx.lock (aarch64-darwin)
+    runs-on: aarch64-darwin
+    # The solve compiles the recipe provider first, which took most of five
+    # hours on the loaded m3 host when nothing was cached.
+    timeout-minutes: 420
+    steps:
+      - name: Mint installation token for cross-repo sibling access
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Realise the CI dev shell
+        timeout-minutes: 60
+        run: nix develop .#ci --command repro --version
+
+      # The checkout and the shell can take most of the first token's hour on
+      # a macOS runner, so the clone below gets a token of its own.
+      - name: Mint a token for the clone below
+        id: clone_token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      # Every dependency, not only the build inputs: the solve records the
+      # revision of each one it finds beside the project. `--reset` puts a
+      # checkout a persistent runner left at another revision back on the lock.
+      # `--all` skips a sibling that a flake recipe pins exactly (nim-shm-gset,
+      # nim-shm-queue, test-certificates-tools, ...), and the refresh then
+      # refuses to write a lock without their recipes, so the build inputs are
+      # named once more with `--only`, which does clone them.
+      - name: Clone repro.lock's develop set at its locked revisions
+        uses: metacraft-labs/metacraft-github-actions/git-auth@a190f3a8b37c5a239d88b8c964b6d13f64fbaa0d
+        with:
+          gh-token: ${{ steps.clone_token.outputs.token }}
+          working-directory: ${{ github.workspace }}
+          run: |
+            siblings_root="$(cd .. && pwd)"
+            nix develop .#ci --command \
+              repro develop --all --reset --into="${siblings_root}"
+            build_inputs="$(ci/repro-lock-build-input-siblings.sh repro.lock)"
+            nix develop .#ci --command \
+              repro develop --all --only="${build_inputs}" --reset --into="${siblings_root}"
+
+      - name: Re-solve the Apple Silicon lock
+        run: |
+          set -euo pipefail
+          cp locks/arm64-macosx.lock "$RUNNER_TEMP/arm64-macosx.lock.before"
+          nix develop .#ci --command \
+            repro lock refresh . --lock locks/arm64-macosx.lock --platform=arm64-macosx --write
+          mkdir -p "$RUNNER_TEMP/arm64-macosx-lock"
+          cp locks/arm64-macosx.lock "$RUNNER_TEMP/arm64-macosx-lock/arm64-macosx.lock"
+          git diff -- locks/arm64-macosx.lock >"$RUNNER_TEMP/arm64-macosx-lock/arm64-macosx.lock.diff" || true
+          git rev-parse HEAD >"$RUNNER_TEMP/arm64-macosx-lock/solved-at.txt"
+          git diff --stat -- locks/arm64-macosx.lock
+
+      - name: The re-solved lock pins repro.lock's revisions
+        run: bash scripts/check-platform-lock-pins.sh locks/arm64-macosx.lock repro.lock
+
+      - name: Upload the re-solved lock
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arm64-macosx-lock
+          path: ${{ runner.temp }}/arm64-macosx-lock
+          retention-days: 30
