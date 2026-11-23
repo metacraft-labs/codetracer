@@ -383,12 +383,18 @@ type
     isHelpDelegate*: bool ## true if the capabilities file declares help-delegate
     relisted*: bool
       ## true for a later directory's version of a name an earlier directory
-      ## already lists (see :proc:`scanInstalledComponents`). Its
-      ## ``declaredCommands`` are then only the commands that reach it.
+      ## already lists (see :proc:`scanInstalledComponents`).
+    shadowedCommands*: seq[string]
+      ## commands this entry's capabilities file declares that the launcher
+      ## runs from another entry (an earlier one, or one with a stronger
+      ## match), so they are not in ``declaredCommands`` and are dropped from
+      ## ``surface`` (see :proc:`scanInstalledComponents`).
     description*: string  ## description from the capabilities file (when present)
     declaredCommands*: seq[string]
       ## command names declared in the capabilities file, in the order
-      ## they appear. Populated by :proc:`parseCapabilitiesFile` from
+      ## they appear, less ``shadowedCommands``: after
+      ## :proc:`scanInstalledComponents`, exactly the commands the launcher
+      ## runs from this entry. Populated by :proc:`parseCapabilitiesFile` from
       ## lines of the form ``<command> [.ext1 .ext2 ...]`` (i.e. lines
       ## whose first token is not a reserved capability-file keyword).
       ## Used by M8's fast-path top-level completion to enumerate
@@ -501,6 +507,25 @@ proc collectComponentLevels(): seq[ComponentLevel] =
         path: "/usr/lib/codetracer/components/v1",
         label: "distro")
 
+proc noFileRank(capabilities, cmd: string): int =
+  ## How strongly the capabilities text ``capabilities`` claims ``cmd`` when
+  ## ``ct <cmd>`` is run with no file argument, as codetracer-launcher's
+  ## ``caps.matches`` decides it with no extension and the ``noext``
+  ## fallback on: 3 for a ``<cmd> ... noext`` line (an extension-rank match),
+  ## 1 for a bare ``<cmd>`` line (unqualified), 0 when every ``<cmd>`` line
+  ## lists extensions only (no match: the command runs from here only with a
+  ## file argument), and -1 when no line declares ``cmd``. The best line
+  ## counts.
+  result = -1
+  for rawLine in capabilities.splitLines:
+    let toks = rawLine.splitWhitespace()
+    if toks.len == 0 or toks[0].startsWith("#") or toks[0] != cmd: continue
+    let rank =
+      if "noext" in toks[1 .. ^1]: 3
+      elif toks.len == 1: 1
+      else: 0
+    result = max(result, rank)
+
 proc scanInstalledComponents*(): seq[InstalledComponent] =
   ## Enumerate the installed components under the configured component
   ## roots, as the launcher resolves them. Higher-priority directories come
@@ -513,11 +538,36 @@ proc scanInstalledComponents*(): seq[InstalledComponent] =
   ## the command. With ``foo@2`` declaring only ``cmd-v2`` in the user
   ## directory and ``foo@1`` declaring ``cmd-v1`` in a system one,
   ## ``ct cmd-v1`` then runs ``foo@1``. So a later directory's version of an
-  ## already listed name is listed too (``relisted``), when it declares a
-  ## command that no entry from an earlier directory declares. Its
-  ## ``declaredCommands`` keep only those commands. A later version of a
-  ## listed name whose every command is declared earlier is left out.
-  ## Consumers take the first entry that declares a command.
+  ## already listed name is listed too (``relisted``), when a command it
+  ## declares reaches it (below). A later version of a listed name that no
+  ## command reaches is left out.
+  ##
+  ## EVERY ENTRY'S ``declaredCommands`` ARE ONLY THE COMMANDS THAT REACH IT,
+  ## the ones the launcher runs from that entry when ``ct <command>`` is typed
+  ## with no file argument. Its ``scanLevelForCommand`` (codetracer-launcher
+  ## ``src/launcher.nim``) ranks the matching capabilities lines -- a line
+  ## carrying ``noext`` above a bare ``<command>`` line, and a line that only
+  ## lists extensions not at all (``noFileRank``) -- and at equal rank keeps
+  ## the first entry in this list's order: levels in priority order, and
+  ## within a level the directory-listing order ``selectedVersionsAt``
+  ## returns. An entry whose capabilities name no ``bin`` runs nothing. A
+  ## command only extension lines declare, which runs only with a file
+  ## argument, stays with the first such entry, so it is still described. Every
+  ## other declared command of an entry is moved to ``shadowedCommands``:
+  ## another entry runs it, from a higher root or listed earlier in the same
+  ## root, whatever the component's name. Before this, only a relisted entry
+  ## was filtered: with ``foo@1`` declaring ``shared`` in the user root and
+  ## ``bar@1`` in a system root, ``ct --help`` described ``shared`` with
+  ## ``bar``'s text although the launcher runs ``foo`` (reprobuild-pm
+  ## issues/2026-11-21-ct-help-describes-a-command-with-a-component-the-
+  ## launcher-does-not-run-for-it.md). An entry that is the first of its name
+  ## is listed even when nothing reaches it: it is installed, and the
+  ## Installed section says so. Consumers take the entry whose
+  ## ``declaredCommands`` hold a command; there is at most one.
+  ##
+  ## Not modelled: a component whose ``project`` markers for the command
+  ## match nothing around the working directory, which the launcher passes
+  ## over, and one whose markers match, which it ranks above a bare line.
   ##
   ## The help delegate itself is never relisted: its commands come from the
   ## running binary, whichever versions are installed.
@@ -537,12 +587,13 @@ proc scanInstalledComponents*(): seq[InstalledComponent] =
     # other way to reach one, and `loadCtrcPins` read it first.
     pins = @[]
   var seen = initTable[string, bool]()
-  # Every command declared by an entry listed so far, in any directory
-  # searched before the current one.
-  var declaredEarlier = initTable[string, bool]()
+  # Every entry the launcher could run something from, in its order, with
+  # each declared command's no-file rank (see `noFileRank`).
+  var cands: seq[tuple[comp: InstalledComponent; later: bool;
+                       ranks: Table[string, int]]]
   for idx, lvl in levels:
     if not dirExists(lvl.path): continue
-    let firstAtLevel = result.len
+    let firstAtLevel = cands.len
     for entry in selectedVersionsAt(lvl.path, pins):
       # An empty version: this level offers nothing for the name
       # (a pin or `active` link naming an absent version).
@@ -556,32 +607,54 @@ proc scanInstalledComponents*(): seq[InstalledComponent] =
         levelLabel: lvl.label)
       comp.name = entry.name
       comp.version = entry.selection.version
+      var content = ""
       try:
-        parseCapabilitiesFile(readFile(capPath), comp)
+        content = readFile(capPath)
+        parseCapabilitiesFile(content, comp)
       except CatchableError:
         # Best-effort: corrupt files are skipped rather than crashing
         # the whole help screen. This matches the launcher's "fail
         # safe and keep going" stance.
         continue
       if comp.name.len == 0: continue
-      if seen.getOrDefault(comp.name, false):
-        # The name is listed from an earlier directory. This version is
-        # listed as well only for the commands that reach it.
-        if comp.name == helpDelegateComponentName: continue
-        var reached: seq[string] = @[]
-        for c in comp.declaredCommands:
-          if not declaredEarlier.getOrDefault(c, false):
-            reached.add c
-        if reached.len == 0: continue
-        comp.relisted = true
-        comp.declaredCommands = reached
-      result.add comp
-    # Only now: two components in ONE directory do not shadow each other
-    # here, as they did not before a name could be listed twice.
-    for i in firstAtLevel ..< result.len:
-      seen[result[i].name] = true
-      for c in result[i].declaredCommands:
-        declaredEarlier[c] = true
+      let later = seen.getOrDefault(comp.name, false)
+      # The name is listed from an earlier directory. The help delegate is
+      # not listed again (see above); any other version is, below, for the
+      # commands that reach it.
+      if later and comp.name == helpDelegateComponentName: continue
+      var ranks = initTable[string, int]()
+      for c in comp.declaredCommands:
+        # The launcher skips a component whose capabilities name no `bin`.
+        ranks[c] = if comp.binPath.len == 0: -1 else: noFileRank(content, c)
+      cands.add (comp: comp, later: later, ranks: ranks)
+    # A name occurs once per directory (one selected version), so marking it
+    # seen only after the directory changes nothing for names; it keeps
+    # "relisted" meaning "from a later directory".
+    for i in firstAtLevel ..< cands.len:
+      seen[cands[i].comp.name] = true
+  # The entry each command runs from: the highest rank, and at equal rank the
+  # first in the launcher's order -- the higher level, then the directory
+  # listing. An entry that cannot run it (rank -1) never wins.
+  var winner = initTable[string, int]()
+  for i, cand in cands:
+    for c, rank in cand.ranks:
+      if rank < 0: continue
+      let w = winner.getOrDefault(c, -1)
+      if w < 0 or rank > cands[w].ranks[c]:
+        winner[c] = i
+  for i, cand in cands:
+    var comp = cand.comp
+    var reached: seq[string] = @[]
+    for c in comp.declaredCommands:
+      if winner.getOrDefault(c, -1) == i: reached.add c
+      else: comp.shadowedCommands.add c
+    comp.declaredCommands = reached
+    if cand.later:
+      # A later version of a listed name is listed only for the commands
+      # that reach it.
+      if reached.len == 0: continue
+      comp.relisted = true
+    result.add comp
 
 # ---------------------------------------------------------------------------
 # Component binary execution: run `<binary> ct-describe-commands`.
@@ -743,7 +816,8 @@ type
 
 proc gatherInstalledSurfaces(asm0: var HelpAssembly) =
   ## Run ``ct-describe-commands`` on each installed component and
-  ## attach the resulting surface to the component entry.
+  ## attach the resulting surface to the component entry. The surfaces are
+  ## whole here; :proc:`restrictSurfacesToRouting` cuts them down.
   for i in 0 ..< asm0.installed.len:
     var comp = asm0.installed[i]
     if comp.name == helpDelegateComponentName:
@@ -751,14 +825,40 @@ proc gatherInstalledSurfaces(asm0: var HelpAssembly) =
       comp.surface = selfSurface()
     else:
       comp.surface = runDescribeCommands(comp)
-      if comp.relisted:
-        # Only the commands that reach this version. Its other commands run
-        # from an earlier directory, and merging them here would replace
-        # that version's descriptions with this one's.
-        var kept: seq[RuntimeCommand] = @[]
-        for c in comp.surface.commands:
-          if c.name in comp.declaredCommands: kept.add c
-        comp.surface.commands = kept
+    asm0.installed[i] = comp
+
+proc restrictSurfacesToRouting(asm0: var HelpAssembly) =
+  ## Keep in each entry's surface only the commands the launcher runs from
+  ## that entry, so that every help surface -- the Commands section,
+  ## ``ct-describe-commands`` and the ``fileTypes`` / flags
+  ## ``completionsForSubcommand`` reads from ``asm0.merged`` -- describes a
+  ## command with the component the launcher would run for it.
+  ## ``runtime_surface.merge`` lets the LAST surface win, so leaving a
+  ## command in two surfaces would describe it with the later, unrouted one
+  ## (reprobuild-pm issues/2026-11-21-ct-help-describes-a-command-with-a-
+  ## component-the-launcher-does-not-run-for-it.md).
+  ##
+  ## An entry keeps a command when its (reached) ``declaredCommands`` hold
+  ## it. A command no scanned capabilities file declares is one the launcher
+  ## routes nowhere; every surface that describes it keeps it, and the merge
+  ## lets the last one win, as it always did (the synthesised help delegate
+  ## below is last, so on an uninstalled checkout our own description wins).
+  ## A relisted entry keeps only its reached declared commands. Runs after
+  ## :proc:`ensureSelfPresent`, so a synthesised help delegate is held to the
+  ## same rule.
+  var declaredAnywhere = initTable[string, bool]()
+  for comp in asm0.installed:
+    for c in comp.declaredCommands: declaredAnywhere[c] = true
+  for i in 0 ..< asm0.installed.len:
+    var comp = asm0.installed[i]
+    var kept: seq[RuntimeCommand] = @[]
+    for c in comp.surface.commands:
+      let keep =
+        if c.name in comp.declaredCommands: true
+        elif comp.relisted: false
+        else: not declaredAnywhere.getOrDefault(c.name, false)
+      if keep: kept.add c
+    comp.surface.commands = kept
     asm0.installed[i] = comp
 
 proc mergeInstalledIntoUnified(asm0: var HelpAssembly) =
@@ -781,7 +881,9 @@ proc detectUpgradeCommands(asm0: var HelpAssembly) =
   ## A component can be listed more than once (see
   ## ``scanInstalledComponents``). Its installed version is the first entry's,
   ## the one the launcher prefers, and a command any of its entries describes
-  ## already runs and needs no upgrade.
+  ## already runs and needs no upgrade. Nor does one an entry declares that
+  ## another component shadows (``shadowedCommands``): it is installed, and
+  ## ``ct <command>`` runs.
   var installedByName = initTable[string, InstalledComponent]()
   for comp in asm0.installed:
     if comp.name notin installedByName:
@@ -795,6 +897,9 @@ proc detectUpgradeCommands(asm0: var HelpAssembly) =
       var found = false
       for comp in asm0.installed:
         if comp.name != entry.name: continue
+        if cmdName in comp.shadowedCommands:
+          found = true
+          break
         for c in comp.surface.commands:
           if c.name == cmdName:
             found = true
@@ -855,6 +960,7 @@ proc assembleHelp*(): HelpAssembly =
   result.installed = scanInstalledComponents()
   gatherInstalledSurfaces(result)
   ensureSelfPresent(result)
+  restrictSurfacesToRouting(result)
   result.registry = readRegistry()
   collectLatestCache(result)
   mergeInstalledIntoUnified(result)
@@ -900,8 +1006,15 @@ proc renderInstalledSection(asm0: HelpAssembly): string =
     line.add "(" & comp.levelLabel & ")"
     let latest = asm0.latestByComponent.getOrDefault(comp.name, "")
     # A relisted row is an older version kept for its own commands; the
-    # component's first row says whether a newer one is available.
-    if latest.len > 0 and latest != comp.version and not comp.relisted:
+    # component's first row says whether a newer one is available. Not when
+    # the latest is itself a row below: `foo 1 (user) [3 available]` above
+    # `foo 3 (system)` offered what is already installed.
+    var latestListed = false
+    for other in asm0.installed:
+      if other.name == comp.name and other.version == latest:
+        latestListed = true
+    if latest.len > 0 and latest != comp.version and not comp.relisted and
+       not latestListed:
       line.add "  [" & latest & " available]"
     result.add line & "\n"
   result.add "\n"
@@ -1032,18 +1145,26 @@ proc fastTopLevelCommandNames*(): seq[string] =
         result.add c
   result.sort()
 
-proc findComponentForCommand*(cmdName: string): InstalledComponent =
-  ## Return the highest-priority installed component whose capability
-  ## file declares ``cmdName``. Returns an empty component (``name ==
-  ## ""``) if no installed component handles it. ``scanInstalledComponents``
-  ## returns its entries in the launcher's priority order, and lists a
-  ## component again from a later directory when that version declares a
-  ## command nothing earlier does, so we just take the first hit.
-  for comp in scanInstalledComponents():
-    if comp.name == helpDelegateComponentName: continue
+proc routedEntry(entries: openArray[InstalledComponent];
+                 cmdName: string): InstalledComponent =
+  ## The entry the launcher runs ``cmdName`` from: the one whose
+  ## ``declaredCommands`` hold it (``scanInstalledComponents`` keeps a
+  ## command only in the entry that reaches it). Empty when none does.
+  for comp in entries:
     if cmdName in comp.declaredCommands:
       return comp
-  return InstalledComponent()
+  InstalledComponent()
+
+proc findComponentForCommand*(cmdName: string): InstalledComponent =
+  ## Return the installed component, other than the help delegate, that the
+  ## launcher runs ``cmdName`` from. Returns an empty component (``name ==
+  ## ""``) if no installed component handles it, or if the help delegate does
+  ## (it declares the command earlier). ``scanInstalledComponents`` returns
+  ## its entries in the launcher's order and leaves a command declared only
+  ## by the entry that reaches it, so the first hit is the answer.
+  let comp = routedEntry(scanInstalledComponents(), cmdName)
+  if comp.name == helpDelegateComponentName: return InstalledComponent()
+  comp
 
 proc delegateCompletionToComponent*(comp: InstalledComponent,
                                     args: seq[string]): tuple[ok: bool, output: string] =
@@ -1078,6 +1199,22 @@ proc selfHandlesCommand(cmdName: string): bool =
     if cmd.name == cmdName: return true
   false
 
+proc completionTarget*(cmdName: string):
+    tuple[local: bool; comp: InstalledComponent] =
+  ## Where ``ct <cmdName> <TAB>`` completes: where the launcher would run the
+  ## command, the installed entry that reaches it, the help delegate
+  ## included. ``local`` is true when that is codetracer-desktop, or when no
+  ## capabilities file declares the command and our own surface has it; the
+  ## completion then runs here. Otherwise ``comp`` is the component to
+  ## delegate to, empty for an unknown command. Asking ``selfHandlesCommand``
+  ## first, as this once did, completed ``ct record <TAB>`` locally even when
+  ## the launcher runs ``record`` from another component.
+  let routed = routedEntry(scanInstalledComponents(), cmdName)
+  if routed.name.len > 0:
+    (local: routed.name == helpDelegateComponentName, comp: routed)
+  else:
+    (local: selfHandlesCommand(cmdName), comp: routed)
+
 proc runCtComplete*(args: seq[string]) =
   ## Entry point for ``codetracer ct-complete``. M8 implements the
   ## two-level dispatch described in spec §2.7:
@@ -1092,10 +1229,11 @@ proc runCtComplete*(args: seq[string]) =
   ## **Delegation path (subcommand)**: when ``args`` starts with a
   ## known command:
   ##
-  ## * If the command is handled by codetracer-desktop itself, run
-  ##   the M7 file-system + flag completion logic locally.
-  ## * Otherwise, find the component that declares the command in
-  ##   its capabilities file and exec ``<binary> ct-complete <args>``
+  ## * If the launcher runs the command from codetracer-desktop itself
+  ##   (see :proc:`completionTarget`), run the M7 file-system + flag
+  ##   completion logic locally.
+  ## * Otherwise, take the component the launcher runs it from and exec
+  ##   ``<binary> ct-complete <args>``
   ##   -- the component is responsible for context-aware completions
   ##   (trace IDs, license-gated flags, etc.).
   if args.len <= 1:
@@ -1109,7 +1247,8 @@ proc runCtComplete*(args: seq[string]) =
   # ---- Delegation path: a subcommand was named ----
   let cmdName = args[0]
   let prefix = args[^1]
-  if selfHandlesCommand(cmdName):
+  let (local, routed) = completionTarget(cmdName)
+  if local:
     # codetracer-desktop owns this command -- use M7's local
     # completion (file-system filtered by file-types, flag tokens).
     let asm0 = assembleHelp()
@@ -1124,8 +1263,8 @@ proc runCtComplete*(args: seq[string]) =
       stdout.writeLine cand
     stdout.flushFile()
     return
-  # Locate the component declaring this command and delegate.
-  let comp = findComponentForCommand(cmdName)
+  # Delegate to the component the launcher runs the command from.
+  let comp = routed
   if comp.name.len == 0:
     # Unknown command -- fall back to filtered top-level names so
     # the user gets *something* useful from a typo.
