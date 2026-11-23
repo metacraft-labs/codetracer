@@ -803,9 +803,27 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install capnproto
+      - name: Use the pinned Cap'n Proto from env.ps1
+        # env.ps1 (windows-diy, above) already provisions the pinned Cap'n
+        # Proto at CAPNP_DIR. This used to `choco install capnproto`, which
+        # failed on win-ci-bare-001 ("The term 'choco' is not recognized",
+        # run 45236060796) and would install an unpinned version where it
+        # did run.
         shell: pwsh
-        run: choco install capnproto -y
+        run: |
+          $ErrorActionPreference = "Stop"
+          $capnp = Get-Command capnp.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $capnp) {
+            if (-not $env:CAPNP_DIR) { throw "env.ps1 set no CAPNP_DIR and no capnp.exe is on PATH" }
+            $bin = @($env:CAPNP_DIR, (Join-Path $env:CAPNP_DIR "bin")) |
+              Where-Object { Test-Path -LiteralPath (Join-Path $_ "capnp.exe") -PathType Leaf } | Select-Object -First 1
+            if (-not $bin) { throw "no capnp.exe under CAPNP_DIR=$env:CAPNP_DIR" }
+            Add-Content -LiteralPath $env:GITHUB_PATH -Value $bin
+            $capnp = Get-Item -LiteralPath (Join-Path $bin "capnp.exe")
+          }
+          $exe = if ($capnp.Source) { $capnp.Source } else { $capnp.FullName }
+          & $exe --version
+          if ($LASTEXITCODE -ne 0) { throw "capnp --version exited $LASTEXITCODE" }
 
       - name: Install Python 3.12
         # From uv (env.ps1 puts it on PATH), not actions/setup-python: on a
