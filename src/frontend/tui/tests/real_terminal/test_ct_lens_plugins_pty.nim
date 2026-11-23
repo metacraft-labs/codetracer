@@ -286,7 +286,7 @@ suite "ct-lens on a real terminal":
     # healthy plugin hung and restarted it, which drops what it pushed.
     var changed = ""
     var refused, watched = false
-    for _ in 0 ..< 3:
+    for round in 1 .. 3:
       changed = ""
       for _ in 0 ..< 60:
         sess.command("next")
@@ -297,7 +297,10 @@ suite "ct-lens on a real terminal":
           if list.len > 0 and list notin ["none", "…"] and ',' notin list:
             changed = list
             break
-      if changed.len == 0: continue
+      if changed.len == 0:
+        checkpoint "round " & $round & ": no step named one changed value; status line:\n" &
+          sess.statusLine
+        continue
       # F7 on its own: nothing is open (the last `:next` closed its line).
       sleep(500)
       sess.send(F7)
@@ -323,6 +326,9 @@ suite "ct-lens on a real terminal":
             break
           sleep(400)
         if watched: break
+      if not watched:
+        checkpoint "round " & $round & ": F7 on " & changed &
+          " was refused afterwards, but no watch row appeared:\n" & sess.screen
       if watched: break
     check changed.len > 0
     check refused
