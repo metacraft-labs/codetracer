@@ -31,7 +31,14 @@
 ##     and its explanation strip;
 ##   * an item's page: its load state, kind, banner, validation and answer
 ##     state, a login's state, Cancel, Continue and Open sign-in, the expired
-##     badge, each choice and whether it is chosen.
+##     badge, each choice, whether it is chosen and its control (the
+##     checkbox for several, the composer's toggle for one), each queued
+##     approval's command and purpose apart, the priority dropdown's value
+##     whole, and its parts within the reading measure;
+##   * the Inbox's hint in the page's place while items wait and none is on
+##     screen;
+##   * the Code tab's marks, each with its tooltip, and the legend that says
+##     what the short marks stand for.
 ##
 ## And, the terminal's own:
 ##
@@ -68,6 +75,8 @@ const
     ## `agent_harbor_changes.styl`: `@container ah-changes (max-width: 30rem)`.
   InboxCompactStepperMaxPx = 50 * 16
     ## `agent_harbor_inbox.styl`: `@container ah-inbox (max-width: 50rem)`.
+  ItemReadingMaxCells = 48 * 16 div CellPx
+    ## `AH_ITEM_READING_WIDTH`, 48rem: an item page's parts at most this wide.
 
   P3TextFacts* = [
     "state-text", "tab-label", "card-title", "card-path", "card-summary", "question",
@@ -75,7 +84,8 @@ const
     "file-position", "renamed-from", "vcs-file-status", "vcs-file-name", "select-value",
     "item-label", "kind-word", "explanation", "chip-text", "position", "auto-switch-text",
     "degraded", "server-name", "strip", "kind-words", "item-session", "prose", "last-reply",
-    "draft-text", "context", "approval-summary", "choice-label", "login-provider",
+    "draft-text", "context", "approval-subject", "approval-purpose", "choice-label",
+    "login-provider", "item-hint", "code-legend", "mark-word",
     "login-state", "login-error", "validation", "phase-text", "no-options", "attachment",
     "executive-summary", "button", "description", "purpose", "group-name"]
     ## The P3 views' facts that name a text their node's cells draw.
@@ -294,6 +304,19 @@ proc checkCode(view: AhNode; vm: ChangesVM): seq[string] =
   for e in view.all("vcs-row"):
     if e.attr("focused") == "true": drawnFocus.add e.attr("file")
   result.expect("the keyboard's file", drawnFocus, focused)
+  # The marks: short, each with its tooltip, and the legend saying what
+  # they stand for.
+  var marks: seq[string]
+  for row in vm.files:
+    marks.add originShort(row.file.origin)
+    if row.key: marks.add KeyFileMark
+    if row.file.binary: marks.add BinaryLabel
+  result.expect("file marks", view.values("mark-word"), marks)
+  for e in view.all("mark-word"):
+    if e.attr("mark-title").len == 0:
+      result.add "the mark " & e.attr("mark-word") & " has no tooltip"
+  result.expect("marks legend", view.values("code-legend"),
+                if vm.files.len > 0: @[CodeMarksLegend] else: @[])
   if diffs.len > 0:
     result.expect("file position", view.values("file-position"), shown(vm.selectedPosition))
 
@@ -367,6 +390,19 @@ proc checkItemPage*(view: AhNode; page: InboxItemVM; ctx: AgentHarborInboxItemCo
   result.expect("validation", view.values("validation"), shown(page.validation.val))
   result.expect("answer state", view.values("phase-text"), shown(page.phaseText))
   result.expect("summary first", view.values("summary-first").len, ord(page.leadsWithSummary))
+  result.expect("priority dropdown", view.values("priority-menu"), @[PriorityLabel])
+  for w in view.values("reading-width"):
+    if parseInt(w) > ItemReadingMaxCells:
+      result.add "the page's parts run " & w & " cells wide, past the reading measure of " &
+                 $ItemReadingMaxCells
+  var subjects, purposes: seq[string]
+  for a in d.approvals:
+    subjects.add approvalSubject(a)
+    if approvalPurposeText(a).len > 0: purposes.add approvalPurposeText(a)
+  result.expect("approval commands", view.values("approval-subject"), subjects)
+  result.expect("approval purposes", view.values("approval-purpose"), purposes)
+  for subject in view.values("approval-subject"):
+    if " in order to" in subject: result.add "an approval's command runs on into its purpose: " & subject
   let buttons = view.values("button")
   if d.kind == ikLoginRequest:
     result.expect("login", view.values("login"),
@@ -393,6 +429,10 @@ proc checkItemPage*(view: AhNode; page: InboxItemVM; ctx: AgentHarborInboxItemCo
       checked.add $(o.id in chosen)
     result.expect("choices", drawn, ids)
     result.expect("chosen", view.values("checked"), checked)
+    let single = d.kind != ikAsyncFeedback and d.form == qfSingle
+    var controls: seq[string]
+    for o in options: controls.add(if single: "toggle" else: "checkbox")
+    result.expect("choice controls", view.values("control"), controls)
 
 # ---------------------------------------------------------------------------
 # The Inbox panel
@@ -433,6 +473,8 @@ proc checkInbox*(view: AhNode; vm: InboxVM; ctx: AgentHarborInboxContext): seq[s
   result.expect("explanations", view.values("explanation"), explanations)
   let page = vm.page
   result.expect("item page", view.values("page"), if page.isNil: @[] else: @["inbox"])
+  result.expect("item hint", view.values("item-hint"),
+                if vm.wantsItemHint: @[itemHintText()] else: @[])
   if not page.isNil:
     result.expect("explanation strip", view.values("strip"), shown(vm.explanationStrip))
     let drawnPage = view.first("page")

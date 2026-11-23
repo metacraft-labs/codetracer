@@ -1,7 +1,7 @@
  Changes  ⚲ ✕
  CHANGES  Relay backpressure: bound the relay queues                            9 files +18 −5
   Spec Changes 5   Tests 2   Implementation Details 4   Code 9
-  RB-M1: Specify the backpressure contract    ▾
+  RB-M1: Specify the backpressure contract ▾
  REQUIREMENTS (2)
  ▸ RELAY-AREQ2 Bounded queues                                                       ● modified
  ▸ RELAY-AREQ4 Shed the oldest frame                                                   ● added

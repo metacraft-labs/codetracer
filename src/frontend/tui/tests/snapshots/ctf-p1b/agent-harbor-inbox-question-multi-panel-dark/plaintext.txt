@@ -1,5 +1,5 @@
  Inbox  ⚲ ✕
- ● NEEDS YOUR ANSWER  Port the route cache                                        Priority… ▾
+ ● NEEDS YOUR ANSWER  Port the route cache                                         Priority ▾
                                                                                                
  ● Agent is waiting for an answer
                                                                                                

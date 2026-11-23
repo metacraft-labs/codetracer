@@ -1,11 +1,11 @@
  Inbox  ⚲ ✕
- ● ASKS FOR PERMISSION                                                            Priority… ▾
+ ● ASKS FOR PERMISSION                                                             Priority ▾
                                                                                                
                                                                                                
- packages.example.org in order to: download the pinned benchmark tool
+ packages.example.org
+ In order to download the pinned benchmark tool
                                                                                                
   Approve   Approve for session   Deny
-                                                                                               
                                                                                                
                                                                                                
                                                                                                

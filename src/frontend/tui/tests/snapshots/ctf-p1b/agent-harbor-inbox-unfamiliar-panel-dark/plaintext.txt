@@ -1,5 +1,5 @@
  Inbox  ⚲ ✕
- ● NEEDS YOUR ANSWER                                                              Priority… ▾
+ ● NEEDS YOUR ANSWER                                                               Priority ▾
                                                                                                
  SUMMARY
  Ports the route cache to the new storage layer; three of five milestones done; it now needs a

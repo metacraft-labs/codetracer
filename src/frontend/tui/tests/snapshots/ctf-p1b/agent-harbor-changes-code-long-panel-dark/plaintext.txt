@@ -4,8 +4,10 @@
                                                                                               █
  Since main                                                       300 files changed +600 −300 █
                                                                                               █
-  Search files…                                                                   All      ▾  █
+ C committed · U uncommitted · key: a key source file                                         █
                                                                                               ▄
+  Search files…                                                                        All ▾
+                                                                                               
   M src/relay/stations/region-1/site-1/adapters/telemetry/frames/decoder_1.py +2 -1         C
   M src/relay/stations/region-2/site-2/adapters/telemetry/frames/decoder_2.py +2 -1         C
   M src/relay/stations/region-3/site-3/adapters/telemetry/frames/decoder_3.py +2 -1         C
@@ -36,5 +38,3 @@
   M src/relay/stations/region-0/site-28/adapters/telemetry/frames/decoder_28.py +2 -1       C
   M src/relay/stations/region-1/site-29/adapters/telemetry/frames/decoder_29.py +2 -1       C
   M src/relay/stations/region-2/site-30/adapters/telemetry/frames/decoder_30.py +2 -1       C
-  M src/relay/stations/region-3/site-31/adapters/telemetry/frames/decoder_31.py +2 -1       C
-  M src/relay/stations/region-4/site-32/adapters/telemetry/frames/decoder_32.py +2 -1       C

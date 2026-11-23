@@ -1,13 +1,13 @@
  Inbox  ⚲ ✕
- ● ASKS YOU TO SIGN IN  Benchmark the cache                                                                                                                            Priority… ▾
+                                           ● ASKS YOU TO SIGN IN  Benchmark the cache                                         Priority ▾
                                                                                                                                                                                     
- Example Cloud
- Sign in to read the benchmark bucket.
- A sign-in window has opened on this desktop.
- Signed in, but the agent's browser profile has not picked up the session yet. Try signing in again.
+                                           Example Cloud
+                                           Sign in to read the benchmark bucket.
+                                           A sign-in window has opened on this desktop.
+                                           Signed in, but the agent's browser profile has not picked up the session yet. Try signing
+                                           in again.
                                                                                                                                                                                     
-  Open sign-in   Cancel
-                                                                                                                                                                                    
+                                            Open sign-in   Cancel
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     

@@ -17,8 +17,17 @@
 ## what the keyboard is on is kept in view (`keepKeyboardItemInView`):
 ## the keyboard's card or file, the item on screen, as the terminal's views
 ## keep it (`ah_tui_changes_inbox_parts.drawScrolled`). A story's first frame
-## is not scrolled: GPUI's story panel does not scroll, and the web's first
-## frame is held to GPUI's layout (`test_ctf_p1b_gpui_capture_matches_web_layout`).
+## shows it too (`keepInViewWhenLaidOut`, called by the StoryBook mounts),
+## as the terminal's and GPUI's first frames do (GPUI's panels scroll the
+## same way, `gpui/agent_harbor/ah_changes_inbox_parts.scrollWindow`), so
+## the web's first frame and GPUI's agree
+## (`test_ctf_p1b_gpui_capture_matches_web_layout`).
+##
+## Presses on the elements that carry their operation (the dropdowns'
+## `dropdown.toggle` / `dropdown.choose`, a single choice's
+## `inbox.choose-option`) go through the page's one pointer listener and the
+## base keymap's pointer rows (`installBaseElementRouting`), which run the
+## procedure bound to the element pressed (`element_operations`).
 ##
 ## Refuses to own: what an operation does (`agent_harbor_changes_inbox_words`)
 ## and which operation a key runs (the router).
@@ -33,6 +42,7 @@ import ../viewmodel/views/agent_harbor_changes_inbox_words
 import ../viewmodel/keymap/[base_keymaps, context_keys, keymap_router, scope_path,
                             editing_keymap]
 import ../../common/key_event_names
+from ../viewmodel/input/dom_pane_presses import installBaseElementRouting
 
 var shownChanges: proc(): ChangesVM
 var shownInbox: proc(): InboxVM
@@ -92,6 +102,37 @@ proc keepKeyboardItemInView*(root: JsObject = nil) =
   ## document for nil) the least that shows what the keyboard is on.
   keepInView(root, cstring(KeyboardItemSelector))
 
+proc keepWhenLaidOut(root: JsObject; selector: cstring; keep: proc(root: JsObject)) {.importjs: """
+(function (root, sel, keep) {
+  // Polls (every 50 ms, up to 3 s) until what the keyboard is on sits in a
+  // scrolling region the browser has laid out -- its golden-layout frame is
+  // sized after the mount, so the region may not overflow yet -- then keeps
+  // it in view once. Nothing to keep, or a region that never overflows,
+  // needs no scroll.
+  var tries = 60;
+  function laidOut() {
+    var els = (root || document).querySelectorAll(sel);
+    if (els.length === 0) return false;
+    for (var i = 0; i < els.length; i++) {
+      var p = els[i].parentElement;
+      while (p && !(p.scrollHeight > p.clientHeight &&
+                    /(auto|scroll)/.test(getComputedStyle(p).overflowY))) p = p.parentElement;
+      if (p && p.clientHeight > 0) return true;
+    }
+    return false;
+  }
+  (function step() {
+    if (laidOut()) keep(root);
+    else if (--tries > 0) setTimeout(step, 50);
+  })();
+})(#, #, #)""".}
+
+proc keepInViewWhenLaidOut*(root: JsObject) =
+  ## Once the panel under `root` is laid out (its region overflowing, so the
+  ## rows' heights are their drawn ones), scrolls each of its regions the
+  ## least that shows what the keyboard is on: a story's first frame.
+  keepWhenLaidOut(root, cstring(KeyboardItemSelector), keepKeyboardItemInView)
+
 proc onPanelKey(ev: JsObject) =
   ## A key while the focus is in the Changes panel or the Inbox: resolved in
   ## its scope by the base keymap; one of its operations runs and the event
@@ -123,6 +164,10 @@ proc onPanelKey(ev: JsObject) =
     keepKeyboardItemInView()
 
 proc installKeys() =
+  ## The panels' key listener, once per window, and the routing of the
+  ## presses their elements carry (`installBaseElementRouting` keeps a
+  ## router the page already has).
+  installBaseElementRouting()
   if not keysInstalled:
     keysInstalled = true
     {.emit: ["window.addEventListener('keydown', ", onPanelKey, ", true);"].}

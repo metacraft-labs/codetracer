@@ -2,11 +2,11 @@
  INBOX  this server
   ←   →     Auto-switch: off
                                                                                                                                                                                     
-            Nothing is waiting for you.               ● ASKS FOR PERMISSION                                                                                            Priority… ▾
+            Nothing is waiting for you.                              ● ASKS FOR PERMISSION                                                              Priority ▾
                                                                                                                                                                                     
-                                                      Run `psql -f migrations/0042_cache.sql` against the staging database?
+                                                                     Run `psql -f migrations/0042_cache.sql` against the staging database?
                                                                                                                                                                                     
-                                                       Allow once   Allow always   Reject once   Reject always
+                                                                      Allow once   Allow always   Reject once   Reject always
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     

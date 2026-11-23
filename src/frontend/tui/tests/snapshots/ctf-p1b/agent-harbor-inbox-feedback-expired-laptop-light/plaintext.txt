@@ -1,15 +1,15 @@
  Inbox  ⚲ ✕
- ● ASKS FOR FEEDBACK  Write the release notes                                                                                                                          Priority… ▾
+                                           ● ASKS FOR FEEDBACK  Write the release notes                                       Priority ▾
                                                                                                                                                                                     
-  Expired
+                                            Expired
                                                                                                                                                                                     
- Should the notes mention the old cache?
+                                           Should the notes mention the old cache?
                                                                                                                                                                                     
-  Your response
+                                            Your response
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     
-  Submit
+                                            Submit
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     

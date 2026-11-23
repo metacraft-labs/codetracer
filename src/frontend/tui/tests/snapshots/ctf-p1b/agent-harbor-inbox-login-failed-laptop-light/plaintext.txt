@@ -1,10 +1,10 @@
  Inbox  ⚲ ✕
- ● ASKS YOU TO SIGN IN  Benchmark the cache                                                                                                                            Priority… ▾
+                                           ● ASKS YOU TO SIGN IN  Benchmark the cache                                         Priority ▾
                                                                                                                                                                                     
- Example Cloud
- Sign in to read the benchmark bucket.
- Sign-in failed
- The sign-in window was closed before the sign-in finished.
+                                           Example Cloud
+                                           Sign in to read the benchmark bucket.
+                                           Sign-in failed
+                                           The sign-in window was closed before the sign-in finished.
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     
