@@ -23,10 +23,11 @@
 ##   `pluginsWordsOf`), a stopped plugin's fault actions among them
 ##   (`faultEntries`), and the footer's text (`footerText`).
 
-import std/[json, os, strutils]
+import std/[json, options, os, strutils]
 
 import ../../tui/host/plugin_processes
 import ../../viewmodel/plugin_host/supervisor
+import headless_app/layout_model   # where *Show pane* places a plugin's pane
 import ../../viewmodel/session_vm
 import ../../viewmodel/viewmodels/omnibar_vm
 import ../../../common/view_vocabulary/mappings   # `feGpui`
@@ -212,3 +213,17 @@ proc windowFooterNote*(p: SessionPlugins; statusNote: string): string =
     let items = p.statusText
     if items.len > 0: parts.add items
   parts.join("  ·  ")
+
+const PluginPaneAnchors* = [paneState, paneCalltrace, paneEventLog, paneEditor]
+  ## Where *Show pane* places a plugin's pane that the layout does not hold:
+  ## a TAB beside the first of these that is placed (the Variables stack in
+  ## the shared default), as the terminal places one
+  ## (`tui/app/layout/binding.ContributedPaneAnchors`). With no anchor the
+  ## pane went into the root row with no weight: a column too narrow to show.
+
+proc pluginPaneCommand*(tree: LayoutNode; id, title: string): LayoutCommand =
+  ## The layout command that docks plugin pane `id` into `tree`.
+  for a in PluginPaneAnchors:
+    if tree.contains(a):
+      return cmdAddContributedPane(id, title, after = some(builtinRef(a)))
+  cmdAddContributedPane(id, title)

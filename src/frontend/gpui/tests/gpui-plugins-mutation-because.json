@@ -3,6 +3,7 @@
   "G10": "\"metrics ok\" in p.windowFooterNote(\"a note\")",
   "G11": "\"Plugins: Re-enable acme-tools.flame\" notin labels(p.pluginEntries())",
   "G12": "\"Plugins: Re-enable acme-tools.flame\" in offered",
+  "G13": "cmd.addContributedAfter == some(paneState)",
   "G2": "not p.routePluginKey(\"Ctrl+Alt+M\", userBound = true)",
   "G3": "queue[] == @[\"next\"]",
   "G4": "not p.observeWindowEscape(\"j\")",

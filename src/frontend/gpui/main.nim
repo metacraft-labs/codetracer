@@ -7394,7 +7394,7 @@ proc dockPluginPane(r: GpuiRenderer; id: string) =
     var title = id
     for pane in gPlugins.pluginPanesShown:
       if pane.id == id: title = pane.title
-    applyGestureCommand(r, cmdAddContributedPane(id, title))
+    applyGestureCommand(r, committedLayout().tree.pluginPaneCommand(id, title))
     discard drawArrangement(r)
   redrawPluginPanes(r)
   focusWindowPane(r, id)

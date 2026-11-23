@@ -29,7 +29,7 @@
 ## The CI host runs at load above 100: every wait is on state, with a generous
 ## ceiling, and a threshold that is not a case's subject is widened.
 
-import std/[json, os, posix, sequtils, sets, strutils, times, unittest]
+import std/[json, options, os, posix, sequtils, sets, strutils, times, unittest]
 
 import isonim/core/[owner]
 import isonim_gpui/renderer
@@ -398,6 +398,15 @@ suite "GPUI: the window's plugins (host/gpui_plugins)":
       p.layerHeld)
     p.close()
 
+  test "Show pane places a plugin's pane as a tab beside the Variables stack":
+    let tree = sharedDefaultLayout().tree
+    let cmd = tree.pluginPaneCommand("acme-tools.metrics/overview", "Metrics")
+    ck cmd.kind == lcAddContributedPane
+    ck cmd.addContributedAfter == some(paneState)
+    # With no anchor placed, it still goes somewhere.
+    let bare = contributedPaneNode("acme-tools.flame/flame", "Flame", 1.0)
+    ck bare.pluginPaneCommand("acme-tools.metrics/overview", "Metrics").addContributedAfter.isNone
+
   test "assertion count":
-    ck CHECKS == 115
+    ck CHECKS == 118
     echo "CHECKS: ", CHECKS

@@ -48,6 +48,7 @@ KEYS = S + ("keys: the layer takes Escape, the user's row beats the plugin "
             "pass, the chord recovers")
 HOLDER = S + ("a plugin killed while it holds the keyboard: its layer goes at "
               "once, the next key is the window's")
+PLACED = S + "Show pane places a plugin's pane as a tab beside the Variables stack"
 
 ARMS = [
     ("G1", [(DOOR, '  if k == "esc": "escape" else: k', "  k")],
@@ -68,7 +69,7 @@ ARMS = [
              "  discard")],
      [(SUITE, KEYS)],
      "§11.7.6: any three keys open the recovery dialog"),
-    ("G5", [(LEAVES, "  r.appendChild(parent, renderGpui(r, view).root)",
+    ("G5", [(LEAVES, "  r.appendChild(body, renderGpui(r, view).root)",
              "  discard renderGpui(r, view)")],
      [(SUITE, LEAF)],
      "a contributed leaf draws its title and not its plugin's view"),
@@ -105,6 +106,10 @@ ARMS = [
      [(SUITE, HOLDER)],
      "§11.7.5: a stopped plugin's Re-enable, Disable and Show log are not in "
      "the omnibar"),
+    ("G13", [(DOOR, "      return cmdAddContributedPane(id, title, after = some(builtinRef(a)))",
+              "      return cmdAddContributedPane(id, title)")],
+     [(SUITE, PLACED)],
+     "Show pane docks a plugin's pane into the root row, too narrow to show"),
 ]
 
 

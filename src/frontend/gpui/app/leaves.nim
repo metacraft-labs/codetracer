@@ -4908,6 +4908,9 @@ proc renderPaneView(r: GpuiRenderer; parent: GpuiElement;
     r.appendChild(parent, binding.root)
   pv.report.len == 0
 
+const ContributedPaneInk = DesignTokenHex[dtColorsUiTextPrimaryBody][dmDark]
+  ## A plugin pane's text: the panes' body colour.
+
 const ContributedPaneAttribute* = "data-ct-contributed-pane"
   ## A contributed leaf drawing its plugin's view names the qualified pane id
   ## it drew (`renderContributedView`).
@@ -4925,7 +4928,16 @@ proc renderContributedView*(r: GpuiRenderer; parent: GpuiElement;
   ## A contributed pane's view, through the vocabulary's GPUI binding — the
   ## binding every built-in pane's generic view is drawn by.
   r.setAttribute(parent, ContributedPaneAttribute, leaf.paneId)
-  r.appendChild(parent, renderGpui(r, view).root)
+  # The vocabulary's binding draws structure and no ink (its elements carry
+  # no colour), so the view sits on a body that gives its text the panes'
+  # body colour; without one it was drawn in the renderer's default, dark on
+  # the dark pane, and could not be read.
+  let body = r.createElement("div")
+  r.setStyle(body, "color", ContributedPaneInk)
+  r.setStyle(body, "padding-left", "8px")
+  r.setStyle(body, "padding-top", "4px")
+  r.appendChild(body, renderGpui(r, view).root)
+  r.appendChild(parent, body)
 
 proc paneTitleElement(r: GpuiRenderer; leaf: GpuiLeaf): GpuiElement =
   ## A leaf's title, carrying its TEXT ROLE, its metric and its token.
