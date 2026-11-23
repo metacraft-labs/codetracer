@@ -76,6 +76,9 @@ from ../viewmodel/views/context_menu_bridge import contextMenuIsOpen,
 # PLAT-70 Part B (Horizontal-Overflow.md §5): the table panes' detail, copy
 # and column widths.
 import ../viewmodel/views/table_overflow_dom
+# Extensibility-Model.md §11.7: installed plugins' keys (`ui/plugin_panes`),
+# decided in this listener from what they pushed.
+import ./plugin_hooks
 
 type
   NativeKind = enum
@@ -876,6 +879,16 @@ proc monacoWouldAnswer(name: string; ev: JsObject): bool =
       return true
   key.len >= 2 and key[0] == 'F' and key[1 .. ^1].allCharsInSet({'0' .. '9'})
 
+proc userBindsKey*(name: string): bool =
+  ## Whether a user row binds `name` as a one-chord key: such a key is the
+  ## user's, and a plugin's static binding for it is not consulted (the
+  ## terminal's rule, `tui/app/runtime`).
+  let k = name.toLowerAscii
+  for b in deskRouter.user.bindings:
+    if b.chords.len == 1 and b.chords[0].toLowerAscii == k:
+      return true
+  false
+
 proc routeKey(name: string; ev: JsObject) =
   ## One canonical key through the router, run once, the event stopped when
   ## it was run.
@@ -883,6 +896,16 @@ proc routeKey(name: string; ev: JsObject) =
   syncContextMenuLayer()
   syncMenuLayer()
   syncVideoPickerLayer()
+  # EXTENSIBILITY-MODEL §11.7: THE PLUGINS, DECIDED IN THIS TURN from what
+  # they pushed (`plugin_panes.decideKey`). Every `Esc` is observed for the
+  # recovery chord; host modal layers — the palette, the program menu, a
+  # context menu — rank above every plugin layer. A key a plugin takes is
+  # stopped here and answered by the plugin later.
+  if not pluginKeyHook.isNil and
+     pluginKeyHook(name, ev, desktopFacts().paletteVisible or menuIsOpen() or
+                             contextMenuIsOpen()):
+    stop(ev)
+    return
   # A widget of the shared editor that owns keys while it is open (the
   # suggestion list) answers first.
   let sharedText = textFocusedSharedEditor()

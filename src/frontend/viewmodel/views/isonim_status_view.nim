@@ -122,6 +122,12 @@ type
       ## nothing at all — see `StatusCertificateModel`.
     build*: StatusBuildModel
       ## PLAT-56: the build indicator; empty renders nothing.
+    plugins*: string
+      ## The installed plugins' item (Extensibility-Model.md §11): their
+      ## status items, the top plugin layer and its plugin, a plugin waiting
+      ## for consent. "" renders NO ELEMENT, so a renderer with no plugins
+      ## emits the DOM it emitted before.
+    pluginsTitle*: string
 
   StatusShellModel* = object
     activeNotifications*: seq[StatusNotificationRecord]
@@ -283,6 +289,9 @@ proc statusStructureSignature*(model: StatusShellModel): string =
   # PLAT-56: the build indicator's presence; its words, icon and class are
   # patched in place.
   result.add("|bs:" & (if model.base.build.text.len > 0: "1" else: "0"))
+  # The plugins' item: rebuilt when its words change, which is rare (a
+  # plugin's status item, a layer pushed or popped), never on a step.
+  result.add("|pl:" & model.base.plugins & "\x1e" & model.base.pluginsTitle)
   result.add("|ce:" & (if model.base.certificate.label.len > 0: "1" else: "0"))
   result.add("|cd:" & (if model.base.certificate.disclosed: "1" else: "0"))
   if model.base.certificate.disclosed:
@@ -392,6 +401,12 @@ proc renderStatusShell*[R, N](
           span(class = "test-movement"):
             text model.base.testMovementText
         span(class = "status-right"):
+          # The installed plugins' item (Extensibility-Model.md §11).
+          if model.base.plugins.len > 0:
+            span(class = "plugin-status status-inline", role = "status",
+                 `aria-live` = "polite", title = model.base.pluginsTitle,
+                 `data-ct-plugin-status` = "1"):
+              text model.base.plugins
           # PLAT-56: THE BUILD INDICATOR (Build-Output-Pane.md §3.10) — the
           # current build's verdict, always on the bar; pressed, the Build
           # Output pane is revealed.

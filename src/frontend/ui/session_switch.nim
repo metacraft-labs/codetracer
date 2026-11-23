@@ -21,6 +21,7 @@
 import
   std/[strformat, jsffi, asyncjs],
   ../types,
+  plugin_hooks,
   ../dap,
   ../event_helpers,
   ../renderer,
@@ -431,6 +432,9 @@ proc closeSession*(data: Data, targetIndex: int) =
   let closingVMs = viewModelsOf(closingSession)
   if not closingVMs.isNil:
     forgetTestResultsVM(closingVMs.testResultsVM)
+  # Its plugins stop with it (Extensibility-Model.md §11.8).
+  if not pluginTabClosed.isNil and not closingSession.dapApi.isNil:
+    pluginTabClosed(closingSession.dapApi.sessionId)
   disposeViewModels(closingSession)
 
   # Remove the session from the list.
@@ -490,6 +494,9 @@ proc switchSession*(data: Data, targetIndex: int) =
   #    showed in its own ViewModels; there is nothing to save or restore.
   data.activeSessionIndex = targetIndex
   bindWindowTo(data.activeSession)
+  # The palette's and the status bar's plugin entries are the new tab's
+  # (Extensibility-Model.md §11, `ui/plugin_panes`).
+  if not pluginTabSwitched.isNil: pluginTabSwitched()
 
   # 3. Show (or create) the target session's container.
   var targetContainer = getSessionContainer(targetIndex)

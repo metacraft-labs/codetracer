@@ -1518,6 +1518,17 @@ test_lane_files() {
 		# being quoted), the origins of each kind of bind, and
 		# CODETRACER_HOST_ALLOWED_ORIGINS.
 		echo src/frontend/tests/host_session_guard_test.nim
+		#
+		# `plugin_sessions_test.nim` (Extensibility-Model.md §11.2.1) runs the
+		# desktop main process's and `ct host`'s installed plugins
+		# (`index/plugin_sessions`) against REAL plugin processes, which node
+		# spawns through `process_link`'s `child_process` arm: consent, one
+		# process for a package's plugins, the desktop's mirror of a renderer
+		# tab's session and the relay of a plugin's step back to it, the key
+		# snapshot decided as the supervisor decides, and one process per
+		# session with neither seeing the other. Builds the `acme-tools` test
+		# package with the lane's `nim`; writes under its scratch directory.
+		echo src/frontend/tests/plugin_sessions_test.nim
 		;;
 
 	frontend-native-units)

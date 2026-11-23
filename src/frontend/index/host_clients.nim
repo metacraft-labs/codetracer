@@ -83,7 +83,9 @@ when not defined(js):
 import std/[asyncjs, jsffi, strutils, tables]
 
 import base_handlers, bootstrap_cache, served_client, electron_vars,
-  hosted_session
+  hosted_session, plugin_sessions
+import ../viewmodel/sync/hosted_primary
+import ../viewmodel/sdk/debugger_session
 import ipc_subsystems/dap
 import ../../common/ct_logging
 
@@ -115,6 +117,10 @@ type
       ## Its current replay; -1 while it has none.
     primary: HostedPrimary
       ## The server's session over `replayId`, which the tab mirrors.
+    plugins: PluginSession
+      ## The installed plugins beside `primary` (Extensibility-Model.md
+      ## §11.2.1: one plugin-host process per primary session), their state
+      ## sent to this client alone.
 
   HostClient* = ref object
     id: string
@@ -239,6 +245,14 @@ proc current(hc: HostClients): HostClient =
   let store = currentClient()
   if store.isNil: nil else: cast[HostClient](store)
 
+proc currentTabPlugins*(hc: HostClients; tab: int): PluginSession =
+  ## The plugins of the CURRENT client's tab `tab`; nil outside every
+  ## client's context, so no client reaches another client's plugins.
+  let c = hc.current()
+  if c.isNil: return nil
+  let t = c.tabOf(tab)
+  if t.isNil: nil else: t.plugins
+
 proc attachedCount*(hc: HostClients): int =
   ## How many clients have a socket now.
   for c in hc.clients.values:
@@ -285,6 +299,9 @@ proc primaryIdFor(replayId: int): string =
   "ct-host/replay-" & $replayId
 
 proc closePrimary(t: HostTab) =
+  if not t.plugins.isNil:
+    t.plugins.closePluginSession()
+    t.plugins = nil
   if not t.primary.isNil:
     t.primary.close()
     t.primary = nil
@@ -323,6 +340,16 @@ proc bindReplay(hc: HostClients; c: HostClient; tab: int; replayId: int;
     if folder.len > 0:
       t.primary = openHostedSession(hc.sessions, primaryIdFor(replayId),
                                     replayId, folder)
+      # The plugins beside it: keyed by the client and its tab, delivered to
+      # this client only, whatever context a later pump runs in.
+      let owner = c
+      t.plugins = openPluginSession(
+        "ct-host/" & c.id & "/tab-" & $tab, tab, t.primary.debugger.session,
+        primaryIdFor(replayId),
+        proc(channel: cstring; payload: JsObject) =
+          runAsClient(owner.toJs, proc() =
+            mainWindow.webContents.send(channel, payload)),
+        "web")
       if not c.socket.isNil:
         t.primary.connectPage(c.socket.toJs, tab)
   infoPrint "ct host: client ", c.id, " tab ", $tab, " replays ", $replayId
