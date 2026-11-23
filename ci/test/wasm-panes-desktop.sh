@@ -14,6 +14,9 @@
 # build or a tool is missing — a failure, never a skip.
 
 set -uo pipefail
+# The spec's output is shown as it runs through `tee >(cat >&2)`, not
+# `tee /dev/stderr`: when stderr is a file, the latter reopens it from the
+# start and overwrites everything written before, the measurements included.
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${repo_root}" || exit 2
@@ -55,14 +58,14 @@ fi
 
 echo "--- the spec ---"
 (cd src/tests/gui && CT_WASM_PANES_REQUIRED=1 CODETRACER_BUILD_DIR="${build_dir}" npx playwright test \
-	tests/wasm-panes/wasm_panes_draw_the_panes.spec.ts --reporter=line) | tee /dev/stderr | grep -q ' passed'
+	tests/wasm-panes/wasm_panes_draw_the_panes.spec.ts --reporter=line) | tee >(cat >&2) | grep -q ' passed'
 rc=$?
 echo "--- the spec in the web build, served by ct host, in a browser ---"
 # The same renderer bundle, served by `ct host` (which serves wasm-panes/
 # beside ui.js) and opened in a browser: the browser front-end with the
 # editor pane open, over the same recording.
 (cd src/tests/gui && CODETRACER_TEST_IN_BROWSER=1 CT_WASM_PANES_REQUIRED=1 CODETRACER_BUILD_DIR="${build_dir}" npx playwright test \
-	tests/wasm-panes/wasm_panes_draw_the_panes.spec.ts -g "draw Call Trace" --reporter=line) | tee /dev/stderr | grep -q ' passed'
+	tests/wasm-panes/wasm_panes_draw_the_panes.spec.ts -g "draw Call Trace" --reporter=line) | tee >(cat >&2) | grep -q ' passed'
 web_rc=$?
 if [ "${rc}" -ne 0 ] || [ "${web_rc}" -ne 0 ]; then
 	echo "wasm-panes-desktop: FAILED (electron ${rc}, web ${web_rc})"
