@@ -715,8 +715,6 @@ src/frontend/tui/tests/plat57-find-in-files-mutation-control.sha256	src/frontend
 src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend/viewmodel/input/dom_pane_presses.nim	c81194a315115893a9bacf18b75fb8c4ee3c1264d558dc3f97ea9ff10cf8a12a	2c3e2736fa6bf7b9f86296c0fcce26e018cc7047185cb4204872eeb2b63186a0
 src/frontend/tui/tests/plat70d-grep-mutation-control.sha256	src/frontend/viewmodel/views/isonim_search_results_view.nim	f46ce588770cdc9b283d2d8cd33333962f15391bc9343b3207b3f55f243c531d	f0ad78aa5b0d77803be89e2fad8df7c27cf849ae20b3a5bb1fd7ea864cba826d
 src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/run-nim-test-lane.sh	3faa671c35896f38d4e764ee8cdf379953e6adeec265a186ab966956f4f79811	3466f2374fa109b34c6326f47f0bccff13a5591911f251156bc5a4255f010916
-src/frontend/viewmodel/tests/unit/plat18-marshalling-mutation-control.sha256	src/frontend/viewmodel/views/isonim_state_view.nim	68a33a4b16b1e15562812871ca34f0a159dd99b2d46ea6044ca8a32aad31ceca	06380e7b2269a990f491704e429bcb6ce32f627c6d5f9df6327765f9ff58a5a4
-src/frontend/viewmodel/tests/unit/plat18-marshalling-mutation-control.sha256	src/frontend/viewmodel/views/isonim_calltrace_view.nim	c996fd7c21e2c4571a7fdf84a475c3bb9b8fcb1767536f1ef0b1d0c07a9bfe04	2697620b8aa813e868301bf028930639c30e3a78c839bd446a597c13dec886fc
 
 # 2026-11-21, the terminal binding's Variables reader reads the column layout
 # (a fold glyph, then name, type and value), for the project-definitions port.
@@ -832,11 +830,5 @@ src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/front
 src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/process_link.nim	92855333df47ca9e0a3bdb7b026ff27a9620efda405af90a379c7fce665fd526	687b2729524a069c31220df9f22b1074d55abb3398718c568f30db8006a5a9d0
 src/frontend/viewmodel/tests/unit/plat7-boundary-mutation-control.sha256	ci/test/plugin-reactive-boundary.sh	6e9f1bda4d55463800d5d327bdc5a960c330d6c63a3f7205ebe6797b705dff86	c8ae759cff230f3e6f1d51b39cb75d93d86a67ec5d2b2de34b26586223d6a9a8
 src/frontend/viewmodel/tests/unit/plat8-io-mutation-control.sha256	ci/test/plugin-reactive-boundary.sh	6e9f1bda4d55463800d5d327bdc5a960c330d6c63a3f7205ebe6797b705dff86	c8ae759cff230f3e6f1d51b39cb75d93d86a67ec5d2b2de34b26586223d6a9a8
-
-# 2026-11-22: -d:ctPlat18Slice removed from the two views; the slice, its probe and the
-# plat18-marshalling harness build -d:ctWasmCore (plat18-marshalling is re-graded for it;
-# plat70f owes a re-grade for the state view's comment-only change).
-src/frontend/viewmodel/tests/unit/plat18-marshalling-mutation-control.sha256	src/frontend/viewmodel/tests/manual/plat18_marshalling_probe.nim	ea6ca25922a41dee1b6474a6d3f3c13644d9a44f2d219df8ea2060b5f968880d	2d5aaed15ece9c997a392ce081cd4f19b95baa2f2e0ce6a6460d5d90eceec134
-src/frontend/viewmodel/tests/unit/plat18-marshalling-mutation-control.sha256	ci/test/plat18-electron-slice.sh	0f543c736c46517893431918cf6ec722b17970d63856948d551d5afaeff5fce3	351031a09dbcce39bbe91557046ecb904c7fa5d64a277dfa331c2cb1cb55396f
 
 # plat50-clicks-mutation-control.sha256: graded at 7135bbccaf7; these subjects moved after it.
