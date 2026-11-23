@@ -24,6 +24,8 @@ on:
       - ".github/workflows/windows-nargo.yml"
       - "non-nix-build/windows/ensure-nargo.ps1"
       - "non-nix-build/windows/toolchain-versions.env"
+      # LOCK_NOIR: a Noir pin move is a new nargo to build and smoke-test.
+      - "ci/toolchain.pin"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
