@@ -5548,7 +5548,17 @@ proc updateEditors(data: Data) =
     editor.updateOptions(options)
   for path, editor in data.ui.editors:
     if not editor.flow.isNil and not editor.flow.flow.isNil:
-      editor.flow.redrawFlow()
+      # Each editor's flow is redrawn on its own. A redraw that throws (a
+      # Monaco query about a line its model does not have, say) is logged and
+      # leaves only that editor's labels unchanged: it must not end this loop,
+      # because every editor after it would then keep its labels at the old
+      # size and position, over the code (#908). The rest of this iteration
+      # (test and diff zones) is per editor too, so it still runs.
+      try:
+        editor.flow.redrawFlow()
+      except:
+        cerror "editor: zoom: flow redraw failed for " & $path & ": " &
+          getCurrentExceptionMsg()
     for id, zone in editor.testDom:
       let textModel = editor.monacoEditor.getModel()
       let lineContent = textModel.getLineContent(id)
