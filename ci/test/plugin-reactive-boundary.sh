@@ -1916,9 +1916,14 @@ fi
 # 9 -> 10 (2026-11-21): the TLS name check imports `std/openssl` for
 # `SSL_set1_host` and `X509_VERIFY_PARAM_set1_ip_asc`, which `std/net` does
 # not wrap. A real operating-system (library) module, so the move is genuine.
+#
+# 10 -> 9 (2026-11-23): `std/strtabs` is gone. It held the environment table
+# `startProcess` took; a plugin's child is now spawned by `posix_spawn` in
+# `spawnGrouped` (its own process group whichever stdlib built the plugin),
+# which takes the environment as a C array.
 # ---------------------------------------------------------------------------
 
-ALLOWLIST_CONTROL_UNADMITTED=10
+ALLOWLIST_CONTROL_UNADMITTED=9
 ALLOWLIST_CONTROL_ADMITTED="std/strutils"
 
 if [ -f "${SYNC_IO_REL}" ]; then

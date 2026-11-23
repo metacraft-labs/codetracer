@@ -734,8 +734,12 @@ suite "§11.7.2: the plugin pass and pushed state":
   test "a static binding resolves on the plugin's last pushed context, never asking it":
     var r = newRig()
     r.both()
-    check r.sup.waitUntil("context pushed", proc(): bool =
-      r.sup.contextKeys.getOrDefault("plugin.acme-tools.metrics.ready", false))
+    # The context key and the operation's enablement are separate pushes;
+    # the binding resolves only once both arrived (it read false 1 run in 6
+    # at load ~150, waiting on the context key alone).
+    check r.sup.waitUntil("context and enablement pushed", proc(): bool =
+      r.sup.contextKeys.getOrDefault("plugin.acme-tools.metrics.ready", false) and
+        r.sup.enablementOf("acme-tools.metrics", "metrics.step").enabled)
     let route = r.sup.resolveStaticKey("ctrl+alt+m", "")
     check route.found
     check route.plugin == "acme-tools.metrics"

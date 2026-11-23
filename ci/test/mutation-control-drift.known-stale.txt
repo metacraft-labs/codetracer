@@ -545,7 +545,7 @@ src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/fro
 # 2026-11-21, plugins' TLS connections check the certificate's name and honour
 # SSL_CERT_FILE / SSL_CERT_DIR (plugin_io, plat8); the plugin-tls lane and its
 # recipe (test-lane-files, justfile: plat17, plat33, plat34).
-src/frontend/viewmodel/tests/unit/plat8-io-mutation-control.sha256	src/frontend/viewmodel/plugin_host/plugin_io.nim	52bc1afdd35a4cfcfc29a5b7d3742d43b3e167a309a6362daa50d11c129f9c06	5cf1d0a87314246b164f4c55245ddb72d364ccbf93b9204617a64989c3cf276f
+src/frontend/viewmodel/tests/unit/plat8-io-mutation-control.sha256	src/frontend/viewmodel/plugin_host/plugin_io.nim	52bc1afdd35a4cfcfc29a5b7d3742d43b3e167a309a6362daa50d11c129f9c06	d5de198bc351a80da5aa4c73b99ed7c6fd48d90d8a9a55ad3a59df7e1e664b26
 
 # 2026-11-20, the wasm32 developer profile: the wasm lane compiles through
 # ci/lib/wasm-cc.sh, and the justfile gained the profile's, the second pane's
@@ -621,7 +621,7 @@ src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/fronten
 # suite moved under plat81's record, and the supervisor under its Node twin's
 # (plat81-node-plugin-host). Both owe a re-grade for these bytes.
 src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/supervisor.nim	9c5739a3e43b891145fb03985c8d59531341c4bc0fd40d5f612789cdf476b6e0	8632d01ac0e288b769ee002ee800f305f981ed929bbc6fc2fb0833b94e3e267f
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_plugin_process_host.nim	25a46e3c835516db9e2260705fe51667c06efe3317a7afec196b152333b3071e	b4c0a8cdc6d1d23eec24e75824a9cdf7383d9096a17c3e6743b12c5649f99e2a
+src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_plugin_process_host.nim	25a46e3c835516db9e2260705fe51667c06efe3317a7afec196b152333b3071e	96e54034050201d009726ebec5ee79dcceb093afcca83accccd1bab18ae278de
 src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/tui/tests/real_terminal/test_plat81_plugin_processes_pty.nim	656dd8f478424c872f60f3a72b0d8fc37bf2f7d67b509bbbbcf8e6a41984831a	0ebf845f3cc918c19bb7d54afc90ec4013a641fa0e8334fa904cc6e403c4f57f
 src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/viewmodel/plugin_host/supervisor.nim	1c8a1e016ccdd015111f497d22c2b3fe9ebbcf7c3cd21f4e720b09f991cf2a31	8632d01ac0e288b769ee002ee800f305f981ed929bbc6fc2fb0833b94e3e267f
 
@@ -707,7 +707,7 @@ src/frontend/tui/tests/plat70b-table-mutation-control.sha256	src/frontend/viewmo
 src/frontend/viewmodel/tests/unit/hsf-sdk-mutation-control.sha256	src/frontend/viewmodel/viewmodels/event_log_vm.nim	75c008b2da091f77fed96996db91d7ad8cd44393c2e1c06705bb8444c5f7f32b	826bdadedb493db77e782fa39cb37ff64eab510e256a7e28b1ab33d7719c5e9a
 src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/plugin_sdk/codetracer_plugin_sdk.nim	a0c27d2992078e2221c721cd86f40c68f545b6014df880843d59676df9b9ea50	2d4903eaa226c5295c0ced78d7a2666d9ecabd473c9bf9d3066d0a009d782fee
 src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/common/plugin_model/package.nim	45537e6ad4b07bf40f4a92f9cef0e77a67f0dbab044276cc5d5bf9e60aa129a3	3b63192135a7d255e4d02097d414341a3c368009924ae09249be83861fa14886
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/plugin_io.nim	22f2d01676fd1fc37defd8244c0c97352f008deaa9435f9dfd1c029d2b7435df	5cf1d0a87314246b164f4c55245ddb72d364ccbf93b9204617a64989c3cf276f
+src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/plugin_io.nim	22f2d01676fd1fc37defd8244c0c97352f008deaa9435f9dfd1c029d2b7435df	d5de198bc351a80da5aa4c73b99ed7c6fd48d90d8a9a55ad3a59df7e1e664b26
 
 # 2026-11-22, the GPUI vocabulary: Image carries its picture, the pass-through tags match
 # the render plan, and the escape census records gap ids. plat21 was re-graded (28 of 28
@@ -793,8 +793,8 @@ src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	ci/test/inpu
 # the TLS name check. plat81 (process, Node twin) owes a re-grade over these bytes
 # together with the SDK rework; plat7/plat8 owe one for the boundary script.
 src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/process_link.nim	92855333df47ca9e0a3bdb7b026ff27a9620efda405af90a379c7fce665fd526	67a0095978446fcf0f5c4b2ab6e769482b685d4041d552431b9bad3e9362de98
-src/frontend/viewmodel/tests/unit/plat7-boundary-mutation-control.sha256	ci/test/plugin-reactive-boundary.sh	6e9f1bda4d55463800d5d327bdc5a960c330d6c63a3f7205ebe6797b705dff86	c8ae759cff230f3e6f1d51b39cb75d93d86a67ec5d2b2de34b26586223d6a9a8
-src/frontend/viewmodel/tests/unit/plat8-io-mutation-control.sha256	ci/test/plugin-reactive-boundary.sh	6e9f1bda4d55463800d5d327bdc5a960c330d6c63a3f7205ebe6797b705dff86	c8ae759cff230f3e6f1d51b39cb75d93d86a67ec5d2b2de34b26586223d6a9a8
+src/frontend/viewmodel/tests/unit/plat7-boundary-mutation-control.sha256	ci/test/plugin-reactive-boundary.sh	6e9f1bda4d55463800d5d327bdc5a960c330d6c63a3f7205ebe6797b705dff86	80987fdfec08ede87826699cef3508cdb66e67b4d0073f52da0cfe5038f54044
+src/frontend/viewmodel/tests/unit/plat8-io-mutation-control.sha256	ci/test/plugin-reactive-boundary.sh	6e9f1bda4d55463800d5d327bdc5a960c330d6c63a3f7205ebe6797b705dff86	80987fdfec08ede87826699cef3508cdb66e67b4d0073f52da0cfe5038f54044
 
 # plat50-clicks-mutation-control.sha256: graded at 7135bbccaf7; these subjects moved after it.
 
