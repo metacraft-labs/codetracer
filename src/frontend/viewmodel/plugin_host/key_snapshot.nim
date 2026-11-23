@@ -50,6 +50,12 @@ proc contextOf(snap: JsonNode; host: Table[string, bool]): Table[string, bool] =
     for k, v in c:
       result[k] = v.getBool(false)
 
+proc isRecoveryChordKey*(key: string): bool =
+  ## Whether `key` (a front-end's canonical name, any case) is the recovery
+  ## chord's key, `Escape` (§11.7.6). The host owns the chord, so a
+  ## front-end asks here instead of spelling the key itself.
+  key.toLowerAscii in ["esc", "escape"]
+
 proc isReserved*(snap: JsonNode; key: string): bool =
   ## The palette key and the recovery chord's key are no plugin's.
   let k = key.toLowerAscii

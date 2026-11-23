@@ -535,6 +535,13 @@ method register*(self: StatusComponent, api: MediatorWithSubscribers) =
     onBuildStatusChange = proc() = self.requestStatusRender()
     # So does the plugins' item (Extensibility-Model.md §11).
     pluginStatusChanged = proc() = self.requestStatusRender()
+    # A plugin's fault: a notification whose buttons are its actions.
+    pluginNotify = proc(text: string; actions: seq[PluginPaletteCommand]) =
+      var buttons: seq[NotificationAction]
+      for a in actions:
+        buttons.add newNotificationButtonAction(cstring(a.label), a.run)
+      self.onNotification(newNotification(NotificationKind.NotificationError,
+                                          text, actions = buttons))
   api.subscribe(InternalStatusUpdate, proc(kind: CtEventKind, response: StatusState, sub: Subscriber) =
     self.onStatusUpdate(response)
   )

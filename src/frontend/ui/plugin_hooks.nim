@@ -39,5 +39,10 @@ var pluginTabSwitched*: proc()
   ## Called by `session_switch` when the tab on screen changes: the palette
   ## and the status bar show THAT tab's plugins.
 
+var pluginNotify*: proc(text: string; actions: seq[PluginPaletteCommand])
+  ## Set by the status bar: show a plugin's fault notification (§11.6.5) with
+  ## its actions (`Re-enable`, `Disable`, `Show log`) as the notification's
+  ## buttons.
+
 var pluginTabClosed*: proc(tab: int)
   ## Called by `session_switch` when a tab closes: its plugins stop.

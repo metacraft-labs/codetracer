@@ -37,6 +37,7 @@ import std/[asyncjs, json, jsffi, strutils, tables]
 import ../../common/[ct_logging, plugin_model]
 import ../../ct/extension_selection
 import ../tui/host/plugin_processes
+import ../tui/host/plugin_panes as host_panes
 import ../viewmodel/plugin_host/[protocol, supervisor, key_snapshot]
 import ../viewmodel/session_vm
 import ../viewmodel/sync/[transport, mirror_session]
@@ -62,6 +63,8 @@ type
     deliver: PluginDeliver
     mirror*: MirrorSession
       ## The desktop's mirror of the renderer's session; nil under `ct host`.
+    panes: PluginPanes
+      ## The panes as presses act on them (`paneClickNode`), made on first use.
     lastSent: string
     lastSentMs: float
     lastBuiltMs: float
@@ -155,10 +158,15 @@ proc stateOf*(ps: PluginSession): JsonNode =
                     "enabled": enabled, "reason": reason}
   var notes = newJArray()
   for n in sup.notifications:
-    notes.add %*{"plugin": n.plugin, "text": n.text, "actions": n.actions}
+    notes.add %*{"plugin": n.plugin, "text": n.text, "actions": n.actions,
+                 "atMs": n.atMs}
   var plugins = newJArray()
   for id, s in sup.slots:
-    plugins.add %*{"id": id, "state": sup.stateOf(s), "pid": sup.pidOf(id)}
+    let (p50, p99) = s.latency
+    plugins.add %*{"id": id, "state": sup.stateOf(s), "pid": sup.pidOf(id),
+                   "breaker": $s.breaker, "latched": s.latched,
+                   "strikes": s.totalStrikes, "slowAcks": s.slowAcks,
+                   "ackP50": p50, "ackP99": p99}
   %*{"sessionId": ps.tab,
      "extensionsEnabled": sup.extensionsEnabled,
      "panes": panes, "status": status, "commands": commands,
@@ -206,6 +214,28 @@ proc ensureTimer() =
 # Opening and closing
 # ---------------------------------------------------------------------------
 
+proc applyTestThresholds*(sup: Supervisor) =
+  ## `CODETRACER_PLUGIN_TEST_THRESHOLDS`: a JSON object of the supervisor's
+  ## input-defence thresholds (`inputDeadlineMs`, `strikesToOpen`,
+  ## `breakerBackoffMs`, `breakerBackoffCapMs`, `openingsToLatch`,
+  ## `strikeWindowMs`), for the GUI suites that walk a breaker through
+  ## half-open and latch in minutes rather than the product's 30 s backoffs.
+  ## Unset in the product; a malformed value is logged and ignored.
+  let text = $jsEnv(cstring"CODETRACER_PLUGIN_TEST_THRESHOLDS")
+  if text.len == 0: return
+  try:
+    let t = parseJson(text)
+    if t.hasKey("inputDeadlineMs"): sup.inputDeadlineMs = t["inputDeadlineMs"].getInt
+    if t.hasKey("strikesToOpen"): sup.strikesToOpen = t["strikesToOpen"].getInt
+    if t.hasKey("breakerBackoffMs"): sup.breakerBackoffMs = t["breakerBackoffMs"].getInt
+    if t.hasKey("breakerBackoffCapMs"): sup.breakerBackoffCapMs = t["breakerBackoffCapMs"].getInt
+    if t.hasKey("openingsToLatch"): sup.openingsToLatch = t["openingsToLatch"].getInt
+    if t.hasKey("strikeWindowMs"): sup.strikeWindowMs = t["strikeWindowMs"].getInt
+    if t.hasKey("halfOpenProbationMs"): sup.halfOpenProbationMs = t["halfOpenProbationMs"].getInt
+    infoPrint "plugins: test thresholds ", text
+  except CatchableError as e:
+    warnPrint "plugins: CODETRACER_PLUGIN_TEST_THRESHOLDS ignored: ", e.msg
+
 proc openPluginSession*(key: string; tab: int; session: SessionViewModel;
                         sessionId: string; deliver: PluginDeliver;
                         frontEnd: string; startDir = ""): PluginSession =
@@ -221,6 +251,7 @@ proc openPluginSession*(key: string; tab: int; session: SessionViewModel;
     result.plugins = openSessionPlugins(session, sessionId, extensionsEnabled(),
                                         dir, frontEnd = frontEnd,
                                         surfaces = feWeb)
+    result.plugins.sup.applyTestThresholds()
     result.plugins.attach(session, sessionId)
   except CatchableError as e:
     # The session is the user's; its plugins failing to open must not take
@@ -327,7 +358,18 @@ proc escape*(ps: PluginSession) =
   ps.send(force = true)
 
 proc viewEvent*(ps: PluginSession; surface: string; event: JsonNode) =
-  ps.plugins.sup.viewEvent(surface, event)
+  ## A press on a plugin pane's element (`ui/plugin_panes.activatePressed`):
+  ## the node, and its option or table row, activated as the terminal's and
+  ## GPUI's presses activate it (`paneClickNode`) — the row highlighted or
+  ## chosen, and the plugin sent the vocabulary's own transition. Any other
+  ## event is the plugin's as it came.
+  if event{"kind"}.getStr("") == "activate":
+    if ps.panes.isNil: ps.panes = newPluginPanes(ps.plugins)
+    discard ps.panes.paneClickNode(surface, event{"node"}.getStr(""),
+                                   event{"option"}.getInt(-1))
+  else:
+    ps.plugins.sup.viewEvent(surface, event)
+  ps.send(force = true)
 
 proc handle*(ps: PluginSession; kind: string; msg: JsonNode) =
   ## One `plugins-*` message from the renderer.

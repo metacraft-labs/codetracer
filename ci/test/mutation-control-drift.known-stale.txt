@@ -825,7 +825,11 @@ src/frontend/tui/tests/plat81-plugin-panes-mutation-control.sha256	src/frontend/
 # 8fd7eeb45fc's change only.
 ci/test/plat70i-fit-mutation-control.sha256	src/frontend/ui/key_router.nim	9994e157d0760237fb047c3f49346530ce7a9bcb02d4741f9a56ed854d91203f	c30aaf05c19eab4624461a18a3fa2702cd6eb2f249d79408dbda6e5af7b079d0
 src/frontend/tui/tests/plat45-layout-mutation-control.sha256	src/frontend/headless_app/desktop_panes.nim	a468757a2e6189dc46ef094308864e18340ea93f28c84f41805bbe573ddf3b76	36b8305e6ab36df9d0f6bc0d1a36e209721fda6b3f87cf8c954331b816741634
-src/frontend/tui/tests/plat56-build-output-mutation-control.sha256	src/frontend/ui/status.nim	df43b16eb8c1ebbdb419f3fa3db0471c2e9c6f56853a672a76f614b0fa13f518	bda32e487b2f73add6322e544ebe32f282b69a41d9608fc40ab763d32eee0949
+# 2026-11-23, the desktop's input defences: fault notifications with Re-enable,
+# Disable and Show log buttons (status), breaker figures and test thresholds in the
+# plugins' state, pane presses through paneClickNode (plugin_sessions), the chord's
+# key named by the host (key_snapshot). plat81-node-plugin-host and plat56 owe re-grades.
+src/frontend/tui/tests/plat56-build-output-mutation-control.sha256	src/frontend/ui/status.nim	df43b16eb8c1ebbdb419f3fa3db0471c2e9c6f56853a672a76f614b0fa13f518	9ef6e34245835ce010a9301461f12e8226ae904622500fffe4ba19ac267919f6
 src/frontend/tui/tests/plat57-find-in-files-mutation-control.sha256	src/frontend/ui/command_interpreter.nim	474e6f0aa46ed3aaef8dacf0a087fff872b6cf10ea4bc7eec28feff66a7b04d6	f969fe5c195b17744265b646b0231791110852df800e7311e2467436dfc34cb4
 src/frontend/tui/tests/plat57-find-in-files-mutation-control.sha256	src/frontend/index/ipc_utils.nim	37ec4874982ea39f53a83cde32a3a8c66e1810b1bbf163accd715a28e1b1411d	bcf9f7467a4f6fb00e08db270464fc24208191e0dafe7099aa975085c6e70aa1
 src/frontend/tui/tests/plat61-shell-mutation-control.sha256	src/frontend/ui/key_router.nim	9994e157d0760237fb047c3f49346530ce7a9bcb02d4741f9a56ed854d91203f	c30aaf05c19eab4624461a18a3fa2702cd6eb2f249d79408dbda6e5af7b079d0
@@ -835,3 +839,6 @@ src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	src/frontend/ui/ke
 
 src/frontend/gpui/tests/gpui-plugins-mutation-control.sha256	src/frontend/tui/host/plugin_panes.nim	d9aba9dc68dd568155b5c3fb22ff62bbb08fc190b601099cc12d3f26505cdf8c	f791fa24e11e8efdfc59645a5d8556bd36b818198ddafbafac3065adc87e6102
 src/frontend/tui/tests/plat3-vocabulary-mutation-control.sha256	src/common/view_vocabulary/behaviour.nim	e987a7493e4e98fd6aea560fab68eae8a7e922c55f32a8b276707f6d3d5d1162	0e36aead99ee9570eb53d03b2d3f674406a3457caae4d578f41ba91bad9535c5
+
+src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/viewmodel/plugin_host/key_snapshot.nim	e0e66066d97b1bdcdf6603b2b72352602b768e400bf7b7e95b79680ec6bdaff7	5eb27da2055793c7ade416e15bbbb39fa41b7f3110d8e18375c964d8a6f82522
+src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/index/plugin_sessions.nim	1d5997145c23620ac0eba8ab310bef10d73fc0cb408132791bf9c16ed064dfe7	75d1dab1260ef183dd6facf838fc4195ea4ddc13dcae27e841903802328aa2ab
