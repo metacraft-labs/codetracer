@@ -135,7 +135,9 @@ jobs:
           # env.ps1's allowlist: only these steps run, and it also leaves out
           # codetracer's own node-packages install, which a WINDOWS_DIY_SKIP_*
           # list would still run.
-          WINDOWS_DIY_ONLY: "GCC,ZSTD,ZLIB,RUST,NIM,NARGO"
+          # TTD only for WinDbg's cdb, which prints a hung nargo's thread
+          # stacks (WINDOWS_DIY_ENSURE_TTD=false above keeps it optional).
+          WINDOWS_DIY_ONLY: "GCC,ZSTD,ZLIB,RUST,NIM,NARGO,TTD"
         run: |
           $ErrorActionPreference = "Stop"
           $started = Get-Date
@@ -192,6 +194,19 @@ jobs:
                 Write-Host "::error::$Activity did not finish within ${TimeoutSeconds}s. Process tree:"
                 Write-Host "  $($p.Id) $($p.ProcessName) cpu=$([int]$p.TotalProcessorTime.TotalSeconds)s threads=$($p.Threads.Count)"
                 Show-ProcessTree -RootId $p.Id -Indent "    "
+                # Every thread's stack, non-invasively, with nargo's PDB from
+                # the build tree when it is still there.
+                if ($env:WINDOWS_DIY_CDB_EXE -and (Test-Path -LiteralPath $env:WINDOWS_DIY_CDB_EXE -PathType Leaf)) {
+                  $sym = Join-Path (Split-Path -Parent $env:NARGO_DIR) "noir\target\release"
+                  Write-Host "Thread stacks (cdb -pv, symbols from $sym):"
+                  try {
+                    $null = Invoke-BoundedNativeCommand -FilePath $env:WINDOWS_DIY_CDB_EXE `
+                      -ArgumentList @("-pv", "-p", "$($p.Id)", "-y", $sym, "-c", ".reload /f nargo.exe; ~*k 40; qd") `
+                      -Activity "cdb thread-stack dump" -TimeoutSeconds 180
+                  } catch { Write-Host "  cdb failed: $($_.Exception.Message)" }
+                } else {
+                  Write-Host "  (no WINDOWS_DIY_CDB_EXE, so no thread stacks)"
+                }
                 try { $p.Kill($true) } catch { }
                 throw "$Activity did not finish within ${TimeoutSeconds}s and was killed."
               }
