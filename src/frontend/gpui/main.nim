@@ -14314,6 +14314,15 @@ proc onPaneClick(c: GPaneClick) =
                                index: int64(parseInt(c.key["commit-".len .. ^1]))),
                              gestureOfClick(c), c.x, c.y)
       except ValueError: discard
+  of gcpPluginNode:
+    # §11.4.4: a press on a plugin pane's row or control focuses the pane and
+    # activates the node, as its Enter would; the plugin is sent the
+    # `view-event` and its answer is drawn when it arrives.
+    if c.button != gbLeft or gPluginPanes.isNil:
+      return
+    focusWindowPane(r, c.key)
+    if gPluginPanes.routePaneClick(c.key, c.node, int(c.index)):
+      traceGesture("plugin view click " & c.node & "#" & $c.index & " on " & c.key)
 
 proc wireClicks(r: GpuiRenderer) =
   ## Give every row the window draws its click listeners (`window_clicks`).

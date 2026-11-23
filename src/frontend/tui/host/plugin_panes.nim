@@ -208,37 +208,55 @@ proc paneKey*(pp: PluginPanes; id, key: string): bool =
   pp.send(id, target, o.transition)
   true
 
-proc paneClick*(pp: PluginPanes; id: string; row: int): bool =
-  ## A click on content row `row` of a plugin pane: the row's node becomes
-  ## the key target, its option is highlighted (or chosen, for `Tabs` and
-  ## `Select`), and the node is activated — a list row activated, a checkbox
-  ## toggled, a button pressed, a tab chosen — through `applyKey`'s own
-  ## transition for Enter, sent as `view-event`.
-  if pp.isNil or pp.plugins.isNil: return false
-  let tree = pp.treeOf(id)
-  let rows = rowsOf(tree)
-  if row < 0 or row >= rows.len or rows[row].node.isNil: return false
-  let r = rows[row]
-  let n = r.node
+proc activate(pp: PluginPanes; id: string; n: ViewNode; option: int): bool =
+  ## A press on node `n` of pane `id` (on its option `option`, or -1): the
+  ## node becomes the key target, its option is highlighted (or chosen, for
+  ## `Tabs` and `Select`), and the node is activated — a list row activated,
+  ## a checkbox toggled, a button pressed, a tab chosen — through `applyKey`'s
+  ## own transition for Enter, sent as `view-event`.
   pp.stateOf(id).target = n.id
-  if r.option >= 0:
+  if option >= 0:
     case n.kind
-    of pkList, pkMenu: n.highlight = r.option
+    of pkList, pkMenu: n.highlight = option
     of pkTabs:
-      n.selected = r.option
+      n.selected = option
       pp.send(id, n, trCommit)
       return true
     of pkSelect:
-      n.selected = r.option
-      n.highlight = r.option
+      n.selected = option
+      n.highlight = option
       n.open = false
       pp.send(id, n, trCommit)
       return true
-    of pkTable, pkTree: n.cursor = r.option
+    of pkTable, pkTree: n.cursor = option
     else: discard
   let o = applyKey(n, KeyPress(key: kEnter))
   pp.send(id, n, if o.handled: o.transition else: trActivate)
   true
+
+proc paneClick*(pp: PluginPanes; id: string; row: int): bool =
+  ## A click on content row `row` of a plugin pane (the terminal's rows).
+  if pp.isNil or pp.plugins.isNil: return false
+  let rows = rowsOf(pp.treeOf(id))
+  if row < 0 or row >= rows.len or rows[row].node.isNil: return false
+  pp.activate(id, rows[row].node, rows[row].option)
+
+proc paneClickNode*(pp: PluginPanes; id, nodeId: string; option = -1): bool =
+  ## A click on the element drawing node `nodeId` of a plugin pane (its option
+  ## `option`, or -1 for the node itself) — a window that draws the pushed
+  ## tree as elements names the press by node, not by row. False for a node
+  ## the pushed tree does not have, or an option out of its range.
+  if pp.isNil or pp.plugins.isNil or nodeId.len == 0: return false
+  let n = findNode(pp.treeOf(id), nodeId)
+  if n.isNil: return false
+  if option >= 0:
+    let count =
+      case n.kind
+      of pkList, pkMenu, pkTabs, pkSelect: n.options.len
+      of pkTable: n.rows.len
+      else: -1
+    if count >= 0 and option >= count: return false
+  pp.activate(id, n, option)
 
 proc sameDocument(a, b: string): bool =
   a == b or (a.len > 0 and b.len > 0 and
