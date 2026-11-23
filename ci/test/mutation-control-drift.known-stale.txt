@@ -517,7 +517,7 @@ src/frontend/tui/tests/plat59-visual-replay-mutation-control.sha256	src/frontend
 # suite off the JS and WASM lanes (plat17, plat33, plat34).
 src/frontend/viewmodel/tests/unit/plat10-distribution-mutation-control.sha256	src/ct/launch/plugin_components.nim	2448cca0305e39e7c9c00b717561d5ccbbe8b392394b5e193774c9c166b9f570	0c346dfa2ceb0e75157e15cf2c570561663317fbfac55ae71b5900e00a31b294
 src/frontend/viewmodel/tests/unit/plat10-distribution-mutation-control.sha256	src/ct/launch/grant_store.nim	855ffe542a0a6508269696da474d5b1da309d2464d70a628cfb84e6d9c6f703a	f9f2b5ff5eb212c5537a1f0eab37929d98a8fa08e0daa59d37ffbbf3ada76a3a
-src/frontend/viewmodel/tests/unit/plat9-surface-mutation-control.sha256	src/frontend/viewmodel/plugin_host/surface_host.nim	ce85f5f1bcaa85a0abbf6fbeae95f639cc7abedd39f2817b5a04726f4134625a	b9739471421fd0bd62b026910ca72297affe6a9b83eba235cd4a05f01a753dcb
+src/frontend/viewmodel/tests/unit/plat9-surface-mutation-control.sha256	src/frontend/viewmodel/plugin_host/surface_host.nim	ce85f5f1bcaa85a0abbf6fbeae95f639cc7abedd39f2817b5a04726f4134625a	3fddebc1d5a1d4df6d8846db8374b95600bb0b09dd3d28b102283f41a0d3bbec
 
 # 2026-11-20, the zgui front-end: its lane and recipes edit ci/lib/test-lane-files.sh
 # and the justfile again. plat17, plat33 and plat34 already owed a re-grade for those
