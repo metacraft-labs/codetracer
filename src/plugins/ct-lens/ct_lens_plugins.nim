@@ -4,8 +4,10 @@
 ## `ct-lens.history` — LINE HISTORY. Wherever the debugger stops, it asks git
 ## which commits last changed the function the stop is in (`git log -L`), and
 ## shows them in a pane and a status item. git runs as a child process of the
-## plugin, started in a handler and finished in the SDK's idle loop
-## (`lens_tools`), so a slow repository never holds the other plugin.
+## plugin through the SDK's `runTool` (a declared program, an argv list, a
+## process group of its own, a deadline): it is started in a handler and its
+## answer is handled in a continuation, so a slow repository never holds the
+## other plugin.
 ##
 ## `ct-lens.watch` — CHANGED VALUES. It reads the core State ViewModel's own
 ## change set (`StateVM.valueChanges`) and the locals from the plugin's mirror
@@ -30,7 +32,6 @@
 import std/[algorithm, os, sets, strutils, tables]
 
 import codetracer_plugin_sdk
-import lens_tools
 import lens_watch
 
 const
@@ -38,8 +39,6 @@ const
   JumpId = "ct-lens.jump"
   PackageName = "ct-lens"
   Version = "0.1.0"
-
-let runner = newToolRunner()
 
 # ---------------------------------------------------------------------------
 # Line history
@@ -162,23 +161,27 @@ proc startHistory(p: Plugin; h: HistoryState; force = false) =
       h.running = true
       let plugin = p
       let state = h
-      h.run = runner.start(HistoryId,
-        historyArgv(git, t.file, t.first, t.last, limit), t.file.parentDir,
-        timeout, proc(r: ToolRun) =
-          if r != state.run: return
-          state.running = false
-          state.run = nil
-          if r.startError.len > 0:
-            state.message = "could not run " & git & ": " & r.startError
-          elif r.timedOut:
-            state.message = git & " did not answer within " & $timeout & " ms"
-          elif r.exitCode != 0:
-            let first = r.output.strip.splitLines
-            state.message = git & ": " &
-              (if first.len > 0: first[0] else: "exit status " & $r.exitCode)
-          else:
-            state.rows = parseHistory(r.output)
-          if plugin.active: plugin.pushHistory(state))
+      let argv = historyArgv(git, t.file, t.first, t.last, limit)
+      let r = p.runTool(argv[0], argv[1 .. ^1], workingDir = t.file.parentDir,
+                        timeoutMs = timeout,
+                        env = @[("PATH", getEnv("PATH")),
+                                ("HOME", getEnv("HOME"))])
+      h.run = r
+      r.finished.addCallback(proc() =
+        if r != state.run or r.cancelled: return
+        state.running = false
+        state.run = nil
+        if r.startError.len > 0:
+          state.message = "could not run " & git & ": " & r.startError
+        elif r.timedOut:
+          state.message = git & " did not answer within " & $timeout & " ms"
+        elif r.exitCode != 0:
+          let first = r.output.strip.splitLines
+          state.message = git & ": " &
+            (if first.len > 0: first[0] else: "exit status " & $r.exitCode)
+        else:
+          state.rows = parseHistory(r.output)
+        if plugin.active: plugin.pushHistory(state))
   p.pushEnablement("history.refresh", t.file.len > 0,
                    if t.file.len > 0: "" else: "the debugger has not stopped yet")
   p.pushHistory(h)
@@ -195,7 +198,10 @@ proc setupHistory(sdk: PluginSdk) =
   h.onSettingsChanged = proc(p: Plugin) =
     p.startHistory(state, force = true)
   h.onDeactivate = proc(p: Plugin) =
-    runner.stopOwnedBy(HistoryId)
+    # Deactivation kills what is still running (the SDK's handle sweep);
+    # the run is forgotten here so its answer is never handled.
+    if not state.run.isNil: state.run.cancel()
+    state.run = nil
   h.onInvoke("history.refresh", proc(p: Plugin; args: JsonNode; req: Request) =
     p.startHistory(state, force = true)
     p.done(req))
@@ -343,8 +349,4 @@ when isMainModule:
   setupHistory(sdk)
   setupWatch(sdk)
   setupJump(sdk)
-  runner.onError = proc(owner, message: string) =
-    let p = sdk.plugins.getOrDefault(owner, nil)
-    if not p.isNil: p.log(message, "error")
-  sdk.idle.add proc() = runner.pump()
   sdk.run()

@@ -630,11 +630,18 @@ src/frontend/viewmodel/tests/unit/plat4-layout-mutation-control.sha256	src/front
 # activates reaches it: the supervisor, the host suite and the real-terminal
 # suite moved under plat81's record, and the supervisor under its Node twin's
 # (plat81-node-plugin-host). Both owe a re-grade for these bytes.
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/supervisor.nim	9c5739a3e43b891145fb03985c8d59531341c4bc0fd40d5f612789cdf476b6e0	64d322db371a06119a6264a4c4d47e7527a5e648ef0ad6aece15044f6b4d9389
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_plugin_process_host.nim	25a46e3c835516db9e2260705fe51667c06efe3317a7afec196b152333b3071e	960212477385b4f7276bb48b701693108e70669c8d350be32fef294e504916a7
+src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/supervisor.nim	9c5739a3e43b891145fb03985c8d59531341c4bc0fd40d5f612789cdf476b6e0	1c8a1e016ccdd015111f497d22c2b3fe9ebbcf7c3cd21f4e720b09f991cf2a31
+src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_plugin_process_host.nim	25a46e3c835516db9e2260705fe51667c06efe3317a7afec196b152333b3071e	8754c046dbbcb2f9748847b9aaa65c0efcd2aa321f7c2b789c9a6f81f690b4b6
 src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/tui/tests/real_terminal/test_plat81_plugin_processes_pty.nim	656dd8f478424c872f60f3a72b0d8fc37bf2f7d67b509bbbbcf8e6a41984831a	0ebf845f3cc918c19bb7d54afc90ec4013a641fa0e8334fa904cc6e403c4f57f
-src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/viewmodel/plugin_host/supervisor.nim	9c5739a3e43b891145fb03985c8d59531341c4bc0fd40d5f612789cdf476b6e0	64d322db371a06119a6264a4c4d47e7527a5e648ef0ad6aece15044f6b4d9389
+src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/viewmodel/plugin_host/supervisor.nim	9c5739a3e43b891145fb03985c8d59531341c4bc0fd40d5f612789cdf476b6e0	1c8a1e016ccdd015111f497d22c2b3fe9ebbcf7c3cd21f4e720b09f991cf2a31
 
+# 2026-11-23, the native plugin SDK rework: the protocol on descriptors 3-6 with a
+# liveness channel, the SDK's event loop, process and socket primitives, attributed
+# timers. The SDK, process_link, supervisor and both host suites moved again under
+# plat81 (process) and its Node twin, and the lines in this section and the next were
+# refreshed to these bytes; the Node harness's arms for the channel are J10-J12. The
+# plat81-process re-grade is the terminal helper's (after its rebase), the Node
+# twin's the desktop helper's (with its K arms).
 # 2026-11-22, the Node link probes setpriv before using it (codetracer-pm issue
 # 2026-11-21-the-node-plugin-link-starts-every-plugin-through-a-setpriv-that-
 # cannot-run): process_link.nim gained the probe and ProcessLink.launchNote,
@@ -645,7 +652,7 @@ src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/front
 # nixos-ci-bare-001: util-linux setpriv cannot run there (NoNewPrivs, empty
 # bounding set), so main-ends cannot kill J5 on that host. Both harnesses owe
 # a re-grade for these bytes on a host where setpriv runs.
-src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_plugin_process_host_node.nim	1a8c0a12f61f74d82830403feac1e421afdd6d41fd70a270c15c92c17230b516	20d228e77946b7a7d9d171e07f37055a38d1104ddb96f72d15e96d019b73a680
+src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_plugin_process_host_node.nim	1a8c0a12f61f74d82830403feac1e421afdd6d41fd70a270c15c92c17230b516	fbdc49b3a2e4dec80014b3398e66c18754a998dcc76efebb0e8ddda497848892
 
 # 2026-11-21, the find decisions (Find-And-Incremental-Search.md OQ-F5 – OQ-F7):
 # regular expressions and Find in Selection in the editor core's matcher, the
@@ -710,7 +717,7 @@ src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/viewmo
 src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/viewmodel/viewmodels/event_log_vm.nim	75c008b2da091f77fed96996db91d7ad8cd44393c2e1c06705bb8444c5f7f32b	826bdadedb493db77e782fa39cb37ff64eab510e256a7e28b1ab33d7719c5e9a
 src/frontend/tui/tests/plat70b-table-mutation-control.sha256	src/frontend/viewmodel/viewmodels/event_log_vm.nim	75c008b2da091f77fed96996db91d7ad8cd44393c2e1c06705bb8444c5f7f32b	826bdadedb493db77e782fa39cb37ff64eab510e256a7e28b1ab33d7719c5e9a
 src/frontend/viewmodel/tests/unit/hsf-sdk-mutation-control.sha256	src/frontend/viewmodel/viewmodels/event_log_vm.nim	75c008b2da091f77fed96996db91d7ad8cd44393c2e1c06705bb8444c5f7f32b	826bdadedb493db77e782fa39cb37ff64eab510e256a7e28b1ab33d7719c5e9a
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/plugin_sdk/codetracer_plugin_sdk.nim	a0c27d2992078e2221c721cd86f40c68f545b6014df880843d59676df9b9ea50	6a299f65789979bdafa88c6ca81cc02f37abc3896448c805ffa8c8a783330100
+src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/plugin_sdk/codetracer_plugin_sdk.nim	a0c27d2992078e2221c721cd86f40c68f545b6014df880843d59676df9b9ea50	2d4903eaa226c5295c0ced78d7a2666d9ecabd473c9bf9d3066d0a009d782fee
 src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/common/plugin_model/package.nim	45537e6ad4b07bf40f4a92f9cef0e77a67f0dbab044276cc5d5bf9e60aa129a3	3b63192135a7d255e4d02097d414341a3c368009924ae09249be83861fa14886
 src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/plugin_io.nim	22f2d01676fd1fc37defd8244c0c97352f008deaa9435f9dfd1c029d2b7435df	5cf1d0a87314246b164f4c55245ddb72d364ccbf93b9204617a64989c3cf276f
 
@@ -799,8 +806,8 @@ src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	ci/test/inpu
 # helper confirms each step, and the plugin boundary script's pinned counts move for
 # the TLS name check. plat81 (process, Node twin) owes a re-grade over these bytes
 # together with the SDK rework; plat7/plat8 owe one for the boundary script.
-src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/viewmodel/plugin_host/process_link.nim	92855333df47ca9e0a3bdb7b026ff27a9620efda405af90a379c7fce665fd526	687b2729524a069c31220df9f22b1074d55abb3398718c568f30db8006a5a9d0
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/process_link.nim	92855333df47ca9e0a3bdb7b026ff27a9620efda405af90a379c7fce665fd526	687b2729524a069c31220df9f22b1074d55abb3398718c568f30db8006a5a9d0
+src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/viewmodel/plugin_host/process_link.nim	92855333df47ca9e0a3bdb7b026ff27a9620efda405af90a379c7fce665fd526	67a0095978446fcf0f5c4b2ab6e769482b685d4041d552431b9bad3e9362de98
+src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/process_link.nim	92855333df47ca9e0a3bdb7b026ff27a9620efda405af90a379c7fce665fd526	67a0095978446fcf0f5c4b2ab6e769482b685d4041d552431b9bad3e9362de98
 src/frontend/viewmodel/tests/unit/plat7-boundary-mutation-control.sha256	ci/test/plugin-reactive-boundary.sh	6e9f1bda4d55463800d5d327bdc5a960c330d6c63a3f7205ebe6797b705dff86	c8ae759cff230f3e6f1d51b39cb75d93d86a67ec5d2b2de34b26586223d6a9a8
 src/frontend/viewmodel/tests/unit/plat8-io-mutation-control.sha256	ci/test/plugin-reactive-boundary.sh	6e9f1bda4d55463800d5d327bdc5a960c330d6c63a3f7205ebe6797b705dff86	c8ae759cff230f3e6f1d51b39cb75d93d86a67ec5d2b2de34b26586223d6a9a8
 

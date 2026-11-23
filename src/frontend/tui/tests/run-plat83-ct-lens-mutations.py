@@ -32,7 +32,7 @@ from plat71_mutation_engine import Harness  # noqa: E402
 
 LENS = "src/plugins/ct-lens/ct_lens_plugins.nim"
 WATCH = "src/plugins/ct-lens/lens_watch.nim"
-TOOLS = "src/plugins/ct-lens/lens_tools.nim"
+SDK = "src/plugin_sdk/codetracer_plugin_sdk.nim"
 
 PROCS = "src/frontend/tui/host/plugin_processes.nim"
 RUNTIME = "src/frontend/tui/app/runtime.nim"
@@ -40,7 +40,7 @@ RUNTIME = "src/frontend/tui/app/runtime.nim"
 SUITE = "src/frontend/viewmodel/tests/unit/test_ct_lens_plugins.nim"
 PTY = "src/frontend/tui/tests/real_terminal/test_ct_lens_plugins_pty.nim"
 
-SUBJECTS = [LENS, WATCH, TOOLS, PROCS, RUNTIME]
+SUBJECTS = [LENS, WATCH, SDK, PROCS, RUNTIME]
 SUITES = [SUITE, PTY]
 IN_BINARY = {PROCS, RUNTIME}
 
@@ -62,13 +62,13 @@ ARMS = [
              "  if false and st.functionFirst > 0 and")],
      [(SUITE, FUNCTION)],
      "the stop's function range is ignored; only the line is asked about"),
-    ("M2", [(TOOLS, "    elif now > r.deadline:",
-             "    elif false:")],
+    ("M2", [(SDK, "  let inTime = await p.own(withTimeout(exited, max(1, timeoutMs)))",
+             "  let inTime = await p.own(withTimeout(exited, high(int32)))")],
      [(SUITE, DEADLINE)],
      "a tool past its deadline is left running"),
-    ("M3", [(TOOLS, "      result.fd = result.process.outputHandle.cint",
-             "      result.fd = result.process.outputHandle.cint\n"
-             "      discard result.process.waitForExit()")],
+    ("M3", [(SDK, "  let body = toolBody(p, run, env, workingDir, timeoutMs, maxOutput)",
+             "  let body = toolBody(p, run, env, workingDir, timeoutMs, maxOutput)\n"
+             "  while not body.finished: poll(5)")],
      [(SUITE, SLOW)],
      "the handler waits for the tool, holding the sibling plugin"),
     ("M4", [(WATCH, "  p.pushEnablement(\"watch.add-changed\", pending.len > 0, reason)",
@@ -87,10 +87,10 @@ ARMS = [
              "  p.pushContext(\"hasChanges\", %false)")],
      [(SUITE, CHANGED)],
      "the binding's context key never holds, so the key is never live"),
-    ("M8", [(LENS, "  sdk.idle.add proc() = runner.pump()",
-             "  discard")],
+    ("M8", [(SDK, "          if not run.finished.finished:\n            run.finished.complete(run)",
+             "          discard")],
      [(SUITE, FUNCTION)],
-     "the idle loop never finishes a tool run; the history never arrives"),
+     "a finished tool run is never handed back; the history never arrives"),
     ("M9", [(WATCH, "  p.publish(\"visualisers\", %*[",
              "  p.publish(\"visualisers-unpublished\", %*[")],
      [(SUITE, VISUAL)],

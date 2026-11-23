@@ -56,6 +56,7 @@ proc scratchRoot*(): string =
 const PackageSources = [PackageSrcDir / "acme_tools_plugins.nim",
                         SdkDir / "codetracer_plugin_sdk.nim",
                         RepoRoot / "src/frontend/viewmodel/plugin_host/protocol.nim",
+                        RepoRoot / "src/frontend/viewmodel/plugin_host/plugin_io.nim",
                         RepoRoot / "src/frontend/viewmodel/sync/mirror_session.nim"]
 
 proc sourceKey(args: seq[string]): string =

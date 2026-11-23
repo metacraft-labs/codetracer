@@ -67,6 +67,25 @@ const
   ShutdownGraceMs* = 2_000
   TermGraceMs* = 1_000
 
+  # ---- §11.4.1 the channel's descriptors -------------------------------------
+  ChannelEnv* = "CODETRACER_PLUGIN_CHANNEL"
+    ## Set by the host for every plugin process it starts, to
+    ## `fds:<in>,<out>,<ping-in>,<pong-out>`. The protocol does not use the
+    ## process's standard streams: stdin is `/dev/null`, and stdout and stderr
+    ## both go to the plugin's log, so a stray `echo` in a plugin (or a child
+    ## it starts with inherited stdio) is a log line, never a broken frame.
+  ProtocolInFd* = 3
+    ## Host to process: every message but `ping`.
+  ProtocolOutFd* = 4
+    ## Process to host: every message but `pong`.
+  LivenessInFd* = 5
+    ## Host to process: `ping` only, read by the SDK's watchdog thread.
+  LivenessOutFd* = 6
+    ## Process to host: `pong` only, written by the watchdog thread alone, so
+    ## a `pong` never waits behind a frame the main thread is writing.
+  ChannelEnvValue* = "fds:" & $ProtocolInFd & "," & $ProtocolOutFd & "," &
+    $LivenessInFd & "," & $LivenessOutFd
+
   HostToProcessTypes* = [
     "hello", "signal-snapshot", "signal-batch", "view-event", "invoke",
     "query", "cancel", "activate", "deactivate", "settings-changed",
