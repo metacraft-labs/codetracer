@@ -204,7 +204,18 @@ proc onFatalSignal(sig: cint) {.noconv.} =
   # The faulting thread's own instance: it is the one executing.
   const prefix = "\nct-plugin-crash: "
   discard posix.write(2, prefix.cstring, prefix.len)
-  let s = mySlot
+  # A signal raised by a worker names its own instance. One sent to the
+  # process (`kill`) lands on any thread: then the instance whose call has run
+  # longest is the one executing. Only reads of the shared arrays, so it stays
+  # async-signal-safe.
+  var s = mySlot
+  if s < 0 or slots[s].busyLen == 0:
+    s = -1
+    var since = high(int64)
+    for i in 0 ..< MaxWorkers:
+      if slots[i].busyLen > 0 and slots[i].busySinceNs < since:
+        since = slots[i].busySinceNs
+        s = i
   if s >= 0 and slots[s].busyLen > 0:
     discard posix.write(2, slots[s].busyName[0].addr, slots[s].busyLen)
   discard posix.write(2, "\n".cstring, 1)

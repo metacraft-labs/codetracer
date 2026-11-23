@@ -32,6 +32,11 @@
 ##    on a worker thread of its own, so its neighbour answers in well under
 ##    100 ms while it loops (the median of five queries asked during the loop,
 ##    every one answered before the loop was cut off).
+## 8. A fatal signal in the host is charged through its crash record: with
+##    liveness pings switched off (so no `pong` names the busy plugin), the
+##    host is sent SIGABRT while one plugin's call runs; its fatal-signal
+##    handler writes `ct-plugin-crash: <plugin>` and the supervisor charges
+##    that plugin from the record alone.
 ## 7. A release layout finds its host with no environment: the TUI component
 ##    `scripts/build-tui-component.sh --copy` lays out carries
 ##    `bin/ct-plugin-host` beside the front-end, and a program in that `bin/`
@@ -81,7 +86,11 @@ proc newRoot(): string =
   removeDir(result)
   createDir(result)
 
-proc newWasmSupervisor(root: string; deadlineMs = 500; memoryMb = 32): Supervisor =
+proc newWasmSupervisor(root: string; deadlineMs = 3_000; memoryMb = 32): Supervisor =
+  ## `deadlineMs`: the per-call deadline. Not 500: on the interpreter, under
+  ## load 100+, a plugin's first frames (the session snapshot) took 664 ms
+  ## (measured), and a deadline the activation itself overruns is not the
+  ## loop the cases are about.
   result = newSupervisor("tui", "1.0.0", true)
   result.wasmHost = pluginHostBin()
   result.wasmHostArgs = @["--call-deadline-ms", $deadlineMs,
@@ -161,7 +170,11 @@ suite "ct-plugin-host: many packages in one process, each plugin in its own inst
       check a{"value"}{"answered"}.getInt == asked
 
     echoOnce()
-    # spin: its call never returns.
+    # spin: its call never returns. Faults are counted from here, so nothing
+    # before the call can stand in for the one under test.
+    let spinBefore = sup.faultOf("wasm-faults.spin").len
+    let hogBefore = sup.faultOf("wasm-faults.hog").len
+    check spinBefore == 0 and hogBefore == 0
     let spinReq = sup.invoke("wasm-faults.spin", "spin.run")
     check spinReq.len > 0
     # Asked while spin holds the host's thread; answered once spin is cut off.
@@ -169,7 +182,7 @@ suite "ct-plugin-host: many packages in one process, each plugin in its own inst
                            deadlineMs = 60_000)
     inc asked
     check sup.waitUntil("spin faulted", proc(): bool =
-      sup.faultOf("wasm-faults.spin").len > 0)
+      sup.faultOf("wasm-faults.spin").len > spinBefore)
     # What it pushed went with its instance, in the turn that saw the fault
     # (it is pushed again when the plugin is activated anew, below).
     check sup.slot("wasm-faults.spin").status.len == 0
@@ -183,7 +196,7 @@ suite "ct-plugin-host: many packages in one process, each plugin in its own inst
     # hog: allocates until its limit.
     check sup.invoke("wasm-faults.hog", "hog.run").len > 0
     check sup.waitUntil("hog faulted", proc(): bool =
-      sup.faultOf("wasm-faults.hog").len > 0)
+      sup.faultOf("wasm-faults.hog").len > hogBefore)
     check sup.slot("wasm-faults.hog").status.len == 0
     check not sup.slot("wasm-faults.hog").active
     echoOnce()
@@ -449,4 +462,38 @@ suite "ct-plugin-host: many packages in one process, each plugin in its own inst
     check sup.waitUntil("echo active from the bundle's host", proc(): bool =
       sup.slot("wasm-steady.echo").active)
     check sup.ask("wasm-steady.echo", "echo", %*{"n": 7}){"value"}{"echo"}{"n"}.getInt == 7
+    sup.shutdown()
+
+  test "a fatal signal in the host is charged through its crash record":
+    let root = newRoot()
+    let steady = installWasmPackage(root, "wasm-steady", wasmPackage("wasm-steady", @[
+      wasmPlugin("wasm-steady.echo", [], ["echo.status"]),
+      wasmPlugin("wasm-steady.busy", ["busy.run"], ["busy.status"])]),
+      testModule("wasm-steady"))
+    let sup = newWasmSupervisor(root, deadlineMs = 60_000)
+    # No pings: the record is the only evidence of who was executing.
+    sup.pingBusyMs = 3_600_000
+    sup.pingIdleMs = 3_600_000
+    sup.add(steady)
+    sup.activate("wasm-steady.echo")
+    sup.activate("wasm-steady.busy")
+    check sup.waitUntil("both active", proc(): bool =
+      sup.slot("wasm-steady.echo").active and sup.slot("wasm-steady.busy").active)
+    let pid = sup.pidOf("wasm-steady.busy")
+    check sup.invoke("wasm-steady.busy", "busy.run", %*{"ms": 50_000}).len > 0
+    # The call is under way once its acknowledgement has come back.
+    let t0 = monotonicMs()
+    while monotonicMs() - t0 < 1_500:
+      sup.poll()
+      os.sleep(5)
+    check sup.slot("wasm-steady.busy").hostInstance.busy == ""
+    check posix.kill(Pid(pid), SIGABRT) == 0
+    check sup.waitUntil("the crash recorded", proc(): bool =
+      sup.faultOf("wasm-steady.busy").len > 0 or sup.faultOf("").len > 0)
+    check sup.faultOf("").len == 0
+    check sup.faultOf("wasm-steady.busy").len == 1
+    check sup.faultOf("wasm-steady.busy")[0].kind == fkCrash
+    check "ct-plugin-crash: wasm-steady.busy" in
+      readFile(root / "logs" / "ct-plugin-host.stderr.log")
+    check sup.faultOf("wasm-steady.echo").len == 0
     sup.shutdown()
