@@ -15,7 +15,10 @@
 ## renderer's (it is a measurement); `scrollToShow` below is the one rule
 ## both renderers use to keep the active tab visible.
 
+import std/options
+
 import codetracer_embed   # the store's agent sessions (`AgentSessionsState`)
+import nim_agents_isonim_viewmodels/agent_harbor/progress_pie
 
 import ./headless_app
 
@@ -100,6 +103,35 @@ func agentTooltipText*(title: string; a: SessionTabAgent): string =
   let p = agentProgressText(a)
   if p.len > 0:
     result.add " — " & p
+
+func pieRoleOf*(l: AgentServiceLifecycle): PieRole =
+  ## The colour family of the agent tab's progress pie, in the roles the
+  ## Agent Harbor pies use (`progress_pie.PieRole`), so CodeTracer's own
+  ## agent reads like any other session:
+  ## - starting or working is running: success;
+  ## - failed is error;
+  ## - completed and cancelled have ended: ended, grey;
+  ## - disconnected is not working and has not ended: idle.
+  ## No lifecycle waits for the reader, so none maps to warning.
+  case l
+  of aslConnecting, aslRunning: prSuccess
+  of aslError: prError
+  of aslCompleted, aslCancelled: prEnded
+  of aslDisconnected: prIdle
+
+func pieOf*(a: SessionTabAgent): Option[ProgressPie] =
+  ## The progress pie of the agent working in a tab: its lifecycle's role
+  ## (`pieRoleOf`) and its milestones, completed of total. An agent that
+  ## declared no milestones has unknown progress (the pie's ring and dot,
+  ## never 0 %). The accessible name is built once here, from the state word
+  ## the tooltip uses (`agentStateText`): `working, 13 of 24 milestones,
+  ## 54%`. A tab with no agent draws no pie: `none`. The web caption, GPUI's
+  ## top bar and the terminal's top bar all draw this pie, so none of them
+  ## decides the role or the words itself.
+  if not a.present:
+    return none(ProgressPie)
+  some(progressPie(pieRoleOf(a.lifecycle), agentStateText(a.lifecycle),
+                   a.completed, a.total, puMilestones))
 
 proc agentOf*(state: AgentSessionsState): SessionTabAgent =
   ## The agent a session's tab reports: the store's active agent session,
