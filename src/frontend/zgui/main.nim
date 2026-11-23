@@ -612,8 +612,7 @@ proc run(cmd: Command): int =
   if not gSession.session.editorVM.isNil:
     gSession.session.editorVM.showFlowOverlay.val = FlowOverlayShownByDefault
 
-  gShell = newGpuiShell(DockViewport(width: cmd.width, height: cmd.height,
-                                     dockExtent: DefaultGpuiViewport.dockExtent))
+  gShell = newGpuiShell(DockViewport(width: cmd.width, height: cmd.height))
   let layout = initLayout(sharedDefaultLayout().tree,
                           sharedDefaultLayout().docked)
   let slot = gShell.app.openSession(gSession.backend.toBackendService(),

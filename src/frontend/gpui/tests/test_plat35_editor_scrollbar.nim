@@ -224,8 +224,7 @@ proc codeTextByLine(plan: JsonNode): seq[(int, string)] =
 
 proc geometryAt(w, h: int): WindowGeometry =
   let layout = initLayout(sharedDefaultLayout().tree)
-  let proj = projectDock(layout, DockViewport(width: w, height: h,
-                                              dockExtent: 300))
+  let proj = projectDock(layout, DockViewport(width: w, height: h))
   doAssert proj.status == dpsProjected
   windowGeometryOf(layout, proj.state, w, h, GpuiTopBandPx)
 

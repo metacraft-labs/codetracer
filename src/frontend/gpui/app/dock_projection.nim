@@ -94,11 +94,11 @@ type
     ## and the pixels belong to the host's window.
     width*: int
     height*: int
-    dockExtent*: int
-      ## How many pixels an auto-hide strip is given. **The model does not
-      ## carry this** — `DockedPane` has an edge and an order and no size — so
-      ## it is the host's, stated here rather than invented inside the
-      ## projection. Recorded as a residue in PLAT-20's status block.
+      ## THERE IS NO DOCK EXTENT HERE. A dock's size is the MODEL's
+      ## (`DockedPane.openSharePercent`, a share of the axis), and
+      ## `dockExtentOf` derives its pixels from this viewport the way the
+      ## centre's are derived from `distributeExtent`: weights and shares
+      ## stay the model's, pixels are the host's.
 
   DockProjectionProblemKind* = enum
     ## Why a `Layout` has no dock document. Enumerated rather than reported as
@@ -318,6 +318,23 @@ func dockGroupsOf(layout: Layout; edge: LayoutEdge): seq[DockedPane] =
   ## The docked panes at one edge, in `order`. `dockedAt` already sorts.
   layout.dockedAt(edge)
 
+func dockExtentOf*(layout: Layout; edge: LayoutEdge;
+                   viewport: DockViewport): int =
+  ## How many pixels the dock at `edge` is given: the model's share of the
+  ## viewport's axis (`openSharePercent`) — of the pane shown open there, or
+  ## else of the edge's first pane, whose share is the one a click on the
+  ## strip would open. 0 for an edge that holds nothing.
+  let docked = dockGroupsOf(layout, edge)
+  if docked.len == 0:
+    return 0
+  var share = docked[0].openSharePercent
+  for d in docked:
+    if d.open:
+      share = d.openSharePercent
+  let axis = if edge in {leLeft, leRight}: viewport.width
+             else: viewport.height
+  max(1, axis * share div 100)
+
 proc dockStateFor(layout: Layout; edge: LayoutEdge; extent: int;
                   problems: var seq[DockProjectionProblem]): JsonNode =
   ## One `DockState`, or `nil` when the edge holds nothing.
@@ -391,9 +408,12 @@ proc projectDock*(layout: Layout; viewport: DockViewport): DockProjection =
                                    detail: $p.kind & " at '" & p.path & "'")
     return DockProjection(status: dpsRefused, problems: ps)
 
-  var left = dockStateFor(layout, leLeft, viewport.dockExtent, problems)
-  var right = dockStateFor(layout, leRight, viewport.dockExtent, problems)
-  var bottom = dockStateFor(layout, leBottom, viewport.dockExtent, problems)
+  var left = dockStateFor(layout, leLeft,
+                         dockExtentOf(layout, leLeft, viewport), problems)
+  var right = dockStateFor(layout, leRight,
+                          dockExtentOf(layout, leRight, viewport), problems)
+  var bottom = dockStateFor(layout, leBottom,
+                           dockExtentOf(layout, leBottom, viewport), problems)
   # PLAT-48: A TOP-DOCKED PANE IS NO LONGER A REFUSAL. gpui-kit's
   # `DockPlacement` still has no `top`, so the document carries no top dock —
   # the window draws the top strip and its reveal ITSELF, outside the
@@ -406,10 +426,11 @@ proc projectDock*(layout: Layout; viewport: DockViewport): DockProjection =
 
   var centreWidth = viewport.width
   var centreHeight = viewport.height
-  if not left.isNil: centreWidth -= viewport.dockExtent
-  if not right.isNil: centreWidth -= viewport.dockExtent
-  if not bottom.isNil: centreHeight -= viewport.dockExtent
-  if topDocked: centreHeight -= viewport.dockExtent
+  if not left.isNil: centreWidth -= dockExtentOf(layout, leLeft, viewport)
+  if not right.isNil: centreWidth -= dockExtentOf(layout, leRight, viewport)
+  if not bottom.isNil:
+    centreHeight -= dockExtentOf(layout, leBottom, viewport)
+  if topDocked: centreHeight -= dockExtentOf(layout, leTop, viewport)
 
   let centre = panelStateOf(layout.tree, centreWidth, centreHeight, problems,
                             "")

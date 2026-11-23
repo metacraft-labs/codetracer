@@ -497,8 +497,7 @@ suite "PLAT-49 part B: the GPUI window's drop zones are GoldenLayout's":
   test "a quarter on each side, the SMALLER centre joins; a tab's halves":
     let shared = sharedDefaultLayout()
     let layout = initLayout(shared.tree, shared.docked)
-    let proj = projectDock(layout, DockViewport(width: W, height: H,
-                                                dockExtent: DockStripPx))
+    let proj = projectDock(layout, DockViewport(width: W, height: H))
     ck proj.status == dpsProjected
     let g = windowGeometryOf(layout, proj.state, W, H, GpuiTopBandPx)
     var swept = 0

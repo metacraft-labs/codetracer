@@ -444,6 +444,15 @@ type
       ## came back behind the pane that had followed it (Call Trace | Agent
       ## Activity became Agent Activity | Call Trace). Persisted
       ## (`"besideBefore": true`) only when set.
+    openShare*: int
+      ## How much of the arrangement's extent on its axis the pane takes when
+      ## it is shown OPEN, in percent; 0 means `DefaultDockOpenSharePercent`.
+      ## THE DOCK'S SIZE IS THE MODEL'S, not a front-end's: the terminal's
+      ## open band, the GPUI window's open band and the dock document's
+      ## `size` are all derived from this one number (`openSharePercent`),
+      ## so a size set in one front-end is the size the others draw, and it
+      ## survives a restart. Set by `cmdSetDockShare`, persisted
+      ## (`"openShare"`, schema version 12) only when set.
 
   Layout* = object
     ## The persisted unit: a tree, the panes docked beside it, and a version.
@@ -504,6 +513,11 @@ type
       ## can be activated, resized, moved, split, merged, docked and renamed
       ## by the same rules as a built-in one.
     lcRemoveContributedPane = "removeContributedPane"
+    lcSetDockShare = "setDockShare"
+      ## How much of its axis a DOCKED pane takes when shown open
+      ## (`DockedPane.openShare`). A command of its own rather than an
+      ## `lcSetAutoHide` direction: it changes no placement, and a pane need
+      ## not be open for its size to be set.
 
   SplitAxis* = enum
     ## Which container a split creates.
@@ -678,6 +692,13 @@ type
         ## A CONTRIBUTED anchor: "put this extension's pane beside that one".
     of lcRemoveContributedPane:
       removedContributedPane*: string
+    of lcSetDockShare:
+      dockSharePane*: PaneKind
+      dockShareContributed*: string
+      dockSharePercent*: int
+        ## Clamped into `MinDockSharePercent .. MaxDockSharePercent` by
+        ## `apply`, as a divider drag's weight is clamped: a gesture past
+        ## the bound stops at it rather than being refused mid-drag.
 
   LayoutOutcomeKind* = enum
     ## Layout-ViewModel §2.3.
@@ -763,7 +784,7 @@ type
     detail*: string
 
 const
-  LayoutSchemaVersion* = 11
+  LayoutSchemaVersion* = 12
     ## Bumped when the serialised shape changes incompatibly. A decoder that
     ## meets a version it does not know raises `ldeUnknownVersion` rather than
     ## guessing — the failure mode `savedLayoutConfig` has no way to express,
@@ -839,6 +860,12 @@ const
     ##       so `migrateV10toV11` re-stamps the version; the bump makes an
     ##       older build refuse a document whose docked entry it could only
     ##       read as `ldeMissingField`. |
+    ## | 12 | a `docked` entry may carry `openShare`, the percent of its axis
+    ##       the pane takes when shown open — the dock's size, now the
+    ##       model's rather than each front-end's. Every v11 document is a v12
+    ##       document (no entry has the key, so each takes the default), so
+    ##       `migrateV11toV12` re-stamps the version; the bump makes an older
+    ##       build refuse a document whose dock sizes it would drop. |
     ##
     ## ### The v2→v3 migration changes nothing, and that is not a reason to
     ## ### have skipped the bump
@@ -875,6 +902,16 @@ const
     ## `ldeUnknownVersion`, exactly as one above `LayoutSchemaVersion` is:
     ## "too old to migrate" and "too new to understand" are both "this build
     ## cannot read it", and a shell answers both by falling back.
+
+  DefaultDockOpenSharePercent* = 21
+    ## The share a docked pane shown open takes when it has none of its own
+    ## (`DockedPane.openShare` 0): the desktop's docked panel, 280 px of a
+    ## 1334 px layout (21%, measured, `plat49-panes-capture.spec.ts`).
+  MinDockSharePercent* = 5
+  MaxDockSharePercent* = 80
+    ## The bounds `cmdSetDockShare` is clamped into. Below 5% an open pane
+    ## shows no row of content in a terminal; above 80% the arrangement it
+    ## is docked beside has nothing left to show.
 
   ReplayCorePanes* = {
     paneEditor, paneCalltrace, paneState, paneEventLog, paneDebugControls}
@@ -1772,6 +1809,17 @@ proc openDocked*(layout: Layout): Option[DockedPane] =
       return some(d)
   none(DockedPane)
 
+proc cmdSetDockShare*(pane: PaneKind; percent: int): LayoutCommand =
+  ## Set how much of its axis the docked `pane` takes when shown open
+  ## (`DockedPane.openShare`).
+  LayoutCommand(kind: lcSetDockShare, dockSharePane: pane,
+                dockSharePercent: percent)
+
+func openSharePercent*(d: DockedPane): int =
+  ## The share `d` takes when shown open: its own, or the default. The ONE
+  ## answer every front-end's open band and the dock document's size read.
+  if d.openShare > 0: d.openShare else: DefaultDockOpenSharePercent
+
 proc cmdRename*(pane: PaneKind; title: string): LayoutCommand =
   LayoutCommand(kind: lcRename, renameTarget: pane, renameTitle: title)
 
@@ -1906,6 +1954,10 @@ proc cmdRename*(pane: PaneRef; title: string): LayoutCommand =
   LayoutCommand(kind: lcRename, renameTarget: kindOf(pane),
                 renameContributed: idOf(pane), renameTitle: title)
 
+proc cmdSetDockShare*(pane: PaneRef; percent: int): LayoutCommand =
+  LayoutCommand(kind: lcSetDockShare, dockSharePane: kindOf(pane),
+                dockShareContributed: idOf(pane), dockSharePercent: percent)
+
 proc subjectRef*(cmd: LayoutCommand): PaneRef =
   ## The pane a command acts ON, in whichever namespace the command names it:
   ## the tab activated, the leaf resized, the pane added, removed, moved,
@@ -1922,6 +1974,7 @@ proc subjectRef*(cmd: LayoutCommand): PaneRef =
   of lcRename: refOf(cmd.renameTarget, cmd.renameContributed)
   of lcAddContributedPane: contributedRef(cmd.addedContributedPane)
   of lcRemoveContributedPane: contributedRef(cmd.removedContributedPane)
+  of lcSetDockShare: refOf(cmd.dockSharePane, cmd.dockShareContributed)
 
 proc anchorRef*(cmd: LayoutCommand): Option[PaneRef] =
   ## The OTHER pane a command names, if any: an add's anchor, a move's or a
@@ -1987,6 +2040,8 @@ proc `$`*(cmd: LayoutCommand): string =
     "addContributedPane(" & subject & ", after=" & anchorText & ")"
   of lcRemoveContributedPane:
     "removeContributedPane(" & subject & ")"
+  of lcSetDockShare:
+    "setDockShare(" & subject & ", " & $cmd.dockSharePercent & "%)"
 
 # ---------------------------------------------------------------------------
 # §2.1 / §2.3 — `apply`
@@ -2526,6 +2581,18 @@ proc apply*(layout: Layout; cmd: LayoutCommand): LayoutOutcome =
     next.docked[at].title = cmd.renameTitle
     return appliedTo(next)
 
+  of lcSetDockShare:
+    let sizing = cmd.subjectRef
+    let at = next.dockedIndex(sizing)
+    if at < 0:
+      return refusedFor(lpPaneNotDocked, sizing)
+    let share = clamp(cmd.dockSharePercent, MinDockSharePercent,
+                      MaxDockSharePercent)
+    if next.docked[at].openSharePercent == share:
+      return noOp()
+    next.docked[at].openShare = share
+    return appliedTo(next)
+
 proc apply*(node: LayoutNode; cmd: LayoutCommand): LayoutOutcome =
   ## Layout-ViewModel §2.1's literal signature, for a caller that has a bare
   ## tree and no docked panes. The tree is not mutated; the outcome's layout
@@ -2883,6 +2950,8 @@ proc toJson*(d: DockedPane): JsonNode =
     result["weight"] = %d.weight
   if d.besideBefore:
     result["besideBefore"] = %true
+  if d.openShare > 0:
+    result["openShare"] = %d.openShare
 
 proc saveLayout*(layout: Layout): JsonNode =
   ## A versioned document, which is what a shell persists. `docked` is always
@@ -3138,6 +3207,12 @@ proc migrateV10toV11(doc: JsonNode): JsonNode =
   result = copy(doc)
   result["version"] = %11
 
+proc migrateV11toV12(doc: JsonNode): JsonNode =
+  ## A docked entry may carry `openShare`. No v11 document has one, so this
+  ## re-stamps the version, for the v3→v4 reason.
+  result = copy(doc)
+  result["version"] = %12
+
 proc migrateDocument(doc: JsonNode): JsonNode =
   ## Walk a document forward, ONE VERSION AT A TIME, to this build's schema
   ## version (§6).
@@ -3174,6 +3249,8 @@ proc migrateDocument(doc: JsonNode): JsonNode =
       result = migrateV9toV10(result)
     of 10:
       result = migrateV10toV11(result)
+    of 11:
+      result = migrateV11toV12(result)
     else:
       # Unreachable while the chain is complete, and this is what makes
       # "complete" checkable: a bump that forgets its migration lands here
@@ -3273,6 +3350,14 @@ proc restoreLayoutDocument*(j: JsonNode): Layout =
       if entry["weight"].kind notin {JFloat, JInt}:
         raiseDecode(ldeWrongFieldType, "docked.weight is " & $entry["weight"].kind)
       d.weight = max(0.0, entry["weight"].getFloat)
+    if entry.hasKey("openShare"):
+      if entry["openShare"].kind != JInt:
+        raiseDecode(ldeWrongFieldType,
+                    "docked.openShare is " & $entry["openShare"].kind)
+      # Clamped as `cmdSetDockShare` clamps, so a hand-edited document cannot
+      # give a front-end a band it has no room for.
+      d.openShare = clamp(entry["openShare"].getInt, MinDockSharePercent,
+                          MaxDockSharePercent)
     result.docked.add(d)
 
 proc restoreLayout*(j: JsonNode): LayoutNode =

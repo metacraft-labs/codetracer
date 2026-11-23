@@ -70,6 +70,9 @@ LEAVES = "src/frontend/gpui/app/leaves.nim"
 EXTENT = "src/frontend/headless_app/extent_distribution.nim"
 UISEL = "src/ct/ui_selection.nim"
 UIDISP = "src/ct/launch/ui_dispatch.nim"
+MODEL = "src/frontend/headless_app/layout_model.nim"
+BINDING = "src/frontend/tui/app/layout/binding.nim"
+WGEOM = "src/frontend/gpui/window_geometry.nim"
 
 # --- the suites the arms are graded against ---------------------------------
 # §16c: these are NOT mutation subjects, and they are in TOUCHED anyway. A
@@ -80,7 +83,7 @@ SUITE_SPLIT = "src/frontend/gpui/tests/test_gpui_shell_split.nim"
 SUITE_CROSS = "src/frontend/tui/tests/test_cross_frontend_layout.nim"
 SUITE_UISEL = "src/ct/ui_selection_test.nim"
 
-TOUCHED = [DOCK, SHELL, LEAVES, EXTENT, UISEL, UIDISP,
+TOUCHED = [DOCK, SHELL, LEAVES, EXTENT, UISEL, UIDISP, MODEL, BINDING, WGEOM,
            SUITE_DOCK, SUITE_SPLIT, SUITE_CROSS, SUITE_UISEL]
 
 CONTROL_HASHES = HARNESS_DIR / "plat20-mutation-control.sha256"
@@ -357,6 +360,85 @@ ARMS = [
         "measured to die against the same new case. They are not three arms "
         "because all three print the identical substituted failure text "
         "(`Check failed: found`), and §17a REFUSES a shared `because`."),
+
+    # ------------------------------------------------------------------
+    # RESIDUE 3, 2026-11-23: the dock's size is the MODEL's. Each arm puts
+    # one medium's private size back, or loses the size on its way through
+    # the model, and each is killed by the cross-front-end suite's
+    # dock-size cases.
+    # ------------------------------------------------------------------
+    Arm("G15", DOCK,
+        "  var share = docked[0].openSharePercent\n  for d in docked:\n    if d.open:\n      share = d.openSharePercent",
+        "  var share = DefaultDockOpenSharePercent",
+        SUITE_CROSS,
+        "one command sizes the open dock in the terminal, the window and the document",
+        "  let axis = if edge in {leLeft, leRight}: viewport.width",
+        "  let axis = if edge in {leLeft, leRight}: viewport.width  # ctl",
+        "THE DOCK DOCUMENT SIZES EVERY DOCK BY THE DEFAULT, ignoring the pane's "
+        "own share — the host-owned `dockExtent` this residue removed, "
+        "arriving as a constant instead of a viewport field."),
+
+    Arm("G16", MODEL,
+        "    next.docked[at].openShare = share\n",
+        "    discard share\n",
+        SUITE_CROSS,
+        "one command sizes the open dock in the terminal, the window and the document",
+        "    let sizing = cmd.subjectRef",
+        "    let sizing = cmd.subjectRef  # ctl",
+        "`cmdSetDockShare` IS APPLIED AND STORES NOTHING: the outcome is "
+        "`loApplied`, so a caller logs an undo entry for a size no medium "
+        "draws."),
+
+    Arm("G17", MODEL,
+        '  if d.openShare > 0:\n    result["openShare"] = %d.openShare\n',
+        "",
+        SUITE_CROSS,
+        "the size survives a save and a restore, and an old document has none",
+        '  if d.besideBefore:\n    result["besideBefore"] = %true\n',
+        '  if d.besideBefore:  # ctl\n    result["besideBefore"] = %true\n',
+        "THE SIZE IS NOT PERSISTED: it holds for the session and is gone after "
+        "a restart, which is the difference between the model's size and a "
+        "front-end's."),
+
+    Arm("G18", BINDING,
+        "  let h = max(2, inner.height * sharePercent div 100)",
+        "  let h = max(2, inner.height * DockedOpenSharePercent div 100)",
+        SUITE_CROSS,
+        "one command sizes the open dock in the terminal, the window and the document",
+        "  let w = max(2, inner.width * sharePercent div 100)",
+        "  let w = max(2, inner.width * sharePercent div 100)  # ctl",
+        "THE TERMINAL CUTS ITS OPEN BAND FROM ITS OWN CONSTANT again, so a size "
+        "set in the window is not the size the terminal draws."),
+
+    Arm("G19", WGEOM,
+        "    let share = opened.get.openSharePercent",
+        "    let share = DockedOpenSharePercent",
+        SUITE_CROSS,
+        "one command sizes the open dock in the terminal, the window and the document",
+        "    if not band.isEmpty:\n      result.openDock = band",
+        "    if not band.isEmpty:  # ctl\n      result.openDock = band",
+        "THE GPUI WINDOW CUTS ITS OPEN BAND FROM ITS OWN CONSTANT again — the "
+        "same defect as G18, one medium over."),
+
+    Arm("G20", BINDING,
+        "  if b.layout.dockedIndex(b.focusRef) >= 0:\n    return b.dispatch(cmdSetDockShare(b.focusRef, percent))\n",
+        "",
+        SUITE_CROSS,
+        "the terminal's `:resize` sizes a focused docked pane, and the window draws that size",
+        "  let started = beginResize(b.layout, b.focusRef)",
+        "  let started = beginResize(b.layout, b.focusRef)  # ctl",
+        "`:resize` ON A DOCKED PANE IS REFUSED as a pane with no divider, so "
+        "the terminal has no way to set the size every medium draws."),
+
+    Arm("G21", MODEL,
+        '      d.openShare = clamp(entry["openShare"].getInt, MinDockSharePercent,\n                          MaxDockSharePercent)',
+        '      d.openShare = entry["openShare"].getInt',
+        SUITE_CROSS,
+        "the size is clamped, refused for a pane that is not docked, and a no-op when unchanged",
+        '      if entry["openShare"].kind != JInt:',
+        '      if entry["openShare"].kind != JInt:  # ctl',
+        "THE DECODER TRUSTS A HAND-EDITED SIZE, so a document can hand a "
+        "front-end an open band larger than the area it is cut from."),
 ]
 
 

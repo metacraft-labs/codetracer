@@ -331,7 +331,9 @@ suite "Interaction — separate from Layout, structurally (§4.1)":
     # so the docked pane's arity is 9. Docked contributed panes added
     # `DockedPane.contributedPane` and `DockedPane.besideContributed`
     # (identities, persisted, not transient), so it is 11.
-    check checkedFields == 7 + 11 + 3
+    # `DockedPane.openShare` (the open size, persisted, not transient) makes
+    # it 12.
+    check checkedFields == 7 + 12 + 3
 
   test "layout_model names none of the transient types, and cannot":
     # `layout_interaction` imports `layout_model`; the reverse import is a

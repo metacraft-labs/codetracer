@@ -48,8 +48,7 @@ template ck(cond: untyped) =
   check(cond)
 
 proc geometryOf(layout: Layout): WindowGeometry =
-  let proj = projectDock(layout, DockViewport(width: W, height: H,
-                                              dockExtent: 240))
+  let proj = projectDock(layout, DockViewport(width: W, height: H))
   doAssert proj.status == dpsProjected
   windowGeometryOf(layout, proj.state, W, H)
 
@@ -184,7 +183,7 @@ suite "the editor pane shows whole rows":
     # A taller editor holds more.
     let tall = geometryOf(start).editorRowsOf()
     ck windowGeometryOf(start, projectDock(start, DockViewport(width: W,
-         height: 2 * H, dockExtent: 240)).state, W, 2 * H).editorRowsOf() >
+         height: 2 * H)).state, W, 2 * H).editorRowsOf() >
        tall
 
 suite "PLAT-47 deliverable 5: dragging a divider":

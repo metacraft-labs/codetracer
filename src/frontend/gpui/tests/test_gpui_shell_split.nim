@@ -277,7 +277,7 @@ suite "PLAT-20: the leaves are GPUI, through the real shim":
     # A viewport that cannot give every sibling a pixel (`dppViewportTooSmall`)
     # — since PLAT-48 a top-docked pane is projected, so it no longer serves
     # as this case's refusal.
-    var sh = newGpuiShell(DockViewport(width: 1, height: 1, dockExtent: 0))
+    var sh = newGpuiShell(DockViewport(width: 1, height: 1))
     let id = WindowId(0)
     let layout = defaultReplayLayoutValue()
     let docked = (kind: loApplied, layout: layout)

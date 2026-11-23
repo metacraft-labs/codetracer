@@ -88,7 +88,9 @@ const
     ## How thick an AUTO-HIDE STRIP is: the band along a window edge that
     ## holds the panes docked there, one label each (Layout-ViewModel §3.1's
     ## collapsed tabs; the terminal draws the same strip one cell thick).
-  DockedOpenSharePercent* = 21
+  DockedOpenSharePercent* = DefaultDockOpenSharePercent
+    ## The DEFAULT share only: a docked pane's own size is the model's
+    ## (`DockedPane.openSharePercent`), and the band is cut from that.
     ## PLAT-49 part B: the desktop's docked panel, 280 px of a 1334 px layout
     ## (measured, `plat49-panes-capture.spec.ts`).
   FooterPx* = 32
@@ -458,11 +460,13 @@ proc windowGeometryOf*(layout: Layout; dock: JsonNode;
   # GoldenLayout.
   let opened = layout.openDocked
   if opened.isSome:
-    # The desktop's docked panel: 21% of the layout on its axis (280 px of
-    # 1334, measured — the terminal's `binding.DockedOpenSharePercent`).
+    # The model's share of the layout on its axis (`openSharePercent`; by
+    # default the desktop's docked panel, 21% — 280 px of 1334, measured),
+    # the same number the terminal's band is cut from.
     let r = result.inner
-    let w = max(1, r.w * DockedOpenSharePercent div 100)
-    let h = max(1, r.h * DockedOpenSharePercent div 100)
+    let share = opened.get.openSharePercent
+    let w = max(1, r.w * share div 100)
+    let h = max(1, r.h * share div 100)
     let band =
       case opened.get.edge
       of leLeft: PxRect(x: r.x, y: r.y, w: w, h: r.h)

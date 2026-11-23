@@ -160,8 +160,7 @@ func live*(leaf: GpuiLeaf): bool =
 proc raiseShell(msg: string) {.noreturn.} =
   raise newException(GpuiShellError, msg)
 
-const DefaultGpuiViewport* = DockViewport(width: 1440, height: 900,
-                                          dockExtent: 300)
+const DefaultGpuiViewport* = DockViewport(width: 1440, height: 900)
   ## A host that has not measured its window yet. Named rather than inlined so
   ## a test and a host cannot disagree about what "the default" divides.
 

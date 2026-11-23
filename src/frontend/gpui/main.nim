@@ -16686,8 +16686,7 @@ proc runEdit(cmd: GpuiCommand): int =
   defer: gVerification.finishWait()   # PLAT-63: a Verno run still going
   # PLAT-62: and the project's `nargo info`.
   defer: stopConstraintsHost()
-  var shell = newGpuiShell(DockViewport(width: cmd.width, height: cmd.height,
-                                        dockExtent: DefaultGpuiViewport.dockExtent))
+  var shell = newGpuiShell(DockViewport(width: cmd.width, height: cmd.height))
   # EDIT MODE OPENS WHAT IT REMEMBERS (`gpui-layout-edit.json`), or the
   # shared Edit default — the arrangement the desktop's edit mode and the
   # terminal's show — at depth 0 (this front-end has no pixel minimums, so it
@@ -16938,8 +16937,7 @@ proc runOpen(cmd: GpuiCommand): int =
                        $declared & " declared operations")
       return 1
 
-  var shell = newGpuiShell(DockViewport(width: cmd.width, height: cmd.height,
-                                        dockExtent: DefaultGpuiViewport.dockExtent))
+  var shell = newGpuiShell(DockViewport(width: cmd.width, height: cmd.height))
   # `toBackendService` is the adapter `headless_session` itself uses to inject
   # the stdio transport as the SDK's `BackendService` (spec §3.1). The shell
   # takes its backend BY INJECTION and never constructs one — that is
