@@ -146,24 +146,21 @@ jobs:
           # Git Bash users), so PowerShell cannot start it: run nargo.exe
           # directly, then the shim through Git Bash, the way a developer's
           # shell calls it.
+          #
+          # Every run is bounded and gets an empty stdin
+          # (Invoke-BoundedNativeCommand, from toolchain-utils.ps1, which
+          # env.ps1 sources). In run 45072232143 the shim's `nargo compile`
+          # printed nothing for 5.5 hours, until the job's limit, so each path
+          # compiles separately and a hang names the path that hung.
           if (-not $env:NARGO_DIR) { throw "env.ps1 set no NARGO_DIR" }
           $exe = Join-Path $env:NARGO_DIR "nargo.exe"
           if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw "env.ps1 produced no nargo.exe (NARGO_DIR='$env:NARGO_DIR')" }
-          Write-Host "nargo: $exe"
-          & $exe --version
-          if ($LASTEXITCODE -ne 0) { throw "nargo.exe --version exited $LASTEXITCODE" }
-          $nargoCmd = $exe
-          $nargoPre = @()
+          $runs = @(@{ Name = "nargo.exe"; File = $exe; Pre = @() })
           $shim = if ($env:WINDOWS_DIY_SHIMS_DIR) { Join-Path $env:WINDOWS_DIY_SHIMS_DIR "nargo" }
           if ($shim -and (Test-Path -LiteralPath $shim -PathType Leaf)) {
             $bash = if ($env:WINDOWS_DIY_GIT_BASH_BIN) { Join-Path $env:WINDOWS_DIY_GIT_BASH_BIN "bash.exe" } else { "C:\PortableGit\bin\bash.exe" }
             if (-not (Test-Path -LiteralPath $bash -PathType Leaf)) { throw "the nargo shim exists but Git Bash ($bash) does not" }
-            $shimArg = $shim -replace '\\', '/'
-            Write-Host "nargo shim: $shim, through $bash"
-            & $bash $shimArg --version
-            if ($LASTEXITCODE -ne 0) { throw "the nargo shim's --version exited $LASTEXITCODE" }
-            $nargoCmd = $bash
-            $nargoPre = @($shimArg)
+            $runs += @{ Name = "the nargo shim ($shim, through $bash)"; File = $bash; Pre = @($shim -replace '\\', '/') }
           }
           $proj = Join-Path $env:RUNNER_TEMP ("nargo-smoke-" + [Guid]::NewGuid().ToString('N'))
           New-Item -ItemType Directory -Force -Path (Join-Path $proj "src") | Out-Null
@@ -171,11 +168,23 @@ jobs:
             '[package]', 'name = "smoke"', 'type = "bin"', 'authors = [""]', '', '[dependencies]')
           Set-Content -LiteralPath (Join-Path $proj "src/main.nr") -Encoding ASCII -Value @(
             'fn main(x: Field, y: pub Field) {', '    assert(x != y);', '}')
-          Push-Location -LiteralPath $proj
-          try {
-            & $nargoCmd @nargoPre compile
-            if ($LASTEXITCODE -ne 0) { throw "nargo compile exited $LASTEXITCODE" }
-          } finally { Pop-Location }
+          foreach ($r in $runs) {
+            foreach ($cmd in @("--version", "compile")) {
+              Remove-Item -Recurse -Force -LiteralPath (Join-Path $proj "target") -ErrorAction SilentlyContinue
+              Write-Host "== $($r.Name) $cmd"
+              Push-Location -LiteralPath $proj
+              try {
+                $t0 = Get-Date
+                $rc = Invoke-BoundedNativeCommand -FilePath $r.File -ArgumentList (@($r.Pre) + @($cmd)) `
+                  -Activity "$($r.Name) $cmd" -TimeoutSeconds 600
+                Write-Host "   exit $rc after $([int]((Get-Date) - $t0).TotalSeconds) s"
+                if ($rc -ne 0) { throw "$($r.Name) $cmd exited $rc" }
+              } finally { Pop-Location }
+              if ($cmd -eq "compile" -and -not (Test-Path -LiteralPath (Join-Path $proj "target/smoke.json"))) {
+                throw "$($r.Name) compile wrote no target/smoke.json"
+              }
+            }
+          }
           if (-not (Test-Path -LiteralPath (Join-Path $proj "target/smoke.json"))) { throw "nargo compile wrote no target/smoke.json" }
           Write-Host "nargo compiled the smoke program: $(Join-Path $proj 'target/smoke.json')"
           Remove-Item -Recurse -Force -LiteralPath $proj -ErrorAction SilentlyContinue
