@@ -18,8 +18,8 @@
 ##   every role at each share and with no known progress, on each ground
 ##   (`stories/agent_harbor_pie_stories`).
 ##
-## The pie is not yet drawn by any panel, tab or line; those take it from
-## here.
+## The panels, tabs and lines that draw a pie take it from here: the
+## fleet's rows (`isonim_agent_harbor_fleet_view`) first.
 
 import std/strutils
 when defined(js):

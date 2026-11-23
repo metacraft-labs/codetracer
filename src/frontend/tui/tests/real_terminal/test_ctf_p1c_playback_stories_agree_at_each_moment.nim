@@ -258,8 +258,11 @@ proc drawnFacts[N](view: N; surface: string): seq[string] =
     for f in view.all("filter-count"): counts.add f.attr("filter-count")
     result.add "filters " & counts.join(" ")
     for row in view.all("row"):
-      result.add "row " & row.fact("title") & " | " & row.fact("status") & " [" &
-                 row.attr("category") & "]"
+      # CTF-P1d, the fleet's rows: the row's pie, by its role and its share.
+      var pie = ""
+      for d in row.all("pie"):
+        pie.add " | pie " & d.attr("pie") & " " & d.attr("pie-fraction")
+      result.add "row " & row.fact("title") & " | " & row.fact("status") & pie
       # Why a failed row failed, and the activity lines it shows: the
       # reason once, as the failure (never again as an activity line).
       for f in row.all("failure"): result.add "failure " & f.attr("failure")
@@ -324,6 +327,14 @@ proc tokenAfter(n: MockNode; prefix: string): string =
   ## The rest of `n`'s first class token starting with `prefix`.
   for c in n.classes:
     if c.startsWith(prefix): return c[prefix.len .. ^1]
+
+proc pieFacts(n: MockNode): string =
+  ## Every pie under `n` as the GPUI and terminal facts spell it: ` | pie
+  ## <role> <share>`, the share `unknown` for a pie with no known progress.
+  for d in n.byClass("ah-pie"):
+    let share = if d.hasClass("ah-pie-unknown"): "unknown"
+                else: d.attributes["data-ah-pie-p"]
+    result.add " | pie " & d.attributes["data-ah-pie-role"] & " " & share
 
 proc webFacts(view: MockNode; surface: string): seq[string] =
   case surface
@@ -399,7 +410,7 @@ proc webFacts(view: MockNode; surface: string): seq[string] =
     result.add "filters " & counts.join(" ")
     for row in view.byClass("ah-fleet-row"):
       result.add "row " & row.textOf("ah-fleet-row-title") & " | " &
-                 row.textOf("ah-fleet-status-label") & " [" & row.tokenAfter("ah-fleet-cat-") & "]"
+                 row.textOf("ah-fleet-status-label") & row.pieFacts
       for f in row.byClass("ah-fleet-row-failure"): result.add "failure " & f.textContent
       for a in row.byClass("ah-fleet-activity-line"): result.add "activity " & a.textContent
   of "agent-harbor-session-activity":
@@ -699,11 +710,13 @@ let SpotChecks: seq[SpotCheck] = @[
     "milestone TR-M1 current | 1/2 deliverables" & Dot & "Tests: 1 failing"]),
   ("agent-harbor-initiative-progress", "plan-done", @[
     "headline 3 of 3 milestones" & Dot & "100%"]),
-  # The fleet: a row per session, its status following the session.
-  ("agent-harbor-fleet", "", @["row " & Config & " | needs input [needs-input]"]),
+  # The fleet: a row per session, its status word and its pie (its role;
+  # its share unknown: the scenario's sessions report no plan) following
+  # the session.
+  ("agent-harbor-fleet", "", @["row " & Config & " | needs input | pie warning unknown"]),
   # A failed row says why once, as its failure; its activity line is the
   # next thing it did, not the same words again.
-  ("agent-harbor-fleet", "migration-fails", @["row " & Migration & " | failed [failed]",
+  ("agent-harbor-fleet", "migration-fails", @["row " & Migration & " | failed | pie error unknown",
     "failure error: the migration test failed", "activity Ran just test",
     "!activity error: the migration test failed"]),
   # A question answered no longer leads a running row: by +210 s each
@@ -714,7 +727,7 @@ let SpotChecks: seq[SpotCheck] = @[
     "activity assistant: Reads are three times faster on the new layer.",
     "activity assistant: The config format is TOML.",
     "!activity Asked a single-choice question"]),
-  ("agent-harbor-fleet", "port-completes", @["row " & Port & " | completed [ended]"]),
+  ("agent-harbor-fleet", "port-completes", @["row " & Port & " | completed | pie ended unknown"]),
   # The session activity timeline over session-run (CTF-P2b): the jitter
   # session's events, one line or one group each; the logging session's
   # events never show. Before the instruction the session runs with no
@@ -1291,7 +1304,7 @@ suite "CTF-P1c: the comparison can fail":
   test "a fact that must not be shown is reported when it is":
     # The failed row's reason said again as its activity line, as the fleet
     # showed it before the viewmodel left that line out.
-    let twice = @["row " & Migration & " | failed [failed]",
+    let twice = @["row " & Migration & " | failed | pie error unknown",
                   "failure error: the migration test failed",
                   "activity error: the migration test failed", "activity Ran just test"]
     let problems = spotProblems("agent-harbor-fleet", "migration-fails", twice)

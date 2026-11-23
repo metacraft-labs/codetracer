@@ -15,7 +15,10 @@
 ah-rem(px)
   unit(px / 16, 'rem')
 
-AH_ROW_DOT = 0.5rem
+// A pie on a line or a row (the palette's `PieLinePx`, CTF-P1d), and the
+// plate it keeps on a surface it was not resolved for (`PiePlatePx`).
+AH_PIE_LINE = 0.75rem
+AH_PIE_PLATE = 0.125rem
 
 // ---------------------------------------------------------------------------
 // Cut text (CTF-P1c D6)
@@ -234,7 +237,7 @@ AH_ROW_DOT = 0.5rem
 // click target, hover lifts it, the selection takes the action surface.
 .ah-fleet-row
   display: grid
-  grid-template-columns: AH_ROW_DOT minmax(0, 1fr) auto
+  grid-template-columns: AH_PIE_LINE minmax(0, 1fr) auto
   column-gap: 0.5rem
   align-items: start
   padding: 0.375rem PANEL_INSET
@@ -270,43 +273,22 @@ AH_ROW_DOT = 0.5rem
   .ah-fleet-col
     color: by-mode(colors-ui-text-on-action-primary, colors-ui-text-primary-body)
 
-  // The dot keeps its category colour and is ringed like the selected
-  // commit's graph dot, so the status mark survives the fill.
-  // The dot keeps its status colour on the selection, with no ring (a ring
-  // is the idle mark elsewhere).
-  .ah-fleet-dot
-    outline: none
+  // The pie keeps the panel's ground as a plate around it: the action
+  // surface is no ground its inks were resolved for (`PiePlatePx`).
+  .ah-fleet-pie
+    border-radius: 50%
+    background: colors-ui-surface-base-panel
+    box-shadow: 0 0 0 AH_PIE_PLATE colors-ui-surface-base-panel
 
 .agent-harbor-fleet .ah-fleet-row-selected .ah-fleet-status-label
   color: by-mode(colors-ui-text-on-action-primary, colors-ui-text-primary-body)
 
-// The status dot sits on the title's first line.
-.ah-fleet-dot
-  width: AH_ROW_DOT
-  height: AH_ROW_DOT
-  margin-top: 0.375rem
-  border-radius: 50%
-  background: colors-ui-icon-primary-subtle
-
-// Needing input is told by the dot's colour and by the status word
-// ("needs input"); no halo -- no warning role contrasts with the warning icon
-// role in both modes.
-.ah-fleet-cat-needs-input .ah-fleet-dot
-  background: colors-ui-icon-warning-primary
-
-.ah-fleet-cat-running .ah-fleet-dot
-  background: colors-ui-icon-success-primary
-
-.ah-fleet-cat-queued .ah-fleet-dot
-  background: colors-ui-icon-information-primary
-
-.ah-fleet-cat-failed .ah-fleet-dot
-  background: colors-ui-icon-error-primary
-
-// Ended: grey, but in Light a grey that keeps 3:1 on every surface a mark
-// sits on (icon-subtle fell to 1.42:1 on the active tab).
-.ah-fleet-cat-ended .ah-fleet-dot
-  background: by-mode(colors-ui-icon-primary-subtle, colors-ui-icon-primary-default-hover)
+// The progress pie sits on the title's first line (a 20px line: centred).
+.ah-fleet-pie
+  display: flex
+  width: AH_PIE_LINE
+  height: AH_PIE_LINE
+  margin-top: 0.25rem
 
 .ah-fleet-row-main
   display: flex
@@ -447,12 +429,12 @@ AH_ROW_DOT = 0.5rem
   // at the right, not spread between them.
   .ah-fleet-row,
   .ah-fleet-columns
-    grid-template-columns: 0.5rem minmax(0, 32rem) 9rem 7rem minmax(0, 12rem) 5rem 3rem minmax(0, 1fr)
+    grid-template-columns: 0.75rem minmax(0, 32rem) 9rem 7rem minmax(0, 12rem) 5rem 3rem minmax(0, 1fr)
 
   // No session names an initiative: the column goes.
   .ah-fleet-no-initiative .ah-fleet-row,
   .ah-fleet-no-initiative .ah-fleet-columns
-    grid-template-columns: 0.5rem minmax(0, 32rem) 9rem 7rem 5rem 3rem minmax(0, 1fr)
+    grid-template-columns: 0.75rem minmax(0, 32rem) 9rem 7rem 5rem 3rem minmax(0, 1fr)
 
   .ah-fleet-no-initiative .ah-fleet-col-initiative,
   .ah-fleet-no-initiative .ah-fleet-columns-initiative

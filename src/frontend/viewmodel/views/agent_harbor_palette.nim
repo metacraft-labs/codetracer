@@ -678,6 +678,20 @@ const
   PieRingGapStepPx* = 12
     ## The ground between the ring and the wedge's disc is one whole pixel
     ## for every this many pixels of diameter (`pieRingGapPx`).
+  PieLinePx* = 12
+    ## A pie on a line, a row or the initiative popup: sidebar lines,
+    ## initiatives-tree lines, fleet rows (the web and GPUI; the terminal's
+    ## pie is one cell everywhere).
+  PieTabPx* = 10
+    ## A pie in a tab, a menu or a `+N` chip.
+  PieCaptionPx* = 16
+    ## The caption bar's pie (CodeTracer's own agent tab).
+  PiePlatePx* = 2
+    ## Where a pie sits on a surface it was not resolved for -- the action
+    ## surface of a selected fleet row, on which no six inks hold the floors
+    ## (Dark's `#6366f1` leaves ended no grey 3.3:1 and 20 apart from the
+    ## light inks) -- it sits on a plate of the ground it was resolved for
+    ## (the panel), this many pixels around it, so its inks keep the floors.
   PieDotFraction* = 1.0 / 4.0
     ## An unknown pie's dot: this share of the diameter, centred -- a quarter,
     ## so at native size it stays well short of the wedge's disc (8 px of a

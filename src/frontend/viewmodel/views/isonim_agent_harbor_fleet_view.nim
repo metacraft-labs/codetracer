@@ -47,6 +47,7 @@ when defined(js):
 import nim_agents_isonim_viewmodels/agent_harbor/fleet_vm
 
 import ./agent_harbor_words
+import ./isonim_agent_harbor_pie_view
 
 export signals, computation, components, fleet_vm, agent_harbor_words
 
@@ -181,14 +182,18 @@ proc renderRow[R](r: R; vm: FleetSnapshotVM;
                   callbacks: AgentHarborFleetCallbacks; row: FleetRow): auto =
   let sessionId = row.id
   var activity: typeof(r.createElement("div"))
-  var agentCell, hostCell, initiativeCell, durationCell: typeof(r.createElement("span"))
+  var agentCell, hostCell, initiativeCell, durationCell, pieHost: typeof(r.createElement("span"))
   let agentText = if row.agentCount > 1: row.agentLabel & " \xC3\x97" & $row.agentCount
                   else: row.agentLabel
   let node = ui(r):
     tdiv(role = "button", tabindex = "0", class = rowClass(row),
          title = row.id,
          onclick = proc() = vm.invokeSelect(callbacks, sessionId)):
-      span(class = "ah-fleet-dot", title = row.statusLabel):
+      # The row's progress pie (CTF-P1d): its state's role and its plan's
+      # share, read from the viewmodel (`FleetRow.pie`), on the panel's
+      # ground; on the selected row it keeps that ground as a plate
+      # (`.ah-fleet-row-selected .ah-fleet-pie`).
+      span(ref = pieHost, class = "ah-fleet-pie"):
         discard
       tdiv(class = "ah-fleet-row-main"):
         # The title plainly, whatever named it: the header says once that the
@@ -226,6 +231,8 @@ proc renderRow[R](r: R; vm: FleetSnapshotVM;
         text row.durationLabel
       span(class = "ah-fleet-row-age"):
         text row.ageLabel
+  r.appendRendered(pieHost, pieIndicator[R, typeof(r.createElement("span"))](
+    r, row.pie, pgPanel, PieLinePx))
   # A column with nothing to say shows the shared placeholder.
   for (cell, value) in [(agentCell, agentText), (hostCell, row.host),
                         (initiativeCell, row.initiative), (durationCell, row.durationLabel)]:
