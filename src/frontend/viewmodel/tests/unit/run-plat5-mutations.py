@@ -174,15 +174,17 @@ MUTATIONS = [
         "P3", INTER,
         # PLAT-51 part B: `hoverGolden` has the same shape; the needle is
         # `hoverAt`'s, by the end of its doc comment.
+        # Re-aimed 2026-11-23: f594351d5 routed the construction through
+        # `draggingOf` (extension panes), so the tail line is now its call.
         "  ## written as a mutation, so it is the one most worth having as a value.\n"
         "  if interaction.kind != ikDraggingTab:\n"
         "    return interaction\n"
-        "  Interaction(kind: ikDraggingTab, source: interaction.source,",
+        "  draggingOf(interaction.sourceRef, interaction.origin,",
         "  ## written as a mutation, so it is the one most worth having as a value.\n"
         "  if interaction.kind != ikDraggingTab:\n"
         "    return interaction\n"
         '  layout.tree.title = layout.tree.title & "!"\n'
-        "  Interaction(kind: ikDraggingTab, source: interaction.source,",
+        "  draggingOf(interaction.sourceRef, interaction.origin,",
         T_BYTES,
         "hovering writes through the tree ref it was handed",
     ),
@@ -247,8 +249,9 @@ MUTATIONS = [
     ),
     Mutation(
         "P12", INTER,
-        "    some(cmdSplitMove(target.splitTarget, source, target.axis, side))",
-        "    some(cmdSplit(target.splitTarget, source, target.axis, side))",
+        "    some(cmdSplitMove(target.splitOf, source, target.axis, side))",
+        "    some(cmdSplit(target.splitOf, source, target.axis, side))",
+        # Re-aimed 2026-11-23: f594351d5 renamed DropTarget.splitTarget -> splitOf.
         T_KINDS,
         "a split that cannot move a placed pane loses two kinds outright",
     ),
@@ -277,33 +280,35 @@ MUTATIONS = [
     Mutation(
         "P16", INTER,
         "    if not parent.isNil and parent.kind == lnStack:\n"
-        "      return some(cmdMoveTab(source, target.stackAnchor, target.index))\n"
-        "    some(cmdMergeIntoStack(source, target.stackAnchor))",
+        "      return some(cmdMoveTab(source, target.anchorOf, target.index))\n"
+        "    some(cmdMergeIntoStack(source, target.anchorOf))",
         "    if layout.dockedIndex(source) >= 0:\n"
-        "      return some(cmdRestoreDocked(source, some(target.stackAnchor)))\n"
+        "      return some(cmdRestoreDocked(source, some(target.anchorOf)))\n"
         "    if not parent.isNil and parent.kind == lnStack:\n"
-        "      return some(cmdMoveTab(source, target.stackAnchor, target.index))\n"
-        "    some(cmdMergeIntoStack(source, target.stackAnchor))",
+        "      return some(cmdMoveTab(source, target.anchorOf, target.index))\n"
+        "    some(cmdMergeIntoStack(source, target.anchorOf))",
         T_DOCK_SLOT0,
         "RESPELLED 2026-09-27: restores the pre-closing ahRestore route for a "
         "docked source, which lands every slot after the anchor",
     ),
     Mutation(
         "P16B", INTER,
+        # Re-aimed 2026-11-23: 17f3ccf31/f594351d5 build the target with
+        # `intoStackTarget` (extension panes) instead of a DropTarget literal.
         "  # A bare pane: dropping onto its body turns it into a two-tab stack.\n"
-        "  result.add(DropTarget(",
+        "  result.add(intoStackTarget(paneRefOf(leaf), 1,",
         "  if layout.dockedIndex(source) >= 0:\n"
         "    return\n"
-        "  result.add(DropTarget(",
+        "  result.add(intoStackTarget(paneRefOf(leaf), 1,",
         T_DOCK_SLOT0,
         "a docked pane stops being offered a bare pane's body (the old absence)",
     ),
     Mutation(
         "P17", INTER,
-        "    some(cmdSplitMove(target.splitTarget, source, target.axis, side))",
+        "    some(cmdSplitMove(target.splitOf, source, target.axis, side))",
         "    if layout.dockedIndex(source) >= 0:\n"
         "      return none(LayoutCommand)\n"
-        "    some(cmdSplitMove(target.splitTarget, source, target.axis, side))",
+        "    some(cmdSplitMove(target.splitOf, source, target.axis, side))",
         T_DOCK_SPLIT,
         "RESPELLED 2026-09-26: the gesture used to be absent and this arm "
         "offered it; PLAT-4's closing pass made it present, so the arm now "
@@ -311,24 +316,28 @@ MUTATIONS = [
     ),
     Mutation(
         "P18", INTER,
-        "  @[DropTarget(kind: dtSplitBefore, splitTarget: leaf.pane, axis: saRow,\n"
-        "               region: DropRegion(kind: drNodeStrip, path: leafPath,\n"
-        "                                  side: leLeft)),",
-        "  @[DropTarget(kind: dtSplitBefore, splitTarget: leaf.pane, axis: saColumn,\n"
-        "               region: DropRegion(kind: drNodeStrip, path: leafPath,\n"
-        "                                  side: leLeft)),",
+        # Re-aimed 2026-11-23: f594351d5 builds split targets through
+        # `splitTargetOf` over the leaf's PaneRef (extension panes).
+        "  @[splitTargetOf(dtSplitBefore, r, saRow,\n"
+        "                  DropRegion(kind: drNodeStrip, path: leafPath, side: leLeft)),",
+        "  @[splitTargetOf(dtSplitBefore, r, saColumn,\n"
+        "                  DropRegion(kind: drNodeStrip, path: leafPath, side: leLeft)),",
         T_EVERY_KIND,
         "the left strip splits on the wrong axis",
     ),
     # --- refusals PLAT-4 owns and this milestone depends on -----------------
     Mutation(
         "P19", MODEL,
-        "      if allPanes(tree).len <= 1:\n"
+        # Re-aimed 2026-11-23: 17f3ccf31 counts over both namespaces
+        # (`paneCount`) and names the pane `hiding`; same decision.
+        "      if paneCount(tree) <= 1:\n"
         "        # Docking the last placed pane would empty the root — §2.4 rule 3\n"
-        "        # again, reached from the other direction.\n"
-        "        return refusedFor(lpEmptyRoot, cmd.autoHidePane)",
+        "        # again, reached from the other direction. Counted over BOTH\n"
+        "        # namespaces, as `lcRemovePane` counts: a tree that keeps an\n"
+        "        # extension's pane is not empty.\n"
+        "        return refusedFor(lpEmptyRoot, hiding)",
         "      if false:\n"
-        "        return refusedFor(lpEmptyRoot, cmd.autoHidePane)",
+        "        return refusedFor(lpEmptyRoot, hiding)",
         T_ONLY_PANE,
     ),
     Mutation(
@@ -375,12 +384,12 @@ MUTATIONS = [
     ),
     Mutation(
         "P25", INTER,
-        "  some(Interaction(kind: ikDraggingTab, source: source, origin: origin.get,\n"
-        "                   hover: none(DropTarget)))",
-        "  some(Interaction(kind: ikDraggingTab, source: source, origin: origin.get,\n"
-        "                   hover: some(DropTarget(kind: dtDockEdge, edge: leLeft,\n"
-        "                     region: DropRegion(kind: drLayoutStrip, path: \"\",\n"
-        "                                        side: leLeft)))))",
+        # Re-aimed 2026-11-23: f594351d5 builds it with `draggingOf`.
+        "  some(draggingOf(source, origin.get, none(DropTarget)))",
+        "  some(draggingOf(source, origin.get,\n"
+        "                  some(DropTarget(kind: dtDockEdge, edge: leLeft,\n"
+        "                    region: DropRegion(kind: drLayoutStrip, path: \"\",\n"
+        "                                       side: leLeft)))))",
         T_NOT_DRAGGING,
         "a drag that has hovered nothing claims to be over something",
     ),
@@ -409,17 +418,19 @@ MUTATIONS = [
     # --- CLOSING PASS: a docked source for lcMoveTab / lcMergeIntoStack ------
     Mutation(
         "M1", MODEL,
-        "      destination.children.insert(pane(entry.pane, entry.title),\n"
+        # Re-aimed 2026-11-23: 17f3ccf31 builds the leaf with `leafOf(entry.paneRefOf, ...)` (extension panes).
+        "      destination.children.insert(leafOf(entry.paneRefOf, entry.title),\n"
         "                                  cmd.moveIndex)",
-        "      destination.children.insert(pane(entry.pane, entry.title),\n"
+        "      destination.children.insert(leafOf(entry.paneRefOf, entry.title),\n"
         "                                  destination.children.len)",
         T_DOCK_SLOT0,
         "a docked pane lands last whatever slot was named",
     ),
     Mutation(
         "M2", MODEL,
-        "      destination.children.insert(pane(entry.pane, entry.title),",
-        "      destination.children.insert(pane(entry.pane),",
+        # Re-aimed 2026-11-23: 17f3ccf31 moved to `leafOf(entry.paneRefOf, title)`.
+        "      destination.children.insert(leafOf(entry.paneRefOf, entry.title),",
+        "      destination.children.insert(leafOf(entry.paneRefOf),",
         T_DOCK_SLOT0,
         "the strip's title is lost on the way into the stack",
     ),
@@ -432,15 +443,16 @@ MUTATIONS = [
     ),
     Mutation(
         "M4", MODEL,
+        # Re-aimed 2026-11-23: 17f3ccf31 names the pane `moving` and uses `leafOf`.
         "      if cmd.moveIndex < 0 or cmd.moveIndex > destination.children.len:\n"
-        "        return refusedFor(lpIndexOutOfRange, cmd.movedPane)\n"
+        "        return refusedFor(lpIndexOutOfRange, moving)\n"
         "      let entry = next.docked[dockedFrom]\n"
         "      next.docked.delete(dockedFrom)\n"
-        "      destination.children.insert(pane(entry.pane, entry.title),\n"
+        "      destination.children.insert(leafOf(entry.paneRefOf, entry.title),\n"
         "                                  cmd.moveIndex)",
         "      let entry = next.docked[dockedFrom]\n"
         "      next.docked.delete(dockedFrom)\n"
-        "      destination.children.insert(pane(entry.pane, entry.title),\n"
+        "      destination.children.insert(leafOf(entry.paneRefOf, entry.title),\n"
         "        max(0, min(cmd.moveIndex, destination.children.len)))",
         T_DOCK_SLOT0,
         "an index past the end is clamped instead of refused by kind",
@@ -491,9 +503,9 @@ MUTATIONS = [
     Mutation(
         "D4", MODEL,
         "      if parent.isNil or parent.kind == lnStack:\n"
-        "        return refusedFor(lpNoDivider, cmd.weightTarget)",
+        "        return refusedFor(lpNoDivider, target)",
         "      if parent.isNil:\n"
-        "        return refusedFor(lpNoDivider, cmd.weightTarget)",
+        "        return refusedFor(lpNoDivider, target)",
         T_NO_DIVIDER,
         "two tabs of a stack are given a divider",
     ),
