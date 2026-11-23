@@ -193,7 +193,14 @@ LOCK_FENIX=dd2c80d0b88463ccc0402c86e9e72dbb354ac091
 # return values, mutable reference snapshots, constant-body call anchoring,
 # shadowed-binding order, the schema-6 fixture recorder); same trace-format
 # pin, so `nargo trace` still writes `meta.dat` version 7.
-LOCK_NOIR=f09f459714b839a5952b59e09ce0546a936c797e
+#
+# Moved to 6a3d93dd (`codetracer`): nargo takes each file lock once. It used
+# to call lock_exclusive after a successful try_lock_exclusive on the same
+# handle, which Windows' non-reentrant byte-range locks turn into a wait for
+# ever, so every `nargo check`/`compile` hung on Windows (windows-nargo run
+# 45166673332). Same trace-format pin, so `nargo trace` still writes
+# `meta.dat` version 7.
+LOCK_NOIR=6a3d93ddfaf6c3e77d9d24a6923f9802bdf4df5e
 
 # ## Private siblings a CI lane clones by revision
 #

@@ -13020,17 +13020,17 @@
     "noir": {
       "flake": false,
       "locked": {
-        "lastModified": 1795120076,
-        "narHash": "sha256-HTY/ArI5xvxnpA0ZKeACEU6R2i6k2ShrWSVeMLcHXSc=",
+        "lastModified": 1795455980,
+        "narHash": "sha256-4rtFbKsv/z5N6fvw1wWD6jsbLYuMjpE2Xb1MpW8+dq0=",
         "ref": "codetracer",
-        "rev": "f09f459714b839a5952b59e09ce0546a936c797e",
-        "revCount": 8656,
+        "rev": "6a3d93ddfaf6c3e77d9d24a6923f9802bdf4df5e",
+        "revCount": 8657,
         "type": "git",
         "url": "https://github.com/metacraft-labs/noir.git"
       },
       "original": {
         "ref": "codetracer",
-        "rev": "f09f459714b839a5952b59e09ce0546a936c797e",
+        "rev": "6a3d93ddfaf6c3e77d9d24a6923f9802bdf4df5e",
         "type": "git",
         "url": "https://github.com/metacraft-labs/noir.git"
       }
