@@ -594,8 +594,14 @@ jobs:
         # Ruby and JS in the nightly matrix), and env.ps1's from-source nargo
         # build alone took both jobs past their 75-minute bound in run
         # 44940608244.
+        # No TTD/WinDbg check either: this job records and replays Python only
+        # (`just test-origin-dap` with CT_TEST_LANGS=python runs db-backend's
+        # origin_python_dap_test), and nothing in it touches TTD or WinDbg. The
+        # check made it fail setup on a runner without the WinDbg package in
+        # run 45069526428. The nightly matrix below keeps TTD required.
         env:
           WINDOWS_DIY_SKIP_NARGO: "1"
+          WINDOWS_DIY_ENSURE_TTD: "false"
         uses: ./.github/actions/setup-db-backend-siblings
         with:
           env-flavor: windows-diy
