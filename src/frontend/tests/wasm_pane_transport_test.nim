@@ -38,7 +38,25 @@ template ck(cond: untyped) =
   inc checks
   if not (cond):
     inc failedChecks
-    echo "  [FAILED] ", astToStr(cond)
+    echo "    check failed: ", astToStr(cond)
+
+# Each case reports itself in the lane runner's tally: `[OK] <case>` or
+# `[FAILED] <case>` once it ends (the shape `locals_answer_identity_test.nim`
+# uses, for the same reason). Without them the runner sees no result line
+# and scores the file DID NOT RUN however its checks came out.
+var caseName = ""
+var caseFailuresBefore = 0
+var caseOpen = false
+proc endCase() =
+  if caseOpen:
+    caseOpen = false
+    echo (if failedChecks == caseFailuresBefore: "  [OK] " else: "  [FAILED] ") &
+         caseName
+proc beginCase(name: string) =
+  endCase()
+  caseName = name
+  caseFailuresBefore = failedChecks
+  caseOpen = true
 
 var sentPackets: seq[JsObject] = @[]
 proc recordingIpc(): JsObject =
@@ -63,7 +81,7 @@ proc main() {.async.} =
   let backend = worker.toBackendService()
 
   echo "[Suite] a request from the core"
-  echo "  case: reaches the renderer's DapApi with its command and arguments"
+  beginCase("reaches the renderer's DapApi with its command and arguments")
   sentPackets.setLen(0)
   var answered: JsonNode = nil
   onComplete(backend.send("ct/load-locals", %*{"rrTicks": 42, "countBudget": 3000}),
@@ -76,7 +94,7 @@ proc main() {.async.} =
   ck packet["sessionId"].to(int) == 7
 
   echo "[Suite] the answer"
-  echo "  case: comes back to the core's own request, with its body"
+  beginCase("comes back to the core's own request, with its body")
   sentPackets.setLen(0)
   var reply: JsonNode = nil
   onComplete(backend.send("ct/load-locals", %*{"rrTicks": 5}),
@@ -99,7 +117,7 @@ proc main() {.async.} =
   ck responseBody(reply){"marker"}.getInt(0) == 1234
 
   echo "[Suite] a refusal"
-  echo "  case: reaches the core as a failed response, with the engine's message"
+  beginCase("reaches the core as a failed response, with the engine's message")
   sentPackets.setLen(0)
   var refused: JsonNode = nil
   onComplete(backend.send("ct/load-locals", %*{"rrTicks": 9}),
@@ -121,7 +139,7 @@ proc main() {.async.} =
   ck refused{"message"}.getStr == "no replay for this tab"
 
   echo "[Suite] an event"
-  echo "  case: reaches the core under its DAP name, and moves an attached session"
+  beginCase("reaches the core under its DAP name, and moves an attached session")
   let session = newDebuggerSession(backend)
   session.followBackendMoves()
   session.attach(localFolderTrace("/recordings/example"))
@@ -138,7 +156,7 @@ proc main() {.async.} =
   ck session.position.file == "/src/main.py"
 
   echo "[Suite] two tabs"
-  echo "  case: each tab's panes are its own core's, over its own connection"
+  beginCase("each tab's panes are its own core's, over its own connection")
   # The panes' host (`web_core_panels.js`) as the renderer loads it, over a
   # stand-in core and core host that record which transport each core was
   # booted with and which presses reached it — the wasm module itself is
@@ -202,6 +220,8 @@ proc main() {.async.} =
   ck placed
   ck routed
 
+  endCase()
+  echo "CHECKS: ", checks
   if failedChecks > 0:
     {.emit: "process.exitCode = 1;".}
   echo "wasm_pane_transport_test: ", checks, " checks, ", failedChecks, " failed"

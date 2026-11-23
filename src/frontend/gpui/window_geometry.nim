@@ -290,9 +290,18 @@ proc addNode(g: var WindowGeometry; layout: Layout; n: JsonNode;
                         stacked: info.isSome and info.get.kind == lnStack,
                         active: active)
     for t in tabs:
-      let id = t{"info", "panel", "pane"}.getStr
+      # A plugin's pane (Extensibility-Model §11.4) is projected with its
+      # qualified id under `contributedPane` and its title, not under `pane`
+      # (`dock_projection.leafPanelState`): read both, or its tab had no id
+      # (a press on it focused no pane) and an empty label.
+      var id = t{"info", "panel", "pane"}.getStr
+      var label = ""
+      if id.len == 0:
+        id = t{"info", "panel", "contributedPane"}.getStr
+        label = t{"info", "panel", "title"}.getStr
       node.panes.add id
-      var label = labelOf(id)
+      if label.len == 0:
+        label = labelOf(id)
       if not node.stacked:
         for (pane, lone) in g.loneLabels:
           if pane == id and lone.len > 0:

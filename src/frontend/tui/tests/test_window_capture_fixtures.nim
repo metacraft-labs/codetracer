@@ -48,7 +48,7 @@ suite "the GPUI window capture lane's recordings":
     check windowCaptureFixtures("plat70b").names == @["calc", "wide_lines"]
     check windowCaptureFixtures("m71").names == @["calc", "multi_root"]
     for capture in ["plat45", "plat48", "plat68", "plat69", "vcsoffloop",
-                    "flowfirst"]:
+                    "flowfirst", "plugins"]:
       check windowCaptureFixtures(capture).names == @["calc"]
 
   test "the lane's default run records each recording once":

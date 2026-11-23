@@ -14,7 +14,8 @@
 #                              (default test-programs/js_flow_test/flow_test.js) is
 #                              recorded with CT_BIN (default the build's ct)
 #   CT_WEB_CORE_ENGINES        engines to run (default "chromium firefox")
-#   CT_WEB_CORE_STEPS          steps per run (default 4)
+#   CT_WEB_CORE_STEPS          steps per run (default 4; 3 over the default program,
+#                              whose recording ends three `next`s after its entry stop)
 #   CT_WEB_CORE_RELEASE=1      build both cores -d:release
 #   CT_WEB_CORE_OUT            build directory (default test-logs/web-core)
 #
@@ -49,11 +50,18 @@ if [ -z "${replay_server}" ] || [ ! -x "${replay_server}" ]; then
 	echo "ERROR: REPLAY_SERVER_BIN must name a replay-server binary (got '${replay_server}')." >&2
 	exit 2
 fi
+default_steps=4
 # No recording given: make one, with the same `ct record` a user records
 # with, from CT_WEB_CORE_PROGRAM (default: the JavaScript flow test, which the
 # CI job's JS recorder can record).
 if [ -z "${recording}" ]; then
 	program="${CT_WEB_CORE_PROGRAM:-test-programs/js_flow_test/flow_test.js}"
+	# The flow test's recording stops at lines 3, 13, 3 and 10 (`return
+	# final_result`, its last stop) — three `next`s. A fourth does not move,
+	# and the browser test then fails "did not settle" in every engine and
+	# core, which says nothing about either core. Measured 2026-11-23 over the
+	# JS recorder at its pin, both cores stopping at the same four lines.
+	[ -z "${CT_WEB_CORE_PROGRAM:-}" ] && default_steps=3
 	ct_bin="${CT_BIN:-}"
 	if [ -z "${ct_bin}" ]; then
 		for c in src/build-debug/bin/ct src/build-debug-repro/bin/ct src/build-release/bin/ct; do
@@ -96,7 +104,7 @@ failures=0
 for engine in ${CT_WEB_CORE_ENGINES:-chromium firefox}; do
 	echo "--- ${engine} ---"
 	CT_REPO="${repo_root}" node ci/test/web-core-browser/browser.mjs "${out}" "${engine}" \
-		"${replay_server}" "${recording}" "${CT_WEB_CORE_STEPS:-4}"
+		"${replay_server}" "${recording}" "${CT_WEB_CORE_STEPS:-${default_steps}}"
 	rc=$?
 	if [ "${rc}" -eq 2 ]; then
 		exit 2

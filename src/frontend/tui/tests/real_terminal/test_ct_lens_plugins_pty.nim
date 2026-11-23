@@ -15,7 +15,8 @@
 ##   bound to F7 with a `when` clause over the context key it pushes, adds the
 ##   changed values as watches in the Variables pane. Its visualiser shows
 ##   Python's `None` as Python spells it.
-## * `ct-lens.jump` pushes a modal layer (Shift+F7) over the window. It is the
+## * `ct-lens.jump` lists calls in its docked pane (Enter on one jumps, a
+##   `view-event`) and pushes a modal layer (Shift+F7) over the window. It is the
 ##   plugin PLAT-82's defences are exercised against: the recovery chord, and
 ##   the input deadline with the process stopped by SIGSTOP — the plugin's own
 ##   code, unchanged, in a state a debugger or a swapping machine puts a
@@ -226,9 +227,9 @@ suite "ct-lens on a real terminal":
     var sess = spawnTui(home)
     settleOnDebugger(sess, Cols, Rows)
     check sess.commandShows("plugins", "Waiting for your consent: ct-lens.history")
-    check lensPids().len == 0
+    check lensPids(home / "components").len == 0
     sess.grant("ct-lens.history", "ct-lens.watch")
-    check lensPids().len == 1
+    check lensPids(home / "components").len == 1
     # The first stop of `calc` is the module's first line: the function the
     # stop reports is the module, and its range is what git is asked about.
     const head = "History of <__main__> (main.py:"
@@ -243,13 +244,21 @@ suite "ct-lens on a real terminal":
     check first > 0 and last >= first
     let src = calcSource()
     check src.len > 0
-    let want = gitSays(src, first, last)
+    # The recording names its source by the path it was recorded at; when
+    # that file is no longer on this machine the plugin says so instead.
+    let onDisk = fileExists(src)
+    let want = if onDisk: gitSays(src, first, last)
+               else: "the source is not on this machine"
     check want.len > 0
-    let refused = "not a git repository" in want.toLowerAscii
+    let refused = not onDisk or "not a git repository" in want.toLowerAscii
     check sess.commandShows("plugins show ct-lens.history/history",
-                            (if refused: "not a git repository" else: want))
+      (if not onDisk: want elif refused: "not a git repository" else: want))
     # Its status item, on the status line beside the last note.
     check sess.statusHas("history: " & (if refused: "unavailable" else: want))
+    # And its editor decoration: the module's first line, which is on screen
+    # at the first stop, carries the commit that last changed it.
+    if not refused:
+      check sess.screenHas("± history: " & want)
     sess.finish(home)
 
   test "F7 watches what the step changed; the plugin's visualiser renders Python's None":
@@ -277,7 +286,7 @@ suite "ct-lens on a real terminal":
     # healthy plugin hung and restarted it, which drops what it pushed.
     var changed = ""
     var refused, watched = false
-    for _ in 0 ..< 3:
+    for round in 1 .. 3:
       changed = ""
       for _ in 0 ..< 60:
         sess.command("next")
@@ -288,7 +297,10 @@ suite "ct-lens on a real terminal":
           if list.len > 0 and list notin ["none", "…"] and ',' notin list:
             changed = list
             break
-      if changed.len == 0: continue
+      if changed.len == 0:
+        checkpoint "round " & $round & ": no step named one changed value; status line:\n" &
+          sess.statusLine
+        continue
       # F7 on its own: nothing is open (the last `:next` closed its line).
       sleep(500)
       sess.send(F7)
@@ -297,7 +309,14 @@ suite "ct-lens on a real terminal":
       refused = sess.commandShows("plugins run ct-lens.watch watch.add-changed",
                                   "every changed value is already watched",
                                   ceilingMs = 30_000)
-      if not refused: continue
+      if not refused:
+        # What the host recorded, for whoever reads a red run.
+        for f in walkDirRec(home / "state"):
+          if f.endsWith("plugins.log"):
+            checkpoint "plugin log " & f & ":\n" & readFile(f)
+        sess.command("plugins")
+        checkpoint "after F7 on " & changed & ":\n" & sess.screen
+        continue
       # The watch row arrives with the locals of the next stop.
       for _ in 0 ..< 6:
         sess.command("next")
@@ -307,6 +326,9 @@ suite "ct-lens on a real terminal":
             break
           sleep(400)
         if watched: break
+      if not watched:
+        checkpoint "round " & $round & ": F7 on " & changed &
+          " was refused afterwards, but no watch row appeared:\n" & sess.screen
       if watched: break
     check changed.len > 0
     check refused
@@ -321,7 +343,7 @@ suite "ct-lens on a real terminal":
     var sess = spawnTui(home)
     settleOnDebugger(sess, Cols, Rows)
     sess.grant("ct-lens.history", "ct-lens.watch")
-    let pids = lensPids()
+    let pids = lensPids(home / "components")
     check pids.len == 1
     var disabled = false
     for _ in 0 ..< 6:
@@ -333,7 +355,7 @@ suite "ct-lens on a real terminal":
     check sess.commandShows("plugins", "ct-lens.history  running")
     sess.command("step")
     check sess.commandShows("plugins show ct-lens.history/history", "History of ")
-    check lensPids() == pids
+    check lensPids(home / "components") == pids
     sess.finish(home)
 
   test "plugins granted in an earlier session start by themselves in the next":
@@ -371,7 +393,28 @@ suite "ct-lens.jump on a real terminal: a mode, and the defences against it":
     check left
     sess.finish(home)
 
-  test "three Escapes take the keyboard back from the mode":
+  test "Enter on a call in the docked jump pane jumps to it, without the mode":
+    let home = newHome()
+    var sess = spawnTui(home)
+    settleOnDebugger(sess, Cols, Rows)
+    sess.grant("ct-lens.jump")
+    # `:plugins show` brings the docked pane to the front and focuses it.
+    check sess.commandShows("plugins show ct-lens.jump/calls",
+                            "Enter on a call jumps to it")
+    check "JUMP MODE (ct-lens.jump)" notin sess.statusLine
+    # Enter: the terminal's own key handling activates the highlighted row
+    # and sends the plugin a view event; the plugin jumps and says so.
+    var jumped = false
+    for _ in 0 ..< 5:
+      sess.send("\r")
+      if sess.screenHas("jumped to ", ceilingMs = 10_000):
+        jumped = true
+        break
+      sess.command("plugins show ct-lens.jump/calls")
+    check jumped
+    sess.finish(home)
+
+  test "three Escapes take the keyboard back from the mode, and the healthy plugin gets it back":
     let home = newHome()
     var sess = spawnTui(home)
     settleOnDebugger(sess, Cols, Rows)
@@ -384,6 +427,10 @@ suite "ct-lens.jump on a real terminal: a mode, and the defences against it":
     check sess.screenHas("The plugins that held the keyboard: ct-lens.jump")
     sess.closeOverlay()
     check "JUMP MODE (ct-lens.jump)" notin sess.statusLine
+    # The plugin was healthy: it is running again (not "not responding")
+    # without a re-enable, and its key opens the mode again.
+    check sess.commandShows("plugins", "ct-lens.jump  running")
+    check sess.openJump()
     sess.finish(home)
 
   test "stopped while it holds the keyboard, the plugin loses it within its deadline; its siblings keep running":
@@ -393,7 +440,7 @@ suite "ct-lens.jump on a real terminal: a mode, and the defences against it":
     sess.grant("ct-lens.history", "ct-lens.watch", "ct-lens.jump")
     let pid = sess.jumpPid()
     check pid > 0
-    check lensPids().len == 2
+    check lensPids(home / "components").len == 2
     check sess.openJump()
     check kill(Pid(pid), SIGSTOP) == 0
     sess.send("1")

@@ -49,11 +49,13 @@ proc freshDir(): string =
 proc install(root, name, version, command: string) =
   ## The layout `ct install` produces: `<root>/<name>@<version>/capabilities`.
   ## Each version declares its OWN command, so the command that routes shows
-  ## which version was taken.
+  ## which version was taken. The `bin` line is there because the launcher
+  ## passes over a component whose capabilities name none.
   let dir = root / (name & "@" & version)
   createDir(dir)
   writeFile(dir / "capabilities",
-            "name " & name & "\nversion " & version & "\n" & command & "\n")
+            "name " & name & "\nversion " & version & "\nbin " & name & "\n" &
+            command & "\n")
 
 template withLauncherEnv(settings: openArray[(string, string)], body: untyped) =
   var saved: seq[(string, bool, string)]

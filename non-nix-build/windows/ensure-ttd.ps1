@@ -184,12 +184,32 @@ function Install-TtdViaMsixBundle {
     ttd_source  = $BundleUrl
   }
 
+  # The same msix carries the WinDbg debugger engine (cdb.exe, dbgeng.dll,
+  # dbgmodel.dll, dbghelp.dll) under <engine-arch>\. On this path there is no
+  # usable WinDbg AppX for the account (a runner service account such as
+  # NetworkService cannot register or execute AppX packages), so the engine
+  # is cached beside TTD, at <root>\windbg\<version>\<engine-arch>, and
+  # env.ps1's Resolve-TtdRuntimeInfo reads it from there.
+  $engineArch = if ($Arch -eq "arm64") { "arm64" } else { "amd64" }
+  $windbgCacheDir = Join-Path $Root "windbg/$BundleVersion"
+  $windbgCacheCdb = Join-Path $windbgCacheDir "$engineArch/cdb.exe"
+  $windbgMetaFile = Join-Path $windbgCacheDir "windbg.install.meta"
+  $expectedWindbgMeta = @{
+    windbg_version = $BundleVersion
+    windbg_source  = $BundleUrl
+  }
+
+  $ttdCached = $false
   if ((Test-Path -LiteralPath $ttdCacheExe -PathType Leaf) -and (Test-Path -LiteralPath $metaFile -PathType Leaf)) {
-    $cachedMeta = Read-KeyValueFile -Path $metaFile
-    if (Test-KeyValueFileMatches -Expected $expectedMeta -Actual $cachedMeta) {
-      Write-Host "TTD $BundleVersion already cached at $ttdCacheDir (msixbundle path)."
-      return
-    }
+    $ttdCached = Test-KeyValueFileMatches -Expected $expectedMeta -Actual (Read-KeyValueFile -Path $metaFile)
+  }
+  $windbgCached = $false
+  if ((Test-Path -LiteralPath $windbgCacheCdb -PathType Leaf) -and (Test-Path -LiteralPath $windbgMetaFile -PathType Leaf)) {
+    $windbgCached = Test-KeyValueFileMatches -Expected $expectedWindbgMeta -Actual (Read-KeyValueFile -Path $windbgMetaFile)
+  }
+  if ($ttdCached -and $windbgCached) {
+    Write-Host "TTD and the WinDbg engine $BundleVersion already cached at $ttdCacheDir and $windbgCacheDir (msixbundle path)."
+    return
   }
 
   $workDir = Join-Path $env:TEMP ("windbg-bundle-" + [guid]::NewGuid().ToString("N"))
@@ -270,36 +290,61 @@ function Install-TtdViaMsixBundle {
     Copy-Item -LiteralPath $msixPath -Destination $msixAsZip -Force
     Expand-Archive -LiteralPath $msixAsZip -DestinationPath $msixExtractDir -Force
 
-    # TTD ships at the package root in current WinDbg versions; older
-    # layouts nest it under <arch>\ttd\. Search recursively so we
-    # tolerate both.
-    $ttdExeCandidate = Get-ChildItem -LiteralPath $msixExtractDir -Filter "TTD.exe" -File -Recurse -ErrorAction SilentlyContinue |
-      Select-Object -First 1
-    if ($null -eq $ttdExeCandidate) {
-      throw "TTD.exe not found inside extracted msix at $msixExtractDir"
-    }
-    $ttdSourceDir = $ttdExeCandidate.Directory.FullName
+    if (-not $ttdCached) {
+      # TTD ships at the package root in current WinDbg versions; older
+      # layouts nest it under <arch>\ttd\. Search recursively so we
+      # tolerate both.
+      $ttdExeCandidate = Get-ChildItem -LiteralPath $msixExtractDir -Filter "TTD.exe" -File -Recurse -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+      if ($null -eq $ttdExeCandidate) {
+        throw "TTD.exe not found inside extracted msix at $msixExtractDir"
+      }
+      $ttdSourceDir = $ttdExeCandidate.Directory.FullName
 
-    Write-Host "Copying TTD files from extracted msix to DIY cache: $ttdCacheDir"
-    if (Test-Path -LiteralPath $ttdCacheDir) {
-      Remove-Item -LiteralPath $ttdCacheDir -Recurse -Force
-    }
-    New-Item -ItemType Directory -Force -Path $ttdCacheDir | Out-Null
+      Write-Host "Copying TTD files from extracted msix to DIY cache: $ttdCacheDir"
+      if (Test-Path -LiteralPath $ttdCacheDir) {
+        Remove-Item -LiteralPath $ttdCacheDir -Recurse -Force
+      }
+      New-Item -ItemType Directory -Force -Path $ttdCacheDir | Out-Null
 
-    $sourceFiles = Get-ChildItem -LiteralPath $ttdSourceDir -File -ErrorAction SilentlyContinue
-    foreach ($f in $sourceFiles) {
-      Copy-Item -LiteralPath $f.FullName -Destination (Join-Path $ttdCacheDir $f.Name) -Force
-    }
-    $sourceDirs = Get-ChildItem -LiteralPath $ttdSourceDir -Directory -ErrorAction SilentlyContinue
-    foreach ($d in $sourceDirs) {
-      Copy-Item -LiteralPath $d.FullName -Destination (Join-Path $ttdCacheDir $d.Name) -Recurse -Force
+      $sourceFiles = Get-ChildItem -LiteralPath $ttdSourceDir -File -ErrorAction SilentlyContinue
+      foreach ($f in $sourceFiles) {
+        Copy-Item -LiteralPath $f.FullName -Destination (Join-Path $ttdCacheDir $f.Name) -Force
+      }
+      $sourceDirs = Get-ChildItem -LiteralPath $ttdSourceDir -Directory -ErrorAction SilentlyContinue
+      foreach ($d in $sourceDirs) {
+        Copy-Item -LiteralPath $d.FullName -Destination (Join-Path $ttdCacheDir $d.Name) -Recurse -Force
+      }
+
+      if (-not (Test-Path -LiteralPath $ttdCacheExe -PathType Leaf)) {
+        throw "TTD.exe not found at $ttdCacheExe after copying from extracted msix."
+      }
+      Write-KeyValueFile -Path $metaFile -Values $expectedMeta
+      Write-Host "TTD $BundleVersion cached successfully at $ttdCacheDir (msixbundle path)."
     }
 
-    if (-not (Test-Path -LiteralPath $ttdCacheExe -PathType Leaf)) {
-      throw "TTD.exe not found at $ttdCacheExe after copying from extracted msix."
+    if (-not $windbgCached) {
+      $engineSource = Join-Path $msixExtractDir $engineArch
+      if (-not (Test-Path -LiteralPath (Join-Path $engineSource "cdb.exe") -PathType Leaf)) {
+        throw "cdb.exe not found at $engineSource inside the extracted WinDbg msix."
+      }
+      Write-Host "Copying the WinDbg engine from extracted msix to DIY cache: $windbgCacheDir"
+      if (Test-Path -LiteralPath $windbgCacheDir) {
+        Remove-Item -LiteralPath $windbgCacheDir -Recurse -Force
+      }
+      $engineDest = Join-Path $windbgCacheDir $engineArch
+      New-Item -ItemType Directory -Force -Path $engineDest | Out-Null
+      # The ttd\ subdirectory is TTD itself, already cached above.
+      foreach ($item in @(Get-ChildItem -LiteralPath $engineSource -ErrorAction SilentlyContinue)) {
+        if ($item.PSIsContainer -and $item.Name -eq "ttd") { continue }
+        Copy-Item -LiteralPath $item.FullName -Destination (Join-Path $engineDest $item.Name) -Recurse -Force
+      }
+      if (-not (Test-Path -LiteralPath $windbgCacheCdb -PathType Leaf)) {
+        throw "cdb.exe not found at $windbgCacheCdb after copying from extracted msix."
+      }
+      Write-KeyValueFile -Path $windbgMetaFile -Values $expectedWindbgMeta
+      Write-Host "WinDbg engine $BundleVersion cached successfully at $windbgCacheDir (msixbundle path)."
     }
-    Write-KeyValueFile -Path $metaFile -Values $expectedMeta
-    Write-Host "TTD $BundleVersion cached successfully at $ttdCacheDir (msixbundle path)."
   } finally {
     Remove-Item -LiteralPath $workDir -Recurse -Force -ErrorAction SilentlyContinue
   }

@@ -1,0 +1,92 @@
+{
+ "takenAt": "2026-11-23T03:57:32.846508+00:00",
+ "host": "gpu-server-001",
+ "binary": "codetracer-gpui-window",
+ "commit": "a6ae939d706a94d94aa6d7c0be834ec1235400dc",
+ "dirty": true,
+ "windows": {
+  "consentAndRun": {
+   "mapped": true,
+   "awaitingConsent": true,
+   "pidsBeforeConsent": [],
+   "grantScreen": "plugins review acme-tools.metrics -> GRANT acme-tools.metrics?",
+   "grantScreenSaysNative": true,
+   "bothRunningState": "plugins state package acme-tools: acme-tools running pid 1492009 | acme-tools.metrics  running  breaker closed  strikes 0 | acme-tools.flame  running  breaker closed  strikes 0",
+   "statePid": 1492009,
+   "pidsRunning": [
+    1492009
+   ],
+   "paneDrew": "plugin pane acme-tools.metrics/overview drew: Metrics line main.py:1 position 1 label metrics",
+   "paneDocked": true,
+   "paneOcr": "ol\n\n<\n\n>\n\n-\n\n3\n\no~\n\n-\n\n=\n\nL 1\n\n\u201c\n\n\u00bb\n\nI\n\n[\n\n&>\n\nL]\n\nQ Navigate to file or run a :command\n\nFILES\n\nX\n\nves\n\nTS\n\ncalo/main.py\n\nX\n\nVARIABLES\n\nMetrics\n\nX\n\nRATCHPAD\n\nCALLTRACE\n\nX\n\nAGENT ACTIVITY\n\n=\n\n>\n\n1\n\n~ [ source folders\n\n[t /usr/bin/env pythons\n\nQ Search\n\n2\n\n5\n\ncalc \u2014 the small,\n\nfast,\n\ndeterminis\n\nMetrics\n\n~ O cale\n\n3\n\nline main.py:1\n\nB <toplevel> #0 () =>0\n\n# main.py\n\nWHY THIS PROGRAM EXISTS, AND WHY IT L(\n\nposition 1\n\nB <__main__> #1 ()\n\n-\n\nB\n\nlabel metrics\n\nB main #2 0 =>als, 7, 42, 17, 2]\n\ncodetracer-specs/Front-Ends/CodeTrac\n\nB evaluate #3 (expression=\"2 + 3\") =>5\n\n7\n\na fixture that is \"small,\n\nfast,\n\ndeterr\n\n8\n\n& apply_op #4 (symbol=\"+\", left=2, right=3) =>5\n\nlayout tests\u201d.\n\nEvery constraint in ti\n\n1 add #5 (left=2, right=3) =>5\n\n9\n\nB evaluate #6 (expression=\"10 - 4 + 1\")\n\n7\n\n10\n\nv# **small / fast** \u2014 the fixture is re\u00a2\n\n11\n\n\u2018src/frontend/tui/tests/fixtures/f:\n\nB apply_op #7 (symbol=\"-\n\n, left=10, right=4) =>8\n\n12\n\nlane pays for that recording the fii\n\n1 sub #8 (left=10, right=4) =>6\n\n13\n\nwhole program is a few hundred reco:\n\n& apply_op #9 (symbol=\"+\", left=6, right=1) =>7\n\n14\n\nseconds rather than minutes.\n\n1 add #10 (left=6, righ\n\n)=>7\n\n15\n\nv\n\n**deterministic** \u2014 no clock, no rar\n\nB evaluate #11 (expressiol\n\n\"G % 77) =\n\na2\n\n16\n\nother than\n\n\u2018print\n\nA fixture whe\n\n=\n\n-\n\nB apply_op #12 (symbol:\n\n-\n\n, left=6, right=7) =>..\n\n17\n\ncannot be the ground truth for a st\n\n18\n\nv\n\n*#stepping and layouts* \u2014 it is wri\n\n: mul #13 (left=B, right=7) =>42\n\n100 / 6 - 3\") =>17\n\n19\n\nC \"main\u00ae\n\n-\n\n\u201cevaluate\u201d\n\n=\n\n\u201capply\n\nB evaluate #14 (expressiol\n\n20\n\nB apply_op #15 (symbol=\"/\"\n\nleft=100, right=5) =>\n\nrather than as one flat loop, becau:\n\n21\n\nit exercises nothing.\n\nEvery step L\n\n= div #16 (left=100, right=5) =>20\n\n22\n\n23\n\nNothing here asserts anything.\n\nThe a:\n\nEVENT LOG\n\nX\n\nNAL OUTPUT\n\n24\n\n\u201csrc/frontend/tui/tests/test_fixture.\n\nQ Find event\n\n[T\n\n25\n\ntrace through a real\n\n\u201cHeadlessDebugSe\n\ntick\n\n26\n\noutput\n\n27\n\nstdout\n\n2+3-=\n\n5\n\n=\n\n28\n\n68\n\nstdout\n\n10 - 4 + 1\n\n29\n\n=\n\nvdef add(left, right\n\n& __builtins_\n\n88\n\nstdout\n\n6 *7\n\no\n\n-\n\n42\n\n30\n\n\"\"\"Integer addition, as its own f1\n\n22\u2014\n\n118\n\nstdout\n\n100 / 5 - 3\n\na\n\n-\n\n17\n\n31\n\nreturn left + right\n\n32\n\n168\n\nstdout\n\n1+2+3-4/2\n\na\n\n-\n\n2\n\n33\n\n170\n\nstdout\n\nchecksum\n\na\n\n-\n\n73\n\n34\n\nvdef\n\n& __builtins_\n\nsub(left, right):\n\ne\n\n35\n\n\"\"\"Integer subtraction.\n\n36\n\nreturn left - right\n\n37\n\n38\n\n39\n\nvdef\n\nmul(left, right):\n\n& __builtins_\n\n40\n\n\"\"\"Integer multiplication.\n\na1\n\nreturn left * right\n\na2\n\na3\n\naa\n\nvdef div(left, right\n\n& __builtins_\n\nRows 1\n\nt060f6\n\n=\n\nP\n\ni\n\n\u2014\u2014\u2014\u2014\n\nPython\n\nUTF-8\n\nBUILD\n\nPROBLEMS\n\nFIND IN FILES\n\nREQUESTS\n\ngranted acme-tools.flame (groRecorded) - metrics ok\n\nNo certificates /tmp/p70f/m/codetracer/test-programs/calc/main.py:1#1\n\no\n",
+   "pluginMove": "plugin move next",
+   "controlAfterMove": "control next tick=2",
+   "paneDrewAfterStep": "plugin pane acme-tools.metrics/overview drew: Metrics line main.py:2 position 2 label metrics",
+   "killedPid": 1492009,
+   "pidsAfterKill": [
+    1526403
+   ],
+   "restartedState": "plugins state package acme-tools: acme-tools running pid 1526403 | acme-tools.metrics  running  breaker closed  strikes 1  ack p50 3 ms p99 3 ms | last fault: crashed: the process was killed by signal 9 (SIGKILL) (unattributed) | acme-tools.flame  running  breaker closed  strikes 1 | last fault: crashed: the process was killed by signal 9 (SIGKILL) (unattributed)",
+   "keyStepAfterRestart": "control next tick=3",
+   "rc": 0,
+   "elapsedMs": 102149,
+   "endedOnDeadline": false,
+   "pluginPidsAfterExit": []
+  },
+  "noExtensions": {
+   "mapped": true,
+   "unloadedLeaf": "leaf acme-tools.metrics/overview unloaded-extension",
+   "statusReport": "plugins report Extensions are off for this session (--no-extensions): no plugin process was started.",
+   "pidSamples": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+   ],
+   "unloadedOcr": "ol\n\n<\n\n>\n\n-\n\n3\n\no~\n\n5\n\n=\n\n=\n\nL 1\n\n\u201c\n\n\u00bb\n\nI\n\n[\n\n&>\n\nL]\n\nQ Navigate to file or run a :command\n\nFILES\n\nX\n\nves\n\n-\n\nTS\n\ncalo/main.py\n\nX\n\nVARIABLES\n\nMetrics\n\nX\n\nRATCHPAD\n\nCALLTRACE\n\nX\n\nAGENT ACTIVITY\n\n=\n\n>\n\n1\n\n~ [ source folders\n\n[t /usr/bin/env pythons\n\nQ Search\n\n2\n\n5\n\ncalc \u2014 the small,\n\nfast,\n\ndeterminis\n\nThis pane is provided by an extension that is not loaded:\n\n~ O cale\n\nacme-tools.metrics/overview\n\n3\n\nB <toplevel> #0 () =>0\n\n# main.py\n\nWHY THIS PROGRAM EXISTS, AND WHY IT L(\n\nB <__main__> #1 ()\n\n-\n\nB\n\nB main #2 0 =>als, 7, 42, 17, 2]\n\ncodetracer-specs/Front-Ends/CodeTrac\n\nB evaluate #3 (expression=\"2 + 3\") =>5\n\n7\n\na fixture that is \"small,\n\nfast,\n\ndeterr\n\n8\n\n& apply_op #4 (symbol=\"+\", left=2, right=3) =>5\n\nlayout tests\u201d.\n\nEvery constraint in ti\n\n1 add #5 (left=2, right=3) =>5\n\n9\n\nB evaluate #6 (expression=\"10 - 4 + 1\")\n\n7\n\n10\n\nv# **small / fast** \u2014 the fixture is re\u00a2\n\n11\n\n\u2018src/frontend/tui/tests/fixtures/f:\n\nB apply_op #7 (symbol=\"-\n\n, left=10, right=4) =>8\n\n12\n\nlane pays for that recording the fii\n\n1 sub #8 (left=10, right=4) =>6\n\n13\n\nwhole program is a few hundred reco:\n\n& apply_op #9 (symbol=\"+\", left=6, right=1) =>7\n\n14\n\nseconds rather than minutes.\n\n1 add #10 (left=6, righ\n\n)=>7\n\n15\n\nv\n\n**deterministic** \u2014 no clock, no rar\n\nB evaluate #11 (expressiol\n\n\"G % 77) =\n\na2\n\n16\n\nother than\n\n\u2018print\n\nA fixture whe\n\n=\n\n-\n\nB apply_op #12 (symbol:\n\n-\n\n, left=6, right=7) =>..\n\n17\n\ncannot be the ground truth for a st\n\n18\n\nv\n\n*#stepping and layouts* \u2014 it is wri\n\n: mul #13 (left=B, right=7) =>42\n\n100 / 6 - 3\") =>17\n\n19\n\nC \"main\u00ae\n\n-\n\n\u201cevaluate\u201d\n\n=\n\n\u201capply\n\nB evaluate #14 (expressiol\n\n20\n\nB apply_op #15 (symbol=\"/\"\n\nleft=100, right=5) =>\n\nrather than as one flat loop, becau:\n\n21\n\nit exercises nothing.\n\nEvery step L\n\n= div #16 (left=100, right=5) =>20\n\n22\n\n23\n\nNothing here asserts anything.\n\nThe a:\n\nEVENT LOG\n\nX\n\nERMINAL OUTPUT\n\n24\n\n\u201csrc/frontend/tui/tests/test_fixture.\n\nQ Find event\n\n[T\n\n25\n\ntrace through a real\n\n\u201cHeadlessDebugSe\n\ntick\n\n26\n\noutput\n\n27\n\nstdout\n\n2+3-=\n\n5\n\n=\n\n28\n\n68\n\nstdout\n\n10 - 4 + 1\n\n29\n\n=\n\nvdef add(left, right\n\n& __builtins_\n\n88\n\nstdout\n\n6 *7\n\no\n\n-\n\n42\n\n30\n\n\"\"\"Integer addition, as its own f1\n\n22\u2014\n\n118\n\nstdout\n\n100 / 5 - 3\n\na\n\n-\n\n17\n\n31\n\nreturn left + right\n\n32\n\n168\n\nstdout\n\n1+2+3-4/2\n\na\n\n-\n\n2\n\n33\n\n170\n\nstdout\n\nchecksum\n\na\n\n-\n\n73\n\n34\n\nvdef\n\n& __builtins_\n\nsub(left, right):\n\ne\n\n35\n\n\"\"\"Integer subtraction.\n\n36\n\nreturn left - right\n\n37\n\n38\n\n39\n\nvdef\n\nmul(left, right):\n\n& __builtins_\n\n40\n\n\"\"\"Integer multiplication.\n\na1\n\nreturn left * right\n\na2\n\na3\n\naa\n\nvdef div(left, right\n\n& __builtins_\n\nRows.\n\n1\n\nt060f6\n\n=\n\nP\n\ni\n\n\u2014\u2014\u2014\u2014\n\nPython\n\nUTF-8\n\nBUILD\n\nPROBLEMS\n\nFIND IN FILES\n\nREQUESTS\n\nNo certificates /tmp/p70f/m/codetracer/test-programs/calc/main.py:1#1\n\no\n",
+   "rc": 0,
+   "elapsedMs": 80457,
+   "endedOnDeadline": false,
+   "pluginPidsAfterExit": []
+  },
+  "recoveryChord": {
+   "mapped": true,
+   "footerWithLayer": "plugins footer FLAME MODE (acme-tools.flame)  \u00b7  granted acme-tools.flame (groRecorded)  \u00b7  metrics ok",
+   "pidsRunning": [
+    1575432,
+    1576688
+   ],
+   "dialog": "plugins dialog RECOVER INPUT: The plugins that held the keyboard: acme-tools.flame /  / :plugins re-enable <id>   :plugins disable-session <id>   :plugins disable <id>   :plugins disable-all",
+   "footerAfterChord": "plugins footer `escape` went to acme-tools.flame, which did not answer  \u00b7  metrics ok",
+   "rc": 0,
+   "elapsedMs": 28575,
+   "endedOnDeadline": false,
+   "pluginPidsAfterExit": []
+  },
+  "swallowedKey": {
+   "mapped": true,
+   "footerWithLayer": "plugins footer FLAME MODE (acme-tools.flame)  \u00b7  granted acme-tools.flame (groRecorded)  \u00b7  metrics ok",
+   "keyRouted": "plugin key j",
+   "droppedSentence": "status: `j` went to acme-tools.flame, which did not answer",
+   "footerAfterDrop": "plugins footer `j` went to acme-tools.flame, which did not answer  \u00b7  metrics ok",
+   "nextKeyReachedRouter": "key k at window:window / tab:tab:1 / pane:editor / editor:editor:/tmp/p70f/m/codetracer/test-programs/calc/main.py",
+   "nextKeyToPlugin": false,
+   "thirdKeyReachedRouter": "key l at window:window / tab:tab:1 / pane:editor / editor:editor:/tmp/p70f/m/codetracer/test-programs/calc/main.py",
+   "breakerOpen": "plugins state package acme-tools: acme-tools running pid 1585090, acme-tools[acme-tools.flame] stopped | acme-tools.metrics  running  breaker closed  strikes 0 | acme-tools.flame  stopped (restarts in 29 s)  breaker open  strikes 3 | last fault: stopped answering: its watchdog did not answer a ping within 2000 ms",
+   "rc": 0,
+   "elapsedMs": 52228,
+   "endedOnDeadline": false,
+   "pluginPidsAfterExit": []
+  }
+ }
+}
