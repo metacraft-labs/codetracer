@@ -178,7 +178,7 @@ fi
 echo "--- building js-crossing ---"
 if ! nim js "${nim_common[@]}" "${opt_flags[@]}" \
 	-d:ctRenderer -d:chronicles_enabled=off \
-	-d:ctPlat18Slice -d:ctPlat18Frame \
+	-d:ctWasmCore -d:ctPlat18Frame \
 	--nimcache:"${cache_root}/js-crossing" \
 	-o:"${out}/arm_js_crossing.raw.js" "${slice_src}"; then
 	echo "PLAT18-SLICE-VERDICT FAIL js-crossing did not build"
@@ -210,7 +210,7 @@ if ! nim c "${nim_common[@]}" "${opt_flags[@]}" \
 	--cpu:wasm32 --os:linux -d:emscripten \
 	--cc:clang --clang.exe:emcc --clang.linkerexe:emcc \
 	--mm:orc --threads:off \
-	-d:ctPlat18Slice -d:ctPlat18Frame \
+	-d:ctWasmCore -d:ctPlat18Frame \
 	--passL:-sSTACK_SIZE=8388608 \
 	--passL:-sALLOW_MEMORY_GROWTH=1 \
 	--passL:-sEXIT_RUNTIME=0 \

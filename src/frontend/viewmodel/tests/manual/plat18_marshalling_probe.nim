@@ -423,7 +423,7 @@ proc run() =
          " note=whole-StateViewState-per-update-not-the-shipped-design"
     dispose()
 
-when defined(ctPlat18Slice):
+when defined(ctWasmCore):
   import isonim/web/frame_renderer
 
   proc crossCheckWireAgainstMeter() =
@@ -457,6 +457,14 @@ when defined(ctPlat18Slice):
         meterCodec = false
         resetMeter()
         let panel = renderStatePanel[MockRenderer, MockNode](r, vm)
+        # The ONE operation the view issues to the frame renderer and not to
+        # this one: the WebAssembly core's half of the watch form's decoration
+        # (`isonim_state_view.nim`, `when N is FrameNode`), its submit
+        # listener — on a DOM build `wireWatchInputForm` adds it, and on the
+        # mock nothing does. Charged here, by the meter's own encoding, so the
+        # two totals compare the same stream; a further frame-only operation
+        # makes them disagree again, which is the point of the check.
+        noteOp(boAddEventListener, 2, "submit")
         if phase == "EXPAND":
           resetMeter()
           vm.toggleExpand(WideName)
@@ -504,7 +512,7 @@ when isMainModule:
        " danger=", (when defined(danger): "yes" else: "no"),
        " fixture=wide_state-600"
   run()
-  when defined(ctPlat18Slice):
+  when defined(ctWasmCore):
     crossCheckWireAgainstMeter()
   if problems.len == 0:
     echo "PLAT18-MARSHAL-VERDICT ok"

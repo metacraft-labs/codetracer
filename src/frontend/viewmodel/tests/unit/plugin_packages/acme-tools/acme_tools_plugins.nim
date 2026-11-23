@@ -212,6 +212,17 @@ proc setupFlame(sdk: PluginSdk) =
       raise newException(IOError, "flame data is unreadable")
     of "exit":
       quit(3)
+    of "trickle":
+      # One large frame drained slowly into the pipe, holding the frame lock:
+      # the watchdog's `pong` waits behind it, as it did under load.
+      var opts: seq[ViewOption]
+      for i in 0 ..< 2_000:
+        opts.add ViewOption(id: $i, label: "frame " & $i & " " & repeat('x', 40))
+      p.sendTrickled(%*{"type": "view", "surface": "flame",
+                        "tree": viewList("flame.list", opts).toJson,
+                        "epoch": p.epoch.toJson},
+                     chunk = 4_096, delayMs = p.settings{"trickleMs"}.getInt(60))
+      p.done(req)
     of "protocol":
       discard posix.write(1, "\x00\x00\x00\x05hello".cstring, 9)
     else:

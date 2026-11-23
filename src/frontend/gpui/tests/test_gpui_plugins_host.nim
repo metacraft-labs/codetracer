@@ -29,14 +29,14 @@
 ## The CI host runs at load above 100: every wait is on state, with a generous
 ## ceiling, and a threshold that is not a case's subject is widened.
 
-import std/[json, os, posix, sets, strutils, times, unittest]
+import std/[json, os, posix, sequtils, sets, strutils, times, unittest]
 
 import isonim/core/[owner]
 import isonim_gpui/renderer
 
 import codetracer_embed
 import backend/mock_backend
-import plugin_host/supervisor
+import plugin_host/[protocol, supervisor]
 import headless_app/layout_model
 import ../app/shell
 import ../app/leaves
@@ -67,7 +67,7 @@ proc waitFor(p: SessionPlugins; what: string; cond: proc(): bool;
 
 var homeCount = 0
 
-proc newHome(capture = false; flameMode = ""): string =
+proc newHome(capture = false; flameMode = ""; flameSettings: JsonNode = nil): string =
   ## A user's components root with the package installed, and their
   ## settings, as `ct install` and a settings edit leave them.
   inc homeCount
@@ -82,8 +82,10 @@ proc newHome(capture = false; flameMode = ""): string =
     manifest = $doc
   discard installPackage(result / "components", manifest)
   if flameMode.len > 0:
+    var settings = if flameSettings.isNil: newJObject() else: flameSettings.copy
+    settings["mode"] = %flameMode
     writeFile(result / "user-root" / "plugin-settings.json",
-      $(%*{"plugins": {"acme-tools.flame": {"settings": {"mode": flameMode}}}}))
+      $(%*{"plugins": {"acme-tools.flame": {"settings": settings}}}))
   putEnv("CODETRACER_COMPONENTS_ROOT", result / "components")
   putEnv("CODETRACER_USER_ROOT", result / "user-root")
   putEnv("XDG_STATE_HOME", result / "state")
@@ -117,6 +119,12 @@ proc grantBoth(p: SessionPlugins) =
 proc running(p: SessionPlugins; id: string): bool =
   let s = p.sup.slot(id)
   not s.isNil and s.active
+
+proc layerHeld(p: SessionPlugins): bool =
+  ## The flame layer is on top AND its plugin is active: a layer arrives
+  ## while the plugin is still activating, and the router skips the layers
+  ## of a plugin that is not active yet (the supervisor suite's `layerUp`).
+  p.layerLabel == "FLAME MODE (acme-tools.flame)" and p.running("acme-tools.flame")
 
 proc labels(entries: seq[OmnibarEntry]): seq[string] =
   for e in entries: result.add e.label
@@ -244,7 +252,7 @@ suite "GPUI: the window's plugins (host/gpui_plugins)":
     let p = openFor(home)
     p.grantBoth()
     ck p.waitFor("the flame layer", proc(): bool =
-      p.layerLabel == "FLAME MODE (acme-tools.flame)")
+      p.layerHeld)
     ck p.waitFor("metrics ready", proc(): bool =
       p.sup.enablementOf("acme-tools.metrics", "metrics.step").enabled)
     ck pluginKeyName("Esc") == "escape"
@@ -278,7 +286,7 @@ suite "GPUI: the window's plugins (host/gpui_plugins)":
     let p = openFor(home)
     p.grantBoth()
     ck p.waitFor("the flame layer", proc(): bool =
-      p.layerLabel == "FLAME MODE (acme-tools.flame)")
+      p.layerHeld)
     ck p.routePluginKey("j", userBound = false)
     var note = ""
     ck p.waitFor("the dropped key", proc(): bool =
@@ -289,6 +297,107 @@ suite "GPUI: the window's plugins (host/gpui_plugins)":
     ck p.layerLabel == ""
     p.close()
 
+  test "a layer that never answers: the first key dropped, the next falls through, the third opens the breaker":
+    let home = newHome(capture = true, flameMode = "swallow-input")
+    let p = openFor(home)
+    p.sup.inputDeadlineMs = InputDeadlineMs   # the subject: the spec's value
+    p.grantBoth()
+    ck p.waitFor("the flame layer", proc(): bool =
+      p.layerHeld)
+    ck p.routePluginKey("j", userBound = false)
+    ck p.waitFor("the missed deadline", proc(): bool =
+      p.sup.slot("acme-tools.flame").suspect)
+    ck p.takeNote(" (Plugins: Show status for more)") ==
+      "`j` went to acme-tools.flame, which did not answer"
+    # The second key is the window's: the layer is transparent.
+    ck not p.routePluginKey("k", userBound = false)
+    ck p.sup.slot("acme-tools.flame").breaker == bsClosed
+    # The third strike opens the breaker, and the layer is gone for good.
+    ck not p.routePluginKey("l", userBound = false)
+    ck p.sup.slot("acme-tools.flame").breaker == bsOpen
+    ck p.layerLabel == ""
+    p.close()
+
+  test "a key answered in 300 ms is no strike, and its latency is in the status":
+    let home = newHome(capture = true, flameMode = "slow-ack",
+                       flameSettings = %*{"ackDelayMs": 300})
+    let p = openFor(home)
+    p.sup.inputDeadlineMs = 10_000   # widened: 300 ms is the subject, not the clock
+    p.grantBoth()
+    ck p.waitFor("the flame layer", proc(): bool =
+      p.layerHeld)
+    ck p.routePluginKey("j", userBound = false)
+    ck p.waitFor("the answer", proc(): bool =
+      p.sup.slot("acme-tools.flame").ackSamples.len == 1)
+    let s = p.sup.slot("acme-tools.flame")
+    ck s.ackSamples[0] >= 300
+    ck s.strikes.len == 0
+    ck not s.suspect
+    ck "ack p50" in p.control(@["status"]).body
+    ck p.layerLabel == "FLAME MODE (acme-tools.flame)"
+    p.close()
+
+  test "a plugin killed while it holds the keyboard: its layer goes at once, the next key is the window's":
+    let home = newHome(capture = true, flameMode = "swallow-input")
+    let p = openFor(home)
+    p.grantBoth()
+    ck p.waitFor("the flame layer", proc(): bool =
+      p.layerHeld)
+    discard kill(Pid(p.sup.pidOf("acme-tools.flame")), SIGKILL)
+    ck p.waitFor("the crash", proc(): bool =
+      p.sup.faults.anyIt(it.kind == fkCrash))
+    ck p.layerLabel == ""
+    ck not p.routePluginKey("j", userBound = false)
+    ck p.sup.slot("acme-tools.flame").breaker == bsOpen
+    # The fault notification's actions are the omnibar's while it is stopped.
+    ck "acme-tools.flame" in p.takeNote(" (Plugins: Show status for more)")
+    let offered = labels(p.pluginEntries())
+    ck "Plugins: Re-enable acme-tools.flame" in offered
+    ck "Plugins: Disable acme-tools.flame" in offered
+    ck "Plugins: Show log" in offered
+    ck "Plugins: Re-enable acme-tools.metrics" notin offered
+    # Re-enable, as the omnibar runs it: the entry's target, through the verbs.
+    var target = ""
+    for e in p.pluginEntries():
+      if e.label == "Plugins: Re-enable acme-tools.flame": target = e.target
+    let (ok, words) = pluginsWordsOf(target)
+    ck ok
+    ck p.control(words).body == "re-enabled acme-tools.flame (on probation)"
+    ck p.sup.slot("acme-tools.flame").breaker == bsHalfOpen
+    ck p.waitFor("the plugin running again", proc(): bool =
+      p.running("acme-tools.flame"))
+    ck "Plugins: Re-enable acme-tools.flame" notin labels(p.pluginEntries())
+    p.close()
+
+  test "half-open after the backoff, one strike reopens, the third opening latches until Re-enable":
+    let home = newHome(capture = true, flameMode = "swallow-input")
+    let p = openFor(home)
+    p.sup.inputDeadlineMs = 300
+    p.sup.breakerBackoffMs = 200
+    p.sup.strikesToOpen = 1
+    p.grantBoth()
+    for opening in 1 .. 3:
+      ck p.waitFor("the flame layer " & $opening, proc(): bool =
+        p.layerHeld)
+      ck p.routePluginKey("j", userBound = false)
+      ck p.waitFor("opening " & $opening, proc(): bool =
+        p.sup.slot("acme-tools.flame").openings == opening)
+      if opening < 3:
+        ck not p.sup.slot("acme-tools.flame").latched
+        ck p.waitFor("half-open " & $opening, proc(): bool =
+          p.sup.slot("acme-tools.flame").breaker == bsHalfOpen)
+    ck p.sup.slot("acme-tools.flame").latched
+    let latchedAt = nowMs()
+    p.waitFor("a backoff's worth", proc(): bool = nowMs() - latchedAt > 600)
+    ck p.sup.slot("acme-tools.flame").breaker == bsOpen
+    ck "stopped until re-enabled" in p.control(@["status"]).body
+    ck p.control(@["re-enable", "acme-tools.flame"]).body ==
+      "re-enabled acme-tools.flame (on probation)"
+    ck p.sup.slot("acme-tools.flame").breaker == bsHalfOpen
+    ck p.waitFor("the layer back", proc(): bool =
+      p.layerHeld)
+    p.close()
+
   test "assertion count":
-    ck CHECKS == 64
+    ck CHECKS == 115
     echo "CHECKS: ", CHECKS

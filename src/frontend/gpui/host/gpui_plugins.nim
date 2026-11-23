@@ -20,7 +20,8 @@
 ##   for EVERY key before anything else resolves it, and the second only where
 ##   a key would reach the router, with no host modal open.
 ## * **The omnibar's entries and the `:plugins` verbs** (`pluginEntries`,
-##   `pluginsWordsOf`), and the footer's text (`footerText`).
+##   `pluginsWordsOf`), a stopped plugin's fault actions among them
+##   (`faultEntries`), and the footer's text (`footerText`).
 
 import std/[json, os, strutils]
 
@@ -109,11 +110,37 @@ proc routePluginKey*(p: SessionPlugins; canonical: string;
   discard p.sup.routeKey(route, k)
   true
 
+proc faultEntries*(p: SessionPlugins): seq[OmnibarEntry] =
+  ## A fault notification's actions (§11.7.5: *Re-enable*, *Disable*, *Show
+  ## log*) as omnibar entries, for each plugin a fault STOPPED: one whose
+  ## notification is on record and whose breaker is open. The footer says the
+  ## notification's sentence once; the entries stay while the plugin is
+  ## stopped, so the action is there when the user goes to take it. A plugin
+  ## the user re-enabled is on probation, not stopped, and offers none.
+  if p.isNil: return
+  var seen: seq[string]
+  for n in p.sup.notifications:
+    if n.plugin.len == 0 or n.plugin in seen: continue
+    let s = p.sup.slot(n.plugin)
+    if s.isNil or s.breaker != bsOpen: continue
+    seen.add n.plugin
+    for (action, verb) in [("Re-enable", "re-enable"), ("Disable", "disable")]:
+      if action notin n.actions: continue
+      let line = ":plugins " & verb & " " & n.plugin
+      result.add OmnibarEntry(kind: OmnibarMode.omCommand,
+        label: "Plugins: " & action & " " & n.plugin, detail: line,
+        target: GpuiPluginsTargetPrefix & line)
+  if seen.len > 0:
+    result.add OmnibarEntry(kind: OmnibarMode.omCommand,
+      label: "Plugins: Show log", detail: ":plugins log",
+      target: GpuiPluginsTargetPrefix & ":plugins log")
+
 proc pluginEntries*(p: SessionPlugins): seq[OmnibarEntry] =
   ## The window's omnibar entries: the reserved four, every plugin command
-  ## and pane, and *Review* / *Grant* for each plugin waiting for consent.
+  ## and pane, *Review* / *Grant* for each plugin waiting for consent, and a
+  ## stopped plugin's fault actions (`faultEntries`).
   p.pluginPaletteEntries(GpuiPluginsTargetPrefix) &
-    p.consentPaletteEntries(GpuiPluginsTargetPrefix)
+    p.consentPaletteEntries(GpuiPluginsTargetPrefix) & p.faultEntries
 
 proc pluginsWordsOf*(target: string): tuple[ok: bool, words: seq[string]] =
   ## A plugin entry's target, or a `:plugins …` line typed in the omnibar

@@ -3953,6 +3953,14 @@ test-vm-unit: vm-test-prereqs
   exec > >(tee test-logs/test-vm-unit.log) 2>&1
   bash ci/lib/run-nim-test-lane.sh vm-unit
 
+# `vm-unit-js` runs the ViewModel suites whose subject ships under `nim js`,
+# and only those: the script builds every bundle that ships under `nim js`
+# (the renderer shell, the main process and `ct host`, the subwindow, the
+# VS Code host and panel, BlockTracer's Embed SDK) with `--genDeps:on` and
+# holds `_TLF_VM_UNIT_JS_NOT_SHIPPED` against their module graphs both ways.
+test-vm-unit-js-scope:
+  bash ci/test/vm-unit-js-ships-under-nim-js.sh
+
 # The same Tier-1 ViewModel suites under `nim js` + node.
 #
 # Front-End-Architecture.md §6 asks for the pyramid "run on both the C and JS

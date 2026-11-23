@@ -287,6 +287,23 @@ proc send(p: Plugin; msg: JsonNode) =
   msg["plugin"] = %p.id
   sendRaw(msg)
 
+when defined(ctPluginSdkTestHooks):
+  proc sendTrickled*(p: Plugin; msg: JsonNode; chunk, delayMs: int) =
+    ## TEST HOOK, compiled only into the host's test package: one frame
+    ## written `chunk` bytes at a time, `delayMs` apart, holding the frame
+    ## lock throughout, so the watchdog's `pong` queues behind it. It
+    ## reproduces, without depending on machine load, a large frame
+    ## draining into a full pipe.
+    msg["plugin"] = %p.id
+    let frame = encodeMessage(msg)
+    withLock writeLock:
+      var off = 0
+      while off < frame.len:
+        let n = min(chunk, frame.len - off)
+        writeAll(1, frame[off ..< off + n])
+        off += n
+        os.sleep(delayMs)
+
 proc pushView*(p: Plugin; surface: string; tree: ViewNode) =
   ## The whole tree for one of the plugin's surfaces (its LOCAL id).
   p.send(%*{"type": "view", "surface": surface, "tree": tree.toJson,

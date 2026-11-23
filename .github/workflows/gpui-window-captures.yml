@@ -193,16 +193,34 @@ jobs:
         # /etc/dbus-1/session.conf", run 43996043232, shard 1). The host gets
         # the configuration from this flake's nixpkgs dbus; a host that has
         # one keeps its own.
+        #
+        # It is a COPY without the line that includes /etc/dbus-1/session.conf.
+        # nixpkgs' file includes that path for local overrides, so a symlink
+        # to it there includes itself and the bus refuses to start ("Circular
+        # inclusion of file '/etc/dbus-1/session.conf'", run 44940608244,
+        # shard 1: every GuiAssert sway capture failed).
         run: |
+          # A reused host may still hold the self-including link an earlier
+          # version of this step made; that one is not the host's own.
+          if [ -L /etc/dbus-1/session.conf ] &&
+            readlink /etc/dbus-1/session.conf | grep -q '^/nix/store/[^/]*-dbus-[^/]*/share/dbus-1/session.conf$'; then
+            sudo rm /etc/dbus-1/session.conf
+          fi
           if [ -e /etc/dbus-1/session.conf ]; then
             echo "the host has /etc/dbus-1/session.conf; keeping it"
           else
             dbus="$(nix build --no-link --print-out-paths --inputs-from . nixpkgs#dbus.out)"
-            test -f "${dbus}/share/dbus-1/session.conf"
+            conf="${dbus}/share/dbus-1/session.conf"
+            self='<include ignore_missing="yes">/etc/dbus-1/session.conf</include>'
+            test -f "${conf}"
             sudo mkdir -p /etc/dbus-1
-            sudo ln -s "${dbus}/share/dbus-1/session.conf" /etc/dbus-1/session.conf
-            # A GC root for the job, so the linked file outlives no collection.
-            nix-store --add-root "${RUNNER_TEMP}/dbus-session-conf-root" --realise "${dbus}" >/dev/null
+            grep -vF "${self}" "${conf}" | sudo tee /etc/dbus-1/session.conf >/dev/null
+            if grep -qF /etc/dbus-1/session.conf /etc/dbus-1/session.conf; then
+              echo "::error::/etc/dbus-1/session.conf still includes itself"
+              exit 1
+            fi
+            # The bus starts on it, before anything depends on that.
+            "${dbus}/bin/dbus-run-session" --config-file=/etc/dbus-1/session.conf -- true
           fi
 
       - name: Restore ct and the windowed shim from the ct-build job

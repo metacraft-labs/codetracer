@@ -46,12 +46,24 @@
 ##   `SIGINT` and `SIGHUP` kill each registered group with SIGKILL; a signal
 ##   handler that finds no other listener re-raises the signal afterwards, so
 ##   installing it does not change how the main process ends;
-## * on Linux, when `setpriv` (util-linux) is on `PATH`, the child is started
-##   through `setpriv --pdeathsig KILL`, which sets `PR_SET_PDEATHSIG` before
-##   it execs the plugin: then even a SIGKILLed main process takes its plugins
-##   with it, as on the C backend.
+## * on Linux, when `setpriv` (util-linux) is on `PATH` AND can run here, the
+##   child is started through `setpriv --pdeathsig KILL`, which sets
+##   `PR_SET_PDEATHSIG` before it execs the plugin: then even a SIGKILLed main
+##   process takes its plugins with it, as on the C backend.
 ##
-## What remains when the main process is SIGKILLed and `setpriv` is absent:
+## "Can run here" is measured, not assumed. Under `NoNewPrivs` with an empty
+## capability bounding set (an agent sandbox, a locked-down container)
+## util-linux `setpriv` exits 1 before it execs anything ("keep process
+## capabilities failed: Operation not permitted"), and a launcher that took it
+## on trust started EVERY plugin into that exit: each failed to start and was
+## struck for a fault that was the host's. So each `setpriv` found is probed
+## once, by running `setpriv --pdeathsig KILL -- setpriv --version`, and one
+## whose probe fails is not used: plugins start unhelped, as when `setpriv` is
+## absent. Why the helper is not used is `ProcessLink.launchNote`, which the
+## supervisor writes to its log at every start.
+##
+## What remains when the main process is SIGKILLed and `setpriv` is absent or
+## cannot run:
 ## the plugin's stdin closes, and an SDK plugin's reader sees end-of-file and
 ## the process exits (`codetracer_plugin_sdk.run`). A plugin whose main thread
 ## is stuck in a handler at that moment never returns to its loop and outlives
@@ -125,6 +137,16 @@ type
     stderrSink*: proc(data: string)
       ## Every byte of stderr, for the plugin log. May be nil.
     readEof*: bool
+    bytesRead*: int
+      ## Every protocol byte read from the child so far. The supervisor's
+      ## liveness check reads it: a process that is still delivering a frame
+      ## is answering, even when its `pong` is queued behind that frame.
+    launchNote*: string
+      ## How the start departed from §11.8, for the supervisor's log: on
+      ## Node on Linux, why the child was started WITHOUT
+      ## `PR_SET_PDEATHSIG` (`setpriv` absent, disabled, or unable to run
+      ## here). Empty when nothing is missing, and always on the C backend,
+      ## which sets it itself.
     oversize*: bool
       ## The process sent a frame larger than the cap.
     writeFailed*: bool
@@ -177,6 +199,10 @@ when defined(js):
       try { process.kill(-pid, sig); } catch (e) { }
     })(#, #)""".}
 
+  proc jsIsLinux(): bool {.importjs: "(process.platform === 'linux')".}
+  proc jsSetprivDisabled(): bool {.importjs:
+    "(!!process.env.CODETRACER_PLUGIN_NO_SETPRIV)".}
+
   proc jsFindPdeathHelper(): cstring {.importjs: """
     (function () {
       if (process.platform !== 'linux') { return ''; }
@@ -191,6 +217,25 @@ when defined(js):
       }
       return '';
     })()""".}
+
+  proc jsProbePdeathHelper(helper: cstring): cstring {.importjs: """
+    (function (helper) {
+      // The helper sets PR_SET_PDEATHSIG and execs: here it execs ITSELF with
+      // `--version`, which needs nothing else on PATH and does no privileged
+      // work of its own, so a failure is the pdeathsig step's. '' = usable.
+      var r;
+      try {
+        r = require('child_process').spawnSync(helper,
+          ['--pdeathsig', 'KILL', '--', helper, '--version'],
+          { stdio: ['ignore', 'ignore', 'pipe'], timeout: 10000 });
+      } catch (e) { return 'could not be run: ' + e.message; }
+      if (r.error) { return 'could not be run: ' + r.error.message; }
+      if (r.status === 0 && !r.signal) { return ''; }
+      var line = String(r.stderr || '').trim().split('\n')[0] || '';
+      var how = r.signal ? 'was killed by ' + r.signal
+                         : 'exited with status ' + r.status;
+      return how + (line.length > 0 ? ' (' + line + ')' : '');
+    })(#)""".}
 
   proc jsInstallExitGuards(killAll: proc()) {.importjs: """
     (function (killAll) {
@@ -226,6 +271,12 @@ when defined(js):
   var liveLinks: seq[ProcessLink]
   var guardsInstalled = false
   var pdeathHelper: cstring
+  var probedHelper = ""
+    ## The `setpriv` the last probe ran, and what it found (`probeFailure`,
+    ## empty when it works). A helper is probed once; another one found on a
+    ## changed `PATH` is probed in its turn.
+  var probeFailure = ""
+  var pdeathNote = ""
 
   proc killEveryGroup() =
     ## SIGKILL every running plugin group: the main process is ending.
@@ -248,9 +299,39 @@ when defined(js):
   proc usesPdeathHelper*(): bool =
     ## True when a child started now starts through `setpriv --pdeathsig
     ## KILL`. Looked up at every start (a handful of `access` calls), so
-    ## `PATH` and `CODETRACER_PLUGIN_NO_SETPRIV` are read as they are then.
-    pdeathHelper = jsFindPdeathHelper()
-    pdeathHelper.len > 0
+    ## `PATH` and `CODETRACER_PLUGIN_NO_SETPRIV` are read as they are then;
+    ## a `setpriv` found is used only when its probe (run once per helper,
+    ## see the module header) shows it can run here. When it is not used,
+    ## `pdeathHelperNote` says why.
+    pdeathNote = ""
+    if not jsIsLinux():
+      pdeathHelper = ""
+      return false
+    if jsSetprivDisabled():
+      pdeathHelper = ""
+      pdeathNote = "started without PR_SET_PDEATHSIG: " &
+        "CODETRACER_PLUGIN_NO_SETPRIV is set"
+      return false
+    let found = $jsFindPdeathHelper()
+    if found.len == 0:
+      pdeathHelper = ""
+      pdeathNote = "started without PR_SET_PDEATHSIG: setpriv is not on PATH"
+      return false
+    if found != probedHelper:
+      probedHelper = found
+      probeFailure = $jsProbePdeathHelper(cstring(found))
+    if probeFailure.len > 0:
+      pdeathHelper = ""
+      pdeathNote = "started without PR_SET_PDEATHSIG: " & found &
+        " cannot run here: its probe `setpriv --pdeathsig KILL` " & probeFailure
+      return false
+    pdeathHelper = cstring(found)
+    true
+
+  proc pdeathHelperNote*(): string =
+    ## Why the last `usesPdeathHelper` answered false on Linux; empty when it
+    ## answered true, and on every other platform.
+    pdeathNote
 
   proc spawnPluginProcess*(executable: string; args: seq[string] = @[];
                            env: seq[(string, string)] = @[];
@@ -270,7 +351,9 @@ when defined(js):
       argv = @["-c", "ulimit -v " & $(addressSpaceLimit div 1024) &
                  " && exec \"$0\" \"$@\"", cmd] & argv
       cmd = "/bin/sh"
-    if usesPdeathHelper():
+    let helped = usesPdeathHelper()
+    let note = pdeathHelperNote()
+    if helped:
       argv = @["--pdeathsig", "KILL", "--", cmd] & argv
       cmd = $pdeathHelper
     var cargs: seq[cstring]
@@ -279,7 +362,8 @@ when defined(js):
     for (k, v) in env:
       keys.add cstring(k)
       values.add cstring(v)
-    let link = ProcessLink(executable: executable, stdinOpen: true)
+    let link = ProcessLink(executable: executable, stdinOpen: true,
+                           launchNote: note)
     var child: JsObject
     try:
       child = jsSpawn(jsRequire("child_process"), cstring(cmd), cargs,
@@ -293,7 +377,9 @@ when defined(js):
     let stdoutStream = jsField(child, "stdout")
     let stderrStream = jsField(child, "stderr")
     jsOnData(stdoutStream, "data", proc(d: JsObject) =
-      link.reader.feed(toNimString(d)))
+      let s = toNimString(d)
+      link.bytesRead += s.len
+      link.reader.feed(s))
     jsOn(stdoutStream, "end", proc() = link.readEof = true)
     jsOnData(stderrStream, "data", proc(d: JsObject) =
       let data = toNimString(d)
@@ -523,7 +609,9 @@ else:
       if link.stderrTail.len > MaxStderrKeep:
         link.stderrTail = link.stderrTail[^MaxStderrKeep .. ^1], errEof)
     var eof = false
-    drainFd(p.fromChild, proc(d: string) = link.reader.feed(d), eof)
+    drainFd(p.fromChild, proc(d: string) =
+      link.bytesRead += d.len
+      link.reader.feed(d), eof)
     if eof: p.readEof = true
     var frame: string
     while result.len < maxFrames:

@@ -59,7 +59,7 @@ ARMS = [
      [(NODE, "main-ends")],
      "§11.8: no exit guard; a stuck plugin outlives a main process that is "
      "terminated"),
-    ("J5", [(LINK, "    if usesPdeathHelper():", "    if false:")],
+    ("J5", [(LINK, "    if helped:", "    if false:")],
      [(NODE, "main-ends")],
      "§11.8: setpriv is not used; a stuck plugin outlives a SIGKILLed main "
      "process"),
@@ -81,6 +81,10 @@ ARMS = [
      [(NODE, "segfault")],
      "§11.6.1: Node's stderr is not kept; the SDK's crash record is never "
      "read and a segfault is unattributed"),
+    ("J9", [(LINK, "    if probeFailure.len > 0:", "    if false:")],
+     [(NODE, "setpriv-probe")],
+     "§11.8: a setpriv that cannot run here is used anyway; every plugin "
+     "exits 1 before its hello and is struck for the host's fault"),
 ]
 
 
