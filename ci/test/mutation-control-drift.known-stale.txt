@@ -508,7 +508,6 @@ src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/fro
 # window's layout memory, main.nim and its plat45 suite moved; the plat6 harness's
 # arms on the edited lines were re-aimed. Every harness that digests those bytes owes
 # a re-grade.
-src/common/terminal_graphics/plat14-image-mutation-control.sha256	src/frontend/tui/app/cli.nim	139675c9de802f77500f70b23626de5611908814843eac5ec2edcd78bdf139e6	d3327df7945cbf8d56a24efac2a5c695c80e7d65c8c1fe76fa4f1c2913bb4e17
 
 # 2026-11-20, terminal graphics (octants, dithering, the Video Player's tier-0
 # frame through emit.emitProtocolImage, the lazy graphics probe, CSI 16 t, the
