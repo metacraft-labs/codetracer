@@ -1,6 +1,6 @@
 name: Scenario inventory and lint
 
-# The scenario pack's two cheap whole-tree checks, on every push to `agents`:
+# The scenario pack's two cheap whole-tree checks:
 #
 #   * `ci/test/scenario-inventory.py`: every UI test file is classified in
 #     src/tests/scenarios/inventory/inventory.tsv, every ported row names a
@@ -8,38 +8,32 @@ name: Scenario inventory and lint
 #   * `ci/test/scenarios.sh lint`: every scenario against the pack (no step may
 #     reach application code), and the Playwright bindings parse.
 #
-# WHY A WORKFLOW OF ITS OWN, ON `agents`.
+# NOT ON `agents`. Pushes to `agents` run no CI: that branch takes several
+# pushes an hour, and a run per push queued ahead of real work on the shared
+# runners (nine of codetracer's thirteen queued runs, 2026-11-23). `agents` is
+# verified locally instead: `just scenario-inventory` runs the inventory
+# check and `just scenario-lint` the linter. This workflow checks what
+# reaches `dev` and `stable`, and pull requests.
 #
-# `agents` is landed on directly (a fast-forward `git push --no-verify`), so no
-# pull request and no pre-push hook stands between an author's commit and the
-# branch. The only other job that runs these checks is tui-tests' scenario
-# step, which codetracer.yml reaches on pushes to dev/stable and pull requests
-# that are not into `agents`, i.e. only when `agents` is promoted. So a UI test
-# landed without an inventory row was found days later, by whoever promoted
-# (codetracer-pm issues/2026-11-21-four-new-ui-tests-are-missing-from-the-
-# scenario-inventory.md, and nine more two days after it). These checks need
-# no build: Python over the tree, and the DemoVideoScript linter compiled from
-# its pinned source with a stock Nim. They take minutes, so the author of the
-# push sees the red.
-#
-# The linter's sibling is DemoVideoScript at the revision the test lock pins
-# (ci/test/siblings/repro.lock), cloned beside the checkout where
-# scenarios.sh looks for it.
+# These checks need no build: Python over the tree, and the DemoVideoScript
+# linter compiled from its pinned source with a stock Nim. The linter's sibling
+# is DemoVideoScript at the revision the test lock pins
+# (ci/test/siblings/repro.lock), cloned beside the checkout where scenarios.sh
+# looks for it.
 
 on:
   push:
-    branches: [agents, dev, stable]
+    branches: [dev, stable]
   pull_request:
     branches-ignore: [agents]
   workflow_dispatch:
 
-# A push is checked as itself: `agents` takes several pushes an hour, and a
-# group per branch with cancel-in-progress cancelled every run before a runner
-# picked it up (the first five runs on agents, 2026-11-22), so no push was
-# ever checked. A pull request's newer commit still replaces its older run.
+# One group per branch (a pull request's head branch), never cancelled: at
+# most one run in progress and one pending, the pending one replaced by each
+# newer push, so no queue builds up behind a busy branch.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.head_ref || github.sha }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: read

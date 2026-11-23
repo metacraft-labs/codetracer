@@ -295,8 +295,9 @@ done
 # screen oracle moved out of viewmodel-tests into a job of its own.
 #
 # 49 -> 50: scenario-inventory.yml's `scenario-inventory`, the scenario
-# inventory and linter on every push to `agents`. It installs Nix through
-# ./.github/actions/setup-nix before its `nix shell` for Nim and Node.
+# inventory and linter on pushes to dev/stable and pull requests. It
+# installs Nix through ./.github/actions/setup-nix before its `nix shell` for
+# Nim and Node.
 readonly EXPECTED_NIX_JOBS=50
 
 if [ "${#nix_jobs[@]}" -eq "$EXPECTED_NIX_JOBS" ]; then
