@@ -790,7 +790,7 @@ jobs:
             # carry it. They do now; going bare is a separate change.
             isonim=d906e7ce3bad73a587d3fe718364ab063f21fe16
             isonim-tui=8e43ce06f7f078530c7a8585c210ad7648fa0051
-            runquota=814b991861f64ad0e524c696fc1251ff1fbb6c67
+            runquota=b63c6c17ffd9f046baa70a62cbeb067c3a0a2745
             # Required by scripts/require-siblings.sh (`ct` links its reference
             # library). SHA, not bare: this workflow is also called from recorder
             # repos, whose repro.lock need not pin it. It is a flake input, so the
