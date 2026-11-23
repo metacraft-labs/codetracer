@@ -351,8 +351,21 @@ function Invoke-CodeTracerGitCommand {
     [Parameter(Mandatory)][string[]]$Arguments
   )
 
-  $output = (& $GitPath @Arguments 2>&1 | Out-String)
-  $status = $LASTEXITCODE
+  # Git's stderr is part of the result, not an error of this function. Under
+  # Windows PowerShell 5.1 with ErrorActionPreference=Stop, `2>&1` turns each
+  # stderr line into a terminating NativeCommandError, so a git warning
+  # ("unable to access ...: Permission denied") would escape as the
+  # exception, ahead of the caller's own exit-status handling (seen on
+  # win-ci-bare-001, run 45236060796). Run the command with Continue, so
+  # its stderr is captured and its exit status decides.
+  $savedPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    $output = (& $GitPath @Arguments 2>&1 | Out-String)
+    $status = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $savedPreference
+  }
   if ($null -eq $status) {
     $status = if ($?) { 0 } else { 1 }
   }
