@@ -3,8 +3,8 @@
 # Refreshed with --record-control-hashes, gated by the needle
 # scan (§39a).
 799810535b136c0f8216207a218bd83e0703a046ed46c439bdf9b015d50270ca  src/frontend/gpui/app/gpui_keys.nim
-82c6f1ba8a318c2cce37531504b07ac8f35b12ce5d65477eeee9e08fcd4e08bf  src/frontend/gpui/app/edit_arm.nim
-bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85  src/frontend/gpui/main.nim
+bd79648c35fc18b2d8ae2dc8d8c208419c058fdb755e8075e1a3430141f64773  src/frontend/gpui/app/edit_arm.nim
+93e0d62046619caab3c26eb7d894941ff23c8d044e139302cc93481b87bc8f5b  src/frontend/gpui/main.nim
 5e2ecebd37257c6a00fdbe281a00a1d94c1b125133fceed2a5daaffba7b5aae0  src/frontend/gpui/tests/test_gpui_edit_arm.nim
-14c295c7ffd34d78bde88f7bd2f490d2e5341bfd6fb7a0e39f48fea4b67e9428  src/frontend/gpui/tests/test_plat44_shipped_writes.nim
+d8a3c61dbbca27ff692fa95d83c5b7c19a33aff49bebced1662fc1e70c71a7f0  src/frontend/gpui/tests/test_plat44_shipped_writes.nim
 4b2956068d87cf7363f425b6ec5a71812753de69911859df42935de37a6e3fb4  src/frontend/tui/tests/test_plat44_both_arms_write.nim
