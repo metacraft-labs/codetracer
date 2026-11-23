@@ -147,9 +147,7 @@ jobs:
           # directly, then the shim through Git Bash, the way a developer's
           # shell calls it.
           #
-          # Every run is bounded and gets an empty stdin
-          # (Invoke-BoundedNativeCommand, from toolchain-utils.ps1, which
-          # env.ps1 sources). In run 45072232143 the shim's `nargo compile`
+          # Every run is bounded and gets an empty stdin. In run 45072232143 the shim's `nargo compile`
           # printed nothing for 5.5 hours, until the job's limit, so each path
           # compiles separately and a hang names the path that hung.
           if (-not $env:NARGO_DIR) { throw "env.ps1 set no NARGO_DIR" }
@@ -168,15 +166,51 @@ jobs:
             '[package]', 'name = "smoke"', 'type = "bin"', 'authors = [""]', '', '[dependencies]')
           Set-Content -LiteralPath (Join-Path $proj "src/main.nr") -Encoding ASCII -Value @(
             'fn main(x: Field, y: pub Field) {', '    assert(x != y);', '}')
+          # In run 45119240471 nargo.exe's own `compile` hung (600 s, no
+          # output), so the shim is not the cause. Until that is understood,
+          # `check` runs first (front end only), and a run that hits its
+          # bound prints the process tree under it before it is killed:
+          # whether nargo waits on a child, and on which.
+          Write-Host "Environment nargo inherits (CODETRACER*, CT_*, NARGO*, NOIR*, RUST*):"
+          Get-ChildItem env: | Where-Object { $_.Name -match '^(CODETRACER|CT_|NARGO|NOIR|RUST)' } |
+            ForEach-Object { Write-Host "  $($_.Name)=$($_.Value)" }
+          $env:RUST_BACKTRACE = "1"
+          function Show-ProcessTree([int]$RootId, [string]$Indent = "  ") {
+            foreach ($c in @(Get-CimInstance Win32_Process -Filter "ParentProcessId=$RootId" -ErrorAction SilentlyContinue)) {
+              Write-Host "$Indent$($c.ProcessId) $($c.Name) cpu=$([int](($c.KernelModeTime + $c.UserModeTime) / 1e7))s :: $($c.CommandLine)"
+              Show-ProcessTree -RootId $c.ProcessId -Indent "$Indent  "
+            }
+          }
+          function Invoke-Smoke([string]$File, [string[]]$Arguments, [string]$Activity, [int]$TimeoutSeconds) {
+            $stdin = Join-Path $env:RUNNER_TEMP ("nargo-stdin-" + [Guid]::NewGuid().ToString('N'))
+            New-Item -ItemType File -Path $stdin -Force | Out-Null
+            $p = Start-Process -FilePath $File -ArgumentList (ConvertTo-NativeCommandLine -ArgumentList $Arguments) `
+              -NoNewWindow -PassThru -RedirectStandardInput $stdin
+            try {
+              if (-not $p.WaitForExit($TimeoutSeconds * 1000)) {
+                $p.Refresh()
+                Write-Host "::error::$Activity did not finish within ${TimeoutSeconds}s. Process tree:"
+                Write-Host "  $($p.Id) $($p.ProcessName) cpu=$([int]$p.TotalProcessorTime.TotalSeconds)s threads=$($p.Threads.Count)"
+                Show-ProcessTree -RootId $p.Id -Indent "    "
+                try { $p.Kill($true) } catch { }
+                throw "$Activity did not finish within ${TimeoutSeconds}s and was killed."
+              }
+              return $p.ExitCode
+            } finally {
+              $p.Dispose()
+              Remove-Item -LiteralPath $stdin -Force -ErrorAction SilentlyContinue
+            }
+          }
           foreach ($r in $runs) {
-            foreach ($cmd in @("--version", "compile")) {
+            foreach ($cmd in @("--version", "check", "compile")) {
               Remove-Item -Recurse -Force -LiteralPath (Join-Path $proj "target") -ErrorAction SilentlyContinue
+              Remove-Item -Force -LiteralPath (Join-Path $proj "Prover.toml") -ErrorAction SilentlyContinue
               Write-Host "== $($r.Name) $cmd"
               Push-Location -LiteralPath $proj
               try {
                 $t0 = Get-Date
-                $rc = Invoke-BoundedNativeCommand -FilePath $r.File -ArgumentList (@($r.Pre) + @($cmd)) `
-                  -Activity "$($r.Name) $cmd" -TimeoutSeconds 600
+                $rc = Invoke-Smoke -File $r.File -Arguments (@($r.Pre) + @($cmd)) `
+                  -Activity "$($r.Name) $cmd" -TimeoutSeconds 300
                 Write-Host "   exit $rc after $([int]((Get-Date) - $t0).TotalSeconds) s"
                 if ($rc -ne 0) { throw "$($r.Name) $cmd exited $rc" }
               } finally { Pop-Location }
