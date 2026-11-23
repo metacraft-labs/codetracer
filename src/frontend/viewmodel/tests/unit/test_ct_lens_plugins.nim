@@ -40,7 +40,7 @@
 ## they are not the subject here. The two cases about a slow git compare
 ## ORDER (the sibling answered while git was still running), not durations.
 
-import std/[json, options, os, osproc, posix, sequtils, strutils, tables, times, unittest]
+import std/[algorithm, json, options, os, osproc, posix, sequtils, strutils, tables, times, unittest]
 
 import isonim/core/[computation, owner, signals]
 
@@ -521,6 +521,52 @@ when not LensWasm:
       r.stopAt(r.file, 5, 4, 6, "apply")
       check r.sup.waitUntil("history still answers", proc(): bool =
         "multiply instead of adding" in r.pane("ct-lens.history/history"))
+      r.sup.shutdown()
+
+    test "measured: the acknowledgement latency of its keys (§11.7.4's 50 ms / 500 ms)":
+      # PLAT-82's deliverable 8: the figure the input budget is judged against,
+      # taken from a plugin someone other than the host's author wrote. Each
+      # round routes `Shift+F7` (a static binding: the mode opens) and `q` (a
+      # key of the layer it pushed: the mode closes), two acknowledged keys,
+      # and the supervisor records each key's routed-to-`ack` time. Nothing is
+      # asserted about the figure itself — it depends on the machine and its
+      # load, which the line prints beside it.
+      var r = newRig()
+      r.openJump()
+      let q0 = r.sup.resolveLayerKey("q", "")
+      check q0.found and q0.op == "jump.close"
+      discard r.sup.routeKey(q0, "q")
+      check r.sup.waitUntil("the mode closed", proc(): bool =
+        r.sup.topLayerLabel.len == 0)
+      let rounds = parseInt(getEnv("CT_LENS_ACK_ROUNDS", "100"))
+      let before = r.sup.slot("ct-lens.jump").ackSamples.len
+      var completed = 0
+      for i in 0 ..< rounds:
+        let open = r.sup.resolveStaticKey("shift+f7", "")
+        if not open.found: break
+        discard r.sup.routeKey(open, "shift+f7")
+        if not r.sup.waitUntil("the mode", proc(): bool =
+            r.sup.topLayerLabel.len > 0): break
+        let close = r.sup.resolveLayerKey("q", "")
+        if not close.found: break
+        discard r.sup.routeKey(close, "q")
+        if not r.sup.waitUntil("closed", proc(): bool =
+            r.sup.topLayerLabel.len == 0): break
+        inc completed
+      let s = r.sup.slot("ct-lens.jump")
+      check completed == rounds
+      check s.ackSamples.len - before >= 2 * rounds
+      let samples = s.ackSamples[^min(s.ackSamples.len, 2 * rounds) .. ^1]
+      var sorted = samples
+      sorted.sort()
+      proc pct(q: float): int = sorted[min(sorted.high, int(q * float(sorted.len)))]
+      let load = (try: readFile("/proc/loadavg").split(' ')[0] except IOError: "n/a")
+      echo "MEASURE ct-lens.jump acknowledgement, ", sorted.len, " keys: p50 ",
+           pct(0.5), " ms, p90 ", pct(0.9), " ms, p99 ", pct(0.99), " ms, max ",
+           sorted[^1], " ms; over the 50 ms budget ", sorted.countIt(it > 50),
+           ", over the 500 ms deadline ", sorted.countIt(it > 500),
+           "; 1-min load ", load
+      check s.totalStrikes == 0
       r.sup.shutdown()
 
     test "three Escapes take the keyboard back from its mode, and the healthy plugin gets it back":

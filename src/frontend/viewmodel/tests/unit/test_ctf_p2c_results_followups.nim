@@ -6,6 +6,9 @@
 ##   whole; the start kept first, then the end, then both sides cut around
 ##   the match; the trim rule on each side of a "…"; a cut never splits a
 ##   rune; a match wider than the room keeps its start.
+## * **The matches drawn bold** (`agent_harbor_results_words.spansIn`): every
+##   match in a cut line, case ignored and non-overlapping, as the editor's
+##   one matcher (`find_match.matchesOf`) finds them.
 ## * **Empty providers** (D60): the providers that answered with nothing
 ##   are named on one quiet line, in the providers' order, and are not
 ##   drawn as groups.
@@ -24,7 +27,8 @@ import std/[strutils, tables, unittest]
 from std/unicode import runes, validateUtf8
 import isonim/core/owner
 import isonim/testing/mock_dom
-import ../../views/[cut_text_rules, isonim_agent_harbor_results_view, ah_cut_text]
+import ../../views/[cut_text_rules, isonim_agent_harbor_results_view, ah_cut_text,
+                   agent_harbor_results_words]
 import ../../../stories/agent_harbor_results_stories
 
 proc cells(t: string): int =
@@ -93,6 +97,20 @@ suite "the matched-line rule (D62)":
       let at = text.find("remaining_shield")
       let shown = cutAroundMatch(text, at, at + 16, room, cells, 1)
       check shown.validateUtf8 == -1
+
+suite "the matches a cut line draws bold (D62)":
+  # `spansIn` asks the editor's one matcher (`find_match.matchesOf`, FS-1),
+  # so a row bolds what a find for the same text would highlight.
+  test "every match in view, case ignored":
+    check spansIn("Damage = damage * DAMAGE_FACTOR;", "damage") ==
+      @[(0, 6), (9, 6), (18, 6)]
+
+  test "matches do not overlap, in the text's order":
+    check spansIn("aaaa", "aa") == @[(0, 2), (2, 2)]
+
+  test "no needle, no match":
+    check spansIn("remaining_shield", "").len == 0
+    check spansIn("remaining_shield", "absent").len == 0
 
 suite "empty providers and a failed provider (D60, D61)":
   test "the empty providers are named on one line, and are no group":

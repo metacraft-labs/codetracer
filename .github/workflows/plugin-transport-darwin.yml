@@ -75,6 +75,23 @@ jobs:
               "*::invoke/ack round trip and a 1,000-node view over the pipe" \
               | tee test-logs/plugin-transport-darwin.log'
 
+      - name: Measure the acknowledgement latency of a real plugin's keys (release build)
+        run: |
+          # PLAT-82's thresholds, taken on ct-lens.jump (a layered plugin
+          # written apart from the host): 2 x CT_LENS_ACK_ROUNDS routed keys,
+          # each routed-to-`ack` time recorded by the supervisor.
+          nix develop . --command bash -c '
+            set -euo pipefail
+            uptime
+            CT_LENS_ACK_ROUNDS=200 nim c -r --hints:off --warnings:off -d:release \
+              --path:src/frontend/viewmodel \
+              --nimcache:"$RUNNER_TEMP/nc-ct-lens-ack" \
+              -o:"$RUNNER_TEMP/test_ct_lens_plugins" \
+              src/frontend/viewmodel/tests/unit/test_ct_lens_plugins.nim \
+              "*::measured: the acknowledgement latency*" \
+              | tee -a test-logs/plugin-transport-darwin.log
+            uptime'
+
       - name: The whole plugin-process suite on this platform
         run: |
           nix develop . --command bash -c '
