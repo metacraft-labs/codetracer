@@ -22,7 +22,7 @@
  3 of 5 ·
  Waiting longest of the normal items.
                                              
- ○ WAITING FOR YOUR NEXT INS…   Priority… ▾
+ ○ WAITING FOR YOUR NEXT INST…   Priority ▾
                                              
  THE AGENT'S LAST REPLY
  Done. The upload client logs through its

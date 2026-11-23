@@ -305,15 +305,15 @@ proc drawButtons*(c: var AhCanvas; parent: AhNode; row, col, width: int;
 proc drawSelect*(c: var AhCanvas; s: AhP3State; parent: AhNode; row, col, maxCells: int;
                  key, fact, shown: string; choices: seq[AhMenuChoice]; current: string;
                  pick: proc(id: string)): int =
-  ## A closed select: ` <value> ▾ ` on the controls' ground, as wide as its
-  ## widest choice (the browser's sizing), at most `maxCells`. A press drops
-  ## its menu (or closes it), and a press on a choice calls `pick` and closes
-  ## it. Tagged `fact` (the shown value) and `select-value`. Returns the
-  ## cells it takes.
+  ## The design system's dropdown, closed: ` <value> ▾ ` on the controls'
+  ## ground, as wide as the value it shows, whole (the web's trigger is a
+  ## button sized by its content, `agent_harbor_dropdown_view`), at most
+  ## `maxCells` (the value then cut with "…"). A press drops its menu (or
+  ## closes it), as wide as its widest choice, and a press on a choice calls
+  ## `pick` and closes it. Tagged `fact` (the shown value) and
+  ## `select-value`. Returns the cells it takes.
   let g = c.p3Grounds
-  var widest = widthOf(shown)
-  for ch in choices: widest = max(widest, widthOf(ch.label))
-  let w = max(4, min(maxCells, widest + 4))
+  let w = max(4, min(maxCells, widthOf(shown) + 4))
   let value = elide(shown, w - 4)
   discard c.put(row, col, " " & value & repeat(' ', max(0, w - 4 - widthOf(value))) & " " &
                 DropGlyph & " ", c.p.textLabel, bg = g.control)

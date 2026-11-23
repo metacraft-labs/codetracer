@@ -29,20 +29,22 @@
 ## The CI host runs at load above 100: every wait is on state, with a generous
 ## ceiling, and a threshold that is not a case's subject is widened.
 
-import std/[json, os, posix, sets, strutils, times, unittest]
+import std/[json, options, os, posix, sequtils, sets, strutils, times, unittest]
 
 import isonim/core/[owner]
-import isonim_gpui/renderer
+import isonim_gpui/[bindings, renderer]
 
 import codetracer_embed
 import backend/mock_backend
-import plugin_host/supervisor
+import plugin_host/[protocol, supervisor]
 import headless_app/layout_model
 import ../app/shell
 import ../app/leaves
-import ../../view_vocabulary/editor_surface
+import ../../view_vocabulary/[editor_surface, pane_views]
+import ../../../common/view_vocabulary/editor_rows   # `emBreakpoint`
 import ../../viewmodel/viewmodels/omnibar_vm
 import ../host/gpui_plugins
+import ../window_clicks   # the window's press wiring, `GPaneClick`
 import ../../viewmodel/tests/unit/plugin_process_fixture
 
 var CHECKS = 0
@@ -67,7 +69,7 @@ proc waitFor(p: SessionPlugins; what: string; cond: proc(): bool;
 
 var homeCount = 0
 
-proc newHome(capture = false; flameMode = ""): string =
+proc newHome(capture = false; flameMode = ""; flameSettings: JsonNode = nil): string =
   ## A user's components root with the package installed, and their
   ## settings, as `ct install` and a settings edit leave them.
   inc homeCount
@@ -82,8 +84,10 @@ proc newHome(capture = false; flameMode = ""): string =
     manifest = $doc
   discard installPackage(result / "components", manifest)
   if flameMode.len > 0:
+    var settings = if flameSettings.isNil: newJObject() else: flameSettings.copy
+    settings["mode"] = %flameMode
     writeFile(result / "user-root" / "plugin-settings.json",
-      $(%*{"plugins": {"acme-tools.flame": {"settings": {"mode": flameMode}}}}))
+      $(%*{"plugins": {"acme-tools.flame": {"settings": settings}}}))
   putEnv("CODETRACER_COMPONENTS_ROOT", result / "components")
   putEnv("CODETRACER_USER_ROOT", result / "user-root")
   putEnv("XDG_STATE_HOME", result / "state")
@@ -117,6 +121,19 @@ proc grantBoth(p: SessionPlugins) =
 proc running(p: SessionPlugins; id: string): bool =
   let s = p.sup.slot(id)
   not s.isNil and s.active
+
+proc layerHeld(p: SessionPlugins): bool =
+  ## The flame layer is on top AND its plugin is active: a layer arrives
+  ## while the plugin is still activating, and the router skips the layers
+  ## of a plugin that is not active yet (the supervisor suite's `layerUp`).
+  p.layerLabel == "FLAME MODE (acme-tools.flame)" and p.running("acme-tools.flame")
+
+proc withAttribute(node: GpuiElement; name: string): seq[GpuiElement] =
+  ## Every element under `node` (itself included) that carries `name`.
+  if node.isNil: return
+  if getAttribute(node, name).len > 0: result.add node
+  for i in 0 ..< childCount(node):
+    result.add withAttribute(nthChild(node, i), name)
 
 proc labels(entries: seq[OmnibarEntry]): seq[string] =
   for e in entries: result.add e.label
@@ -244,7 +261,7 @@ suite "GPUI: the window's plugins (host/gpui_plugins)":
     let p = openFor(home)
     p.grantBoth()
     ck p.waitFor("the flame layer", proc(): bool =
-      p.layerLabel == "FLAME MODE (acme-tools.flame)")
+      p.layerHeld)
     ck p.waitFor("metrics ready", proc(): bool =
       p.sup.enablementOf("acme-tools.metrics", "metrics.step").enabled)
     ck pluginKeyName("Esc") == "escape"
@@ -278,7 +295,7 @@ suite "GPUI: the window's plugins (host/gpui_plugins)":
     let p = openFor(home)
     p.grantBoth()
     ck p.waitFor("the flame layer", proc(): bool =
-      p.layerLabel == "FLAME MODE (acme-tools.flame)")
+      p.layerHeld)
     ck p.routePluginKey("j", userBound = false)
     var note = ""
     ck p.waitFor("the dropped key", proc(): bool =
@@ -289,6 +306,228 @@ suite "GPUI: the window's plugins (host/gpui_plugins)":
     ck p.layerLabel == ""
     p.close()
 
+  test "a layer that never answers: the first key dropped, the next falls through, the third opens the breaker":
+    let home = newHome(capture = true, flameMode = "swallow-input")
+    let p = openFor(home)
+    p.sup.inputDeadlineMs = InputDeadlineMs   # the subject: the spec's value
+    p.grantBoth()
+    ck p.waitFor("the flame layer", proc(): bool =
+      p.layerHeld)
+    ck p.routePluginKey("j", userBound = false)
+    ck p.waitFor("the missed deadline", proc(): bool =
+      p.sup.slot("acme-tools.flame").suspect)
+    ck p.takeNote(" (Plugins: Show status for more)") ==
+      "`j` went to acme-tools.flame, which did not answer"
+    # The second key is the window's: the layer is transparent.
+    ck not p.routePluginKey("k", userBound = false)
+    ck p.sup.slot("acme-tools.flame").breaker == bsClosed
+    # The third strike opens the breaker, and the layer is gone for good.
+    ck not p.routePluginKey("l", userBound = false)
+    ck p.sup.slot("acme-tools.flame").breaker == bsOpen
+    ck p.layerLabel == ""
+    p.close()
+
+  test "a key answered in 300 ms is no strike, and its latency is in the status":
+    let home = newHome(capture = true, flameMode = "slow-ack",
+                       flameSettings = %*{"ackDelayMs": 300})
+    let p = openFor(home)
+    p.sup.inputDeadlineMs = 10_000   # widened: 300 ms is the subject, not the clock
+    p.grantBoth()
+    ck p.waitFor("the flame layer", proc(): bool =
+      p.layerHeld)
+    ck p.routePluginKey("j", userBound = false)
+    ck p.waitFor("the answer", proc(): bool =
+      p.sup.slot("acme-tools.flame").ackSamples.len == 1)
+    let s = p.sup.slot("acme-tools.flame")
+    ck s.ackSamples[0] >= 300
+    ck s.strikes.len == 0
+    ck not s.suspect
+    ck "ack p50" in p.control(@["status"]).body
+    ck p.layerLabel == "FLAME MODE (acme-tools.flame)"
+    p.close()
+
+  test "a plugin killed while it holds the keyboard: its layer goes at once, the next key is the window's":
+    let home = newHome(capture = true, flameMode = "swallow-input")
+    let p = openFor(home)
+    p.grantBoth()
+    ck p.waitFor("the flame layer", proc(): bool =
+      p.layerHeld)
+    discard kill(Pid(p.sup.pidOf("acme-tools.flame")), SIGKILL)
+    ck p.waitFor("the crash", proc(): bool =
+      p.sup.faults.anyIt(it.kind == fkCrash))
+    ck p.layerLabel == ""
+    ck not p.routePluginKey("j", userBound = false)
+    ck p.sup.slot("acme-tools.flame").breaker == bsOpen
+    # The fault notification's actions are the omnibar's while it is stopped.
+    ck "acme-tools.flame" in p.takeNote(" (Plugins: Show status for more)")
+    let offered = labels(p.pluginEntries())
+    ck "Plugins: Re-enable acme-tools.flame" in offered
+    ck "Plugins: Disable acme-tools.flame" in offered
+    ck "Plugins: Show log" in offered
+    ck "Plugins: Re-enable acme-tools.metrics" notin offered
+    # Re-enable, as the omnibar runs it: the entry's target, through the verbs.
+    var target = ""
+    for e in p.pluginEntries():
+      if e.label == "Plugins: Re-enable acme-tools.flame": target = e.target
+    let (ok, words) = pluginsWordsOf(target)
+    ck ok
+    ck p.control(words).body == "re-enabled acme-tools.flame (on probation)"
+    ck p.sup.slot("acme-tools.flame").breaker == bsHalfOpen
+    ck p.waitFor("the plugin running again", proc(): bool =
+      p.running("acme-tools.flame"))
+    ck "Plugins: Re-enable acme-tools.flame" notin labels(p.pluginEntries())
+    p.close()
+
+  test "half-open after the backoff, one strike reopens, the third opening latches until Re-enable":
+    let home = newHome(capture = true, flameMode = "swallow-input")
+    let p = openFor(home)
+    p.sup.inputDeadlineMs = 300
+    p.sup.breakerBackoffMs = 200
+    p.sup.strikesToOpen = 1
+    p.grantBoth()
+    for opening in 1 .. 3:
+      ck p.waitFor("the flame layer " & $opening, proc(): bool =
+        p.layerHeld)
+      ck p.routePluginKey("j", userBound = false)
+      ck p.waitFor("opening " & $opening, proc(): bool =
+        p.sup.slot("acme-tools.flame").openings == opening)
+      if opening < 3:
+        ck not p.sup.slot("acme-tools.flame").latched
+        ck p.waitFor("half-open " & $opening, proc(): bool =
+          p.sup.slot("acme-tools.flame").breaker == bsHalfOpen)
+    ck p.sup.slot("acme-tools.flame").latched
+    let latchedAt = nowMs()
+    p.waitFor("a backoff's worth", proc(): bool = nowMs() - latchedAt > 600)
+    ck p.sup.slot("acme-tools.flame").breaker == bsOpen
+    ck "stopped until re-enabled" in p.control(@["status"]).body
+    ck p.control(@["re-enable", "acme-tools.flame"]).body ==
+      "re-enabled acme-tools.flame (on probation)"
+    ck p.sup.slot("acme-tools.flame").breaker == bsHalfOpen
+    ck p.waitFor("the layer back", proc(): bool =
+      p.layerHeld)
+    p.close()
+
+  test "Show pane places a plugin's pane as a tab beside the Variables stack":
+    let tree = sharedDefaultLayout().tree
+    let cmd = tree.pluginPaneCommand("acme-tools.metrics/overview", "Metrics")
+    ck cmd.kind == lcAddContributedPane
+    ck cmd.addContributedAfter == some(paneState)
+    # With no anchor placed, it still goes somewhere.
+    let bare = contributedPaneNode("acme-tools.flame/flame", "Flame", 1.0)
+    ck bare.pluginPaneCommand("acme-tools.metrics/overview", "Metrics").addContributedAfter.isNone
+
+  test "a key on a focused plugin pane goes to its view, and the plugin answers it":
+    let home = newHome()
+    let p = openFor(home)
+    p.grantBoth()
+    const flame = "acme-tools.flame/flame"
+    ck p.waitFor("the flame list", proc(): bool =
+      p.running("acme-tools.flame") and
+        "work 40%" in viewLines(p.sup.renderSurface(flame)).join("\n"))
+    let panes = newPluginPanes(p)
+    # Not a plugin pane, and keys the window keeps: never the view's.
+    ck not panes.routePaneKey("editor", "Enter")
+    ck not panes.routePaneKey(flame, "Tab")
+    ck not panes.routePaneKey(flame, "F10")
+    ck panes.viewEventsSent == 0
+    # The list reads its arrows and Enter; Enter activates the row.
+    ck panes.routePaneKey(flame, "Down")
+    ck panes.routePaneKey(flame, "Enter")
+    ck panes.viewEventsSent == 2
+    ck p.waitFor("the plugin's answer", proc(): bool =
+      "(activated)" in viewLines(p.sup.renderSurface(flame)).join("\n"))
+    p.close()
+
+  test "a press on a plugin pane's row activates it, and the plugin answers it":
+    # The row is the element the GPUI binding drew for the pushed tree, wired
+    # by the window's own `wireWindowClicks` and pressed through the shim's
+    # event delivery (`fireEvent`), as the window's compositor press arrives.
+    let home = newHome()
+    let p = openFor(home)
+    p.grantBoth()
+    const flame = "acme-tools.flame/flame"
+    ck p.waitFor("the flame list", proc(): bool =
+      p.running("acme-tools.flame") and
+        "work 40%" in viewLines(p.sup.renderSurface(flame)).join("\n"))
+    let panes = newPluginPanes(p)
+    var r: GpuiRenderer
+    let (leaf, _) = renderLeaf(r, GpuiLeaf(kind: glkContributed, paneId: flame,
+      title: "Flame"), EditorSurface(medium: GpuiMedium),
+      contributedView = p.paneView(flame))
+    var clicks: seq[GPaneClick]
+    var dedupe: PressDedupe
+    var nodes = snapshotTree(leaf)
+    ck wireWindowClicks(r, nodes, addr dedupe,
+                        proc(c: GPaneClick) = clicks.add c) >= 2
+    let row = findClickTarget(r, leaf, gcpPluginNode, "flame.list#1")
+    ck not row.isNil
+    ck fireEvent(row, "mousedown", GpuiEvent(kind: gekPointerDown, key: "10,20,1")) > 0
+    ck clicks.len == 1
+    ck clicks.len == 1 and clicks[0].part == gcpPluginNode and
+       clicks[0].key == flame and clicks[0].node == "flame.list" and
+       clicks[0].index == 1
+    # Not a plugin pane, a node the tree does not have, an option past its
+    # end: never the plugin's.
+    ck not panes.routePaneClick("editor", "flame.list", 1)
+    ck not panes.routePaneClick(flame, "no.such.node", 1)
+    ck not panes.routePaneClick(flame, "flame.list", 9)
+    ck panes.viewEventsSent == 0
+    ck panes.routePaneClick(clicks[0].key, clicks[0].node, int(clicks[0].index))
+    ck panes.viewEventsSent == 1
+    ck p.waitFor("the plugin's answer", proc(): bool =
+      "work 40% (activated)" in viewLines(p.sup.renderSurface(flame)).join("\n"))
+    p.close()
+
+  test "the editor's plugin decorations and markers, from what the plugins pushed":
+    let home = newHome()
+    let p = openFor(home)
+    p.grantBoth()
+    let panes = newPluginPanes(p)
+    ck p.waitFor("the decoration", proc(): bool =
+      panes.editorDecorations("/src/main.nim").len > 0)
+    let d = panes.editorDecorations("/src/main.nim")
+    ck d.len == 1 and d[0].line == 10 and d[0].glyph == "◆" and
+       d[0].text == "metrics: line 10" and d[0].plugin == "acme-tools.metrics"
+    ck p.waitFor("the marker", proc(): bool =
+      panes.editorMarkers("/src/main.nim").len > 0)
+    let m = panes.editorMarkers("/src/main.nim")
+    ck m.len == 1 and m[0].line == 10 and m[0].glyph == "★"
+    ck panes.lineDecorationNote("/src/main.nim", 10) ==
+      "◆ metrics: line 10 (acme-tools.metrics)"
+    ck panes.lineDecorationNote("/src/main.nim", 11) == ""
+    ck panes.editorDecorations("/src/other.nim").len == 0
+    # A disabled plugin draws none.
+    discard p.control(@["disable", "acme-tools.metrics"])
+    ck p.waitFor("the decoration gone", proc(): bool =
+      panes.editorDecorations("/src/main.nim").len == 0 and
+        panes.editorMarkers("/src/main.nim").len == 0)
+    p.close()
+
+  test "the editor draws a plugin's marker in the mark column and its decoration after the code":
+    gpui_reset_tree()
+    var r: GpuiRenderer
+    let root = r.createElement("div")
+    var surface = editorSurfaceForProject("example.py", "x = 1\ny = 2\n",
+                                          GpuiMedium, false)
+    surface.rows[1].mark = emBreakpoint
+    surface.pluginMarks = @[
+      EditorPluginMark(line: 1, glyph: "◆", text: "metrics: line 1",
+                       plugin: "acme-tools.metrics"),
+      EditorPluginMark(line: 1, glyph: "★", text: "hotspot",
+                       plugin: "acme-tools.metrics", gutter: true),
+      # A breakpoint's line: the plugin's marker never covers it.
+      EditorPluginMark(line: 2, glyph: "★", text: "hotspot",
+                       plugin: "acme-tools.metrics", gutter: true)]
+    discard renderEditor(r, root, sourcePaneView(GpuiMedium).root, surface, 800)
+    let decorations = withAttribute(root, PluginDecorationAttribute)
+    ck decorations.len == 1
+    ck decorations.len == 1 and
+       getAttribute(decorations[0], PluginDecorationAttribute) == "acme-tools.metrics" and
+       elementText(decorations[0]) == "◆ metrics: line 1"
+    let markers = withAttribute(root, PluginMarkerAttribute)
+    ck markers.len == 1
+    ck markers.len == 1 and elementText(markers[0]) == "★"
+
   test "assertion count":
-    ck CHECKS == 64
+    ck CHECKS == 152
     echo "CHECKS: ", CHECKS

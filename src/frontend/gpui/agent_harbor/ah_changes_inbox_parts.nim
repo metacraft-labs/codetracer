@@ -29,6 +29,7 @@ from ../../viewmodel/views/agent_harbor_changes_inbox_words import NoHunksText
 import ../../viewmodel/views/agent_harbor_changes_inbox_palette
 import ../chrome
 import ./ah_theme
+from ./ah_session_activity import wrappedRows
 
 export ah_theme, agent_harbor_changes_inbox_palette
 
@@ -43,14 +44,15 @@ const
   ButtonPadPx* = 7.5       ## `[class*="ct-button-sm-"]`: 0 0.625em at 12px
   ButtonRadiusPx* = 6      ## `button`: 0.5em at 12px
   SelectPadPx* = 6         ## `.ah-changes-select`: 0 0.375rem
-  SelectInnerPx* = 4
-    ## Chromium sets a select's value 4px further in than its padding
-    ## (measured: the value at 11px from the box's left edge).
-  SelectArrowPx* = 16
-    ## The browser's own drop-down arrow beside the value: a select is its
-    ## widest choice plus 34px wide (measured at 12px in Chromium:
-    ## `Modified` 89px, `Session changes` 132px, a 268px label 302px), its
-    ## padding, border and inner inset taking 18 of them.
+  SelectGapPx* = 4         ## `.ah-dropdown-trigger`: 0.25rem between the value and its arrow
+  DropdownArrow* = "\xE2\x96\xBE"
+    ## ▾ after a dropdown's value (`agent_harbor_dropdown_view.DropdownArrow`).
+  CheckboxPx* = 16         ## `.ct-checkmark`: the design system's 16px checkbox
+  CheckboxRadiusPx* = 4    ## its corners at 16px
+  CheckGlyph* = "\xE2\x9C\x93"
+    ## ✓ the checkbox's mark (the design system's check path, drawn as a
+    ## glyph: a GPUI window draws no SVG mask).
+  TogglePadPx* = 8         ## `.ah-composer-toggle`: 0 0.5rem
   TextFieldRowsPx* = 62    ## a three-row `.ah-text-field`: 3 × 16 + 2 × 6 + 2 × 1
   MonoAdvance* = 0.6
     ## Space Mono's advance, a fixed 0.6em per character
@@ -146,36 +148,79 @@ proc actionButton*(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; label: 
 proc actionButtonPx*(label: string): int =
   int(ceil(2 * ButtonPadPx)) + textPx(label, LabelPx)
 
-proc selectBoxPx*(widestPx: int): int =
-  ## A closed select's width for its widest choice's text width.
-  widestPx + 2 * SelectPadPx + SelectInnerPx + SelectArrowPx + 2
+proc selectBoxPx*(shownPx: int): int =
+  ## A closed dropdown's width for the text width of the value it shows:
+  ## its 1px border and 6px padding each side, the value, the gap, the arrow.
+  shownPx + 2 * SelectPadPx + 2 + SelectGapPx + textPx(DropdownArrow, LabelPx)
 
 proc selectBox*(r: GpuiRenderer; p: AhPalette; shown: string; choices: seq[string];
                 fact: string): GpuiElement =
-  ## A compact select (`.ah-changes-select`): 24px high, 6px in, a 1px
+  ## The design system's dropdown, closed (`agent_harbor_dropdown_view`,
+  ## `.ah-dropdown-trigger.ah-changes-select`): 24px high, 6px in, a 1px
   ## border in the control border role, rounded 6px, on the secondary
-  ## surface, the chosen value at the label size and the drop-down arrow at
-  ## its end. As the browser sizes a select, it is as wide as its widest
-  ## choice. A GPUI window has no native drop-down, so the select draws its
-  ## closed state, which is what every story shows.
-  var widest = textPx(shown, LabelPx)
-  for c in choices: widest = max(widest, textPx(c, LabelPx))
+  ## surface, the value it shows at the label size, whole, then the arrow.
+  ## It is as wide as that value (the trigger is a button sized by its
+  ## content), and where its row is narrower it shrinks and cuts the value
+  ## with "…" rather than run past the row's edge. A GPUI window draws no
+  ## dropped menu, so the dropdown draws its closed state, which is what
+  ## every story shows; `choices` are the menu's rows, named for a reader.
+  let shownPx = textPx(shown, LabelPx)
   result = r.box(pairs = [("height", $ControlPx & "px"), ("items", "center"),
-                          ("padding-left", $(SelectPadPx + SelectInnerPx) & "px"),
+                          ("gap", $SelectGapPx & "px"),
+                          ("padding-left", $SelectPadPx & "px"),
                           ("padding-right", $SelectPadPx & "px"),
                           ("border-width", "1px"), ("border-color", p.borderSecondary),
                           ("rounded", $ControlRadiusPx & "px"),
                           ("background", p.secondary), ("flex-shrink", "1"),
                           ("min-width", "0px"),
-                          ("width", $selectBoxPx(widest) & "px"),
+                          ("max-width", $selectBoxPx(shownPx) & "px"),
                           ("cursor", cursorOf(hkControl))])
   r.tag(result, fact, shown)
-  let value = r.text(shown, LabelPx, p.textLabel, pairs = [("flex-grow", "1")])
+  r.tag(result, "select-width", $selectBoxPx(shownPx))
+  r.tag(result, "menu-choices", $choices.len)
+  let value = r.text(shown, LabelPx, p.textLabel, pairs = [("min-width", "0px")])
   r.tag(value, "select-value", shown)
   r.appendChild(result, value)
-  # The arrow: a chevron in the label colour, as the browser draws one.
-  r.appendChild(result, r.text("\xE2\x8C\x84", LabelPx, p.textLabel, shrink = false,
-                               pairs = [("margin-left", "4px")]))
+  r.appendChild(result, r.text(DropdownArrow, LabelPx, p.textLabel, shrink = false))
+
+proc checkbox*(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks;
+               checked, disabled: bool): GpuiElement =
+  ## The design system's checkbox (`.ct-checkmark`, `checkmark.styl`): 16px,
+  ## rounded 4px, a 1px border in border/primary inside it, filled
+  ## surface/primary/default; checked, its check in icon/primary/default;
+  ## disabled, the disabled fill with no border and the mark dimmed.
+  result = r.box(pairs = [("width", $CheckboxPx & "px"), ("height", $CheckboxPx & "px"),
+                          ("rounded", $CheckboxRadiusPx & "px"),
+                          ("items", "center"), ("justify", "center"),
+                          ("background", if disabled: ink.disabledSurface else: p.ground),
+                          ("flex-shrink", "0")])
+  if not disabled: r.styles(result, [("border-width", "1px"), ("border-color", p.borderPrimary)])
+  r.tag(result, "control", "checkbox")
+  if checked:
+    r.appendChild(result, r.text(CheckGlyph, LabelPx,
+                                 if disabled: p.textDisabled else: p.iconDefault,
+                                 shrink = false, pairs = [("line-height", $CheckboxPx & "px")]))
+
+proc toggleChip*(r: GpuiRenderer; p: AhPalette; label: string; on, disabled: bool): GpuiElement =
+  ## One option of a single choice: the omnibox composer's toggle
+  ## (`.ah-composer-toggle`, the VCS panel's mode toggles): 24px high, 8px
+  ## in, a 1px border (the action border when chosen, the secondary
+  ## otherwise), rounded 6px on no ground of its own, its label at the label
+  ## size in the body colour when chosen, the label colour otherwise.
+  result = r.box(pairs = [("height", $ControlPx & "px"), ("items", "center"),
+                          ("padding-left", $TogglePadPx & "px"),
+                          ("padding-right", $TogglePadPx & "px"),
+                          ("border-width", "1px"),
+                          ("border-color", if on: p.borderAction else: p.borderSecondary),
+                          ("rounded", $ControlRadiusPx & "px"), ("flex-shrink", "0"),
+                          ("cursor", cursorOf(if disabled: hkNone else: hkControl))])
+  r.tag(result, "control", "toggle")
+  let words = r.text(label, LabelPx, if disabled: p.textDisabled
+                                     elif on: p.textBody else: p.textLabel, shrink = false)
+  r.tag(words, "choice-label", label)
+  r.appendChild(result, words)
+
+proc toggleChipPx*(label: string): int = textPx(label, LabelPx) + 2 * TogglePadPx + 2
 
 proc textField*(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; typed,
                 placeholder: string; disabled: bool; rows = 3): GpuiElement =
@@ -292,6 +337,178 @@ proc flowLinesFit*(r: GpuiRenderer; items: seq[FlowItem]; heights: seq[int];
       if h.len > 0: lineHeight = max(lineHeight, parseInt(h))
     if lineHeight > 0: r.setStyle(line, "height", $lineHeight & "px")
 
+proc flowFitHeightPx*(items: seq[FlowItem]; heights: seq[int]; availPx, gapPx,
+                      rowGapPx: int): int =
+  ## The height `flowLinesFit` gives the same items: each line as high as its
+  ## tallest item, `rowGapPx` between lines. Measured from the same widths,
+  ## so a view that scrolls by hand (`scrollWindow`) lays it out as drawn.
+  if items.len == 0: return 0
+  let starts = flowLineStarts(items, availPx, gapPx)
+  var line = 0
+  for k in 0 ..< items.len:
+    if k > 0 and starts[k]:
+      result += line + rowGapPx
+      line = 0
+    line = max(line, heights[k])
+  result += line
+
+proc textRows*(text: string; sizePx, availPx: int): int =
+  ## How many lines wrapping prose takes at `availPx` (0 for no text), at
+  ## the face's kerned widths, as the window wraps it.
+  if text.len == 0: 0 else: wrappedRows(text, sizePx, max(1, availPx), faceGlyphs = true)
+
 proc fillWidth*(r: GpuiRenderer; el: GpuiElement) =
   ## `el` takes the free width of its row and may shrink below its content.
   r.styles(el, [("flex-grow", "1"), ("flex-shrink", "1"), ("min-width", "0px")])
+
+# ---------------------------------------------------------------------------
+# Scrolling by hand
+# ---------------------------------------------------------------------------
+#
+# GPUI's layout does not scroll a box or measure an overflow, so a P3 region
+# that holds more than it shows is scrolled the way the shim's own test
+# scrolls a list (isonim-gpui `rust/gpui-nim-shim/tests/scrolled_rows_take_clicks.rs`)
+# and the omnibox composer scrolls its sheet (`ah_composer.drawComposer`):
+# its parts are laid out here at the heights the stylesheet gives them, the
+# column that holds them is pulled up by the region's first pixel shown
+# (`margin-top`) under a box that clips at the region's foot. The host keeps
+# each region's first pixel between draws (`P3Scroll`, as the terminal's
+# `AhP3State` keeps its first row); what the keyboard is on (the keyboard's
+# card or file, the item on screen) is brought into view when it changes:
+# the least move that shows its top, or, for the item on screen, to the
+# region's top, as the web's `keepKeyboardItemInView` and the terminal's
+# `drawScrolled` do.
+
+type
+  ScrollPart* = object
+    ## One part of a scrolling region, in order: its element, its height as
+    ## laid out, and the fact value that names it as what the keyboard is on
+    ## ("" for none).
+    el*: GpuiElement
+    heightPx*: int
+    key*: string
+
+  P3Scroll* = ref object
+    ## What a GPUI host keeps between draws of a Changes or Inbox story that
+    ## no viewmodel holds: each region's first pixel shown and the item kept
+    ## in view at its last draw, and each region as last drawn.
+    tops: seq[(string, int)]
+    seen: seq[(string, string)]
+    regions*: seq[P3ScrollRegion]
+
+  P3ScrollRegion* = object
+    ## A region as last drawn: its key, how tall it shows and holds, its
+    ## first pixel shown.
+    key*: string
+    viewPx*, contentPx*, topPx*: int
+
+proc topOf(s: P3Scroll; key: string): int =
+  if s.isNil: return 0
+  for (k, v) in s.tops:
+    if k == key: return v
+
+proc setTop(s: P3Scroll; key: string; top: int) =
+  if s.isNil: return
+  for i in 0 ..< s.tops.len:
+    if s.tops[i][0] == key:
+      s.tops[i][1] = top
+      return
+  s.tops.add (key, top)
+
+proc beginDraw*(s: P3Scroll) =
+  ## A draw starts: no region drawn yet.
+  if not s.isNil: s.regions.setLen(0)
+
+proc regionOf*(s: P3Scroll; key: string): P3ScrollRegion =
+  if s.isNil: return
+  for r in s.regions:
+    if r.key == key: return r
+
+proc scrollBy*(s: P3Scroll; key: string; deltaPx: int): bool =
+  ## Moves region `key`'s window `deltaPx` (negative: up), within its content
+  ## as the last draw laid it out; true when it moved. The host redraws.
+  let r = s.regionOf(key)
+  if r.key.len == 0: return false
+  let top = clamp(r.topPx + deltaPx, 0, max(0, r.contentPx - r.viewPx))
+  if top == r.topPx: return false
+  s.setTop(key, top)
+  true
+
+proc pagePxOf*(s: P3Scroll; key: string): int =
+  ## A page of region `key`: its height less a line kept for context (the
+  ## panel's 24px line), as the terminal keeps a row.
+  max(1, s.regionOf(key).viewPx - BodyLinePx)
+
+proc keptTop*(top, viewPx, contentPx, at, heightPx: int; keepAtTop: bool): int =
+  ## The region's first pixel once the part at `at` (`heightPx` high) is in
+  ## view: unchanged when it already is; else the least move that shows its
+  ## top (the whole of it when it fits), or, with `keepAtTop`, its top at
+  ## the region's top. Kept within the content.
+  result = top
+  let bottom = at + heightPx
+  let outside = at < top or bottom > top + viewPx
+  if keepAtTop and outside: result = at
+  elif at < top: result = at
+  elif bottom > top + viewPx: result = top + min(bottom - (top + viewPx), at - top)
+  result = clamp(result, 0, max(0, contentPx - viewPx))
+
+proc scrollWindow*(r: GpuiRenderer; s: P3Scroll; key: string; parts: seq[ScrollPart];
+                   viewPx: int; keepKey: string; keepAtTop = false;
+                   groupCount = 0; groupFact = ""; groupValue = ""): GpuiElement =
+  ## Region `key`, `viewPx` high: `parts` in a column pulled up by the
+  ## region's first pixel shown, clipped at its foot. The first pixel is the
+  ## host's (`s`; 0 without one), kept within the content and moved to show
+  ## the part named `keepKey` when that changed since the last draw
+  ## (`keptTop`). Each part carries where it lies in the content
+  ## (`scroll-y`, `scroll-h`) and its name (`scroll-key`), and the region what
+  ## it shows (`scroll-region`, `scroll-top`, `scroll-view`,
+  ## `scroll-content`), so a reader of the drawing can tell what is in view.
+  ## The first `groupCount` parts are held in a box of their own tagged
+  ## `groupFact` = `groupValue` (the web's list element inside its scrolling
+  ## region: the inbox's rows above the page under them).
+  var content = 0
+  var starts: seq[int]
+  for part in parts:
+    starts.add content
+    content += part.heightPx
+  var top = clamp(s.topOf(key), 0, max(0, content - viewPx))
+  var last = ""
+  var known = false
+  if not s.isNil:
+    for (k, v) in s.seen:
+      if k == key:
+        last = v
+        known = true
+  if keepKey.len > 0 and (not known or keepKey != last):
+    for i, part in parts:
+      if part.key == keepKey:
+        top = keptTop(top, viewPx, content, starts[i], part.heightPx, keepAtTop)
+        break
+  if not s.isNil:
+    var found = false
+    for i in 0 ..< s.seen.len:
+      if s.seen[i][0] == key:
+        s.seen[i][1] = keepKey
+        found = true
+    if not found: s.seen.add (key, keepKey)
+    s.setTop(key, top)
+    s.regions.add P3ScrollRegion(key: key, viewPx: viewPx, contentPx: content, topPx: top)
+  result = r.box(column = true, pairs = [("height", $viewPx & "px"), ("flex-shrink", "0"),
+                                         ("min-height", "0px"), ("overflow", "hidden")])
+  r.tag(result, "scroll-region", key)
+  r.tag(result, "scroll-top", $top)
+  r.tag(result, "scroll-view", $viewPx)
+  r.tag(result, "scroll-content", $content)
+  let column = r.box(column = true, pairs = [("flex-shrink", "0"), ("min-width", "0px")])
+  if top != 0: r.setStyle(column, "margin-top", $(-top) & "px")
+  var group: GpuiElement = nil
+  if groupCount > 0:
+    group = r.box(column = true, pairs = [("flex-shrink", "0"), ("min-width", "0px")])
+    if groupFact.len > 0: r.tag(group, groupFact, groupValue)
+    r.appendChild(column, group)
+  for i, part in parts:
+    r.setAttribute(part.el, "data-ah-scroll-y", $starts[i])
+    r.setAttribute(part.el, "data-ah-scroll-h", $part.heightPx)
+    if part.key.len > 0: r.setAttribute(part.el, "data-ah-scroll-key", part.key)
+    r.appendChild(if i < groupCount: group else: column, part.el)
+  r.appendChild(result, column)

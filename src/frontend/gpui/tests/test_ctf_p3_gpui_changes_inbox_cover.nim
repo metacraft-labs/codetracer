@@ -20,7 +20,14 @@
 ##     the spec card list drawn one card short, a card's state word drawn
 ##     but tagged with another, the item on screen moved after drawing, a
 ##     login's Continue missing, the full tab labels on a narrow panel, an
-##     inbox step drawn in the wrong ink, a file row of the Code tab gone.
+##     inbox step drawn in the wrong ink, a file row of the Code tab gone,
+##     the inbox's hint gone, an approval's command run on into its purpose,
+##     a Code-tab mark short where the row has room, a choice drawn with
+##     another control, the reading column at another width, and the
+##     keyboard's file scrolled out of its region's window; and
+##   * mounts the keyboard stories in the GPUI story host at the brief's
+##     sizes and shows their first frames scrolled to what the keyboard is
+##     on, and the page keys scrolling a long list.
 ##
 ## No mocks: the viewmodels read the synthetic fixture sets of
 ## nim-agents-isonim-viewmodels through the production data-source seam,
@@ -235,7 +242,9 @@ suite "CTF-P3: the keys (the catalogue's changes.* and inbox.*) in the GPUI stor
     ck c.changesInbox.changes.specCards[0].open
     ck c.changesKey("Right") == "changes.next-tab"
     ck c.changesInbox.changes.activeTab.val == rtTests
-    ck c.changesKey("PageDown") == ""
+    # A page key scrolls the tab only when it holds more than it shows
+    # (the next suite); here it is routed either way.
+    discard c.changesKey("PageDown")
     gpui_reset_tree()
     let i = r.mountAgentHarborStoryGpui("agent-harbor-inbox", "prev-next", 1440, 900)
     defer: i.dispose()
@@ -245,6 +254,122 @@ suite "CTF-P3: the keys (the catalogue's changes.* and inbox.*) in the GPUI stor
     ck i.inboxKey("[") == "inbox.previous"
     ck i.inboxKey("1") == "inbox.priority-1"
 
+suite "CTF-P3 step 3d: the review's follow-ups in GPUI":
+  test "the keyboard stories' first frames show what the keyboard is on, at every size":
+    for (surface, fixture) in [("agent-harbor-changes", "code-long-keyboard"),
+                               ("agent-harbor-inbox", "long-keyboard")]:
+      for (w, h) in [(1440, 900), (760, 640), (360, 900)]:
+        gpui_reset_tree()
+        let m = r.mountAgentHarborStoryGpui(surface, fixture, w, h, dmDark, frameTitle = "Story")
+        let width = parseInt(m.view.fact("width-px"))
+        let problems =
+          if surface == "agent-harbor-changes":
+            checkChanges(m.view, m.changesInbox.changes, width, changesStoryContext(fixture))
+          else:
+            checkInbox(m.view, m.changesInbox.inbox, width,
+                       inboxStoryContext(fixture, StoryHostRequests()))
+        if problems.len > 0: echo "  " & fixture & " @ " & $w & ": " & problems.join("; ")
+        ck problems.len == 0
+        var scrolled = false
+        for region in m.view.all("scroll-region"):
+          if parseInt(region.fact("scroll-top")) > 0: scrolled = true
+        ck scrolled
+        m.dispose()
+
+  test "the page keys scroll a long list, and the keyboard's item stays in view after a step":
+    gpui_reset_tree()
+    let c = r.mountAgentHarborStoryGpui("agent-harbor-changes", "code-long", 760, 640)
+    defer: c.dispose()
+    ck c.changesInbox.changes.activeTab.val == rtCode
+    let before = c.view.firstOf("scroll-region").fact("scroll-top")
+    ck c.changesKey("PageDown") == "changes.page-down"
+    ck c.view.firstOf("scroll-region").fact("scroll-top") != before
+    ck c.changesKey("PageUp") == "changes.page-up"
+    ck c.view.firstOf("scroll-region").fact("scroll-top") == before
+    gpui_reset_tree()
+    let i = r.mountAgentHarborStoryGpui("agent-harbor-inbox", "long-keyboard", 1440, 900)
+    defer: i.dispose()
+    let at = i.view.firstOf("scroll-region").fact("scroll-top")
+    ck i.inboxKey("PageUp") == "inbox.page-up"
+    ck i.view.firstOf("scroll-region").fact("scroll-top") != at
+    # A step puts another item on screen: it is brought into view again.
+    ck i.inboxKey("[") == "inbox.previous"
+    let width = parseInt(i.view.fact("width-px"))
+    ck checkInbox(i.view, i.changesInbox.inbox, width,
+                  inboxStoryContext("long-keyboard", StoryHostRequests())).len == 0
+
+  test "the inbox's hint gone is reported; the hint shows only with nothing on screen":
+    let (view, vm) = drawnInbox("populated", 1432, dmDark)
+    ck vm.current.val.isNone and vm.wantsItemHint
+    ck view.values("item-hint") == @[itemHintText()]
+    ck inboxProblems(view, vm, "populated", 1432, dmDark).len == 0
+    # The hint not drawn: its fact gone with it (a fact that is empty is
+    # not found).
+    let hint = view.firstOf("item-hint")
+    if hint != nil: r.setAttribute(hint, "data-ah-item-hint", "")
+    ck inboxProblems(view, vm, "populated", 1432, dmDark).join("; ").contains("item hint: drawn")
+    vm.dispose()
+    let (walked, wvm) = drawnInbox("prev-next", 1432, dmDark)
+    ck walked.values("item-hint").len == 0
+    wvm.dispose()
+
+  test "an approval's command run on into its purpose is reported":
+    let (view, page, ctx) = drawnItem("sudo", 1432, dmLight)
+    ck checkItemPage(view, page, ctx, 1432).len == 0
+    let subject = view.firstOf("approval-subject")
+    ck subject != nil
+    if subject != nil:
+      r.setAttribute(subject, "data-ah-approval-subject", approvalSummary(page.detail.approvals[0]))
+    let problems = checkItemPage(view, page, ctx, 1432).join("; ")
+    ck problems.contains("approval commands: drawn")
+    ck problems.contains("runs on into its purpose")
+    page.dispose()
+
+  test "a Code-tab mark with no tooltip, or the legend gone, is reported":
+    let (view, vm) = drawnChanges("code", 1432, dmDark)
+    ck changesProblems(view, vm, "code", 1432).len == 0
+    ck view.values("code-legend") == @[CodeMarksLegend]
+    let mark = view.firstOf("mark-word")
+    ck mark != nil
+    if mark != nil: r.setAttribute(mark, "data-ah-mark-title", "")
+    let legend = view.firstOf("code-legend")
+    if legend != nil: r.setAttribute(legend, "data-ah-code-legend", "")
+    let problems = changesProblems(view, vm, "code", 1432).join("; ")
+    ck problems.contains("marks legend: drawn")
+    ck problems.contains("has no tooltip")
+    vm.dispose()
+    let (narrow, nvm) = drawnChanges("code", 352, dmDark)
+    ck narrow.values("code-legend") == @[CodeMarksLegend]
+    nvm.dispose()
+
+  test "a choice drawn with another control, or the reading column at another width, is reported":
+    let (view, page, ctx) = drawnItem("question-multi", 1432, dmDark)
+    ck checkItemPage(view, page, ctx, 1432).len == 0
+    ck view.values("control") == @["checkbox", "checkbox", "checkbox"]
+    let control = view.firstOf("control")
+    if control != nil: r.setAttribute(control, "data-ah-control", "toggle")
+    ck checkItemPage(view, page, ctx, 1432).join("; ").contains("choice controls: drawn")
+    page.dispose()
+    let (single, spage, sctx) = drawnItem("question-single", 1432, dmDark)
+    ck single.values("control") == @["toggle", "toggle"]
+    ck single.values("reading-width") == @[$ItemReadingMaxPx]
+    let reading = single.firstOf("reading-width")
+    if reading != nil: r.setAttribute(reading, "data-ah-reading-width", "1416")
+    ck checkItemPage(single, spage, sctx, 1432).join("; ").contains("reading column: drawn")
+    spage.dispose()
+
+  test "the keyboard's file scrolled out of its region's window is reported":
+    gpui_reset_tree()
+    let m = r.mountAgentHarborStoryGpui("agent-harbor-changes", "code-long-keyboard", 760, 640)
+    defer: m.dispose()
+    let width = parseInt(m.view.fact("width-px"))
+    let ctx = changesStoryContext("code-long-keyboard")
+    ck checkChanges(m.view, m.changesInbox.changes, width, ctx).len == 0
+    let region = m.view.firstOf("scroll-region")
+    if region != nil: r.setAttribute(region, "data-ah-scroll-top", "0")
+    ck checkChanges(m.view, m.changesInbox.changes, width, ctx).join("; ").contains(
+      "the keyboard's item is out of view")
+
 suite "CTF-P3: assertion count":
   test "every assertion ran":
-    check countedAssertions == 40
+    check countedAssertions == 39 + 12 + 9 + 5 + 4 + 6 + 6 + 2

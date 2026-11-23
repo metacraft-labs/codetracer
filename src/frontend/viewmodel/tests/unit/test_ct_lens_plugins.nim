@@ -17,10 +17,12 @@
 ##   them, and the core `StateVM` derives its change set from them itself.
 ##   The real replay, the real recording and the real terminal are the TUI
 ##   suite's (`tui/tests/real_terminal/test_ct_lens_plugins_pty.nim`).
-## * `slow-git` is a two-line shell script that sleeps and then runs the real
-##   git with the same arguments. It is the one stand-in, and it is not a
-##   mock: it is a slow repository, which is the condition under test, and
-##   everything it answers comes from git.
+## * The slow `git` is a two-line shell script, installed as `git` in a
+##   directory put first on the PATH the plugin process starts with (the
+##   plugin runs the program its manifest declares, by name), that sleeps and
+##   then runs the real git with the same arguments. It is the one stand-in,
+##   and it is not a mock: it is a slow repository, which is the condition
+##   under test, and everything it answers comes from git.
 ## * The repository is real (`ct_lens_fixture.makeHistoryRepo`): three
 ##   commits, made by the suite.
 ##
@@ -40,7 +42,7 @@
 ## they are not the subject here. The two cases about a slow git compare
 ## ORDER (the sibling answered while git was still running), not durations.
 
-import std/[json, options, os, osproc, posix, sequtils, strutils, tables, times, unittest]
+import std/[algorithm, json, options, os, osproc, posix, sequtils, strutils, tables, times, unittest]
 
 import isonim/core/[computation, owner, signals]
 
@@ -196,15 +198,34 @@ proc expectedHistory(dir, file: string; first, last: int): seq[string] =
   for l in o.splitLines:
     if l.strip.len > 0: result.add l.strip
 
+var pathBeforeSlowGit = ""
+
 proc slowGit(r: Rig; sleepSeconds: int; never = false): string =
   ## A git that takes `sleepSeconds` to start, or (`never`) one that never
   ## answers: it becomes `sleep` in place, so the pid it writes beside itself
-  ## is the process the plugin must kill.
-  result = r.dir.parentDir / "slow-git"
+  ## is the process the plugin must kill. It is installed as `git` in a
+  ## directory put first on this process's PATH, which the plugin process
+  ## inherits when it starts (so call this before `both`); `restorePath`
+  ## undoes it. Returns the script's path.
+  # Not resolved through symlinks: `sleep` is a link to a multi-call
+  # coreutils, which dispatches on the name it was run by.
+  let realGit = findExe("git", followSymlinks = false)
+  let realSleep = findExe("sleep", followSymlinks = false)
+  doAssert realGit.len > 0 and realSleep.len > 0
+  let dir = r.dir.parentDir / "slow-bin"
+  createDir(dir)
+  result = dir / "git"
   writeFile(result, "#!/bin/sh\necho $$ > \"$0.pid\"\n" &
-    (if never: "exec sleep " & $sleepSeconds & "\n"
-     else: "sleep " & $sleepSeconds & "\nexec git \"$@\"\n"))
+    (if never: "exec " & realSleep & " " & $sleepSeconds & "\n"
+     else: realSleep & " " & $sleepSeconds & "\nexec " & realGit & " \"$@\"\n"))
   setFilePermissions(result, {fpUserRead, fpUserWrite, fpUserExec})
+  pathBeforeSlowGit = getEnv("PATH")
+  putEnv("PATH", dir & ":" & pathBeforeSlowGit)
+
+proc restorePath() =
+  if pathBeforeSlowGit.len > 0:
+    putEnv("PATH", pathBeforeSlowGit)
+    pathBeforeSlowGit = ""
 
 proc pidAlive(pid: int): bool = pid > 0 and kill(Pid(pid), 0) == 0
 
@@ -265,6 +286,28 @@ when not LensWasm:
       check "multiply instead of adding" notin r.pane("ct-lens.history/history")
       r.sup.shutdown()
 
+    test "the commit that last changed the function decorates its first line":
+      var r = newRig()
+      r.both()
+      r.stopAt(r.file, 5, 4, 6, "apply")
+      let newest = expectedHistory(r.repo, r.file, 4, 6)[0].split(' ')[0]
+      proc marks(r: Rig; doc: string): JsonNode =
+        r.sup.slot("ct-lens.history").decorations.getOrDefault(doc, newJArray())
+      check r.sup.waitUntil("the decoration", proc(): bool =
+        r.marks(r.file).len == 1)
+      let m = r.marks(r.file)[0]
+      check m{"line"}.getInt(0) == 4
+      check m{"text"}.getStr("").startsWith("history: " & newest & " ")
+      check "multiply instead of adding" in m{"text"}.getStr("")
+      # Another file: the first one's decoration is withdrawn.
+      let loose = r.dir.parentDir / "loose"
+      createDir(loose)
+      writeFile(loose / "y.py", "y = 1\n")
+      r.stopAt(loose / "y.py", 1)
+      check r.sup.waitUntil("withdrawn", proc(): bool =
+        r.marks(r.file).len == 0)
+      r.sup.shutdown()
+
     test "a stop without a function range asks about its line alone":
       var r = newRig()
       r.both()
@@ -289,17 +332,24 @@ when not LensWasm:
       r.sup.shutdown()
 
     test "a git that cannot be started is named":
+      # The plugin runs a program by the NAME its manifest declares (`git`):
+      # a path, or a name it did not declare, is refused, and said so.
       var r = newRig(history = %*{"git": "/nonexistent/ct-lens-git"})
       r.both()
       r.stopAt(r.file, 5, 4, 6, "apply")
       check r.sup.waitUntil("could not run", proc(): bool =
         "could not run /nonexistent/ct-lens-git" in r.pane("ct-lens.history/history"))
+      r.sup.settingsChanged("ct-lens.history", %*{"git": "ct-lens-undeclared-git"})
+      check r.sup.waitUntil("not declared", proc(): bool =
+        let pane = r.pane("ct-lens.history/history")
+        "could not run ct-lens-undeclared-git" in pane and
+          "declared executable set" in pane)
       r.sup.shutdown()
 
     test "a slow git does not hold the sibling plugin":
       var r = newRig()
-      let slow = r.slowGit(8)
-      r.sup.configure("ct-lens.history", true, %*{"git": slow})
+      discard r.slowGit(8)
+      defer: restorePath()
       r.both()
       r.stopAt(r.file, 5, 4, 6, "apply")
       check r.sup.waitUntil("asking git", proc(): bool =
@@ -325,7 +375,8 @@ when not LensWasm:
     test "a git past its deadline is killed and the history says so":
       var r = newRig()
       let slow = r.slowGit(600, never = true)
-      r.sup.configure("ct-lens.history", true, %*{"git": slow, "timeoutMs": 300})
+      defer: restorePath()
+      r.sup.configure("ct-lens.history", true, %*{"timeoutMs": 300})
       r.both()
       r.stopAt(r.file, 5, 4, 6, "apply")
       check r.sup.waitUntil("deadline", proc(): bool =
@@ -440,6 +491,29 @@ when not LensWasm:
         r.sup.topLayerLabel.len == 0)
       r.sup.shutdown()
 
+    test "a call activated in its docked pane is a jump, without the mode":
+      var r = newRig()
+      r.sup.activate("ct-lens.jump")
+      check r.sup.waitUntil("jump active", proc(): bool =
+        r.sup.slot("ct-lens.jump").active)
+      r.calls(["main", "evaluate", "apply_op", "add"], 0)
+      check r.sup.waitUntil("the calls listed", proc(): bool =
+        "evaluate (calc.py:20)" in r.pane("ct-lens.jump/calls") and
+        "add (calc.py:40)" in r.pane("ct-lens.jump/calls"))
+      check r.sup.topLayerLabel.len == 0
+      r.mock.clearReceivedCommands()
+      # Row 1 (from 0) of the list is apply_op, the second call after main:
+      # the transition the terminal's `applyKey` produces for Enter on it.
+      r.sup.viewEvent("ct-lens.jump/calls",
+        %*{"transition": "trActivate", "node": "calls.list", "kind": "List",
+           "index": 1})
+      check r.sup.waitUntil("the jump reached the backend", proc(): bool =
+        r.mock.findCommand("ct/calltrace-jump").isSome)
+      check r.mock.findCommand("ct/calltrace-jump").get.args{"line"}.getInt(0) == 30
+      check r.sup.waitUntil("the pane says so", proc(): bool =
+        "jumped to apply_op (calc.py:30)" in r.pane("ct-lens.jump/calls"))
+      r.sup.shutdown()
+
     test "a mode plugin runs in a process of its own, apart from its siblings":
       var r = newRig()
       r.both()
@@ -478,7 +552,53 @@ when not LensWasm:
         "multiply instead of adding" in r.pane("ct-lens.history/history"))
       r.sup.shutdown()
 
-    test "three Escapes take the keyboard back from its mode":
+    test "measured: the acknowledgement latency of its keys (§11.7.4's 50 ms / 500 ms)":
+      # PLAT-82's deliverable 8: the figure the input budget is judged against,
+      # taken from a plugin someone other than the host's author wrote. Each
+      # round routes `Shift+F7` (a static binding: the mode opens) and `q` (a
+      # key of the layer it pushed: the mode closes), two acknowledged keys,
+      # and the supervisor records each key's routed-to-`ack` time. Nothing is
+      # asserted about the figure itself — it depends on the machine and its
+      # load, which the line prints beside it.
+      var r = newRig()
+      r.openJump()
+      let q0 = r.sup.resolveLayerKey("q", "")
+      check q0.found and q0.op == "jump.close"
+      discard r.sup.routeKey(q0, "q")
+      check r.sup.waitUntil("the mode closed", proc(): bool =
+        r.sup.topLayerLabel.len == 0)
+      let rounds = parseInt(getEnv("CT_LENS_ACK_ROUNDS", "100"))
+      let before = r.sup.slot("ct-lens.jump").ackSamples.len
+      var completed = 0
+      for i in 0 ..< rounds:
+        let open = r.sup.resolveStaticKey("shift+f7", "")
+        if not open.found: break
+        discard r.sup.routeKey(open, "shift+f7")
+        if not r.sup.waitUntil("the mode", proc(): bool =
+            r.sup.topLayerLabel.len > 0): break
+        let close = r.sup.resolveLayerKey("q", "")
+        if not close.found: break
+        discard r.sup.routeKey(close, "q")
+        if not r.sup.waitUntil("closed", proc(): bool =
+            r.sup.topLayerLabel.len == 0): break
+        inc completed
+      let s = r.sup.slot("ct-lens.jump")
+      check completed == rounds
+      check s.ackSamples.len - before >= 2 * rounds
+      let samples = s.ackSamples[^min(s.ackSamples.len, 2 * rounds) .. ^1]
+      var sorted = samples
+      sorted.sort()
+      proc pct(q: float): int = sorted[min(sorted.high, int(q * float(sorted.len)))]
+      let load = (try: readFile("/proc/loadavg").split(' ')[0] except IOError: "n/a")
+      echo "MEASURE ct-lens.jump acknowledgement, ", sorted.len, " keys: p50 ",
+           pct(0.5), " ms, p90 ", pct(0.9), " ms, p99 ", pct(0.99), " ms, max ",
+           sorted[^1], " ms; over the 50 ms budget ", sorted.countIt(it > 50),
+           ", over the 500 ms deadline ", sorted.countIt(it > 500),
+           "; 1-min load ", load
+      check s.totalStrikes == 0
+      r.sup.shutdown()
+
+    test "three Escapes take the keyboard back from its mode, and the healthy plugin gets it back":
       var r = newRig()
       r.openJump()
       check r.sup.observeEscape() == false
@@ -487,4 +607,14 @@ when not LensWasm:
       check r.sup.topLayerLabel.len == 0
       check "ct-lens.jump" in r.sup.recoveryPlugins
       check not r.sup.resolveLayerKey("1", "").found
+      # The chord is the user's gesture, not a fault: the healthy plugin gets
+      # its key back once its watchdog answers idle, and the mode opens again.
+      check r.sup.waitUntil("no longer suspect", proc(): bool =
+        not r.sup.slot("ct-lens.jump").suspect)
+      check r.sup.waitUntil("its key is live again", proc(): bool =
+        r.sup.resolveStaticKey("shift+f7", "").found)
+      let again = r.sup.resolveStaticKey("shift+f7", "")
+      discard r.sup.routeKey(again, "shift+f7")
+      check r.sup.waitUntil("the mode again", proc(): bool =
+        r.sup.topLayerLabel == "JUMP MODE (ct-lens.jump)")
       r.sup.shutdown()

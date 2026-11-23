@@ -12,7 +12,7 @@
    Waiting 6 minutes.                                                                         █
  ● Invented session 4                                                                      8m █
    needs your answer                                                                          █
-   Waiting 8 minutes.                                                                         ▅
+   Waiting 8 minutes.                                                                         ▇
  ● Port the route cache's eviction policy to the new storage layer and keep the old one…  10m
    needs your answer
    Waiting 10 minutes.

@@ -1,7 +1,7 @@
  Inbox  ⚲ ✕
  INBOX  this server                                                                                                                                  1 waiting · 1 feedback request
   ←  1 waiting  →     Auto-switch: off
- ● Write the release notes                                                                                                                                                  low  1m
+ ● Write the release notes                  low  1m
    asks for feedback   Needs Follow-up
    Low priority; the agent keeps working.
                                                                                                                                                                                     
@@ -26,7 +26,7 @@
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     
-                                                                                                                                                                                    
+                                                                                            Select an item, or press ] for the one at the top
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     

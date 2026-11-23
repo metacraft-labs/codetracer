@@ -18,7 +18,7 @@
    Low priority; draft ready.
  1 of 5 · Urgent: the migration holds a write lock until you decide.
                                                                                                
- ● ASKS FOR PERMISSION  Migrate the cache schema                                  Priority… ▾
+ ● ASKS FOR PERMISSION  Migrate the cache schema                                   Priority ▾
                                                                                                
  Run `psql -f migrations/0042_cache.sql` against the staging database?
                                                                                                

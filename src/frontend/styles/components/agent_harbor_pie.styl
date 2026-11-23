@@ -2,17 +2,21 @@
 // its colour, its progress by a wedge of the same colour. A file of its own,
 // as agent_harbor_composer.styl is.
 //
-// One disc, drawn as a two-stop conic gradient (CSS Images Level 4 §3.3,
-// https://www.w3.org/TR/css-images-4/#conic-gradients): the wedge from twelve
-// o'clock clockwise to `--ah-pie-p` (set on the element), hard against the
-// rest of the disc, and a 1px edge in the wedge's ink, inset so the pie keeps
-// its size. Sizes are in rem (px / 16), as UI-Design-Decisions.md's Units
+// A ring with the wedge filled inside it: a 1px edge in the role's ink (an
+// inset box-shadow, so the pie keeps its size) and, inset past it and a gap
+// of the ground (the element's padding, set per size by the view from
+// `pieWedgeInsetPx`), a disc painted as a two-stop conic gradient (CSS
+// Images Level 4 §3.3, https://www.w3.org/TR/css-images-4/#conic-gradients):
+// the wedge from twelve o'clock clockwise to `--ah-pie-p` (set on the
+// element) in the same ink, hard against a transparent rest, so the rest is
+// the ground the pie sits on. 0% is an empty ring, 100% a full disc inside
+// the ring. Sizes are in rem (px / 16), as UI-Design-Decisions.md's Units
 // asks: the story's 104px words column is 6.5rem, its pie columns' 24, 32,
-// 32, 34, 40 and 60px are 1.5 to 3.75rem. The
-// inks (`--ah-pie-wedge`, `--ah-pie-rest`, `--ah-pie-edge`) are
-// set per ground and role by agent_harbor_pie_inks.styl, which is GENERATED
-// from the palette's `pieInks` (`agent_harbor_palette.pieStylesheet`), so the
-// web draws the inks GPUI and the terminal draw.
+// 32, 34, 40 and 60px are 1.5 to 3.75rem. The inks (`--ah-pie-wedge`,
+// `--ah-pie-edge`) are set per ground and role by agent_harbor_pie_inks.styl,
+// which is GENERATED from the palette's `pieInks`
+// (`agent_harbor_palette.pieStylesheet`), so the web draws the inks GPUI and
+// the terminal draw.
 
 @import "agent_harbor_pie_inks"
 
@@ -22,20 +26,13 @@
   flex-shrink: 0
   box-sizing: border-box
   border-radius: 50%
-  background: conic-gradient(var(--ah-pie-wedge) 0 var(--ah-pie-p), var(--ah-pie-rest) var(--ah-pie-p) 100%)
+  background: conic-gradient(var(--ah-pie-wedge) 0 var(--ah-pie-p), transparent var(--ah-pie-p) 100%)
+  background-clip: content-box
   box-shadow: inset 0 0 0 0.0625rem var(--ah-pie-edge)
 
-// Idle (`ah-pie-hollow`): the gradient painted only inside the content box,
-// 2px (a sixth of 12px) in from the ring, so the ground shows between the
-// ring and the wedge and a whole idle pie is never the solid disc an ended
-// one is.
-.ah-pie-hollow
-  padding: 0.125rem
-  background-clip: content-box
-
-// No known progress (`ah-pie-unknown`): no rest and no wedge, only the ring
-// and a centred dot of the full ink a quarter of the diameter across, well
-// short of a hollow pie's inner disc so the two never read alike.
+// No known progress (`ah-pie-unknown`): no wedge, only the ring and a
+// centred dot of the full ink a quarter of the diameter across, well short
+// of the wedge's disc so a whole pie and an unknown one never read alike.
 .ah-pie-unknown
   background: none
 

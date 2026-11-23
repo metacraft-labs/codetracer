@@ -162,6 +162,59 @@ AH_STATE_DOT = 0.4375rem
   &:hover
     border-color: colors-ui-border-primary-hover
 
+// The design system's Dropdown (agent_harbor_dropdown_view.nim): the compact
+// select's trigger above, its value in full and an arrow; open, a menu of
+// the design system's dropdown items (`.ct-menu-item`) on the shared
+// dropdown surface, as the composer's add-context menu
+// (agent_harbor_composer.styl `.ah-composer-menu`).
+// The wrapper, not the trigger, carries the row's limit. A button is a
+// "compressible" control (https://drafts.csswg.org/css-sizing-3/#min-content-zero):
+// with a percentage `max-width` its intrinsic size contribution drops to
+// zero, so the trigger, with `.ah-changes-select`'s `max-width: 100%`, sized
+// its value to nothing in every flex row it sat in. The wrapper is a grid of
+// one column, as wide as the trigger's content and no wider than the row;
+// the trigger takes the column and its value is cut only where the row is
+// narrower than the value.
+.ah-dropdown
+  position: relative
+  display: inline-grid
+  grid-template-columns: minmax(0, max-content)
+  min-width: 0
+  max-width: 100%
+
+.ah-dropdown-trigger
+  display: inline-flex
+  align-items: center
+  gap: 0.25rem
+  min-width: 0
+  max-width: none
+  cursor: pointer
+  text-align: start
+
+.ah-dropdown-value
+  min-width: 0
+  white-space: nowrap
+  overflow: hidden
+
+.ah-dropdown-arrow
+  flex-shrink: 0
+
+.ah-dropdown-menu-host
+  position: absolute
+  top: 100%
+  left: 0
+  z-index: 20
+
+.ah-dropdown-menu
+  dropdown-surface-chrome()
+  margin-top: 0.25rem
+  width: max-content
+  min-width: 8rem
+
+.ah-dropdown-item
+  dropdown-surface-row()
+  font-size: ah-rem(type-ui-size-caption-md)
+
 // ---------------------------------------------------------------------------
 // The tab bar
 // ---------------------------------------------------------------------------
@@ -608,7 +661,9 @@ AH_STATE_DOT = 0.4375rem
   flex: 1 1 auto
   min-width: 0
 
-.ah-status-filter
+// The status filter keeps its value whole beside the search (its wrapper is
+// the toolbar's flex item).
+.ah-code-toolbar > .ah-dropdown
   flex-shrink: 0
 
 .ah-code-files
@@ -665,6 +720,22 @@ AH_STATE_DOT = 0.4375rem
 
 .ah-key-mark
   color: colors-ui-text-information-primary
+
+// The marks stay short (`C`, `U`, `C+U`, `key`), each with its tooltip; the
+// legend says what they stand for. Between the summary line and the toolbar,
+// so it sits above the toolbar's hairline rather than adding one. (Marks
+// spelled out by the panel's width were tried: a container query on every
+// one of 300 rows made each path cut's forced layout restyle every row, and
+// the long list took 50 s to mount at 360px.)
+.ah-code-legend
+  padding: 0 PANEL_INSET 0.375rem
+  font-size: ah-rem(type-ui-size-caption-md)
+  line-height: ah-rem(type-ui-lineheight-caption-md)
+  color: colors-ui-text-primary-caption
+
+  // No file listed (a filter that leaves nothing): no marks to explain.
+  &[data-ah-hidden="true"]
+    display: none
 
 .ah-renamed-from
   display: flex

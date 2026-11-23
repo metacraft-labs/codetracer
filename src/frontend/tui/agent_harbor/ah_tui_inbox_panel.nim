@@ -80,10 +80,15 @@ const
     ## wider the item's page stands beside the rows.
   ListBesideCells* = 26 * 16 div CellPx
     ## `.ah-inbox-list`: 26rem beside the page.
-  RadioOff = "( )"
-  RadioOn = "(\xE2\x80\xA2)"   ## (•)
   CheckOff = "[ ]"
-  CheckOn = "[x]"
+  CheckOn = "[\xE2\x9C\x93]"
+    ## [✓]: the design system's checkbox in cells (a box and its check), as
+    ## the omnibox composer marks a chosen one of several (`✓`).
+  ReadingCells* = 48 * 16 div CellPx
+    ## `AH_ITEM_READING_WIDTH`, 48rem: an item page's parts keep to a column
+    ## this many cells wide, centred, on a wider pane.
+  HintPadRows = 1
+    ## Under the rows, a row of the page's ground above and below the hint.
   PasswordGiven = "\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2"
   PasswordCells = 192 div CellPx  ## `.ah-password-field`: 12rem
   InboxScrollKey* = "inbox"
@@ -103,7 +108,10 @@ type
     ctx: AgentHarborInboxItemContext
     s: AhP3State
     g: P3Grounds
-    col, width: int       ## the page's columns
+    col, width: int       ## the page's columns (its reading measure)
+    bandCol, bandWidth: int
+      ## The whole page's columns: the head band runs across them, so the
+      ## band, not the page's ground, meets what is above the page.
     ground: string        ## the page's own ground
 
 proc endArea(c: var AhCanvas; name: string; row, col, width, height: int; bg: string) =
@@ -177,20 +185,54 @@ proc drawDraft(c: var AhCanvas; d: PageDraw; parent: AhNode; row: int; draft: Dr
   n.height = r - row
   r - row
 
+proc drawToggles(c: var AhCanvas; d: PageDraw; parent: AhNode; row: int;
+                 options: seq[AnswerOption]; disabled: bool): int =
+  ## One choice: a row of the omnibox composer's toggles (the design system
+  ## has no radio button), each ` label ` on a ground of its own, a cell
+  ## apart: the chosen one on the selection's ground, its label bold in the
+  ## body ink, the others on the controls' ground in the label ink. A line
+  ## that cannot hold the next toggle wraps, a row of the page's ground
+  ## between the lines, so two toggles one above the other never share a
+  ## ground edge to edge. A press on a toggle chooses it. Returns the rows.
+  let n = c.node(parent, row, d.x, d.w, 1, [("choices", "single")])
+  let chosen = d.page.choices.val
+  let page = d.page
+  var r = row
+  var x = d.x
+  for o in options:
+    let checked = o.id in chosen
+    let label = " " & o.label & (if o.description.len > 0: "  " & o.description else: "") & " "
+    let w = min(widthOf(label), d.w)
+    if x > d.x and x + w > d.x + d.w:
+      r += 2
+      x = d.x
+    let fg = if disabled: c.p.textDisabled elif checked: c.p.textBody else: c.p.textLabel
+    discard c.put(r, x, elide(label, w), fg, bold = checked and not disabled,
+                  bg = (if checked: d.g.selection else: d.g.control))
+    let t = c.node(n, r, x, w, 1, [("choice", o.id), ("checked", $checked),
+                                    ("control", "toggle")])
+    discard c.node(t, r, x + 1, min(widthOf(o.label), w - 1), 1, [("choice-label", o.label)])
+    if not disabled: c.target(r, x, w, 1, choicePress(page, o.id))
+    x += w + 1
+  n.height = r - row + 1
+  r - row + 1
+
 proc drawChoices(c: var AhCanvas; d: PageDraw; parent: AhNode; row: int;
                  options: seq[AnswerOption]; single, disabled: bool): int =
-  ## Radio buttons (one choice) or checkboxes (several), each with its label
-  ## and description; a press on a choice's line toggles it.
+  ## One choice: the toggles (`drawToggles`); several: the design system's
+  ## checkboxes, `[✓]` or `[ ]`, each with its label and description; a
+  ## press on a choice's line toggles it.
+  if single: return c.drawToggles(d, parent, row, options, disabled)
   let n = c.node(parent, row, d.x, d.w, max(1, options.len),
-                 [("choices", if single: "single" else: "multi")])
+                 [("choices", "multi")])
   let chosen = d.page.choices.val
   let page = d.page
   var r = row
   for o in options:
     let checked = o.id in chosen
-    let box = if single: (if checked: RadioOn else: RadioOff)
-              else: (if checked: CheckOn else: CheckOff)
+    let box = if checked: CheckOn else: CheckOff
     let line = c.node(n, r, d.x, d.w, 1, [("choice", o.id), ("checked", $checked)])
+    discard c.node(line, r, d.x, widthOf(box), 1, [("control", "checkbox")])
     discard c.put(r, d.x, box, if disabled: c.p.textDisabled
                                elif checked: c.p.borderAction else: c.p.textLabel,
                   bold = checked)
@@ -292,14 +334,20 @@ proc drawApproval(c: var AhCanvas; d: PageDraw; parent: AhNode; row: int; a: App
   ## to: <reason>`, then (sudo) the password field and the three decisions.
   let page = d.page
   let requestId = a.requestId
-  let summary = approvalSummary(a)
+  let subject = approvalSubject(a)
+  let purpose = approvalPurposeText(a)
   var buttons: seq[AhButton]
   for (label, primary, decision) in [(ApproveLabel, true, adApprove),
                                      (ApproveForSessionLabel, false, adApproveForSession),
                                      (DenyLabel, false, adDeny)]:
     buttons.add AhButton(label: label, primary: primary,
                          press: decisionPress(page, requestId, decision))
-  let lines = wrapCells(summary, d.w)
+  # The command (or the domain) on a line of its own in code style (bold, in
+  # the information ink, as the panels draw a path or a hunk's head), why
+  # the agent asks under it in prose.
+  let subjectLines = wrapCells(subject, d.w)
+  let purposeLines = if purpose.len > 0: wrapCells(purpose, d.w) else: @[]
+  let lines = subjectLines & purposeLines
   # The rows first: the band is painted before what is drawn on it.
   var actionRows = 1
   var x = d.x + (if a.scope == asSudo: PasswordCells + 1 else: 0)
@@ -313,7 +361,8 @@ proc drawApproval(c: var AhCanvas; d: PageDraw; parent: AhNode; row: int; a: App
   c.endArea("approval", row, d.col, d.width, rows, ground)
   let n = c.node(parent, row, d.col, d.width, rows, [("approval", $a.scope)])
   var r = row + 1
-  r += c.prose(d, n, r, summary, "approval-summary")
+  r += c.prose(d, n, r, subject, "approval-subject", c.inks.textInfo, bold = true)
+  if purpose.len > 0: r += c.prose(d, n, r, purpose, "approval-purpose")
   inc r
   let actions = c.node(n, r, d.x, d.w, actionRows, [("actions", $buttons.len)])
   x = d.x
@@ -470,16 +519,16 @@ proc drawItemHead(c: var AhCanvas; d: PageDraw; parent: AhNode; row: int; it: In
   ## The page's head band (`.ah-item-head`): the kind's mark and words in
   ## small caps, the session's label taking the free width, the priority
   ## menu at the right.
-  c.area("item-head", row, d.col, d.width, 1, d.g.groupHead)
+  c.area("item-head", row, d.bandCol, d.bandWidth, 1, d.g.groupHead)
   let n = c.node(parent, row, d.col, d.width, 1, [("item-kind", $it.kind)])
   discard c.mark(n, row, d.x, c.p.roleDot(kindRole(it.kind)))
   let words = kindWordOf(it.kind).toUpperAscii
   var menuChoices: seq[AhMenuChoice]
-  var widest = widthOf(PriorityLabel) + 1
   for pr in priorityChoices():
     menuChoices.add AhMenuChoice(id: $pr, label: priorityKeyText(pr))
-    widest = max(widest, widthOf(priorityKeyText(pr)))
-  let menuW = widest + 4
+  # The design system's dropdown, its value whole (`Priority`); its menu as
+  # wide as its widest choice (`drawMenus`).
+  let menuW = min(widthOf(PriorityLabel) + 4, max(4, d.width - 6))
   let menuCol = d.col + d.width - 1 - menuW
   let used = c.text(n, row, d.x + 2, max(1, menuCol - 2 - d.x - 2), words, c.p.textLabel,
                     bold = true, fact = "kind-words")
@@ -489,7 +538,7 @@ proc drawItemHead(c: var AhCanvas; d: PageDraw; parent: AhNode; row: int; it: In
                    fact = "item-session", before = menuCol)
   let page = d.page
   discard c.drawSelect(d.s, n, row, menuCol, menuW, "priority", "priority-menu",
-                       PriorityLabel & Ellipsis, menuChoices, "",
+                       PriorityLabel, menuChoices, "",
                        proc(id: string) =
                          for pr in priorityChoices():
                            if $pr == id: discard page.setPriority(pr))
@@ -498,9 +547,18 @@ proc drawItemPageBody*(c: var AhCanvas; page: InboxItemVM; ctx: AgentHarborInbox
                        parent: AhNode; row, col, width, height: int; ground: string;
                        state: AhP3State = nil): int =
   ## One page's content for its load state from (`row`, `col`), `width`
-  ## cells wide, on `ground` (which the caller has laid). Returns the rows.
+  ## cells wide, on `ground` (which the caller has laid). A ready page's
+  ## parts keep to a column at most `ReadingCells` wide, centred (the web's
+  ## `.ah-item-page > *`). Returns the rows.
+  let bandCol = col
+  let bandWidth = width
+  var col = col
+  var width = width
+  if page.state.val == asReady and width > ReadingCells:
+    col += (width - ReadingCells) div 2
+    width = ReadingCells
   let d = PageDraw(page: page, ctx: ctx, s: state, g: c.p3Grounds, col: col, width: width,
-                   ground: ground)
+                   bandCol: bandCol, bandWidth: bandWidth, ground: ground)
   let body = c.node(parent, row, col, width, max(1, height),
                     [("page-state", stateName(page.state.val))])
   case page.state.val
@@ -518,6 +576,7 @@ proc drawItemPageBody*(c: var AhCanvas; page: InboxItemVM; ctx: AgentHarborInbox
     return height
   of asReady: discard
   let it = page.detail
+  body.tag("reading-width", $width)
   c.drawItemHead(d, body, row, it)
   var r = row + 2
   if page.leadsWithSummary:
@@ -741,16 +800,34 @@ proc itemContextOf(vm: InboxVM; ctx: AgentHarborInboxContext;
     onTyping: proc(typing: bool) = vm.setTyping(typing),
     onContinue: proc() = discard vm.next(), sessionLabel: label)
 
+proc drawHint(c: var AhCanvas; parent: AhNode; row, col, width, height: int): int =
+  ## The quiet line in the page's place while items wait and none is on
+  ## screen (the web's `.ah-inbox-hint`, `InboxVM.wantsItemHint`): the
+  ## caption ink, centred across `width`, a row of the page's ground above
+  ## and below it; given more `height` than that, in its middle. Nothing is
+  ## opened. Returns the rows.
+  let hint = itemHintText()
+  let lines = wrapCells(hint, max(1, width - 2))
+  let rows = lines.len + 2 * HintPadRows
+  let top = row + max(HintPadRows, (height - lines.len) div 2)
+  let n = c.node(parent, top, col + 1, max(1, width - 2), lines.len, [("item-hint", hint)])
+  for i, l in lines:
+    discard c.put(top + i, col + max(1, (width - widthOf(l)) div 2), l, c.p.textCaption)
+  max(rows, height)
+
 proc listBody(vm: InboxVM; ctx: AgentHarborInboxContext; g: P3Grounds; col: int;
               page: InboxItemVM; pageCtx: AgentHarborInboxItemContext; strip: string;
-              state: AhP3State; height: int): ScrolledBody =
+              state: AhP3State; height: int; hint = false): ScrolledBody =
   ## A scrolling region's content: the rows and, given a page, the page
-  ## under them. A proc of its own, so the closure owns what it draws with.
+  ## under them, or the hint in its place. A proc of its own, so the closure
+  ## owns what it draws with.
   result = proc(sub: var AhCanvas; parent: AhNode; row, w: int): int =
     var rows = sub.drawInboxList(vm, ctx, g, parent, row, col, w)
     if not page.isNil:
       rows += sub.drawInboxPage(page, pageCtx, strip, state, g, parent, row + rows, col, w,
                                 height)
+    elif hint:
+      rows += sub.drawHint(parent, row + rows, col, w, 0)
     rows
 
 proc pageBody(page: InboxItemVM; pageCtx: AgentHarborInboxItemContext; strip: string;
@@ -800,7 +877,8 @@ proc drawInboxPanel*(c: var AhCanvas; vm: InboxVM; row, col, width, height: int;
     r += c.para(root, r, col + 1, width - 2, line, c.p.roleInk(c.inks, role),
                 fact = "degraded")
   let page = vm.page
-  let beside = width * CellPx >= PageBesideMinPx and not page.isNil
+  let hint = page.isNil and vm.wantsItemHint
+  let beside = width * CellPx >= PageBesideMinPx and (not page.isNil or hint)
   let listW = if beside: ListBesideCells else: width
   let label = block:
     let found = vm.currentItem
@@ -815,7 +893,7 @@ proc drawInboxPanel*(c: var AhCanvas; vm: InboxVM; row, col, width, height: int;
     # top, so its page under the rows shows with it.
     discard c.drawScrolled(state, InboxScrollKey, root, r, col, width, regionH, g.panel,
                            "item", keepItem,
-                           listBody(vm, ctx, g, col, page, pageCtx, strip, state, regionH),
+                           listBody(vm, ctx, g, col, page, pageCtx, strip, state, regionH, hint),
                            keepAtTop = true)
     c.drawMenus(state)
     return
@@ -829,6 +907,12 @@ proc drawInboxPanel*(c: var AhCanvas; vm: InboxVM; row, col, width, height: int;
   c.area("page-gap", r, col + listW, 1, regionH, g.gap)
   let pageCol = col + listW + 1
   let pageW = width - listW - 1
+  if hint:
+    # No item on screen: the page's place holds the hint, in its middle.
+    c.area("page", r, pageCol, pageW, regionH, g.panel)
+    discard c.drawHint(root, r, pageCol, pageW, regionH)
+    c.drawMenus(state)
+    return
   c.area("page", r, pageCol, pageW, 1, g.panel)
   discard c.drawScrolled(state, InboxPageScrollKey, root, r + 1, pageCol, pageW, regionH - 1,
                          g.panel, "", "",

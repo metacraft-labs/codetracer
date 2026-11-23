@@ -45,10 +45,40 @@ proc screenHas(sess: var TuiTestSession; needle: string;
   checkpoint "not on screen: " & needle & "\n" & sess.screen
   false
 
-proc command(sess: var TuiTestSession; line: string) =
+
+proc escapeKey(sess: var TuiTestSession) =
+  ## One Escape, on its own: a second ESC byte inside the framer's delay
+  ## would make the pair one Alt token.
   sess.send("\e")
-  sleep(100)
-  sess.send(":" & line & "\r")
+  sleep(200)
+
+proc promptShows(sess: var TuiTestSession; text: string; ceilingMs: int): bool =
+  ## The bottom line is the open prompt's sigil and buffer (§3.3.6).
+  var waited = 0
+  while waited < ceilingMs:
+    discard sess.drainOutput(100)
+    if sess.text(Rows - 1).startsWith(text): return true
+    sleep(100)
+    waited += 200
+  false
+
+proc command(sess: var TuiTestSession; line: string) =
+  ## Each step is confirmed on the screen before the next. Sent blind, as
+  ## `ESC`, 100 ms, `:line⏎`, a command was lost at load ~190: a stalled TUI
+  ## reads the queued ESC and `:` together, as ONE Alt+`:` token, and the
+  ## rest of the line went to whatever had focus. So the Escape goes alone,
+  ## the prompt must show the whole line before Enter, and a prompt that
+  ## does not is cancelled and typed again.
+  for attempt in 1 .. 5:
+    sess.escapeKey()
+    sess.send(":")
+    if not sess.promptShows(":", 10_000):
+      continue
+    sess.send(line)
+    if sess.promptShows(":" & line, 10_000):
+      sess.send("\r")
+      return
+  checkpoint "the prompt never showed :" & line & "\n" & sess.screen
 
 proc commandShows(sess: var TuiTestSession; line, needle: string;
                   ceilingMs = 90_000): bool =
@@ -62,12 +92,6 @@ proc commandShows(sess: var TuiTestSession; line, needle: string;
     waited += 2_500
   checkpoint "never shown by :" & line & ": " & needle & "\n" & sess.screen
   false
-
-proc escapeKey(sess: var TuiTestSession) =
-  ## One Escape, on its own: a second ESC byte inside the framer's delay
-  ## would make the pair one Alt token.
-  sess.send("\e")
-  sleep(200)
 
 proc pluginPids(home: string): seq[int] =
   ## The plugin processes of THIS test's install, by their executable's path

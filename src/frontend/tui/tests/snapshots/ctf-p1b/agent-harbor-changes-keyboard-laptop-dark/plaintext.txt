@@ -1,7 +1,7 @@
  Changes  ⚲ ✕
  CHANGES  Relay backpressure: bound the relay queues                                                                                                                 9 files +18 −5
   Spec Changes 8   Tests 5   Implementation Details 6   Code 9
-  All milestones                              ▾
+  All milestones ▾
  REQUIREMENTS (2)
  ▸ RELAY-AREQ2 Bounded queues                                                                                                                                            ● modified
 ▎▾ RELAY-AREQ4 Shed the oldest frame                                                                                                                                        ● added

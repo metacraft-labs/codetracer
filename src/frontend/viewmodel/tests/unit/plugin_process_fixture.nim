@@ -15,7 +15,7 @@
 ## `common/node_os`. The plugin is a NATIVE executable either way, which is the
 ## point: Node spawns it as the desktop's main process and `ct host` do.
 
-import std/[json, strutils]
+import std/[hashes, json, strutils]
 when defined(js):
   import std/jsffi
   import ../../../../common/node_os
@@ -42,7 +42,7 @@ when defined(js):
     })(#, #)""".}
   const NimExe = getCurrentCompilerExe()
 else:
-  import std/[os, osproc, times]
+  import std/[os, osproc]
 
 const
   PackageSrcDir* = currentSourcePath.parentDir / "plugin_packages" / "acme-tools"
@@ -56,45 +56,45 @@ proc scratchRoot*(): string =
 const PackageSources = [PackageSrcDir / "acme_tools_plugins.nim",
                         SdkDir / "codetracer_plugin_sdk.nim",
                         RepoRoot / "src/frontend/viewmodel/plugin_host/protocol.nim",
+                        RepoRoot / "src/frontend/viewmodel/plugin_host/plugin_io.nim",
                         RepoRoot / "src/frontend/viewmodel/sync/mirror_session.nim"]
 
-when defined(js):
-  proc newestSourceMs(): float =
-    result = 0
-    for f in PackageSources:
-      result = max(result, jsMtimeMs(cstring(f)))
-else:
-  proc newestSource(): Time =
-    result = fromUnix(0)
-    for f in PackageSources:
-      if fileExists(f):
-        result = max(result, getLastModificationTime(f))
+proc sourceKey(args: seq[string]): string =
+  ## A digest of every source the package is built from plus the arguments.
+  var h: Hash = hash(args.join("\x1f"))
+  for f in PackageSources:
+    h = h !& hash(f)
+    h = h !& hash(if fileExists(f): readFile(f) else: "")
+  toHex(int64(!$h), 16)
 
 proc buildPackageExecutable*(): string =
-  ## The built `acme-tools-plugins`, rebuilt when a source is newer.
+  ## The built `acme-tools-plugins` for the sources as they are NOW.
   let outDir = scratchRoot() / "build"
   createDir(outDir)
-  result = outDir / "acme-tools-plugins"
-  let args = @["c", "--hints:off", "--warnings:off",
-    "--threads:on", "--mm:orc", "-d:release",
-    "--path:" & SdkDir,
-    "--nimcache:" & outDir / "nimcache",
-    "-o:" & result, PackageSrcDir / "acme_tools_plugins.nim"]
+  let base = @["c", "--hints:off", "--warnings:off",
+    "--threads:on", "--mm:orc", "-d:release", "-d:ctPluginSdkTestHooks",
+    "--path:" & SdkDir]
+  let key = sourceKey(base)
+  result = outDir / ("acme-tools-plugins-" & key)
+  if fileExists(result):
+    return
+  let tmp = result & ".building-" & $getCurrentProcessId()
+  let args = base & @["--nimcache:" & outDir / ("nimcache-" & key),
+    "-o:" & tmp, PackageSrcDir / "acme_tools_plugins.nim"]
   when defined(js):
-    if fileExists(result) and jsMtimeMs(cstring(result)) > newestSourceMs():
-      return
     var cargs: seq[cstring]
     for a in args: cargs.add cstring(a)
     let r = jsRun(cstring(NimExe), cargs, cstring(RepoRoot))
     doAssert r["code"].to(int) == 0, "building the acme-tools test package " &
       "failed:\n" & $r["output"].to(cstring)
   else:
-    if fileExists(result) and getLastModificationTime(result) > newestSource():
-      return
     let nim = getCurrentCompilerExe()
     let cmd = quoteShellCommand(@[nim] & args)
     let (output, code) = execCmdEx(cmd, workingDir = RepoRoot)
     doAssert code == 0, "building the acme-tools test package failed:\n" & output
+  # Published under its key only when complete: a parallel suite never
+  # copies a half-written binary.
+  moveFile(tmp, result)
 
 proc installPackage*(root: string; manifest = ""): string =
   ## Install the package under `root` as `acme-tools@1.0.0`; returns the

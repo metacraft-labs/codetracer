@@ -124,7 +124,7 @@ BUILD_SIBLINGS="${SUITE_ROOT}/scripts/build-siblings.sh"
 # Every contract this suite claims to check. A suite that silently runs fewer
 # assertions than it advertises is a suite that stops protecting anything, so
 # the count is asserted at the end and has to be changed deliberately.
-EXPECTED_ASSERTIONS=161
+EXPECTED_ASSERTIONS=162
 
 ASSERTIONS=0
 FAILURES=0
@@ -1654,6 +1654,22 @@ cargo_refuses() { # <desc> <fragment> <checkout>
 printf 'x\n' >"${BASE_A}/stray"
 cargo_refuses "an unknown object in the slot is refused" "unexpected entry" "${CK_CA}"
 rm -f "${BASE_A}/stray"
+
+# THE OTHER DIRECTION: every target directory repro.nim builds into is one the
+# slot accepts on the next build. `plugin_host_engine_target` was added to
+# repro.nim and not here, so the first build-once in a checkout created it and
+# every later one refused its own slot ("unexpected entry").
+slot_names="$(grep -o 'ReproCargoSlot & "/[a-z_]*_target' "${SUITE_ROOT}/repro.nim" | sed 's|.*"/||' | sort -u)"
+for n in ${slot_names}; do mkdir -p "${BASE_A}/${n}"; done
+out="$(RUSTC="${STUB_RUSTC_DIR}/1.89/rustc" bash "${CARGO_LIB}" "${CK_CA}" 2>"${TEST_ROOT}/cargo-err")"
+status=$?
+if [[ ${status} -eq 0 && ${out} == "${BASE_A}" && -n ${slot_names} ]]; then
+	ok "the slot accepts every target directory repro.nim builds into ($(echo ${slot_names}))"
+else
+	bad "the slot accepts every target directory repro.nim builds into" "names: ${slot_names}" \
+		"status: ${status}" "stdout: ${out}" "stderr: $(cat "${TEST_ROOT}/cargo-err")"
+fi
+for n in ${slot_names}; do rmdir "${BASE_A}/${n}"; done
 
 ln -s /tmp "${BASE_A}/db_backend_target"
 cargo_refuses "a target directory that is a link is refused" "not a plain directory" "${CK_CA}"

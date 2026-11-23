@@ -257,6 +257,9 @@ type
     registered*: seq[string]
     lastPingMs: int64
     pingOutstanding: bool
+    bytesAtPing: int
+      ## `link.bytesRead` when the outstanding ping was sent (or when the
+      ## deadline last restarted on received bytes).
     pingSeq: int
     pongs*: int
       ## Pongs received over this instance's life, for the report and the
@@ -518,6 +521,7 @@ proc sendPing(inst: Instance; t: int64) =
   inc inst.pingSeq
   inst.pingOutstanding = true
   inst.lastPingMs = t
+  inst.bytesAtPing = inst.link.bytesRead
   inst.sendTo(%*{"type": "ping", "seq": inst.pingSeq})
 
 proc broadcastState(sup: Supervisor; msg: JsonNode) =
@@ -712,6 +716,10 @@ proc startInstance(sup: Supervisor; inst: Instance) =
   inst.startedMs = sup.now()
   inst.lastPingMs = inst.startedMs
   sup.note("start " & inst.label & " pid " & $inst.link.pid)
+  if inst.link.launchNote.len > 0:
+    # The host's own departure from §11.8 (on Node: no usable `setpriv`, so
+    # no PR_SET_PDEATHSIG). Logged, never a fault: no plugin caused it.
+    sup.note(inst.label & ": " & inst.link.launchNote)
   inst.sendTo(hostHello(sup.version, sup.frontEnd, sup.platform))
 
 proc sendActivate(sup: Supervisor; s: PluginSlot) =
@@ -725,7 +733,19 @@ proc sendActivate(sup: Supervisor; s: PluginSlot) =
   # A fresh activation answers for itself: what it pushes while activating
   # (its layers among them) is not refused for an earlier silence.
   s.clearSuspect()
+  # The declared sets travel with the grants, so the SDK's process and
+  # socket primitives resolve a program, a host or a path against what the
+  # manifest declared (§8.1.1), in the plugin's own process.
+  let g = s.spec.parsed.manifest.grants
+  var hosts = newJArray()
+  for h in g.hosts:
+    hosts.add %*{"host": h.host, "port": h.port}
+  let declared = %*{"executables": g.executables, "hosts": hosts,
+                    "readPaths": g.readPaths, "writePaths": g.writePaths,
+                    "traceEgress": {"acknowledged": g.traceEgress.acknowledged,
+                                    "statement": g.traceEgress.statement}}
   inst.sendTo(%*{"type": "activate", "plugin": s.id, "grants": grants,
+                 "declared": declared,
                  "settings": s.settings, "epoch": sup.epoch.toJson})
   if not sup.publisher.isNil:
     var snap = sup.publisher.snapshot()
@@ -1343,9 +1363,20 @@ proc pollInstance(sup: Supervisor; inst: Instance) =
   inst.link.flushWrites()
   for frame in inst.link.readMessages():
     var msg: JsonNode
-    try:
-      msg = parseJson(frame)
-    except CatchableError:
+    var notJson = false
+    when defined(js):
+      # Node's `JSON.parse` throws a native `SyntaxError`, which is not a
+      # Nim `CatchableError`: only a bare `except` catches it.
+      try:
+        msg = parseJson(frame)
+      except:
+        notJson = true
+    else:
+      try:
+        msg = parseJson(frame)
+      except CatchableError:
+        notJson = true
+    if notJson:
       sup.killForFault(inst, fkProtocol, "", "a frame that is not JSON")
       break
     sup.handleMessage(inst, msg)
@@ -1423,9 +1454,18 @@ proc pollInstance(sup: Supervisor; inst: Instance) =
       else: sup.pingIdleMs
     if inst.pingOutstanding:
       if t - inst.lastPingMs > sup.pongDeadlineMs:
-        sup.killForFault(inst, fkHang, "", "its watchdog did not answer a " &
-                         "ping within " & $sup.pongDeadlineMs & " ms")
-        return
+        if inst.link.bytesRead > inst.bytesAtPing:
+          # STILL DELIVERING, SO ANSWERING. The `pong` can queue behind a
+          # large frame the plugin is writing into a full pipe: at load
+          # 120-165 a healthy plugin was called hung this way. Bytes that
+          # arrived since the ping are progress; the deadline restarts from
+          # them, and a process that then goes silent is still hung.
+          inst.lastPingMs = t
+          inst.bytesAtPing = inst.link.bytesRead
+        else:
+          sup.killForFault(inst, fkHang, "", "its watchdog did not answer a " &
+                           "ping within " & $sup.pongDeadlineMs & " ms")
+          return
     elif t - inst.lastPingMs >= interval:
       inst.sendPing(t)
   inst.link.flushWrites()

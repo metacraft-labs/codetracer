@@ -602,6 +602,8 @@ try {
   $applied = @(Assert-NonInteractiveDebugger)
   Assert-Equal -Expected 0 -Actual $applied.Count `
     -Message "on a clean host the guard reports nothing"
+  Assert-Equal -Expected "None" -Actual ([string]$Host.Runspace.Debugger.DebugMode) `
+    -Message "and the debugger is off either way, so Ctrl+Break and Wait-Debugger cannot open a prompt"
 
 } finally {
   Remove-Item -LiteralPath $scratchRoot -Recurse -Force -ErrorAction SilentlyContinue

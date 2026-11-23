@@ -965,9 +965,39 @@ function rowControl(panel, row) {
   }
 }
 
+// The form controls are the design system's (CTF-P3 step 3d): no native
+// `select` or radio button anywhere in the panel, every checkbox the
+// design system's (`.ct-checkmark`) over its visually hidden input, and a
+// dropdown's value whole where the panel has room for it (wider than the
+// 30rem at which the Changes panel shortens its labels).
+const COMPACT_PANEL_PX = 30 * 16;
+function controlProblems(panel) {
+  const problems = [];
+  for (const e of panel.querySelectorAll("select, input[type=radio]")) {
+    problems.push(`a native ${e.tagName.toLowerCase()}${e.type === "radio" ? " radio" : ""}`);
+  }
+  for (const e of panel.querySelectorAll("input[type=checkbox]")) {
+    if (!e.classList.contains("ct-checkmark-input") ||
+        !e.nextElementSibling?.classList.contains("ct-checkmark")) {
+      problems.push(`a native checkbox (${e.className || "no class"})`);
+    }
+  }
+  const roomy = panel.getBoundingClientRect().width > COMPACT_PANEL_PX;
+  for (const v of panel.querySelectorAll(".ah-dropdown-value")) {
+    if (v.textContent.endsWith("\u2026")) problems.push(`a dropdown reads "${v.textContent}"`);
+    // A value cut to nothing (its box collapsed to no width) is cut too;
+    // only a dropdown that is not drawn at all is left out.
+    if (roomy && shownEl(v.closest(".ah-dropdown")) && v.scrollWidth > v.clientWidth + 1) {
+      problems.push(`the dropdown value "${v.textContent}" is cut where the panel has room`);
+    }
+  }
+  return problems;
+}
+
 // A Changes or Inbox story: its panel drawn in its declared state, its rows
-// cardless (with the control, wherever a row is drawn), and, where `rows`
-// says the story is for its rows, at least one drawn. Returns the panel.
+// cardless (with the control, wherever a row is drawn), its form controls
+// the design system's, and, where `rows` says the story is for its rows,
+// at least one drawn. Returns the panel.
 async function changesInboxChecks(canvasElement, selector, { rows = false } = {}) {
   const panel = await waitFor(canvasElement, selector);
   await tick();
@@ -976,7 +1006,103 @@ async function changesInboxChecks(canvasElement, selector, { rows = false } = {}
   expect(rowProblems(panel)).toEqual([]);
   const row = panel.querySelector(".ah-inbox-row, .ah-spec-card") ?? drawn[0];
   if (row) rowControl(panel, row);
+  expect(controlProblems(panel)).toEqual([]);
   return panel;
+}
+
+// A visible element: laid out with an area, not hidden by its own display.
+const shownEl = (e) => !!e && e.getBoundingClientRect().width > 0 &&
+  getComputedStyle(e).display !== "none";
+
+// The Code tab's marks (step 3d): each short mark (`C`, `U`, `C+U`,
+// `key`) with its tooltip, and the legend over the files saying what they
+// stand for.
+function codeMarkProblems(panel) {
+  const problems = [];
+  const marks = [...panel.querySelectorAll(".ah-origin-mark, .ah-key-mark, .ah-binary-mark")];
+  if (marks.length === 0) return problems;
+  for (const m of marks) {
+    if (!(m.getAttribute("title") ?? "").trim()) problems.push(`the mark "${m.textContent}" has no tooltip`);
+  }
+  const legend = panel.querySelector(".ah-code-legend");
+  if (!shownEl(legend)) problems.push("no legend saying what the marks stand for");
+  else if (!/^C committed/.test(legend.textContent)) problems.push(`the legend reads "${legend.textContent}"`);
+  return problems;
+}
+
+// The inbox's hint (step 3d): while items wait and none is on screen (no
+// row selected and no item's page: an item answered elsewhere keeps its
+// page though its row has gone), the page's place says how to put one
+// there; otherwise no hint. That nothing is opened to fill the place is
+// the viewmodel's rule, held by `test_inbox_vm`.
+function inboxHintProblems(panel) {
+  const rows = panel.querySelectorAll(".ah-inbox-row");
+  const onScreen = panel.querySelector(".ah-inbox-row-current, .ah-item-page");
+  const hint = panel.querySelector(".ah-inbox-hint");
+  if (rows.length === 0) return hint ? ["a hint with nothing waiting"] : [];
+  if (onScreen) return hint ? ["a hint beside the item on screen"] : [];
+  const problems = [];
+  if (!shownEl(hint)) problems.push("no hint while items wait and none is on screen");
+  else if (!/^Select an item/.test(hint.textContent)) problems.push(`the hint reads "${hint.textContent}"`);
+  return problems;
+}
+
+// An item's page (step 3d): a queued approval's command on a line of its
+// own in code (Space Mono), its purpose apart; and, on a pane wider than
+// the reading measure, every part kept to it and centred.
+const READING_PX = 48 * 16;
+function itemPageProblems(panel) {
+  const problems = [];
+  for (const a of panel.querySelectorAll(".ah-item-approval")) {
+    const subject = a.querySelector(".ah-item-approval-subject");
+    if (!subject) { problems.push("an approval with no command line"); continue; }
+    if (/ in order to/.test(subject.textContent)) problems.push(`the command runs on into its purpose: "${subject.textContent}"`);
+    if (!/Space ?Mono/i.test(getComputedStyle(subject).fontFamily)) problems.push("the command is not in code style");
+    const purpose = a.querySelector(".ah-item-approval-purpose");
+    if (purpose && /Space ?Mono/i.test(getComputedStyle(purpose).fontFamily)) problems.push("the purpose is set as code");
+  }
+  for (const page of panel.querySelectorAll(".ah-item-page")) {
+    const pr = page.getBoundingClientRect();
+    if (pr.width <= READING_PX + 16) continue;
+    for (const part of page.children) {
+      const r = part.getBoundingClientRect();
+      if (r.width === 0) continue;
+      if (r.width > READING_PX + 0.5) problems.push(`a page part ${r.width}px wide, past the reading measure`);
+      const left = r.left - pr.left, right = pr.right - r.right;
+      if (Math.abs(left - right) > 2) problems.push(`a page part not centred (${left}px left, ${right}px right)`);
+    }
+  }
+  return problems;
+}
+
+// Keys, as a reader presses them on the panel (the StoryBook mounts' key
+// listener, `stories/dom_changes_inbox_keys.nim`): a keydown that bubbles
+// from `target`; answers whether the listener took it (ran an operation).
+async function pressKey(target, key, code = key) {
+  const ev = new KeyboardEvent("keydown", { key, code, bubbles: true, cancelable: true });
+  target.dispatchEvent(ev);
+  await tick();
+  return ev.defaultPrevented;
+}
+const twoFrames = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+// The scrolling region `el` lies in: its nearest ancestor that scrolls and
+// holds more than it shows (null for none).
+function scrollerOf(el) {
+  let p = el?.parentElement;
+  while (p && !(p.scrollHeight > p.clientHeight && /(auto|scroll)/.test(getComputedStyle(p).overflowY))) {
+    p = p.parentElement;
+  }
+  return p ?? null;
+}
+
+// Whether `el` lies in its scrolling region's window: its top shown, and
+// all of it when it fits.
+function inRegionView(el) {
+  const p = scrollerOf(el);
+  if (!p) return true;
+  const er = el.getBoundingClientRect(), pr = p.getBoundingClientRect();
+  return er.top >= pr.top - 1 && Math.min(er.bottom, er.top + pr.height) <= pr.bottom + 1;
 }
 
 // The inbox's Previous / Next group: its position is the viewmodel's
@@ -1671,7 +1797,81 @@ export const plays = {
   // The Changes panel (CTF-P3): every story's rows cardless; a story of its
   // spec cards draws at least one.
   "agent-harbor-changes": async ({ canvasElement }) => {
-    await changesInboxChecks(canvasElement, changesPanel);
+    const panel = await changesInboxChecks(canvasElement, changesPanel);
+    expect(codeMarkProblems(panel)).toEqual([]);
+  },
+  // The Changes panel's keys, pressed (step 3d; the listener had no test):
+  // Down and Up move the keyboard's card, Enter closes and opens it, Right
+  // and Left step the tabs. Each press is answered by its inverse, so the
+  // story ends as it began (the captures shoot it as the play leaves it).
+  "agent-harbor-changes-keys": async (context) => {
+    await plays["agent-harbor-changes-cards"](context);
+    const panel = context.canvasElement.querySelector(changesPanel);
+    const focused = () => panel.querySelector(".ah-card-focused")?.getAttribute("data-ah-card") ?? "";
+    const openCards = () => [...panel.querySelectorAll(".ah-card-open")].map((c) => c.getAttribute("data-ah-card"));
+    const activeTab = () => panel.querySelector(".ah-changes-tab-active")?.textContent ?? "";
+    const start = { focused: focused(), open: openCards(), tab: activeTab() };
+    expect(start.focused).not.toBe("");
+    expect(await pressKey(panel, "ArrowDown")).toBe(true);
+    expect(focused()).not.toBe(start.focused);
+    expect(await pressKey(panel, "ArrowUp")).toBe(true);
+    expect(focused()).toBe(start.focused);
+    expect(await pressKey(panel, "Enter")).toBe(true);
+    expect(openCards()).not.toEqual(start.open);
+    expect(await pressKey(panel, "Enter")).toBe(true);
+    expect(openCards()).toEqual(start.open);
+    expect(await pressKey(panel, "ArrowRight")).toBe(true);
+    expect(activeTab()).not.toBe(start.tab);
+    expect(await pressKey(panel, "ArrowLeft")).toBe(true);
+    expect(activeTab()).toBe(start.tab);
+    // A tab step leaves the keyboard on no card; Down twice puts it back on
+    // the second, as the story's constructor did.
+    await pressKey(panel, "ArrowDown");
+    await pressKey(panel, "ArrowDown");
+    expect({ focused: focused(), open: openCards(), tab: activeTab() }).toEqual(start);
+  },
+  // Far down 300 files (step 3d): the first frame shows the keyboard's
+  // file, its list scrolled to it. (No key is pressed here: at the sidebar
+  // width each redraw of the 300 rows takes tens of seconds on this tree;
+  // the listener's keeping in view after a key is pressed on the long
+  // inbox, below.)
+  "agent-harbor-changes-keys-scroll": async (context) => {
+    await plays["agent-harbor-changes"](context);
+    await twoFrames();
+    const panel = context.canvasElement.querySelector(changesPanel);
+    const file = panel.querySelector(".ah-code-file-focused");
+    expect(file).toBeTruthy();
+    const region = scrollerOf(file);
+    expect(region).toBeTruthy();
+    expect(region.scrollTop).toBeGreaterThan(0);
+    expect(inRegionView(file)).toBe(true);
+  },
+  // Far down the forty items (step 3d): the first frame shows the item on
+  // screen, its rows scrolled to it; after `]` (the top of the inbox) and
+  // `[` (back to it) the listener keeps each in view. The story ends as it
+  // began: the same item, the rows scrolled back as they were.
+  "agent-harbor-inbox-keys-scroll": async (context) => {
+    await plays["agent-harbor-inbox-rows"](context);
+    await twoFrames();
+    const panel = context.canvasElement.querySelector(inboxPanel);
+    const current = () => panel.querySelector(".ah-inbox-row-current");
+    const at = current()?.getAttribute("data-ah-item");
+    expect(at).toBeTruthy();
+    const region = scrollerOf(current());
+    expect(region).toBeTruthy();
+    const top = region.scrollTop;
+    expect(top).toBeGreaterThan(0);
+    expect(inRegionView(current())).toBe(true);
+    try {
+      expect(await pressKey(panel, "]", "BracketRight")).toBe(true);
+      expect(current()?.getAttribute("data-ah-item")).not.toBe(at);
+      expect(inRegionView(current())).toBe(true);
+      expect(await pressKey(panel, "[", "BracketLeft")).toBe(true);
+      expect(current()?.getAttribute("data-ah-item")).toBe(at);
+      expect(inRegionView(current())).toBe(true);
+    } finally {
+      region.scrollTop = top;
+    }
   },
   "agent-harbor-changes-cards": async ({ canvasElement }) => {
     const panel = await changesInboxChecks(canvasElement, changesPanel, { rows: true });
@@ -1686,14 +1886,30 @@ export const plays = {
     const panel = await changesInboxChecks(canvasElement, inboxPanel, { rows: true });
     expect(panel.querySelectorAll(".ah-inbox-row").length).toBeGreaterThan(0);
     expect(panel.querySelectorAll(".ah-inbox-row-current").length).toBeLessThanOrEqual(1);
+    expect(inboxHintProblems(panel)).toEqual([]);
+    expect(itemPageProblems(panel)).toEqual([]);
   },
   // Mid-walk (`prev-next`): `3 of 5` with both steps enabled, the row on
   // screen selected; the first step of a walk (`1 of 5`) cannot go back;
   // the last of the order (`5 of 5`), reached by going back from the top
   // to the only item visited, cannot go back either and still goes on while
   // items wait.
+  // Mid-walk, the keys are pressed too (step 3d; the listener had no
+  // test): `]` steps to the top of the inbox and `[` back to the item it
+  // left, so the story ends as it began; `]` typed in the page's text field
+  // is the field's, never Next.
   "agent-harbor-inbox-prev-next": async ({ canvasElement }) => {
     const panel = await changesInboxChecks(canvasElement, inboxPanel, { rows: true });
+    stepperIs(panel, "3 of 5", { prev: true, next: true });
+    const position = () => panel.querySelector(".ah-inbox-stepper")?.getAttribute("data-ah-position");
+    expect(await pressKey(panel, "]", "BracketRight")).toBe(true);
+    expect(position()).not.toBe("3 of 5");
+    expect(await pressKey(panel, "[", "BracketLeft")).toBe(true);
+    stepperIs(panel, "3 of 5", { prev: true, next: true });
+    const field = panel.querySelector(".ah-item-page textarea, .ah-item-page input[type=password]");
+    expect(field).toBeTruthy();
+    expect(await pressKey(field, "]", "BracketRight")).toBe(false);
+    expect(await pressKey(field, "1", "Digit1")).toBe(false);
     stepperIs(panel, "3 of 5", { prev: true, next: true });
   },
   "agent-harbor-inbox-prev-next-first": async ({ canvasElement }) => {
@@ -1716,6 +1932,54 @@ export const plays = {
   "agent-harbor-inbox-item": async ({ canvasElement }) => {
     const panel = await changesInboxChecks(canvasElement, inboxItemPanel);
     expect(panel.querySelectorAll(".ah-item-page, .ah-item-head").length).toBeGreaterThan(0);
+    expect(itemPageProblems(panel)).toEqual([]);
+  },
+  // A single choice and the priority dropdown, pressed: their presses are
+  // routed (each element carries its operation, `data-ct-operation`, and
+  // the page's one pointer listener runs the procedure bound to it), so a
+  // press that reached no procedure leaves the drawing as it was. The
+  // trigger opens its menu of design-system rows and closes it again; a
+  // toggle chooses its option and the first one is chosen back. The story
+  // ends as it began (the captures shoot it as the play leaves it).
+  "agent-harbor-inbox-item-presses": async (context) => {
+    await plays["agent-harbor-inbox-item"](context);
+    const panel = context.canvasElement.querySelector(inboxItemPanel);
+    const trigger = panel.querySelector(".ah-item-head .ah-dropdown-trigger");
+    expect(trigger).toBeTruthy();
+    expect(trigger.getAttribute("data-ct-operation")).toBe("dropdown.toggle");
+    const rows = () => [...panel.querySelectorAll(".ah-item-head .ah-dropdown-item")];
+    expect(rows().length).toBe(0);
+    trigger.click();
+    await twoFrames();
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(rows().length).toBe(4);
+    for (const row of rows()) {
+      expect(row.classList.contains("ct-menu-item")).toBe(true);
+      expect(row.getAttribute("data-ct-operation")).toBe("dropdown.choose");
+    }
+    trigger.click();
+    await twoFrames();
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(rows().length).toBe(0);
+    const toggles = () => [...panel.querySelectorAll(".ah-choices-single .ah-choice")];
+    const chosen = () => toggles().filter((t) => t.getAttribute("aria-checked") === "true")
+      .map((t) => t.getAttribute("data-ah-choice"));
+    expect(toggles().length).toBeGreaterThan(1);
+    for (const t of toggles()) expect(t.getAttribute("data-ct-operation")).toBe("inbox.choose-option");
+    const before = chosen();
+    const first = toggles()[0].getAttribute("data-ah-choice");
+    const other = toggles().find((t) => !before.includes(t.getAttribute("data-ah-choice")) &&
+                                       t.getAttribute("data-ah-choice") !== first);
+    expect(other).toBeTruthy();
+    const otherId = other.getAttribute("data-ah-choice");
+    other.click();
+    await twoFrames();
+    expect(chosen()).toEqual([otherId]);
+    // Back as the story began: its constructor's choice, or none.
+    const back = before.length > 0 ? before[0] : otherId;
+    panel.querySelector(`.ah-choices-single .ah-choice[data-ah-choice="${back}"]`).click();
+    await twoFrames();
+    expect(chosen()).toEqual(before);
   },
   // The inbox's playback: the playback bar's check, then the inbox's own.
   "agent-harbor-inbox-playback": async (context) => {

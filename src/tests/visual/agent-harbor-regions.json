@@ -107,7 +107,10 @@
     "rows and the Previous / Next group are compared in pixels too (`px`): a",
     "row a few pixels taller than the web's drifts the whole list. The item's",
     "head counts only inside its page (`within`): GPUI tags the session activity",
-    "timeline's lines with `data-ah-item-kind` too.",
+    "timeline's lines with `data-ah-item-kind` too. The page head's priority",
+    "dropdown (`priority-menu`) is compared in pixels across (`x`, `w`): it keeps",
+    "the page's inset at every width rather than running to the panel's edge",
+    "(CTF-P3 step 3d).",
     "",
     "The control center (CTF-P2c step 4) adds its two columns (`cc-launch`,",
     "`cc-overview`; one under the other at the sidebar size), the first waiting",
@@ -915,6 +918,17 @@
       "gpui": {
         "data-ah-recording-ringed": "true"
       }
+    },
+    {
+      "name": "priority-menu",
+      "web": ".ah-item-page .ah-priority-select",
+      "gpui": {
+        "data-ah-priority-menu": ""
+      },
+      "px": [
+        "x",
+        "w"
+      ]
     },
     {
       "name": "pie-first",

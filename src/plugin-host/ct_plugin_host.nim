@@ -208,7 +208,13 @@ proc onFatalSignal(sig: cint) {.noconv.} =
   if s >= 0 and slots[s].busyLen > 0:
     discard posix.write(2, slots[s].busyName[0].addr, slots[s].busyLen)
   discard posix.write(2, "\n".cstring, 1)
-  discard signal(sig, SIG_DFL)
+  # Back to the default action, then re-raised so the process ends by the
+  # signal. sigaction rather than signal(): posix.signal's return type differs
+  # between Nim versions, and `discard` of a void call does not compile.
+  var dfl: Sigaction
+  dfl.sa_handler = SIG_DFL
+  discard sigemptyset(dfl.sa_mask)
+  discard sigaction(sig, dfl, nil)
   discard posix.raise(sig)
 
 proc installCrashRecord() =

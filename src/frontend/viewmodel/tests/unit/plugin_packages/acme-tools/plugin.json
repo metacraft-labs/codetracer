@@ -98,6 +98,9 @@
       "capabilities": [
         "process"
       ],
+      "executables": [
+        "sh"
+      ],
       "traceEgress": {
         "acknowledged": true,
         "statement": "a native plugin process runs with your authority; this one keeps what it reads on this machine"

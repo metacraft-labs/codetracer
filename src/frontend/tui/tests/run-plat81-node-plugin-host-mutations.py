@@ -45,13 +45,13 @@ ARMS = [
      [(NODE, "segfault")],
      "§11.6.1: Node's signal name is not read back; a segfault is not SIGSEGV"),
     ("J2", [(LINK, "      p.writeBlocked = true", "      discard"),
-            (LINK, "    p.outQueue.len + jsWritableLength(jsField(p.child, \"stdin\"))",
+            (LINK, "    p.outQueue.len + jsWritableLength(p.toChild)",
              "    p.outQueue.len")],
      [(NODE, "write-queue")],
      "§11.7.1: the write queue hands every byte to Node; a child that stops "
      "reading is never noticed"),
-    ("J3", [(LINK, "      var opts = { detached: true, stdio: ['pipe', 'pipe', 'pipe'], env: env };",
-             "      var opts = { detached: false, stdio: ['pipe', 'pipe', 'pipe'], env: env };")],
+    ("J3", [(LINK, "      var opts = { detached: true, env: env,",
+             "      var opts = { detached: false, env: env,")],
      [(NODE, "stop")],
      "§11.8: the child shares the main process's group; the stop sequence's "
      "signals to the group reach nothing"),
@@ -59,7 +59,7 @@ ARMS = [
      [(NODE, "main-ends")],
      "§11.8: no exit guard; a stuck plugin outlives a main process that is "
      "terminated"),
-    ("J5", [(LINK, "    if usesPdeathHelper():", "    if false:")],
+    ("J5", [(LINK, "    if helped:", "    if false:")],
      [(NODE, "main-ends")],
      "§11.8: setpriv is not used; a stuck plugin outlives a SIGKILLed main "
      "process"),
@@ -81,6 +81,26 @@ ARMS = [
      [(NODE, "segfault")],
      "§11.6.1: Node's stderr is not kept; the SDK's crash record is never "
      "read and a segfault is unattributed"),
+    ("J9", [(LINK, "    if probeFailure.len > 0:", "    if false:")],
+     [(NODE, "setpriv-probe")],
+     "§11.8: a setpriv that cannot run here is used anyway; every plugin "
+     "exits 1 before its hello and is struck for the host's fault"),
+    ("J10", [(LINK, "    for fd in [1, 2]:", "    for fd in [2]:")],
+     [(NODE, "echo")],
+     "§11.4.1: the child's stdout is not read into the plugin log; what a "
+     "plugin echoes is lost"),
+    ("J11", [(LINK, "      discard jsWrite(p.pingTo, toBytes(p.livenessQueue))",
+              "      discard")],
+     [(NODE, "hang")],
+     "§11.6.2: pings are never written to the liveness descriptor; no pong "
+     "names the busy plugin"),
+    ("J12", [(LINK, "        link.bytesRead += s.len\n"
+                    "        link.reader.feed(s))",
+              "        link.bytesRead += s.len\n"
+              "        discard)")],
+     [(NODE, "protocol")],
+     "§11.4.1: descriptor 4 is not read; a frame of garbage on it is never "
+     "judged"),
 ]
 
 

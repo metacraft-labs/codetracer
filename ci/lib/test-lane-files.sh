@@ -192,6 +192,36 @@ _tlf_js_only_suites() {
 	return 0
 }
 
+# _TLF_VM_UNIT_JS_NOT_SHIPPED — the `vm-unit` suites whose subject is compiled
+# into NO bundle that ships under `nim js`, so `vm-unit-js` does not run them.
+#
+# The panes' ViewModels run in the WebAssembly core, and what still ships
+# under `nim js` is the renderer's shell (`ui_js.nim`, desktop and web, with
+# the wasm panes), the main process and `ct host` (`index.nim`), the
+# subwindow, the VS Code host and panel, and BlockTracer's Embed SDK bundle
+# (`codetracer_embed.nim`). The JS lane tests that, and nothing else: a suite
+# whose project imports reach none of those bundles' modules runs on
+# `vm-unit` and `vm-unit-wasm` only. `ci/test/vm-unit-js-ships-under-nim-js.sh`
+# builds the bundles' module graphs and holds this list against them in both
+# directions — a suite listed here whose subject a bundle now compiles, and a
+# suite in the lane whose subject none compiles, both fail it.
+#
+# The shell still compiles almost the whole ViewModel tree (the panes' too),
+# which is why the list is short; see that script for the counts.
+#
+#   agent-harbor views (fleet, pie, session tabs, results): the GPUI and TUI
+#       front-ends draw them; no `nim js` bundle imports them.
+#   `codetracer_ui_components` (the editor gutter lanes) and the TUI
+#       vocabulary generator: native front-ends only.
+_TLF_VM_UNIT_JS_NOT_SHIPPED=(
+	'/test_agent_harbor_fleet_activity_error\.nim$'
+	'/test_agent_harbor_pie\.nim$'
+	'/test_agent_harbor_session_list_view\.nim$'
+	'/test_ctf_p2c_results_followups\.nim$'
+	'/test_editor_gutter_lanes\.nim$'
+	'/test_editor_vocabulary_laws\.nim$'
+)
+
 # _tlf_vm_unit_candidates — the ViewModel unit suites that belong to neither
 # the recorder-gated lane nor the collab lane, on EITHER backend. `vm-unit` is
 # this minus the JS-only suites, and `vm-unit-js` adds those JS-only suites
@@ -1755,7 +1785,12 @@ test_lane_files() {
 				'/test_view_census\.nim$' \
 				'/test_vcs_working_tree\.nim$' \
 				'/test_vcs_content_id\.nim$' \
-				'/test_native_file_tree_operations\.nim$'
+				'/test_native_file_tree_operations\.nim$' |
+			_tlf_reject "${_TLF_VM_UNIT_JS_NOT_SHIPPED[@]}"
+		# The second rejection is a different kind of reason from the first:
+		# those suites compile here, but their subject ships in no `nim js`
+		# bundle (`_TLF_VM_UNIT_JS_NOT_SHIPPED`, above).
+		#
 		# `test_plugin_process_host` (Extensibility-Model.md §11) starts REAL
 		# plugin processes with `fork`/`execve` over `std/posix` pipes — the
 		# native front-ends' plugin supervisor — which this backend has no

@@ -31,10 +31,12 @@ from plat71_mutation_engine import Harness  # noqa: E402
 DOOR = "src/frontend/gpui/host/gpui_plugins.nim"
 SHARED = "src/frontend/tui/host/plugin_processes.nim"
 LEAVES = "src/frontend/gpui/app/leaves.nim"
+CLICKS = "src/frontend/gpui/window_clicks.nim"
+PANES = "src/frontend/tui/host/plugin_panes.nim"
 
 SUITE = "src/frontend/gpui/tests/test_gpui_plugins_host.nim"
 
-SUBJECTS = [DOOR, SHARED, LEAVES]
+SUBJECTS = [DOOR, SHARED, LEAVES, CLICKS, PANES]
 SUITES = [SUITE]
 IN_BINARY = set()
 
@@ -46,6 +48,16 @@ MOVE = S + "a plugin's relayed step arrives as the window's own control"
 LEAF = S + "a contributed leaf draws its plugin's view through the GPUI binding"
 KEYS = S + ("keys: the layer takes Escape, the user's row beats the plugin "
             "pass, the chord recovers")
+HOLDER = S + ("a plugin killed while it holds the keyboard: its layer goes at "
+              "once, the next key is the window's")
+PLACED = S + "Show pane places a plugin's pane as a tab beside the Variables stack"
+VIEWKEY = S + ("a key on a focused plugin pane goes to its view, and the "
+               "plugin answers it")
+MARKS = S + "the editor's plugin decorations and markers, from what the plugins pushed"
+PRESS = S + ("a press on a plugin pane's row activates it, and the plugin "
+             "answers it")
+DRAWN = S + ("the editor draws a plugin's marker in the mark column and its "
+             "decoration after the code")
 
 ARMS = [
     ("G1", [(DOOR, '  if k == "esc": "escape" else: k', "  k")],
@@ -66,7 +78,7 @@ ARMS = [
              "  discard")],
      [(SUITE, KEYS)],
      "§11.7.6: any three keys open the recovery dialog"),
-    ("G5", [(LEAVES, "  r.appendChild(parent, renderGpui(r, view).root)",
+    ("G5", [(LEAVES, "  r.appendChild(body, renderGpui(r, view).root)",
              "  discard renderGpui(r, view)")],
      [(SUITE, LEAF)],
      "a contributed leaf draws its title and not its plugin's view"),
@@ -94,6 +106,54 @@ ARMS = [
               "  if statusNote.len == 0 and not p.isNil:\n    let items = p.statusText")],
      [(SUITE, KEYS)],
      "a note on the footer hides the plugins' status items"),
+    ("G11", [(DOOR, "    if s.isNil or s.breaker != bsOpen: continue",
+              "    if s.isNil: continue")],
+     [(SUITE, HOLDER)],
+     "§11.7.5: a re-enabled plugin still offers its fault's Re-enable"),
+    ("G12", [(DOOR, "    p.consentPaletteEntries(GpuiPluginsTargetPrefix) & p.faultEntries",
+              "    p.consentPaletteEntries(GpuiPluginsTargetPrefix)")],
+     [(SUITE, HOLDER)],
+     "§11.7.5: a stopped plugin's Re-enable, Disable and Show log are not in "
+     "the omnibar"),
+    ("G13", [(DOOR, "      return cmdAddContributedPane(id, title, after = some(builtinRef(a)))",
+              "      return cmdAddContributedPane(id, title)")],
+     [(SUITE, PLACED)],
+     "Show pane docks a plugin's pane into the root row, too narrow to show"),
+    ("G14", [(DOOR, "  if panes.isNil: @[] else: panes.markersFor(document)",
+              "  if panes.isNil: @[] else: panes.decorationsFor(document)")],
+     [(SUITE, MARKS)],
+     "§11.4.4: the editor's gutter markers are read from the decorations"),
+    ("G15", [(LEAVES, "      elif hasGutterMark(pluginMarks):",
+              "      elif false:")],
+     [(SUITE, DRAWN)],
+     "§11.4.4: a plugin's marker is never drawn in the mark column"),
+    ("G16", [(DOOR, "    if d.line == line and d.text.len > 0:",
+              "    if d.text.len > 0:")],
+     [(SUITE, MARKS)],
+     "the footer repeats a plugin's decoration from any line, not the "
+     "execution line"),
+    ("G17", [(LEAVES, '      decorations.add m.glyph & " " & m.text',
+              "      discard")],
+     [(SUITE, DRAWN)],
+     "§11.4.4: a plugin's decoration is never drawn after the code"),
+    ("G18", [(DOOR, "  panes.paneKey(focusedPane, k)", "  false")],
+     [(SUITE, VIEWKEY)],
+     "§11.4.4: a focused plugin pane's keys never reach its view; no "
+     "view-event is sent"),
+    ("G19", [(CLICKS, "    if ctx.startsWith(PluginContextPrefix):",
+              "    if false:")],
+     [(SUITE, PRESS)],
+     "§11.4.4: a plugin pane's rows are never wired; a press on one reports "
+     "nothing"),
+    ("G20", [(DOOR, "  panes.paneClickNode(pane, node, index)", "  false")],
+     [(SUITE, PRESS)],
+     "§11.4.4: a press on a plugin pane's row never reaches its view; no "
+     "view-event is sent"),
+    ("G21", [(PANES, "    if count >= 0 and option >= count: return false",
+              "    discard")],
+     [(SUITE, PRESS)],
+     "a press naming an option past the list's end is sent to the plugin as "
+     "an activation"),
 ]
 
 

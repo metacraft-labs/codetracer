@@ -127,7 +127,7 @@ ct_cargo_entries_ok() {
 		[ -e "${entry}" ] || [ -L "${entry}" ] || continue
 		name="${entry##*/}"
 		[ "${name}" = "${CT_CARGO_MARKER_NAME}" ] && continue
-		if [[ ! ${name} =~ ^(backend_manager|db_backend|virtualization_layers)_target[A-Za-z0-9]*$ ]]; then
+		if [[ ! ${name} =~ ^(backend_manager|db_backend|plugin_host_engine|virtualization_layers)_target[A-Za-z0-9]*$ ]]; then
 			printf 'unexpected entry %s in the Cargo target base' "${entry}"
 			return 1
 		fi

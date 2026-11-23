@@ -3,14 +3,16 @@
   ←  3 waiting  →     Auto-switch: off
  Incomplete: orbit-west could not be read (connection refused)
  this server 1
- ● Migrate the cache schema                                                                                                                                  urgent   warm 3:12  1m
+ ● Migrate the cache sche…   urgent   warm 3:12  1m
    asks for permission
-   Urgent: the migration holds a write lock until you decide.
+   Urgent: the migration holds a write lock until
+   you decide.
  relay-lab 2
- ● Port the route cache                                                                                                                                high, raised   warm 3:00  4m
+ ● Port the route c…   high, raised   warm 3:00  4m
    needs your answer
-   Raised: its model cache is warm for three more minutes.
- ○ Tidy the upload client's logging                                                                                                                                   expiring  21m
+   Raised: its model cache is warm for three
+   more minutes.
+ ○ Tidy the upload client's logging   expiring  21m
    waiting for your next instruction
    Waiting longest of the normal items.
                                                                                                                                                                                     
@@ -25,9 +27,7 @@
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     
-                                                                                                                                                                                    
-                                                                                                                                                                                    
-                                                                                                                                                                                    
+                                                                                            Select an item, or press ] for the one at the top
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     

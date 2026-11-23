@@ -29,7 +29,7 @@
 ## subject keeps its value, and the test waits for the consequence, not for the
 ## clock.
 
-import std/[algorithm, json, os, posix, sequtils, strutils, tables, times, unittest]
+import std/[algorithm, json, net, os, posix, sequtils, strutils, tables, times, unittest]
 
 import isonim/core/[computation, owner, signals]
 
@@ -37,7 +37,7 @@ import codetracer_embed
 import ../../../../common/value_presentation/[presenter, vocabulary as value_vocabulary]
 import backend/mock_backend
 import ../../../../common/plugin_model
-import plugin_host/[host, protocol, supervisor, surface_host]
+import plugin_host/[host, process_link, protocol, supervisor, surface_host]
 import plugin_process_fixture
 
 const Ceiling = 120_000
@@ -331,6 +331,30 @@ suite "§11.6, §11.8: faults are attributed, and siblings survive":
     check f.plugin == "acme-tools.flame"
     check r.sup.slot("acme-tools.metrics").totalStrikes == 0
     check r.sup.waitUntil("metrics back", proc(): bool = r.active("acme-tools.metrics"))
+    r.sup.shutdown()
+
+  test "a pong queued behind a large frame is not a hang":
+    # The frame takes ~2 s to drain, under the frame lock, so the watchdog's
+    # pong waits behind it; the deadline is 300 ms. Bytes arriving are the
+    # plugin answering.
+    var r = newRig("trickle", tune = proc(s: Supervisor) = discard)
+    r.sup.pongDeadlineMs = 300
+    r.sup.pingBusyMs = 50
+    r.sup.pingIdleMs = 50
+    r.both()
+    check r.sup.waitUntil("active", proc(): bool = r.active("acme-tools.flame"))
+    let pids = r.sup.processIds
+    discard r.sup.invoke("acme-tools.flame", "flame.refresh")
+    check r.sup.waitUntil("the whole frame arrived", proc(): bool =
+      r.sup.renderSurface("acme-tools.flame/flame").allText.contains("frame 1999"))
+    check not r.sup.faults.anyIt(it.kind == fkHang)
+    check r.sup.processIds == pids
+    check r.sup.slot("acme-tools.flame").totalStrikes == 0
+    # Silence is still a hang: stopped, it sends nothing, and is restarted.
+    check kill(Pid(pids[0]), SIGSTOP) == 0
+    check r.sup.waitUntil("a stopped process is hung", proc(): bool =
+      r.sup.faults.anyIt(it.kind == fkHang))
+    discard kill(Pid(pids[0]), SIGCONT)
     r.sup.shutdown()
 
   test "a flood is rate limited and becomes a strike; the sibling is unaffected":
@@ -751,3 +775,241 @@ suite "§11.11: the measured transport":
     echo "MEASURE a 1,000-node view tree over a pipe, 50 pushes: p50 ",
          viewSamples[25], " ms, p99 ", viewSamples[^1], " ms"
     r.sup.shutdown()
+
+proc pluginLog(r: Rig): string =
+  ## Everything the package's processes wrote to stdout and stderr: the
+  ## plugin log the supervisor keeps under `logDir`.
+  for f in walkFiles(r.sup.logDir / "*.stderr.log"):
+    result.add readFile(f)
+
+proc answerOf(r: Rig; id: string): JsonNode =
+  for a in r.sup.answers:
+    if a.id == id and a.kind == "answer":
+      return a.payload{"value"}
+
+proc invokeAndWait(r: Rig; plugin, op: string; args: JsonNode): JsonNode =
+  let id = r.sup.invoke(plugin, op, args)
+  doAssert id.len > 0, "invoke " & op & " was not sent"
+  doAssert r.sup.waitUntil(op & " answered", proc(): bool =
+    not r.answerOf(id).isNil), op & " was not answered"
+  r.answerOf(id)
+
+suite "§11.4.1: the protocol is not on the standard streams":
+
+  test "a plugin that writes to stdout does not break the protocol; what it wrote is in its log":
+    var r = newRig("echo")
+    r.both()
+    check r.sup.waitUntil("both active", proc(): bool =
+      r.active("acme-tools.flame") and r.active("acme-tools.metrics"))
+    let pid = r.sup.pidOf("acme-tools.flame")
+    let id = r.sup.invoke("acme-tools.flame", "flame.refresh")
+    check r.sup.waitUntil("done", proc(): bool =
+      r.sup.answers.anyIt(it.id == id and it.kind == "done"))
+    check r.sup.waitUntil("the refreshed pane", proc(): bool =
+      r.sup.renderSurface("acme-tools.flame/flame").allText.contains("echoed"))
+    check r.sup.waitUntil("the echo in the log", proc(): bool =
+      r.pluginLog.contains("flame: refreshing (a line on stdout)"))
+    check r.pluginLog.contains("flame: activating (a line on stdout)")
+    # The bytes shaped like a frame went to the log as well, not the protocol.
+    check r.pluginLog.contains("hello")
+    check r.sup.faults.len == 0
+    check r.sup.pidOf("acme-tools.flame") == pid
+    r.sup.shutdown()
+
+suite "§11.5: timers and async continuations are attributed to their plugin":
+
+  test "a timer that loops forever is attributed by the watchdog":
+    var r = newRig("timer-hang")
+    r.sup.busyHangMs = 1_500
+    r.sup.pingBusyMs = 100
+    r.sup.pingIdleMs = 100
+    r.both()
+    check r.sup.waitUntil("hang fault", proc(): bool =
+      r.sup.faults.anyIt(it.kind == fkHang))
+    let f = r.sup.faults.filterIt(it.kind == fkHang)[0]
+    check f.plugin == "acme-tools.flame"
+    check r.sup.slot("acme-tools.metrics").totalStrikes == 0
+    r.sup.shutdown()
+
+  test "a timer that raises is its plugin's error, and the process keeps running":
+    var r = newRig("timer-raise")
+    r.both()
+    check r.sup.waitUntil("the error", proc(): bool =
+      r.sup.slot("acme-tools.flame").lastFault.contains(
+        "flame's timer could not read its data"))
+    let pid = r.sup.pidOf("acme-tools.flame")
+    r.sup.settle(300)
+    check r.sup.pidOf("acme-tools.flame") == pid
+    check r.active("acme-tools.metrics")
+    check r.sup.slot("acme-tools.metrics").totalStrikes == 0
+    check not r.sup.faults.anyIt(it.kind in {fkCrash, fkHang})
+    r.sup.shutdown()
+
+  test "an async continuation that loops forever is attributed by the watchdog":
+    var r = newRig("async-hang")
+    r.sup.busyHangMs = 1_500
+    r.sup.pingBusyMs = 100
+    r.sup.pingIdleMs = 100
+    r.both()
+    check r.sup.waitUntil("hang fault", proc(): bool =
+      r.sup.faults.anyIt(it.kind == fkHang))
+    let f = r.sup.faults.filterIt(it.kind == fkHang)[0]
+    check f.plugin == "acme-tools.flame"
+    check r.sup.slot("acme-tools.metrics").totalStrikes == 0
+    r.sup.shutdown()
+
+  test "an async continuation that raises is its plugin's error, and the process keeps running":
+    var r = newRig("async-raise")
+    r.both()
+    check r.sup.waitUntil("the error", proc(): bool =
+      r.sup.slot("acme-tools.flame").lastFault.contains(
+        "flame's continuation could not read its data"))
+    let pid = r.sup.pidOf("acme-tools.flame")
+    r.sup.settle(300)
+    check r.sup.pidOf("acme-tools.flame") == pid
+    check r.sup.slot("acme-tools.metrics").totalStrikes == 0
+    check not r.sup.faults.anyIt(it.kind in {fkCrash, fkHang})
+    r.sup.shutdown()
+
+suite "§8.1: a native plugin's process and socket primitives":
+
+  test "a declared program runs to completion; an undeclared one is refused by name":
+    var r = newRig()
+    r.both()
+    check r.sup.waitUntil("active", proc(): bool = r.active("acme-tools.flame"))
+    let ran = r.invokeAndWait("acme-tools.flame", "flame.run",
+      %*{"program": "sh", "args": ["-c", "echo to-stdout; echo to-stderr >&2; exit 4"]})
+    check ran{"startError"}.getStr == ""
+    check ran{"exitCode"}.getInt == 4
+    check ran{"output"}.getStr.contains("to-stdout")
+    check ran{"output"}.getStr.contains("to-stderr")
+    let refused = r.invokeAndWait("acme-tools.flame", "flame.run",
+      %*{"program": "ls", "args": ["/"]})
+    check refused{"startError"}.getStr.contains("declared executable set")
+    check refused{"pid"}.getInt == 0
+    check r.sup.faults.len == 0
+    r.sup.shutdown()
+
+  test "a program past its deadline is killed with its whole process group":
+    var r = newRig()
+    r.both()
+    check r.sup.waitUntil("active", proc(): bool = r.active("acme-tools.flame"))
+    let pidFile = r.dir.parentDir / "grandchild.pid"
+    removeFile(pidFile)
+    let ran = r.invokeAndWait("acme-tools.flame", "flame.run",
+      %*{"program": "sh", "timeoutMs": 500,
+         "args": ["-c", "sleep 600 & echo $! > " & pidFile & "; wait"]})
+    check ran{"timedOut"}.getBool
+    check ran{"pid"}.getInt > 0
+    check fileExists(pidFile)
+    let grandchild = parseInt(readFile(pidFile).strip)
+    check r.sup.waitUntil("the grandchild is gone", proc(): bool =
+      not pidAlive(grandchild))
+    check not pidAlive(ran{"pid"}.getInt)
+    r.sup.shutdown()
+
+  test "a loopback listener and a connection; deactivation closes them and kills what it started":
+    var r = newRig()
+    r.both()
+    check r.sup.waitUntil("active", proc(): bool = r.active("acme-tools.flame"))
+    let listened = r.invokeAndWait("acme-tools.flame", "flame.listen", newJObject())
+    let port = listened{"port"}.getInt(0)
+    check port > 0
+    # The plugin connects to its own listener over real loopback TCP.
+    let echoed = r.invokeAndWait("acme-tools.flame", "flame.connect",
+      %*{"port": port, "text": "hello, plugin"})
+    check echoed{"reply"}.getStr == "HELLO, PLUGIN"
+    # And so does this suite, as an outside peer would.
+    var outside = newSocket()
+    outside.connect("127.0.0.1", Port(port))
+    outside.send(encodeFrame("from outside"))
+    # `recv(size, timeout)` waits for exactly `size` bytes: one whole frame.
+    let got = outside.recv(4 + "FROM OUTSIDE".len, timeout = Ceiling)
+    check got.len >= 4 and got[4 .. ^1] == "FROM OUTSIDE"
+    outside.close()
+    let spawned = r.invokeAndWait("acme-tools.flame", "flame.spawn",
+      %*{"args": ["-c", "sleep 600"]})
+    let child = spawned{"pid"}.getInt(-1)
+    check child > 0 and pidAlive(child)
+    let handles = r.invokeAndWait("acme-tools.flame", "flame.handles", newJObject())
+    check handles{"report"}.getStr.contains("sh (pid " & $child & ")")
+    # Deactivation is what ends them.
+    r.sup.deactivate("acme-tools.flame")
+    check r.sup.waitUntil("inactive", proc(): bool = not r.active("acme-tools.flame"))
+    check r.sup.waitUntil("its child is gone", proc(): bool = not pidAlive(child))
+    check r.sup.waitUntil("its listener is closed", proc(): bool =
+      var s = newSocket()
+      defer: s.close()
+      try:
+        s.connect("127.0.0.1", Port(port))
+        false
+      except OSError:
+        true)
+    check r.active("acme-tools.metrics")
+    r.sup.shutdown()
+
+suite "§11.6.2: liveness has a channel of its own":
+
+  test "a pong never waits behind a frame the plugin is writing (measured)":
+    # The host stops reading the protocol while the plugin's handler writes
+    # more than a pipe holds, so the plugin's main thread is blocked in a
+    # write, holding the frame lock. The pongs must still come, and name
+    # the plugin as busy.
+    let root = scratchRoot() / ("liveness-" & $getpid())
+    removeDir(root)
+    createDir(root)
+    let dir = installPackage(root)
+    let link = spawnPluginProcess(dir / "bin" / "acme-tools-plugins")
+    defer:
+      link.signalGroup(SIGKILL)
+      while not link.pollExit(): os.sleep(2)
+      link.closeAll()
+    proc pump(cond: proc(m: JsonNode): bool): bool =
+      let start = monotonicMs()
+      while monotonicMs() - start < Ceiling:
+        link.flushWrites()
+        for f in link.readMessages():
+          if cond(parseJson(f)): return true
+        os.sleep(2)
+      false
+    check link.send(hostHello("1.0.0", "tui", "linux"))
+    check pump(proc(m: JsonNode): bool = m{"type"}.getStr == "hello")
+    check link.send(%*{"type": "activate", "plugin": "acme-tools.metrics",
+      "grants": ["process"], "settings": {}, "epoch": Epoch(session: "s1").toJson})
+    check pump(proc(m: JsonNode): bool = m{"type"}.getStr == "activated")
+    check link.send(%*{"type": "invoke", "plugin": "acme-tools.metrics",
+      "id": "flood", "op": "metrics.views", "args": {"count": 400}})
+    link.flushWrites()
+    # Wait until the plugin is blocked inside the handler: a pong says so.
+    var latencies: seq[int]
+    var busyNamed = 0
+    for i in 1 .. 40:
+      check link.send(%*{"type": "ping", "seq": i})
+      link.flushWrites()
+      let t0 = monotonicMs()
+      var pong: JsonNode
+      # Five times the host's own deadline: a pong this late is the fault
+      # under test, and waiting longer would only slow the red down.
+      while pong.isNil and monotonicMs() - t0 < 5 * PongDeadlineMs:
+        for f in link.readPongs():
+          let m = parseJson(f)
+          if m{"type"}.getStr == "pong" and m{"seq"}.getInt == i: pong = m
+        if pong.isNil: os.sleep(1)
+      check not pong.isNil
+      if pong.isNil: break
+      latencies.add int(monotonicMs() - t0)
+      if pong{"busy"}.getStr == "acme-tools.metrics": inc busyNamed
+      os.sleep(20)
+    check latencies.len == 40
+    # The protocol was never read during the pings: the plugin was blocked
+    # writing for all of them.
+    check busyNamed >= 30
+    let sortedL = latencies.sorted
+    let p50 = sortedL[sortedL.len div 2]
+    let p99 = sortedL[^1]
+    check p99 < PongDeadlineMs
+    var load = ""
+    try: load = readFile("/proc/loadavg").splitWhitespace()[0]
+    except CatchableError: discard
+    echo "MEASURE pong latency with the protocol pipe full, 40 pings: p50 ", p50,
+         " ms, p99 ", p99, " ms (busy named in ", busyNamed, "), load ", load

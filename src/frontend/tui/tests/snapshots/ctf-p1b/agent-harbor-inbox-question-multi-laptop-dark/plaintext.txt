@@ -1,15 +1,15 @@
  Inbox  ⚲ ✕
- ● NEEDS YOUR ANSWER  Port the route cache                                                                                                                             Priority… ▾
+                                           ● NEEDS YOUR ANSWER  Port the route cache                                          Priority ▾
                                                                                                                                                                                     
- ● Agent is waiting for an answer
+                                           ● Agent is waiting for an answer
                                                                                                                                                                                     
- Which regions should run the migration first?
+                                           Which regions should run the migration first?
                                                                                                                                                                                     
- [ ] eu-west
- [ ] us-east
- [ ] ap-south
+                                           [ ] eu-west
+                                           [ ] us-east
+                                           [ ] ap-south
                                                                                                                                                                                     
-  Submit
+                                            Submit
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     

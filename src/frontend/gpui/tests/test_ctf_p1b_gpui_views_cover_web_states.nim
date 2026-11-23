@@ -762,9 +762,11 @@ proc checkPieStory(view: GpuiElement; fixture: string; mode: DesignMode): seq[st
   ## The progress pie's story against its data (`agent_harbor_pie_stories`):
   ## one band per ground in order, one row per role, one pie per column,
   ## each with its role, its share (`unknown` with no known progress) and
-  ## its words; each drawn in the palette's inks for its ground, which hold
-  ## the pie's floors, measured here with GPUI's own contrast measure
-  ## (`chrome.contrastRatio`) rather than the palette's.
+  ## its words; each drawn as a ring (or, unknown, the ring and a dot) in
+  ## the palette's ink for its ground, which holds the pie's floor, measured
+  ## here with GPUI's own contrast measure (`chrome.contrastRatio`) rather
+  ## than the palette's; and a ring's wedge painted in that same ink with
+  ## the ground as its rest, never a tint.
   let p = ahPalette(mode)
   let bands = pieStoryBands(fixture, mode)
   let drawnBands = view.all("pie-ground").filterIt(it.attr("pie") == "")
@@ -795,16 +797,20 @@ proc checkPieStory(view: GpuiElement; fixture: string; mode: DesignMode): seq[st
         collect(e, "data-ah-pie-dot", dots)
         result.expect("dot at " & at, dots.len, if pie.known: 0 else: 1)
         let inks = p.pieInks(pie.role, band.ground)
-        result.expect("inks at " & at, (e.attr("pie-wedge"), e.attr("pie-rest"),
-                      e.attr("pie-edge"), e.attr("pie-ground")),
-                      (inks.wedge, inks.rest, inks.edge, p.pieGroundColour(band.ground)))
+        result.expect("inks at " & at, (e.attr("pie-wedge"), e.attr("pie-edge"),
+                      e.attr("pie-ground")),
+                      (inks.wedge, inks.edge, p.pieGroundColour(band.ground)))
         let ground = e.attr("pie-ground")
         if contrastRatio(e.attr("pie-wedge"), ground) < PieInkFloor:
           result.add "the wedge at " & at & " is under " & $PieInkFloor & ":1 on its ground"
-        if pie.role != prIdle:
-          let wr = contrastRatio(e.attr("pie-wedge"), e.attr("pie-rest"))
-          if wr < PieWedgeFloor or wr > PieWedgeCeiling:
-            result.add "the wedge at " & at & " is " & $wr & ":1 against the rest"
+        # A ring's wedge is painted in the ring's ink over the ground alone.
+        let painted = e.all("pie-disc")
+        if pie.known:
+          let want = "conic-gradient(" & e.attr("pie-edge") & " 0 " & pie.pieStopPercent &
+            ", " & ground & " " & pie.pieStopPercent & " 100%)"
+          result.expect("wedge paint at " & at, painted.mapIt(it.attr("pie-disc")), @[want])
+        else:
+          result.expect("wedge paint at " & at, painted.len, 0)
 
 proc checkProcessSwitcher(view: GpuiElement; vm: ProcessSwitcherVM): seq[string] =
   ## The multi-process recording's tab against its viewmodel (CTF-P2c step
@@ -874,7 +880,8 @@ proc checkStory(m: AhStoryMount; mode = dmDark): seq[string] =
                inboxStoryContext(m.fixture, StoryHostRequests()))
   of "agent-harbor-inbox-item":
     checkItemPage(view, m.changesInbox.inboxItem,
-                  inboxItemStoryContext(m.fixture, StoryHostRequests()))
+                  inboxItemStoryContext(m.fixture, StoryHostRequests()),
+                  parseInt(view.attr("width-px")))
   else: @["this suite has no comparison for surface " & m.surface]
 
 # ---------------------------------------------------------------------------

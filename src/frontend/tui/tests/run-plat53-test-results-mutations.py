@@ -120,7 +120,7 @@ ARMS = [
     ("V1", [(VM, '  of trsPassed: "✓"', '  of trsPassed: "·"')],
      [(VMU, None)],
      "§8.4: a passed test's mark is not the desktop's ✓"),
-    ("V2", [(VM, '  if row.state == trsNotRun: ""', '  if true: ""')],
+    ("V2", [(VM, '  if row.state in {trsNotRun, trsRunning}: ""', '  if true: ""')],
      [(VMU, None)],
      "§8.4: a test that ran shows no duration"),
     ("V3", [(VM, "  if vm.inFlight.val:\n    RunInProgressText\n  elif vm.runAbsence.val.len > 0:",
