@@ -21,7 +21,7 @@ const
                     ("basic", GlyphProfile(tier: tierBasic)),
                     ("ascii", GlyphProfile(tier: tierAscii))]
     ## The glyph tiers the story shows (`pieGlyph`): the quarters and ◌;
-    ## WGL4's ● and ○; ASCII's `*` and `o`.
+    ## WGL4's ○ ½ ● ?; ASCII's `o + * ?`.
   PieStoryReaderColumns* = [1, 5]
     ## The columns whose words the story spells out: 16 % and unknown.
   PieStoryPieCells* = [17, 20, 24, 28, 34, 41]

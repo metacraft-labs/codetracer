@@ -97,6 +97,7 @@ import ../../agent_harbor/ah_tui_fleet_panel
 import ../../agent_harbor/ah_tui_composer
 import ../../agent_harbor/ah_tui_results
 import ../../agent_harbor/ah_tui_pie
+from ../../app/views/glyph_table import GlyphProfile
 import ../../agent_harbor/ah_tui_session_activity
 import ../../agent_harbor/ah_tui_suggested_actions
 import ../../agent_harbor/[ah_tui_control_center, ah_tui_gaze_mark]
@@ -1027,6 +1028,35 @@ proc checkPieStory(m: AhTuiMount): seq[string] =
         result.expect("ground at " & at, look.bg, ground)
         if contrastRatio(look.fg, ground) < 3.0:
           result.add "the pie at " & at & " is under 3:1 on its ground"
+  # The glyph tiers: the running row in each tier, each pie the tier's glyph
+  # for it, and the four kinds (none, some, all, not known) four glyphs, so
+  # a part-done session never reads as done nor an unknown one as not
+  # started, whatever the terminal's glyphs.
+  let running = pieStoryRows()[1]
+  for t in view.all("pie-tier"):
+    let name = t.attr("pie-tier")
+    var profile: GlyphProfile
+    var found = false
+    for (n, pr) in PieStoryTiers:
+      if n == name: (profile, found) = (pr, true)
+    if not found:
+      result.add "the story draws an unknown glyph tier " & name
+      continue
+    let pies = t.all("pie")
+    result.expect("pies of tier " & name, pies.len, running.pies.len)
+    var byKind: array[PieCellKind, seq[string]]
+    for k, pie in running.pies:
+      if k >= pies.len: break
+      let g = cellsText(m.canvas.grid, pies[k].row, pies[k].col, 1)
+      result.expect("glyph of tier " & name & " at " & PieStoryColumns[k], g,
+                    pie.pieGlyph(profile))
+      if g notin byKind[pie.pieCellKind]: byKind[pie.pieCellKind].add g
+    for a in PieCellKind:
+      for b in PieCellKind:
+        if a < b:
+          for g in byKind[a]:
+            if g in byKind[b]:
+              result.add "tier " & name & " draws " & $a & " and " & $b & " alike: " & g
 
 proc checkStory(m: AhTuiMount): seq[string] =
   let view = m.view
