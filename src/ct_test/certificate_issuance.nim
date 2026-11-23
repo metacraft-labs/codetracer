@@ -891,10 +891,16 @@ proc recordUnitResult(run: var AttestedRun; target: string;
   ## The registry's other providers are not on that list and are not a gap
   ## either, because they never report a finished test at all: ``js-jest`` and
   ## ``js-vitest`` wire ``provider.run`` to ``js_common.unsupportedRun``, and
-  ## ``python-pytest``, ``python-unittest`` and ``nim-unittest`` wire it to
-  ## their own not-implemented stub. All of them return a diagnostic and an
-  ## empty event seq, so this fold sees no
-  ## ``tekTestFinished`` and claims no target for them.
+  ## ``python-pytest`` and ``python-unittest`` wire it to their own
+  ## not-implemented stub. All of them return a diagnostic and an empty event
+  ## seq, so this fold sees no ``tekTestFinished`` and claims no target for
+  ## them. ``nim-unittest`` runs only the tests a built binary lists through
+  ## its tests entry, one per unit by exact name, and reports each from that
+  ## process's exit code (``nim_tests_entry.runThroughEntry``). That is the
+  ## exit-code gap above at the granularity of one test: the tests entry
+  ## exits 0 for a test that called ``skip``, so such a test reads as passed.
+  ## The tests it found only by reading the source are refused before
+  ## dispatch (``contracts.NotRunnableTag``), so they claim nothing.
   ##
   ## **Do not check this with a grep for ``tsSkipped``.** A token search answers
   ## "which files mention it", not "which providers can emit it from ``run``" —

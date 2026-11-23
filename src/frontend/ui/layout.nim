@@ -42,6 +42,8 @@ from ./pane_host_lookup import findPaneHost
 from isonim/web/dom_api import nil
 from ../headless_app/layout_model import sharedDefaultDocked, DockedPane
 from ../headless_app/desktop_panes import PaneContent, paneOfContent
+# Extensibility-Model.md §6.1, §11: an installed plugin's contributed pane.
+from ./plugin_panes import mountPluginPane
 from dom import Element, getAttribute, Node, preventDefault, document,
                 getElementById, querySelectorAll, querySelector
 
@@ -2152,6 +2154,13 @@ proc initLayout*(initialLayout: GoldenLayoutResolvedConfig,
   data.ui.layout = layout
   data.ui.layoutConfig = cast[GoldenLayoutConfigClass](window.toJs.LayoutConfig)
   data.ui.contentItemConfig = cast[GoldenLayoutItemConfigClass](window.toJs.ItemConfig)
+
+  # A CONTRIBUTED PANE (`desktop_panes.PluginPaneComponent`): an installed
+  # plugin's pane, drawn from the tree its plugin pushed. Registered on every
+  # layout, so a saved layout that holds one loads whether or not its plugin
+  # is running now (the pane then says why it is empty).
+  layout.registerComponent(cstring"pluginPaneComponent") do (container: GoldenContainer, state: GoldenItemState):
+    mountPluginPane(container.toJs, state.toJs)
 
   layout.registerComponent(cstring"editorComponent") do (container: GoldenContainer, state: GoldenItemState):
     if state.label.len == 0:

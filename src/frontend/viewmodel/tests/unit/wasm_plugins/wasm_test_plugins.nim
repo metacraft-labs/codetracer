@@ -25,9 +25,12 @@ when ctWasmTestPackage == "wasm-faults":
   spin.onActivate = proc(p: Plugin) =
     p.pushStatus("spin.status", viewText("spin.status", "spin: ready"))
   spin.onInvoke("spin.run", proc(p: Plugin; args: JsonNode; req: Request) =
-    var n {.volatile.} = 0
+    # Unsigned, so it wraps: an `int` is 32 bits on wasm32, and a compiled
+    # engine counts past 2^31 inside a 3 s deadline (an OverflowDefect, not
+    # the overrun this plugin exists to cause; measured on wasmtime).
+    var n {.volatile.}: uint32 = 0
     while true:
-      inc n)
+      n = n + 1)
 
   let hog = sdk.addPlugin("wasm-faults.hog", "1.0.0")
   hog.onActivate = proc(p: Plugin) =

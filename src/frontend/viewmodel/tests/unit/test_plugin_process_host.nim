@@ -648,6 +648,40 @@ suite "§11.7.6: the escape no plugin can capture":
       r.sup.answers.anyIt(it.id == id and it.kind == "done"))
     r.sup.shutdown()
 
+  test "the chord landing while a routine ping is in flight still probes the plugin":
+    # The race the case above leaves to timing, made certain: the process is
+    # stopped so a routine ping is OUTSTANDING when the chord fires (the chord
+    # then sends no probe of its own), and both intervals are widened past the
+    # ceiling. The pong to that pre-chord ping cannot clear the plugin; the
+    # host must ask again (`chordProbeMs`) and that answer does.
+    var r = newRig("slow-ack", manifest = inputManifest(),
+                   tune = proc(s: Supervisor) =
+                     s.pingIdleMs = 50
+                     s.pingBusyMs = 50
+                     s.pongDeadlineMs = 120_000)
+    r.sup.configure("acme-tools.flame", true,
+                    %*{"mode": "slow-ack", "ackDelayMs": 0})
+    r.both()
+    check r.layerUp()
+    let pid = r.sup.pidOf("acme-tools.flame")
+    check pid > 0
+    check kill(Pid(pid), SIGSTOP) == 0
+    # Stopped, it answers nothing: within a few 50 ms intervals a ping is out
+    # and stays out.
+    let t0 = epochTime()
+    discard r.sup.waitUntil("a ping in flight", proc(): bool =
+      epochTime() - t0 > 0.5)
+    r.sup.pingIdleMs = 600_000
+    r.sup.pingBusyMs = 600_000
+    check not r.sup.observeEscape()
+    check not r.sup.observeEscape()
+    check r.sup.observeEscape()
+    check r.sup.slot("acme-tools.flame").suspect
+    check kill(Pid(pid), SIGCONT) == 0
+    check r.sup.waitUntil("answering again", proc(): bool =
+      not r.sup.slot("acme-tools.flame").suspect)
+    r.sup.shutdown()
+
   test "the chord does not launder a missed input deadline: pongs do not clear it":
     # The negative control of the probe above: a plugin that missed an input
     # deadline is suspect on evidence, and its watchdog still answers pings

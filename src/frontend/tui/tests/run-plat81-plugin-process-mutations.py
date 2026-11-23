@@ -97,6 +97,7 @@ RUN = "*::a declared program runs to completion; an undeclared one is refused by
 GROUP = "*::a program past its deadline is killed with its whole process group"
 SWEEP = "*::a loopback listener and a connection; deactivation closes them and kills what it started"
 PONG = "*::a pong never waits behind a frame the plugin is writing (measured)"
+INFLIGHT = "*::the chord landing while a routine ping is in flight still probes the plugin"
 
 ARMS = [
     ("M1", [(SUP, "  if p.kind == pkQuery and not samePosition(e, sup.epoch):",
@@ -199,6 +200,13 @@ ARMS = [
               "  for p in sdk.plugins.values:\n    if true:")],
      [(HOST, T_HANG)],
      "§11.5: timers never run"),
+    ("M30", [(SUP, "      if chordSuspect: min(sup.chordProbeMs, sup.pingBusyMs)\n"
+                   "      elif waiting or inst.busy.len > 0: sup.pingBusyMs",
+              "      if chordSuspect: sup.pingBusyMs\n"
+                   "      elif waiting or inst.busy.len > 0: sup.pingBusyMs")],
+     [(HOST, INFLIGHT)],
+     "§11.7.6: a chord-suspect plugin is asked again only at the liveness "
+     "interval; a healthy one stays not responding while a ping was in flight"),
 ]
 
 

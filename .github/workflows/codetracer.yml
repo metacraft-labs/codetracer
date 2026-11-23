@@ -2508,11 +2508,11 @@ jobs:
 
   viewmodel-tests:
     runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
-    # NO GREEN SAMPLE: 0 success in 42 records. Failures stop at step 15 of 31
-    # with 16 real steps skipped, so the 24.3m worst failure covers under half
-    # the body and is a LOWER bound. 75m is ~3x that; the unmeasured half
-    # includes the recorder-gated tests and a `ct` build.
-    timeout-minutes: 75
+    # MEASURED 2026-11-22/23 (runs 45069526428, 45118976975): the steps that
+    # stay in this job took 56 and 68 minutes (provisioning siblings alone 31
+    # and 27), and the old 75-minute limit then ran out in the steps that are
+    # now `viewmodel-tests-wasm`'s. 90 minutes is 1.3x the slower run.
+    timeout-minutes: 90
     name: ViewModel headless tests (native + JS)
     steps:
       - name: Generate CI token
@@ -2588,28 +2588,9 @@ jobs:
       #
       # Keep new clone steps in this block. A clone added further down is a
       # clone that works only until the job gets slower.
-      - name: Clone codetracer-js-recorder sibling
-        # The recorder-gated ViewModel tests
-        # (src/frontend/viewmodel/tests/unit/test_{column,formatted_view_step,
-        # statement_step}_*_vm.nim) drive the real JS recorder to produce a
-        # column-aware trace and replay it through headless_session.  Without
-        # the sibling on disk they all hit recorder_gate's
-        # ``MISSING-RECORDER SKIP:`` path, so the column-aware / formatted-view
-        # / statement-step coverage silently vanished from CI.  Clone it into
-        # the workspace-sibling layout the tests resolve
-        # (../codetracer-js-recorder/packages/cli/dist/index.js) per
-        # codetracer-specs/Testing/Cross-Repo-CI-Integration.md.
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
-        with:
-          repo: metacraft-labs/codetracer-js-recorder
-          # `dev` is that repo's default branch; `main` trails it (15 commits
-          # behind when this was corrected), so the recorder-gated ViewModel
-          # suites and the `ct record` dispatch tests below were exercising a
-          # stale recorder while reporting green.
-          ref: dev
-          path: ${{ github.workspace }}/../codetracer-js-recorder
-          gh-token: ${{ steps.ci_token.outputs.token }}
-          submodules: 'false'
+      # (`codetracer-js-recorder` is cloned by `viewmodel-tests-wasm`, whose
+      # recorder-gated suites and browser test build and drive it; no step
+      # left in this job uses it.)
 
       - name: Clone runquota sibling
         # The `just build-once` step below compiles `ct`, whose import chain
@@ -3418,6 +3399,152 @@ jobs:
         # its emulator library for the cross-front-end DAP case.
         run: nix develop .#devShells.x86_64-linux.default --command just test-vm-collab-integration
 
+  # THE SECOND HALF OF `viewmodel-tests`, A JOB OF ITS OWN. With every step
+  # in one job the 75-minute limit ran out during the PLAT-17 parity gate in
+  # every run measured (45069526428, 45118976975: 75.3 and 75.4 minutes, 26.7
+  # and 31.0 of them provisioning siblings), so none of the ~25 steps from
+  # here on had a CI result — the wasm lane's gates, the PLAT-18 slices, the
+  # frame renderer and applier, the recorder-gated suites, `ct record`'s CLI
+  # tests and the browser front-end's WebAssembly core on a real recording.
+  # Both jobs repeat the same setup (one token, the clones at the top, the
+  # provisioning) so each stands alone and fits its limit.
+  viewmodel-tests-wasm:
+    runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
+    # The same setup as `viewmodel-tests` (provisioning siblings 27-31 minutes
+    # in the two runs measured) and the steps that never ran there, so no
+    # duration of its own has been measured yet: 120 minutes until one has,
+    # then 1.3x the slowest measured run, as the job above.
+    timeout-minutes: 120
+    name: ViewModel headless tests (WASM, slice, browser)
+    steps:
+      - name: Generate CI token
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Clone codetracer-trace-format-nim sibling
+        # Nine ViewModel suites -- the eight request-panel ones plus
+        # request_span_conformance_test -- ``import codetracer_ctfs/container``
+        # to read a real CTFS container. ``config.nims`` resolves that module
+        # from ``$CODETRACER_TRACE_FORMAT_NIM_SRC`` or from the workspace
+        # sibling ``../codetracer-trace-format-nim/src``, and this job set up
+        # neither, so all nine failed to compile with
+        #
+        #   Error: cannot open file: codetracer_ctfs/container
+        #
+        # in every run (30726348404, 31180327493, 31385899773). They compile
+        # and pass in a normal workspace, which is why the gap survived: the
+        # only environment that lacked the sibling was the one nobody was
+        # reading. Cloned here with ``clone-repo``, the same way this job
+        # already gets ``codetracer-js-recorder``, rather than through
+        # ``setup-dev-env`` -- that route additionally requires a published
+        # workspace lock, which is a separate unresolved problem and
+        # would make this job depend on it for no benefit.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-trace-format-nim
+          # That repo's default branch is `dev` (confirmed against the API);
+          # `main` is not where its work lands.
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-trace-format-nim
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      # THE THREE SIBLING CLONES ABOVE AND BELOW ARE DELIBERATELY ADJACENT.
+      #
+      # A GitHub App installation token expires 60 MINUTES after it is minted.
+      # `Generate CI token` above is this job's ONLY mint -- `ci/test/
+      # sibling-provisioning-test.sh` asserts that "no job mints more than one
+      # installation token", so refreshing it mid-job is not available here --
+      # and this job's `timeout-minutes` is 75. Every authenticated git
+      # operation must therefore happen near the TOP of the job.
+      #
+      # `codetracer-js-recorder` and `runquota` used to be cloned next to the
+      # steps that consume them, ~64 minutes in. In run 34219352454 /
+      # job 102038547352 the token was minted at 12:28:05, the
+      # `codetracer-trace-format-nim` clone at 12:29:32 succeeded, and those
+      # two clones -- reached at 13:32:28 and 13:32:34 -- both died with
+      #
+      #   fatal: could not read Username for 'https://github.com':
+      #   terminal prompts disabled
+      #
+      # taking the four steps that depend on those siblings down with them.
+      # Nothing about the clones changed; the job simply grew past an hour and
+      # started reaching an expiry that had always been there.
+      #
+      # Neither clone has an ordering dependency on anything between here and
+      # where it used to sit: `clone-repo` runs plain git, the recorder gate in
+      # src/frontend/viewmodel/tests/unit/recorder_gate.nim keys on the BUILT
+      # recorder binary rather than on the checkout existing, and
+      # `provision-repro-lock-siblings` only reconciles the five repos named in
+      # repro.lock's `depends`, which include neither of these.
+      #
+      # Keep new clone steps in this block. A clone added further down is a
+      # clone that works only until the job gets slower.
+      - name: Clone codetracer-js-recorder sibling
+        # The recorder-gated ViewModel tests
+        # (src/frontend/viewmodel/tests/unit/test_{column,formatted_view_step,
+        # statement_step}_*_vm.nim) drive the real JS recorder to produce a
+        # column-aware trace and replay it through headless_session.  Without
+        # the sibling on disk they all hit recorder_gate's
+        # ``MISSING-RECORDER SKIP:`` path, so the column-aware / formatted-view
+        # / statement-step coverage silently vanished from CI.  Clone it into
+        # the workspace-sibling layout the tests resolve
+        # (../codetracer-js-recorder/packages/cli/dist/index.js) per
+        # codetracer-specs/Testing/Cross-Repo-CI-Integration.md.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-js-recorder
+          # `dev` is that repo's default branch; `main` trails it (15 commits
+          # behind when this was corrected), so the recorder-gated ViewModel
+          # suites and the `ct record` dispatch tests below were exercising a
+          # stale recorder while reporting green.
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-js-recorder
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Clone runquota sibling
+        # The `just build-once` step below compiles `ct`, whose import chain
+        # (src/ct/codetracer.nim -> ../ct_test/ct_test ->
+        # src/ct_test/process_exec.nim) starts with `import runquota_process`.
+        # The checkout is where those modules resolve from --
+        # `config.nims` points at `../runquota/...` (issue #641).
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/runquota
+          ref: dev
+          path: ${{ github.workspace }}/../runquota
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Provision dependency siblings from repro.lock
+        # The ViewModel suites compile against ``../isonim/src`` et al. via
+        # codetracer's top-level ``config.nims``. After ``Install Nix``, not
+        # before it: the action reaches ``repro`` through this repo's dev
+        # shell, which is also where the suites below run.
+        uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
       # ----------------------------------------------------------------
       # PLAT-17: the THIRD backend.
       #
@@ -3829,6 +3956,7 @@ jobs:
           name: viewmodel-test-logs
           path: test-logs/
           retention-days: 30
+
 
   ct-build:
     # The job is in ct-build.yml: build-once and the windowed shim, once per
@@ -7320,6 +7448,16 @@ jobs:
             # the lock, as for the trace-format pair above.
             codetracer-native-backend=9fcfc0adfd81894bf82fc75efee21146caa1b59d
             codetracer-visual-replay=d1bf6605a818b192ab03b8f7b187858e3d3804d5
+            # nim-entrypoints and reprobuild BY COMMIT, for
+            # src/ct_test/cs_m14_ct_test_collects_through_entry_test.nim: its
+            # fixtures compile against nim-entrypoints' tests entry (`--run-exact`)
+            # and against reprobuild's libs/ct_test_unittest_parallel with the
+            # tests entry (reprobuild 72fc7fb8b or later). Both are the revisions
+            # repro.lock records; reprobuild is also a flake input, so it is cloned
+            # at the rev flake.lock locks (ci/test/sibling-input-branch-test.sh).
+            # Move these lines with the lock.
+            nim-entrypoints=d7edafaa9df1c7ae77d469754a463d4a512ec928
+            reprobuild=2f7cb5db5289fa1e9e060281ebe8c095bf9669e9
 
       - name: Allow direnv in the cloned recorder siblings
         # scripts/build-siblings.sh runs every sibling build as

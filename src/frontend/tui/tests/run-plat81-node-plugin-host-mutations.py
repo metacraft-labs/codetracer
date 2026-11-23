@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Plugins run out of process on the JavaScript backend (Extensibility-Model.md
-§11.2.1, §11.8) — the mutation harness for `process_link.nim`'s Node arm
-(`child_process.spawn`) and the supervisor's JavaScript spellings, as the
-desktop's main process and `ct host` run them.
+§11.2.1, §11.7.1, §11.8) — the mutation harness for `process_link.nim`'s Node
+arm (`child_process.spawn`) and the supervisor's JavaScript spellings (the J
+arms), and for the desktop main process's and `ct host`'s wiring of them
+(`index/plugin_sessions.nim`, `plugin_host/key_snapshot.nim`: the K arms).
 
-Each arm plants ONE defect and must be killed by the section of
-`test_plugin_process_host_node.nim` (vm-unit-js) that asserts it, against REAL
-plugin processes started by Node. The C half is
-`run-plat81-plugin-process-mutations.py`'s; no arm here touches a line the C
+Each arm plants ONE defect and must be killed by the section of the suite that
+asserts it, against REAL plugin processes started by Node:
+`test_plugin_process_host_node.nim` (vm-unit-js) for the link,
+`plugin_sessions_test.nim` (main-process) for the wiring. The C half is
+`run-plat81-plugin-process-mutations.py`'s; no J arm touches a line the C
 backend compiles.
 
 The engine is `plat71_mutation_engine.py` — committed control digests over
@@ -32,11 +34,14 @@ from plat71_mutation_engine import (  # noqa: E402
 
 SUP = "src/frontend/viewmodel/plugin_host/supervisor.nim"
 LINK = "src/frontend/viewmodel/plugin_host/process_link.nim"
+SNAP = "src/frontend/viewmodel/plugin_host/key_snapshot.nim"
+SESS = "src/frontend/index/plugin_sessions.nim"
 
 NODE = "src/frontend/viewmodel/tests/unit/test_plugin_process_host_node.nim"
+WIRING = "src/frontend/tests/plugin_sessions_test.nim"
 
-SUBJECTS = [SUP, LINK]
-SUITES = [NODE]
+SUBJECTS = [SUP, LINK, SNAP, SESS]
+SUITES = [NODE, WIRING]
 IN_BINARY = set()
 
 ARMS = [
@@ -101,6 +106,25 @@ ARMS = [
      [(NODE, "protocol")],
      "§11.4.1: descriptor 4 is not read; a frame of garbage on it is never "
      "judged"),
+    ("K1", [(SNAP, "        if l{\"suspect\"}.getBool(false):", "        if false:")],
+     [(WIRING, "keys")],
+     "§11.7.4: the renderer's snapshot keeps a suspect plugin's layer opaque"),
+    ("K2", [(SESS, "    m.relay(msg{\"vm\"}.getStr(\"\"), msg{\"action\"}.getStr(\"\"),",
+             "    discard (msg{\"vm\"}.getStr(\"\"), msg{\"action\"}.getStr(\"\"),")],
+     [(WIRING, "desktop")],
+     "§11.4: a desktop plugin's relayed step never reaches the renderer's "
+     "session"),
+    ("K3", [(SESS, "    ps.mirror.channel.deliver(msg)", "    discard msg")],
+     [(WIRING, "desktop")],
+     "§11.2.1: the desktop's mirror is never fed; the plugins see no session"),
+    ("K4", [(SESS, "  discard ps.plugins.sup.resolveLayerKey(key, focusedSurface)",
+             "  discard")],
+     [(WIRING, "keys")],
+     "§11.7.4: a key that passed a suspect layer in the renderer is no strike"),
+    ("K5", [(SESS, "  if ps.plugins.sup.observeEscape():", "  if false:")],
+     [(WIRING, "keys")],
+     "§11.7.6: the renderer's Escapes are not observed; the chord never "
+     "recovers input"),
 ]
 
 

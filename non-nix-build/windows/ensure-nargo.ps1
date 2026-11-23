@@ -353,6 +353,23 @@ function Ensure-Nargo {
   if (-not $substDrive) {
     Write-Host "::warning::nargo bootstrap could not map a short drive with subst; building from '$sourceDir', where cl.exe may hit MAX_PATH"
   }
+  # The trace writer's build script puts its nimcache under the temp
+  # directory (%TEMP%\ctnw\...), and Nim hands lib.exe its objects relative
+  # to cargo's OUT_DIR. With the build on the subst drive and %TEMP% on C:,
+  # that relative path crosses drives, which no relative path can, and the
+  # link fails with "LNK1181: cannot open input file
+  # '..\..\..\..\..\..\..\..\Temp\ctnw\...obj'" (windows-nargo run
+  # 45134129306, a cold build). So the build's temp directory moves onto the
+  # subst drive too, for the build only.
+  $savedTemp = $env:TEMP
+  $savedTmp = $env:TMP
+  $buildTemp = $null
+  if ($substDrive) {
+    $buildTemp = "$substDrive\.nargo-build-tmp"
+    New-Item -ItemType Directory -Force -Path $buildTemp | Out-Null
+    $env:TEMP = $buildTemp
+    $env:TMP = $buildTemp
+  }
   Push-Location $buildDir
   try {
     & $rustupExe toolchain install nightly --profile minimal
@@ -365,6 +382,11 @@ function Ensure-Nargo {
     }
   } finally {
     Pop-Location
+    $env:TEMP = $savedTemp
+    $env:TMP = $savedTmp
+    if ($buildTemp) {
+      Remove-Item -LiteralPath $buildTemp -Recurse -Force -ErrorAction SilentlyContinue
+    }
     if ($substDrive) {
       & subst.exe $substDrive /D | Out-Null
     }

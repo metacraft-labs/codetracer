@@ -77,6 +77,12 @@ this table, and W18/W19 grade the two that are load-bearing. **The PROPERTY is h
 CASES, which measure cost per instruction and per call and do not care which mechanism
 delivers it** — which is why deleting the redundant mechanism costs no coverage.
 
+RE-MEASURED 2026-11-23 on the repo's nim 2.3.1 fork (ORC): removing W19's cursor costs about 6x
+(34 ms vs 191-279 ms at a callee body of 8,000), not the ~300x quoted below for 2.2.x. The
+call case's old budget (short*10 + 200 ms) was looser than that and W19 SURVIVED; the case now
+budgets short*3 + 40 ms for calls (project_trust_test.nim, CallSlowdownTolerance), which kills it.
+The millisecond figures below are the historical 2.2.x ones.
+
 AND THE MEMORY MANAGER IS AN INPUT TO EVERY TIMING ABOVE. W18, W19 and W20 are about
 `let x = someSeq`, which is a COPY under ORC and a REFCOUNT BUMP under refc — so every
 millisecond in this file is an ORC number, and that is not incidental: this harness runs
@@ -332,8 +338,13 @@ MUTATIONS: list[Mutation] = [
     # -- F2, 2026-09-13: the reader's own §5a --------------------------------
     Mutation(
         "V8", TIER,
-        "  if not dirExists(resolvedRoot):",
-        "  if false:",
+        # Re-aimed 2026-11-23: 87c865c8f added a second `dirExists(resolvedRoot)`
+        # (the verified reader); this arm is about the SCAN, so the next line
+        # (`scan.problems.add`) picks the scan's.
+        "  if not dirExists(resolvedRoot):\n"
+        "    scan.problems.add ExecutableTierProblem(",
+        "  if false:\n"
+        "    scan.problems.add ExecutableTierProblem(",
         C_NOTACHECKOUT, NIM_CLI,
         "Check failed: describeScan(absent).contains(\"is not a directory this machine can\")",
         "THE READER GOES BACK TO SILENCE. `readExecutableDefinition` returned "
@@ -347,9 +358,11 @@ MUTATIONS: list[Mutation] = [
         "scan gives rather than any status: nothing else in this suite "
         "produces that sentence",
         control_name="the root's directory-ness is read into a named binding",
-        control_find="  if not dirExists(resolvedRoot):",
+        control_find="  if not dirExists(resolvedRoot):\n"
+                     "    scan.problems.add ExecutableTierProblem(",
         control_replace="  let rootIsDir = dirExists(resolvedRoot)\n"
-                        "  if not rootIsDir:",
+                        "  if not rootIsDir:\n"
+                        "    scan.problems.add ExecutableTierProblem(",
     ),
     Mutation(
         "D2", TIER,
@@ -366,16 +379,22 @@ MUTATIONS: list[Mutation] = [
     ),
     Mutation(
         "D3", TIER,
-        "  if size > MaxWasmBytes:",
-        "  if false:",
+        # Re-aimed 2026-11-23: 87c865c8f added a second `size > MaxWasmBytes`
+        # (the verified reader); the scan's is the one the `because` is about.
+        "  if size > MaxWasmBytes:\n"
+        "    scan.problems.add ExecutableTierProblem(file: reported,",
+        "  if false:\n"
+        "    scan.problems.add ExecutableTierProblem(file: reported,",
         C_OVERSIZE, NIM_CLI,
         'Check failed: describeScan(scan).contains("costs a stat rather than a read")',
         "an oversized module is read into memory before anything refuses it — "
         "a denial of service with a polite error message, from a file a "
         "repository ships",
         control_name="the size bound is written as an inequality the other way round",
-        control_find="  if size > MaxWasmBytes:",
-        control_replace="  if not (size <= MaxWasmBytes):",
+        control_find="  if size > MaxWasmBytes:\n"
+                     "    scan.problems.add ExecutableTierProblem(file: reported,",
+        control_replace="  if not (size <= MaxWasmBytes):\n"
+                        "    scan.problems.add ExecutableTierProblem(file: reported,",
     ),
     Mutation(
         "D4", TIER,
@@ -766,15 +785,17 @@ MUTATIONS: list[Mutation] = [
     ),
     Mutation(
         "W7", WASM,
-        "      if id <= lastSection:",
+        # Re-aimed 2026-11-23: 80e18c986 compares by RANK (the data-count
+        # section, id 12, sits between ids 9 and 10), not by id.
+        "      if rank <= lastSection:",
         "      if false:",
         P_HOSTILE, NIM_PURE, "wanted wpcSectionOutOfOrder, got a DECODED module",
         "sections may repeat and may arrive in any order, so a module can carry "
         "two code sections and a producer and this decoder disagree about which "
         "one is the module",
         control_name="the section order is tested the other way round",
-        control_find="      if id <= lastSection:",
-        control_replace="      if not (id > lastSection):",
+        control_find="      if rank <= lastSection:",
+        control_replace="      if not (rank > lastSection):",
     ),
     Mutation(
         "W8", WASM,
@@ -829,16 +850,18 @@ MUTATIONS: list[Mutation] = [
     ),
     Mutation(
         "W12", WASM,
-        "  m.memoryPages * WasmPageSize\n",
-        "  0\n",
+        # Re-aimed 2026-11-23: 80e18c986 made the cost an accumulator
+        # (`result = ...` then data-segment bytes are added).
+        "  result = m.memoryPages * WasmPageSize\n",
+        "  result = 0\n",
         P_SPENT, NIM_PURE,
         "Check failed: decoded.module.instantiationCost == 65536",
         "zeroing the module's pages is free, so a module declaring the maximum "
         "memory pays nothing for a quarter-megabyte of writes the host does "
         "before it runs",
         control_name="the instantiation cost is written as a named product",
-        control_find="  m.memoryPages * WasmPageSize\n",
-        control_replace="  let pages = m.memoryPages\n  pages * WasmPageSize\n",
+        control_find="  result = m.memoryPages * WasmPageSize\n",
+        control_replace="  let pages = m.memoryPages\n  result = pages * WasmPageSize\n",
     ),
     Mutation(
         "W13", WASM,
@@ -885,14 +908,20 @@ MUTATIONS: list[Mutation] = [
     ),
     Mutation(
         "W16", WASM,
+        # Re-aimed 2026-11-23: 80e18c986 widened results to `value64` and
+        # derives `value` from it; the `continue` it guards is unchanged.
         "      if frames.len == 0:\n"
         "        result.ok = true\n"
-        "        result.value = (if rft.results.len == 1: rv else: 0)\n"
+        "        result.value64 = (if rft.results.len == 1: rv else: 0)\n"
+        "        result.value = cast[int32](uint32(cast[uint64](result.value64) and\n"
+        "                                          0xFFFF_FFFF'u64))\n"
         "        return\n"
         "      continue",
         "      if frames.len == 0:\n"
         "        result.ok = true\n"
-        "        result.value = (if rft.results.len == 1: rv else: 0)\n"
+        "        result.value64 = (if rft.results.len == 1: rv else: 0)\n"
+        "        result.value = cast[int32](uint32(cast[uint64](result.value64) and\n"
+        "                                          0xFFFF_FFFF'u64))\n"
         "        return\n"
         "      discard",
         P_CONTROLFLOW, NIM_PURE, "Check failed: equalArm.ok",
@@ -902,13 +931,17 @@ MUTATIONS: list[Mutation] = [
         control_name="the frame count is tested through a named binding",
         control_find="      if frames.len == 0:\n"
                      "        result.ok = true\n"
-                     "        result.value = (if rft.results.len == 1: rv else: 0)\n"
+                     "        result.value64 = (if rft.results.len == 1: rv else: 0)\n"
+                     "        result.value = cast[int32](uint32(cast[uint64](result.value64) and\n"
+                     "                                          0xFFFF_FFFF'u64))\n"
                      "        return\n"
                      "      continue",
         control_replace="      let outermost = frames.len == 0\n"
                         "      if outermost:\n"
                         "        result.ok = true\n"
-                        "        result.value = (if rft.results.len == 1: rv else: 0)\n"
+                        "        result.value64 = (if rft.results.len == 1: rv else: 0)\n"
+                        "        result.value = cast[int32](uint32(cast[uint64](result.value64) and\n"
+                        "                                          0xFFFF_FFFF'u64))\n"
                         "        return\n"
                         "      continue",
     ),
@@ -931,18 +964,33 @@ MUTATIONS: list[Mutation] = [
     # -----------------------------------------------------------------------
     Mutation(
         "S1", STORE,
-        "    result = \"fs1:\" & $info.id.device & \":\" & $info.id.file",
-        "    result = \"fs1:\" & root",
+        # Re-aimed 2026-11-23: 87c865c8f added an `fs2:` identity (birth marker)
+        # beside `fs1:`; both branches are the identity, so the arm replaces
+        # both with the path.
+        "    result =\n"
+        "      if born.len > 0:\n"
+        "        \"fs2:\" & $info.id.device & \":\" & $info.id.file & \":\" & born\n"
+        "      else:\n"
+        "        \"fs1:\" & $info.id.device & \":\" & $info.id.file\n",
+        "    result = \"fs1:\" & root\n",
         C_REPLACED, NIM_CLI,
         "Check failed: checkoutIdentity(w.root) != granted",
         "§2.3's \"recorded by identity rather than by path\", inverted in one "
         "line: a different repository later at the same path inherits the grant "
         "the user gave the one that used to be there",
         control_name="the identity's two components are bound before they are joined",
-        control_find="    result = \"fs1:\" & $info.id.device & \":\" & $info.id.file",
+        control_find="    result =\n"
+                     "      if born.len > 0:\n"
+                     "        \"fs2:\" & $info.id.device & \":\" & $info.id.file & \":\" & born\n"
+                     "      else:\n"
+                     "        \"fs1:\" & $info.id.device & \":\" & $info.id.file\n",
         control_replace="    let dev = $info.id.device\n"
                         "    let file = $info.id.file\n"
-                        "    result = \"fs1:\" & dev & \":\" & file",
+                        "    result =\n"
+                        "      if born.len > 0:\n"
+                        "        \"fs2:\" & dev & \":\" & file & \":\" & born\n"
+                        "      else:\n"
+                        "        \"fs1:\" & dev & \":\" & file\n",
     ),
     Mutation(
         "S2", STORE,
@@ -1089,7 +1137,13 @@ MUTATIONS.extend([
     ),
     Mutation(
         "S8", STORE,
-        "    result = \"fs1:\" & $info.id.device & \":\" & $info.id.file\n"
+        # Re-aimed 2026-11-23: 87c865c8f added the `fs2:` branch; both branches
+        # collapse to one constant (see S1).
+        "    result =\n"
+        "      if born.len > 0:\n"
+        "        \"fs2:\" & $info.id.device & \":\" & $info.id.file & \":\" & born\n"
+        "      else:\n"
+        "        \"fs1:\" & $info.id.device & \":\" & $info.id.file\n"
         "  except CatchableError, Defect:",
         "    result = \"fs1:one-identity-for-every-checkout\"\n"
         "  except CatchableError, Defect:",
@@ -1102,9 +1156,17 @@ MUTATIONS.extend([
         "the scan, which is why it leaks where D5 does not — the grant and the "
         "load then agree on the wrong answer instead of disagreeing",
         control_name="the identity's two components are joined through a named value",
-        control_find="    result = \"fs1:\" & $info.id.device & \":\" & $info.id.file\n"
+        control_find="    result =\n"
+                     "      if born.len > 0:\n"
+                     "        \"fs2:\" & $info.id.device & \":\" & $info.id.file & \":\" & born\n"
+                     "      else:\n"
+                     "        \"fs1:\" & $info.id.device & \":\" & $info.id.file\n"
                      "  except CatchableError, Defect:",
-        control_replace="    let composed = \"fs1:\" & $info.id.device & \":\" & $info.id.file\n"
+        control_replace="    let composed =\n"
+                        "      if born.len > 0:\n"
+                        "        \"fs2:\" & $info.id.device & \":\" & $info.id.file & \":\" & born\n"
+                        "      else:\n"
+                        "        \"fs1:\" & $info.id.device & \":\" & $info.id.file\n"
                         "    result = composed\n"
                         "  except CatchableError, Defect:",
     ),

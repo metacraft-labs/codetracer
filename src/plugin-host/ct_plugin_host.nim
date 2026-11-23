@@ -4,7 +4,7 @@
 ## ONE PROCESS, MANY PACKAGES, ONE INSTANCE PER PLUGIN. The supervisor starts
 ## this program once per primary session with every installed WASM package
 ## (`--package <component dir>`, repeated). From the supervisor's side it is a
-## plugin process like any other: it speaks §11.4 on stdin/stdout, its `hello`
+## plugin process like any other: it speaks §11.4 on the descriptors `CODETRACER_PLUGIN_CHANNEL` names (stdin/stdout without it), its `hello`
 ## lists every plugin of every package it was given, and every message it
 ## writes names its plugin. Inside, each plugin that is activated gets its own
 ## engine store — its own linear memory, its own memory limit, its own
@@ -30,7 +30,7 @@
 ## watchdog thread), the routing of frames to workers, and the I/O: every
 ## `ct.io` request is handed to the main thread, which runs `plugin_io.nim`'s
 ## asynchronous primitives on its dispatcher and hands the `io-result` back to
-## the instance's worker. Writes to stdout are whole frames under one lock.
+## the instance's worker. Protocol writes are whole frames under one lock.
 ##
 ## A fault of the HOST — the engine crashing, the process killed — is a process
 ## fault, handled by the supervisor's native path (§11.6.4): the crash is
@@ -150,6 +150,17 @@ var
   writeLock: Lock
   inbox: Channel[string]
   readerThread: Thread[void]
+  livenessThread: Thread[void]
+  pongLock: Lock
+  protoIn: cint = 0
+    ## The protocol's descriptors (§11.4.1): 3 and 4 when the supervisor
+    ## starts the host with `CODETRACER_PLUGIN_CHANNEL=fds:3,4,5,6`, stdin and
+    ## stdout otherwise.
+  protoOut: cint = 1
+  pingIn: cint = -1
+    ## Liveness on its own descriptors (5 and 6), so a `pong` never waits
+    ## behind a frame the host is writing; -1 when pings share the protocol.
+  pongOut: cint = -1
 
 proc nowNs(): int64 = getMonoTime().ticks
 proc nowMs(): int64 = nowNs() div 1_000_000
@@ -193,7 +204,17 @@ proc sendRaw(msg: JsonNode) =
   if frame.len == 0: return
   {.cast(gcsafe).}:
     withLock writeLock:
-      writeAll(1, frame)
+      writeAll(protoOut, frame)
+
+proc sendPong(msg: JsonNode) =
+  ## On the liveness descriptor when there is one, under its own lock.
+  if pongOut < 0:
+    sendRaw(msg)
+    return
+  let frame = encodeMessage(msg)
+  {.cast(gcsafe).}:
+    withLock pongLock:
+      writeAll(pongOut, frame)
 
 proc logLine(s: string) =
   {.cast(gcsafe).}:
@@ -204,7 +225,18 @@ proc onFatalSignal(sig: cint) {.noconv.} =
   # The faulting thread's own instance: it is the one executing.
   const prefix = "\nct-plugin-crash: "
   discard posix.write(2, prefix.cstring, prefix.len)
-  let s = mySlot
+  # A signal raised by a worker names its own instance. One sent to the
+  # process (`kill`) lands on any thread: then the instance whose call has run
+  # longest is the one executing. Only reads of the shared arrays, so it stays
+  # async-signal-safe.
+  var s = mySlot
+  if s < 0 or slots[s].busyLen == 0:
+    s = -1
+    var since = high(int64)
+    for i in 0 ..< MaxWorkers:
+      if slots[i].busyLen > 0 and slots[i].busySinceNs < since:
+        since = slots[i].busySinceNs
+        s = i
   if s >= 0 and slots[s].busyLen > 0:
     discard posix.write(2, slots[s].busyName[0].addr, slots[s].busyLen)
   discard posix.write(2, "\n".cstring, 1)
@@ -229,43 +261,61 @@ proc installCrashRecord() =
     sa.sa_flags = SA_RESETHAND
     discard sigaction(sig, sa, nil)
 
+proc pongFor(frame: string): bool =
+  ## Answer `frame` if it is a `ping`, naming the plugin whose call has run
+  ## longest, so a call stuck in the engine still lets the host learn who is
+  ## stuck. True when it was one.
+  if not frame.contains("\"ping\""): return false
+  var parsed: JsonNode
+  try: parsed = parseJson(frame)
+  except CatchableError: return false
+  if parsed{"type"}.getStr("") != "ping": return false
+  let (busy, ms) = busyNow()
+  sendPong(%*{"type": "pong", "seq": parsed{"seq"},
+              "busy": (if busy.len > 0: %busy else: newJNull()),
+              "busyMs": ms})
+  true
+
+proc readFrames(fd: cint; onFrame: proc(frame: string) {.nimcall, gcsafe.}): bool =
+  ## Read frames from `fd` until end of file. False on an oversize frame.
+  var reader: FrameReader
+  var buf: array[65536, char]
+  while true:
+    let n = posix.read(fd, buf[0].addr, buf.len)
+    if n == 0: return true
+    if n < 0:
+      if errno == EINTR: continue
+      return true
+    var s = newString(n)
+    copyMem(s[0].addr, buf[0].addr, n)
+    reader.feed(s)
+    var frame: string
+    while true:
+      let st = reader.next(frame)
+      if st != fsFrame:
+        if st == fsOversize: return false
+        break
+      onFrame(frame)
+
 proc readerLoop() {.thread.} =
-  ## The watchdog: owns stdin and answers `ping` itself, naming the plugin
-  ## whose call has run longest, so a call stuck in the engine still lets the
-  ## host learn who is stuck.
+  ## Owns the protocol's input. With no liveness descriptors it is also the
+  ## watchdog: it answers `ping` itself.
   {.cast(gcsafe).}:
     mySlot = -1
-    var reader: FrameReader
-    var buf: array[65536, char]
-    while true:
-      let n = posix.read(0, buf[0].addr, buf.len)
-      if n == 0: break
-      if n < 0:
-        if errno == EINTR: continue
-        break
-      var s = newString(n)
-      copyMem(s[0].addr, buf[0].addr, n)
-      reader.feed(s)
-      var frame: string
-      while true:
-        let st = reader.next(frame)
-        if st != fsFrame:
-          if st == fsOversize:
-            inbox.send("")
-            return
-          break
-        if frame.contains("\"ping\""):
-          var parsed: JsonNode
-          try: parsed = parseJson(frame)
-          except CatchableError: parsed = nil
-          if not parsed.isNil and parsed{"type"}.getStr("") == "ping":
-            let (busy, ms) = busyNow()
-            sendRaw(%*{"type": "pong", "seq": parsed{"seq"},
-                       "busy": (if busy.len > 0: %busy else: newJNull()),
-                       "busyMs": ms})
-            continue
-        inbox.send(frame)
+    discard readFrames(protoIn, proc(frame: string) {.nimcall, gcsafe.} =
+      {.cast(gcsafe).}:
+        if pingIn < 0 and pongFor(frame): return
+        inbox.send(frame))
     inbox.send("")
+
+proc livenessLoop() {.thread.} =
+  ## The watchdog on its own descriptors: pings in, pongs out, never behind
+  ## a frame.
+  {.cast(gcsafe).}:
+    mySlot = -1
+    discard readFrames(pingIn, proc(frame: string) {.nimcall, gcsafe.} =
+      {.cast(gcsafe).}:
+        discard pongFor(frame))
 
 # ---------------------------------------------------------------------------
 # Guest memory
@@ -971,7 +1021,18 @@ proc main() =
   for d in dirs: loadPackage(d)
   inbox.open()
   toMain.open()
+  let channel = getEnv(ChannelEnv, "")
+  if channel.startsWith("fds:"):
+    let fds = channel[4 .. ^1].split(',')
+    if fds.len == 4:
+      protoIn = cint(parseInt(fds[0]))
+      protoOut = cint(parseInt(fds[1]))
+      pingIn = cint(parseInt(fds[2]))
+      pongOut = cint(parseInt(fds[3]))
+  initLock(pongLock)
   createThread(readerThread, readerLoop)
+  if pingIn >= 0:
+    createThread(livenessThread, livenessLoop)
   while running:
     var busy = false
     let (got, frame) = inbox.tryRecv()

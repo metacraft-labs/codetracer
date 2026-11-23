@@ -71,6 +71,17 @@ jobs:
               src/plugin-host/engine/measure-engines.sh \
               | tee test-logs/plugin-host-wasm-engines-x86_64-linux.log'
 
+      - name: The host as the shipped build makes it (repro build, its own Nim)
+        # The repro build compiles with the Nim its package catalog pins
+        # (2.2.4 when this was written), not the dev shell's: a host that
+        # built here and failed there broke build-once once (posix.signal's
+        # return type differs between them).
+        run: |
+          nix develop '.?submodules=1' --command bash -c '
+            set -euo pipefail
+            repro build ct-plugin-host 2>&1 | tail -40 | tee test-logs/plugin-host-wasm-repro-x86_64-linux.log
+            src/build-debug-repro/bin/ct-plugin-host --help 2>&1 | tee -a test-logs/plugin-host-wasm-repro-x86_64-linux.log'
+
       - name: Build ct-plugin-host and the WebAssembly plugins
         run: |
           nix develop . --command bash -c '
@@ -194,6 +205,17 @@ jobs:
         with:
           name: plugin-host-wasm-x86_64-linux
           path: ${{ runner.temp }}/linux-artifact
+
+      - name: The host as the shipped build makes it (repro build, its own Nim)
+        # The repro build compiles with the Nim its package catalog pins
+        # (2.2.4 when this was written), not the dev shell's: a host that
+        # built here and failed there broke build-once once (posix.signal's
+        # return type differs between them).
+        run: |
+          nix develop '.?submodules=1' --command bash -c '
+            set -euo pipefail
+            repro build ct-plugin-host 2>&1 | tail -40 | tee test-logs/plugin-host-wasm-repro-aarch64-darwin.log
+            src/build-debug-repro/bin/ct-plugin-host --help 2>&1 | tee -a test-logs/plugin-host-wasm-repro-aarch64-darwin.log'
 
       - name: Build ct-plugin-host and the WebAssembly plugins
         run: |

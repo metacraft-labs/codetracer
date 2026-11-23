@@ -96,6 +96,9 @@ import ./process_link
 
 export protocol.PluginBinding, protocol.Epoch
 
+const ChordProbeIntervalMs* = 200
+  ## `Supervisor.chordProbeMs`'s default.
+
 type
   BreakerState* = enum
     bsClosed = "closed"
@@ -338,6 +341,10 @@ type
     helloDeadlineMs*: int
     pingIdleMs*: int
     pingBusyMs*: int
+    chordProbeMs*: int
+      ## How often a process is asked again while the recovery chord alone
+      ## makes one of its plugins suspect (§11.7.6). Short: its pong is what
+      ## gives a healthy plugin its keys back.
     pongDeadlineMs*: int
     busyHangMs*: int
     ackBudgetMs*: int
@@ -394,7 +401,8 @@ proc newSupervisor*(frontEnd: string; version = "0.0.0";
     rng: initRand(0x5eed),
     reservedKeys: @["ctrl+shift+p"],
     helloDeadlineMs: HelloDeadlineMs, pingIdleMs: PingIdleIntervalMs,
-    pingBusyMs: PingBusyIntervalMs, pongDeadlineMs: PongDeadlineMs,
+    pingBusyMs: PingBusyIntervalMs, chordProbeMs: ChordProbeIntervalMs,
+    pongDeadlineMs: PongDeadlineMs,
     busyHangMs: BusyHangMs, ackBudgetMs: AckBudgetMs,
     inputDeadlineMs: InputDeadlineMs, strikeWindowMs: 60_000,
     strikesToOpen: 3, breakerBackoffMs: 30_000,
@@ -1442,15 +1450,20 @@ proc pollInstance(sup: Supervisor; inst: Instance) =
          sup.slots[p.plugin].instance == inst:
         waiting = true
     # A plugin the recovery chord made suspect is waiting for a pong to
-    # clear it. When the chord found a ping already outstanding (sent before
-    # it, so its pong cannot clear it), the next one goes out at the busy
-    # interval rather than the idle one.
+    # clear it, and only an idle answer to a ping sent after the chord does.
+    # So while one is suspect the process is asked again every
+    # `chordProbeMs`, not at the liveness interval: the chord may have found
+    # a ping already in flight (its pong cannot clear the plugin), or the
+    # probe's pong may name a handler still running. Waiting for the next
+    # liveness ping instead left a healthy plugin "not responding" for up to
+    # `pingBusyMs` (1 run in 3 of the chord case at load ~100).
     var chordSuspect = false
     for s in inst.slotsOf(sup):
       if s.suspect and s.suspectByChord:
         chordSuspect = true
     let interval =
-      if waiting or inst.busy.len > 0 or chordSuspect: sup.pingBusyMs
+      if chordSuspect: min(sup.chordProbeMs, sup.pingBusyMs)
+      elif waiting or inst.busy.len > 0: sup.pingBusyMs
       else: sup.pingIdleMs
     if inst.pingOutstanding:
       if t - inst.lastPingMs > sup.pongDeadlineMs:
@@ -1859,8 +1872,8 @@ proc observeEscape*(sup: Supervisor): bool {.discardable.} =
         s.suspectAfterPing =
           if s.instance.isNil: 0 else: s.instance.pingSeq
   # Probe each affected process now. One whose ping is already outstanding
-  # was pinged before the chord; the liveness loop sends the next at the busy
-  # interval while any of its plugins is suspect by the chord.
+  # was pinged before the chord; the liveness loop asks again every
+  # `chordProbeMs` while any of its plugins is suspect by the chord.
   for s in sup.slots.values:
     let inst = s.instance
     if s.suspect and s.suspectByChord and s.id in sup.recoveryPlugins and

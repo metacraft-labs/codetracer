@@ -420,10 +420,10 @@ proc canRunScope*(capabilities: TestCapabilities; kind: TestScopeKind): bool =
 
 proc isRunnableUnit*(registry: ProviderRegistry; unit: RunUnit): bool =
   ## Whether dispatching ``unit`` would reach a provider able to run it:
-  ## the provider is registered, has a ``run`` implementation, and declares
-  ## it can run the unit's scope. These are exactly the three refusals
-  ## ``runUnitOutcome`` records as ``unrunnable`` before it would call the
-  ## provider, asked ahead of time.
+  ## the provider is registered, has a ``run`` implementation, declares it
+  ## can run the unit's scope, and did not mark the item ``NotRunnableTag``.
+  ## These are exactly the four refusals ``runUnitOutcome`` records as
+  ## ``unrunnable`` before it would call the provider, asked ahead of time.
   ##
   ## ``ct test verify`` uses it to decide which discovered targets a default
   ## requirement may demand: a target no provider here can run is one no run
@@ -431,7 +431,8 @@ proc isRunnableUnit*(registry: ProviderRegistry; unit: RunUnit): bool =
   for provider in registry.providers:
     if provider.provider.info.id == unit.providerId:
       return provider.provider.run != nil and
-        provider.provider.info.capabilities.canRunScope(unit.scope.kind)
+        provider.provider.info.capabilities.canRunScope(unit.scope.kind) and
+        NotRunnableTag notin unit.item.tags
   false
 
 proc runUnitOutcome(
@@ -464,8 +465,9 @@ proc runUnitOutcome(
 
   # ---- The upstream half of "a run that ran nothing reported success" -------
   # A provider whose declared capabilities say it cannot run this scope is not
-  # asked to. Several shipped providers (``nim-unittest``, ``python-pytest``,
-  # ``python-unittest``, every ``smart-*`` harness) declare
+  # asked to. Several shipped providers (``python-pytest``,
+  # ``python-unittest``, every ``smart-*`` harness; ``nim-unittest`` until it
+  # learned to run the tests its binaries list) declare
   # ``canRunProject/File/Single = false`` and wire ``run`` to a stub that
   # returns a *warning* diagnostic and an empty event stream. Dispatching to
   # that stub was indistinguishable, downstream, from a provider that ran and
@@ -486,6 +488,19 @@ proc runUnitOutcome(
       "provider '" & unit.providerId & "' declares it cannot run a " &
       $unit.scope.kind & " scope, so this test was discovered but never " &
       "executed",
+      unit.item.file)
+    return
+  # The same refusal, decided per item: a provider that can run single tests
+  # may still have discovered some it cannot run, and says so on the item
+  # (``contracts.NotRunnableTag``) rather than receiving a run it would have
+  # to answer with nothing.
+  if NotRunnableTag in unit.item.tags:
+    result.unrunnable = true
+    result.diagnostics.add diagnostic(
+      dsError,
+      "provider '" & unit.providerId & "' marked this test " &
+      NotRunnableTag & " when it discovered it, so it was discovered but " &
+      "never executed",
       unit.item.file)
     return
 

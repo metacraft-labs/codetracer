@@ -154,10 +154,24 @@ proc settle(sup: Supervisor; ms: int): Future[void] {.async.} =
     sup.poll()
     await sleep(2)
 
-proc shutdownAndWait(sup: Supervisor): Future[void] =
+proc jsSetTimeout(cb: proc(); ms: int) {.importjs: "setTimeout(#, #)".}
+
+proc shutdownAndWait(sup: Supervisor; ceilingMs = Ceiling): Future[void] =
   ## `shutdown` on this backend returns at once and reports through `onDone`.
+  ## Bounded: a stop sequence whose signals reach nothing never reports, and
+  ## an unbounded wait would turn that failure into a suite that never ends.
   newPromise(proc(resolve: proc()) =
-    sup.shutdown(onDone = resolve))
+    var settled = false
+    sup.shutdown(onDone = proc() =
+      if not settled:
+        settled = true
+        resolve())
+    jsSetTimeout(proc() =
+      if not settled:
+        settled = true
+        ck false, "shutdown finished within " & $(ceilingMs div 1000) &
+          " s (the stop sequence's signals reached its processes)"
+        resolve(), ceilingMs))
 
 type Rig = object
   sup: Supervisor
@@ -341,8 +355,11 @@ proc main() {.async.} =
       r.sup.renderSurface("acme-tools.metrics/overview").allText.contains("main.nim:42")),
       "the mirrored stop reaches the plugin and its pane follows"
     await r.sup.shutdownAndWait()
-    ck not pidAlive(pid), "shutdown reaps the process (Node's event loop not blocked)"
-    ck pid notin liveProcessGroups(), "and forgets its group"
+    # The group first: a shutdown that reports before it has seen the exit
+    # still lists the group, every time, while whether the SIGKILLed process
+    # is already gone is a race the host's load decides.
+    ck pid notin liveProcessGroups(), "shutdown waits for the exit and forgets the group"
+    ck not pidAlive(pid), "and the process is reaped (Node's event loop not blocked)"
     ck r.sup.events.anyIt(it == "stopped acme-tools"), "it stopped gracefully"
 
   if section("no-extensions", "--no-extensions starts no plugin process"):
@@ -595,5 +612,8 @@ proc main() {.async.} =
     {.emit: "process.exitCode = 1;".}
   else:
     echo "[OK] plugin processes on Node"
+  # End here rather than when the event loop drains: a plugin a failed case
+  # could not stop keeps its pipes open, and the suite would never exit.
+  {.emit: "process.exit(process.exitCode || 0);".}
 
 discard main()

@@ -4,7 +4,12 @@
   "J3": "a process stuck in a handler is stopped",
   "J4": "SIGTERM, a stuck plugin, without setpriv (the exit guard): and its plugin process ended with it",
   "J5": "SIGKILL, a stuck plugin, through setpriv --pdeathsig: and its plugin process ended with it",
-  "J6": "and forgets its group",
+  "J6": "shutdown waits for the exit and forgets the group",
   "J7": "exit status 127 (Node's spawn error): the process exited with status 0",
-  "J8": "every fault is flame's: the crash record on stderr was read before the exit"
+  "J8": "every fault is flame's: the crash record on stderr was read before the exit",
+  "K1": "the snapshot's suspect layer is transparent, and names who was passed",
+  "K2": "the relayed step reached the primary's backend",
+  "K3": "the pane shows the RENDERER's session, through the mirror",
+  "K4": "the renderer's report gives the strike the supervisor gives",
+  "K5": "three Escapes pop the layers and open the recovery dialog"
 }

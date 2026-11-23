@@ -837,6 +837,22 @@ const
     ## is the plain statement of which builds were ever affected: this one's
     ## lane, and no shipped `ct`.
 
+const
+  CallSlowdownTolerance = 3
+  CallSlowdownFloorUs = 40_000
+    ## THE CALL CASE'S BUDGET IS TIGHTER THAN THE LOOP CASE'S, AND THE REASON IS
+    ## MEASURED (2026-11-23, Nim 2.3.1 ORC, this host, best of three, same
+    ## process). A body is capped at `MaxWasmBodyInstr` (8,192), so a callee
+    ## cannot be made longer than `LongBody`, and the interpreter's own cost
+    ## per call is the same order as the copy it would add. Removing the
+    ## `{.cursor.}` from `opCall`'s `callee` therefore moved this case only
+    ## from 34.1 ms to 202.7 ms (6x), which the 10x + 200 ms budget above
+    ## (541 ms) passed: the arm graded as SURVIVED twice. The aliased subject
+    ## measures 29.5 ms -> 31.1 ms (1.05x), so 3x + 40 ms (142 ms for that
+    ## short) sits 4.6x above the correct build and 1.4x below the broken one.
+    ## (The 3,390.8 ms row of the table above was a 2.2.x number; the copy is
+    ## much cheaper per element on 2.3.1.)
+
 type Probe = object
   spent: int
   micros: int64
@@ -867,7 +883,8 @@ proc probeRun(bytes: string): Probe =
     result.spent = r.spent
     doAssert r.trap == wtWorkExhausted, $r.trap
 
-template ckFlatIn(short, long: Probe; what: string) =
+template ckFlatIn(short, long: Probe; what: string;
+                  tolerance = SlowdownTolerance; floorUs = SlowdownFloorUs) =
   ## The comparison, written once so the two cases below cannot come to
   ## disagree about what "flat" means (§14).
   ##
@@ -883,7 +900,7 @@ template ckFlatIn(short, long: Probe; what: string) =
                "makes a copy. Under refc it cannot fail and is not evidence")
   check defined(gcOrc) or defined(gcArc)
   inc countedAssertions
-  let budget = short.micros * SlowdownTolerance + SlowdownFloorUs
+  let budget = short.micros * tolerance + floorUs
   if long.micros > budget:
     checkpoint(what & ": " & $short.instrCount & " instruction(s) took " &
                $short.micros & " us and " & $long.instrCount & " took " &
@@ -921,7 +938,8 @@ suite "PLAT-13: one RETIRED INSTRUCTION is one unit, whatever the body's length"
     ckEq long.instrCount - short.instrCount, LongBody
     ckEq short.spent, long.spent
     ckEq long.spent, ProbeWork + 1
-    ckFlatIn short, long, "the call cost"
+    ckFlatIn short, long, "the call cost", CallSlowdownTolerance,
+             CallSlowdownFloorUs
 
 # ---------------------------------------------------------------------------
 # 10. The ledger's GRAMMAR is closed, because one of its fields is a path

@@ -250,7 +250,11 @@ proc autocompleteQuery*(self: CommandInterpreter, query: SearchQuery): seq[Comma
   self.prepareCommandPanelResults(query.kind, fuzzyResults)
 
 proc runQueryCommand*(self: CommandInterpreter, res: CommandPanelResult) =
-  self.data.actions[self.commands[res.value].action](nil)
+  let command = self.commands[res.value]
+  if not command.run.isNil:
+    command.run()
+  else:
+    self.data.actions[command.action](nil)
 
 proc openFileQuery*(self: CommandInterpreter, res: CommandPanelResult) =
   self.data.openTab(self.files[res.value], ViewSource)

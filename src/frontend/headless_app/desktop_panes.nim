@@ -192,6 +192,13 @@ const
     ## the hand-written file. They describe the ENGINE, not the arrangement,
     ## so they are constants of the translation rather than of the tree.
   GenericComponent = "genericUiComponent"
+  PluginPaneComponent* = "pluginPaneComponent"
+    ## The GoldenLayout component of a CONTRIBUTED pane (PLAT-9's
+    ## `contributedPane`, Extensibility-Model.md §6.1): an installed plugin's
+    ## pane, drawn from the tree its plugin pushed (`ui/plugin_panes`).
+  ContributedPaneStateKey* = "contributedPane"
+    ## The `componentState` field that carries the pane's qualified id —
+    ## the same spelling as the layout model's field and GPUI's dock info.
 
   DesktopEditorIndex* = 1
     ## Where `utils.openNewLayoutContainer` puts the editor: index 1 of the
@@ -218,13 +225,25 @@ proc componentJson(kind: PaneKind): JsonNode =
                                 "content": ord(row.content)}
   result["title"] = %GenericComponent
 
+proc contributedComponentJson*(id, title: string): JsonNode =
+  ## A contributed pane's component: its qualified id in the state, its title
+  ## as the tab's. `content` is `NoInfo`'s ordinal, which no built-in pane
+  ## reads back as itself (`goldenItemToNode` reads `contributedPane` first).
+  result = newJObject()
+  result["type"] = %"component"
+  result["componentType"] = %PluginPaneComponent
+  result["componentState"] = %*{"id": 0, "label": (if title.len > 0: title else: id),
+                                "content": ord(Content.NoInfo),
+                                ContributedPaneStateKey: id}
+  result["title"] = %(if title.len > 0: title else: id)
+
 proc emitted(n: LayoutNode): bool =
   ## Whether a node produces any GoldenLayout item — false for the editor leaf
   ## and for a container holding nothing else.
   if n.isNil: return false
   case n.kind
   of lnPane:
-    not n.isContributed and PaneContent[n.pane].placement != dpRuntimeEditor
+    n.isContributed or PaneContent[n.pane].placement != dpRuntimeEditor
   else:
     for c in n.children:
       if emitted(c): return true
@@ -278,9 +297,14 @@ proc itemJson(n: LayoutNode; size: string): JsonNode =
     var active = 0
     var at = 0
     for i, c in n.children:
-      if c.kind != lnPane or c.isContributed:
+      if c.kind != lnPane:
         raise newException(ValueError,
-          "a desktop stack holds built-in panes only")
+          "a desktop stack holds panes only")
+      if c.isContributed:
+        if i == n.activeIndex: active = at
+        content.add contributedComponentJson(c.contributedPane, c.title)
+        inc at
+        continue
       if PaneContent[c.pane].placement == dpRuntimeEditor:
         continue
       if i == n.activeIndex: active = at
@@ -295,7 +319,9 @@ proc itemJson(n: LayoutNode; size: string): JsonNode =
     result["type"] = %"stack"
     if size.len > 0:
       result["size"] = %size
-    result["content"] = %*[componentJson(n.pane)]
+    result["content"] = %*[(if n.isContributed:
+                              contributedComponentJson(n.contributedPane, n.title)
+                            else: componentJson(n.pane))]
 
 proc layoutNodeToGoldenConfig*(tree: LayoutNode): JsonNode =
   ## **THE TRANSLATION** (PLAT-45 deliverable 7). The whole config the desktop
@@ -402,6 +428,10 @@ proc goldenItemToNode(item: JsonNode): LayoutNode =
   let kind = item{"type"}.getStr
   case kind
   of "component":
+    let contributed = item{"componentState", ContributedPaneStateKey}
+    if not contributed.isNil and contributed.kind == JString:
+      return contributedPaneNode(contributed.getStr,
+                                 item{"componentState", "label"}.getStr(""))
     let content = item{"componentState", "content"}
     if content.isNil or content.kind != JInt:
       raise newException(ValueError, "a component names no content ordinal")
