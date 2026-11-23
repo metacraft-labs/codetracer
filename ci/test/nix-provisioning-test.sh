@@ -298,7 +298,11 @@ done
 # inventory and linter on pushes to dev/stable and pull requests. It
 # installs Nix through ./.github/actions/setup-nix before its `nix shell` for
 # Nim and Node.
-readonly EXPECTED_NIX_JOBS=50
+#
+# 50 -> 52: plugin-host-wasm.yml's `linux` and `darwin` (d11479e6b85), which
+# build ct-plugin-host and run the WASM plugin packages under it. Each
+# installs Nix through ./.github/actions/setup-nix before its first `nix`.
+readonly EXPECTED_NIX_JOBS=52
 
 if [ "${#nix_jobs[@]}" -eq "$EXPECTED_NIX_JOBS" ]; then
 	ok "the scanner still classifies the nix-using jobs (${#nix_jobs[@]})"
