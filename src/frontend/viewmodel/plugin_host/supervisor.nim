@@ -733,7 +733,19 @@ proc sendActivate(sup: Supervisor; s: PluginSlot) =
   # A fresh activation answers for itself: what it pushes while activating
   # (its layers among them) is not refused for an earlier silence.
   s.clearSuspect()
+  # The declared sets travel with the grants, so the SDK's process and
+  # socket primitives resolve a program, a host or a path against what the
+  # manifest declared (§8.1.1), in the plugin's own process.
+  let g = s.spec.parsed.manifest.grants
+  var hosts = newJArray()
+  for h in g.hosts:
+    hosts.add %*{"host": h.host, "port": h.port}
+  let declared = %*{"executables": g.executables, "hosts": hosts,
+                    "readPaths": g.readPaths, "writePaths": g.writePaths,
+                    "traceEgress": {"acknowledged": g.traceEgress.acknowledged,
+                                    "statement": g.traceEgress.statement}}
   inst.sendTo(%*{"type": "activate", "plugin": s.id, "grants": grants,
+                 "declared": declared,
                  "settings": s.settings, "epoch": sup.epoch.toJson})
   if not sup.publisher.isNil:
     var snap = sup.publisher.snapshot()
@@ -1351,9 +1363,20 @@ proc pollInstance(sup: Supervisor; inst: Instance) =
   inst.link.flushWrites()
   for frame in inst.link.readMessages():
     var msg: JsonNode
-    try:
-      msg = parseJson(frame)
-    except CatchableError:
+    var notJson = false
+    when defined(js):
+      # Node's `JSON.parse` throws a native `SyntaxError`, which is not a
+      # Nim `CatchableError`: only a bare `except` catches it.
+      try:
+        msg = parseJson(frame)
+      except:
+        notJson = true
+    else:
+      try:
+        msg = parseJson(frame)
+      except CatchableError:
+        notJson = true
+    if notJson:
       sup.killForFault(inst, fkProtocol, "", "a frame that is not JSON")
       break
     sup.handleMessage(inst, msg)

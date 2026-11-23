@@ -11,10 +11,10 @@
 # these files changes on purpose. The needle scan gates that step
 # (Verification-Harness-Traps §16).
 
-d5f84b82eb037366ecd94a8754f1def3e4273d56812ce991254674f02f19347d  src/common/value_presentation/vocabulary.nim
-b4c422d5868d342392928df18640ba00fa36160cb3b0cbd9276dc6bd41ec960d  src/common/value_presentation/presenter.nim
+36af0e461faddf27584de41ec4f134d2b2b08c0883725411b4f06888935e4134  src/common/value_presentation/vocabulary.nim
+d7b203006b0639db094b99c8ae6f7d07dd05bc8b1be0f7f00cca8f2d5e456990  src/common/value_presentation/presenter.nim
 60e1d468f4b73668f3f4ebad6913195151b66c472599c3240a17ea1e171e5c8f  src/common/value_presentation/surfaces.nim
-46ba2e663c98cafe8e7b6ae535aa9854c8561c9381b7d776f55fbbb1335cdf61  src/common/value_visualisers.nim
+9f22ae1b70dda163f3efe03540c38bf8d8c5c4364c7bdd8e3774c264dab787c6  src/common/value_visualisers.nim
 e148a728c438e76138e1754cf9ff51ba2aa30ca67bf3740f91559c4b25c0f1b4  src/frontend/viewmodel/store/value_media_degradation.nim
 9d018cd51a134de40d25c4643fde417c9c72e21d229204952b08cc9557356602  src/frontend/tui/app/views/tree_node.nim
 f95646b8a165bd7e42bfc45135f7bedd647c1b4b795ee4ddbfd14ed338c7eb10  src/frontend/tui/app/views/variables.nim

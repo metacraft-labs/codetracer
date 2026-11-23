@@ -8,11 +8,25 @@
 ## `PR_SET_PDEATHSIG`, and §11.8 requires both: the stop sequence signals the
 ## GROUP (so a plugin's own children go too), and a plugin process must never
 ## outlive the session that started it, even when that session is killed with
-## SIGKILL and runs no cleanup. So this is `fork`, three `dup2`s and `execvp`.
+## SIGKILL and runs no cleanup. So this is `fork`, the `dup2`s that lay out
+## the channel, and `execve`.
+##
+## ## THE CHANNEL IS NOT THE STANDARD STREAMS (§11.4.1)
+##
+## The protocol runs on the child's descriptors 3 (to it) and 4 (from it), and
+## liveness on 5 (`ping`) and 6 (`pong`); `CODETRACER_PLUGIN_CHANNEL` names
+## them. The child's stdin is `/dev/null` and its stdout and stderr both go to
+## the plugin log. Two faults this removes: a stray `echo` in a plugin, or a
+## child it starts with inherited stdio, writing into the protocol and being
+## judged a protocol violation; and a `pong` waiting behind a frame the
+## plugin's main thread is writing into a full pipe, which made a healthy
+## plugin look hung at high load. A `ping` is queued apart from every other
+## frame too, so it never waits behind a signal batch the child is slow to
+## read.
 ##
 ## ## WHY THE WRITES ARE QUEUED
 ##
-## A hung plugin does not read its stdin. A pipe holds 64 KiB, and the host
+## A hung plugin does not read its channel. A pipe holds 64 KiB, and the host
 ## keeps writing — pings, signal batches — so a blocking write would block the
 ## FRONT-END on a plugin, which is the one thing §11.7.1 forbids. Writes go to
 ## a queue drained with non-blocking writes on every poll, and a queue past
@@ -26,8 +40,8 @@
 ## ## ON THE JAVASCRIPT BACKEND (the desktop's main process, `ct host`)
 ##
 ## The same `ProcessLink`, over Node's `child_process.spawn`: `detached: true`
-## puts the child in a process group of its own (`setsid`), stdin/stdout are
-## the protocol pipes and stderr is captured. Node delivers bytes in its event
+## puts the child in a process group of its own (`setsid`), descriptors 3 to 6
+## are the channel's pipes and stdout and stderr are captured. Node delivers bytes in its event
 ## loop, between the front-end's ticks; they are fed to the same
 ## `protocol.FrameReader` as they arrive, and `readMessages` hands out the
 ## whole frames. Writes keep the same queue: a frame goes to the pipe only
@@ -64,7 +78,7 @@
 ##
 ## What remains when the main process is SIGKILLed and `setpriv` is absent or
 ## cannot run:
-## the plugin's stdin closes, and an SDK plugin's reader sees end-of-file and
+## the plugin's channel closes, and an SDK plugin's reader sees end-of-file and
 ## the process exits (`codetracer_plugin_sdk.run`). A plugin whose main thread
 ## is stuck in a handler at that moment never returns to its loop and outlives
 ## the main process, as do any processes the plugin started itself.
@@ -79,6 +93,9 @@ import ./protocol
 
 const
   MaxQueuedBytes* = 16 * 1024 * 1024
+  MaxLivenessQueuedBytes* = 64 * 1024
+    ## `ping`s the child's watchdog has not read. Past this the watchdog is
+    ## not reading at all, and the pong deadline is what judges it.
   MaxStderrKeep* = 256 * 1024
     ## The tail of a process's stderr the host keeps in memory, for the crash
     ## record and the fault message; the whole stream goes to the plugin log.
@@ -117,7 +134,12 @@ type
     when defined(js):
       child: JsObject
         ## The `ChildProcess`; nil once every handle is closed.
+      toChild: JsObject
+        ## The child's descriptor 3 (`ProtocolInFd`), as Node's stream.
+      pingTo: JsObject
+        ## The child's descriptor 5 (`LivenessInFd`).
       stdinOpen: bool
+        ## The protocol stream to the child is open.
       writeBlocked: bool
         ## Node's stdin buffer is past its high-water mark: wait for `drain`.
       exitSeen: bool
@@ -128,8 +150,15 @@ type
       toChild: cint
       fromChild: cint
       errFromChild: cint
+      pingTo: cint
+      pongFrom: cint
     reader: FrameReader
     outQueue: string
+    livenessReader: FrameReader
+      ## The `pong`s, read from their own descriptor (§11.4.1).
+    livenessQueue: string
+      ## The `ping`s, queued apart from every other frame: a `ping` never
+      ## waits behind a signal batch the child has not read yet.
     exit*: ExitState
     exitCode*: int
       ## The exit status, or the signal number when `exit == esSignalled`.
@@ -176,7 +205,8 @@ when defined(js):
   proc jsSpawn(cp: JsObject; cmd: cstring; args: seq[cstring]; cwd: cstring;
                env: JsObject): JsObject {.importjs: """
     (function (cp, cmd, args, cwd, env) {
-      var opts = { detached: true, stdio: ['pipe', 'pipe', 'pipe'], env: env };
+      var opts = { detached: true, env: env,
+                   stdio: ['ignore', 'pipe', 'pipe', 'pipe', 'pipe', 'pipe', 'pipe'] };
       if (cwd.length > 0) { opts.cwd = cwd; }
       return cp.spawn(cmd, args, opts);
     })(#, #, #, #, #)""".}
@@ -262,6 +292,8 @@ when defined(js):
     "(function (s) { return (s && s.writableLength) || 0; })(#)".}
   proc jsPid(child: JsObject): int {.importjs: "(#.pid || 0)".}
   proc jsField(o: JsObject; name: cstring): JsObject {.importjs: "#[#]".}
+  proc jsStdio(child: JsObject; fd: int): JsObject {.importjs:
+    "(#.stdio[#] || null)".}
   proc jsIsNumber(o: JsObject): bool {.importjs: "(typeof # === 'number')".}
   proc jsToInt(o: JsObject): int {.importjs: "(#)".}
   proc jsToCstring(o: JsObject): cstring {.importjs: "String(#)".}
@@ -337,8 +369,8 @@ when defined(js):
                            env: seq[(string, string)] = @[];
                            workingDir = "";
                            addressSpaceLimit: int64 = 0): ProcessLink =
-    ## As on the C backend: `executable` in a new process group, stdin/stdout
-    ## the protocol channel, stderr captured. A start that fails reads as an
+    ## As on the C backend: `executable` in a new process group, the channel
+    ## on descriptors 3 to 6, stdout and stderr captured. A start that fails reads as an
     ## exit with status 127.
     if not guardsInstalled:
       guardsInstalled = true
@@ -362,6 +394,8 @@ when defined(js):
     for (k, v) in env:
       keys.add cstring(k)
       values.add cstring(v)
+    keys.add cstring(ChannelEnv)
+    values.add cstring(ChannelEnvValue)
     let link = ProcessLink(executable: executable, stdinOpen: true,
                            launchNote: note)
     var child: JsObject
@@ -373,26 +407,43 @@ when defined(js):
                          ": " & e.msg)
     link.child = child
     link.pid = jsPid(child)
-    let stdinStream = jsField(child, "stdin")
-    let stdoutStream = jsField(child, "stdout")
-    let stderrStream = jsField(child, "stderr")
-    jsOnData(stdoutStream, "data", proc(d: JsObject) =
-      let s = toNimString(d)
-      link.bytesRead += s.len
-      link.reader.feed(s))
-    jsOn(stdoutStream, "end", proc() = link.readEof = true)
-    jsOnData(stderrStream, "data", proc(d: JsObject) =
+    # §11.4.1: the protocol is on the child's descriptors 3 and 4, liveness
+    # on 5 and 6; its stdout and stderr are both the plugin's log.
+    let toChild = jsStdio(child, ProtocolInFd)
+    let fromChild = jsStdio(child, ProtocolOutFd)
+    let pingTo = jsStdio(child, LivenessInFd)
+    let pongFrom = jsStdio(child, LivenessOutFd)
+    link.toChild = toChild
+    link.pingTo = pingTo
+    let logged = proc(d: JsObject) =
       let data = toNimString(d)
       if not link.stderrSink.isNil: link.stderrSink(data)
       link.stderrTail.add data
       if link.stderrTail.len > MaxStderrKeep:
-        link.stderrTail = link.stderrTail[^MaxStderrKeep .. ^1])
-    jsOn(stdinStream, "drain", proc() = link.writeBlocked = false)
-    jsOnData(stdinStream, "error", proc(e: JsObject) =
-      # EPIPE: the child closed its stdin or ended.
-      link.writeFailed = true
-      link.stdinOpen = false
-      link.outQueue.setLen(0))
+        link.stderrTail = link.stderrTail[^MaxStderrKeep .. ^1]
+    if not jsIsNil(fromChild):
+      jsOnData(fromChild, "data", proc(d: JsObject) =
+        let s = toNimString(d)
+        link.bytesRead += s.len
+        link.reader.feed(s))
+      jsOn(fromChild, "end", proc() = link.readEof = true)
+    if not jsIsNil(pongFrom):
+      jsOnData(pongFrom, "data", proc(d: JsObject) =
+        link.livenessReader.feed(toNimString(d)))
+    for fd in [1, 2]:
+      let s = jsStdio(child, fd)
+      if not jsIsNil(s): jsOnData(s, "data", logged)
+    if not jsIsNil(toChild):
+      jsOn(toChild, "drain", proc() = link.writeBlocked = false)
+      jsOnData(toChild, "error", proc(e: JsObject) =
+        # EPIPE: the child closed its end or ended.
+        link.writeFailed = true
+        link.stdinOpen = false
+        link.outQueue.setLen(0))
+    if not jsIsNil(pingTo):
+      jsOnData(pingTo, "error", proc(e: JsObject) =
+        link.pingTo = nil
+        link.livenessQueue.setLen(0))
     let recordExit = proc(code, signal: JsObject) =
       if link.exitSeen: return
       link.exitSeen = true
@@ -422,18 +473,25 @@ when defined(js):
     liveLinks.add link
     link
 
-  proc canWrite(p: ProcessLink): bool = p.stdinOpen and not p.child.isNil
+  proc canWrite(p: ProcessLink): bool =
+    p.stdinOpen and not p.child.isNil and not jsIsNil(p.toChild)
+
+  proc hasLiveness(p: ProcessLink): bool =
+    not p.child.isNil and not jsIsNil(p.pingTo)
 
   proc queuedBytes*(p: ProcessLink): int =
     ## The bytes the child has not taken: the link's queue plus what Node
     ## holds for the pipe.
     if p.child.isNil: return p.outQueue.len
-    p.outQueue.len + jsWritableLength(jsField(p.child, "stdin"))
+    p.outQueue.len + jsWritableLength(p.toChild)
 
   proc flushWrites*(p: ProcessLink) =
+    if p.livenessQueue.len > 0 and p.hasLiveness:
+      discard jsWrite(p.pingTo, toBytes(p.livenessQueue))
+      p.livenessQueue.setLen(0)
     if p.outQueue.len == 0 or not p.canWrite or p.writeBlocked:
       return
-    let ok = jsWrite(jsField(p.child, "stdin"), toBytes(p.outQueue))
+    let ok = jsWrite(p.toChild, toBytes(p.outQueue))
     p.outQueue.setLen(0)
     if not ok:
       p.writeBlocked = true
@@ -444,6 +502,13 @@ when defined(js):
     if p.isNil:
       return
     var frame: string
+    while true:
+      case p.livenessReader.next(frame)
+      of fsFrame: result.add frame
+      of fsIncomplete: break
+      of fsOversize:
+        p.oversize = true
+        break
     while result.len < maxFrames:
       case p.reader.next(frame)
       of fsFrame: result.add frame
@@ -476,15 +541,20 @@ when defined(js):
     jsKillGroup(p.pid, int(sig))
 
   proc closeStdin*(p: ProcessLink) =
+    ## Close the host's side of the channel to the child (the protocol and
+    ## the liveness streams): the SDK's reader sees end-of-file.
     if p.canWrite:
-      jsDestroy(jsField(p.child, "stdin"))
+      jsDestroy(p.toChild)
       p.stdinOpen = false
+    if p.hasLiveness:
+      jsDestroy(p.pingTo)
+      p.pingTo = nil
 
   proc closeAll*(p: ProcessLink) =
     if p.isNil or p.child.isNil: return
     p.closeStdin()
-    jsDestroy(jsField(p.child, "stdout"))
-    jsDestroy(jsField(p.child, "stderr"))
+    for fd in [1, 2, ProtocolOutFd, LivenessOutFd]:
+      jsDestroy(jsStdio(p.child, fd))
     if p.exit != esRunning:
       p.forget()
       p.child = nil
@@ -497,35 +567,51 @@ else:
   proc setCloexec(fd: cint) =
     discard fcntl(fd, F_SETFD, FD_CLOEXEC)
 
+  const ChildFdBase = cint(64)
+    ## Where the child parks its pipe ends before moving them onto the
+    ## channel's descriptors: above every fd the move writes to, so no `dup2`
+    ## overwrites a pipe end that has not been moved yet.
+
   proc spawnPluginProcess*(executable: string; args: seq[string] = @[];
                            env: seq[(string, string)] = @[];
                            workingDir = "";
                            addressSpaceLimit: int64 = 0): ProcessLink =
-    ## Start `executable` in a new process group, with stdin/stdout as the
-    ## protocol channel and stderr captured. Raises `OSError` when the pipes or
-    ## the fork fail; an exec failure shows up as an exit with status 127.
-    var inPipe, outPipe, errPipe: array[2, cint]
-    if pipe(inPipe) != 0 or pipe(outPipe) != 0 or pipe(errPipe) != 0:
+    ## Start `executable` in a new process group, with the protocol on
+    ## descriptors 3 and 4, liveness on 5 and 6 (§11.4.1), stdin on
+    ## `/dev/null`, and stdout and stderr both captured for the plugin log.
+    ## Raises `OSError` when the pipes or the fork fail; an exec failure shows
+    ## up as an exit with status 127.
+    var inPipe, outPipe, errPipe, pingPipe, pongPipe: array[2, cint]
+    if pipe(inPipe) != 0 or pipe(outPipe) != 0 or pipe(errPipe) != 0 or
+       pipe(pingPipe) != 0 or pipe(pongPipe) != 0:
       raiseOSError(osLastError(), "pipe for plugin process " & executable)
     # Everything the child needs is built BEFORE fork: after fork only
     # async-signal-safe calls are allowed in the child.
     var argv = allocCStringArray(@[executable] & args)
     var envStrings: seq[string]
     for k, v in envPairs():
-      var overridden = false
+      var overridden = k == ChannelEnv
       for (ek, _) in env:
         if ek == k: overridden = true
       if not overridden:
         envStrings.add k & "=" & v
     for (k, v) in env:
       envStrings.add k & "=" & v
+    envStrings.add ChannelEnv & "=" & ChannelEnvValue
     var envp = allocCStringArray(envStrings)
     let cwd = workingDir
     let parentPid = getpid()
+    # (source in the child, the descriptor it becomes)
+    let moves = [(inPipe[0], cint(ProtocolInFd)), (outPipe[1], cint(ProtocolOutFd)),
+                 (pingPipe[0], cint(LivenessInFd)), (pongPipe[1], cint(LivenessOutFd)),
+                 (errPipe[1], cint(1)), (errPipe[1], cint(2))]
+    let allEnds = [inPipe[0], inPipe[1], outPipe[0], outPipe[1], errPipe[0],
+                   errPipe[1], pingPipe[0], pingPipe[1], pongPipe[0], pongPipe[1]]
     let pid = fork()
     if pid < 0:
       deallocCStringArray(argv)
       deallocCStringArray(envp)
+      for fd in allEnds: discard close(fd)
       raiseOSError(osLastError(), "fork for plugin process " & executable)
     if pid == 0:
       # ---- the child --------------------------------------------------------
@@ -540,12 +626,19 @@ else:
         lim.rlim_cur = addressSpaceLimit
         lim.rlim_max = addressSpaceLimit
         discard setrlimit(RLIMIT_AS, lim)
-      discard dup2(inPipe[0], 0)
-      discard dup2(outPipe[1], 1)
-      discard dup2(errPipe[1], 2)
-      for fd in [inPipe[0], inPipe[1], outPipe[0], outPipe[1], errPipe[0],
-                 errPipe[1]]:
-        if fd > 2: discard close(fd)
+      # Park every source above the targets, then move each onto its target.
+      var parked: array[6, cint]
+      for i, (src, _) in moves:
+        parked[i] = fcntl(src, F_DUPFD, ChildFdBase)
+        if parked[i] < 0: exitnow(127)
+      for fd in allEnds: discard close(fd)
+      for i, (_, dst) in moves:
+        if dup2(parked[i], dst) < 0: exitnow(127)
+      for fd in parked: discard close(fd)
+      let devNull = posix.open("/dev/null", O_RDONLY)
+      if devNull >= 0 and devNull != 0:
+        discard dup2(devNull, 0)
+        discard close(devNull)
       if cwd.len > 0:
         discard chdir(cwd.cstring)
       discard execve(argv[0], argv, envp)
@@ -553,30 +646,35 @@ else:
     # ---- the parent ---------------------------------------------------------
     deallocCStringArray(argv)
     deallocCStringArray(envp)
-    discard close(inPipe[0])
-    discard close(outPipe[1])
-    discard close(errPipe[1])
-    for fd in [inPipe[1], outPipe[0], errPipe[0]]:
+    for fd in [inPipe[0], outPipe[1], errPipe[1], pingPipe[0], pongPipe[1]]:
+      discard close(fd)
+    for fd in [inPipe[1], outPipe[0], errPipe[0], pingPipe[1], pongPipe[0]]:
       setNonBlocking(fd)
       setCloexec(fd)
     ProcessLink(pid: pid, executable: executable, toChild: inPipe[1],
-                fromChild: outPipe[0], errFromChild: errPipe[0])
+                fromChild: outPipe[0], errFromChild: errPipe[0],
+                pingTo: pingPipe[1], pongFrom: pongPipe[0])
 
-  proc flushWrites*(p: ProcessLink) =
-    while p.outQueue.len > 0 and p.toChild >= 0:
-      let n = posix.write(p.toChild, p.outQueue[0].addr, p.outQueue.len)
+  proc flushQueue(fd: var cint; queue: var string; failed: var bool) =
+    while queue.len > 0 and fd >= 0:
+      let n = posix.write(fd, queue[0].addr, queue.len)
       if n > 0:
-        p.outQueue = p.outQueue[n .. ^1]
+        queue = queue[n .. ^1]
       elif n < 0 and (errno == EAGAIN or errno == EWOULDBLOCK):
         return
       elif n < 0 and errno == EINTR:
         continue
       else:
-        p.writeFailed = true
-        discard close(p.toChild)
-        p.toChild = -1
-        p.outQueue.setLen(0)
+        failed = true
+        discard close(fd)
+        fd = -1
+        queue.setLen(0)
         return
+
+  proc flushWrites*(p: ProcessLink) =
+    var livenessFailed = false
+    flushQueue(p.pingTo, p.livenessQueue, livenessFailed)
+    flushQueue(p.toChild, p.outQueue, p.writeFailed)
 
   proc drainFd(fd: var cint; sink: proc(data: string); eof: var bool) =
     var buf: array[65536, char]
@@ -608,12 +706,23 @@ else:
       link.stderrTail.add d
       if link.stderrTail.len > MaxStderrKeep:
         link.stderrTail = link.stderrTail[^MaxStderrKeep .. ^1], errEof)
+    # The `pong`s first: they are what says the process is alive, and they
+    # come on a descriptor of their own (§11.4.1).
+    var pongEof = false
+    drainFd(p.pongFrom, proc(d: string) = link.livenessReader.feed(d), pongEof)
+    var frame: string
+    while true:
+      case p.livenessReader.next(frame)
+      of fsFrame: result.add frame
+      of fsIncomplete: break
+      of fsOversize:
+        p.oversize = true
+        break
     var eof = false
     drainFd(p.fromChild, proc(d: string) =
       link.bytesRead += d.len
       link.reader.feed(d), eof)
     if eof: p.readEof = true
-    var frame: string
     while result.len < maxFrames:
       case p.reader.next(frame)
       of fsFrame: result.add frame
@@ -621,6 +730,19 @@ else:
       of fsOversize:
         p.oversize = true
         break
+
+  proc readPongs*(p: ProcessLink): seq[string] =
+    ## Only the liveness descriptor's frames (the `pong`s), leaving the
+    ## protocol's unread: what a suite uses to keep the protocol pipe full
+    ## while it measures liveness.
+    if p.isNil:
+      return
+    var eof = false
+    let link = p
+    drainFd(p.pongFrom, proc(d: string) = link.livenessReader.feed(d), eof)
+    var frame: string
+    while p.livenessReader.next(frame) == fsFrame:
+      result.add frame
 
   proc pollExit*(p: ProcessLink): bool =
     ## Reap the child if it has ended. True once it has.
@@ -647,9 +769,14 @@ else:
     discard kill(Pid(-p.pid), sig)
 
   proc closeStdin*(p: ProcessLink) =
+    ## Close the host's side of the channel to the child (the protocol and
+    ## the liveness descriptors): the SDK's reader sees end-of-file.
     if p.toChild >= 0:
       discard close(p.toChild)
       p.toChild = -1
+    if p.pingTo >= 0:
+      discard close(p.pingTo)
+      p.pingTo = -1
 
   proc closeAll*(p: ProcessLink) =
     if p.isNil: return
@@ -660,8 +787,13 @@ else:
     if p.errFromChild >= 0:
       discard close(p.errFromChild)
       p.errFromChild = -1
+    if p.pongFrom >= 0:
+      discard close(p.pongFrom)
+      p.pongFrom = -1
 
   proc canWrite(p: ProcessLink): bool = p.toChild >= 0
+
+  proc hasLiveness(p: ProcessLink): bool = p.pingTo >= 0
 
   proc queuedBytes*(p: ProcessLink): int = p.outQueue.len
 
@@ -673,6 +805,13 @@ proc send*(p: ProcessLink; msg: JsonNode): bool {.discardable.} =
   let frame = encodeMessage(msg)
   if frame.len == 0:
     return false
+  if msg{"type"}.getStr("") == "ping" and p.hasLiveness:
+    # §11.4.1: a `ping` goes on the liveness descriptor, never behind the
+    # frames queued for a child that is slow to read them.
+    if p.livenessQueue.len > MaxLivenessQueuedBytes:
+      return false
+    p.livenessQueue.add frame
+    return true
   if p.queuedBytes > MaxQueuedBytes:
     return false
   p.outQueue.add frame

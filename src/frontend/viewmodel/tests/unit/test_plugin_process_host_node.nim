@@ -15,7 +15,8 @@
 ## the handshake and two plugins in one pid, crash attribution and restart (a
 ## signal NAME from Node read back as SIGSEGV), hang attribution, the stop
 ## sequence's SIGTERM to the group, `--no-extensions`, a start that fails, a
-## child that stops reading its stdin (the write queue), and what ends a
+## child that stops reading its channel (the write queue), a plugin's stdout
+## going to its log rather than the protocol, and what ends a
 ## plugin when the main process ends — SIGTERM, and SIGKILL with and without
 ## `setpriv`. For the last three the suite starts ITSELF a second time as the
 ## main process (`--guard-child`), and kills that process. And a `setpriv`
@@ -414,6 +415,38 @@ proc main() {.async.} =
       r.active("acme-tools.metrics")), "metrics is back"
     await r.sup.shutdownAndWait()
 
+  if section("echo", "§11.4.1: a plugin's stdout is its log, not the protocol"):
+    var r = newRig("echo")
+    r.both()
+    ck await r.sup.waitUntil("both active", r.bothActive), "both active"
+    let pid = r.sup.pidOf("acme-tools.flame")
+    let id = r.sup.invoke("acme-tools.flame", "flame.refresh")
+    ck await r.sup.waitUntil("done", proc(): bool =
+      r.sup.answers.anyIt(it.id == id and it.kind == "done")),
+      "flame.refresh is answered after the plugin echoed to stdout"
+    ck await r.sup.waitUntil("pane", proc(): bool =
+      r.sup.renderSurface("acme-tools.flame/flame").allText.contains("echoed")),
+      "and its pane is drawn from what it pushed on the protocol"
+    let logFile = r.sup.logDir / "acme-tools.stderr.log"
+    ck await r.sup.waitUntil("log", proc(): bool =
+      fileExists(logFile) and
+        readFile(logFile).contains("flame: refreshing (a line on stdout)")),
+      "what it echoed is in the plugin log"
+    ck r.sup.faults.len == 0, "no protocol violation: " &
+      r.sup.faults.mapIt(it.detail).join("; ")
+    ck r.sup.pidOf("acme-tools.flame") == pid, "the process was not restarted"
+    await r.sup.shutdownAndWait()
+
+  if section("protocol", "§11.6.1: garbage on the protocol's descriptor is a violation"):
+    var r = newRig("protocol")
+    r.both()
+    ck await r.sup.waitUntil("both active", r.bothActive), "both active"
+    discard r.sup.invoke("acme-tools.flame", "flame.refresh")
+    ck await r.sup.waitUntil("violation", proc(): bool =
+      r.sup.faults.anyIt(it.kind == fkProtocol)),
+      "a frame of garbage on descriptor 4 is a protocol violation"
+    await r.sup.shutdownAndWait()
+
   if section("stop", "§11.8: the stop sequence signals the group: SIGTERM for a stuck process"):
     var r = newRig("hang-invoke")
     r.sup.shutdownGraceMs = 300
@@ -427,6 +460,9 @@ proc main() {.async.} =
     r.sup.setEnabled("acme-tools.flame", false, persist = false)
     ck await r.sup.waitUntil("stopped", proc(): bool = not pidAlive(pid)),
       "a process stuck in a handler is stopped"
+    # A process the stop sequence failed to end is the failure just
+    # reported; ending it here keeps Node's loop from waiting on it for ever.
+    if pidAlive(pid): killPid(pid, int(SIGKILL))
     ck await r.sup.waitUntil("the stop observed", proc(): bool =
       r.sup.events.anyIt(it == "stopped acme-tools")), "as a stop, not a fault"
     ck r.sup.faults.len == 0, "no fault is recorded for a stop"

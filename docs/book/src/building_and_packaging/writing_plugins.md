@@ -40,7 +40,8 @@ hosts:
   "package": "ct-lens",
   "host": { "kind": "native", "executable": "bin/ct-lens-plugins" },
   "plugins": [
-    { "id": "ct-lens.history", "version": "0.1.0", "capabilities": ["process"], "...": "..." },
+    { "id": "ct-lens.history", "version": "0.1.0", "capabilities": ["process"],
+      "executables": ["git"], "...": "..." },
     { "id": "ct-lens.watch",   "version": "0.1.0", "capabilities": ["process"], "...": "..." }
   ]
 }
@@ -52,6 +53,9 @@ Rules CodeTracer enforces when it reads the file:
 - Every plugin of a native package declares the `process` capability, and a
   `traceEgress` entry with `"acknowledged": true` and a `statement`. A native
   program runs with the user's full authority, and the grant screen says so.
+- A program a plugin runs is named in its `executables` list (`"git"`), and a
+  plugin that listens on or connects to a loopback socket declares
+  `socket:local`.
 - The program's plugin list must equal the manifest's. A plugin listed in one
   and not the other stops the package from loading.
 - Each contribution names the views it draws (`"views": ["Tree", "Table",
@@ -167,34 +171,64 @@ state, and a plugin that pushes more than 500 messages a second for five
 seconds is stopped for flooding. `ct-lens` keeps a fingerprint of what it last
 pushed and returns early when nothing moved.
 
-### Running another program
+### Running another program, timers and sockets
 
-Handlers run one at a time, on one thread, for every plugin of the package. A
-handler that waits for a child process holds every plugin in the program, and
-after five seconds CodeTracer stops the process as hung. So start the program
-in a handler and collect its output from the SDK's idle loop:
+Handlers run one at a time, on one thread, for every plugin of the package,
+inside an event loop. A handler that waited for a child process would hold
+every plugin in the program, and after five seconds CodeTracer would stop the
+process as hung. So start the program in a handler and handle its answer when
+it comes:
 
 ```nim
-let runner = newToolRunner()            # src/plugins/ct-lens/lens_tools.nim
-sdk.idle.add proc() = runner.pump()
-...
-let run = runner.start("ct-lens.history", @["git", "-C", dir, "log", ...],
-                       dir, timeoutMs = 15_000, proc(r: ToolRun) =
-  if r.exitCode == 0: p.pushView("history", treeOf(r.output)))
+let run = p.runTool("git", @["log", "-L", "4,6:calc.py"], workingDir = dir,
+                    timeoutMs = 15_000, env = @[("PATH", getEnv("PATH"))])
+run.finished.addCallback(proc() =
+  if run.exitCode == 0: p.pushView("history", treeOf(run.output)))
 ```
 
-`lens_tools` passes arguments as a list, with no shell; gives the child its own
-pipes (a child that inherited the plugin's stdout would write into the protocol
-channel); kills a run past its deadline or when you cancel it; and caps the
-output. Copy it, or use it as a model. The SDK does not offer these primitives
-to a native plugin yet, and an `sdk.idle` hook is not attributed to a plugin:
-catch every error in it yourself, or one raised there ends the process and
-every plugin in it takes the blame.
+`runTool` takes the program's name, which must be in the plugin's
+`executables`, and finds it on the `PATH` the plugin was started with. The
+arguments are a list, with no shell. The child gets exactly the environment you
+pass, pipes of its own, and a process group of its own. A run past its deadline,
+or one you `cancel`, is killed with every process it started. The output is
+capped. `startError` says why a program did not start: not declared, not on the
+`PATH`, or a working directory that does not exist.
 
-**Never write to stdout yourself.** It is the protocol channel: an `echo`
-in a plugin is a malformed frame, and the host counts it as a protocol
-violation. Write diagnostics with `p.log`, or to stderr, which goes to the
-plugin log.
+The lower-level calls are there too, and they return futures. Await them in an
+`{.async.}` proc and start that proc with `p.go`:
+
+```nim
+proc serve(p: Plugin) {.async.} =
+  let l = await p.listenTcp("127.0.0.1", 0)       # needs socket:local
+  let c = await p.acceptFrom(l.listener)
+  let frame = await p.readFrame(c.stream, frLengthPrefixed)
+  discard await p.writeFrame(c.stream, frame.frame, frLengthPrefixed)
+
+p.go(p.serve())
+```
+
+`spawnProcess`, `read`, `write`, `awaitExit`, `signalProcess`, `connectTcp`,
+`connectUnixSocket`, `listenUnixSocket` and `sleepFor` work the same way. What a
+plugin opens is its own. Deactivating the plugin kills every process group it
+started and closes every socket, and `p.handleReport` lists what is open.
+
+For periodic work use `p.every(ms, proc(p: Plugin) = ...)` or
+`p.after(ms, ...)`. Timers belong to the plugin and stop when it is deactivated.
+
+A handler, a timer, and code after an `await` on one of these calls all run as
+the plugin's own. If one of them raises a `CatchableError`, that is reported as
+the plugin's error, and the process keeps running. If one of them loops, the
+watchdog reports that plugin as busy. For a future from somewhere else, await
+`p.own(f)` to get the same attribution.
+
+The types the mirrored session's signals carry are exported by the SDK, so
+`VariableDiff`, `VariableChange` and `StateVM` need no import of CodeTracer's
+own source.
+
+**Stdout is the plugin log, not the protocol.** The protocol runs on
+descriptors of its own (3 to 6), so `echo` while debugging, or a child that
+inherited your stdout, is a line in the plugin log. `p.log` writes there too,
+with the plugin's name.
 
 ### Panes that answer keys and clicks
 
@@ -278,13 +312,12 @@ ct-lens.history`, then `:plugins grant ct-lens.history`, once per plugin.
 
 - `:plugins` shows each plugin's state, strikes, last fault and
   acknowledgement latency.
-- `:plugins log` shows the plugin log: the program's stderr, every `p.log`,
-  and every fault. It is kept under
+- `:plugins log` shows the plugin log: the program's stdout and stderr, every
+  `p.log`, and every fault. It is kept under
   `$XDG_STATE_HOME/codetracer/plugin-logs/<session>-<pid>/`.
-- A `CatchableError` a handler raises is reported as that plugin's error and
-  counts as a strike; three in a minute stop the plugin. The SDK does not catch
-  errors raised in an `sdk.idle` hook: catch them yourself, as
-  `lens_tools.ToolRunner.onError` does, or they end the process.
+- A `CatchableError` raised by a handler, a timer or an async continuation is
+  reported as that plugin's error and counts as a strike; three in a minute
+  stop the plugin.
 - `:plugins disable <id>` turns one plugin off; its siblings keep running in
   the same process.
 - After three Escapes, a plugin that held a layer reads `not responding`

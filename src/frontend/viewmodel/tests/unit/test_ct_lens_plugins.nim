@@ -17,10 +17,12 @@
 ##   them, and the core `StateVM` derives its change set from them itself.
 ##   The real replay, the real recording and the real terminal are the TUI
 ##   suite's (`tui/tests/real_terminal/test_ct_lens_plugins_pty.nim`).
-## * `slow-git` is a two-line shell script that sleeps and then runs the real
-##   git with the same arguments. It is the one stand-in, and it is not a
-##   mock: it is a slow repository, which is the condition under test, and
-##   everything it answers comes from git.
+## * The slow `git` is a two-line shell script, installed as `git` in a
+##   directory put first on the PATH the plugin process starts with (the
+##   plugin runs the program its manifest declares, by name), that sleeps and
+##   then runs the real git with the same arguments. It is the one stand-in,
+##   and it is not a mock: it is a slow repository, which is the condition
+##   under test, and everything it answers comes from git.
 ## * The repository is real (`ct_lens_fixture.makeHistoryRepo`): three
 ##   commits, made by the suite.
 ##
@@ -196,15 +198,34 @@ proc expectedHistory(dir, file: string; first, last: int): seq[string] =
   for l in o.splitLines:
     if l.strip.len > 0: result.add l.strip
 
+var pathBeforeSlowGit = ""
+
 proc slowGit(r: Rig; sleepSeconds: int; never = false): string =
   ## A git that takes `sleepSeconds` to start, or (`never`) one that never
   ## answers: it becomes `sleep` in place, so the pid it writes beside itself
-  ## is the process the plugin must kill.
-  result = r.dir.parentDir / "slow-git"
+  ## is the process the plugin must kill. It is installed as `git` in a
+  ## directory put first on this process's PATH, which the plugin process
+  ## inherits when it starts (so call this before `both`); `restorePath`
+  ## undoes it. Returns the script's path.
+  # Not resolved through symlinks: `sleep` is a link to a multi-call
+  # coreutils, which dispatches on the name it was run by.
+  let realGit = findExe("git", followSymlinks = false)
+  let realSleep = findExe("sleep", followSymlinks = false)
+  doAssert realGit.len > 0 and realSleep.len > 0
+  let dir = r.dir.parentDir / "slow-bin"
+  createDir(dir)
+  result = dir / "git"
   writeFile(result, "#!/bin/sh\necho $$ > \"$0.pid\"\n" &
-    (if never: "exec sleep " & $sleepSeconds & "\n"
-     else: "sleep " & $sleepSeconds & "\nexec git \"$@\"\n"))
+    (if never: "exec " & realSleep & " " & $sleepSeconds & "\n"
+     else: realSleep & " " & $sleepSeconds & "\nexec " & realGit & " \"$@\"\n"))
   setFilePermissions(result, {fpUserRead, fpUserWrite, fpUserExec})
+  pathBeforeSlowGit = getEnv("PATH")
+  putEnv("PATH", dir & ":" & pathBeforeSlowGit)
+
+proc restorePath() =
+  if pathBeforeSlowGit.len > 0:
+    putEnv("PATH", pathBeforeSlowGit)
+    pathBeforeSlowGit = ""
 
 proc pidAlive(pid: int): bool = pid > 0 and kill(Pid(pid), 0) == 0
 
@@ -311,17 +332,24 @@ when not LensWasm:
       r.sup.shutdown()
 
     test "a git that cannot be started is named":
+      # The plugin runs a program by the NAME its manifest declares (`git`):
+      # a path, or a name it did not declare, is refused, and said so.
       var r = newRig(history = %*{"git": "/nonexistent/ct-lens-git"})
       r.both()
       r.stopAt(r.file, 5, 4, 6, "apply")
       check r.sup.waitUntil("could not run", proc(): bool =
         "could not run /nonexistent/ct-lens-git" in r.pane("ct-lens.history/history"))
+      r.sup.settingsChanged("ct-lens.history", %*{"git": "ct-lens-undeclared-git"})
+      check r.sup.waitUntil("not declared", proc(): bool =
+        let pane = r.pane("ct-lens.history/history")
+        "could not run ct-lens-undeclared-git" in pane and
+          "declared executable set" in pane)
       r.sup.shutdown()
 
     test "a slow git does not hold the sibling plugin":
       var r = newRig()
-      let slow = r.slowGit(8)
-      r.sup.configure("ct-lens.history", true, %*{"git": slow})
+      discard r.slowGit(8)
+      defer: restorePath()
       r.both()
       r.stopAt(r.file, 5, 4, 6, "apply")
       check r.sup.waitUntil("asking git", proc(): bool =
@@ -347,7 +375,8 @@ when not LensWasm:
     test "a git past its deadline is killed and the history says so":
       var r = newRig()
       let slow = r.slowGit(600, never = true)
-      r.sup.configure("ct-lens.history", true, %*{"git": slow, "timeoutMs": 300})
+      defer: restorePath()
+      r.sup.configure("ct-lens.history", true, %*{"timeoutMs": 300})
       r.both()
       r.stopAt(r.file, 5, 4, 6, "apply")
       check r.sup.waitUntil("deadline", proc(): bool =

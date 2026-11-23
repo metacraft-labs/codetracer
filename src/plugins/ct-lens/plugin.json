@@ -15,6 +15,9 @@
       "capabilities": [
         "process"
       ],
+      "executables": [
+        "git"
+      ],
       "traceEgress": {
         "acknowledged": true,
         "statement": "runs git on the source files of the recording you are debugging; nothing leaves this machine"
