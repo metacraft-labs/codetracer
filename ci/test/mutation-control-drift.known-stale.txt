@@ -545,6 +545,10 @@ src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/viewmo
 src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/viewmodel/views/isonim_event_log_view.nim	db9c4c6924195d6630347f931128a1d0a9d7c22f5b784749911716d1d5ac556a	356970eb9bfa553f52f5c2077cdcf54e54d4b86ee3da638e63f0c8f05a311f96
 src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/viewmodel/views/isonim_state_view.nim	2bf5cf331cabc68c9a48c2f6a055ae5e8f473d9992dced21a86f1848e346aa34	06380e7b2269a990f491704e429bcb6ce32f627c6d5f9df6327765f9ff58a5a4
 src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend/viewmodel/views/isonim_event_log_view.nim	db9c4c6924195d6630347f931128a1d0a9d7c22f5b784749911716d1d5ac556a	356970eb9bfa553f52f5c2077cdcf54e54d4b86ee3da638e63f0c8f05a311f96
+# 2026-11-23, the justfile gained the RunQuota prefix variables and a recipe
+# for the bridge test; none of it touches the WebAssembly profile this control
+# grades.
+src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	8bda0738c9719a3f394aa9ee384bc2c920800d78e38e9b540d58ff8a018e0cc0	04efde08eadef2891be127347c9adfbfb3697c8c9ddf88656d6ecb256da86804
 # src/frontend/tui/app/runtime.nim, ci/lib/test-lane-files.sh, ci/test/vm-unit-wasm-parity.sh: moved by the ct-lens package (lane rows) and the
 # plugin status-item fix. Re-grade the harnesses named.
 
