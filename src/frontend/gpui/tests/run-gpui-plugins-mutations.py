@@ -31,10 +31,12 @@ from plat71_mutation_engine import Harness  # noqa: E402
 DOOR = "src/frontend/gpui/host/gpui_plugins.nim"
 SHARED = "src/frontend/tui/host/plugin_processes.nim"
 LEAVES = "src/frontend/gpui/app/leaves.nim"
+CLICKS = "src/frontend/gpui/window_clicks.nim"
+PANES = "src/frontend/tui/host/plugin_panes.nim"
 
 SUITE = "src/frontend/gpui/tests/test_gpui_plugins_host.nim"
 
-SUBJECTS = [DOOR, SHARED, LEAVES]
+SUBJECTS = [DOOR, SHARED, LEAVES, CLICKS, PANES]
 SUITES = [SUITE]
 IN_BINARY = set()
 
@@ -52,6 +54,8 @@ PLACED = S + "Show pane places a plugin's pane as a tab beside the Variables sta
 VIEWKEY = S + ("a key on a focused plugin pane goes to its view, and the "
                "plugin answers it")
 MARKS = S + "the editor's plugin decorations and markers, from what the plugins pushed"
+PRESS = S + ("a press on a plugin pane's row activates it, and the plugin "
+             "answers it")
 DRAWN = S + ("the editor draws a plugin's marker in the mark column and its "
              "decoration after the code")
 
@@ -136,6 +140,20 @@ ARMS = [
      [(SUITE, VIEWKEY)],
      "§11.4.4: a focused plugin pane's keys never reach its view; no "
      "view-event is sent"),
+    ("G19", [(CLICKS, "    if ctx.startsWith(PluginContextPrefix):",
+              "    if false:")],
+     [(SUITE, PRESS)],
+     "§11.4.4: a plugin pane's rows are never wired; a press on one reports "
+     "nothing"),
+    ("G20", [(DOOR, "  panes.paneClickNode(pane, node, index)", "  false")],
+     [(SUITE, PRESS)],
+     "§11.4.4: a press on a plugin pane's row never reaches its view; no "
+     "view-event is sent"),
+    ("G21", [(PANES, "    if count >= 0 and option >= count: return false",
+              "    discard")],
+     [(SUITE, PRESS)],
+     "a press naming an option past the list's end is sent to the plugin as "
+     "an activation"),
 ]
 
 

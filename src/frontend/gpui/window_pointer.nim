@@ -68,7 +68,8 @@ func kindOfPart(part: string): HitKind =
   ## The rows `window_clicks` wired (`GClickPart`'s names).
   case part
   of $gcpFileNode, $gcpEventRow, $gcpVariable, $gcpCallRow, $gcpPoint,
-     $gcpCallArg, $gcpVcsFile, $gcpVcsCommit, $gcpHistoryEntry, $gcpOriginHop:
+     $gcpCallArg, $gcpVcsFile, $gcpVcsCommit, $gcpHistoryEntry, $gcpOriginHop,
+     $gcpPluginNode:
     hkRow
   of $gcpGutter: hkGutterGlyph
   of $gcpCode: hkEditorText

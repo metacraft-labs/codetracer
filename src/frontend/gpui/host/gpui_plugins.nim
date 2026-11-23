@@ -23,6 +23,9 @@
 ##   own key handling runs on the tree the plugin pushed, here in the host, and
 ##   the transition goes to the plugin as a `view-event`; the plugin answers
 ##   later with a new tree. No plugin code runs to decide or to draw.
+## * **A press on a plugin pane's row or control** (`routePaneClick`): the
+##   same activation the terminal's click runs, by view node rather than by
+##   row, sent as a `view-event`.
 ## * **The editor's plugin marks** (`editorDecorations`, `editorMarkers`): what
 ##   the plugins pushed for the file the editor shows, for `app/leaves` to draw.
 ## * **The omnibar's entries and the `:plugins` verbs** (`pluginEntries`,
@@ -256,6 +259,20 @@ proc routePaneKey*(panes: PluginPanes; focusedPane, canonical: string): bool =
   if k in ["tab", "shift+tab", ":"]:
     return false
   panes.paneKey(focusedPane, k)
+
+proc routePaneClick*(panes: PluginPanes; pane, node: string; index: int): bool =
+  ## §11.4.4: a press on a plugin pane's row or control — the element drawing
+  ## view node `node` of contributed pane `pane`, on its option or table row
+  ## `index` (-1 for the node itself; `window_clicks.gcpPluginNode`). The
+  ## node is activated as the terminal's click activates it
+  ## (`plugin_panes.paneClickNode`) and the plugin is sent the `view-event`.
+  ## False for a pane that is not a loaded plugin's, or a node its pushed
+  ## tree does not have.
+  if panes.isNil or panes.plugins.isNil:
+    return false
+  if pane notin panes.plugins.loadedPanes:
+    return false
+  panes.paneClickNode(pane, node, index)
 
 proc editorDecorations*(panes: PluginPanes; document: string): seq[SourceDecoration] =
   ## The running plugins' editor decorations for `document` (the path the

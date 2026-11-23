@@ -44,6 +44,7 @@ import ../../view_vocabulary/[editor_surface, pane_views]
 import ../../../common/view_vocabulary/editor_rows   # `emBreakpoint`
 import ../../viewmodel/viewmodels/omnibar_vm
 import ../host/gpui_plugins
+import ../window_clicks   # the window's press wiring, `GPaneClick`
 import ../../viewmodel/tests/unit/plugin_process_fixture
 
 var CHECKS = 0
@@ -437,6 +438,46 @@ suite "GPUI: the window's plugins (host/gpui_plugins)":
       "(activated)" in viewLines(p.sup.renderSurface(flame)).join("\n"))
     p.close()
 
+  test "a press on a plugin pane's row activates it, and the plugin answers it":
+    # The row is the element the GPUI binding drew for the pushed tree, wired
+    # by the window's own `wireWindowClicks` and pressed through the shim's
+    # event delivery (`fireEvent`), as the window's compositor press arrives.
+    let home = newHome()
+    let p = openFor(home)
+    p.grantBoth()
+    const flame = "acme-tools.flame/flame"
+    ck p.waitFor("the flame list", proc(): bool =
+      p.running("acme-tools.flame") and
+        "work 40%" in viewLines(p.sup.renderSurface(flame)).join("\n"))
+    let panes = newPluginPanes(p)
+    var r: GpuiRenderer
+    let (leaf, _) = renderLeaf(r, GpuiLeaf(kind: glkContributed, paneId: flame,
+      title: "Flame"), EditorSurface(medium: GpuiMedium),
+      contributedView = p.paneView(flame))
+    var clicks: seq[GPaneClick]
+    var dedupe: PressDedupe
+    var nodes = snapshotTree(leaf)
+    ck wireWindowClicks(r, nodes, addr dedupe,
+                        proc(c: GPaneClick) = clicks.add c) >= 2
+    let row = findClickTarget(r, leaf, gcpPluginNode, "flame.list#1")
+    ck not row.isNil
+    ck fireEvent(row, "mousedown", GpuiEvent(kind: gekPointerDown, key: "10,20,1")) > 0
+    ck clicks.len == 1
+    ck clicks.len == 1 and clicks[0].part == gcpPluginNode and
+       clicks[0].key == flame and clicks[0].node == "flame.list" and
+       clicks[0].index == 1
+    # Not a plugin pane, a node the tree does not have, an option past its
+    # end: never the plugin's.
+    ck not panes.routePaneClick("editor", "flame.list", 1)
+    ck not panes.routePaneClick(flame, "no.such.node", 1)
+    ck not panes.routePaneClick(flame, "flame.list", 9)
+    ck panes.viewEventsSent == 0
+    ck panes.routePaneClick(clicks[0].key, clicks[0].node, int(clicks[0].index))
+    ck panes.viewEventsSent == 1
+    ck p.waitFor("the plugin's answer", proc(): bool =
+      "work 40% (activated)" in viewLines(p.sup.renderSurface(flame)).join("\n"))
+    p.close()
+
   test "the editor's plugin decorations and markers, from what the plugins pushed":
     let home = newHome()
     let p = openFor(home)
@@ -488,5 +529,5 @@ suite "GPUI: the window's plugins (host/gpui_plugins)":
     ck markers.len == 1 and elementText(markers[0]) == "★"
 
   test "assertion count":
-    ck CHECKS == 139
+    ck CHECKS == 152
     echo "CHECKS: ", CHECKS
