@@ -183,18 +183,23 @@ ARMS = [
         "apply works on the caller's tree instead of a copy: every command "
         "now writes through the argument, and undo-by-replay is unsound"),
     Arm("M2", MODEL,
-        "    if tree.isVisible(cmd.activateTarget):\n      return noOp()",
-        "    if tree.isVisible(cmd.activateTarget):\n      return appliedTo(next)",
+        # Re-aimed 2026-11-23: 17f3ccf31 reads the target as `cmd.subjectRef`
+        # (extension panes), bound to `target`.
+        "    if tree.isVisible(target):\n      return noOp()",
+        "    if tree.isVisible(target):\n      return appliedTo(next)",
         C_NOOP,
         "activating a visible tab reports loApplied, so a click on the tab "
         "already showing pushes an undo entry"),
     Arm("M3", MODEL,
+        # Re-aimed 2026-11-23: 17f3ccf31 names the anchor `besideRef`; the
+        # `let destination` line keeps this the first check, not the
+        # re-validation (`destAgain`) further down lcMoveTab.
         "    let destination = parentOf(tree, anchor)\n"
         "    if destination.isNil or destination.kind != lnStack:\n"
-        "      return refusedFor(lpTargetNotAStack, cmd.moveBeside)",
+        "      return refusedFor(lpTargetNotAStack, besideRef)",
         "    let destination = parentOf(tree, anchor)\n"
         "    if destination.isNil or destination.kind != lnStack:\n"
-        "      return refusedFor(lpPaneNotPlaced, cmd.moveBeside)",
+        "      return refusedFor(lpPaneNotPlaced, besideRef)",
         C_NOT_STACK,
         "a move onto a non-stack is still refused, but for the WRONG reason "
         "— the refusal-by-kind claim, not the refusal itself"),
@@ -234,10 +239,12 @@ ARMS = [
         C_UNDO_ONLY,
         "a no-op enters the undo log: the next undo shows the same screen"),
     Arm("M9", MODEL,
-        "    if layout.tree.contains(d.pane):\n"
-        "      result.add(LayoutProblem(kind: lpPaneBothPlacedAndDocked,",
+        # Re-aimed 2026-11-23: 17f3ccf31 checks `d.paneRefOf` and builds the
+        # problem through the `problem` template (contributed-pane aware).
+        "    if layout.tree.contains(d.paneRefOf):\n"
+        "      result.add(problem(lpPaneBothPlacedAndDocked))",
         "    if false:\n"
-        "      result.add(LayoutProblem(kind: lpPaneBothPlacedAndDocked,",
+        "      result.add(problem(lpPaneBothPlacedAndDocked))",
         C_BOTH,
         "validate no longer sees a pane in the tree and on a strip at once"),
     Arm("M10", MODEL,
@@ -290,8 +297,9 @@ ARMS = [
         "merging onto a bare pane drops the moved pane on the floor — a pane "
         "the matrix's conservation law must find missing"),
     Arm("M18", MODEL,
-        "      return refusedFor(lpStackChildNotPane, cmd.mergedPane)",
-        "      return refusedFor(lpDuplicatePane, cmd.mergedPane)",
+        # Re-aimed 2026-11-23: 17f3ccf31 names the pane `merging`.
+        "      return refusedFor(lpStackChildNotPane, merging)",
+        "      return refusedFor(lpDuplicatePane, merging)",
         C_WHOLE,
         "the whole-region drag is still refused but under a kind that "
         "describes a different defect"),
