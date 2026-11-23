@@ -181,7 +181,9 @@ jobs:
     name: zgui lane (aarch64-darwin)
     needs: linux
     runs-on: aarch64-darwin
-    timeout-minutes: 150
+    # The setup alone has taken 75 minutes here (a 42-minute checkout in run
+    # 44935860183), and the post-checkout cleanup up to 25 more.
+    timeout-minutes: 240
     steps:
       - name: Mint installation token for cross-repo sibling access
         id: ci_token
@@ -285,9 +287,27 @@ jobs:
           CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL: "1"
         # Run 44884214467 (attempt 2) spent 107 minutes here until the job's
         # budget cancelled it, and a cancelled job keeps no log. A step bound
-        # fails the step instead, and the job keeps its log.
+        # fails the step instead. Run 44935860183 (attempt 3) then reached
+        # that bound too, and the post-checkout cleanup ran the job past its
+        # budget, so it lost its log all the same. The build therefore writes
+        # its own log, with a process listing every five minutes that shows
+        # whether cargo is compiling or waiting, and the upload below keeps it.
         timeout-minutes: 60
-        run: nix develop . --command bash -c 'cd src/db-backend && cargo build --bin replay-server'
+        run: |
+          set -euo pipefail
+          mkdir -p test-logs
+          log="$PWD/test-logs/replay-server-build.log"
+          : >"$log"
+          (
+            while sleep 300; do
+              echo "== $(date -u +%H:%M:%S) processes"
+              # shellcheck disable=SC2009 # one listing filtered by several names
+              ps -axo pid,etime,pcpu,rss,command | grep -E '[c]argo|[r]ustc|[n]ix|[n]im |[c]c |[c]lang|[l]d ' | cut -c1-220 | head -25 || true
+            done
+          ) >>"$log" 2>&1 &
+          heartbeat=$!
+          trap 'kill "$heartbeat" 2>/dev/null || true' EXIT
+          nix develop . --command bash -c 'cd src/db-backend && cargo build --bin replay-server' 2>&1 | tee -a "$log"
 
       - name: The zgui lane
         env:
@@ -302,5 +322,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: zgui-lane-aarch64-darwin
-          path: test-logs/test-zgui.log
+          path: |
+            test-logs/test-zgui.log
+            test-logs/replay-server-build.log
           retention-days: 30
