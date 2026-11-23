@@ -764,7 +764,7 @@ src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	src/frontend/ui/ke
 src/frontend/gpui/tests/gpui-plugins-mutation-control.sha256	src/frontend/tui/host/plugin_panes.nim	d9aba9dc68dd568155b5c3fb22ff62bbb08fc190b601099cc12d3f26505cdf8c	f791fa24e11e8efdfc59645a5d8556bd36b818198ddafbafac3065adc87e6102
 src/frontend/tui/tests/plat3-vocabulary-mutation-control.sha256	src/common/view_vocabulary/behaviour.nim	e987a7493e4e98fd6aea560fab68eae8a7e922c55f32a8b276707f6d3d5d1162	0e36aead99ee9570eb53d03b2d3f674406a3457caae4d578f41ba91bad9535c5
 
-src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/viewmodel/plugin_host/key_snapshot.nim	e0e66066d97b1bdcdf6603b2b72352602b768e400bf7b7e95b79680ec6bdaff7	5eb27da2055793c7ade416e15bbbb39fa41b7f3110d8e18375c964d8a6f82522
+src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/viewmodel/plugin_host/key_snapshot.nim	e0e66066d97b1bdcdf6603b2b72352602b768e400bf7b7e95b79680ec6bdaff7	8984dc2bd2cabcd13b9940ed6f160b5846d01712d855359a4a367de15f376a45
 src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/index/plugin_sessions.nim	1d5997145c23620ac0eba8ab310bef10d73fc0cb408132791bf9c16ed064dfe7	b11872bdb3846299913918257d3bc9359c239ffa43078d3562efdf7ca18796f8
 
 # 2026-11-24, plugin decorations and markers in the desktop's editor: the editor
