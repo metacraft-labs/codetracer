@@ -615,9 +615,26 @@ jobs:
         run: ./ci/ensure-origin-dap-windows-toolchain.ps1
 
       - name: Install Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+        # From uv (env.ps1 puts it on PATH), not actions/setup-python: on a
+        # runner whose service runs as NetworkService (win-ci-bare-001),
+        # setup-python's installer fails with "Error happened during Python
+        # installation" (run 45118976975). uv's managed Pythons are plain
+        # archives and need no installer. They are marked externally managed,
+        # so the recorder is pip-installed into a seeded venv, which is what
+        # `python` resolves to from here on.
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          # uv.exe itself: env.ps1's extensionless `uv` shim is for Git Bash.
+          $uv = if ($env:UV_DIR) { Join-Path $env:UV_DIR "uv.exe" } else { (Get-Command uv.exe -ErrorAction Stop).Source }
+          if (-not (Test-Path -LiteralPath $uv -PathType Leaf)) { throw "no uv.exe at $uv" }
+          $venv = Join-Path $env:RUNNER_TEMP "origin-dap-python"
+          & $uv venv --seed --python 3.12 --python-preference only-managed $venv
+          if ($LASTEXITCODE -ne 0) { throw "uv could not create a Python 3.12 venv (exit $LASTEXITCODE)" }
+          $scripts = Join-Path $venv "Scripts"
+          & (Join-Path $scripts "python.exe") -m pip --version
+          if ($LASTEXITCODE -ne 0) { throw "the Python 3.12 venv has no pip" }
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $scripts
 
       - name: Read locked Python recorder revision
         id: python-recorder-lock
@@ -791,9 +808,26 @@ jobs:
         run: choco install capnproto -y
 
       - name: Install Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+        # From uv (env.ps1 puts it on PATH), not actions/setup-python: on a
+        # runner whose service runs as NetworkService (win-ci-bare-001),
+        # setup-python's installer fails with "Error happened during Python
+        # installation" (run 45118976975). uv's managed Pythons are plain
+        # archives and need no installer. They are marked externally managed,
+        # so the recorder is pip-installed into a seeded venv, which is what
+        # `python` resolves to from here on.
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          # uv.exe itself: env.ps1's extensionless `uv` shim is for Git Bash.
+          $uv = if ($env:UV_DIR) { Join-Path $env:UV_DIR "uv.exe" } else { (Get-Command uv.exe -ErrorAction Stop).Source }
+          if (-not (Test-Path -LiteralPath $uv -PathType Leaf)) { throw "no uv.exe at $uv" }
+          $venv = Join-Path $env:RUNNER_TEMP "origin-dap-python"
+          & $uv venv --seed --python 3.12 --python-preference only-managed $venv
+          if ($LASTEXITCODE -ne 0) { throw "uv could not create a Python 3.12 venv (exit $LASTEXITCODE)" }
+          $scripts = Join-Path $venv "Scripts"
+          & (Join-Path $scripts "python.exe") -m pip --version
+          if ($LASTEXITCODE -ne 0) { throw "the Python 3.12 venv has no pip" }
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $scripts
 
       - name: Read locked Python recorder revision
         id: python-recorder-lock
