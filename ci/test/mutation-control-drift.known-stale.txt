@@ -586,7 +586,6 @@ src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/test/vm
 # the palette entries moved into the shared plugin host module (plugin_service). The
 # lines above for gpui/main.nim carry its new digest.
 
-src/frontend/gpui/tests/plat22-mutation-control.sha256	src/frontend/gpui/app/leaves.nim	26c522e1dd1d66a42732a2d48c5876100b19bc4712341e352de571cfb29fcfe9	0f037c56269e3ad51c084fc0e545fcd851102cfa91ce32ed2507b9995f372f42
 src/frontend/tui/tests/plat45-layout-mutation-control.sha256	src/frontend/gpui/app/shell.nim	a9552e68369b3bcf30263e986c7563b2770d0dd974bc196c8280d80fc29cf2bb	b632fc2203960410939c43373a48c225e54816129f2d61d746b77593b76222b0
 src/frontend/tui/tests/plat48-topbar-mutation-control.sha256	src/frontend/gpui/app/dock_projection.nim	27c38086df7cebe1d7bc4df208fa4540c40f407d6820740857a9ba7bf97d6016	f4998d738cb3713af13a6925b305689bc8c94c58dd21da84aade7b4830ceee2f
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/gpui/app/shell.nim	a9552e68369b3bcf30263e986c7563b2770d0dd974bc196c8280d80fc29cf2bb	b632fc2203960410939c43373a48c225e54816129f2d61d746b77593b76222b0
@@ -772,7 +771,6 @@ src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/headle
 
 # plat50-clicks-mutation-control.sha256: graded at 7135bbccaf7; these subjects moved after it.
 
-src/frontend/gpui/tests/plat22-mutation-control.sha256	src/frontend/view_vocabulary/editor_surface.nim	e881d10d747b09c8b519b09ac75629f0987ec8ce87bb8dbf1d54603ed090e46a	93db99e62c8f43c7ce6520366fddcdca1f9633521f73b3ad4125505f2ace5f9d
 src/frontend/tui/tests/plat42-surface-mutation-control.sha256	src/frontend/view_vocabulary/editor_surface.nim	e881d10d747b09c8b519b09ac75629f0987ec8ce87bb8dbf1d54603ed090e46a	93db99e62c8f43c7ce6520366fddcdca1f9633521f73b3ad4125505f2ace5f9d
 src/frontend/tui/tests/plat50-stop-path-mutation-control.sha256	src/frontend/view_vocabulary/editor_surface.nim	e881d10d747b09c8b519b09ac75629f0987ec8ce87bb8dbf1d54603ed090e46a	93db99e62c8f43c7ce6520366fddcdca1f9633521f73b3ad4125505f2ace5f9d
 
