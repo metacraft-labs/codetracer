@@ -714,7 +714,6 @@ src/frontend/gpui/tests/gpui-visualiser-mutation-control.sha256	src/frontend/gpu
 # re-grade for those bytes. The keyed-redraw harness (plat85) was graded at its own
 # change's bytes (10 arms killed, 1 declared survivor); main.nim and leaves.nim then moved
 # under it when the change was rebased onto agents, so it owes a re-grade for those two.
-src/frontend/gpui/tests/plat85-keyed-redraw-mutation-control.sha256	src/frontend/gpui/app/leaves.nim	752bc1a01cdc054eac624558e810b593b78e69f32a1529cdb0da1c4740b4ecf8	0f037c56269e3ad51c084fc0e545fcd851102cfa91ce32ed2507b9995f372f42
 src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/gpui/window_clicks.nim	348d412ad297467f77fdde0607263dc7bd3464de3e457506921a3ae2e52530cb	fa57785969e88f3e03240f840175b5d80fed03d8321770842b1ab18f8fafdd6b
 src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/gpui/window_pointer.nim	fe5c284894f50c646f4c66a12fceced65f211cf24b9125d72a6183ffb53eb076	05498c06d9c3296ed9014c5a3bf8041c64d81d665a4e9bdf699ecf78f4f4a859
 src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/gpui/window_clicks.nim	348d412ad297467f77fdde0607263dc7bd3464de3e457506921a3ae2e52530cb	fa57785969e88f3e03240f840175b5d80fed03d8321770842b1ab18f8fafdd6b
@@ -723,7 +722,6 @@ ci/test/plat70-find-decisions-mutation-control.sha256	src/frontend/gpui/main.nim
 ci/test/plat70c-find-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	93e0d62046619caab3c26eb7d894941ff23c8d044e139302cc93481b87bc8f5b
 ci/test/plat70i-fit-mutation-control.sha256	src/frontend/gpui/main.nim	7953de7932634c94ba38056c6f5e8454c74131be118557bc674f6f8c5d6ce036	93e0d62046619caab3c26eb7d894941ff23c8d044e139302cc93481b87bc8f5b
 src/frontend/gpui/tests/gpui-visualiser-mutation-control.sha256	src/frontend/gpui/main.nim	1c6736de0a3d1215676b9175d1230025349fbdaa64d3052d13ca5b4bc9510f63	93e0d62046619caab3c26eb7d894941ff23c8d044e139302cc93481b87bc8f5b
-src/frontend/gpui/tests/plat85-keyed-redraw-mutation-control.sha256	src/frontend/gpui/main.nim	98559cb44e6f005bc4767116e23ea929509f91f50cd38e14194d4a2ab266f07b	93e0d62046619caab3c26eb7d894941ff23c8d044e139302cc93481b87bc8f5b
 src/frontend/tui/tests/build-residuals-mutation-control.sha256	src/frontend/gpui/main.nim	44be0a3c885a6c9561bd625292907fa776d669875783a6445391ec5b1bfecf55	93e0d62046619caab3c26eb7d894941ff23c8d044e139302cc93481b87bc8f5b
 src/frontend/tui/tests/plat45-layout-mutation-control.sha256	src/frontend/gpui/main.nim	44be0a3c885a6c9561bd625292907fa776d669875783a6445391ec5b1bfecf55	93e0d62046619caab3c26eb7d894941ff23c8d044e139302cc93481b87bc8f5b
 src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/gpui/main.nim	28f36a050600425fdbbea72ccc729250a4977ecc589c87e4d67e73d3196f228e	93e0d62046619caab3c26eb7d894941ff23c8d044e139302cc93481b87bc8f5b
@@ -775,7 +773,6 @@ src/frontend/tui/tests/plat50-stop-path-mutation-control.sha256	src/frontend/vie
 # wires a contributed pane's rows, and plugin_panes' row click and GPUI's node
 # click share one activation. gpui-plugins is re-graded over these bytes (21/21);
 # plat85 and plat81-plugin-panes owe a re-grade (the panes PTY suite is 8/8).
-src/frontend/gpui/tests/plat85-keyed-redraw-mutation-control.sha256	src/frontend/gpui/window_clicks.nim	c8e21f13353e2ee6f5741bd3ea5e2bf1327ddd0a4971237a8a1feb6012b979a4	fa57785969e88f3e03240f840175b5d80fed03d8321770842b1ab18f8fafdd6b
 # 2026-11-23, the input-routing gate's plugin sites: a focused plugin pane's key
 # names are decoded by the vocabulary (`behaviour.keyPressOfCanonical`), and the GPUI
 # replay window's Esc gesture dismissal is the router's. plat81-plugin-panes,
