@@ -1,0 +1,398 @@
+## views/agent_harbor_tests_words.nim
+##
+## The words the Agent Harbor Tests panel and the trace links say, in every
+## front-end, and the host contexts their views take: the controls' labels
+## and tooltips, the header strip's phrases, a platform's tooltip (its
+## backends, runners and recorders), the legend's heading, what each of the
+## panel's operations does, and the trace links' host requests.
+##
+## ## Why a module of its own
+##
+## The web views (`isonim_agent_harbor_tests_view.nim`,
+## `agent_harbor_trace_links_view.nim`) say these words, and the GPUI and
+## terminal views of the same viewmodels must say exactly the same ones. A
+## native view never imports a web view, so the words live here, in a
+## module that renders nothing and imports no renderer: only the viewmodels
+## and the standard library (the pattern of
+## `agent_harbor_changes_inbox_words.nim`).
+##
+## Every fact a word is built from comes from the viewmodels
+## (nim-agents-isonim-viewmodels `test_runs_vm`, `test_run_feed`,
+## `trace_opener_vm`, `session_timeline_vm`) or from the domain under them
+## (nim-agents `test_runs`, `trace_links`). Nothing here decides a state: it
+## only names it, and an availability rule is always the feed's, never
+## restated.
+##
+## ## The operations
+##
+## Every element of the two views that a press acts on carries its
+## operation and the procedure that performs it
+## (`element_operations.bindOperation`): `tests.run` on a Run, `tests.toggle`
+## on a test's line, `trace-links.load` on a Load trace button, and so on.
+## The view holds no press handler: the page's one pointer listener resolves
+## a press through the pointer keymap and runs the bound procedure
+## (Input-Routing-And-Keymaps.md §5.1). The keys' operations (`TestsKeyOperations`)
+## are run on the viewmodel by `runTestsOperation`, the same procedure for
+## every host.
+
+import std/strutils
+
+import nim_agents/agent_harbor/[test_runs, trace_links, operator_actions]
+import nim_agents_isonim_viewmodels/agent_harbor/[test_runs_vm, trace_opener_vm,
+                                                  action_tracker]
+
+export test_runs_vm, trace_opener_vm
+
+# ---------------------------------------------------------------------------
+# What a host tells the views
+# ---------------------------------------------------------------------------
+
+type
+  AgentHarborTestsContext* = object
+    ## What the host knows that the Tests panel's viewmodel does not say.
+    sessionLabel*: string
+      ## How the session whose change is tested is named (the header
+      ## strip's context phrase).
+    legendOpen*: bool
+      ## The legend starts open (the host's drawing state, as a dropdown's
+      ## open menu is; a story opens it to show what the marks mean).
+    shiftReachable*: bool
+      ## The host reports Shift, so the open control's title names it (the
+      ## Test Results pane's rule: the terminal does not, §8.4 there).
+
+  TraceLinkHostRequests* = ref object
+    ## What a trace link's host was asked to do that has no viewmodel seam:
+    ## open a file a message names, open a plain web link, show the Tests
+    ## panel at a run. Counted and remembered, so a story's record shows the
+    ## press arrived and nothing else happened; a live host performs them.
+    files*: seq[string]       ## `<path>[:<line>]`, each file asked for
+    urls*: seq[string]
+    testsAt*: seq[string]     ## the run ids `Open in Test Results` asked for
+
+  AgentHarborTraceLinksContext* = object
+    ## What the trace-link view takes from its host.
+    opener*: TraceOpenerVM
+      ## The pane's one opener: every link and test of the pane that names
+      ## the same trace reads the same state (`Show trace` everywhere once
+      ## one of them loaded it).
+    requests*: TraceLinkHostRequests
+      ## Where the presses with no viewmodel seam are recorded; nil: inert.
+    fileMenuOpen*: string
+      ## The text of the file link whose menu of targets starts open ("" for
+      ## none): the host's drawing state, as a dropdown's open menu is.
+    openTests*: seq[string]
+      ## The test ids whose line in a test-run summary starts open.
+
+proc recordFile*(requests: TraceLinkHostRequests; target: FileTarget) =
+  ## The host is asked to open `target`.
+  if requests.isNil: return
+  requests.files.add target.path & (if target.line > 0: ":" & $target.line else: "")
+
+proc recordUrl*(requests: TraceLinkHostRequests; url: string) =
+  if requests.isNil: return
+  requests.urls.add url
+
+proc recordTests*(requests: TraceLinkHostRequests; runId: string) =
+  if requests.isNil: return
+  requests.testsAt.add runId
+
+# ---------------------------------------------------------------------------
+# The Tests panel's words
+# ---------------------------------------------------------------------------
+
+const
+  Dot* = " \xC2\xB7 "
+    ## The separator of a header strip's counts and of a meta line.
+  TestsSectionLabel* = "Tests"
+    ## The header strip's small-caps label; the frame is `Test Results`.
+  RunLabel* = "Run"
+  RecordLabel* = "Record"
+  CancelRunLabel* = "Cancel run"
+  KeepRunningLabel* = "Keep running"
+  CancellingText* = "Cancelling\xE2\x80\xA6"
+  ReuseLabel* = "Reuse certified results"
+  ReuseTitle* = "Answer a test from its certificate when one proves it passed at " &
+    "this tree, instead of running it (never for a recorded run)"
+  RecordModeTitle* = "What the header's Record records"
+  RecordModeLabels*: array[RecordMode, string] = ["none", "failing tests", "all tests"]
+    ## The Record mode dropdown's rows (`none` is never offered).
+  StatusFilterTitle* = "Show tests by status"
+  SearchTestsPlaceholder* = "Search tests\xE2\x80\xA6"
+  LegendLabel* = "What the marks mean"
+  PlatformsLabel* = "Platforms"
+  NotInCatalogHead* = "Not in the catalog"
+    ## The group of the plan's Verification entries no catalog test matches.
+  OutputLabel* = "Output"
+  DiagnosticsLabel* = "Diagnostics"
+  FailureLabel* = "Failure"
+  RecordSkipsPrefix* = "Record skips "
+  RecordMarkGlyph* = "\xE2\x8F\xBA"
+    ## ⏺, the platform's recordability mark (drawn as the pane's record mask).
+  OutputLinesShown* = 6
+    ## How many of a test's last output lines an opened row shows.
+
+proc countsPhrase*(vm: TestRunsVM): string =
+  ## The header strip's counts: `12 tests · 4 platforms`; "" while the
+  ## panel shows no tests.
+  let n = vm.testCount
+  let p = vm.platformKeys.len
+  if n == 0 and p == 0: return ""
+  result = $n & (if n == 1: " test" else: " tests")
+  if p > 0: result.add Dot & $p & (if p == 1: " platform" else: " platforms")
+
+proc testsContextPhrase*(sessionLabel: string): string =
+  ## The header strip's context phrase: the session whose change is tested.
+  sessionLabel
+
+proc runAllTitle*(vm: TestRunsVM): string =
+  ## The header's Run: what it does, or why it cannot.
+  let why = vm.runAllAbsence
+  if why.len > 0: why
+  else: "Run every listed test on the platforms switched on"
+
+proc recordAllTitle*(vm: TestRunsVM): string =
+  ## The header's Record: what it does (in its mode), or why it cannot.
+  let why = vm.recordAllAbsence
+  if why.len > 0: return why
+  "Record the " & (if vm.recordMode.val == rmAll: "tests" else: "failing tests") &
+    " on the platforms switched on that can record; a recorded run never reuses"
+
+proc recordSkipsText*(vm: TestRunsVM): string =
+  ## PL4: the platforms the header's Record skips, with why, beside it:
+  ## `Record skips Windows x86-64: No recorder for …`; "" for none.
+  var parts: seq[string]
+  for (label, why) in vm.recordSkipped:
+    parts.add label & ": " & why
+  if parts.len == 0: "" else: RecordSkipsPrefix & parts.join("; ")
+
+proc cancelTarget(vm: TestRunsVM): string =
+  let run = vm.shownRun
+  if run.id.len == 0: "" else: vm.feed.cancelRequest(run.id).targetOf
+
+proc cancelling*(vm: TestRunsVM): bool =
+  ## Tracked: the shown run's cancel was sent and is not answered yet.
+  let target = vm.cancelTarget
+  target.len > 0 and vm.tracker.entryOf(target).status == astSubmitting
+
+proc cancelTitle*(vm: TestRunsVM): string =
+  let why = vm.cancelAbsence
+  if why.len > 0: why else: "Cancel the run on every platform still running; asks first"
+
+proc platformTitle*(vm: TestRunsVM; head: PlatformHeadView): string =
+  ## PL1: a platform's tooltip: its features, every backend and runner that
+  ## can serve it, and whether each can record (with the reason when not).
+  let offer = vm.feed.offerOf(head.key)
+  var lines = @[head.label & " (" & head.features.join(", ") & ")"]
+  if head.serveAbsence.len > 0: lines.add head.serveAbsence
+  for b in offer.backends:
+    var runners: seq[string]
+    for r in b.runners:
+      runners.add r.runner & (if r.canRecord: " records" else: " cannot record")
+    lines.add b.backend & ": " & (if runners.len > 0: runners.join(", ") else: "no runner")
+  lines.join("\n")
+
+proc recordMarkTitle*(head: PlatformHeadView): string =
+  ## The recordability mark's tooltip: that the platform records, or why not.
+  if head.recordReason.len > 0: "Cannot record here: " & head.recordReason
+  else: "Records a trace of a test here"
+
+proc switchTitle*(head: PlatformHeadView): string =
+  ## A platform Switch's tooltip.
+  (if head.enabled: "Shown and in the next run; switch off to leave it out"
+   else: "Left out of the view and the next run; switch on to include it")
+
+proc cellTitle*(cell: TestCellView; testName: string): string =
+  ## A platform cell's tooltip: the platform, the backend and runner that
+  ## served it, its status, its duration, and why it reads as it does.
+  var parts = @[cell.label & ": " & cell.statusWord]
+  if cell.durationText.len > 0: parts[0].add " in " & cell.durationText
+  if cell.cell.backend.len > 0:
+    parts.add "on " & cell.cell.backend &
+      (if cell.cell.runner.len > 0: " (" & cell.cell.runner & ")" else: "")
+  if cell.statusTitle.len > 0: parts.add cell.statusTitle
+  if cell.reusedTitle.len > 0: parts.add cell.reusedTitle
+  if cell.cell.recording == recRecording and cell.cell.recorder.len > 0:
+    parts.add "recording with " & cell.cell.recorder
+  if cell.runAbsence == NotDiscoveredText: parts.add "This platform's catalog does not hold " & testName
+  parts.join("\n")
+
+proc cellWord*(cell: TestCellView): string =
+  ## What a cell says beside its mark: the status, `not discovered` where
+  ## the platform's catalog lacks the test, `recording…` while recorded.
+  if cell.cell.status == tsNotRun and cell.runAbsence == NotDiscoveredText: NotDiscoveredText
+  elif cell.cell.recording == recRecording: RecordingWord
+  else: cell.statusWord
+
+proc cellRunTitle*(cell: TestCellView): string =
+  if cell.runAbsence.len > 0: cell.runAbsence
+  else: "Run this test on " & cell.label
+
+proc cellRecordTitle*(cell: TestCellView): string =
+  if cell.recordAbsence.len > 0: cell.recordAbsence
+  else: "Record this test on " & cell.label & "; a recorded run never reuses"
+
+proc rowRunTitle*(vm: TestRunsVM; row: TestRowView): string =
+  ## A test's Run: on every platform switched on that can run it.
+  for c in row.cells:
+    if c.runAbsence.len == 0: return "Run " & row.name & " on the platforms switched on"
+  if row.cells.len == 0: NoPlatformSwitchedOnText else: row.cells[0].runAbsence
+
+proc rowCanRun*(row: TestRowView): bool =
+  for c in row.cells:
+    if c.runAbsence.len == 0: return true
+  false
+
+proc rowRecordTitle*(vm: TestRunsVM; row: TestRowView): string =
+  for c in row.cells:
+    if c.recordAbsence.len == 0:
+      return "Record " & row.name & " on the platforms switched on that can record"
+  if row.cells.len == 0: NoPlatformSwitchedOnText else: row.cells[0].recordAbsence
+
+proc rowCanRecord*(row: TestRowView): bool =
+  for c in row.cells:
+    if c.recordAbsence.len == 0: return true
+  false
+
+proc showsOpenInCell*(cell: TestCellView): bool =
+  ## Whether a closed row's cell draws the open control: where a trace is
+  ## kept (`⏵`, `⟳⏵` with Shift), and on a failed or errored test the
+  ## platform can record (`⏺⏵`), the cell a reader wants a trace of. Every
+  ## other cell's open control is in its opened row's sub-row, so a matrix
+  ## of passes is not a matrix of controls.
+  let c = cell.cell
+  if c.recording == recRecorded and c.trace.len > 0: return true
+  c.status in {tsFailed, tsErrored} and cell.open.kind == omRecordAndOpen and
+    cell.open.absence.len == 0
+
+proc locationText*(cell: TestCell; test: TestRowView): string =
+  ## Where a failure is: its own location, else the test's.
+  if cell.location.file.len > 0:
+    cell.location.file & (if cell.location.line > 0: ":" & $cell.location.line else: "")
+  elif test.line > 0: test.file & ":" & $test.line
+  else: test.file
+
+proc lastOutput*(cell: TestCell): seq[OutputLine] =
+  ## The last `OutputLinesShown` output lines.
+  let first = max(0, cell.output.len - OutputLinesShown)
+  cell.output[first .. ^1]
+
+proc filterChoices*(): seq[TestFilter] =
+  @[tfAll, tfFailing, tfPassed, tfNotRun, tfRunning]
+
+proc diagnosticRole*(level: string): string =
+  ## A diagnostic's role: error red, warning amber, anything else quiet.
+  case level.toLowerAscii
+  of "error": "error"
+  of "warning", "warn": "warning"
+  else: "quiet"
+
+proc headlineRole*(vm: TestRunsVM): string =
+  ## The headline's role: a run that ran no test red, running blue, the
+  ## counts in the body's ink (their failures are the rows' marks).
+  let h = vm.headline
+  if h == RunningHeadline: "info"
+  elif h == NoTestsRanHeadline: "error"
+  else: "body"
+
+# ---------------------------------------------------------------------------
+# Operations
+# ---------------------------------------------------------------------------
+
+const
+  TestsFocusNextOperation* = "tests.focus-next"
+  TestsFocusPreviousOperation* = "tests.focus-previous"
+  TestsNextCellOperation* = "tests.next-cell"
+  TestsPreviousCellOperation* = "tests.previous-cell"
+  TestsToggleOperation* = "tests.toggle"
+  TestsRunOperation* = "tests.run"
+  TestsRecordOperation* = "tests.record"
+  TestsOpenOperation* = "tests.open"
+  TestsOpenRedirectedOperation* = "tests.open-redirected"
+  TestsCancelOperation* = "tests.cancel"
+  TestsPageDownOperation* = "tests.page-down"
+  TestsPageUpOperation* = "tests.page-up"
+  TestsKeyOperations* = [TestsFocusNextOperation, TestsFocusPreviousOperation,
+                         TestsNextCellOperation, TestsPreviousCellOperation,
+                         TestsToggleOperation, TestsRunOperation, TestsRecordOperation,
+                         TestsOpenOperation, TestsOpenRedirectedOperation,
+                         TestsCancelOperation, TestsPageDownOperation,
+                         TestsPageUpOperation]
+    ## The panel's key operations (the study's catalogue table `pane:tests`;
+    ## bound in the base rows with the terminal's keys).
+  TestsScrollOperations* = [TestsPageDownOperation, TestsPageUpOperation]
+    ## The operations a host runs on its own drawing.
+
+  # Presses only: what an element of the panel carries.
+  TestsRunAllOperation* = "tests.run-all"
+  TestsRecordAllOperation* = "tests.record-all"
+  TestsConfirmCancelOperation* = "tests.confirm-cancel"
+  TestsKeepRunningOperation* = "tests.keep-running"
+  TestsToggleGroupOperation* = "tests.toggle-group"
+  TestsSwitchPlatformOperation* = "tests.switch-platform"
+  TestsReuseOperation* = "tests.reuse"
+  TestsLegendOperation* = "tests.legend"
+  TestsOpenLocationOperation* = "tests.open-location"
+  TestsRetryOperation* = "tests.retry"
+
+  # The trace links' presses.
+  TraceLoadOperation* = "trace-links.load"
+  TraceDownloadOperation* = "trace-links.download"
+  TraceOpenFileOperation* = "trace-links.open-file"
+  TraceFileMenuOperation* = "trace-links.file-menu"
+  TraceOpenUrlOperation* = "trace-links.open-url"
+  TraceToggleRunOperation* = "trace-links.toggle-run"
+  TraceToggleTestOperation* = "trace-links.toggle-test"
+  TraceOpenInTestsOperation* = "trace-links.open-in-tests"
+
+proc runTestsOperation*(vm: TestRunsVM; operation: string): bool =
+  ## Runs one of the Tests panel's key operations on `vm`: true when it was
+  ## the panel's and it acted. False for a scroll (the host's), and for an
+  ## operation that is not the panel's.
+  if vm.isNil or vm.state != asReady: return false
+  case operation
+  of TestsFocusNextOperation: vm.focusNext(); true
+  of TestsFocusPreviousOperation: vm.focusPrevious(); true
+  of TestsNextCellOperation: vm.stepCell(1); true
+  of TestsPreviousCellOperation: vm.stepCell(-1); true
+  of TestsToggleOperation: vm.toggleFocused(); true
+  of TestsRunOperation: vm.runFocused()
+  of TestsRecordOperation: vm.recordFocused()
+  of TestsOpenOperation, TestsOpenRedirectedOperation:
+    let platform = vm.focusedCell
+    if platform.len == 0: false
+    else: vm.open(vm.focusRow.val, platform,
+                  redirected = operation == TestsOpenRedirectedOperation)
+  of TestsCancelOperation:
+    if vm.confirming.val: vm.keepRunning(); true
+    elif vm.canCancel: vm.cancel(); true
+    else: false
+  else: false
+
+# ---------------------------------------------------------------------------
+# The trace links' words
+# ---------------------------------------------------------------------------
+
+const
+  OpenInTestResultsLabel* = "Open in Test Results"
+  RecordingNotKeptMark* = "\xE2\x80\x94"
+    ## — where a test's recording was not kept: no open control.
+  FileMenuTitle* = "Several files match; choose one"
+
+proc runLineTitle*(state: TestRunState): string =
+  ## A test-run summary line's tooltip: its run and platforms.
+  var platforms: seq[string]
+  for p in state.platformRuns:
+    platforms.add (if p.platform.label.len > 0: p.platform.label
+                   else: platformLabel(p.platform.features)) & " on " & backendLabel(p.backend)
+  "Test run " & state.id & (if platforms.len > 0: ": " & platforms.join(", ") else: "")
+
+proc testDisplayName*(testId: string): string =
+  ## A test's own name from its id: after its runner's prefix and its file
+  ## (`pytest/tests/test_queue.py::test_x` is `test_x`,
+  ## `cargo/a::b::c` is `c`).
+  var name = testId
+  let runner = runnerOf(testId)
+  if runner.len > 0: name = testId[runner.len + 1 .. ^1]
+  let colons = name.rfind("::")
+  if colons >= 0 and colons + 2 < name.len: name = name[colons + 2 .. ^1]
+  name
