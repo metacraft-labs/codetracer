@@ -92,6 +92,16 @@ import ../../common/value_presentation
 export editor_rows
 
 type
+  EditorPluginMark* = object
+    ## One plugin's mark on one line of the editor (`EditorSurface.pluginMarks`).
+    line*: int
+    glyph*: string
+    text*: string
+    plugin*: string
+    gutter*: bool
+      ## A marker surface's row (the gutter's mark column) rather than a
+      ## decoration (after the code).
+
   EditorSurface* = object
     ## **The whole of what a native source editor draws, as a value.**
     ##
@@ -143,6 +153,11 @@ type
       ## session's matches on the drawn rows (`find_vm.marksInWindow`), the
       ## current one flagged — drawn in the editor itself, over the selection.
     rows*: seq[EditorRow]
+    pluginMarks*: seq[EditorPluginMark]
+      ## Extensibility-Model §11.4.4: what the running plugins pushed for this
+      ## file — their editor decorations (a glyph and a text after a line's
+      ## code) and their declared marker surfaces (a glyph in the gutter's
+      ## mark column, never over a breakpoint). Data, never plugin code.
     diagnostics*: seq[EditorDiagnostic]
       ## Build-Output-Pane.md §3.9: the build's diagnostics in this file
       ## (`editor_diagnostics.diagnosticsForFile`, from the Problems pane's

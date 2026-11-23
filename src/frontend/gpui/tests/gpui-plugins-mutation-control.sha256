@@ -2,7 +2,7 @@
 # subjects AND the suites the arms are graded by.
 # Refreshed with --record-control-hashes, gated by the
 # needle scan.
-3154b2e7224c8f1374b7f14337c9b5ffdced891eab1533ed424929305cd244c0  src/frontend/gpui/host/gpui_plugins.nim
+1e311a507f4e59b9378ed664c2a12ade8760f041f59de370237d35b2442284c0  src/frontend/gpui/host/gpui_plugins.nim
 e7c1a24b0eca583538cbea93d8b96a12484c27e35adde4303fd6d66f7e6c6a83  src/frontend/tui/host/plugin_processes.nim
-6d9aaca499366f1ceec7b6ff13e1b316f511c5fa5fa863b2011f8560bdf080bc  src/frontend/gpui/app/leaves.nim
-e4e3a3849d0366f8337a48fa4c8c99e9dd214c973648302a6075d0e8afa15e80  src/frontend/gpui/tests/test_gpui_plugins_host.nim
+0f037c56269e3ad51c084fc0e545fcd851102cfa91ce32ed2507b9995f372f42  src/frontend/gpui/app/leaves.nim
+1fbeb54a7b30c6843249aeb7db25a197488081dfcdeeb826939b79534471e797  src/frontend/gpui/tests/test_gpui_plugins_host.nim

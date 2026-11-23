@@ -1769,6 +1769,12 @@ var
     ## The last status report the gesture trace was given, one line.
   gPluginsFooter = ""
     ## And the last footer note.
+  gPluginPanes: PluginPanes = nil
+    ## The plugins' panes as the window acts on them: a focused plugin pane's
+    ## keys sent as `view-event`s (`routePaneKey`), and the editor's plugin
+    ## decorations and markers (`editorPluginMarks`).
+  gPluginMarksTraced = ""
+    ## The last `plugin marks` line the gesture trace was given.
   gPluginRecoveryKey = false
     ## The key being handled is the recovery chord's third `Escape`: it is
     ## delivered as usual but never to a plugin layer (`routeWindowKey`).
@@ -1777,6 +1783,34 @@ proc pluginPanes(): HashSet[string] =
   ## The contributed panes this window can draw (`leavesFor`'s
   ## `loadedExtensions`).
   gPlugins.loadedPanes
+
+proc editorPluginMarks(path: string): seq[EditorPluginMark] =
+  ## §11.4.4: the running plugins' decorations and declared markers for the
+  ## file the editor shows (`gpui_plugins.editorDecorations` /
+  ## `editorMarkers`), as the editor surface carries them; the gesture trace
+  ## is told when they change.
+  if gPluginPanes.isNil or path.len == 0:
+    return
+  for d in gPluginPanes.editorDecorations(path):
+    result.add EditorPluginMark(line: d.line, glyph: d.glyph, text: d.text,
+                                plugin: d.plugin, gutter: false)
+  for m in gPluginPanes.editorMarkers(path):
+    result.add EditorPluginMark(line: m.line, glyph: m.glyph, text: m.text,
+                                plugin: m.plugin, gutter: true)
+  var parts: seq[string]
+  for m in result:
+    parts.add (if m.gutter: "marker " else: "decoration ") & $m.line & " " &
+              m.glyph & " " & m.text & " (" & m.plugin & ")"
+  let line = path.extractFilename & ": " & parts.join(" | ")
+  if line != gPluginMarksTraced:
+    gPluginMarksTraced = line
+    traceGesture("plugin marks " & line)
+
+proc footerLineNote(): string =
+  ## A plugin's decoration on the execution line, for the footer.
+  if gPluginPanes.isNil: ""
+  else: gPluginPanes.lineDecorationNote(gEditorSurface.path,
+                                        gEditorSurface.executionLine)
 
 proc pluginView(leaf: GpuiLeaf): ViewNode =
   ## A contributed leaf's view: the tree its plugin last pushed
@@ -1799,7 +1833,7 @@ proc tracePluginsState() =
   if line != gPluginsState:
     gPluginsState = line
     traceGesture("plugins state " & line)
-  let footer = gPlugins.windowFooterNote(gStatusNote)
+  let footer = gPlugins.windowFooterNote(gStatusNote, footerLineNote())
   if footer != gPluginsFooter:
     gPluginsFooter = footer
     traceGesture("plugins footer " & footer)
@@ -2924,6 +2958,7 @@ proc drawEditorBody(r: GpuiRenderer; pane: GpuiElement;
         for row in rows:
           if row.line == line: return row.text
         "")
+  gEditorSurface.pluginMarks = editorPluginMarks(gEditorSurface.path)
   discard renderEditor(r, pane, sourcePaneView(GpuiMedium).root,
                        gEditorSurface, gEditorViewportPx, gEditorView.leftCol,
                        gEditorView.contentCols, editorCaretMark(),
@@ -5613,7 +5648,7 @@ proc drawFooter(r: GpuiRenderer) =
                else: copyPathRect().x - 8
   # Extensibility-Model §11.7.3: the top plugin layer names its plugin here,
   # before the note; with no note, the plugins' status items.
-  let footerNote = gPlugins.windowFooterNote(gStatusNote)
+  let footerNote = gPlugins.windowFooterNote(gStatusNote, footerLineNote())
   let noteNeed = if footerNote.len > 0: groteskTextPx(footerNote, 14.0) + 8
                  else: 0
   let fit = if footerNote.len > 0:
@@ -7369,6 +7404,10 @@ proc pumpPluginsWindow(r: GpuiRenderer): bool =
   tracePluginsState()
   if changed:
     redrawPluginPanes(r)
+    # A plugin's decorations and markers moved (a stop, a disable): the
+    # editor's rows are drawn again from the surface that carries them.
+    if editorPluginMarks(gEditorSurface.path) != gEditorSurface.pluginMarks:
+      redrawEditorRows(r)
     drawTopBar(r)
   changed
 
@@ -13906,6 +13945,15 @@ proc routeWindowKey(r: GpuiRenderer; key: string; mods: seq[string]) =
       traceGesture("plugin key " & name)
       drawTopBar(r)
       return
+  # §11.4.4: A FOCUSED PLUGIN PANE'S VIEW takes the keys its vocabulary entry
+  # reads (a list's arrows and Enter, a checkbox's Space): the entry's own key
+  # handling runs on the tree the plugin pushed and the plugin is sent the
+  # `view-event`; its answer is a new tree, drawn when it arrives. Every other
+  # key is the window's. Not while a window-owned surface takes the keys.
+  if not gPluginPanes.isNil and not gOmnibar.isOpen and not gContent.open and
+     not gCtxMenu.open and gPluginPanes.routePaneKey(gFocusPane, name):
+    traceGesture("plugin view key " & name & " on " & gFocusPane)
+    return
   let path = windowScopePath()
   traceGesture("key " & name & " at " & $path)
   let mode = if gFindBrowsing and not gFind.open: nmSearch else: nmNormal
@@ -16999,12 +17047,14 @@ proc runOpen(cmd: GpuiCommand): int =
                                  cmd.traceFolder)
     gPlugins.routeMovesToControls(gPluginMoves)
     gPlugins.setHostModal(pluginHostModalOpen)
+    gPluginPanes = newPluginPanes(gPlugins)
     for id in gPlugins.awaitingConsent:
       traceGesture("plugins awaiting consent " & id)
     tracePluginsState()
   defer:
     gPlugins.close()
     gPlugins = nil
+    gPluginPanes = nil
   var leafSet = shell.leavesFor(windowId, pluginPanes())
   for leaf in leafSet.leaves:
     if leaf.kind == glkUnloadedExtension:

@@ -49,6 +49,11 @@ KEYS = S + ("keys: the layer takes Escape, the user's row beats the plugin "
 HOLDER = S + ("a plugin killed while it holds the keyboard: its layer goes at "
               "once, the next key is the window's")
 PLACED = S + "Show pane places a plugin's pane as a tab beside the Variables stack"
+VIEWKEY = S + ("a key on a focused plugin pane goes to its view, and the "
+               "plugin answers it")
+MARKS = S + "the editor's plugin decorations and markers, from what the plugins pushed"
+DRAWN = S + ("the editor draws a plugin's marker in the mark column and its "
+             "decoration after the code")
 
 ARMS = [
     ("G1", [(DOOR, '  if k == "esc": "escape" else: k', "  k")],
@@ -110,6 +115,27 @@ ARMS = [
               "      return cmdAddContributedPane(id, title)")],
      [(SUITE, PLACED)],
      "Show pane docks a plugin's pane into the root row, too narrow to show"),
+    ("G14", [(DOOR, "  if panes.isNil: @[] else: panes.markersFor(document)",
+              "  if panes.isNil: @[] else: panes.decorationsFor(document)")],
+     [(SUITE, MARKS)],
+     "§11.4.4: the editor's gutter markers are read from the decorations"),
+    ("G15", [(LEAVES, "      elif hasGutterMark(pluginMarks):",
+              "      elif false:")],
+     [(SUITE, DRAWN)],
+     "§11.4.4: a plugin's marker is never drawn in the mark column"),
+    ("G16", [(DOOR, "    if d.line == line and d.text.len > 0:",
+              "    if d.text.len > 0:")],
+     [(SUITE, MARKS)],
+     "the footer repeats a plugin's decoration from any line, not the "
+     "execution line"),
+    ("G17", [(LEAVES, '      decorations.add m.glyph & " " & m.text',
+              "      discard")],
+     [(SUITE, DRAWN)],
+     "§11.4.4: a plugin's decoration is never drawn after the code"),
+    ("G18", [(DOOR, "  panes.paneKey(focusedPane, k)", "  false")],
+     [(SUITE, VIEWKEY)],
+     "§11.4.4: a focused plugin pane's keys never reach its view; no "
+     "view-event is sent"),
 ]
 
 

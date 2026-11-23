@@ -19,13 +19,20 @@
 ##   what the plugins pushed, in the key's own turn. The window calls the first
 ##   for EVERY key before anything else resolves it, and the second only where
 ##   a key would reach the router, with no host modal open.
+## * **A focused plugin pane's keys** (`routePaneKey`): the view vocabulary's
+##   own key handling runs on the tree the plugin pushed, here in the host, and
+##   the transition goes to the plugin as a `view-event`; the plugin answers
+##   later with a new tree. No plugin code runs to decide or to draw.
+## * **The editor's plugin marks** (`editorDecorations`, `editorMarkers`): what
+##   the plugins pushed for the file the editor shows, for `app/leaves` to draw.
 ## * **The omnibar's entries and the `:plugins` verbs** (`pluginEntries`,
 ##   `pluginsWordsOf`), a stopped plugin's fault actions among them
 ##   (`faultEntries`), and the footer's text (`footerText`).
 
-import std/[json, options, os, strutils]
+import std/[json, options, os, sets, strutils]
 
 import ../../tui/host/plugin_processes
+import ../../tui/host/plugin_panes   # a plugin pane's view events, its decorations and markers
 import ../../viewmodel/plugin_host/supervisor
 import headless_app/layout_model   # where *Show pane* places a plugin's pane
 import ../../viewmodel/session_vm
@@ -35,6 +42,7 @@ import ../../../common/view_vocabulary/vocabulary   # `ViewNode`
 import std/tables
 
 export plugin_processes
+export plugin_panes.PluginPanes, plugin_panes.SourceDecoration, plugin_panes.newPluginPanes
 export vocabulary.ViewNode   # a contributed pane's view, for the window that draws it
 
 const
@@ -197,7 +205,8 @@ proc layerLabel*(p: SessionPlugins): string =
   ## §11.7.3: `FLAME MODE (acme-tools.flame)` while a plugin layer is on top.
   if p.isNil: "" else: p.sup.topLayerLabel
 
-proc windowFooterNote*(p: SessionPlugins; statusNote: string): string =
+proc windowFooterNote*(p: SessionPlugins; statusNote: string;
+                       lineNote = ""): string =
   ## The footer's note with plugins: the top plugin layer and its plugin
   ## first — who holds the keyboard is never hidden by a note — then the
   ## window's own note, then the plugins' status items and a plugin waiting
@@ -212,6 +221,9 @@ proc windowFooterNote*(p: SessionPlugins; statusNote: string): string =
   if not p.isNil:
     let items = p.statusText
     if items.len > 0: parts.add items
+  # A plugin's decoration on the execution line (`lineDecorationNote`), as
+  # the terminal repeats it on its status line.
+  if lineNote.len > 0: parts.add lineNote
   parts.join("  ·  ")
 
 const PluginPaneAnchors* = [paneState, paneCalltrace, paneEventLog, paneEditor]
@@ -227,3 +239,40 @@ proc pluginPaneCommand*(tree: LayoutNode; id, title: string): LayoutCommand =
     if tree.contains(a):
       return cmdAddContributedPane(id, title, after = some(builtinRef(a)))
   cmdAddContributedPane(id, title)
+
+proc routePaneKey*(panes: PluginPanes; focusedPane, canonical: string): bool =
+  ## §11.4.4: a key on the FOCUSED plugin pane (`focusedPane`, the window's
+  ## focused pane id) goes to its view when the view vocabulary's entry reads
+  ## it — a list's arrows and Enter, a checkbox's Space — and is sent to the
+  ## plugin as a `view-event`. False, and the key is the window's, for a pane
+  ## that is not a loaded plugin's, for a key the view does not read, and for
+  ## the keys that move the focus or open the omnibar's command line (Tab,
+  ## Shift+Tab, `:`), as in the terminal.
+  if panes.isNil or panes.plugins.isNil:
+    return false
+  if focusedPane notin panes.plugins.loadedPanes:
+    return false
+  let k = pluginKeyName(canonical)
+  if k in ["tab", "shift+tab", ":"]:
+    return false
+  panes.paneKey(focusedPane, k)
+
+proc editorDecorations*(panes: PluginPanes; document: string): seq[SourceDecoration] =
+  ## The running plugins' editor decorations for `document` (the path the
+  ## editor shows), as they pushed them: a glyph and a text on a line. A
+  ## stopped or disabled plugin draws none (§11.7.5).
+  if panes.isNil: @[] else: panes.decorationsFor(document)
+
+proc editorMarkers*(panes: PluginPanes; document: string): seq[SourceDecoration] =
+  ## The running plugins' declared `marker` surfaces for `document`: a glyph
+  ## for the gutter's mark column, on a line.
+  if panes.isNil: @[] else: panes.markersFor(document)
+
+proc lineDecorationNote*(panes: PluginPanes; document: string; line: int): string =
+  ## The decoration on `line` (the execution line) for the footer, as the
+  ## terminal repeats it on its status line: `◆ metrics: line 10
+  ## (acme-tools.metrics)`, or "" for none.
+  for d in panes.editorDecorations(document):
+    if d.line == line and d.text.len > 0:
+      return d.glyph & " " & d.text & " (" & d.plugin & ")"
+  ""

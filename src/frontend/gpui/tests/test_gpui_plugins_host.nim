@@ -32,7 +32,7 @@
 import std/[json, options, os, posix, sequtils, sets, strutils, times, unittest]
 
 import isonim/core/[owner]
-import isonim_gpui/renderer
+import isonim_gpui/[bindings, renderer]
 
 import codetracer_embed
 import backend/mock_backend
@@ -40,7 +40,8 @@ import plugin_host/[protocol, supervisor]
 import headless_app/layout_model
 import ../app/shell
 import ../app/leaves
-import ../../view_vocabulary/editor_surface
+import ../../view_vocabulary/[editor_surface, pane_views]
+import ../../../common/view_vocabulary/editor_rows   # `emBreakpoint`
 import ../../viewmodel/viewmodels/omnibar_vm
 import ../host/gpui_plugins
 import ../../viewmodel/tests/unit/plugin_process_fixture
@@ -125,6 +126,13 @@ proc layerHeld(p: SessionPlugins): bool =
   ## while the plugin is still activating, and the router skips the layers
   ## of a plugin that is not active yet (the supervisor suite's `layerUp`).
   p.layerLabel == "FLAME MODE (acme-tools.flame)" and p.running("acme-tools.flame")
+
+proc withAttribute(node: GpuiElement; name: string): seq[GpuiElement] =
+  ## Every element under `node` (itself included) that carries `name`.
+  if node.isNil: return
+  if getAttribute(node, name).len > 0: result.add node
+  for i in 0 ..< childCount(node):
+    result.add withAttribute(nthChild(node, i), name)
 
 proc labels(entries: seq[OmnibarEntry]): seq[string] =
   for e in entries: result.add e.label
@@ -407,6 +415,78 @@ suite "GPUI: the window's plugins (host/gpui_plugins)":
     let bare = contributedPaneNode("acme-tools.flame/flame", "Flame", 1.0)
     ck bare.pluginPaneCommand("acme-tools.metrics/overview", "Metrics").addContributedAfter.isNone
 
+  test "a key on a focused plugin pane goes to its view, and the plugin answers it":
+    let home = newHome()
+    let p = openFor(home)
+    p.grantBoth()
+    const flame = "acme-tools.flame/flame"
+    ck p.waitFor("the flame list", proc(): bool =
+      p.running("acme-tools.flame") and
+        "work 40%" in viewLines(p.sup.renderSurface(flame)).join("\n"))
+    let panes = newPluginPanes(p)
+    # Not a plugin pane, and keys the window keeps: never the view's.
+    ck not panes.routePaneKey("editor", "Enter")
+    ck not panes.routePaneKey(flame, "Tab")
+    ck not panes.routePaneKey(flame, "F10")
+    ck panes.viewEventsSent == 0
+    # The list reads its arrows and Enter; Enter activates the row.
+    ck panes.routePaneKey(flame, "Down")
+    ck panes.routePaneKey(flame, "Enter")
+    ck panes.viewEventsSent == 2
+    ck p.waitFor("the plugin's answer", proc(): bool =
+      "(activated)" in viewLines(p.sup.renderSurface(flame)).join("\n"))
+    p.close()
+
+  test "the editor's plugin decorations and markers, from what the plugins pushed":
+    let home = newHome()
+    let p = openFor(home)
+    p.grantBoth()
+    let panes = newPluginPanes(p)
+    ck p.waitFor("the decoration", proc(): bool =
+      panes.editorDecorations("/src/main.nim").len > 0)
+    let d = panes.editorDecorations("/src/main.nim")
+    ck d.len == 1 and d[0].line == 10 and d[0].glyph == "◆" and
+       d[0].text == "metrics: line 10" and d[0].plugin == "acme-tools.metrics"
+    ck p.waitFor("the marker", proc(): bool =
+      panes.editorMarkers("/src/main.nim").len > 0)
+    let m = panes.editorMarkers("/src/main.nim")
+    ck m.len == 1 and m[0].line == 10 and m[0].glyph == "★"
+    ck panes.lineDecorationNote("/src/main.nim", 10) ==
+      "◆ metrics: line 10 (acme-tools.metrics)"
+    ck panes.lineDecorationNote("/src/main.nim", 11) == ""
+    ck panes.editorDecorations("/src/other.nim").len == 0
+    # A disabled plugin draws none.
+    discard p.control(@["disable", "acme-tools.metrics"])
+    ck p.waitFor("the decoration gone", proc(): bool =
+      panes.editorDecorations("/src/main.nim").len == 0 and
+        panes.editorMarkers("/src/main.nim").len == 0)
+    p.close()
+
+  test "the editor draws a plugin's marker in the mark column and its decoration after the code":
+    gpui_reset_tree()
+    var r: GpuiRenderer
+    let root = r.createElement("div")
+    var surface = editorSurfaceForProject("example.py", "x = 1\ny = 2\n",
+                                          GpuiMedium, false)
+    surface.rows[1].mark = emBreakpoint
+    surface.pluginMarks = @[
+      EditorPluginMark(line: 1, glyph: "◆", text: "metrics: line 1",
+                       plugin: "acme-tools.metrics"),
+      EditorPluginMark(line: 1, glyph: "★", text: "hotspot",
+                       plugin: "acme-tools.metrics", gutter: true),
+      # A breakpoint's line: the plugin's marker never covers it.
+      EditorPluginMark(line: 2, glyph: "★", text: "hotspot",
+                       plugin: "acme-tools.metrics", gutter: true)]
+    discard renderEditor(r, root, sourcePaneView(GpuiMedium).root, surface, 800)
+    let decorations = withAttribute(root, PluginDecorationAttribute)
+    ck decorations.len == 1
+    ck decorations.len == 1 and
+       getAttribute(decorations[0], PluginDecorationAttribute) == "acme-tools.metrics" and
+       elementText(decorations[0]) == "◆ metrics: line 1"
+    let markers = withAttribute(root, PluginMarkerAttribute)
+    ck markers.len == 1
+    ck markers.len == 1 and elementText(markers[0]) == "★"
+
   test "assertion count":
-    ck CHECKS == 118
+    ck CHECKS == 139
     echo "CHECKS: ", CHECKS
