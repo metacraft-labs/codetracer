@@ -585,7 +585,7 @@ src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/fronten
 # suite moved under plat81's record, and the supervisor under its Node twin's
 # (plat81-node-plugin-host). Both owe a re-grade for these bytes.
 src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/supervisor.nim	9c5739a3e43b891145fb03985c8d59531341c4bc0fd40d5f612789cdf476b6e0	8632d01ac0e288b769ee002ee800f305f981ed929bbc6fc2fb0833b94e3e267f
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_plugin_process_host.nim	25a46e3c835516db9e2260705fe51667c06efe3317a7afec196b152333b3071e	96e54034050201d009726ebec5ee79dcceb093afcca83accccd1bab18ae278de
+src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_plugin_process_host.nim	25a46e3c835516db9e2260705fe51667c06efe3317a7afec196b152333b3071e	b445e5940a10d3b2275d0ed5de6c80dc2780a599d30ee86eb209866a7cd47056
 src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/tui/tests/real_terminal/test_plat81_plugin_processes_pty.nim	656dd8f478424c872f60f3a72b0d8fc37bf2f7d67b509bbbbcf8e6a41984831a	0ebf845f3cc918c19bb7d54afc90ec4013a641fa0e8334fa904cc6e403c4f57f
 src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/viewmodel/plugin_host/supervisor.nim	1c8a1e016ccdd015111f497d22c2b3fe9ebbcf7c3cd21f4e720b09f991cf2a31	8632d01ac0e288b769ee002ee800f305f981ed929bbc6fc2fb0833b94e3e267f
 
