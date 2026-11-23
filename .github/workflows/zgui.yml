@@ -327,6 +327,16 @@ jobs:
           # The runner's own nimcache: a shared /tmp/ct-nim-cache can belong to
           # another runner account on the same host.
           CT_NIM_CACHE_ROOT: ${{ runner.temp }}/ct-nim-cache
+          # No recorder here. `calc` comes from the Linux job of this run, at
+          # this commit and the recorder repro.lock pins, but the fixture
+          # provider identifies a recorder by the content of its installed
+          # package, native extension included, so the macOS build of the same
+          # recorder never matches the Linux stamp, and the provider refused
+          # the recording because it could not re-record it (run 45151089269).
+          # This job records nothing and builds no `ct`; an interpreter that
+          # cannot run the identity probe says so, and the provider keeps the
+          # recording it was handed.
+          CODETRACER_PYTHON_INTERPRETER: /usr/bin/false
         run: nix develop . --command just test-zgui
 
       - name: Upload the lane's log
