@@ -182,8 +182,9 @@ jobs:
     needs: linux
     runs-on: aarch64-darwin
     # The setup alone has taken 75 minutes here (a 42-minute checkout in run
-    # 44935860183), and the post-checkout cleanup up to 25 more.
-    timeout-minutes: 240
+    # 44935860183), the post-checkout cleanup up to 25 more, and a cold
+    # replay-server build up to the 150 its step allows.
+    timeout-minutes: 300
     steps:
       - name: Mint installation token for cross-repo sibling access
         id: ci_token
@@ -292,9 +293,20 @@ jobs:
         # budget, so it lost its log all the same. The build therefore writes
         # its own log, with a process listing every five minutes that shows
         # whether cargo is compiling or waiting, and the upload below keeps it.
-        timeout-minutes: 60
+        #
+        # A cold build is the cost: on m3, beside the other runners there,
+        # half of the crates took 90 minutes. The checkout cleans the
+        # workspace, so target/ under it is cold in every job; the target
+        # directory therefore lives in the runner's home, where the next job
+        # on this runner finds it warm, and the lane takes the binary from
+        # there through REPLAY_SERVER_BIN.
+        timeout-minutes: 150
         run: |
           set -euo pipefail
+          target="$HOME/.cache/codetracer-zgui/db-backend-target"
+          mkdir -p "$target"
+          echo "REPLAY_SERVER_BIN=$target/debug/replay-server" >>"$GITHUB_ENV"
+          export CARGO_TARGET_DIR="$target"
           mkdir -p test-logs
           log="$PWD/test-logs/replay-server-build.log"
           : >"$log"
