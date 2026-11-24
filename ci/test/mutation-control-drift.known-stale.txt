@@ -527,7 +527,7 @@ src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/fro
 # 2026-11-21, the browser's two keyboard oracles: test_cross_renderer_panes.nim
 # exports the four keyboard panes for the Chromium suite, and the renderer-chromium
 # lane lists that suite. Each harness below owes a re-grade for those bytes.
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/test-lane-files.sh	b463de41f09e76644ec644ddfe51bd166d7e2c033699c98ecca5083540215051	f84ed976b90a0326f2564aaddf1ff1da4a89f86eaa50830b2c1b77c744513f96
+src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/test-lane-files.sh	b463de41f09e76644ec644ddfe51bd166d7e2c033699c98ecca5083540215051	6bc216be8edfb75d09db3103295e233200079c6d9c4cf78af18b5c3312b6df07
 # 2026-11-21: a docked plugin pane previews on hover (auto_hide_hover, runtime); these harnesses digest those subjects and owe a re-grade.
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/headless_app/auto_hide_hover.nim	c2395cd53d7292e511d36c714f483d8f6ac8d8bf1f35c2c78237bebd54c73c62	0b4958cca008fcb95abaa5f2a2157cb461ed0b361fe1e0b702efc004cbbcf46f
 
@@ -757,7 +757,7 @@ src/frontend/tui/tests/plat70g-multiclick-mutation-control.sha256	src/frontend/u
 # 2026-11-24, ci/lib/test-lane-files.sh moved in 24bb8bb4a10 (agent-harbor web views
 # for a change's tests and trace links) without its ledger lines; recorded here so the
 # gate is green. plat17, plat33 and plat34 owe re-grades for it.
-src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	ci/lib/test-lane-files.sh	2f5606de487077bdda9b83ccc6ae3b961c68bb94a1ad98b051ce56c00a7b9f30	f84ed976b90a0326f2564aaddf1ff1da4a89f86eaa50830b2c1b77c744513f96
+src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	ci/lib/test-lane-files.sh	2f5606de487077bdda9b83ccc6ae3b961c68bb94a1ad98b051ce56c00a7b9f30	6bc216be8edfb75d09db3103295e233200079c6d9c4cf78af18b5c3312b6df07
 
 # 2026-11-21, a plugin's relayed actions take the terminal's own routes: plugin_service
 # classifies every relayed action (pluginMoveOf / carryOut), the loop in main carries it
@@ -833,3 +833,4 @@ src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/viewmo
 src/frontend/tui/tests/plat52-terminal-mutation-control.sha256	src/frontend/viewmodel/viewmodels/terminal_output_vm.nim	e94568287f58d6cf7fb2817f5d5910468d22c01480004cd440148c6500e94230	095b7575f5c47155ca2ed853f8449c8f464fb24fd12507c9ea55d7901a1ef28a
 src/frontend/tui/tests/plat52-terminal-mutation-control.sha256	src/frontend/viewmodel/views/pane_measure_dom.nim	e56c65daedd51c2a5a90863c831de5acc29421953202d82eaa815a96051d45bd	994c879356ae85c485b968913e6f9751cce67a6ff6738158a7d8216ce0a42d92
 src/frontend/viewmodel/tests/unit/hsf-sdk-mutation-control.sha256	src/frontend/viewmodel/viewmodels/event_log_vm.nim	826bdadedb493db77e782fa39cb37ff64eab510e256a7e28b1ab33d7719c5e9a	a19a17e584c8c0d3eb05e17ee76f0a3fd25bc5fa33f0ed87bfd6cd5b59b3c853
+src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	ci/lib/test-lane-files.sh	f84ed976b90a0326f2564aaddf1ff1da4a89f86eaa50830b2c1b77c744513f96	6bc216be8edfb75d09db3103295e233200079c6d9c4cf78af18b5c3312b6df07
