@@ -123,7 +123,10 @@ proc drawRecordingButton*(c: var AhCanvas; parent: AhNode; vm: InitiativeTabStri
 
 proc drawRecordingsMore*(c: var AhCanvas; parent: AhNode; buttons: RecordingButtons;
                          row, at: int): int =
-  ## The recordings' `+N` from `at`, a chip on its own ground. It takes the
+  ## The recordings' `+N` from `at`, a button like the numbered ones: their
+  ## ground (the panel's) and padding, never the tab's own (the web's
+  ## `.ah-rec-more`; follow-up review: on the tab's ground it read as no
+  ## button at all). It takes the
   ## most severe state of those it hides: a failed one gives it the error
   ## mark and colour, a missing one the warning mark; when it hides the
   ## ringed recording, its count is underlined in the action role (D81).
@@ -132,7 +135,7 @@ proc drawRecordingsMore*(c: var AhCanvas; parent: AhNode; buttons: RecordingButt
   let markCells = if h.severity != hsNone: 2 else: 0
   let more = " +" & $buttons.hidden & " "
   let w = widthOf(more) + markCells
-  c.fill(row, at, w, 1, c.tone.chip)
+  c.fill(row, at, w, 1, c.p.panel)
   let moreNode = c.node(parent, row, at, w, 1,
                         [("recordings-hidden", $buttons.hidden),
                          ("recordings-hidden-severity", $h.severity),
@@ -142,10 +145,10 @@ proc drawRecordingsMore*(c: var AhCanvas; parent: AhNode; buttons: RecordingButt
     discard c.mark(moreNode, row, at + 1,
                    c.p.markOf(if h.severity == hsFailed: saFailed else: saNeedsInput))
   let ink = if h.severity == hsFailed: c.p.textError else: c.p.textLabel
-  discard c.put(row, at + markCells, more, ink, bg = c.tone.chip)
+  discard c.put(row, at + markCells, more, ink, bg = c.p.panel)
   if buttons.hiddenRinged:
     c.grid.paint(row, at + markCells + 1, "+" & $buttons.hidden,
-                 CellStyle(fg: ink, bg: c.tone.chip, underline: true,
+                 CellStyle(fg: ink, bg: c.p.panel, underline: true,
                            underlineColor: c.p.borderAction))
   w
 

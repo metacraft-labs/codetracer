@@ -1361,6 +1361,10 @@ proc styleProblems(m: AhTuiMount; look: LookOf): seq[string] =
   let view = m.view
   if view.isNil: return
   let rows = m.rows
+  # A recording switcher's `+N` is a button like the numbered ones (the
+  # web's `.ah-rec-more`): on their ground, never on the tab's.
+  for e in view.all("recordings-hidden"):
+    result.expectGround(look, e, rows, "the recordings' +N", p.panel)
   # Every section head is on the head band.
   for h in view.all("head"):
     if h.attr("head") == "section header":
