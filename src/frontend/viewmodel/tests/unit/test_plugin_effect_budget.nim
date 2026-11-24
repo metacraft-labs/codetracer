@@ -44,11 +44,11 @@
 ##
 ##   * the offending plugins burn `budget * 8`, read from the run state, so
 ##     "over budget" is true by construction at any host load;
-##   * the well-behaved plugin does O(1) work against a 40 ms budget;
+##   * the well-behaved plugin does O(1) work against a 200 ms budget;
 ##   * the post-suspension cost of two hundred writes is compared against ONE
-##     overrun (320 ms), which it beats by orders of magnitude — the arm
+##     overrun (1.6 s), which it beats by orders of magnitude — the arm
 ##     exists to catch a host that forgot to suspend, and such a host would
-##     spend sixty-four seconds there.
+##     spend over five minutes there.
 ##
 ## The one measurement that is not a constructed factor — that the
 ## well-behaved plugin is never tripped — is paired with a `checkpoint` of its
@@ -89,7 +89,12 @@ template ck(condition: untyped) =
 
 const
   CoreVersion = semver(1, 4, 0)
-  Budget = initDuration(milliseconds = 40)
+  Budget = initDuration(milliseconds = 200)
+    ## Large enough that the well-behaved plugin, whose body is a counter,
+    ## never meets it on a loaded host. At 40 ms it did: under `nim js` at
+    ## load 90 one of its two hundred runs measured 43 ms, a pause of the
+    ## machine or the collector charged to whichever body was running, and
+    ## the host suspended it (vm-unit-js, `agents` 5dff69ab8e5).
   BurnMultiple = 8
     ## The offenders burn eight budgets. Eight rather than two so that the
     ## "did it exceed?" question has no answer that depends on the machine.
@@ -150,7 +155,7 @@ suite "PLAT-7: a plugin exceeding the budget is reported by name":
       checkpoint(line)
       ck line.startsWith("plugin 'codetracer.hot-loop'")
       ck line.contains("hot-loop")
-      ck line.contains("40 ms budget")
+      ck line.contains("200 ms budget")
       ck line.contains("suspended")
       # The host's whole report says the same thing, so a surface that shows
       # only `report()` shows it too.
@@ -247,7 +252,7 @@ suite "PLAT-7: an over-budget plugin does not freeze the front-end":
 
       # 3. AND IT WAS NOT A FREEZE. Two hundred writes after the trip cost
       #    less than the ONE overrun did. Unsuspended they would have cost
-      #    two hundred overruns — sixty-four seconds — so the margin here is
+      #    two hundred overruns — over five minutes — so the margin here is
       #    four orders of magnitude rather than a tuned threshold.
       checkpoint($Writes & " writes after the trip took " &
                  $elapsed.inMilliseconds & " ms; one overrun is " &
