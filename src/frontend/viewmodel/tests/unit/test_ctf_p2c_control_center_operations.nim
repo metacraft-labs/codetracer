@@ -136,9 +136,10 @@ suite "the web view carries the operations and holds no handler":
       check panels.len == 1
       check root.all("data-ah-field").anyIt(it.attr("data-ah-field") == "Repository"))
     # And the source composes them: the panel's and the composer's renderers,
-    # not a copy of either.
-    let source = readFile(currentSourcePath().parentDir / ".." / ".." / "views" /
-                          "isonim_agent_harbor_control_center_view.nim")
+    # not a copy of either. Read when the suite compiles: `readFile` has no
+    # file system under `nim js` ("fopen is not defined" under node).
+    const source = staticRead(currentSourcePath().parentDir / ".." / ".." / "views" /
+                              "isonim_agent_harbor_control_center_view.nim")
     check "renderAgentHarborInitiativesPanel[R, N](r, vm.initiatives)" in source
     check "renderLaunchForm(r, c, form)" in source
     check "renderInitiativeForm(r, c, form)" in source
