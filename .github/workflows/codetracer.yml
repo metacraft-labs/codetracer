@@ -2831,6 +2831,15 @@ jobs:
         # read.
         run: nix develop .#devShells.x86_64-linux.default --command just test-css-token-resolution
 
+      - name: No :has() selector restyles the whole document on every write
+        # A `:has()` naming the `style` attribute is re-evaluated on every
+        # inline-style write, and one anchored at `:root`/`html` on every
+        # inserted element; each re-evaluation restyled the whole document.
+        # The caption bar's switch had both and made a 300-row panel take
+        # 45-100 s to mount. Runs its own planted fixtures first, then reads
+        # the compiled stylesheets, so it needs the dev shell's `stylus`.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-css-has-invalidation
+
       - name: The light theme paints its panels and editor ground from the light palette
         # The light stylesheet once carried every design-token surface in its
         # DARK value (#282828 behind codetracerWhite's text, 1.56:1) and

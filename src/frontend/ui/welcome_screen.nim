@@ -677,6 +677,18 @@ when defined(js):
     mountWelcomeScreen()
     isoNimWelcomeScreenMounted
 
+  const WelcomeShownAttribute = cstring"data-welcome-shown"
+    ## Present on `#welcomeScreen` exactly while it is displayed with the
+    ## welcome view in it: `mountWelcomeScreen` sets it once the view is in the
+    ## host, and `clearIsoNimWelcomeScreen` removes it when it hides and
+    ## empties the host. The caption bar's height switch (`shared_widgets.styl`,
+    ## CAPTION_BAR_HEIGHT) reads this attribute rather than the host's inline
+    ## `style`: a `:has()` that names `style` is re-evaluated on every
+    ## inline-style write anywhere in the document, and anchored at `:root`
+    ## each re-evaluation restyled the whole document (the Changes panel's 300
+    ## path cuts took 45-100 s to mount at 360px). A dedicated attribute is
+    ## invalidated only when it itself changes.
+
   proc mountWelcomeScreen*() =
     if welcomeScreenVMInstance.isNil:
       return
@@ -687,6 +699,8 @@ when defined(js):
     isonim_dom.setAttribute(container, cstring"style", cstring"display: block")
     if isoNimWelcomeScreenMounted and
         welcomeScreenMountedComponentRef == welcomeScreenComponentRef:
+      # Already mounted for this component: the view is still in the host.
+      isonim_dom.setAttribute(container, WelcomeShownAttribute, cstring"")
       return
     container.innerHTML = cstring""
     let callbacks =
@@ -704,6 +718,7 @@ when defined(js):
       else:
         WelcomeScreenCallbacks()
     mountIsoNimWelcomeScreen(container, welcomeScreenVMInstance, callbacks)
+    isonim_dom.setAttribute(container, WelcomeShownAttribute, cstring"")
     isoNimWelcomeScreenMounted = true
     welcomeScreenMountedComponentRef = welcomeScreenComponentRef
 
@@ -713,6 +728,7 @@ when defined(js):
     if not container.isNil:
       container.innerHTML = cstring""
       isonim_dom.setAttribute(container, cstring"style", cstring"display: none")
+      isonim_dom.removeAttribute(container, WelcomeShownAttribute)
     isoNimWelcomeScreenMounted = false
     welcomeScreenMountedComponentRef = nil
 

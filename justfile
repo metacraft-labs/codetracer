@@ -1056,6 +1056,19 @@ storybook-check-render *args: storybook-build
   node storybook/scripts/check-story-render.mjs --self-test
   node storybook/scripts/check-story-render.mjs "$@"
 
+# Count the whole-document restyles the Changes panel's path cuts cost
+# (`ChangesCodeLongKeyboard` at 360px, 300 cuts) from Chromium's
+# `UpdateLayoutTree` element counts, and fail when the cuts, an inline-style
+# write or an inserted element restyle the whole document; also checks that
+# the caption bar's welcome-screen switch still switches. Counts, not time, so
+# a loaded host cannot flip the verdict. The self-test plants the old
+# `:root:has([style...])` caption rule, a `:root:has()` naming a class, a
+# forced caption height and an uncut 1440px mount, and fails unless each is
+# caught. See storybook/scripts/check-style-invalidation.mjs; its static
+# sibling is `just test-css-has-invalidation`.
+storybook-check-style-invalidation *args: storybook-build
+  node storybook/scripts/check-style-invalidation.mjs --self-test {{args}}
+
 # Check directories of captures written by tools/visual-review/capture-storybook.mjs
 # (which shoots only stories the render check's judge passes, and records each
 # image's verdict in the directory's capture-verdicts.json): every PNG must be
@@ -4274,6 +4287,17 @@ test-css-token-resolution:
   mkdir -p test-logs
   exec > >(tee test-logs/test-css-token-resolution.log) 2>&1
   bash ci/test/css-token-resolution.sh
+
+# A `:has()` that names the `style` attribute is re-evaluated on every
+# inline-style write, and one anchored at `:root`/`html` on every inserted
+# element; Chromium restyles the whole document each time. The caption bar's
+# switch had both shapes and made the Changes panel's 300-file Code tab take
+# 45-100 s to mount at 360px. Runs the guard's planted fixtures, compiles the
+# shipped stylesheets and reads the OUTPUT (Stylus nesting decides what a
+# `&:has()` is anchored at). Needs `stylus`, so it runs in the dev shell.
+# See ci/test/css-has-invalidation-guard.py.
+test-css-has-invalidation:
+  bash ci/test/css-has-invalidation.sh
 
 # The guard above, shown failing. Ten arms: four defects it must report (an
 # unresolved token, a theme redefining a token, and a legacy palette leak —

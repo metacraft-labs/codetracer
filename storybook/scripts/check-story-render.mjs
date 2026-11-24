@@ -431,7 +431,7 @@ const MIME = {
   ".woff2": "font/woff2", ".ttf": "font/ttf", ".otf": "font/otf", ".map": "application/json",
 };
 
-function serveStatic(dir) {
+export function serveStatic(dir) {
   const server = createServer((req, res) => {
     const path = decodeURIComponent(new URL(req.url, "http://localhost").pathname);
     let file = normalize(join(dir, path));

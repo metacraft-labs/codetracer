@@ -509,6 +509,10 @@ AH_STATE_DOT = 0.4375rem
   // with 300 files and one open took about 50 s to mount at 360px (2 s
   // with it). The hunks still take the row's width and scroll inside it.
   // https://developer.mozilla.org/en-US/docs/Web/CSS/contain
+  // The same mount went back to 45-100 s with nothing here changed: the cut's
+  // inline-style writes each restyled the whole document through a `:root`
+  // `:has()` that named `style` (the caption bar's switch, shared_widgets.styl).
+  // That is a cost of the selector, not of this list; see the comment there.
   contain: inline-size
   font-family: "SpaceMono", monospace
   font-size: ah-rem(type-ui-size-caption-md)
