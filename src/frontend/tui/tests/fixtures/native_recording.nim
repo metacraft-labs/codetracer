@@ -23,19 +23,21 @@
 ## `replay-server` finds through `CODETRACER_CT_NATIVE_REPLAY_CMD`: resolving
 ## the recording sets it for this process and its children.
 ##
-## The recorder runs with `LD_PRELOAD` REMOVED from its environment
-## (`env -u LD_PRELOAD`). A library preloaded into `rr record` itself — an
-## agent session's command-trace shim is one — runs code in rr's forked child
-## before the tracee's exec (`getcwd` into rr's own heap), rr records it, and
-## the replay cannot write it back: every later session on the recording
-## failed with "Failed to determine RR port from output" (`rr-stderr-*.log`:
-## `write_data_with_holes() errno: EIO` at event 30). Measured 2026-11-12 on
-## the Linux workstation (codetracer-pm issue
+## The recorder runs with nothing preloaded into it, and the fixture proves
+## that before it records (`shim_free_exec`). A library preloaded into
+## `rr record` itself — an agent session's command-trace shim is one — runs
+## code in rr's forked child before the tracee's exec (`getcwd` into rr's own
+## heap), rr records it, and the replay cannot write it back: every later
+## session on the recording failed with "Failed to determine RR port from
+## output" (`rr-stderr-*.log`: `write_data_with_holes() errno: EIO` at event
+## 30). Measured 2026-11-12 on the Linux workstation (codetracer-pm issue
 ## `2026-11-12-rr-replay-of-a-c-program-that-uses-the-heap-fails-on-the-linux-workstation.md`).
-## `unset LD_PRELOAD` in a shell does not drop such a shim — it hooks
-## `execve` and puts itself back — while `env -u` starts the recorder without
-## it. The recording's key names this (`RecordingRecipe`), so a recording an
-## earlier fixture made with the preload is recorded again, not reused.
+## Neither `unset LD_PRELOAD` nor `env -u LD_PRELOAD` drops such a shim: it
+## hooks `execve` and puts itself back, and a dynamic `env` loads it too, so
+## the recordings this fixture made through `env -u LD_PRELOAD` were shimmed
+## and failed to replay (2026-11-23; `shim_free_exec` has the measurement).
+## The recording's key names the recipe (`RecordingRecipe`), so a recording
+## an earlier fixture made that way is recorded again, not reused.
 ##
 ## On a hybrid Intel CPU it also confines this process and its children to the
 ## performance cores, because rr counts branches on the core PMU only: a stock
@@ -49,6 +51,7 @@ import std/[hashes, os, osproc, strutils, times]
 
 import ./fixture_provider
 import ./performance_cores
+import ./shim_free_exec
 
 type
   NativeRecording* = object
@@ -62,7 +65,7 @@ type
 
 const NativeFixtureName* = "native_sudoku_c"
 
-const RecordingRecipe = "record-without-ld-preload"
+const RecordingRecipe = "record-" & ShimFreeRecipe
   ## Part of the recording's key: how it was recorded. Changing how the
   ## fixture records must change it, or a checkout keeps replaying a
   ## recording the old way made.
@@ -123,18 +126,20 @@ proc nativeRecording*(): NativeRecording =
   # rr keeps an `incomplete` marker in the trace until it finishes. A recording
   # that died leaves its directory behind, and reusing that one failed every
   # later run in the checkout: "Failed to determine RR port from output".
-  if dirExists(trace / "rr") and not fileExists(trace / "rr" / "incomplete"):
+  # A recording that packed the command-trace shim was made before the
+  # fixture kept it out, under a key that cannot tell: recorded again.
+  if dirExists(trace / "rr") and not fileExists(trace / "rr" / "incomplete") and
+     packedShim(trace / "rr").len == 0:
     result.ok = true
     result.tracePath = trace
     return
   removeDir(dir)
   createDir(dir)
   let binary = dir / "sudoku_solver"
+  # Nothing preloaded (the header says why), proven before the recorder runs.
+  requireShimFree("ct-native-replay record")
   for args in [@["build", source, binary], @["record", "-o", trace, binary]]:
-    # Without the preload (the header says why): `env` is coreutils', on
-    # every host rr runs on.
-    let (output, code) = execCmdEx(quoteShellCommand(
-      @["env", "-u", "LD_PRELOAD", replay] & args))
+    let (output, code) = execShimFree(@[replay] & args)
     if code != 0:
       raise newException(IOError, "ct-native-replay " & args[0] &
         " failed (" & $code & "):\n" & output)
@@ -144,6 +149,11 @@ proc nativeRecording*(): NativeRecording =
   if fileExists(trace / "rr" / "incomplete"):
     raise newException(IOError, "ct-native-replay record exited 0 and left an " &
       "incomplete rr trace in " & trace)
+  let packed = packedShim(trace / "rr")
+  if packed.len > 0:
+    raise newException(IOError, "ct-native-replay record packed the " &
+      "command-trace shim (" & packed & ") into " & trace & ": it was " &
+      "loaded into rr, and the recording will not replay")
   result.ok = true
   result.tracePath = trace
 
@@ -170,12 +180,12 @@ proc missingNativePrereq*(rec: NativeRecording): string =
 # shell's is CodeTracer's fork) and `ct-native-replay` to replay it. A
 # recorder that is present and fails raises.
 #
-# The recorder runs WITHOUT `LD_PRELOAD` (`env -u LD_PRELOAD`): a library
-# preloaded into the recording process (agent-harbor's command-trace shim,
-# in an agent session) is recorded with the program and its recording does
-# not replay (codetracer-pm issue 2026-11-12, "rr replay of a C program that
-# uses the heap fails on the Linux workstation"). With nothing preloaded,
-# the flag changes nothing.
+# The recorder runs with nothing preloaded, proven first (`shim_free_exec`):
+# a library preloaded into the recording process (agent-harbor's
+# command-trace shim, in an agent session) is recorded with the program and
+# its recording does not replay (codetracer-pm issue 2026-11-12, "rr replay
+# of a C program that uses the heap fails on the Linux workstation").
+# `env -u LD_PRELOAD`, used here before, does not drop that shim (2026-11-23).
 
 const NimForkFixtureName* = "nim_fork_flow"
 
@@ -223,7 +233,8 @@ proc ctRecordingOfNim(source, fixtureName: string): NativeRecording =
   putEnv("CODETRACER_CT_MCR_CMD", mcr)
   putEnv("CODETRACER_IN_UI_TEST", "1")
   let key = toHex(hash(readFile(source) & "|" & identity(ct) & "|" &
-                       identity(mcr) & "|" & nim), 12).toLowerAscii
+                       identity(mcr) & "|" & nim & "|" & ShimFreeRecipe),
+                  12).toLowerAscii
   # OUTSIDE THE CHECKOUT, unlike every other fixture here: Nim reads the
   # `config.nims` of the main module's directory and its parents, and the
   # checkout's root one (paths, defines, a force-imported test module) made
@@ -243,9 +254,9 @@ proc ctRecordingOfNim(source, fixtureName: string): NativeRecording =
   removeDir(dir)
   createDir(dir / "src")
   copyFile(source, program)
-  let (output, code) = execCmdEx(quoteShellCommand(
-    @["env", "-u", "LD_PRELOAD", ct, "record", "-o", trace, program]),
-    workingDir = dir / "src")
+  requireShimFree("ct record")
+  let (output, code) = execShimFree(@[ct, "record", "-o", trace, program],
+                                    workingDir = dir / "src")
   if code != 0:
     raise newException(IOError, "ct record " & program & " failed (" & $code &
       "):\n" & output)

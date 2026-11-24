@@ -422,8 +422,8 @@ jobs:
             ${{ steps.isonim_pins.outputs.isonim_family }}
             # THE REPROBUILD-PACKAGES CATALOG, pinned to the revision the
             # locked reprobuild (flake.lock root input `reprobuild`,
-            # 33be1e9964) is tested against: its own `repro.lock` pins
-            # `reprobuild-packages` at 56ffd673, which is also this repo's
+            # 2f7cb5db52) is tested against: its own `repro.lock` pins
+            # `reprobuild-packages` at 92100803, which is also this repo's
             # flake input and repro.lock entry. `repro.nim`'s `uses:` names
             # `shellcheck`, which reprobuild no longer bundles; the catalog
             # defines it from eed38ec on. The bundle build points
@@ -432,7 +432,7 @@ jobs:
             # reprobuild revision's `repro.lock` (its `.github/sibling-repos`
             # no longer names a revision), and keep this repo's flake input
             # and repro.lock at the same catalog commit.
-            reprobuild-packages=56ffd673bc0f43ab266de53fd5e2e7f656e37431
+            reprobuild-packages=92100803eb827ff21d0cc48b7474fb0a65057cbd
 
       - name: Remove sibling checkouts this job did not clone
         # Persistent runners keep earlier jobs' sibling clones beside the

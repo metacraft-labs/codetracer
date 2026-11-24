@@ -11,6 +11,7 @@
 ## for the three surfaces it names (`ChangesInboxSurfaces`), inside its
 ## reactive root.
 
+import isonim/core/signals
 import ../../stories/agent_harbor_playback
 import ../../stories/agent_harbor_changes_inbox_stories
 import ./ah_changes_panel
@@ -31,28 +32,38 @@ type
     inbox*: InboxVM
     inboxItem*: InboxItemVM
     requests*: StoryHostRequests
+    scroll*: P3Scroll
+      ## Each scrolling region's first pixel, kept between draws.
+    redraw*: Signal[int]
+      ## Moved by the host after it scrolls a region, so the view redraws.
 
 proc mountChangesInboxStory*(r: GpuiRenderer; host: GpuiElement; surface, fixture: string;
                              playback: AhPlayback; p: AhPalette;
-                             widthPx: int): ChangesInboxMount =
+                             widthPx: int; heightPx = 0): ChangesInboxMount =
   ## Builds the story's viewmodel with its constructor and mounts its view in
-  ## `host`, `widthPx` wide. Call inside a reactive root; the caller disposes
-  ## the viewmodel it returns. Raises `ValueError` for a surface this module
-  ## does not mount, and (from the constructors) for a fixture the surface
-  ## does not name.
+  ## `host`, `widthPx` × `heightPx` (the panel's body; 0 for a view that
+  ## does not scroll, clipped at its foot). Call inside a reactive root; the
+  ## caller disposes the viewmodel it returns. Raises `ValueError` for a
+  ## surface this module does not mount, and (from the constructors) for a
+  ## fixture the surface does not name.
   result.requests = StoryHostRequests()
+  result.scroll = P3Scroll()
+  result.redraw = createSignal(0)
   case surface
   of "agent-harbor-changes":
     result.changes = createChangesStoryVM(fixture)
-    r.mountChangesPanel(host, result.changes, p, widthPx, changesStoryContext(fixture))
+    r.mountChangesPanel(host, result.changes, p, widthPx, changesStoryContext(fixture),
+                        heightPx, result.scroll, result.redraw)
   of "agent-harbor-inbox":
     result.inbox = createInboxStoryVM(fixture, playback)
     r.mountInboxPanel(host, result.inbox, p, widthPx,
-                      inboxStoryContext(fixture, result.requests))
+                      inboxStoryContext(fixture, result.requests), heightPx, result.scroll,
+                      result.redraw)
   of "agent-harbor-inbox-item":
     result.inboxItem = createInboxItemStoryVM(fixture)
     r.mountInboxItemPage(host, result.inboxItem, p, widthPx,
-                         inboxItemStoryContext(fixture, result.requests))
+                         inboxItemStoryContext(fixture, result.requests), heightPx,
+                         result.scroll, result.redraw)
   else:
     raise newException(ValueError, "no GPUI rendering of the Changes or Inbox surface " &
                        surface & " (story fixture " & fixture & ")")
@@ -62,3 +73,32 @@ proc dispose*(m: ChangesInboxMount) =
   if m.changes != nil: m.changes.dispose()
   if m.inbox != nil: m.inbox.dispose()
   if m.inboxItem != nil: m.inboxItem.dispose()
+
+proc inboxRegion*(m: ChangesInboxMount): string =
+  ## The region the Inbox's scroll keys move: an item's page standing alone,
+  ## the rows with the page under them, or the rows beside the page.
+  if not m.inboxItem.isNil: return PageRegionKey
+  if m.scroll.regionOf(InboxRegionKey).key.len > 0: InboxRegionKey else: InboxListRegionKey
+
+proc scrollStory*(m: ChangesInboxMount; operation: string): bool =
+  ## Runs one of the panels' scroll operations on the region it moves (the
+  ## page keys a page, the arrows a line, as the web's region scrolls) and
+  ## redraws; true when the region moved. The keyboard's item is not moved.
+  if m.scroll.isNil: return false
+  var region = ""
+  var delta = 0
+  case operation
+  of ChangesPageDownOperation, ChangesPageUpOperation:
+    region = ChangesRegionKey
+    delta = m.scroll.pagePxOf(region)
+    if operation == ChangesPageUpOperation: delta = -delta
+  of InboxScrollDownOperation, InboxScrollUpOperation:
+    region = m.inboxRegion
+    delta = if operation == InboxScrollDownOperation: BodyLinePx else: -BodyLinePx
+  of InboxPageDownOperation, InboxPageUpOperation:
+    region = m.inboxRegion
+    delta = m.scroll.pagePxOf(region)
+    if operation == InboxPageUpOperation: delta = -delta
+  else: return false
+  result = m.scroll.scrollBy(region, delta)
+  if result: m.redraw.val = m.redraw.val + 1

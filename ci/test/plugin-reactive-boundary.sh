@@ -1912,6 +1912,15 @@ fi
 # The count is pinned rather than "at least one" (§4b). The pin is a coupling
 # and it is the intended kind: adding an operating-system module to the SDK
 # reddens this line and asks for the number to be moved deliberately.
+#
+# 9 -> 10 (2026-11-21): the TLS name check imports `std/openssl` for
+# `SSL_set1_host` and `X509_VERIFY_PARAM_set1_ip_asc`, which `std/net` does
+# not wrap. A real operating-system (library) module, so the move is genuine.
+#
+# 10 -> 9 (2026-11-23): `std/strtabs` is gone. It held the environment table
+# `startProcess` took; a plugin's child is now spawned by `posix_spawn` in
+# `spawnGrouped` (its own process group whichever stdlib built the plugin),
+# which takes the environment as a C array.
 # ---------------------------------------------------------------------------
 
 ALLOWLIST_CONTROL_UNADMITTED=9
@@ -2035,9 +2044,15 @@ fi
 # pragma at all and must yield zero.
 #
 # The count is pinned rather than "at least one" (§4b).
+#
+# 2 -> 3 (2026-11-21): the count is of DISTINCT pragma names. The TLS name
+# check binds `SSL_set1_host`, `SSL_get0_param` and
+# `X509_VERIFY_PARAM_set1_ip_asc` (which `std/openssl` does not declare) with
+# `importc` and `dynlib`, so `dynlib` joins `importc` and `header`. The SDK
+# genuinely gained it.
 # ---------------------------------------------------------------------------
 
-FFI_CONTROL_EXPECTED=2
+FFI_CONTROL_EXPECTED=3
 
 if [ "${ffi_pragma_count}" -gt 0 ] && [ -f "${SYNC_IO_REL}" ] && [ -f "${PRIMITIVES_REL}" ]; then
 	ffi_control_hits="$(ffi_names_in "${SYNC_IO_REL}" | cut -d: -f2- | sort -u)"

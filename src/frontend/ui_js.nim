@@ -43,6 +43,9 @@ import
   index/[layout_config_repair, editor_working_set],
   ui/[test_results, constraints, generated_code, point_list, editor_points,
       verification],
+  # Extensibility-Model.md §11: the installed plugins' panes, palette
+  # entries, status item and keys (`ui/plugin_panes`, over `plugin_hooks`).
+  ui/[plugin_panes, plugin_hooks],
   # ONE LAYOUT PER MODE. `applyModeLayout` below is this module's only caller;
   # everything about where a mode's arrangement lives is in there.
   ui/mode_layouts,
@@ -306,6 +309,7 @@ import ui/project_visualisers   # the checkout's per-type visualisers
 from viewmodel/keymap/editing_keymap import BaseKeymap, bkCua, bkEmacs, bkVim,
   bkKakoune
 from ui/pane_host_lookup import tabOfPaneHost
+from ui/key_router import userBindsKey   # a key a user row binds is the user's, not a plugin's
 from isonim/web/dom_api as isonim_dom import nil
 import viewmodel/sdk/[debugger_session, trace_source]
 from viewmodel/viewport import timeoutScheduler
@@ -1970,6 +1974,13 @@ proc refreshCommandPaletteMenuIndex*(data: Data) =
         shortcut: displayedChord(action))
       keymaps.subcommands.add cstring(label)
     data.ui.commandPalette.interpreter.commands[cstring"Keymap"] = keymaps
+  # The installed plugins' entries (Extensibility-Model.md §11.7.6): the
+  # reserved `Plugins:` verbs, which no plugin can shadow, and the running
+  # plugins' commands and panes.
+  if not pluginPaletteCommands.isNil:
+    for entry in pluginPaletteCommands():
+      data.ui.commandPalette.interpreter.commands[cstring(entry.label)] = Command(
+        name: cstring(entry.label), kind: ActionCommand, run: entry.run)
   if not debug_toolbar.projectRunRoute.isNil:
     # Edit-Mode-Toolbar.md §9.4: the project's Run at the command's
     # destination (the natives' `omnibar_sources.replayOpenCommands`), where
@@ -2928,6 +2939,12 @@ proc configureSessionMiddleware(session: ReplaySession; withDebugger = true;
   let realBackend = pageBackendFor(dapRef)
   buildSessionViewModels(session, vms, realBackend,
     asMirror = serverOwnsSession() and withDebugger and initializeDebugger)
+  # THE TAB'S PLUGINS (Extensibility-Model.md §11.2.1). On the desktop the
+  # session is this page's, and the main process runs its plugins beside a
+  # mirror of it (`ui/plugin_panes.hostSessionForPlugins`). Under `ct host`
+  # the server runs them beside its own session of the tab.
+  if withDebugger and initializeDebugger and not serverOwnsSession():
+    hostSessionForPlugins(dapRef.sessionId, vms.vm)
   # Read by the locals wiring below. The move subscription reads the tab's
   # store at each move instead, because `adoptServerSession` can replace it.
   let store = vms.vm.store
@@ -5324,6 +5341,16 @@ proc stampAskingTab(data: Data) =
 
 proc configureIPC(data: Data) =
   stampAskingTab(data)
+  # The installed plugins' state and the hooks the key router, the status
+  # bar and the palette read (`ui/plugin_panes`).
+  installPluginUi(data.ipc.toJs,
+    proc(): int =
+      if data.sessions.len == 0 or data.activeSession.dapApi.isNil: -1
+      else: data.activeSession.dapApi.sessionId,
+    userBindsKey)
+  pluginPaletteChanged = proc() = refreshCommandPaletteMenuIndex(data)
+  layoutOf = proc(): JsObject =
+    if data.ui.isNil or data.ui.layout.isNil: nil else: data.ui.layout.toJs
   when not defined(ctWeb):
     registerInitSessionHandler()
     registerWindowListHandler()
@@ -5521,7 +5548,17 @@ proc updateEditors(data: Data) =
     editor.updateOptions(options)
   for path, editor in data.ui.editors:
     if not editor.flow.isNil and not editor.flow.flow.isNil:
-      editor.flow.redrawFlow()
+      # Each editor's flow is redrawn on its own. A redraw that throws (a
+      # Monaco query about a line its model does not have, say) is logged and
+      # leaves only that editor's labels unchanged: it must not end this loop,
+      # because every editor after it would then keep its labels at the old
+      # size and position, over the code (#908). The rest of this iteration
+      # (test and diff zones) is per editor too, so it still runs.
+      try:
+        editor.flow.redrawFlow()
+      except:
+        cerror "editor: zoom: flow redraw failed for " & $path & ": " &
+          getCurrentExceptionMsg()
     for id, zone in editor.testDom:
       let textModel = editor.monacoEditor.getModel()
       let lineContent = textModel.getLineContent(id)

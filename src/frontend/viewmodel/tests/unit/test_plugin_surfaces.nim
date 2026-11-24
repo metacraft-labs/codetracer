@@ -66,7 +66,9 @@ import plugin_fixtures/desktop_only_plugin
 import plugin_fixtures/tool_surface_plugin
 import plugin_fixtures/throwing_view_plugin
 
-const ExpectedAssertions = 241  # Editor-Hosted-Front-Ends §E15: +2 for MACRO EXPANSION; PLAT-51: -2, `paneTimeline` removed from the whole-enum case; PLAT-45: +2 per each of the 5 new PaneKinds in the whole-enum case; PLAT-48: +2 each for PROBLEMS and REQUESTS; PLAT-60: +2 for LOW LEVEL CODE; PLAT-63: +2 for VERIFICATION
+const HostPathProbeAssertions = 12
+  ## The two host-PATH cases, compiled out under wasm32 (see their suite).
+const ExpectedAssertions = (when defined(wasm32): 241 - HostPathProbeAssertions else: 241)  # Editor-Hosted-Front-Ends §E15: +2 for MACRO EXPANSION; PLAT-51: -2, `paneTimeline` removed from the whole-enum case; PLAT-45: +2 per each of the 5 new PaneKinds in the whole-enum case; PLAT-48: +2 each for PROBLEMS and REQUESTS; PLAT-60: +2 for LOW LEVEL CODE; PLAT-63: +2 for VERIFICATION
   ## Written from a run, and asserted against the tally below.
   ## `ci/lib/run-nim-test-lane.sh` READS this name: a file that declares
   ## it AND fails when its own tally disagrees is a file whose assertion
@@ -293,22 +295,68 @@ suite "PLAT-9 §8.2: a missing tool degrades that surface, visibly":
     # header describes, from this side.
     ck pdDependencyMissing in ContributedPaneDegradations
 
-  test "installing the tool and firing the declared trigger un-degrades it":
-    # §8.2: "The dependency is re-probed on a declared trigger, so installing
-    # the missing component does not require restarting CodeTracer." A REAL
-    # executable, in a real directory, on the real PATH.
-    let p = newToolSurfacePlugin()
-    let host = toolHost(tool_surface_plugin.ManifestJson, "acme.disasm", p)
-    let store = createReplayDataStore(
-      newMockBackendService(autoRespond = true).toBackendService())
+  # THE TWO CASES BELOW PUT A REAL TOOL ON THE HOST'S PATH and re-probe it.
+  # Under wasm32 the probe answers `dpUnsupported` (`surface_host.probeTool`:
+  # a wasm32 build sees Emscripten's environment, not the host's PATH, and
+  # `plugin_io` has no resolver there), so they are native cases; the JS
+  # lane does not collect this file at all. Their 12 counted assertions
+  # leave the tally with them (`HostPathProbeAssertions`).
+  when not defined(wasm32):
+    test "installing the tool and firing the declared trigger un-degrades it":
+      # §8.2: "The dependency is re-probed on a declared trigger, so installing
+      # the missing component does not require restarting CodeTracer." A REAL
+      # executable, in a real directory, on the real PATH.
+      let p = newToolSurfacePlugin()
+      let host = toolHost(tool_surface_plugin.ManifestJson, "acme.disasm", p)
+      let store = createReplayDataStore(
+        newMockBackendService(autoRespond = true).toBackendService())
 
-    var degradation: Memo[PaneDegradation]
-    createRoot proc(disposeRoot: proc()) =
-      degradation = host.surfaces.degradationMemo("acme.disasm/disassembly",
-        proc(): DegradedStateSnapshot = store.degradedSnapshot())
-      ck degradation.val == pdDependencyMissing
+      var degradation: Memo[PaneDegradation]
+      createRoot proc(disposeRoot: proc()) =
+        degradation = host.surfaces.degradationMemo("acme.disasm/disassembly",
+          proc(): DegradedStateSnapshot = store.degradedSnapshot())
+        ck degradation.val == pdDependencyMissing
 
-      let dir = getTempDir() / "plat9-probe-" & $getCurrentProcessId()
+        let dir = getTempDir() / "plat9-probe-" & $getCurrentProcessId()
+        createDir(dir)
+        let exe = dir / "ct-plat9-probe-tool"
+        writeFile(exe, "#!/bin/sh\nexit 0\n")
+        setFilePermissions(exe, {fpUserRead, fpUserWrite, fpUserExec})
+        let oldPath = getEnv("PATH")
+        putEnv("PATH", dir & PathSep & oldPath)
+        try:
+          # The probe has not been re-run yet, so the pane is still degraded:
+          # a probe that consulted the PATH on every read would make the trigger
+          # meaningless, and this is the assertion that says it does not.
+          ck degradation.val == pdDependencyMissing
+
+          # An event this surface did NOT declare changes nothing.
+          ck host.reprobeDependencies(
+            ActivationEvent(kind: aeLanguage, value: "rust")).len == 0
+          ck degradation.val == pdDependencyMissing
+
+          # The DECLARED trigger re-probes it, and the memo re-runs because the
+          # probe wrote a signal it reads.
+          ck host.reprobeDependencies(TraceOpened) ==
+            @["acme.disasm/disassembly"]
+          ck degradation.val == pdNone
+
+          # ... and the surface now renders the plugin's own view, for real.
+          let rendered = textOf(host.renderSurface("acme.disasm/disassembly"))
+          ckHas rendered, "push rbp"
+          ck p.disassemblyRenders == 1
+        finally:
+          putEnv("PATH", oldPath)
+          removeDir(dir)
+        disposeRoot()
+
+    test "a surface that declared NO trigger is not re-probed by the same event":
+      # The control for the case above. Without it, "the declared trigger did
+      # it" and "any event re-probes everything" are the same observation.
+      let p = newToolSurfacePlugin()
+      let host = toolHost(tool_surface_plugin.NoReprobeManifestJson,
+                          "acme.disasm-static", p)
+      let dir = getTempDir() / "plat9-probe-static-" & $getCurrentProcessId()
       createDir(dir)
       let exe = dir / "ct-plat9-probe-tool"
       writeFile(exe, "#!/bin/sh\nexit 0\n")
@@ -316,62 +364,23 @@ suite "PLAT-9 §8.2: a missing tool degrades that surface, visibly":
       let oldPath = getEnv("PATH")
       putEnv("PATH", dir & PathSep & oldPath)
       try:
-        # The probe has not been re-run yet, so the pane is still degraded:
-        # a probe that consulted the PATH on every read would make the trigger
-        # meaningless, and this is the assertion that says it does not.
-        ck degradation.val == pdDependencyMissing
-
-        # An event this surface did NOT declare changes nothing.
-        ck host.reprobeDependencies(
-          ActivationEvent(kind: aeLanguage, value: "rust")).len == 0
-        ck degradation.val == pdDependencyMissing
-
-        # The DECLARED trigger re-probes it, and the memo re-runs because the
-        # probe wrote a signal it reads.
-        ck host.reprobeDependencies(TraceOpened) ==
-          @["acme.disasm/disassembly"]
-        ck degradation.val == pdNone
-
-        # ... and the surface now renders the plugin's own view, for real.
-        let rendered = textOf(host.renderSurface("acme.disasm/disassembly"))
-        ckHas rendered, "push rbp"
-        ck p.disassemblyRenders == 1
+        ck host.reprobeDependencies(TraceOpened).len == 0
+        ck host.surfaces.surfaceDegradation(
+          "acme.disasm-static/disassembly", initDegradedStateSnapshot()) ==
+          pdDependencyMissing
+        # ... and the user's explicit "check again" DOES reach it, because the
+        # user's request is the trigger. A surface with no declaration would
+        # otherwise have no way back short of a restart.
+        ck host.surfaces.reprobeAll() == @["acme.disasm-static/disassembly"]
+        ck host.surfaces.surfaceDegradation(
+          "acme.disasm-static/disassembly", initDegradedStateSnapshot()) == pdNone
       finally:
         putEnv("PATH", oldPath)
         removeDir(dir)
-      disposeRoot()
 
-  test "a surface that declared NO trigger is not re-probed by the same event":
-    # The control for the case above. Without it, "the declared trigger did
-    # it" and "any event re-probes everything" are the same observation.
-    let p = newToolSurfacePlugin()
-    let host = toolHost(tool_surface_plugin.NoReprobeManifestJson,
-                        "acme.disasm-static", p)
-    let dir = getTempDir() / "plat9-probe-static-" & $getCurrentProcessId()
-    createDir(dir)
-    let exe = dir / "ct-plat9-probe-tool"
-    writeFile(exe, "#!/bin/sh\nexit 0\n")
-    setFilePermissions(exe, {fpUserRead, fpUserWrite, fpUserExec})
-    let oldPath = getEnv("PATH")
-    putEnv("PATH", dir & PathSep & oldPath)
-    try:
-      ck host.reprobeDependencies(TraceOpened).len == 0
-      ck host.surfaces.surfaceDegradation(
-        "acme.disasm-static/disassembly", initDegradedStateSnapshot()) ==
-        pdDependencyMissing
-      # ... and the user's explicit "check again" DOES reach it, because the
-      # user's request is the trigger. A surface with no declaration would
-      # otherwise have no way back short of a restart.
-      ck host.surfaces.reprobeAll() == @["acme.disasm-static/disassembly"]
-      ck host.surfaces.surfaceDegradation(
-        "acme.disasm-static/disassembly", initDegradedStateSnapshot()) == pdNone
-    finally:
-      putEnv("PATH", oldPath)
-      removeDir(dir)
-
-# ---------------------------------------------------------------------------
-# §7 — a view that throws on every frame
-# ---------------------------------------------------------------------------
+  # ---------------------------------------------------------------------------
+  # §7 — a view that throws on every frame
+  # ---------------------------------------------------------------------------
 
 suite "PLAT-9 §7: a view that throws is contained, attributed and disabled":
 

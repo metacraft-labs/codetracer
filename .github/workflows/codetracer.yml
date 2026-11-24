@@ -594,8 +594,14 @@ jobs:
         # Ruby and JS in the nightly matrix), and env.ps1's from-source nargo
         # build alone took both jobs past their 75-minute bound in run
         # 44940608244.
+        # No TTD/WinDbg check either: this job records and replays Python only
+        # (`just test-origin-dap` with CT_TEST_LANGS=python runs db-backend's
+        # origin_python_dap_test), and nothing in it touches TTD or WinDbg. The
+        # check made it fail setup on a runner without the WinDbg package in
+        # run 45069526428. The nightly matrix below keeps TTD required.
         env:
           WINDOWS_DIY_SKIP_NARGO: "1"
+          WINDOWS_DIY_ENSURE_TTD: "false"
         uses: ./.github/actions/setup-db-backend-siblings
         with:
           env-flavor: windows-diy
@@ -609,9 +615,26 @@ jobs:
         run: ./ci/ensure-origin-dap-windows-toolchain.ps1
 
       - name: Install Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+        # From uv (env.ps1 puts it on PATH), not actions/setup-python: on a
+        # runner whose service runs as NetworkService (win-ci-bare-001),
+        # setup-python's installer fails with "Error happened during Python
+        # installation" (run 45118976975). uv's managed Pythons are plain
+        # archives and need no installer. They are marked externally managed,
+        # so the recorder is pip-installed into a seeded venv, which is what
+        # `python` resolves to from here on.
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          # uv.exe itself: env.ps1's extensionless `uv` shim is for Git Bash.
+          $uv = if ($env:UV_DIR) { Join-Path $env:UV_DIR "uv.exe" } else { (Get-Command uv.exe -ErrorAction Stop).Source }
+          if (-not (Test-Path -LiteralPath $uv -PathType Leaf)) { throw "no uv.exe at $uv" }
+          $venv = Join-Path $env:RUNNER_TEMP "origin-dap-python"
+          & $uv venv --seed --python 3.12 --python-preference only-managed $venv
+          if ($LASTEXITCODE -ne 0) { throw "uv could not create a Python 3.12 venv (exit $LASTEXITCODE)" }
+          $scripts = Join-Path $venv "Scripts"
+          & (Join-Path $scripts "python.exe") -m pip --version
+          if ($LASTEXITCODE -ne 0) { throw "the Python 3.12 venv has no pip" }
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $scripts
 
       - name: Read locked Python recorder revision
         id: python-recorder-lock
@@ -703,8 +726,97 @@ jobs:
   # other languages, or MCP/CLI. This workflow currently has only push and PR
   # triggers, so the guarded job remains inactive until a scheduled or manual
   # trigger is added deliberately.
+  # The nightly Windows origin-DAP job restores its env.ps1 toolchain from
+  # actions/cache instead of bootstrapping it on every run: on an ephemeral
+  # runner the full bootstrap alone took 55 min (run 45292632494), so the job
+  # could never finish inside its 75-minute bound. This job is the one that
+  # WRITES that cache. It looks the key up first and stops in a minute or two
+  # when the cache is there; only a cold key (a changed toolchain pin) runs
+  # the bootstrap, which is why this job, and only this job, gets a longer
+  # budget than the 75-minute one the test job keeps.
+  #
+  # The root is a path every Windows runner has, under RUNNER_TEMP
+  # (C:\actions-runner\_work\_temp), so the cached paths are identical on the
+  # ephemeral runners and on win-ci-bare-001; env.ps1's default root differs
+  # between them (D:\metacraft-dev-deps vs the account's LOCALAPPDATA), which
+  # would make each runner class miss the other's cache.
+  origin-dap-windows-toolchain:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, windows, x64]
+    name: origin-DAP Windows toolchain cache
+    # A cold bootstrap of the components below: GCC 244 s, NIM 283 s, RUST
+    # 137 s, TTD 425 s, ZLIB 106 s on an ephemeral runner (run 45134129306),
+    # plus NODE, UV, CAPNP and JUST, and the cache upload. 120 min leaves
+    # margin for a slow download; a warm key exits after the lookup.
+    timeout-minutes: 120
+    steps:
+      - name: Ensure Git and Git Bash are on PATH
+        shell: powershell
+        env:
+          CODETRACER_GIT_BOOTSTRAP_REVISION: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $revision = $env:CODETRACER_GIT_BOOTSTRAP_REVISION
+          if ($revision -cnotmatch '^[0-9a-f]{40}$') {
+            throw "The workflow did not supply an immutable bootstrap revision."
+          }
+          $bootstrapUrl =
+            "https://raw.githubusercontent.com/metacraft-labs/codetracer/" +
+            "$revision/ci/ensure-git-for-checkout.ps1"
+          $bootstrapScript = Join-Path $env:RUNNER_TEMP `
+            "codetracer-ensure-git-$revision-$([Guid]::NewGuid().ToString('N')).ps1"
+          [Net.ServicePointManager]::SecurityProtocol =
+            [Net.ServicePointManager]::SecurityProtocol -bor
+            [Net.SecurityProtocolType]::Tls12
+          try {
+            Invoke-WebRequest `
+              -Uri $bootstrapUrl `
+              -OutFile $bootstrapScript `
+              -UseBasicParsing
+            & $bootstrapScript
+          }
+          finally {
+            Remove-Item -LiteralPath $bootstrapScript -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: false
+
+      - name: Look up the toolchain cache
+        id: lookup
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}\ct-diy
+          key: windows-diy-origin-dap-v1-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}
+          lookup-only: true
+
+      - name: Bootstrap the toolchain through env.ps1
+        if: steps.lookup.outputs.cache-hit != 'true'
+        shell: pwsh
+        env:
+          WINDOWS_DIY_INSTALL_ROOT: ${{ runner.temp }}\ct-diy
+          # The components the nightly origin-DAP job uses (see its setup
+          # step); keep the two lists identical.
+          WINDOWS_DIY_ONLY: "GCC,ZSTD,ZLIB,RUST,NIM,CAPNP,UV,NODE,JUST,TTD"
+          WINDOWS_DIY_ENSURE_TTD: "true"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $started = Get-Date
+          . ./env.ps1
+          Write-Host "env.ps1 bootstrap of $env:WINDOWS_DIY_ONLY into $env:WINDOWS_DIY_INSTALL_ROOT took $([int]((Get-Date) - $started).TotalMinutes) min"
+
+      - name: Save the toolchain cache
+        if: steps.lookup.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}\ct-diy
+          key: windows-diy-origin-dap-v1-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}
+
   origin-dap-windows-nightly:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: origin-dap-windows-toolchain
     runs-on: [self-hosted, windows, x64]  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
     name: origin-DAP (nightly routed materialized matrix, Windows)
     # See the timeout-minutes rationale on windows-rust-components. This job is
@@ -755,11 +867,39 @@ jobs:
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
+      # Not `submodules: recursive`: on an ephemeral runner that cloned and
+      # checked out all 37 submodules one after another, 13 of the Checkout
+      # step's 20 minutes (run 45134129306), and this job uses a handful.
+      # db-backend's Cargo.toml names every tree-sitter grammar as a path
+      # dependency (cargo reads optional ones' manifests too), and the Nim
+      # side needs nim-stew and nim-result (CT_EMULATOR_EXTRA_NIM_PATHS).
+      # All of them are public repositories.
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          submodules: recursive
+          submodules: false
           token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Fetch the submodules this job uses
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $paths = @(
+            "libs/nim-stew", "libs/nim-result",
+            "libs/tree-sitter-nim", "libs/tree-sitter-cairo", "libs/tree-sitter-aiken",
+            "libs/tree-sitter-move-on-aptos", "libs/tree-sitter-sway", "libs/tree-sitter-circom",
+            "libs/tree-sitter-leo", "libs/tree-sitter-tolk", "libs/tree-sitter-masm",
+            "libs/tree-sitter-cadence")
+          git -c protocol.version=2 submodule update --init --recursive --depth=1 --jobs 8 -- @paths
+          if ($LASTEXITCODE -ne 0) { throw "git submodule update exited $LASTEXITCODE" }
+
+      - name: Restore the toolchain cache
+        # Written by origin-dap-windows-toolchain, above.
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}\ct-diy
+          key: windows-diy-origin-dap-v1-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}
+          fail-on-cache-miss: true
 
       - name: Setup db-backend siblings
         # `windows-diy`, for the reason spelled out in the per-PR job above:
@@ -770,8 +910,11 @@ jobs:
         # Ruby and JS in the nightly matrix), and env.ps1's from-source nargo
         # build alone took both jobs past their 75-minute bound in run
         # 44940608244.
+        # Only the components this job uses, at the cached root restored
+        # above; env.ps1 finds them installed and skips them. NARGO stays out.
         env:
-          WINDOWS_DIY_SKIP_NARGO: "1"
+          WINDOWS_DIY_INSTALL_ROOT: ${{ runner.temp }}\ct-diy
+          WINDOWS_DIY_ONLY: "GCC,ZSTD,ZLIB,RUST,NIM,CAPNP,UV,NODE,JUST,TTD"
         uses: ./.github/actions/setup-db-backend-siblings
         with:
           env-flavor: windows-diy
@@ -780,14 +923,49 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install capnproto
+      - name: Use the pinned Cap'n Proto from env.ps1
+        # env.ps1 (windows-diy, above) already provisions the pinned Cap'n
+        # Proto at CAPNP_DIR. This used to `choco install capnproto`, which
+        # failed on win-ci-bare-001 ("The term 'choco' is not recognized",
+        # run 45236060796) and would install an unpinned version where it
+        # did run.
         shell: pwsh
-        run: choco install capnproto -y
+        run: |
+          $ErrorActionPreference = "Stop"
+          $capnp = Get-Command capnp.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $capnp) {
+            if (-not $env:CAPNP_DIR) { throw "env.ps1 set no CAPNP_DIR and no capnp.exe is on PATH" }
+            $bin = @($env:CAPNP_DIR, (Join-Path $env:CAPNP_DIR "bin")) |
+              Where-Object { Test-Path -LiteralPath (Join-Path $_ "capnp.exe") -PathType Leaf } | Select-Object -First 1
+            if (-not $bin) { throw "no capnp.exe under CAPNP_DIR=$env:CAPNP_DIR" }
+            Add-Content -LiteralPath $env:GITHUB_PATH -Value $bin
+            $capnp = Get-Item -LiteralPath (Join-Path $bin "capnp.exe")
+          }
+          $exe = if ($capnp.Source) { $capnp.Source } else { $capnp.FullName }
+          & $exe --version
+          if ($LASTEXITCODE -ne 0) { throw "capnp --version exited $LASTEXITCODE" }
 
       - name: Install Python 3.12
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+        # From uv (env.ps1 puts it on PATH), not actions/setup-python: on a
+        # runner whose service runs as NetworkService (win-ci-bare-001),
+        # setup-python's installer fails with "Error happened during Python
+        # installation" (run 45118976975). uv's managed Pythons are plain
+        # archives and need no installer. They are marked externally managed,
+        # so the recorder is pip-installed into a seeded venv, which is what
+        # `python` resolves to from here on.
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          # uv.exe itself: env.ps1's extensionless `uv` shim is for Git Bash.
+          $uv = if ($env:UV_DIR) { Join-Path $env:UV_DIR "uv.exe" } else { (Get-Command uv.exe -ErrorAction Stop).Source }
+          if (-not (Test-Path -LiteralPath $uv -PathType Leaf)) { throw "no uv.exe at $uv" }
+          $venv = Join-Path $env:RUNNER_TEMP "origin-dap-python"
+          & $uv venv --seed --python 3.12 --python-preference only-managed $venv
+          if ($LASTEXITCODE -ne 0) { throw "uv could not create a Python 3.12 venv (exit $LASTEXITCODE)" }
+          $scripts = Join-Path $venv "Scripts"
+          & (Join-Path $scripts "python.exe") -m pip --version
+          if ($LASTEXITCODE -ne 0) { throw "the Python 3.12 venv has no pip" }
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $scripts
 
       - name: Read locked Python recorder revision
         id: python-recorder-lock
@@ -815,13 +993,18 @@ jobs:
             -Revision $env:RECORDER_REVISION `
             -Destination $destination
 
-      - name: Install Nim toolchain
+      - name: Use the pinned Nim from env.ps1
+        # Not `choco install nim`: win-ci-bare-001 has no Chocolatey, and choco
+        # installs whatever Nim is current. env.ps1 provisions the pinned one.
         shell: pwsh
         run: |
-          choco install nim -y
-          $nimBin = (Get-ChildItem -Path "C:\tools\Nim\nim-*\bin" -Directory | Select-Object -First 1).FullName
-          if ($nimBin) { Add-Content -Path $env:GITHUB_PATH -Value $nimBin }
+          $ErrorActionPreference = "Stop"
+          if (-not $env:NIM_DIR) { throw "env.ps1 set no NIM_DIR" }
+          $nimBin = Join-Path $env:NIM_DIR "bin"
+          if (-not (Test-Path -LiteralPath (Join-Path $nimBin "nim.exe") -PathType Leaf)) { throw "no nim.exe under $nimBin" }
+          Add-Content -Path $env:GITHUB_PATH -Value $nimBin
           Add-Content -Path $env:GITHUB_PATH -Value "$env:USERPROFILE\.nimble\bin"
+          & (Join-Path $nimBin "nim.exe") --version
 
       - name: Install and verify locked Rust-backed Python recorder
         shell: pwsh
@@ -855,11 +1038,15 @@ jobs:
           cd libs/tree-sitter-nim
           tree-sitter generate
 
-      - name: Install just
+      - name: Use the pinned just from env.ps1
+        # Not `choco install just`, for the same reason as Nim above.
         shell: pwsh
         run: |
-          choco install just -y
-          just --version
+          $ErrorActionPreference = "Stop"
+          $just = Join-Path $env:CARGO_HOME "bin\just.exe"
+          if (-not (Test-Path -LiteralPath $just -PathType Leaf)) { throw "env.ps1 put no just.exe at $just" }
+          Add-Content -Path $env:GITHUB_PATH -Value (Split-Path -Parent $just)
+          & $just --version
 
       - name: Run routed materialized origin-DAP matrix
         shell: bash
@@ -1100,12 +1287,19 @@ jobs:
           consumer-directory: wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer
           workspace-directory: wr3-${{ github.run_id }}-${{ github.run_attempt }}
           sibling-strategy: repro-lock
-          # At least the reprobuild repro.lock was written with (33be1e996,
-          # in v0.2.28): v0.2.26 derived another interface digest for the
-          # catalog's tree-sitter and refused the lock ("provisioning
-          # contribution interface mismatch for package tree-sitter",
-          # run 44577379303).
-          repro-version: v0.2.28
+          # Built from the reprobuild revision repro.lock pins, not a release.
+          # The pinned repro.nim (2f7cb5db5) calls `nim.c(..., binary = ...,
+          # noNimblePath = ...)`; no published Windows release has that API:
+          # v0.2.28 stopped the provider compile with "unknown named
+          # parameter: binary / noNimblePath" (run 45068892139), and the
+          # v0.2.31 release is cut from 7618e3cb2, before af8bf966a added
+          # noNimblePath. Earlier, v0.2.26 derived another interface digest
+          # for the catalog's tree-sitter (run 44577379303). Keep this SHA
+          # equal to repro.lock's reprobuild revision; a release published
+          # from it or later can replace the source build.
+          repro-from-source: true
+          repro-build-pin: 2f7cb5db5289fa1e9e060281ebe8c095bf9669e9
+          repro-version: v0.2.31
           gh-token: ${{ steps.ci_token.outputs.token }}
           # THIS LIST HOLDS ONLY WHAT THE LOCK PATH WILL NOT CLONE. `repro develop
           # --all` materialises what repro.lock pins, but it skips a row a recipe
@@ -2461,11 +2655,11 @@ jobs:
 
   viewmodel-tests:
     runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
-    # NO GREEN SAMPLE: 0 success in 42 records. Failures stop at step 15 of 31
-    # with 16 real steps skipped, so the 24.3m worst failure covers under half
-    # the body and is a LOWER bound. 75m is ~3x that; the unmeasured half
-    # includes the recorder-gated tests and a `ct` build.
-    timeout-minutes: 75
+    # MEASURED 2026-11-22/23 (runs 45069526428, 45118976975): the steps that
+    # stay in this job took 56 and 68 minutes (provisioning siblings alone 31
+    # and 27), and the old 75-minute limit then ran out in the steps that are
+    # now `viewmodel-tests-wasm`'s. 90 minutes is 1.3x the slower run.
+    timeout-minutes: 90
     name: ViewModel headless tests (native + JS)
     steps:
       - name: Generate CI token
@@ -2541,28 +2735,9 @@ jobs:
       #
       # Keep new clone steps in this block. A clone added further down is a
       # clone that works only until the job gets slower.
-      - name: Clone codetracer-js-recorder sibling
-        # The recorder-gated ViewModel tests
-        # (src/frontend/viewmodel/tests/unit/test_{column,formatted_view_step,
-        # statement_step}_*_vm.nim) drive the real JS recorder to produce a
-        # column-aware trace and replay it through headless_session.  Without
-        # the sibling on disk they all hit recorder_gate's
-        # ``MISSING-RECORDER SKIP:`` path, so the column-aware / formatted-view
-        # / statement-step coverage silently vanished from CI.  Clone it into
-        # the workspace-sibling layout the tests resolve
-        # (../codetracer-js-recorder/packages/cli/dist/index.js) per
-        # codetracer-specs/Testing/Cross-Repo-CI-Integration.md.
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
-        with:
-          repo: metacraft-labs/codetracer-js-recorder
-          # `dev` is that repo's default branch; `main` trails it (15 commits
-          # behind when this was corrected), so the recorder-gated ViewModel
-          # suites and the `ct record` dispatch tests below were exercising a
-          # stale recorder while reporting green.
-          ref: dev
-          path: ${{ github.workspace }}/../codetracer-js-recorder
-          gh-token: ${{ steps.ci_token.outputs.token }}
-          submodules: 'false'
+      # (`codetracer-js-recorder` is cloned by `viewmodel-tests-wasm`, whose
+      # recorder-gated suites and browser test build and drive it; no step
+      # left in this job uses it.)
 
       - name: Clone runquota sibling
         # The `just build-once` step below compiles `ct`, whose import chain
@@ -3371,6 +3546,152 @@ jobs:
         # its emulator library for the cross-front-end DAP case.
         run: nix develop .#devShells.x86_64-linux.default --command just test-vm-collab-integration
 
+  # THE SECOND HALF OF `viewmodel-tests`, A JOB OF ITS OWN. With every step
+  # in one job the 75-minute limit ran out during the PLAT-17 parity gate in
+  # every run measured (45069526428, 45118976975: 75.3 and 75.4 minutes, 26.7
+  # and 31.0 of them provisioning siblings), so none of the ~25 steps from
+  # here on had a CI result — the wasm lane's gates, the PLAT-18 slices, the
+  # frame renderer and applier, the recorder-gated suites, `ct record`'s CLI
+  # tests and the browser front-end's WebAssembly core on a real recording.
+  # Both jobs repeat the same setup (one token, the clones at the top, the
+  # provisioning) so each stands alone and fits its limit.
+  viewmodel-tests-wasm:
+    runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
+    # The same setup as `viewmodel-tests` (provisioning siblings 27-31 minutes
+    # in the two runs measured) and the steps that never ran there, so no
+    # duration of its own has been measured yet: 120 minutes until one has,
+    # then 1.3x the slowest measured run, as the job above.
+    timeout-minutes: 120
+    name: ViewModel headless tests (WASM, slice, browser)
+    steps:
+      - name: Generate CI token
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Clone codetracer-trace-format-nim sibling
+        # Nine ViewModel suites -- the eight request-panel ones plus
+        # request_span_conformance_test -- ``import codetracer_ctfs/container``
+        # to read a real CTFS container. ``config.nims`` resolves that module
+        # from ``$CODETRACER_TRACE_FORMAT_NIM_SRC`` or from the workspace
+        # sibling ``../codetracer-trace-format-nim/src``, and this job set up
+        # neither, so all nine failed to compile with
+        #
+        #   Error: cannot open file: codetracer_ctfs/container
+        #
+        # in every run (30726348404, 31180327493, 31385899773). They compile
+        # and pass in a normal workspace, which is why the gap survived: the
+        # only environment that lacked the sibling was the one nobody was
+        # reading. Cloned here with ``clone-repo``, the same way this job
+        # already gets ``codetracer-js-recorder``, rather than through
+        # ``setup-dev-env`` -- that route additionally requires a published
+        # workspace lock, which is a separate unresolved problem and
+        # would make this job depend on it for no benefit.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-trace-format-nim
+          # That repo's default branch is `dev` (confirmed against the API);
+          # `main` is not where its work lands.
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-trace-format-nim
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      # THE THREE SIBLING CLONES ABOVE AND BELOW ARE DELIBERATELY ADJACENT.
+      #
+      # A GitHub App installation token expires 60 MINUTES after it is minted.
+      # `Generate CI token` above is this job's ONLY mint -- `ci/test/
+      # sibling-provisioning-test.sh` asserts that "no job mints more than one
+      # installation token", so refreshing it mid-job is not available here --
+      # and this job's `timeout-minutes` is 75. Every authenticated git
+      # operation must therefore happen near the TOP of the job.
+      #
+      # `codetracer-js-recorder` and `runquota` used to be cloned next to the
+      # steps that consume them, ~64 minutes in. In run 34219352454 /
+      # job 102038547352 the token was minted at 12:28:05, the
+      # `codetracer-trace-format-nim` clone at 12:29:32 succeeded, and those
+      # two clones -- reached at 13:32:28 and 13:32:34 -- both died with
+      #
+      #   fatal: could not read Username for 'https://github.com':
+      #   terminal prompts disabled
+      #
+      # taking the four steps that depend on those siblings down with them.
+      # Nothing about the clones changed; the job simply grew past an hour and
+      # started reaching an expiry that had always been there.
+      #
+      # Neither clone has an ordering dependency on anything between here and
+      # where it used to sit: `clone-repo` runs plain git, the recorder gate in
+      # src/frontend/viewmodel/tests/unit/recorder_gate.nim keys on the BUILT
+      # recorder binary rather than on the checkout existing, and
+      # `provision-repro-lock-siblings` only reconciles the five repos named in
+      # repro.lock's `depends`, which include neither of these.
+      #
+      # Keep new clone steps in this block. A clone added further down is a
+      # clone that works only until the job gets slower.
+      - name: Clone codetracer-js-recorder sibling
+        # The recorder-gated ViewModel tests
+        # (src/frontend/viewmodel/tests/unit/test_{column,formatted_view_step,
+        # statement_step}_*_vm.nim) drive the real JS recorder to produce a
+        # column-aware trace and replay it through headless_session.  Without
+        # the sibling on disk they all hit recorder_gate's
+        # ``MISSING-RECORDER SKIP:`` path, so the column-aware / formatted-view
+        # / statement-step coverage silently vanished from CI.  Clone it into
+        # the workspace-sibling layout the tests resolve
+        # (../codetracer-js-recorder/packages/cli/dist/index.js) per
+        # codetracer-specs/Testing/Cross-Repo-CI-Integration.md.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-js-recorder
+          # `dev` is that repo's default branch; `main` trails it (15 commits
+          # behind when this was corrected), so the recorder-gated ViewModel
+          # suites and the `ct record` dispatch tests below were exercising a
+          # stale recorder while reporting green.
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-js-recorder
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Clone runquota sibling
+        # The `just build-once` step below compiles `ct`, whose import chain
+        # (src/ct/codetracer.nim -> ../ct_test/ct_test ->
+        # src/ct_test/process_exec.nim) starts with `import runquota_process`.
+        # The checkout is where those modules resolve from --
+        # `config.nims` points at `../runquota/...` (issue #641).
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/runquota
+          ref: dev
+          path: ${{ github.workspace }}/../runquota
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Provision dependency siblings from repro.lock
+        # The ViewModel suites compile against ``../isonim/src`` et al. via
+        # codetracer's top-level ``config.nims``. After ``Install Nix``, not
+        # before it: the action reaches ``repro`` through this repo's dev
+        # shell, which is also where the suites below run.
+        uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
       # ----------------------------------------------------------------
       # PLAT-17: the THIRD backend.
       #
@@ -3410,6 +3731,16 @@ jobs:
       - name: Run the ViewModel unit suites on the WASM backend
         if: ${{ !cancelled() }}
         run: nix develop .#devShells.x86_64-linux.default --command just test-vm-unit-wasm
+
+      - name: The JavaScript ViewModel lane runs what ships under nim js
+        if: ${{ !cancelled() }}
+        # The panes' ViewModels run in the WebAssembly core; `vm-unit-js`
+        # keeps the suites whose subject a `nim js` bundle still compiles (the
+        # renderer shell, the main process, the VS Code host and panel,
+        # BlockTracer's Embed SDK). This builds those bundles' module graphs
+        # and fails when the lane's list of unshipped suites disagrees with
+        # them in either direction.
+        run: nix develop .#devShells.x86_64-linux.default --command bash -c 'source scripts/detect-siblings.sh && just test-vm-unit-js-scope'
 
       - name: PLAT-17 gate — the WASM lane's counts EQUAL native's
         if: ${{ !cancelled() }}
@@ -3772,6 +4103,7 @@ jobs:
           name: viewmodel-test-logs
           path: test-logs/
           retention-days: 30
+
 
   ct-build:
     # The job is in ct-build.yml: build-once and the windowed shim, once per
@@ -5819,7 +6151,7 @@ jobs:
             codetracer-snapshot-codecs=3e503da83b73e805f30096d4baa45c18d138f6d3
             codetracer-image-diff=982e669585a150ede87973db281df63188459328
             reprobuild=2f7cb5db5289fa1e9e060281ebe8c095bf9669e9
-            runquota=814b991861f64ad0e524c696fc1251ff1fbb6c67
+            runquota=b63c6c17ffd9f046baa70a62cbeb067c3a0a2745
 
       - name: Stage codetracer-trace-format into libs/
         # The nix flake build below overrides the codetracer-trace-format input
@@ -6912,7 +7244,7 @@ jobs:
             codetracer-native-backend=9fcfc0adfd81894bf82fc75efee21146caa1b59d
             codetracer-native-recorder=6142cc6a30bc3057ee01c6a8c417436744e393ed
             codetracer-native-test-programs=0d0d64e2ebe2cb261284778fa7959bb7cf761604
-            runquota=814b991861f64ad0e524c696fc1251ff1fbb6c67
+            runquota=b63c6c17ffd9f046baa70a62cbeb067c3a0a2745
             isonim-tui
             test-certificates-tools
             nim-pty
@@ -7263,6 +7595,16 @@ jobs:
             # the lock, as for the trace-format pair above.
             codetracer-native-backend=9fcfc0adfd81894bf82fc75efee21146caa1b59d
             codetracer-visual-replay=d1bf6605a818b192ab03b8f7b187858e3d3804d5
+            # nim-entrypoints and reprobuild BY COMMIT, for
+            # src/ct_test/cs_m14_ct_test_collects_through_entry_test.nim: its
+            # fixtures compile against nim-entrypoints' tests entry (`--run-exact`)
+            # and against reprobuild's libs/ct_test_unittest_parallel with the
+            # tests entry (reprobuild 72fc7fb8b or later). Both are the revisions
+            # repro.lock records; reprobuild is also a flake input, so it is cloned
+            # at the rev flake.lock locks (ci/test/sibling-input-branch-test.sh).
+            # Move these lines with the lock.
+            nim-entrypoints=d7edafaa9df1c7ae77d469754a463d4a512ec928
+            reprobuild=2f7cb5db5289fa1e9e060281ebe8c095bf9669e9
 
       - name: Allow direnv in the cloned recorder siblings
         # scripts/build-siblings.sh runs every sibling build as

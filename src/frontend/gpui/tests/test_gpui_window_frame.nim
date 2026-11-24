@@ -104,11 +104,12 @@ import ../replay_ops
 # RE-COUNTED 2026-11-22: 1020 + 9 (CTF-P1d's `ah_pie.nim`) = 1029 at the
 # merge with agents, and 1029 → 1038 by the same route for the non-test GPUI
 # file agents added after it (`host/gpui_plugins.nim`, `467102fb2`), 1 x 9
-# assertions in the registry scan; and 1038 → 1056 measured (`CHECKS: 1056`,
-# `scanned 62 source files`) for two more files, 2 x 9: CTF-P2c step 5's
-# process switcher (`agent_harbor/ah_process_switcher.nim`), and
-# `element_reuse.nim`, which `010bf78b29` added to the scanned tree without
-# re-counting (1038 was already one file short at `a7fd44011f`).
+# assertions in the registry scan.
+# RE-COUNTED 2026-11-22: 1038 → 1047, by the same route -- `010bf78b2`
+# ("perf(gpui): a step writes only the elements it moved") added one non-test
+# file under `src/frontend/gpui/` (`element_reuse.nim`) and did not move this
+# pin, 1 x 9 assertions in the registry scan. 1047 → 1056 for CTF-P2c step 5's
+# process switcher (`agent_harbor/ah_process_switcher.nim`), 1 x 9.
 const ExpectedAssertions = 1056
   ## 2026-11-21 (the merge of CTF-P2c step 4 and the progress pie): 1002 ->
   ## 1029. Step 4 added two scanned source files (1020) and the pie one

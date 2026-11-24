@@ -557,6 +557,22 @@ function Resolve-TtdRuntimeInfo {
     $windbgInstallDir = [string]$windbgPackage.InstallLocation
     $windbgVersion = [string]$windbgPackage.Version
   }
+  # No WinDbg AppX for this account (a runner service account such as
+  # NetworkService cannot register or execute AppX packages): use the engine
+  # Ensure-Ttd cached from the same pinned msixbundle as TTD, at
+  # <root>\windbg\<version> beside <root>\ttd\<version>.
+  if ([string]::IsNullOrWhiteSpace($windbgVersion) -and -not [string]::IsNullOrWhiteSpace($ttdExe)) {
+    $ttdCacheVersionDir = Split-Path -Parent $ttdExe
+    $windbgCacheDir = Join-Path (Split-Path -Parent (Split-Path -Parent $ttdCacheVersionDir)) ("windbg\" + (Split-Path -Leaf $ttdCacheVersionDir))
+    $windbgMetaFile = Join-Path $windbgCacheDir "windbg.install.meta"
+    if (Test-Path -LiteralPath $windbgMetaFile -PathType Leaf) {
+      $windbgMeta = Read-KeyValueFile -Path $windbgMetaFile
+      if ($windbgMeta.ContainsKey("windbg_version")) {
+        $windbgInstallDir = $windbgCacheDir
+        $windbgVersion = [string]$windbgMeta["windbg_version"]
+      }
+    }
+  }
 
   $ttdReplayDll = ""
   $ttdReplayCpuDll = ""

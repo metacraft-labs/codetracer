@@ -64,10 +64,23 @@ const
   ListBesidePx = 416       ## `.ah-inbox-list`: 26rem beside the page
   BarPx = 2                ## the focus inset bar, 0.125rem
   PasswordPx = 192         ## `.ah-password-field`: 12rem
-  ChoiceMarkPx = 13        ## a radio button or a checkbox, as the browser draws one
   RowLinePx = 24           ## a line of an inbox row's label line: the panel's line
-  NativeBorder = "#767676" ## Chromium's unstyled checkbox and radio outline
-  NativeAccent = "#0075ff" ## Chromium's default accent, a chosen checkbox's fill
+  CheckboxGapPx = 7        ## `.ct-checkmark-field`: 0.5em at the choices' 14px
+  ChoiceGapPx = 4          ## `.ah-choices`: 0.25rem; the toggles' row gap too
+  ReadingMaxPx* = 768
+    ## `AH_ITEM_READING_WIDTH`, 48rem: an item's page keeps its parts to a
+    ## column this wide, centred, on a wider pane.
+  HintPadPx = 24           ## `AH_INBOX_HINT_PAD`, 1.5rem
+  StepperPx = 5 + ControlPx + 5 + 1
+    ## `.ah-inbox-stepper`: 5px above and below the controls, its hairline.
+  ServerHeadPx = 35        ## `.ah-inbox-server-head`
+  InboxRegionKey* = "inbox"
+    ## The scrolling region of the rows and the page under them.
+  InboxListRegionKey* = "inbox-list"
+  InboxPageRegionKey* = "inbox-page"
+    ## The two regions while the page stands beside the rows.
+  PageRegionKey* = "page"
+    ## The region of an item's page standing alone.
 
 # ---------------------------------------------------------------------------
 # An item's page
@@ -119,51 +132,88 @@ proc textInput(r: GpuiRenderer; c: PageCtx; placeholder: string; disabled: bool)
   result = r.textField(c.p, c.ink, c.page.text.val, placeholder, disabled)
   r.tag(result, "answer-field", placeholder)
 
+proc choicePress(page: InboxItemVM; id: string): proc() =
+  ## A choice's press: a proc of its own so each closure owns its id (a
+  ## closure made in a Nim loop body shares the body's variables with every
+  ## other iteration's).
+  result = proc() = page.toggleChoice(id)
+
+proc pressChoice(r: GpuiRenderer; el: GpuiElement; page: InboxItemVM; id: string) =
+  ## The one press a choice takes, whichever control draws it (a single
+  ## choice's toggle, one of several's checkbox line): choosing it. One
+  ## place for both, so the drawings cannot disagree on what a press does,
+  ## and the one site the pointer keymap will take over when the panel's
+  ## presses are routed.
+  r.addEventListener(el, "click", choicePress(page, id))
+
+proc choicesItems(options: seq[AnswerOption]): seq[FlowItem] =
+  ## The single choice's toggles as a wrapping row measures them: each
+  ## toggle, its description after its label.
+  for o in options:
+    var w = toggleChipPx(o.label)
+    if o.description.len > 0: w += 6 + textPx(o.description, CaptionPx)
+    result.add FlowItem(widthPx: w)
+
+proc choicesPx(options: seq[AnswerOption]; single: bool; availPx: int): int =
+  ## The choices' height: the toggles' lines, or one 24px line a checkbox.
+  if options.len == 0: return 0
+  if single:
+    let lines = flowLineCount(choicesItems(options), availPx, ChoiceGapPx)
+    lines * ControlPx + (lines - 1) * ChoiceGapPx
+  else:
+    options.len * BodyLinePx + (options.len - 1) * ChoiceGapPx
+
 proc drawChoices(r: GpuiRenderer; c: PageCtx; options: seq[AnswerOption];
                  single, disabled: bool): GpuiElement =
-  ## Radio buttons (one choice) or checkboxes (several), each with its
-  ## label and description (`.ah-choices`, `.ah-choice`), 4px apart.
-  result = r.box(column = true, pairs = [("gap", "4px"), ("flex-shrink", "0")])
-  r.tag(result, "choices", if single: "single" else: "multi")
+  ## One choice: a row of the omnibox composer's toggles, wrapping, 4px
+  ## apart (the design system has no radio button); several: a column of
+  ## the design system's checkboxes, each with its label and description,
+  ## 4px apart (`.ah-choices`, `.ct-checkmark-field`).
   let chosen = c.page.choices.val
   let page = c.page
+  if single:
+    var items = choicesItems(options)
+    for i, o in options:
+      let checked = o.id in chosen
+      let t = r.toggleChip(c.p, o.label, checked, disabled)
+      if o.description.len > 0:
+        r.appendChild(t, r.text(o.description, CaptionPx, c.p.textCaption, shrink = false,
+                                pairs = [("margin-left", "6px")]))
+      r.tag(t, "choice", o.id)
+      r.tag(t, "checked", $checked)
+      if not disabled: r.pressChoice(t, page, o.id)
+      items[i].el = t
+    result = r.flowLines(items, c.avail, ChoiceGapPx, ControlPx, ChoiceGapPx)
+    r.setStyle(result, "flex-shrink", "0")
+    r.tag(result, "choices", "single")
+    return
+  result = r.box(column = true, pairs = [("gap", $ChoiceGapPx & "px"), ("flex-shrink", "0")])
+  r.tag(result, "choices", "multi")
   for o in options:
-    let id = o.id
-    let checked = id in chosen
-    # `.ah-choice` is a `label`, which the shared stylesheet gives 8px
-    # below; on the panel's 24px line.
-    let line = r.box(pairs = [("gap", "8px"), ("items", "start"), ("min-width", "0px"),
-                              ("height", $BodyLinePx & "px"), ("margin-bottom", "8px"),
-                              ("flex-shrink", "0"), ("cursor", cursorOf(hkControl))])
-    r.tag(line, "choice", id)
+    let checked = o.id in chosen
+    # `.ct-checkmark-field`: the box and its label 7px apart on the panel's
+    # 24px line (its 3.5px above and below and the label's 1.2 line).
+    let line = r.box(pairs = [("gap", $CheckboxGapPx & "px"), ("items", "center"),
+                              ("min-width", "0px"), ("height", $BodyLinePx & "px"),
+                              ("flex-shrink", "0"),
+                              ("cursor", cursorOf(if disabled: hkNone else: hkControl))])
+    r.tag(line, "choice", o.id)
     r.tag(line, "checked", $checked)
-    # The browser's own radio button (round) and checkbox (2px corners), as
-    # Chromium draws them unstyled: 13px, 4px down on the label's baseline, a
-    # grey outline on white, its accent blue when chosen
-    # (https://html.spec.whatwg.org/multipage/input.html#checkbox-state-(type=checkbox)
-    # leaves the look to the browser; these are Chromium's defaults).
-    let markEl = r.box(pairs = [("width", $ChoiceMarkPx & "px"),
-                                ("height", $ChoiceMarkPx & "px"), ("margin-top", "4px"),
-                                ("rounded", (if single: $(ChoiceMarkPx div 2) else: "2") & "px"),
-                                ("border-width", "1px"),
-                                ("border-color", if checked: NativeAccent else: NativeBorder),
-                                ("background", if checked: NativeAccent else: "#ffffff"),
-                                ("flex-shrink", "0")])
-    r.appendChild(line, markEl)
+    r.appendChild(line, r.checkbox(c.p, c.ink, checked, disabled))
     let label = r.text(o.label, BodyPx, if disabled: c.p.textDisabled else: c.p.textBody,
-                       shrink = false, pairs = [("line-height", $BodyLinePx & "px")])
+                       shrink = false)
     r.tag(label, "choice-label", o.label)
     r.appendChild(line, label)
     if o.description.len > 0:
-      r.appendChild(line, r.text(o.description, CaptionPx, c.p.textCaption,
-                                 pairs = [("line-height", $BodyLinePx & "px")]))
-    if not disabled: r.addEventListener(line, "click", proc() = page.toggleChoice(id))
+      r.appendChild(line, r.text(o.description, CaptionPx, c.p.textCaption))
+    if not disabled: r.pressChoice(line, page, o.id)
     r.appendChild(result, line)
 
 proc drawDraft(r: GpuiRenderer; c: PageCtx; draft: Draft; disabled: bool): GpuiElement =
   ## A manager's draft (`.ah-item-draft`): 8px in past an inset bar in the
-  ## information border role; its provenance, rationale and text, `Send
-  ## draft`.
+  ## information border role; its provenance, rationale and text, and `Send
+  ## draft` in an actions row of its own, as compact as `Submit` and at the
+  ## row's start (the web's `.ah-item-actions` inside the draft).
   result = r.section(c, DraftHead, confidenceText(draft))
   r.styles(result, [("padding-left", "8px"), ("position", "relative")])
   r.appendChild(result, r.insetBar(c.ink.borderInfo, BarPx))
@@ -172,13 +222,13 @@ proc drawDraft(r: GpuiRenderer; c: PageCtx; draft: Draft; disabled: bool): GpuiE
   if draft.text.len > 0: r.appendChild(result, r.prose(c, draft.text, fact = "draft-text"))
   if draft.choices.len > 0:
     r.appendChild(result, r.prose(c, draft.choices.join(", "), fact = "draft-text"))
-  # The web view appends `Send draft` to the draft's column itself, not in
-  # an actions row, so the button takes the column's whole width.
+  # The row wraps within the draft's column: the page's width less the 8px
+  # the draft stands in.
   let page = c.page
-  let send = r.actionButton(c.p, c.ink, SendDraftLabel, true,
-                            proc() = discard page.sendDraft(), disabled)
-  r.setStyle(send, "justify", "start")
-  r.appendChild(result, send)
+  var inner = c
+  inner.avail = c.avail - 8
+  r.appendChild(result, r.actions(inner, @[(SendDraftLabel, true, disabled,
+                                            proc() = discard page.sendDraft())]))
 
 proc drawBanner(r: GpuiRenderer; c: PageCtx; text, role: string): GpuiElement =
   ## A question's banner (`.ah-item-banner`): a band on the raised ground,
@@ -252,8 +302,26 @@ proc drawApproval(r: GpuiRenderer; c: PageCtx; a: ApprovalRequest): GpuiElement 
                                          ("border-top-width", "1px"),
                                          ("border-color", c.p.borderSecondary)])
   r.tag(result, "approval", $a.scope)
-  let summary = r.mono(r.prose(c, approvalSummary(a), fact = "approval-summary"))
-  r.appendChild(result, summary)
+  # The command (or the domain) on a line of its own, in code style
+  # (`.ah-item-approval-subject`: Space Mono on the raised ground, 2px by
+  # 6px in, rounded 4px, as wide as it is); why the agent asks under it in
+  # prose.
+  let subject = approvalSubject(a)
+  let code = r.box(pairs = [("padding-top", "2px"), ("padding-bottom", "2px"),
+                            ("padding-left", "6px"), ("padding-right", "6px"),
+                            ("rounded", "4px"), ("background", c.p.secondary),
+                            ("flex-shrink", "0"), ("min-width", "0px"),
+                            ("max-width", $c.avail & "px")])
+  let codeText = r.mono(r.wrapping(subject, BodyPx, BodyLinePx, c.p.textBody))
+  r.tag(codeText, "approval-subject", subject)
+  r.appendChild(code, codeText)
+  r.tag(code, "approval-code", "true")
+  let codeRow = r.box(pairs = [("flex-shrink", "0"), ("min-width", "0px")])
+  r.appendChild(codeRow, code)
+  r.appendChild(result, codeRow)
+  let purpose = approvalPurposeText(a)
+  if purpose.len > 0:
+    r.appendChild(result, r.prose(c, purpose, fact = "approval-purpose"))
   let page = c.page
   let requestId = a.requestId
   var items: seq[FlowItem]
@@ -429,16 +497,150 @@ proc drawItemHead(r: GpuiRenderer; c: PageCtx; d: InboxItemDetail): GpuiElement 
   r.appendChild(result, session)
   var labels: seq[string]
   for pr in priorityChoices(): labels.add priorityKeyText(pr)
-  let menu = r.selectBox(c.p, PriorityLabel & "\xE2\x80\xA6", labels, "priority-menu")
+  # The design system's dropdown, its value whole (`Priority`), as wide as
+  # that value: the session's label gives way first, so the head keeps the
+  # page's inset (`.ah-item-head > .ah-dropdown`: `flex-shrink: 0`).
+  let menu = r.selectBox(c.p, PriorityLabel, labels, "priority-menu")
   r.setStyle(menu, "flex-shrink", "0")
   r.appendChild(result, menu)
+
+# ---------------------------------------------------------------------------
+# A page's height, for the regions that scroll it
+# ---------------------------------------------------------------------------
+#
+# The page's parts at the heights the drawing above gives them, wrapped
+# prose counted by the face's widths (`textRows`): what a scrolling region
+# holds. Each mirrors the drawing proc it names.
+
+proc actionsPx(labels: seq[string]; availPx: int; leadPx = 0): int =
+  ## `actions`: the buttons' lines (6px apart), after a field `leadPx` wide.
+  var items: seq[FlowItem]
+  if leadPx > 0: items.add FlowItem(widthPx: leadPx)
+  for l in labels: items.add FlowItem(widthPx: actionButtonPx(l))
+  if items.len == 0: return 0
+  let lines = flowLineCount(items, availPx, 6)
+  lines * ControlPx + (lines - 1) * 6
+
+proc gapped(parts: seq[int]; gap: int): int =
+  ## Parts one under another, `gap` apart; a part of no height takes none.
+  var n = 0
+  for h in parts:
+    if h > 0:
+      result += h
+      inc n
+  if n > 1: result += (n - 1) * gap
+
+proc draftPx(c: PageCtx; draft: Draft): int =
+  ## `drawDraft`: its head, rationale, text, choices and `Send draft`'s
+  ## actions row, 4px apart, 8px in.
+  let w = c.avail - 8
+  gapped(@[BodyLinePx, ShortLinePx * textRows(draft.rationale, CaptionPx, w),
+           BodyLinePx * textRows(draft.text, BodyPx, w),
+           BodyLinePx * textRows(draft.choices.join(", "), BodyPx, w),
+           actionsPx(@[SendDraftLabel], w)], 4)
+
+proc bannerPx(c: PageCtx; text: string): int =
+  ## `drawBanner`: 6px above and below, the words wrapped past the dot.
+  if text.len == 0: return 0
+  12 + BodyLinePx * textRows(text, BodyPx, c.avail - 16 - StateDotPx - 8)
+
+proc approvalPx(c: PageCtx; a: ApprovalRequest): int =
+  ## `drawApproval`: its hairline, 6px above and below, the code line (2px
+  ## above and below), the purpose and the decisions, 6px apart.
+  let lead = if a.scope == asSudo: PasswordPx else: 0
+  1 + 12 + gapped(@[4 + BodyLinePx * textRows(approvalSubject(a), BodyPx, c.avail - 12),
+                     BodyLinePx * textRows(approvalPurposeText(a), BodyPx, c.avail),
+                     actionsPx(@[ApproveLabel, ApproveForSessionLabel, DenyLabel], c.avail, lead)],
+                   6)
+
+proc itemContentPx(c: PageCtx; d: InboxItemDetail): int =
+  ## The page's parts for `d`, 8px apart, as `drawItemPageBody` draws them.
+  let page = c.page
+  var parts = @[ControlPx]                                  # the head
+  if page.leadsWithSummary:
+    parts.add BodyLinePx + 4 + BodyLinePx * textRows(d.executiveSummary, BodyPx, c.avail)
+  case d.kind
+  of ikBlockedQuestion, ikUnknown:
+    parts.add bannerPx(c, page.banner)
+    parts.add BodyLinePx * textRows(d.prompt, BodyLargePx, c.avail)
+    if d.draft.present: parts.add draftPx(c, d.draft)
+    if page.optionsNotice.len > 0:
+      parts.add ShortLinePx * textRows(page.optionsNotice, CaptionPx, c.avail)
+    else:
+      let field = case d.form
+        of qfFreeForm: TextFieldRowsPx
+        of qfSingle, qfMulti: choicesPx(d.options, d.form == qfSingle, c.avail)
+        of qfConfirmation: 0
+      let buttons = if d.form == qfConfirmation: @[ApproveLabel, RejectLabel] else: @[SubmitLabel]
+      parts.add gapped(@[field, actionsPx(buttons, c.avail)], 6)
+  of ikEndedTurn:
+    if d.lastReply.len > 0:
+      parts.add BodyLinePx + 4 + BodyLinePx * textRows(d.lastReply, BodyPx, c.avail)
+    parts.add gapped(@[TextFieldRowsPx, ControlPx], 6)
+  of ikPermissionGate:
+    parts.add BodyLinePx * textRows(d.prompt, BodyLargePx, c.avail)
+    var labels: seq[string]
+    for o in d.permissionOptions: labels.add o.label
+    parts.add actionsPx(labels, c.avail)
+    for a in d.approvals: parts.add approvalPx(c, a)
+  of ikLoginRequest:
+    let login = d.login
+    let has = page.hasLoginRequest
+    var buttons: seq[string]
+    if page.canCancelLogin and c.ctx.onOpenSignIn != nil: buttons.add OpenSignInLabel
+    if page.canCancelLogin: buttons.add CancelLabel
+    if page.canContinueLogin and c.ctx.onContinue != nil: buttons.add ContinueLabel
+    parts.add gapped(@[
+      (if has: BodyLinePx * textRows(login.provider, BodyLargePx, c.avail) else: 0),
+      (if has and login.mode == lmLocalDesktop: BodyLinePx * textRows(login.prompt, BodyPx, c.avail)
+       else: 0),
+      BodyLinePx * textRows(page.loginText, BodyPx, c.avail),
+      ShortLinePx * textRows(page.loginError, CaptionPx, c.avail),
+      actionsPx(buttons, c.avail)], 6)
+  of ikAsyncFeedback:
+    let fb = d.feedback
+    if page.expiredBadge(c.ctx.nowMs).len > 0: parts.add BodyLinePx
+    parts.add BodyLinePx * textRows(fb.prompt, BodyLargePx, c.avail)
+    parts.add ShortLinePx * textRows(fb.context, CaptionPx, c.avail)
+    if fb.attachments.len > 0:
+      parts.add BodyLinePx + 4 + fb.attachments.len * BodyLinePx + (fb.attachments.len - 1) * 4
+    if d.draft.present: parts.add draftPx(c, d.draft)
+    let field = case fb.feedbackType
+      of ftQuestion: TextFieldRowsPx
+      of ftOptions: choicesPx(fb.options, false, c.avail)
+      else: 0
+    let buttons = case fb.feedbackType
+      of ftConfirmation: @[ApproveLabel, RejectLabel]
+      of ftInformation: @[AcknowledgeLabel]
+      else: @[SubmitLabel]
+    parts.add gapped(@[field, actionsPx(buttons, c.avail)], 6)
+  parts.add gapped(@[ShortLinePx * textRows(page.validation.val, CaptionPx, c.avail),
+                     ShortLinePx * textRows(page.phaseText, CaptionPx, c.avail)], 4)
+  gapped(parts, 8)
+
+proc readingAvailPx(widthPx: int): int =
+  ## The width an item page's parts take: the page less its insets, at most
+  ## the reading measure.
+  min(widthPx - 2 * InsetPx, ReadingMaxPx)
+
+proc itemPagePx*(p: AhPalette; page: InboxItemVM; ctx: AgentHarborInboxItemContext;
+                 widthPx: int): int =
+  ## How tall `pageBox` draws `page` at `widthPx`: its 8px above, 12px
+  ## below, and its parts (0 while it is not ready: then it fills its room
+  ## with a centred notice and does not scroll).
+  if page.state.val != asReady: return 0
+  let c = PageCtx(p: p, ink: changesInboxInks(p.mode), page: page, ctx: ctx,
+                  avail: readingAvailPx(widthPx))
+  8 + itemContentPx(c, page.detail) + 12
 
 proc drawItemPageBody*(r: GpuiRenderer; p: AhPalette; page: InboxItemVM;
                        ctx: AgentHarborInboxItemContext; body: GpuiElement; widthPx: int) =
   ## One page's content for its load state, into `body` (which the caller
-  ## clears); `widthPx` is the page's own width.
+  ## clears); `widthPx` is the page's own width. A ready page's parts keep
+  ## to a column at most `ReadingMaxPx` wide, centred in the page
+  ## (`.ah-item-page > *`: `max-width: 48rem; align-self: center`).
   let c = PageCtx(p: p, ink: changesInboxInks(p.mode), page: page, ctx: ctx,
-                  avail: widthPx - 2 * InsetPx)
+                  avail: readingAvailPx(widthPx))
   r.tag(body, "page-state", stateName(page.state.val))
   case page.state.val
   of asIdle, asLoading:
@@ -453,6 +655,14 @@ proc drawItemPageBody*(r: GpuiRenderer; p: AhPalette; page: InboxItemVM;
                                        proc() = target.load()))
   of asReady:
     let d = page.detail
+    let inner = widthPx - 2 * InsetPx
+    let content = r.box(column = true, pairs = [("gap", "8px"), ("flex-shrink", "0"),
+                                                ("min-width", "0px"),
+                                                ("width", $c.avail & "px")])
+    if inner > c.avail: r.setStyle(content, "margin-left", $((inner - c.avail) div 2) & "px")
+    r.tag(content, "reading-width", $c.avail)
+    r.appendChild(body, content)
+    let body = content
     r.appendChild(body, r.drawItemHead(c, d))
     if page.leadsWithSummary:
       let s = r.section(c, SummaryHead, "")
@@ -478,8 +688,13 @@ proc pageBox(r: GpuiRenderer): GpuiElement =
   r.tag(result, "item-page", "true")
 
 proc drawInboxItemPage*(r: GpuiRenderer; host: GpuiElement; page: InboxItemVM; p: AhPalette;
-                        widthPx: int; ctx = AgentHarborInboxItemContext()) =
+                        widthPx: int; ctx = AgentHarborInboxItemContext();
+                        heightPx = 0; scroll: P3Scroll = nil) =
   ## An item's page standing alone (the session tab's page), `widthPx` wide.
+  ## Given its `heightPx`, a ready page taller than that scrolls as a region
+  ## (`PageRegionKey`, its first pixel kept by `scroll`); without, it is
+  ## clipped at the panel's foot.
+  scroll.beginDraw()
   r.clearChildren(host)
   r.styles(host, [("display", "flex"), ("flex-direction", "column"),
                   ("width", $widthPx & "px"), ("height", "100%"),
@@ -488,19 +703,29 @@ proc drawInboxItemPage*(r: GpuiRenderer; host: GpuiElement; page: InboxItemVM; p
   r.tag(host, "width-px", $widthPx)
   r.tag(host, "state", stateName(page.state.val))
   let body = r.pageBox()
-  r.setStyle(body, "flex-grow", "1")
   r.tag(body, "page", "standalone")
   r.drawItemPageBody(p, page, ctx, body, widthPx)
-  r.appendChild(host, body)
+  let contentPx = itemPagePx(p, page, ctx, widthPx)
+  if heightPx > 0 and contentPx > 0:
+    # The page fills the panel (`.ah-fleet-body`), and holds more than it
+    # shows when its parts run past the foot.
+    r.setStyle(body, "min-height", $heightPx & "px")
+    r.appendChild(host, r.scrollWindow(scroll, PageRegionKey,
+      @[ScrollPart(el: body, heightPx: max(contentPx, heightPx))], heightPx, ""))
+  else:
+    r.setStyle(body, "flex-grow", "1")
+    r.appendChild(host, body)
 
 proc mountInboxItemPage*(r: GpuiRenderer; host: GpuiElement; page: InboxItemVM; p: AhPalette;
-                         widthPx: int; ctx = AgentHarborInboxItemContext()) =
-  ## Draws the page, redraws it whenever what it reads changes, and marks
-  ## it visible while mounted (its viewing heartbeat runs), as the web
-  ## mount does.
+                         widthPx: int; ctx = AgentHarborInboxItemContext();
+                         heightPx = 0; scroll: P3Scroll = nil; redraw: Signal[int] = nil) =
+  ## Draws the page, redraws it whenever what it reads changes (or the host
+  ## moves `redraw`, after a scroll), and marks it visible while mounted
+  ## (its viewing heartbeat runs), as the web mount does.
   createRenderEffect proc() =
     discard page.revision.val
-    drawInboxItemPage(r, host, page, p, widthPx, ctx)
+    if redraw != nil: discard redraw.val
+    drawInboxItemPage(r, host, page, p, widthPx, ctx, heightPx, scroll)
   page.setVisible(true)
 
 # ---------------------------------------------------------------------------
@@ -566,7 +791,7 @@ proc drawStepper(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: Inbox
 
 proc drawRow(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: InboxVM;
              ctx: AgentHarborInboxContext; item: InboxItem; onScreen: bool;
-             widthPx: int): GpuiElement =
+             widthPx: int): tuple[el: GpuiElement, heightPx: int] =
   ## One item (`.ah-inbox-row`): 6px by 8px in; the kind's mark in its own
   ## 8px column, 6px down; then, 8px on, the label line (the session's label
   ## taking the free width, the chips, the age, wrapping), the kind's words
@@ -577,23 +802,23 @@ proc drawRow(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: InboxVM;
   let warmth = warmthChip(item.warmth, ctx.nowMs)
   let age = ageLabel(ctx.nowMs, item.enteredAtMs)
   let holder = holderText(item)
-  result = r.box(pairs = [("gap", "8px"), ("items", "start"), ("padding-top", "6px"),
-                          ("padding-bottom", "6px"), ("padding-left", $InsetPx & "px"),
-                          ("padding-right", $InsetPx & "px"), ("flex-shrink", "0"),
-                          ("min-width", "0px"), ("position", "relative"),
-                          ("cursor", cursorOf(hkRow))])
-  r.tag(result, "item", item.id)
-  r.tag(result, "item-server", item.server)
-  r.tag(result, "kind", item.kindText)
-  r.tag(result, "item-position", $item.position)
-  r.tag(result, "current", $onScreen)
+  let row = r.box(pairs = [("gap", "8px"), ("items", "start"), ("padding-top", "6px"),
+                           ("padding-bottom", "6px"), ("padding-left", $InsetPx & "px"),
+                           ("padding-right", $InsetPx & "px"), ("flex-shrink", "0"),
+                           ("min-width", "0px"), ("position", "relative"),
+                           ("cursor", cursorOf(hkRow))])
+  r.tag(row, "item", item.id)
+  r.tag(row, "item-server", item.server)
+  r.tag(row, "kind", item.kindText)
+  r.tag(row, "item-position", $item.position)
+  r.tag(row, "current", $onScreen)
   if onScreen:
-    r.setStyle(result, "background", p.hover)
-    r.appendChild(result, r.insetBar(p.borderAction, BarPx))
+    r.setStyle(row, "background", p.hover)
+    r.appendChild(row, r.insetBar(p.borderAction, BarPx))
   let markHolder = r.box(pairs = [("width", $ItemMarkPx & "px"), ("padding-top", "6px"),
                                   ("flex-shrink", "0")])
   r.appendChild(markHolder, r.mark(p.roleDot(kindRole(item.kind)), ItemMarkPx))
-  r.appendChild(result, markHolder)
+  r.appendChild(row, markHolder)
   let avail = widthPx - 2 * InsetPx - ItemMarkPx - 8
   let main = r.box(column = true, pairs = [("gap", "2px"), ("min-width", "0px"),
                                            ("flex-grow", "1"), ("flex-shrink", "1")])
@@ -644,15 +869,39 @@ proc drawRow(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: InboxVM;
     let e = r.wrapping(item.explanation, CaptionPx, ShortLinePx, p.textCaption)
     r.tag(e, "explanation", item.explanation)
     r.appendChild(main, e)
-  r.appendChild(result, main)
+  r.appendChild(row, main)
   let target = vm
-  r.addEventListener(result, "click", proc() = target.open(itemRef))
+  r.addEventListener(row, "click", proc() = target.open(itemRef))
+  # Its height, from the same lines it was drawn with: the label line, the
+  # kind's line and the explanation, 2px apart, beside the mark's 14px, 6px
+  # above and below.
+  let mainPx = gapped(@[flowFitHeightPx(line1, heights1, avail, 6, 2),
+                        flowFitHeightPx(line2, heights2, avail, 6, 2),
+                        ShortLinePx * textRows(item.explanation, CaptionPx, avail)], 2)
+  r.tag(row, "row-px", $(12 + max(mainPx, 6 + ItemMarkPx)))
+  (row, 12 + max(mainPx, 6 + ItemMarkPx))
 
-proc drawRows(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: InboxVM;
-              ctx: AgentHarborInboxContext; list: GpuiElement; widthPx: int) =
-  ## The rows in the server's order. A run of rows from another server is
-  ## headed by its name and count (`.ah-inbox-server-head`); the order is
-  ## never changed to group them.
+proc serverHead(r: GpuiRenderer; p: AhPalette; server: string; count: int): GpuiElement =
+  ## A run of rows from another server, headed by its name and count
+  ## (`.ah-inbox-server-head`).
+  let name = if server.len > 0: server else: ThisServerLabel
+  result = r.box(pairs = [("gap", "8px"), ("items", "center"), ("padding-top", "6px"),
+                          ("padding-bottom", "4px"), ("padding-left", $InsetPx & "px"),
+                          ("padding-right", $InsetPx & "px"), ("flex-shrink", "0"),
+                          ("height", $ServerHeadPx & "px"), ("min-width", "0px")])
+  r.rule(result, p.borderSecondary)
+  r.tag(result, "server", server)
+  let n = r.text(name, LabelPx, p.textLabel, bold = true,
+                 pairs = [("line-height", $ShortLinePx & "px")])
+  r.tag(n, "server-name", name)
+  r.appendChild(result, n)
+  r.appendChild(result, r.text($count, LabelPx, p.textCaption, shrink = false))
+
+proc rowParts(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: InboxVM;
+              ctx: AgentHarborInboxContext; widthPx: int): seq[ScrollPart] =
+  ## The rows in the server's order, each with its height and its item's id.
+  ## A run of rows from another server is headed by its name and count; the
+  ## order is never changed to group them.
   let items = vm.items
   var fleet = false
   for item in items:
@@ -663,30 +912,56 @@ proc drawRows(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: InboxVM;
     var j = i + 1
     if fleet:
       while j < items.len and items[j].server == items[i].server: inc j
-      let server = items[i].server
-      let name = if server.len > 0: server else: ThisServerLabel
-      let head = r.box(pairs = [("gap", "8px"), ("items", "center"), ("padding-top", "6px"),
-                                ("padding-bottom", "4px"), ("padding-left", $InsetPx & "px"),
-                                ("padding-right", $InsetPx & "px"), ("flex-shrink", "0"),
-                                ("height", "35px"), ("min-width", "0px")])
-      r.rule(head, p.borderSecondary)
-      r.tag(head, "server", server)
-      let n = r.text(name, LabelPx, p.textLabel, bold = true,
-                     pairs = [("line-height", $ShortLinePx & "px")])
-      r.tag(n, "server-name", name)
-      r.appendChild(head, n)
-      r.appendChild(head, r.text($(j - i), LabelPx, p.textCaption, shrink = false))
-      r.appendChild(list, head)
+      result.add ScrollPart(el: r.serverHead(p, items[i].server, j - i), heightPx: ServerHeadPx)
     for k in i ..< j:
-      r.appendChild(list, r.drawRow(p, ink, vm, ctx, items[k], items[k].refOf == current,
-                                    widthPx))
+      let (el, h) = r.drawRow(p, ink, vm, ctx, items[k], items[k].refOf == current, widthPx)
+      result.add ScrollPart(el: el, heightPx: h, key: items[k].id)
     i = j
 
+proc stepperHint(r: GpuiRenderer; p: AhPalette; beside: bool): GpuiElement =
+  ## The quiet line in the page's place while items wait and none is on
+  ## screen (`.ah-inbox-hint`, `InboxVM.wantsItemHint`): the caption size in
+  ## the caption colour, centred, 24px above and below and 8px in; beside
+  ## the rows, in the middle of the empty page. Nothing is opened.
+  let hint = itemHintText()
+  result = r.box(column = true, pairs = [("padding-top", $HintPadPx & "px"),
+                                         ("padding-bottom", $HintPadPx & "px"),
+                                         ("padding-left", $InsetPx & "px"),
+                                         ("padding-right", $InsetPx & "px"),
+                                         ("items", "center"), ("justify", "center"),
+                                         ("flex-shrink", "0"), ("min-width", "0px")])
+  if beside: r.setStyle(result, "flex-grow", "1")
+  let t = r.wrapping(hint, CaptionPx, ShortLinePx, p.textCaption)
+  r.setStyle(t, "text-align", "center")
+  r.tag(t, "item-hint", hint)
+  r.appendChild(result, t)
+
+proc hintPx(widthPx: int): int =
+  ## `stepperHint`'s height under the rows.
+  2 * HintPadPx + ShortLinePx * textRows(itemHintText(), CaptionPx, widthPx - 2 * InsetPx)
+
+proc sectionHeaderPx(source, counts: string; widthPx: int): int =
+  ## The header strip's height (`drawSectionHeader`): its 24px lines, 2px
+  ## apart, 4px above and below, its hairline.
+  let items = @[FlowItem(widthPx: textPx(InboxSectionLabel.toUpperAscii, CaptionPx) * 11 div 10),
+                FlowItem(widthPx: textPx(source, CaptionPx), grow: true),
+                FlowItem(widthPx: textPx(counts, CaptionPx), alignEnd: true)]
+  let lines = flowLineCount(items, max(1, widthPx - 2 * InsetPx), 8)
+  8 + lines * 24 + (lines - 1) * 2 + 1
+
 proc drawInboxPanel*(r: GpuiRenderer; host: GpuiElement; vm: InboxVM; p: AhPalette;
-                     widthPx: int; ctx = AgentHarborInboxContext()) =
+                     widthPx: int; ctx = AgentHarborInboxContext(); heightPx = 0;
+                     scroll: P3Scroll = nil) =
   ## The Inbox panel over `vm`, `widthPx` wide; with the viewmodel's pages
-  ## on, the item on screen's page under (or beside) the rows. Redrawn whole
-  ## on each call.
+  ## on, the item on screen's page under (or beside) the rows, or, while
+  ## items wait and none is on screen, the hint in the page's place.
+  ## Redrawn whole on each call. Given its `heightPx`, the rows and the page
+  ## under them scroll as one region (`InboxRegionKey`), or, beside, the
+  ## rows and the page each as one (`InboxListRegionKey`,
+  ## `InboxPageRegionKey`); the item on screen is brought to its region's
+  ## top when it changes and is out of view, so its page under the rows
+  ## shows with it. Without a height they are clipped at the panel's foot.
+  scroll.beginDraw()
   r.clearChildren(host)
   r.styles(host, [("display", "flex"), ("flex-direction", "column"),
                   ("width", $widthPx & "px"), ("height", "100%"),
@@ -712,6 +987,7 @@ proc drawInboxPanel*(r: GpuiRenderer; host: GpuiElement; vm: InboxVM; p: AhPalet
     return
   of asReady: discard
   r.appendChild(host, r.drawStepper(p, ink, vm, widthPx))
+  var used = sectionHeaderPx(ctx.scope, counts, widthPx) + StepperPx
   let notes = if vm.cursorError.val.len > 0: @[(vm.cursorError.val, "error")] else: @[]
   var lines = notes
   for line in vm.degradedText: lines.add (line, "warning")
@@ -724,6 +1000,8 @@ proc drawInboxPanel*(r: GpuiRenderer; host: GpuiElement; vm: InboxVM; p: AhPalet
     r.appendChild(d, words)
     r.tag(d, "degraded", line)
     r.appendChild(host, d)
+    used += 8 + ShortLinePx * textRows(line, CaptionPx, widthPx - 2 * InsetPx) + 1
+  let viewPx = if heightPx > 0: max(1, heightPx - used) else: 0
   let beside = widthPx >= PageBesideMinPx
   let main = r.box(column = not beside, pairs = [("flex-grow", "1"), ("min-height", "0px"),
                                                  ("overflow", "hidden")])
@@ -734,6 +1012,7 @@ proc drawInboxPanel*(r: GpuiRenderer; host: GpuiElement; vm: InboxVM; p: AhPalet
     r.styles(list, [("width", $ListBesidePx & "px"), ("border-right-width", "1px"),
                     ("border-color", p.borderSecondary)])
   let notice = vm.notice()
+  var parts: seq[ScrollPart]
   if notice.len > 0:
     # The list is not a flex container (`.ah-fleet-list`), so the overlay's
     # centring has no height to centre in: the notice sits at the top of the
@@ -742,16 +1021,18 @@ proc drawInboxPanel*(r: GpuiRenderer; host: GpuiElement; vm: InboxVM; p: AhPalet
     r.styles(n, [("flex-grow", "0"), ("flex-shrink", "0")])
     r.appendChild(list, n)
   else:
-    r.drawRows(p, ink, vm, ctx, list, listW - (if beside: 1 else: 0))
-  r.appendChild(main, list)
+    parts = r.rowParts(p, ink, vm, ctx, listW - (if beside: 1 else: 0))
   let page = vm.page
+  let keep = if page.isNil: "" else: vm.current.val.id
+  let pageW = if beside: widthPx - ListBesidePx else: widthPx
+  var pageHost: GpuiElement
+  var pagePx = 0
   if not page.isNil:
-    let pageW = if beside: widthPx - ListBesidePx else: widthPx
     # Under the rows the page keeps its content's height (`.ah-inbox-page`
     # is not a flex item that shrinks; the column scrolls); beside them it
     # takes the free width.
-    let pageHost = r.box(column = true, pairs = [("min-width", "0px"), ("flex-shrink", "0"),
-                                                 ("overflow", "hidden")])
+    pageHost = r.box(column = true, pairs = [("min-width", "0px"), ("flex-shrink", "0"),
+                                             ("overflow", "hidden")])
     if beside: r.styles(pageHost, [("flex-grow", "1"), ("flex-shrink", "1")])
     r.tag(pageHost, "page", "inbox")
     let strip = vm.explanationStrip
@@ -762,6 +1043,7 @@ proc drawInboxPanel*(r: GpuiRenderer; host: GpuiElement; vm: InboxVM; p: AhPalet
       r.appendChild(s, r.wrapping(strip, CaptionPx, ShortLinePx, p.textBody))
       r.tag(s, "strip", strip)
       r.appendChild(pageHost, s)
+      pagePx += 10 + ShortLinePx * textRows(strip, CaptionPx, pageW - 2 * InsetPx)
     let label = block:
       let found = vm.currentItem
       if found.found: found.item.session.label else: ""
@@ -773,15 +1055,51 @@ proc drawInboxPanel*(r: GpuiRenderer; host: GpuiElement; vm: InboxVM; p: AhPalet
     discard page.revision.val
     r.drawItemPageBody(p, page, pageCtx, body, pageW)
     r.appendChild(pageHost, body)
-    r.appendChild(main, pageHost)
+    pagePx += itemPagePx(p, page, pageCtx, pageW)
+  elif vm.wantsItemHint:
+    # Items wait and none is on screen: the page's place says how to put
+    # one there. Nothing is opened for the reader.
+    pageHost = r.stepperHint(p, beside)
+    pagePx = hintPx(pageW)
+  if viewPx > 0 and parts.len > 0 and not beside:
+    # The rows and what stands under them scroll as one region.
+    # The rows in a box of their own (the web's `.ah-inbox-list` inside its
+    # scrolling `.ah-inbox-main`), the page under it.
+    let rowCount = parts.len
+    if pageHost != nil: parts.add ScrollPart(el: pageHost, heightPx: pagePx)
+    let region = r.scrollWindow(scroll, InboxRegionKey, parts, viewPx, keep, keepAtTop = true,
+                                groupCount = rowCount, groupFact = "rows",
+                                groupValue = "inbox")
+    r.appendChild(main, region)
+    r.appendChild(host, main)
+    return
+  if viewPx > 0 and parts.len > 0:
+    r.setStyle(list, "height", $viewPx & "px")
+    r.appendChild(list, r.scrollWindow(scroll, InboxListRegionKey, parts, viewPx, keep,
+                                       keepAtTop = true))
+  else:
+    for part in parts: r.appendChild(list, part.el)
+  r.appendChild(main, list)
+  if pageHost != nil:
+    if viewPx > 0 and beside and not page.isNil and pagePx > viewPx:
+      let w = r.box(column = true, pairs = [("flex-grow", "1"), ("flex-shrink", "1"),
+                                            ("min-width", "0px")])
+      r.styles(pageHost, [("flex-grow", "0"), ("flex-shrink", "0")])
+      r.appendChild(w, r.scrollWindow(scroll, InboxPageRegionKey,
+        @[ScrollPart(el: pageHost, heightPx: pagePx)], viewPx, ""))
+      r.appendChild(main, w)
+    else:
+      r.appendChild(main, pageHost)
   r.appendChild(host, main)
 
 proc mountInboxPanel*(r: GpuiRenderer; host: GpuiElement; vm: InboxVM; p: AhPalette;
-                      widthPx: int; ctx = AgentHarborInboxContext()) =
-  ## Draws the panel, redraws it whenever what it reads changes, and (with
-  ## the viewmodel's pages on) marks its pages visible while it is mounted,
-  ## as the web mount does.
+                      widthPx: int; ctx = AgentHarborInboxContext(); heightPx = 0;
+                      scroll: P3Scroll = nil; redraw: Signal[int] = nil) =
+  ## Draws the panel, redraws it whenever what it reads changes (or the host
+  ## moves `redraw`, after a scroll), and (with the viewmodel's pages on)
+  ## marks its pages visible while it is mounted, as the web mount does.
   createRenderEffect proc() =
     discard vm.revision.val
-    drawInboxPanel(r, host, vm, p, widthPx, ctx)
+    if redraw != nil: discard redraw.val
+    drawInboxPanel(r, host, vm, p, widthPx, ctx, heightPx, scroll)
   if vm.showPages: vm.setPagesVisible(true)

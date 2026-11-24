@@ -33,11 +33,11 @@ import fixture_provider
 
 const WindowCaptures* = ["plat45", "plat47", "plat48", "plat68", "plat69",
                          "plat70a", "plat70b", "m71", "vcsoffloop",
-                         "flowfirst"]
+                         "flowfirst", "plugins"]
   ## Every capture `gpui-window-captures.sh` accepts, in its default order
   ## (plat59 aside: it opens a committed recording and records none).
-  ## `vcsoffloop` opens a git fixture and `flowfirst` opens `calc`, which every
-  ## capture records.
+  ## `vcsoffloop` opens a git fixture; `flowfirst` and `plugins` open `calc`,
+  ## which every capture records.
 
 proc pythonScript(name, program: string): FixtureSpec =
   FixtureSpec(

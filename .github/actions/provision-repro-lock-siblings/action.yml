@@ -218,9 +218,41 @@ inputs:
     required: false
     default: ""
 
+  codetracer-dir:
+    description: >
+      The codetracer checkout this action provisions for: its locks are read,
+      its `ci/` scripts and `.#ci` dev shell are used, and its siblings are
+      cloned next to it. Defaults to the job's workspace, which is codetracer
+      in every codetracer job. A job whose primary checkout is ANOTHER repo
+      (the launcher/recorder E2E gate called from a recorder) passes the
+      sibling path it cloned codetracer to, e.g. `../codetracer`.
+    required: false
+    default: ""
+  exclude:
+    description: >
+      Repositories NOT to clone or reset, comma-separated, even when a lock
+      names them. The E2E gate passes the calling repo here: when a recorder
+      that is one of codetracer's build inputs calls it, the recorder's own
+      checkout is the sibling directory `--reset` would otherwise reconcile to
+      codetracer's pin, destroying the commit under test.
+    required: false
+    default: ""
 runs:
   using: composite
   steps:
+    - name: Resolve the codetracer checkout
+      shell: bash
+      env:
+        CT_DIR_INPUT: ${{ inputs.codetracer-dir }}
+      run: |
+        set -euo pipefail
+        ct_dir="${CT_DIR_INPUT:-${GITHUB_WORKSPACE}}"
+        ct_dir="$(cd "${ct_dir}" && pwd)"
+        [ -f "${ct_dir}/repro.lock" ] || {
+          echo "::error::provision-repro-lock-siblings: '${ct_dir}' has no repro.lock; codetracer-dir must name a codetracer checkout." >&2
+          exit 1
+        }
+        echo "CT_PROVISION_DIR=${ct_dir}" >>"$GITHUB_ENV"
     # Nix fetches Cargo git dependencies (Agave's, Sui's) by running `git`
     # with no credential of its own, and the job's git credential covers only
     # github.com/metacraft-labs/, so those fetches went out anonymously and
@@ -228,7 +260,7 @@ runs:
     # git answers a github.com challenge from the job netrc; see the helper.
     - name: Give git the job's token for github.com
       shell: bash
-      run: bash "${GITHUB_WORKSPACE}/ci/register-git-credential-helper.sh"
+      run: bash "${CT_PROVISION_DIR}/ci/register-git-credential-helper.sh"
 
     # Realise the dev shell BEFORE the token is minted. On a cold runner this
     # can take most of an hour (45 minutes in release job 126333283602), and
@@ -254,7 +286,7 @@ runs:
     # its PATH outside the dev shell.
     - name: Keep the token fresh for the rest of the job
       shell: bash
-      working-directory: ${{ github.workspace }}
+      working-directory: ${{ inputs.codetracer-dir || github.workspace }}
       env:
         APP_ID: ${{ inputs.app-id }}
         APP_PRIVATE_KEY: ${{ inputs.private-key }}
@@ -262,7 +294,7 @@ runs:
         log="$RUNNER_TEMP/keep-refreshing-github-token.log"
         nohup nix shell nixpkgs#openssl nixpkgs#curl nixpkgs#jq \
           nixpkgs#gnugrep nixpkgs#gnused nixpkgs#gawk nixpkgs#coreutils -c \
-          bash "${GITHUB_WORKSPACE}/.github/actions/refresh-github-token/keep-refreshing.sh" \
+          bash "${CT_PROVISION_DIR}/.github/actions/refresh-github-token/keep-refreshing.sh" \
           >"$log" 2>&1 &
         echo "token refresher started (pid $!); log: $log"
 
@@ -274,7 +306,7 @@ runs:
     # `flake prefetch-inputs` fetches them lazily, as before.
     - name: Realise the CI dev shell
       shell: bash
-      working-directory: ${{ github.workspace }}
+      working-directory: ${{ inputs.codetracer-dir || github.workspace }}
       run: |
         # A fetch that fails on the network (run 43996043232, GPUI shard 19:
         # "Could not resolve host: github.com" from one garm VM) is retried,
@@ -339,12 +371,23 @@ runs:
       uses: metacraft-labs/metacraft-github-actions/git-auth@a190f3a8b37c5a239d88b8c964b6d13f64fbaa0d
       with:
         gh-token: ${{ steps.sibling_token.outputs.token }}
-        working-directory: ${{ github.workspace }}
+        working-directory: ${{ inputs.codetracer-dir || github.workspace }}
         run: |
           # The selector uses bash builtins only: it runs outside the dev
           # shell, and a nix-darwin runner has no grep or sed on its PATH
           # here.
           build_inputs="$(ci/repro-lock-build-input-siblings.sh repro.lock)"
+          exclude=",${{ inputs.exclude }},"
+          drop_excluded() {
+            local kept="" n
+            IFS=, read -r -a names <<<"$1"
+            for n in "${names[@]}"; do
+              [ -n "$n" ] || continue
+              case "$exclude" in *",$n,"*) echo "Not provisioning '$n': excluded (the calling repo's own checkout)." >&2 ;; *) kept="${kept:+$kept,}$n" ;; esac
+            done
+            printf '%s' "$kept"
+          }
+          build_inputs="$(drop_excluded "${build_inputs}")"
           echo "Provisioning the lock's build-input siblings: ${build_inputs}"
           siblings_root="$(cd .. && pwd)"
           nix develop .#ci --command \
@@ -352,7 +395,7 @@ runs:
           # The test siblings come from the test project's own lock. `repro
           # develop` reads the lock of the project it runs in, so it runs in
           # ci/test/siblings; --into puts them beside codetracer all the same.
-          test_siblings="${{ inputs.test-siblings }}"
+          test_siblings="$(drop_excluded "${{ inputs.test-siblings }}")"
           if [ -n "${test_siblings}" ]; then
             echo "Provisioning the test siblings from ci/test/siblings/repro.lock: ${test_siblings}"
             nix develop .#ci --command bash -c \
@@ -367,7 +410,7 @@ runs:
     # bash builtins only, like the build-input selector.
     - name: Every cloned sibling's lock pins repro.lock's package catalog
       shell: bash
-      working-directory: ${{ github.workspace }}
+      working-directory: ${{ inputs.codetracer-dir || github.workspace }}
       run: bash ci/repro-lock-catalog-agreement.sh repro.lock ..
 
     # Hand the clone's fresh token to the rest of the job. Every store the
@@ -380,12 +423,12 @@ runs:
     # grep or sed on its PATH outside it; the first step realised that shell.
     - name: Give later steps the fresh token
       shell: bash
-      working-directory: ${{ github.workspace }}
+      working-directory: ${{ inputs.codetracer-dir || github.workspace }}
       env:
         NEW_TOKEN: ${{ steps.sibling_token.outputs.token }}
       run: |
         nix develop .#ci --command \
-          bash "${GITHUB_WORKSPACE}/.github/actions/refresh-github-token/refresh.sh"
+          bash "${CT_PROVISION_DIR}/.github/actions/refresh-github-token/refresh.sh"
 
     - name: Seed isonim tailwind-styles.json placeholder
       # Still required after the switch. `scripts/build-tailwind.sh` PRODUCES
@@ -401,7 +444,7 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        isonim_build="${GITHUB_WORKSPACE}/../isonim/build"
+        isonim_build="${CT_PROVISION_DIR}/../isonim/build"
         mkdir -p "${isonim_build}"
         if [ ! -f "${isonim_build}/tailwind-styles.json" ]; then
           echo '{}' > "${isonim_build}/tailwind-styles.json"

@@ -74,6 +74,10 @@
 @import "components/file_conflict_dialog"
 @import "components/hcr_live_edit_panel"
 @import "components/ns9_panes"
+// The Agent Harbor Tests panel draws the Test Results pane's marks
+// (`TEST_MARK_*`, ns9_panes), so it comes after it.
+@import "components/agent_harbor_link_inks"
+@import "components/agent_harbor_tests"
 // Last on purpose — see the note at the top of the file.
 @import "components/code_font"
 @import "components/empty_states"

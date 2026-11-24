@@ -17,6 +17,8 @@ from ../viewmodel/platform/displayed_build_identity import
 # `statusBaseModel` stays backend-neutral instead of growing a `when`.
 from certificate_indicator import statusCertificateModel
 from ../notification_key import notificationKey
+# Extensibility-Model.md §11: the installed plugins' status item.
+import ./plugin_hooks
 
 when defined(js):
   import isonim/web/web_renderer
@@ -272,6 +274,11 @@ when defined(js):
     let editorFilePath =
       if not loc.path.isNil and loc.path.len > 0: $loc.path else: ""
 
+    # The installed plugins' item (`ui/plugin_panes`): their status items,
+    # the top plugin layer, a plugin waiting for consent. "" renders nothing.
+    let (pluginsText, pluginsTitle) =
+      if pluginStatusText.isNil: ("", "") else: pluginStatusText()
+
     StatusBaseModel(
       language: lang,
       encoding: encoding,
@@ -306,7 +313,9 @@ when defined(js):
       # run, and the projection of nil is an empty model that renders nothing,
       # so the first paint of the bar is never blocked on a filesystem read.
       certificate: statusCertificateModel(certificateIndicator()),
-      build: statusBuildModel())
+      build: statusBuildModel(),
+      plugins: pluginsText,
+      pluginsTitle: pluginsTitle)
 
   proc statusShellModel(self: StatusComponent): StatusShellModel =
     var activeNotifications: seq[StatusNotificationRecord] = @[]
@@ -524,6 +533,15 @@ method register*(self: StatusComponent, api: MediatorWithSubscribers) =
   when defined(js):
     # PLAT-56: the build indicator follows the build.
     onBuildStatusChange = proc() = self.requestStatusRender()
+    # So does the plugins' item (Extensibility-Model.md §11).
+    pluginStatusChanged = proc() = self.requestStatusRender()
+    # A plugin's fault: a notification whose buttons are its actions.
+    pluginNotify = proc(text: string; actions: seq[PluginPaletteCommand]) =
+      var buttons: seq[NotificationAction]
+      for a in actions:
+        buttons.add newNotificationButtonAction(cstring(a.label), a.run)
+      self.onNotification(newNotification(NotificationKind.NotificationError,
+                                          text, actions = buttons))
   api.subscribe(InternalStatusUpdate, proc(kind: CtEventKind, response: StatusState, sub: Subscriber) =
     self.onStatusUpdate(response)
   )

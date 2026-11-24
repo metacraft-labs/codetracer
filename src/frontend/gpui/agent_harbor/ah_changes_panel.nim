@@ -65,6 +65,17 @@ const
   CodeRowPx = 30           ## a VCS changed-file row in the Code tab
   SearchPx = 26            ## the panel search input (`ct-input-panel`)
   BarPx = 2                ## the focus inset bar, 0.125rem
+  GroupHeadPx = 35         ## `.ah-changes-group-head`
+  GroupGapPx = 4           ## `.ah-changes-group + .ah-changes-group`: 0.25rem
+  TabBarPx = 4 + TabPx + 1 ## `.ah-changes-tabs`: 4px above, its hairline
+  ScopePx = 6 + ControlPx + 6 + 1
+    ## `.ah-changes-scope`: the milestone selector 6px above and below, its
+    ## hairline.
+  RenamedPx = 28           ## `.ah-renamed-from`: the 24px line and 4px below
+  ToolbarPx = SearchPx + 6 + 1
+    ## `.ah-code-toolbar`: the search, 6px below it, its hairline.
+  ChangesRegionKey* = "changes"
+    ## The scrolling region of a tab's content.
 
 # ---------------------------------------------------------------------------
 # The tab bar and the milestone selector
@@ -224,28 +235,65 @@ proc drawRequestInput(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: 
     (r.actionButton(p, ink, CancelLabel, false, proc() = vm.closeRequestChanges()),
      actionButtonPx(CancelLabel))], availPx))
 
+proc metaPx(label, text: string; availPx: int): int =
+  ## `drawMeta`'s height: its text's 16px lines beside its small-caps label
+  ## (set semibold and spaced: a tenth wider than the face's metrics).
+  ShortLinePx * max(1, textRows(text, CaptionPx,
+                                availPx - textPx(label.toUpperAscii, LabelPx) * 11 div 10 - 8))
+
+proc hunksPx(hunks: seq[DiffHunk]): int =
+  ## `hunks`' height: each hunk's 20px head and its 16px lines; one 16px
+  ## line when there is none.
+  if hunks.len == 0: return ShortLinePx
+  for h in hunks: result += 20 + ShortLinePx * vcsHunkRow(h).lines.len
+
+proc actionRowPx(labels: seq[string]; availPx: int): int =
+  ## `actionRow`'s height: its buttons' 24px lines, 6px apart.
+  var items: seq[FlowItem]
+  for l in labels: items.add FlowItem(widthPx: actionButtonPx(l))
+  if items.len == 0: return 0
+  let lines = flowLineCount(items, availPx, 6)
+  lines * ControlPx + (lines - 1) * 6
+
+proc cardActionLabels(card: SpecCardView): seq[string] =
+  ## The buttons `drawCardActions` draws for `card`, in order.
+  if card.staged: result.add @[ApproveApplyLabel, DiscardLabel]
+  else:
+    if card.canApprove: result.add ApproveLabel
+    if card.tier == stSpec: result.add RevertLabel
+  result.add RequestChangesLabel
+
+proc gappedPx(parts: seq[int]; gap: int): int =
+  ## Parts one under another, `gap` apart; a part of no height takes none.
+  var n = 0
+  for h in parts:
+    if h > 0:
+      result += h
+      inc n
+  if n > 1: result += (n - 1) * gap
+
 proc drawSpecCard(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: ChangesVM;
-                  card: SpecCardView; widthPx: int): GpuiElement =
+                  card: SpecCardView; widthPx: int): tuple[el: GpuiElement, heightPx: int] =
   ## One spec card (`.ah-spec-card`): 5px by 8px in; its head (fold glyph,
   ## title, the origin badge, the state word at the right) wraps as the
   ## web's does; open, the body under it, 20px in, and the inset bar.
   let key = card.key
-  result = r.box(column = true, pairs = [("padding-top", "5px"), ("padding-bottom", "5px"),
+  let cardEl = r.box(column = true, pairs = [("padding-top", "5px"), ("padding-bottom", "5px"),
                                          ("padding-left", $InsetPx & "px"),
                                          ("padding-right", $InsetPx & "px"),
                                          ("flex-shrink", "0"), ("position", "relative")])
-  r.tag(result, "card", key)
-  r.tag(result, "tier", $card.tier)
-  r.tag(result, "card-state", card.stateText)
-  r.tag(result, "open", $card.open)
-  if card.open: r.appendChild(result, r.insetBar(p.borderAction, BarPx))
+  r.tag(cardEl, "card", key)
+  r.tag(cardEl, "tier", $card.tier)
+  r.tag(cardEl, "card-state", card.stateText)
+  r.tag(cardEl, "open", $card.open)
+  if card.open: r.appendChild(cardEl, r.insetBar(p.borderAction, BarPx))
   let avail = widthPx - 2 * InsetPx
   let isPath = card.tier == stSpec or card.title == card.path
   # The keyboard's card: its fold glyph in the action border colour, bold.
   let fold = r.text(if card.open: "\xE2\x96\xBE" else: "\xE2\x96\xB8", CaptionPx,
                     if card.focused: p.borderAction else: p.textCaption,
                     bold = card.focused, shrink = false, pairs = [("width", $FoldPx & "px")])
-  r.tag(result, "focused", $card.focused)
+  r.tag(cardEl, "focused", $card.focused)
   let title = if isPath: r.pathText(card.title, BodyPx, p.textBody)
               else: r.text(card.title, BodyPx, p.textBody)
   r.setStyle(title, "line-height", $ShortLinePx & "px")
@@ -271,8 +319,9 @@ proc drawSpecCard(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: Chan
   let head = r.flowLinesFit(items, heights, avail, 6, 2)
   r.setStyle(head, "cursor", cursorOf(hkRow))
   r.addEventListener(head, "click", proc() = vm.toggleCard(key))
-  r.appendChild(result, head)
-  if not card.open: return
+  r.appendChild(cardEl, head)
+  let headPx = flowFitHeightPx(items, heights, avail, 6, 2)
+  if not card.open: return (cardEl, 10 + headPx)
   let bodyAvail = avail - CardIndentPx
   let body = r.box(column = true, pairs = [("gap", "6px"), ("padding-left", $CardIndentPx & "px"),
                                            ("padding-top", "4px"), ("padding-bottom", "6px"),
@@ -307,12 +356,29 @@ proc drawSpecCard(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: Chan
     r.tag(line, "action-status", $card.action)
     r.tag(line, "action-status-text", status)
     r.appendChild(body, line)
-  r.appendChild(result, body)
+  r.appendChild(cardEl, body)
+  # The body's height, part by part as drawn above, 6px apart, 4px above
+  # and 6px below.
+  var parts: seq[int]
+  if card.tier != stSpec and card.title != card.path: parts.add ShortLinePx
+  if card.sections.len > 0: parts.add metaPx(SectionsLabel, sectionsText(card), bodyAvail)
+  if card.commits.len > 0: parts.add metaPx(CommitsLabel, commitsText(card), bodyAvail)
+  parts.add ControlPx
+  if card.showsDiff: parts.add hunksPx(vm.cardDiff(key))
+  elif card.summary.len > 0: parts.add BodyLinePx * textRows(card.summary, BodyPx, bodyAvail)
+  if card.confirmingRevert:
+    parts.add gappedPx(@[BodyLinePx * textRows(revertQuestion(card), BodyPx, bodyAvail),
+                         actionRowPx(@[ConfirmRevertLabel, CancelLabel], bodyAvail)], 6)
+  else: parts.add actionRowPx(cardActionLabels(card), bodyAvail)
+  if card.requestOpen:
+    parts.add gappedPx(@[TextFieldRowsPx, actionRowPx(@[SubmitLabel, CancelLabel], bodyAvail)], 6)
+  parts.add BodyLinePx * textRows(status, CaptionPx, bodyAvail)
+  (cardEl, 10 + headPx + 4 + gappedPx(parts, 6) + 6)
 
-proc drawSpecChanges(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: ChangesVM;
-                     list: GpuiElement; widthPx: int) =
-  ## The cards, tier by tier, each tier a group under its head; groups 4px
-  ## apart.
+proc specParts(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: ChangesVM;
+               widthPx: int): seq[ScrollPart] =
+  ## The cards, tier by tier, each tier under its head; tiers 4px apart.
+  ## Each card is named by its key, so the keyboard's card is kept in view.
   let cards = vm.specCards
   var i = 0
   var first = true
@@ -320,13 +386,17 @@ proc drawSpecChanges(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: C
     let tier = cards[i].tier
     var j = i
     while j < cards.len and cards[j].tier == tier: inc j
-    let group = r.box(column = true, pairs = [("flex-shrink", "0")])
-    if not first: r.setStyle(group, "margin-top", "4px")
+    let head = r.groupHead(p, tierHead(tier), j - i)
+    r.tag(head, "tier-group", $tier)
+    var headPx = GroupHeadPx
+    if not first:
+      r.setStyle(head, "margin-top", $GroupGapPx & "px")
+      headPx += GroupGapPx
     first = false
-    r.tag(group, "tier-group", $tier)
-    r.appendChild(group, r.groupHead(p, tierHead(tier), j - i))
-    for k in i ..< j: r.appendChild(group, r.drawSpecCard(p, ink, vm, cards[k], widthPx))
-    r.appendChild(list, group)
+    result.add ScrollPart(el: head, heightPx: headPx)
+    for k in i ..< j:
+      let (el, h) = r.drawSpecCard(p, ink, vm, cards[k], widthPx)
+      result.add ScrollPart(el: el, heightPx: h, key: cards[k].key)
     i = j
 
 # ---------------------------------------------------------------------------
@@ -341,6 +411,18 @@ proc drawFileLink(r: GpuiRenderer; ink: ChangesInboxInks; vm: ChangesVM; path: s
   r.styles(result, [("line-height", $ShortLinePx & "px"), ("cursor", cursorOf(hkControl))])
   r.tag(result, "file-link", path)
   r.addEventListener(result, "click", proc() = vm.openInEditor(path))
+
+proc testPx(entry: VerificationEntry; widthPx: int): int =
+  ## `drawTest`'s height: 5px above and below, its lines 2px apart.
+  let avail = widthPx - 2 * InsetPx
+  let word = testStatusWord(entry)
+  let first = flowFitHeightPx(@[FlowItem(widthPx: monoTextPx(entry.testName, BodyPx)),
+                                FlowItem(widthPx: stateWordPx(word), alignEnd: true)],
+                              @[ShortLinePx, ShortLinePx], avail, 8, 2)
+  10 + gappedPx(@[first, ShortLinePx * textRows(entry.description, CaptionPx, avail),
+                  (if entry.status != vsUnknown:
+                     ShortLinePx * textRows(entry.annotation, CaptionPx, avail) else: 0),
+                  (if entry.file.len > 0: ShortLinePx else: 0)], 2)
 
 proc drawTest(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: ChangesVM;
               entry: VerificationEntry; widthPx: int): GpuiElement =
@@ -375,45 +457,55 @@ proc drawTest(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: ChangesV
     r.appendChild(f, r.drawFileLink(ink, vm, entry.file))
     r.appendChild(result, f)
 
-proc drawTests(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: ChangesVM;
-               list: GpuiElement; widthPx: int) =
+proc testParts(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: ChangesVM;
+               widthPx: int): seq[ScrollPart] =
+  ## Each milestone's tests under its head; milestones 4px apart.
   var first = true
   for group in vm.tests:
-    let g = r.box(column = true, pairs = [("flex-shrink", "0")])
-    if not first: r.setStyle(g, "margin-top", "4px")
+    let head = r.groupHead(p, group.milestoneId & ": " & group.title, group.entries.len,
+                           "test-group")
+    var headPx = GroupHeadPx
+    if not first:
+      r.setStyle(head, "margin-top", $GroupGapPx & "px")
+      headPx += GroupGapPx
     first = false
-    r.appendChild(g, r.groupHead(p, group.milestoneId & ": " & group.title, group.entries.len,
-                                 "test-group"))
-    for entry in group.entries: r.appendChild(g, r.drawTest(p, ink, vm, entry, widthPx))
-    r.appendChild(list, g)
+    result.add ScrollPart(el: head, heightPx: headPx)
+    for entry in group.entries:
+      result.add ScrollPart(el: r.drawTest(p, ink, vm, entry, widthPx),
+                            heightPx: testPx(entry, widthPx))
 
-proc drawDetails(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: ChangesVM;
-                 list: GpuiElement) =
+proc detailParts(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: ChangesVM;
+                 widthPx: int): seq[ScrollPart] =
   ## Each milestone's notes as written (`.ah-details-notes`, body text on
   ## 24px lines, 6px by 8px in) and its key source files under a small-caps
-  ## label, each a link and what it does.
+  ## label, each a link and what it does; milestones 4px apart. Each part
+  ## is a part of the scrolling region.
   var first = true
+  let avail = widthPx - 2 * InsetPx
   for d in vm.details:
-    let g = r.box(column = true, pairs = [("flex-shrink", "0")])
-    if not first: r.setStyle(g, "margin-top", "4px")
+    let head = r.groupHead(p, d.milestoneId & ": " & d.title, d.keySourceFiles.len,
+                           "details-group")
+    r.tag(head, "details", d.milestoneId)
+    var headPx = GroupHeadPx
+    if not first:
+      r.setStyle(head, "margin-top", $GroupGapPx & "px")
+      headPx += GroupGapPx
     first = false
-    r.tag(g, "details", d.milestoneId)
-    r.appendChild(g, r.groupHead(p, d.milestoneId & ": " & d.title, d.keySourceFiles.len,
-                                 "details-group"))
+    result.add ScrollPart(el: head, heightPx: headPx)
     if d.notes.len > 0:
       let notes = r.box(pairs = [("padding-top", "6px"), ("padding-bottom", "6px"),
                                  ("padding-left", $InsetPx & "px"),
                                  ("padding-right", $InsetPx & "px"), ("flex-shrink", "0")])
       r.appendChild(notes, r.wrapping(d.notes, BodyPx, BodyLinePx, p.textBody))
       r.tag(notes, "notes", d.milestoneId)
-      r.appendChild(g, notes)
+      result.add ScrollPart(el: notes, heightPx: 12 + BodyLinePx * textRows(d.notes, BodyPx, avail))
     if d.keySourceFiles.len > 0:
       # `.ah-details-label`: 4px above, 2px below, on the panel's 24px line.
       let label = r.box(pairs = [("padding-top", "4px"), ("padding-bottom", "2px"),
                                  ("padding-left", $InsetPx & "px"), ("flex-shrink", "0"),
                                  ("height", "30px"), ("items", "center")])
       r.appendChild(label, r.sectionLabel(p, KeySourceFilesLabel))
-      r.appendChild(g, label)
+      result.add ScrollPart(el: label, heightPx: 30)
       for k in d.keySourceFiles:
         # `.ah-key-file`: 2px above and below the panel's 24px line; what the
         # file does wraps onto more of them where the panel is narrow.
@@ -426,10 +518,12 @@ proc drawDetails(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: Chang
         let link = r.drawFileLink(ink, vm, k.path)
         r.setStyle(link, "line-height", $BodyLinePx & "px")
         r.appendChild(line, link)
+        var purposePx = BodyLinePx
         if k.purpose.len > 0:
           r.appendChild(line, r.wrapping(k.purpose, CaptionPx, BodyLinePx, p.textCaption))
-        r.appendChild(g, line)
-    r.appendChild(list, g)
+          purposePx = BodyLinePx * textRows(k.purpose, CaptionPx,
+                                            avail - monoTextPx(k.path, CaptionPx) - 8)
+        result.add ScrollPart(el: line, heightPx: 4 + max(BodyLinePx, purposePx))
 
 # ---------------------------------------------------------------------------
 # Code
@@ -445,6 +539,7 @@ proc smallMark(r: GpuiRenderer; p: AhPalette; text, colour, title: string): Gpui
   r.appendChild(result, r.text(text, CaptionSmPx, colour, shrink = false))
   r.tag(result, "mark-word", text)
   r.tag(result, "mark-title", title)
+  r.tag(result, "tooltip", title)
 
 proc drawVcsRow(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: ChangesVM;
                 row: FileRow): GpuiElement =
@@ -480,14 +575,16 @@ proc drawVcsRow(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: Change
   r.fillWidth(name)
   r.tag(name, "vcs-file-name", vcs.baseName)
   r.appendChild(result, name)
+  # Each mark short, with its tooltip; the legend over the files says what
+  # the short ones stand for.
   let marks = r.box(pairs = [("gap", "4px"), ("items", "center"), ("flex-shrink", "0")])
   r.appendChild(marks, r.smallMark(p, originShort(row.file.origin),
                                    if row.file.origin == coCommitted: p.textLabel
                                    else: p.textWarning, originMark(row.file.origin)))
   if row.key:
-    r.appendChild(marks, r.smallMark(p, KeyFileMark, ink.textInfo, "A key source file of the plan"))
+    r.appendChild(marks, r.smallMark(p, KeyFileMark, ink.textInfo, KeyFileTitle))
   if row.file.binary:
-    r.appendChild(marks, r.smallMark(p, BinaryLabel, p.textLabel, BinaryLabel))
+    r.appendChild(marks, r.smallMark(p, BinaryLabel, p.textLabel, BinaryTitle))
   r.appendChild(result, marks)
   if vcs.additions > 0 or vcs.deletions > 0:
     let stats = r.box(pairs = [("gap", "4px"), ("items", "center"), ("flex-shrink", "0")])
@@ -553,10 +650,22 @@ proc drawFileDiff(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: Chan
   of fdLoaded:
     r.appendChild(result, r.hunks(p, ink, view.file.hunks))
 
-proc drawCode(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: ChangesVM;
-              list: GpuiElement; widthPx: int) =
-  ## The Code tab: the base selector and the summary line, the search and
-  ## the status filter over a hairline, then the files.
+proc fileDiffPx(vm: ChangesVM; path: string): int =
+  ## `drawFileDiff`'s height: 4px above, 8px below, its navigation and its
+  ## state 6px apart.
+  let view = vm.fileDiff(path)
+  let state = case view.state
+    of fdNotLoaded: ControlPx
+    of fdLoaded: hunksPx(view.file.hunks)
+    else: ShortLinePx
+  4 + ControlPx + 6 + state + 8
+
+proc codeParts(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: ChangesVM;
+               widthPx: int): seq[ScrollPart] =
+  ## The Code tab: the base selector and the summary line, the legend of the
+  ## short marks, the search and the status filter over a
+  ## hairline, then the files, each named by its path, so the keyboard's
+  ## file is kept in view.
   let summary = vm.summaryLine
   let avail = widthPx - 2 * InsetPx
   let bases = vm.bases
@@ -569,9 +678,7 @@ proc drawCode(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: ChangesV
       labels.add b.label
       if b.id == vm.base.val: shown = b.label
     baseEl = r.selectBox(p, shown, labels, "base")
-    var widest = 0
-    for l in labels: widest = max(widest, textPx(l, LabelPx))
-    baseW = selectBoxPx(widest)
+    baseW = selectBoxPx(textPx(shown, LabelPx))
   else:
     baseEl = r.text(vm.baseLabel, LabelPx, p.textLabel, shrink = false)
     r.tag(baseEl, "base", vm.baseLabel)
@@ -582,11 +689,24 @@ proc drawCode(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: ChangesV
                                            ("padding-left", $InsetPx & "px"),
                                            ("padding-right", $InsetPx & "px"),
                                            ("flex-shrink", "0")])
-  r.appendChild(head, r.flowLines(@[FlowItem(el: baseEl, widthPx: baseW),
-                                    FlowItem(el: sum, widthPx: textPx(summary, CaptionPx),
-                                             alignEnd: true)],
-                                  avail, 8, ControlPx, 6))
-  r.appendChild(list, head)
+  let headItems = @[FlowItem(el: baseEl, widthPx: baseW),
+                    FlowItem(el: sum, widthPx: textPx(summary, CaptionPx), alignEnd: true)]
+  r.appendChild(head, r.flowLines(headItems, avail, 8, ControlPx, 6))
+  let headLines = flowLineCount(headItems, avail, 8)
+  result.add ScrollPart(el: head, heightPx: 12 + headLines * ControlPx + (headLines - 1) * 6)
+  let notice = vm.filesNotice
+  if notice.len == 0:
+    # `.ah-code-legend`: what the short marks stand for, the caption size
+    # on 16px lines, 6px below, above the toolbar's hairline.
+    let legend = r.box(pairs = [("padding-left", $InsetPx & "px"),
+                                ("padding-right", $InsetPx & "px"),
+                                ("padding-bottom", "6px"), ("flex-shrink", "0"),
+                                ("min-width", "0px")])
+    let t = r.wrapping(CodeMarksLegend, CaptionPx, ShortLinePx, p.textCaption)
+    r.tag(t, "code-legend", CodeMarksLegend)
+    r.appendChild(legend, t)
+    result.add ScrollPart(el: legend,
+                          heightPx: 6 + ShortLinePx * textRows(CodeMarksLegend, CaptionPx, avail))
   # The search and the status filter (`.ah-code-toolbar`).
   let toolbar = r.box(pairs = [("gap", "8px"), ("items", "center"),
                                ("padding-left", $InsetPx & "px"),
@@ -612,43 +732,57 @@ proc drawCode(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: ChangesV
   var filters: seq[string]
   for f in filterChoices(): filters.add $f
   r.appendChild(toolbar, r.selectBox(p, $vm.filter.val, filters, "status-filter"))
-  r.appendChild(list, toolbar)
-  let files = r.box(column = true, pairs = [("flex-shrink", "0")])
-  r.tag(files, "files", "code")
-  let notice = vm.filesNotice
+  result.add ScrollPart(el: toolbar, heightPx: ToolbarPx)
   if notice.len > 0:
-    r.setStyle(files, "flex-grow", "1")
+    let files = r.box(column = true, pairs = [("flex-shrink", "0"), ("flex-grow", "1")])
+    r.tag(files, "files", "code")
     r.appendChild(files, r.notice(p, notice, "filtered"))
-  else:
-    for row in vm.files:
-      let file = r.box(column = true, pairs = [("flex-shrink", "0"), ("position", "relative")])
-      if row.selected: r.appendChild(file, r.insetBar(p.borderAction, BarPx))
-      r.appendChild(file, r.drawVcsRow(p, ink, vm, row))
-      if row.file.oldPath.len > 0:
-        # `.ah-renamed-from`: 4px under the panel's 24px line.
-        let old = r.box(pairs = [("gap", "6px"), ("items", "center"), ("height", "28px"),
-                                 ("padding-left", $(InsetPx + CardIndentPx) & "px"),
-                                 ("padding-right", $InsetPx & "px"), ("padding-bottom", "4px"),
-                                 ("min-width", "0px"), ("flex-shrink", "0")])
-        r.appendChild(old, r.text(RenamedFromLabel, CaptionPx, p.textCaption, shrink = false))
-        let oldPath = r.mono(r.pathText(row.file.oldPath, CaptionPx, p.textCaption))
-        r.tag(oldPath, "renamed-from", row.file.oldPath)
-        r.appendChild(old, oldPath)
-        r.appendChild(file, old)
-      if row.selected:
-        r.appendChild(file, r.drawFileDiff(p, ink, vm, row.file.path))
-      r.appendChild(files, file)
-  r.appendChild(list, files)
-  if notice.len > 0: r.setStyle(list, "flex-grow", "1")
+    result.add ScrollPart(el: files, heightPx: 0)
+    return
+  for row in vm.files:
+    let file = r.box(column = true, pairs = [("flex-shrink", "0"), ("position", "relative")])
+    if row.selected: r.appendChild(file, r.insetBar(p.borderAction, BarPx))
+    r.appendChild(file, r.drawVcsRow(p, ink, vm, row))
+    var h = CodeRowPx
+    if row.file.oldPath.len > 0:
+      # `.ah-renamed-from`: 4px under the panel's 24px line.
+      let old = r.box(pairs = [("gap", "6px"), ("items", "center"), ("height", $RenamedPx & "px"),
+                               ("padding-left", $(InsetPx + CardIndentPx) & "px"),
+                               ("padding-right", $InsetPx & "px"), ("padding-bottom", "4px"),
+                               ("min-width", "0px"), ("flex-shrink", "0")])
+      r.appendChild(old, r.text(RenamedFromLabel, CaptionPx, p.textCaption, shrink = false))
+      let oldPath = r.mono(r.pathText(row.file.oldPath, CaptionPx, p.textCaption))
+      r.tag(oldPath, "renamed-from", row.file.oldPath)
+      r.appendChild(old, oldPath)
+      r.appendChild(file, old)
+      h += RenamedPx
+    if row.selected:
+      r.appendChild(file, r.drawFileDiff(p, ink, vm, row.file.path))
+      h += fileDiffPx(vm, row.file.path)
+    result.add ScrollPart(el: file, heightPx: h, key: row.file.path)
 
 # ---------------------------------------------------------------------------
 # The panel
 # ---------------------------------------------------------------------------
 
+proc changesHeaderPx(source, rollUp: string; widthPx: int): int =
+  ## The header strip's height (`drawSectionHeader`): its 24px lines, 2px
+  ## apart, 4px above and below, its hairline.
+  let items = @[FlowItem(widthPx: textPx(ChangesSectionLabel.toUpperAscii, CaptionPx) * 11 div 10),
+                FlowItem(widthPx: textPx(source, CaptionPx), grow: true),
+                FlowItem(widthPx: textPx(rollUp, CaptionPx), alignEnd: true)]
+  let lines = flowLineCount(items, max(1, widthPx - 2 * InsetPx), 8)
+  8 + lines * 24 + (lines - 1) * 2 + 1
+
 proc drawChangesPanel*(r: GpuiRenderer; host: GpuiElement; vm: ChangesVM; p: AhPalette;
-                       widthPx: int; context = AgentHarborChangesContext()) =
+                       widthPx: int; context = AgentHarborChangesContext(); heightPx = 0;
+                       scroll: P3Scroll = nil) =
   ## The Changes panel over `vm`, `widthPx` wide, the session `context`
-  ## names; redrawn whole on each call.
+  ## names; redrawn whole on each call. Given its `heightPx`, the tab's
+  ## content scrolls as a region (`ChangesRegionKey`, its first pixel kept
+  ## by `scroll`), the keyboard's card or file brought into view when it
+  ## changes; without, it is clipped at the panel's foot.
+  scroll.beginDraw()
   r.clearChildren(host)
   r.styles(host, [("display", "flex"), ("flex-direction", "column"),
                   ("width", $widthPx & "px"), ("height", "100%"),
@@ -658,9 +792,9 @@ proc drawChangesPanel*(r: GpuiRenderer; host: GpuiElement; vm: ChangesVM; p: AhP
   r.tag(host, "state", stateName(vm.state.val))
   let ink = changesInboxInks(p.mode)
   let ready = vm.state.val == asReady
-  let head = r.drawSectionHeader(p, ChangesSectionLabel,
-                                 changesContextPhrase(context.sessionLabel),
-                                 if ready: vm.rollUp(context.ended) else: "", widthPx)
+  let source = changesContextPhrase(context.sessionLabel)
+  let rollUp = if ready: vm.rollUp(context.ended) else: ""
+  let head = r.drawSectionHeader(p, ChangesSectionLabel, source, rollUp, widthPx)
   r.tag(head, "head", "section header")
   r.appendChild(host, head)
   case vm.state.val
@@ -672,9 +806,11 @@ proc drawChangesPanel*(r: GpuiRenderer; host: GpuiElement; vm: ChangesVM; p: AhP
                                      proc() = target.restart()))
   of asReady:
     r.appendChild(host, r.drawTabBar(p, vm, widthPx))
+    var used = changesHeaderPx(source, rollUp, widthPx) + TabBarPx
     let tab = vm.activeTab.val
     if vm.hasPlan and tab != rtCode:
       r.appendChild(host, r.drawMilestoneSelector(p, vm))
+      used += ScopePx
     let list = r.box(column = true, pairs = [("flex-grow", "1"), ("min-height", "0px"),
                                              ("overflow", "hidden")])
     r.tag(list, "tab-shown", $tab)
@@ -682,15 +818,35 @@ proc drawChangesPanel*(r: GpuiRenderer; host: GpuiElement; vm: ChangesVM; p: AhP
     if notice.len > 0:
       r.appendChild(list, r.notice(p, notice, "empty"))
     else:
-      case tab
-      of rtSpecChanges: r.drawSpecChanges(p, ink, vm, list, widthPx)
-      of rtTests: r.drawTests(p, ink, vm, list, widthPx)
-      of rtImplementation: r.drawDetails(p, ink, vm, list)
-      of rtCode: r.drawCode(p, ink, vm, list, widthPx)
+      let parts = case tab
+        of rtSpecChanges: r.specParts(p, ink, vm, widthPx)
+        of rtTests: r.testParts(p, ink, vm, widthPx)
+        of rtImplementation: r.detailParts(p, ink, vm, widthPx)
+        of rtCode: r.codeParts(p, ink, vm, widthPx)
+      if heightPx > 0 and (tab != rtCode or vm.filesNotice.len == 0):
+        # The Code tab's head and toolbar stay; its file list scrolls (the
+        # web's `.ah-code-files` is the VCS panel's `vcs-file-list`, a
+        # scrolling list of its own). Every other tab scrolls whole.
+        var region = parts
+        if tab == rtCode:
+          region = @[]
+          for part in parts:
+            if part.key.len == 0 and region.len == 0:
+              r.appendChild(list, part.el)
+              used += part.heightPx
+            else: region.add part
+        r.appendChild(list, r.scrollWindow(scroll, ChangesRegionKey, region,
+                                           max(1, heightPx - used), vm.focus.val))
+      else:
+        for part in parts: r.appendChild(list, part.el)
+        if tab == rtCode and vm.filesNotice.len > 0: r.setStyle(list, "flex-grow", "1")
     r.appendChild(host, list)
 
 proc mountChangesPanel*(r: GpuiRenderer; host: GpuiElement; vm: ChangesVM; p: AhPalette;
-                        widthPx: int; context = AgentHarborChangesContext()) =
-  ## Draws the panel and redraws it whenever what it reads changes.
+                        widthPx: int; context = AgentHarborChangesContext(); heightPx = 0;
+                        scroll: P3Scroll = nil; redraw: Signal[int] = nil) =
+  ## Draws the panel and redraws it whenever what it reads changes (or the
+  ## host moves `redraw`, after a scroll).
   createRenderEffect proc() =
-    drawChangesPanel(r, host, vm, p, widthPx, context)
+    if redraw != nil: discard redraw.val
+    drawChangesPanel(r, host, vm, p, widthPx, context, heightPx, scroll)

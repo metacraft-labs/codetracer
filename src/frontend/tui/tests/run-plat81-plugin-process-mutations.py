@@ -88,6 +88,16 @@ RESERVED = "*::a plugin binding the palette key or the recovery chord is refused
 CHORD = "*::three Escapes pop a layer that binds Escape, and open the recovery dialog"
 LATCH = "*::half-open after the backoff; one strike reopens; the third opening latches until Re-enable"
 SEGV = "*::a plugin that segfaults on activation: blamed by name, siblings restarted at most 3 times"
+ECHO = "*::a plugin that writes to stdout does not break the protocol; what it wrote is in its log"
+T_HANG = "*::a timer that loops forever is attributed by the watchdog"
+T_RAISE = "*::a timer that raises is its plugin's error, and the process keeps running"
+A_HANG = "*::an async continuation that loops forever is attributed by the watchdog"
+A_RAISE = "*::an async continuation that raises is its plugin's error, and the process keeps running"
+RUN = "*::a declared program runs to completion; an undeclared one is refused by name"
+GROUP = "*::a program past its deadline is killed with its whole process group"
+SWEEP = "*::a loopback listener and a connection; deactivation closes them and kills what it started"
+PONG = "*::a pong never waits behind a frame the plugin is writing (measured)"
+INFLIGHT = "*::the chord landing while a routine ping is in flight still probes the plugin"
 
 ARMS = [
     ("M1", [(SUP, "  if p.kind == pkQuery and not samePosition(e, sup.epoch):",
@@ -152,6 +162,51 @@ ARMS = [
               "        of gsUndecided: discard")],
      [(CLITEST, C_WAIT)],
      "§11.6.5: ct plugins status reports a plugin waiting for consent as enabled"),
+    ("M16", [(LINK, "  if msg{\"type\"}.getStr(\"\") == \"ping\" and p.hasLiveness:",
+              "  if false:")],
+     [(HOST, PONG)],
+     "§11.4.1: a ping is queued behind the protocol's frames, not on the "
+     "liveness descriptor"),
+    ("M17", [(SDK, "          if c.pongLocked:", "          if true:")],
+     [(HOST, PONG)],
+     "§11.6.2: the pong waits for the frame lock the blocked main thread holds"),
+    ("M18", [(LINK, "                 (errPipe[1], cint(1)), (errPipe[1], cint(2))]",
+              "                 (outPipe[1], cint(1)), (errPipe[1], cint(2))]")],
+     [(HOST, ECHO)],
+     "§11.4.1: the child's stdout is the protocol; an echo is a protocol violation"),
+    ("M19", [(SDK, "      p.attributed(\"\"):\n        t.cb(p)",
+              "      t.cb(p)")],
+     [(HOST, T_RAISE)],
+     "§11.5: a timer is not attributed; its error ends the process"),
+    ("M20", [(SDK, "      let owner = currentOwner",
+              "      let owner: Plugin = nil")],
+     [(HOST, A_HANG), (HOST, A_RAISE)],
+     "§11.5: an async continuation runs with no owner: its hang and its "
+     "error name no plugin"),
+    ("M21", [(SDK, "    discard p.io.state.handles.closeAll(failures)",
+              "    discard")],
+     [(HOST, SWEEP)],
+     "§8.1.1: deactivation leaves the plugin's processes and sockets open"),
+    ("M22", [(SDK, "    closeProcess(child)      # SIGKILL to the group, reaped",
+              "    discard")],
+     [(HOST, GROUP)],
+     "§8.1: a program past its deadline is reported and left running"),
+    ("M23", [(SDK, "      if keep < r.data.len: run.truncated = true",
+              "      if keep < r.data.len: run.truncated = true\n"
+              "      run.output.setLen(0)")],
+     [(HOST, RUN)],
+     "§8.1: a program's output is not collected"),
+    ("M24", [(SDK, "  for p in sdk.plugins.values:\n    if not p.active or p.timers.len == 0:",
+              "  for p in sdk.plugins.values:\n    if true:")],
+     [(HOST, T_HANG)],
+     "§11.5: timers never run"),
+    ("M30", [(SUP, "      if chordSuspect: min(sup.chordProbeMs, sup.pingBusyMs)\n"
+                   "      elif waiting or inst.busy.len > 0: sup.pingBusyMs",
+              "      if chordSuspect: sup.pingBusyMs\n"
+                   "      elif waiting or inst.busy.len > 0: sup.pingBusyMs")],
+     [(HOST, INFLIGHT)],
+     "§11.7.6: a chord-suspect plugin is asked again only at the liveness "
+     "interval; a healthy one stays not responding while a ping was in flight"),
 ]
 
 

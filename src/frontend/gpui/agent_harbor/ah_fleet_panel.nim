@@ -25,6 +25,7 @@ from ../../viewmodel/views/agent_harbor_words import
 
 import ./ah_theme
 import ./ah_initiative_panels
+import ./ah_pie
 
 export fleet_vm, ah_theme
 
@@ -47,29 +48,19 @@ const
 type
   FleetGrid = object
     ## The wide panel's columns (`.ah-fleet-row` / `.ah-fleet-columns`,
-    ## a grid): the dot, then the session at two shares of the free width,
-    ## agent, host and (when any row has one) initiative at one share each,
-    ## then duration (5rem) and active (4rem), 8px apart -- measured in the
-    ## browser at 1440px: 8, 486, 243, 243, 243, 80, 64. Fluid, so a wider
-    ## window widens every share.
+    ## a grid): the progress pie (`PieLinePx`, 12px), then the session at
+    ## two shares of the free width, agent, host and (when any row has one)
+    ## initiative at one share each, then duration (5rem) and active
+    ## (4rem), 8px apart. Fluid, so a wider window widens every share.
     session, share: int
 
 proc fleetGrid(widthPx: int; anyInitiative: bool): FleetGrid =
   let shares = if anyInitiative: 5 else: 4
   let columns = if anyInitiative: 7 else: 6
-  let free = widthPx - 2 * InsetPx - MarkPx - DurationColumnPx - WideAgeColumnPx -
+  let free = widthPx - 2 * InsetPx - PieLinePx - DurationColumnPx - WideAgeColumnPx -
              GridGapPx * (columns - 1)
   let share = max(0, free) div shares
   FleetGrid(session: 2 * share, share: share)
-
-proc markOf(p: AhPalette; category: FleetCategory): MarkStyle =
-  ## The row's status dot (`.ah-fleet-cat-*`), in the sessions' status roles.
-  case category
-  of fcNeedsInput: MarkStyle(colour: p.iconWarning)
-  of fcRunning: MarkStyle(colour: p.iconSuccess)
-  of fcQueued: MarkStyle(colour: p.iconInfo)
-  of fcFailed: MarkStyle(colour: p.iconError)
-  of fcEnded: MarkStyle(colour: p.endedMark)
 
 proc statusColour(p: AhPalette; category: FleetCategory): string =
   ## The status word (`.ah-fleet-status-label`): the label role, or the
@@ -151,8 +142,12 @@ proc drawRow(r: GpuiRenderer; p: AhPalette; vm: FleetSnapshotVM; row: FleetRow;
   r.tag(result, "selected", $row.selected)
   r.tag(result, "expanded", $row.expanded)
   r.addEventListener(result, "click", proc() = vm.select(id))
+  # The row's progress pie (CTF-P1d), read from the viewmodel
+  # (`FleetRow.pie`), on the panel's ground; on the selected row's action
+  # surface it keeps that ground as a plate (`.ah-fleet-row-selected
+  # .ah-fleet-pie`).
   let markHolder = r.box(pairs = [("height", "20px"), ("items", "center")])
-  r.appendChild(markHolder, r.mark(p.markOf(row.category)))
+  r.appendChild(markHolder, r.drawPie(p, row.pie, p.panel, PieLinePx, plate = sel))
   r.appendChild(result, markHolder)
   # Every line of the row is 16px (`.ah-fleet-row-title`, `-meta`,
   # `-failure`, `.ah-fleet-activity-line`), 2px apart, so a row is as tall as
@@ -307,7 +302,7 @@ proc drawFleetPanel*(r: GpuiRenderer; host: GpuiElement; vm: FleetSnapshotVM;
   if columns:
     # `.ah-fleet-columns`: 24px names, 4px by 8px in, over a hairline.
     let names = r.box(pairs = [("gap", $GridGapPx & "px"), ("items", "center"), ("height", "33px"),
-                               ("padding-left", $(InsetPx + MarkPx + GridGapPx) & "px"),
+                               ("padding-left", $(InsetPx + PieLinePx + GridGapPx) & "px"),
                                ("padding-right", $InsetPx & "px"), ("flex-shrink", "0")])
     r.rule(names, p.borderSecondary)
     r.tag(names, "columns", "")

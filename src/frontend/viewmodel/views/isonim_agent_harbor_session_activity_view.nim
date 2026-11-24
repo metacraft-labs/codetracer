@@ -30,6 +30,12 @@
 ##   timeline's own lines (P2c study D23, D55). The timeline's own lines are
 ##   not changed by it.
 ##
+## An agent's message with links (`LinePart.links`) is drawn, when the host
+## gives a link renderer (`linkPart`, the trace-link view's
+## `renderLinkedPart`), as its parts with the links in them: a trace with its
+## Load trace button, a recording, a web link, a file. The line's text, its
+## copy and its facts are what they are without links.
+##
 ## Every line carries its facts (`lineFacts`, `data-ah-*`), so the host
 ## tests read the same facts in every host.
 ##
@@ -106,7 +112,8 @@ proc renderPart[R](r: R; part: LinePart; cut: bool): auto =
       span(class = "ah-activity-part " & roleClass(part.role)):
         text part.text
 
-proc renderLine[R, N](r: R; line: TimelineLine): N =
+proc renderLine[R, N](r: R; line: TimelineLine;
+                     linkPart: proc(part: LinePart): N = nil): N =
   let id = line.id
   var glyph, body: N
   let node = ui(r):
@@ -126,7 +133,19 @@ proc renderLine[R, N](r: R; line: TimelineLine): N =
       span(class = (if line.glyph.len > 0: "ah-activity-mark" else: "ah-activity-turn-mark")):
         text mark
     r.appendRendered(glyph, g)
-  if line.isProse:
+  if line.isProse and linkPart != nil and line.hasLinks:
+    # An agent's message with links: each part drawn by the host's link
+    # renderer (`agent_harbor_trace_links_view.renderLinkedPart`), the parts
+    # joined by the spaces `line.text` joins them with, so the line reads as
+    # the same text.
+    for i, part in line.parts:
+      if i > 0:
+        let gap = ui(r):
+          span(class = "ah-activity-part " & roleClass(line.textRole)):
+            text " "
+        r.appendRendered(body, gap)
+      r.appendRendered(body, linkPart(part))
+  elif line.isProse:
     let prose = ui(r):
       span(class = "ah-activity-part " & roleClass(line.textRole)):
         text line.text
@@ -290,9 +309,14 @@ when defined(js):
     })(#, #, #, #, #, #)""".}
 
 proc renderAgentHarborSessionActivity*[R, N](r: R; vm: SessionTimelineVM;
-                                            tail: SuggestedActionsVM = nil): N =
+                                            tail: SuggestedActionsVM = nil;
+                                            linkPart: proc(part: LinePart): N = nil): N =
   ## The timeline, for every renderer, and the suggested-actions block
   ## `tail` gives, if any. The body is rebuilt whenever what it shows moves.
+  ## `linkPart`, when the host gives one, draws a part of an agent's message
+  ## that holds links (`LinePart.links`: traces, recordings, web links,
+  ## files) with them (`agent_harbor_trace_links_view.renderLinkedPart`);
+  ## without it such a line is drawn as its plain text.
   mixin clearChildren, setAttribute
   var body: N
   let panel = ui(r):
@@ -352,7 +376,7 @@ proc renderAgentHarborSessionActivity*[R, N](r: R; vm: SessionTimelineVM;
       tdiv(ref = list, class = "ah-activity-lines", tabindex = "0",
            `data-ah-lines` = $lines.len)
     for line in lines:
-      r.appendRendered(list, renderLine[R, N](r, line))
+      r.appendRendered(list, renderLine[R, N](r, line, linkPart))
     r.appendRendered(body, listNode)
     if vm.showsUnseenChip:
       let chip = ui(r):
@@ -383,9 +407,11 @@ when defined(js):
 
   proc mountAgentHarborSessionActivityPanel*(container: isonim_dom.Element;
                                              vm: SessionTimelineVM;
-                                             tail: SuggestedActionsVM = nil) =
+                                             tail: SuggestedActionsVM = nil;
+                                             linkPart: proc(part: LinePart): isonim_dom.Element = nil) =
     ## The timeline in `container`, for the browser, with the
-    ## suggested-actions block `tail` gives, if any.
+    ## suggested-actions block `tail` gives, if any, and the links of its
+    ## agents' messages drawn by `linkPart`, if given.
     discard isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(
       renderAgentHarborSessionActivity[WebRenderer, isonim_dom.Element](WebRenderer(), vm,
-                                                                         tail)))
+                                                                         tail, linkPart)))

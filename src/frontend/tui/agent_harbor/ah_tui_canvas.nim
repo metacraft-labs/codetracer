@@ -68,6 +68,16 @@ import ../../viewmodel/views/agent_harbor_palette
 
 export styled_row, agent_harbor_palette, data_source, viewmodel
 
+type
+  PieCellKind* = enum
+    ## What a one-cell pie must tell apart in every glyph tier, whatever the
+    ## tier's glyphs: nothing done, some done, all done, and progress not
+    ## known (`pieCellKind`).
+    pckEmpty = "empty"
+    pckPartial = "partial"
+    pckFull = "full"
+    pckUnknown = "unknown"
+
 const
   CellPx* = 8
     ## One terminal column in CSS pixels (the brief's sizes: 1440 px = 180
@@ -87,13 +97,19 @@ const
     ## ◌ (U+25CC, dotted circle): no known progress on the extended screen,
     ## so it never reads as 0 % (○); the glyph table's extended set has it
     ## (`grShellWorking`).
-  PieBasicGlyphs* = ["\xE2\x97\x8B", "\xE2\x97\x8F"]
-    ## The `basic` tier's two: ○ for no progress drawn, ● for any. WGL4 (the
-    ## basic tier's set) carries these two and none of ◔ ◑ ◕.
-  PieAsciiGlyphs* = ["o", "*"]
-    ## The `ascii` tier's two, and the ambiguous-wide screen's, where the
-    ## circles (East Asian Width `A`) take two cells: the glyph table's
-    ## spelling of ○ and ● there (`grBreakpointDisabled`, `grBreakpoint`).
+  PieBasicGlyphs*: array[PieCellKind, string] = ["\xE2\x97\x8B", "\xC2\xBD",
+                                                 "\xE2\x97\x8F", "?"]
+    ## The `basic` tier's four, one per kind (`pieCellKind`): ○ none done,
+    ## ½ (U+00BD) some done but not all, ● all done, `?` progress not known.
+    ## The tier is WGL4 (its code points: https://en.wikipedia.org/wiki/WGL4),
+    ## which carries ○, ●, ½ (all of Latin-1) and `?`, and none of ◔ ◑ ◕ ◌: so a
+    ## session part done never reads as finished, and one whose progress is
+    ## not known never reads as not started.
+  PieAsciiGlyphs*: array[PieCellKind, string] = ["o", "+", "*", "?"]
+    ## The `ascii` tier's four, and the ambiguous-wide screen's, where the
+    ## circles (East Asian Width `A`) take two cells: `o` and `*` are the
+    ## glyph table's spelling of ○ and ● there (`grBreakpointDisabled`,
+    ## `grBreakpoint`), `+` some done, `?` not known.
   FoldedGlyph* = "\xE2\x96\xB8"  ## ▸ (what expands)
   UnfoldedGlyph* = "\xE2\x96\xBE" ## ▾
   BarGlyph* = "\xE2\x96\x8E"     ## ▎ an inset bar down a row's left edge
@@ -639,31 +655,42 @@ proc mark*(c: var AhCanvas; parent: AhNode; row, col: int; m: MarkStyle): AhNode
   c.node(parent, row, col, 1, 1,
          [("mark", if m.ring: "ring:" & m.colour else: m.colour)])
 
+proc pieCellKind*(pie: ProgressPie): PieCellKind =
+  ## Which of the four a pie is: not known; nothing done (0 %); everything
+  ## done (100 %); else some done, however little or however nearly all.
+  if not pie.known: pckUnknown
+  elif pie.done <= 0: pckEmpty
+  elif pie.done >= pie.total: pckFull
+  else: pckPartial
+
 proc pieQuarter*(pie: ProgressPie): int =
-  ## The quarters of a pie's disc its one-cell glyph fills, 0 to 4: the
-  ## share rounded to the nearest quarter (under 12.5 % none, from 87.5 %
-  ## all). A pie with no known progress fills none, as at 0 %: the glyph
-  ## alone cannot tell them apart; its words (`label`) do.
-  if not pie.known: 0
-  else: clamp(int(floor(pie.fraction * 4.0 + 0.5)), 0, 4)
+  ## The quarters of a pie's disc its extended-tier glyph fills, 0 to 4: the
+  ## share rounded to the nearest quarter, except that a pie part done
+  ## fills at least one quarter and at most three, so 5 % does not read as
+  ## not started (○) and 95 % does not read as done (●). A pie with no
+  ## known progress fills none; its glyph is ◌, not a quarter.
+  case pie.pieCellKind
+  of pckUnknown, pckEmpty: 0
+  of pckFull: 4
+  of pckPartial: clamp(int(floor(pie.fraction * 4.0 + 0.5)), 1, 3)
 
 proc pieGlyph*(pie: ProgressPie; glyphs: GlyphProfile = DefaultGlyphs): string =
   ## The pie as one cell, by the terminal's glyph tier: the extended
-  ## screen's quarters (`PieGlyphs`), and ◌ for no known progress
-  ## (`PieUnknownGlyph`); on the `basic` tier ○ or ● (none, or any
-  ## quarter), and ○ for no known progress, WGL4 having no ◌; on the `ascii`
-  ## tier and where the circles are two cells wide (`ambiguousWide`), `o` or
-  ## `*`. Where the glyph cannot tell unknown from none, the words can
-  ## (`pieText`, the label: "progress unknown").
-  let q = pie.pieQuarter
+  ## screen's quarters (`PieGlyphs`, by `pieQuarter`), and ◌ for no known
+  ## progress (`PieUnknownGlyph`); on the `basic` tier ○ ½ ● ?
+  ## (`PieBasicGlyphs`), and on the `ascii` tier and where the circles are
+  ## two cells wide (`ambiguousWide`) `o + * ?` (`PieAsciiGlyphs`). Every
+  ## tier tells the four kinds apart (`pieCellKind`): none, some, all and
+  ## not known.
+  let kind = pie.pieCellKind
   if glyphs.tier == tierAscii or glyphs.ambiguousWide:
-    PieAsciiGlyphs[min(q, 1)]
+    PieAsciiGlyphs[kind]
   elif glyphs.tier == tierBasic:
-    PieBasicGlyphs[min(q, 1)]
-  elif not pie.known:
+    PieBasicGlyphs[kind]
+  elif kind == pckUnknown:
     PieUnknownGlyph
   else:
-    PieGlyphs[q]
+    PieGlyphs[pie.pieQuarter]
 
 proc pieText*(pie: ProgressPie; glyphs: GlyphProfile = DefaultGlyphs): string =
   ## What the terminal shows for a pie: its glyph, or in the screen-reader

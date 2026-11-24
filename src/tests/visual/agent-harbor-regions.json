@@ -107,7 +107,10 @@
     "rows and the Previous / Next group are compared in pixels too (`px`): a",
     "row a few pixels taller than the web's drifts the whole list. The item's",
     "head counts only inside its page (`within`): GPUI tags the session activity",
-    "timeline's lines with `data-ah-item-kind` too.",
+    "timeline's lines with `data-ah-item-kind` too. The page head's priority",
+    "dropdown (`priority-menu`) is compared in pixels across (`x`, `w`): it keeps",
+    "the page's inset at every width rather than running to the panel's edge",
+    "(CTF-P3 step 3d).",
     "",
     "The control center (CTF-P2c step 4) adds its two columns (`cc-launch`,",
     "`cc-overview`; one under the other at the sidebar size), the first waiting",
@@ -122,7 +125,10 @@
     "is the story's whole window (`.ah-pie-story`); `pie-first` is the first pie",
     "drawn (the window band's needs-input row at 0 %) and `pie-band-menu` the last",
     "band, each compared in pixels too (`px`): a pie a pixel larger, or a row a",
-    "pixel taller, moves every pie below it. `pie-head-100` and `pie-head-unknown`",
+    "pixel taller, moves every pie below it. `pie-first` is taken only `within`",
+    "the story's window, so the pies the other stories draw at their tabs, lines",
+    "and rows are not compared in pixels by it: each of those is held by its own",
+    "story's regions. `pie-head-100` and `pie-head-unknown`",
     "are the words of the last two columns' heads, the pair that crowds first:",
     "each is centred over its column's pies, and their x and width are compared",
     "in pixels.",
@@ -917,10 +923,27 @@
       }
     },
     {
+      "name": "priority-menu",
+      "web": ".ah-item-page .ah-priority-select",
+      "gpui": {
+        "data-ah-priority-menu": ""
+      },
+      "px": [
+        "x",
+        "w"
+      ]
+    },
+    {
       "name": "pie-first",
       "web": ".ah-pie",
       "gpui": {
         "data-ah-pie": ""
+      },
+      "within": {
+        "web": ".ah-pie-story",
+        "gpui": {
+          "data-ah-surface": "agent-harbor-pie"
+        }
       },
       "px": [
         "x",

@@ -96,6 +96,9 @@ import ./process_link
 
 export protocol.PluginBinding, protocol.Epoch
 
+const ChordProbeIntervalMs* = 200
+  ## `Supervisor.chordProbeMs`'s default.
+
 type
   BreakerState* = enum
     bsClosed = "closed"
@@ -257,6 +260,9 @@ type
     registered*: seq[string]
     lastPingMs: int64
     pingOutstanding: bool
+    bytesAtPing: int
+      ## `link.bytesRead` when the outstanding ping was sent (or when the
+      ## deadline last restarted on received bytes).
     pingSeq: int
     pongs*: int
       ## Pongs received over this instance's life, for the report and the
@@ -335,6 +341,10 @@ type
     helloDeadlineMs*: int
     pingIdleMs*: int
     pingBusyMs*: int
+    chordProbeMs*: int
+      ## How often a process is asked again while the recovery chord alone
+      ## makes one of its plugins suspect (§11.7.6). Short: its pong is what
+      ## gives a healthy plugin its keys back.
     pongDeadlineMs*: int
     busyHangMs*: int
     ackBudgetMs*: int
@@ -391,7 +401,8 @@ proc newSupervisor*(frontEnd: string; version = "0.0.0";
     rng: initRand(0x5eed),
     reservedKeys: @["ctrl+shift+p"],
     helloDeadlineMs: HelloDeadlineMs, pingIdleMs: PingIdleIntervalMs,
-    pingBusyMs: PingBusyIntervalMs, pongDeadlineMs: PongDeadlineMs,
+    pingBusyMs: PingBusyIntervalMs, chordProbeMs: ChordProbeIntervalMs,
+    pongDeadlineMs: PongDeadlineMs,
     busyHangMs: BusyHangMs, ackBudgetMs: AckBudgetMs,
     inputDeadlineMs: InputDeadlineMs, strikeWindowMs: 60_000,
     strikesToOpen: 3, breakerBackoffMs: 30_000,
@@ -518,6 +529,7 @@ proc sendPing(inst: Instance; t: int64) =
   inc inst.pingSeq
   inst.pingOutstanding = true
   inst.lastPingMs = t
+  inst.bytesAtPing = inst.link.bytesRead
   inst.sendTo(%*{"type": "ping", "seq": inst.pingSeq})
 
 proc broadcastState(sup: Supervisor; msg: JsonNode) =
@@ -712,6 +724,10 @@ proc startInstance(sup: Supervisor; inst: Instance) =
   inst.startedMs = sup.now()
   inst.lastPingMs = inst.startedMs
   sup.note("start " & inst.label & " pid " & $inst.link.pid)
+  if inst.link.launchNote.len > 0:
+    # The host's own departure from §11.8 (on Node: no usable `setpriv`, so
+    # no PR_SET_PDEATHSIG). Logged, never a fault: no plugin caused it.
+    sup.note(inst.label & ": " & inst.link.launchNote)
   inst.sendTo(hostHello(sup.version, sup.frontEnd, sup.platform))
 
 proc sendActivate(sup: Supervisor; s: PluginSlot) =
@@ -725,7 +741,19 @@ proc sendActivate(sup: Supervisor; s: PluginSlot) =
   # A fresh activation answers for itself: what it pushes while activating
   # (its layers among them) is not refused for an earlier silence.
   s.clearSuspect()
+  # The declared sets travel with the grants, so the SDK's process and
+  # socket primitives resolve a program, a host or a path against what the
+  # manifest declared (§8.1.1), in the plugin's own process.
+  let g = s.spec.parsed.manifest.grants
+  var hosts = newJArray()
+  for h in g.hosts:
+    hosts.add %*{"host": h.host, "port": h.port}
+  let declared = %*{"executables": g.executables, "hosts": hosts,
+                    "readPaths": g.readPaths, "writePaths": g.writePaths,
+                    "traceEgress": {"acknowledged": g.traceEgress.acknowledged,
+                                    "statement": g.traceEgress.statement}}
   inst.sendTo(%*{"type": "activate", "plugin": s.id, "grants": grants,
+                 "declared": declared,
                  "settings": s.settings, "epoch": sup.epoch.toJson})
   if not sup.publisher.isNil:
     var snap = sup.publisher.snapshot()
@@ -1343,9 +1371,20 @@ proc pollInstance(sup: Supervisor; inst: Instance) =
   inst.link.flushWrites()
   for frame in inst.link.readMessages():
     var msg: JsonNode
-    try:
-      msg = parseJson(frame)
-    except CatchableError:
+    var notJson = false
+    when defined(js):
+      # Node's `JSON.parse` throws a native `SyntaxError`, which is not a
+      # Nim `CatchableError`: only a bare `except` catches it.
+      try:
+        msg = parseJson(frame)
+      except:
+        notJson = true
+    else:
+      try:
+        msg = parseJson(frame)
+      except CatchableError:
+        notJson = true
+    if notJson:
       sup.killForFault(inst, fkProtocol, "", "a frame that is not JSON")
       break
     sup.handleMessage(inst, msg)
@@ -1411,21 +1450,35 @@ proc pollInstance(sup: Supervisor; inst: Instance) =
          sup.slots[p.plugin].instance == inst:
         waiting = true
     # A plugin the recovery chord made suspect is waiting for a pong to
-    # clear it. When the chord found a ping already outstanding (sent before
-    # it, so its pong cannot clear it), the next one goes out at the busy
-    # interval rather than the idle one.
+    # clear it, and only an idle answer to a ping sent after the chord does.
+    # So while one is suspect the process is asked again every
+    # `chordProbeMs`, not at the liveness interval: the chord may have found
+    # a ping already in flight (its pong cannot clear the plugin), or the
+    # probe's pong may name a handler still running. Waiting for the next
+    # liveness ping instead left a healthy plugin "not responding" for up to
+    # `pingBusyMs` (1 run in 3 of the chord case at load ~100).
     var chordSuspect = false
     for s in inst.slotsOf(sup):
       if s.suspect and s.suspectByChord:
         chordSuspect = true
     let interval =
-      if waiting or inst.busy.len > 0 or chordSuspect: sup.pingBusyMs
+      if chordSuspect: min(sup.chordProbeMs, sup.pingBusyMs)
+      elif waiting or inst.busy.len > 0: sup.pingBusyMs
       else: sup.pingIdleMs
     if inst.pingOutstanding:
       if t - inst.lastPingMs > sup.pongDeadlineMs:
-        sup.killForFault(inst, fkHang, "", "its watchdog did not answer a " &
-                         "ping within " & $sup.pongDeadlineMs & " ms")
-        return
+        if inst.link.bytesRead > inst.bytesAtPing:
+          # STILL DELIVERING, SO ANSWERING. The `pong` can queue behind a
+          # large frame the plugin is writing into a full pipe: at load
+          # 120-165 a healthy plugin was called hung this way. Bytes that
+          # arrived since the ping are progress; the deadline restarts from
+          # them, and a process that then goes silent is still hung.
+          inst.lastPingMs = t
+          inst.bytesAtPing = inst.link.bytesRead
+        else:
+          sup.killForFault(inst, fkHang, "", "its watchdog did not answer a " &
+                           "ping within " & $sup.pongDeadlineMs & " ms")
+          return
     elif t - inst.lastPingMs >= interval:
       inst.sendPing(t)
   inst.link.flushWrites()
@@ -1819,8 +1872,8 @@ proc observeEscape*(sup: Supervisor): bool {.discardable.} =
         s.suspectAfterPing =
           if s.instance.isNil: 0 else: s.instance.pingSeq
   # Probe each affected process now. One whose ping is already outstanding
-  # was pinged before the chord; the liveness loop sends the next at the busy
-  # interval while any of its plugins is suspect by the chord.
+  # was pinged before the chord; the liveness loop asks again every
+  # `chordProbeMs` while any of its plugins is suspect by the chord.
   for s in sup.slots.values:
     let inst = s.instance
     if s.suspect and s.suspectByChord and s.id in sup.recoveryPlugins and

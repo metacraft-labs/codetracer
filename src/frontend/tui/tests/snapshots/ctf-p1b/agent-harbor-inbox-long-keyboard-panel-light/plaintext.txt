@@ -33,7 +33,7 @@
    Waiting 80 minutes.                                                                        █
  31 of 40 · Waiting 62 minutes.                                                               █
                                                                                               █
- ● NEEDS YOUR ANSWER  Invented session 31                                        Priority… ▾  █
+ ● NEEDS YOUR ANSWER  Invented session 31                                         Priority ▾  █
                                                                                               █
  ● Agent has stopped and is waiting for your answer                                           █
                                                                                               ▆

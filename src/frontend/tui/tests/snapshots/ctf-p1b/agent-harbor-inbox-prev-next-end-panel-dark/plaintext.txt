@@ -18,7 +18,7 @@
 ▎  Low priority; draft ready.
  5 of 5 · Low priority; draft ready.
                                                                                                
- ● ASKS FOR FEEDBACK  Write the release notes                                     Priority… ▾
+ ● ASKS FOR FEEDBACK  Write the release notes                                      Priority ▾
                                                                                                
  Which changes belong in the highlights?
                                                                                                

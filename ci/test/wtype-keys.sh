@@ -15,6 +15,22 @@
 # So each call PRIMES the new keyboard (Shift pressed and released: no text, no
 # motion in any keymap) and then waits before the caller's keys.
 #
+# WHY THE KEY IS LOST (measured 2026-11-22, WAYLAND_DEBUG=client on a real GPUI
+# window): the headless sway has no keyboard of its own, so a `wtype` call
+# HOT-PLUGS the seat's only keyboard. The client has a `wl_keyboard` to receive
+# keys on only after it has read the seat's new capability and answered with
+# `wl_seat.get_keyboard`; a key sent before that reaches no one, and when
+# `wtype` exits the capability goes and the next call starts over. A window too
+# busy to read its socket for the lead therefore loses the call's keys whatever
+# the priming: a window SIGSTOPped across one call lost its key 3 times of 3.
+# A user's keyboard stays plugged in, so this is the injection's artefact, not
+# the window's. The cure is to HOLD a keyboard for the whole run (`wtype -s
+# 3600000` in the background, which creates its virtual keyboard and sleeps):
+# with one held, the same stalled window received its key 3 times of 3, because
+# the key waits in its socket. `ci/test/gpui_plugins_window.py` does that
+# (`hold_keyboard`). Not done here: a per-call script cannot hold one across
+# calls, and plat38's oracle counts the keyboard's own events.
+#
 #   WTYPE_LEAD_MS  the wait after the priming, before the keys (default 500)
 #   WTYPE_PRIME=0  no Shift priming: for a lane whose oracle counts the
 #                  modifier events themselves (plat38's delivery sequence)

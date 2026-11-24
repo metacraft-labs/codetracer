@@ -16,9 +16,9 @@
 # Refreshed with --record-control-hashes, which the needle scan GATES (§16):
 # re-recording from a tree whose arms have stopped matching certifies the arms
 # along with the bytes.
-27c38086df7cebe1d7bc4df208fa4540c40f407d6820740857a9ba7bf97d6016  src/frontend/gpui/app/dock_projection.nim
-a9552e68369b3bcf30263e986c7563b2770d0dd974bc196c8280d80fc29cf2bb  src/frontend/gpui/app/shell.nim
-4d6f23582e69908a7dfc350d3ae6e3223887410703a23389aebe5396c6020c49  src/frontend/gpui/app/leaves.nim
+f4998d738cb3713af13a6925b305689bc8c94c58dd21da84aade7b4830ceee2f  src/frontend/gpui/app/dock_projection.nim
+b632fc2203960410939c43373a48c225e54816129f2d61d746b77593b76222b0  src/frontend/gpui/app/shell.nim
+0f037c56269e3ad51c084fc0e545fcd851102cfa91ce32ed2507b9995f372f42  src/frontend/gpui/app/leaves.nim
 17936a2eb728f155e928a4c892a979829cfa9a7dec7dc6cbff3299d03076496e  src/frontend/headless_app/extent_distribution.nim
 ff398d15c8fab2de97cacf4d917b9d20bdf5c36b967ab0dfa036b1c79010f900  src/ct/ui_selection.nim
 2ccbf371ada562a14c0692f64d2afc84190949d0a8d25e8494452e3150cd8fce  src/ct/launch/ui_dispatch.nim

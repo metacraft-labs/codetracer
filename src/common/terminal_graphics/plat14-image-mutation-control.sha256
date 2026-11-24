@@ -23,5 +23,5 @@
 a7007e26619374fe6e5678edd26f33035d278592559268e3ceeaa7888ba97c49  src/common/terminal_graphics/emit.nim
 230e8df49ba6f719fe1d6e7669e4ed81f7042cfd3c29e33b25d1acc753c71996  src/frontend/tui/app/theme/image_capability.nim
 85ad9cdbe1122b50134e9f59944213c901a084b9d8315cbd180ab632aef53fe1  src/common/terminal_graphics/media.nim
-139675c9de802f77500f70b23626de5611908814843eac5ec2edcd78bdf139e6  src/frontend/tui/app/cli.nim
+d3327df7945cbf8d56a24efac2a5c695c80e7d65c8c1fe76fa4f1c2913bb4e17  src/frontend/tui/app/cli.nim
 22ec0234032fe585664a75f162911778bc3bb278e2881785d00f7f118ce217b1  src/common/png.nim

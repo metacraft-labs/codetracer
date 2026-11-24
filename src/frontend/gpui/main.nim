@@ -718,7 +718,7 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
         # the copy nothing exercised was the wrong one. The op is now driven
         # by `test_plat48_gpui_plan.nim`, so an arm added to one and not the
         # other reddens by name instead of being discovered by hand.
-        if head notin ["key", "press", "contextmenu", "move", "release", "menu", "control",
+        if head notin ["key", "press", "contextmenu", "move", "release", "menu", "control",  # ir1-gate: not a key (`--window-ops` op names)
                        "label", "pin", "unpin", "drag", "hold",
                        "hover-label", "wait", "tab", "tab-close",
                        "tab-add", "hwheel", "swheel", "hbar", "click",
@@ -1769,6 +1769,12 @@ var
     ## The last status report the gesture trace was given, one line.
   gPluginsFooter = ""
     ## And the last footer note.
+  gPluginPanes: PluginPanes = nil
+    ## The plugins' panes as the window acts on them: a focused plugin pane's
+    ## keys sent as `view-event`s (`routePaneKey`), and the editor's plugin
+    ## decorations and markers (`editorPluginMarks`).
+  gPluginMarksTraced = ""
+    ## The last `plugin marks` line the gesture trace was given.
   gPluginRecoveryKey = false
     ## The key being handled is the recovery chord's third `Escape`: it is
     ## delivered as usual but never to a plugin layer (`routeWindowKey`).
@@ -1777,6 +1783,34 @@ proc pluginPanes(): HashSet[string] =
   ## The contributed panes this window can draw (`leavesFor`'s
   ## `loadedExtensions`).
   gPlugins.loadedPanes
+
+proc editorPluginMarks(path: string): seq[EditorPluginMark] =
+  ## §11.4.4: the running plugins' decorations and declared markers for the
+  ## file the editor shows (`gpui_plugins.editorDecorations` /
+  ## `editorMarkers`), as the editor surface carries them; the gesture trace
+  ## is told when they change.
+  if gPluginPanes.isNil or path.len == 0:
+    return
+  for d in gPluginPanes.editorDecorations(path):
+    result.add EditorPluginMark(line: d.line, glyph: d.glyph, text: d.text,
+                                plugin: d.plugin, gutter: false)
+  for m in gPluginPanes.editorMarkers(path):
+    result.add EditorPluginMark(line: m.line, glyph: m.glyph, text: m.text,
+                                plugin: m.plugin, gutter: true)
+  var parts: seq[string]
+  for m in result:
+    parts.add (if m.gutter: "marker " else: "decoration ") & $m.line & " " &
+              m.glyph & " " & m.text & " (" & m.plugin & ")"
+  let line = path.extractFilename & ": " & parts.join(" | ")
+  if line != gPluginMarksTraced:
+    gPluginMarksTraced = line
+    traceGesture("plugin marks " & line)
+
+proc footerLineNote(): string =
+  ## A plugin's decoration on the execution line, for the footer.
+  if gPluginPanes.isNil: ""
+  else: gPluginPanes.lineDecorationNote(gEditorSurface.path,
+                                        gEditorSurface.executionLine)
 
 proc pluginView(leaf: GpuiLeaf): ViewNode =
   ## A contributed leaf's view: the tree its plugin last pushed
@@ -1799,7 +1833,7 @@ proc tracePluginsState() =
   if line != gPluginsState:
     gPluginsState = line
     traceGesture("plugins state " & line)
-  let footer = gPlugins.windowFooterNote(gStatusNote)
+  let footer = gPlugins.windowFooterNote(gStatusNote, footerLineNote())
   if footer != gPluginsFooter:
     gPluginsFooter = footer
     traceGesture("plugins footer " & footer)
@@ -2924,6 +2958,7 @@ proc drawEditorBody(r: GpuiRenderer; pane: GpuiElement;
         for row in rows:
           if row.line == line: return row.text
         "")
+  gEditorSurface.pluginMarks = editorPluginMarks(gEditorSurface.path)
   discard renderEditor(r, pane, sourcePaneView(GpuiMedium).root,
                        gEditorSurface, gEditorViewportPx, gEditorView.leftCol,
                        gEditorView.contentCols, editorCaretMark(),
@@ -5613,7 +5648,7 @@ proc drawFooter(r: GpuiRenderer) =
                else: copyPathRect().x - 8
   # Extensibility-Model §11.7.3: the top plugin layer names its plugin here,
   # before the note; with no note, the plugins' status items.
-  let footerNote = gPlugins.windowFooterNote(gStatusNote)
+  let footerNote = gPlugins.windowFooterNote(gStatusNote, footerLineNote())
   let noteNeed = if footerNote.len > 0: groteskTextPx(footerNote, 14.0) + 8
                  else: 0
   let fit = if footerNote.len > 0:
@@ -7369,6 +7404,10 @@ proc pumpPluginsWindow(r: GpuiRenderer): bool =
   tracePluginsState()
   if changed:
     redrawPluginPanes(r)
+    # A plugin's decorations and markers moved (a stop, a disable): the
+    # editor's rows are drawn again from the surface that carries them.
+    if editorPluginMarks(gEditorSurface.path) != gEditorSurface.pluginMarks:
+      redrawEditorRows(r)
     drawTopBar(r)
   changed
 
@@ -7394,7 +7433,7 @@ proc dockPluginPane(r: GpuiRenderer; id: string) =
     var title = id
     for pane in gPlugins.pluginPanesShown:
       if pane.id == id: title = pane.title
-    applyGestureCommand(r, cmdAddContributedPane(id, title))
+    applyGestureCommand(r, committedLayout().tree.pluginPaneCommand(id, title))
     discard drawArrangement(r)
   redrawPluginPanes(r)
   focusWindowPane(r, id)
@@ -13880,10 +13919,18 @@ proc routeWindowKey(r: GpuiRenderer; key: string; mods: seq[string]) =
   # in flight — closes it BEFORE the key is routed; it never reaches the
   # focused editor (whose Vim layer would take it as "back to normal mode"
   # and leave the revealed pane standing).
-  if name == "Esc" and (gGestures.active or gGestures.revealing) and
-     cancelWindowGesture():
-    traceGesture("dismissed by Esc")
-    return
+  # The router decides which key that is, with the gesture's layer pushed
+  # (`syncOverlayLayers`): `Esc`, or the key the user bound
+  # `layout.cancel-drag` to, as in an Edit window (`editDismissalRoutes`).
+  if gGestures.active or gGestures.revealing:
+    syncOverlayLayers()
+    var probe = gRouter
+    let res = probe.route(windowSessionFacts(), windowScopePath(), nmNormal,
+                          name, int64(epochTime() * 1000))
+    if res.kind == erOperation and res.operation == "layout.cancel-drag" and
+       cancelWindowGesture():
+      traceGesture("dismissed by " & name)
+      return
   let nowMs = int64(epochTime() * 1000)
   # The user's file changed since it loaded: the key resolves under the new
   # rows (the window's loop has no frame hook of its own to poll from).
@@ -13906,6 +13953,15 @@ proc routeWindowKey(r: GpuiRenderer; key: string; mods: seq[string]) =
       traceGesture("plugin key " & name)
       drawTopBar(r)
       return
+  # §11.4.4: A FOCUSED PLUGIN PANE'S VIEW takes the keys its vocabulary entry
+  # reads (a list's arrows and Enter, a checkbox's Space): the entry's own key
+  # handling runs on the tree the plugin pushed and the plugin is sent the
+  # `view-event`; its answer is a new tree, drawn when it arrives. Every other
+  # key is the window's. Not while a window-owned surface takes the keys.
+  if not gPluginPanes.isNil and not gOmnibar.isOpen and not gContent.open and
+     not gCtxMenu.open and gPluginPanes.routePaneKey(gFocusPane, name):
+    traceGesture("plugin view key " & name & " on " & gFocusPane)
+    return
   let path = windowScopePath()
   traceGesture("key " & name & " at " & $path)
   let mode = if gFindBrowsing and not gFind.open: nmSearch else: nmNormal
@@ -14266,6 +14322,15 @@ proc onPaneClick(c: GPaneClick) =
                                index: int64(parseInt(c.key["commit-".len .. ^1]))),
                              gestureOfClick(c), c.x, c.y)
       except ValueError: discard
+  of gcpPluginNode:
+    # §11.4.4: a press on a plugin pane's row or control focuses the pane and
+    # activates the node, as its Enter would; the plugin is sent the
+    # `view-event` and its answer is drawn when it arrives.
+    if c.button != gbLeft or gPluginPanes.isNil:
+      return
+    focusWindowPane(r, c.key)
+    if gPluginPanes.routePaneClick(c.key, c.node, int(c.index)):
+      traceGesture("plugin view click " & c.node & "#" & $c.index & " on " & c.key)
 
 proc wireClicks(r: GpuiRenderer) =
   ## Give every row the window draws its click listeners (`window_clicks`).
@@ -15628,7 +15693,7 @@ proc runWindowOp(r: GpuiRenderer; op: string; release = true): string =
       else:
         return "unknown scrub event '" & parts[2] & "'"
     of "press": windowPointer(r, gekPointerDown, at(1), at(2))
-    of "contextmenu":
+    of "contextmenu":  # ir1-gate: not a key (the `contextmenu:` window-op, a dispatch)
       # the `contextmenu` event a right-click sends after its press
       windowPointer(r, gekContextMenu, at(1), at(2))
     of "move": windowPointer(r, gekPointerMove, at(1), at(2))
@@ -16999,12 +17064,14 @@ proc runOpen(cmd: GpuiCommand): int =
                                  cmd.traceFolder)
     gPlugins.routeMovesToControls(gPluginMoves)
     gPlugins.setHostModal(pluginHostModalOpen)
+    gPluginPanes = newPluginPanes(gPlugins)
     for id in gPlugins.awaitingConsent:
       traceGesture("plugins awaiting consent " & id)
     tracePluginsState()
   defer:
     gPlugins.close()
     gPlugins = nil
+    gPluginPanes = nil
   var leafSet = shell.leavesFor(windowId, pluginPanes())
   for leaf in leafSet.leaves:
     if leaf.kind == glkUnloadedExtension:

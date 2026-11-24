@@ -381,6 +381,9 @@ type
     of ActionCommand:
       action*: ClientAction
       shortcut*: cstring
+      run*: proc()
+        ## Run in place of `action` when set: an entry no `ClientAction`
+        ## names (an installed plugin's command, `ui/plugin_panes`).
 
   CommandInterpreter* = ref object
     data*: Data

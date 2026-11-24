@@ -30,7 +30,14 @@ concurrency:
 
 jobs:
   push-to-attic:
-    runs-on: [self-hosted, linux, x64]
+    # A dedicated, name-routed GARM scale set (infra `central-garm.nix`
+    # `cachePushLane`: one runner on gpu-server-001, scale-to-zero). On the
+    # shared `[self-hosted, linux, x64]` queue this job waited 10 min to 3 h
+    # for a runner, and the concurrency group below superseded most pushes'
+    # runs while it waited: 50 of 60 runs on agents were cancelled
+    # (codetracer-pm issues/2026-11-21-cache-push-on-agents-waits-hours-for-a-runner-so-pushes-supersede-it.md).
+    # A scale set is matched by exact name, so no other job can take it.
+    runs-on: eph-linux-x64-cache-push
     # A cold store builds the whole closure (about 15 GiB): the TUI job's
     # equivalent build ran past four hours (run 43765077986). Warm, the build
     # is a no-op and the push uploads only what is new.

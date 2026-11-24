@@ -71,6 +71,17 @@ jobs:
               src/plugin-host/engine/measure-engines.sh \
               | tee test-logs/plugin-host-wasm-engines-x86_64-linux.log'
 
+      - name: The host as the shipped build makes it (repro build, its own Nim)
+        # The repro build compiles with the Nim its package catalog pins
+        # (2.2.4 when this was written), not the dev shell's: a host that
+        # built here and failed there broke build-once once (posix.signal's
+        # return type differs between them).
+        run: |
+          nix develop '.?submodules=1' --command bash -c '
+            set -euo pipefail
+            repro build ct-plugin-host 2>&1 | tail -40 | tee test-logs/plugin-host-wasm-repro-x86_64-linux.log
+            src/build-debug-repro/bin/ct-plugin-host --help 2>&1 | tee -a test-logs/plugin-host-wasm-repro-x86_64-linux.log'
+
       - name: Build ct-plugin-host and the WebAssembly plugins
         run: |
           nix develop . --command bash -c '
@@ -82,7 +93,7 @@ jobs:
               "$RUNNER_TEMP/modules/ct-lens-watch.wasm" --path:src/plugins/ct-lens \
               2>&1 | tee -a test-logs/plugin-host-wasm-build-x86_64-linux.log
             ls -l "$RUNNER_TEMP/bin/ct-plugin-host" "$RUNNER_TEMP/modules/ct-lens-watch.wasm"
-            shasum -a 256 "$RUNNER_TEMP/modules/ct-lens-watch.wasm" \
+            { sha256sum "$RUNNER_TEMP/modules/ct-lens-watch.wasm" 2>/dev/null || openssl dgst -sha256 "$RUNNER_TEMP/modules/ct-lens-watch.wasm"; } \
               | tee -a test-logs/plugin-host-wasm-build-x86_64-linux.log'
 
       - name: Measure the engines on a real plugin module
@@ -117,7 +128,7 @@ jobs:
               -o:"$RUNNER_TEMP/test_ct_lens_wasm" \
               src/frontend/viewmodel/tests/unit/test_ct_lens_plugins.nim \
               | tee test-logs/plugin-host-wasm-ct-lens-x86_64-linux.log
-            shasum -a 256 "$CT_LENS_WASM_MODULE" \
+            { sha256sum "$CT_LENS_WASM_MODULE" 2>/dev/null || openssl dgst -sha256 "$CT_LENS_WASM_MODULE"; } \
               | tee -a test-logs/plugin-host-wasm-ct-lens-x86_64-linux.log'
 
       - name: The packaged host (nix, as the release bundles carry it)
@@ -216,7 +227,7 @@ jobs:
                 2>&1 | tee -a test-logs/plugin-host-wasm-build-aarch64-darwin.log
             fi
             ls -l "$RUNNER_TEMP/bin/ct-plugin-host" "$RUNNER_TEMP/modules/ct-lens-watch.wasm"
-            shasum -a 256 "$RUNNER_TEMP/modules/ct-lens-watch.wasm" \
+            { sha256sum "$RUNNER_TEMP/modules/ct-lens-watch.wasm" 2>/dev/null || openssl dgst -sha256 "$RUNNER_TEMP/modules/ct-lens-watch.wasm"; } \
               | tee -a test-logs/plugin-host-wasm-build-aarch64-darwin.log'
 
       - name: Measure the engines on a real plugin module
@@ -251,7 +262,7 @@ jobs:
               -o:"$RUNNER_TEMP/test_ct_lens_wasm" \
               src/frontend/viewmodel/tests/unit/test_ct_lens_plugins.nim \
               | tee test-logs/plugin-host-wasm-ct-lens-aarch64-darwin.log
-            shasum -a 256 "$CT_LENS_WASM_MODULE" \
+            { sha256sum "$CT_LENS_WASM_MODULE" 2>/dev/null || openssl dgst -sha256 "$CT_LENS_WASM_MODULE"; } \
               | tee -a test-logs/plugin-host-wasm-ct-lens-aarch64-darwin.log'
 
       - name: The packaged host (nix, as the release bundles carry it)
@@ -259,6 +270,20 @@ jobs:
           out="$(nix build --no-link --print-out-paths '.?submodules=1#ct-plugin-host')"
           ls -l "$out/bin/ct-plugin-host" | tee test-logs/plugin-host-wasm-nix-aarch64-darwin.log
           "$out/bin/ct-plugin-host" --help 2>&1 | tee -a test-logs/plugin-host-wasm-nix-aarch64-darwin.log
+
+      - name: The host as the shipped build makes it (repro build, its own Nim)
+        # Last, and run whatever came before: the darwin repro build has been
+        # refused by the committed lock alone, and that must not hide the suites.
+        if: ${{ !cancelled() }}
+        # The repro build compiles with the Nim its package catalog pins
+        # (2.2.4 when this was written), not the dev shell's: a host that
+        # built here and failed there broke build-once once (posix.signal's
+        # return type differs between them).
+        run: |
+          nix develop '.?submodules=1' --command bash -c '
+            set -euo pipefail
+            repro build ct-plugin-host 2>&1 | tail -40 | tee test-logs/plugin-host-wasm-repro-aarch64-darwin.log
+            src/build-debug-repro/bin/ct-plugin-host --help 2>&1 | tee -a test-logs/plugin-host-wasm-repro-aarch64-darwin.log'
 
       - name: Keep the logs
         if: always()

@@ -295,9 +295,18 @@ done
 # screen oracle moved out of viewmodel-tests into a job of its own.
 #
 # 49 -> 50: scenario-inventory.yml's `scenario-inventory`, the scenario
-# inventory and linter on every push to `agents`. It installs Nix through
-# ./.github/actions/setup-nix before its `nix shell` for Nim and Node.
-readonly EXPECTED_NIX_JOBS=50
+# inventory and linter on pushes to dev/stable and pull requests. It
+# installs Nix through ./.github/actions/setup-nix before its `nix shell` for
+# Nim and Node.
+#
+# 50 -> 52: plugin-host-wasm.yml's `linux` and `darwin` (d11479e6b85), which
+# build ct-plugin-host and run the WASM plugin packages under it. Each
+# installs Nix through ./.github/actions/setup-nix before its first `nix`.
+#
+# 52 -> 53: codetracer.yml's `viewmodel-tests-wasm`, the second half of
+# `viewmodel-tests` split off so each fits its time limit. It installs Nix
+# with the same step as the job it came from.
+readonly EXPECTED_NIX_JOBS=53
 
 if [ "${#nix_jobs[@]}" -eq "$EXPECTED_NIX_JOBS" ]; then
 	ok "the scanner still classifies the nix-using jobs (${#nix_jobs[@]})"

@@ -4,7 +4,7 @@
                                              
          Nothing is waiting for you.
                                              
- ● ASKS FOR PERMISSION          Priority… ▾
+ ● ASKS FOR PERMISSION           Priority ▾
                                              
  Run `psql -f migrations/0042_cache.sql`
  against the staging database?

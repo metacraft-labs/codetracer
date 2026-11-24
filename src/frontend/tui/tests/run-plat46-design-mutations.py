@@ -110,9 +110,13 @@ ARMS = [
      "    tcKeyword: CellStyle(role: srSyntaxKeyword),",
      "    tcKeyword: CellStyle(fg: \"magenta\", bold: true),",
      SOURCE_GATE, "a view paints an ANSI name again"),
+    # Re-aimed 2026-11-24: a contributed-pane painter now carries the same
+    # fillSurface line (its own pane fill), so the find takes the following
+    # editor-fill guard line to pick the standard pane's occurrence.
     ("S1", SHELL,
-     "  g.fillSurface(full.row, full.col, full.width, full.height, srSurfacePanel)",
-     "  discard", TABLES, "panes are no longer filled with the panel surface"),
+     "  g.fillSurface(full.row, full.col, full.width, full.height, srSurfacePanel)\n"
+     "  if region.pane == paneEditor and a.height > 1:",
+     "  discard\n  if region.pane == paneEditor and a.height > 1:", TABLES, "panes are no longer filled with the panel surface"),
     ("S3", SHELL,
      "    g.restyleRole(row, start, w, barRole, tabRole)",
      "    discard", TABLES, "tabs lose their active/inactive roles"),

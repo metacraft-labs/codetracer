@@ -12,7 +12,7 @@
 ## renders under `MockRenderer` in the headless tests
 ## (`src/tests/gui/tests/views/isonim_views_test.nim`), under `WebRenderer`
 ## on the desktop and the web page (mounted by `ui/panel_host`), and under
-## PLAT-18's `FrameRenderer`. The browser-only parts — the watch form's
+## `FrameRenderer` in the WebAssembly core (`-d:ctWasmCore`). The browser-only parts — the watch form's
 ## submit, the row context menu, the history auto-scroll — are decorations
 ## applied when `N` is the DOM element. The markup is the legacy Karax
 ## `value-component`'s, so Playwright's queries (`.value-expanded`,
@@ -64,19 +64,18 @@ when defined(js):
 else:
   template BadgeEvent*(r: MockRenderer): typedesc = MockEvent
 
-when defined(ctPlat18Slice) or defined(ctWasmCore):
-  # PLAT-18's third renderer. THE IMPORT AND THIS TEMPLATE HAVE TO BE HERE,
-  # ahead of `renderVariableRow`, and that is a fact about Nim rather than
-  # a preference: a template binds the symbols in its body at its DEFINITION
+when defined(ctWasmCore):
+  # The command-frame renderer a WebAssembly core draws through: the panes'
+  # core (`src/frontend/web_core/web_core.nim`) and the evaluation slice
+  # (`tests/manual/plat18_*_slice.nim`), both built `-d:ctWasmCore`.
+  # THE IMPORT AND THIS TEMPLATE HAVE TO BE HERE, ahead of
+  # `renderVariableRow`, and that is a fact about Nim rather than a
+  # preference: a template binds the symbols in its body at its DEFINITION
   # site, so an overload of `BadgeEvent` declared further down is not in the
   # set `renderVariableRow` resolves against and the instantiation fails
   # with `Expected one of: template BadgeEvent(r: MockRenderer)`. Measured on
   # the C backend; the JS backend accepted it, which is worse, because it
   # means the two targets disagree about when the overload set closes.
-  #
-  # Everything else PLAT-18 adds is at the END of this file. See the block
-  # there for why the slice is in this module at all and when it must be
-  # removed.
   import isonim/web/frame_renderer
   template BadgeEvent*(r: FrameRenderer): typedesc = FrameEvent
     ## The event object does not cross the boundary either — `FrameEvent`
@@ -1066,29 +1065,3 @@ when defined(js):
     let panel = renderStatePanel[WebRenderer, isonim_dom.Element](r, vm)
     isonim_dom.appendChild(isonim_dom.Node(container), isonim_dom.Node(panel))
     attachStateTableOverflow(cast[JsObject](panel), vm)
-
-# ---------------------------------------------------------------------------
-# PLAT-18's vertical slice: a THIRD renderer, behind a define
-# ---------------------------------------------------------------------------
-#
-# `codetracer-specs/Planned-Work/CodeTracer-Platform.milestones.org` PLAT-18
-# asks for "the variables pane with the 600-member fixture … driven by
-# PLAT-17's core in Electron". A WASM core cannot hold a DOM node, so the
-# renderer it runs against emits a HANDLE-and-BYTES command stream that the
-# host applies — `isonim/web/frame_renderer`.
-#
-# It is here, under `-d:ctPlat18Slice`, and not in its own module, for one
-# reason: the alternative is a COPY of this pane's markup, and a copy would
-# make the slice's byte counts a measurement of the copy. The helpers the row
-# and panel bodies use are private to this file, so a second module would need
-# sixteen of them exported to serve an evaluation. Nothing below is compiled
-# into any shipping build — `ctPlat18Slice` is set by
-# `ci/test/plat18-electron-slice.sh` and by nothing else — and the define
-# adds no branch to any existing proc.
-#
-# It must be REMOVED, not left behind, if PLAT-18 ends in "no" and nothing
-# succeeds it. A define that outlives its evaluation is how an evaluation
-# becomes a migration.
-
-# The slice instantiates `renderStatePanel[FrameRenderer, FrameNode]`, the
-# same generic proc the product renders, so it measures the product's markup.

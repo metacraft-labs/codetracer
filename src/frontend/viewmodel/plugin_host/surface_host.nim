@@ -291,7 +291,11 @@ proc probeTool*(name: string): DependencyProbe =
   ## own `findExe` would be a second copy of that predicate, and the two would
   ## eventually disagree about whether a tool "is there"
   ## (Verification-Harness-Traps §14).
-  when defined(js):
+  ##
+  ## Unsupported where `plugin_io` has no resolver: under JS, and under wasm32,
+  ## whose builds reach the host's process primitives only through
+  ## `ct-plugin-host`'s imports.
+  when defined(js) or defined(wasm32):
     dpUnsupported
   else:
     if resolveExecutable(name).len > 0: dpPresent else: dpAbsent

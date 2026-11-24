@@ -45,14 +45,6 @@ proc fleetGrid(width: int; anyInitiative: bool): FleetGrid =
   let share = max(1, free div shares)
   FleetGrid(session: 2 * share, share: share)
 
-proc markOf(p: AhPalette; category: FleetCategory): MarkStyle =
-  case category
-  of fcNeedsInput: MarkStyle(colour: p.iconWarning)
-  of fcRunning: MarkStyle(colour: p.iconSuccess)
-  of fcQueued: MarkStyle(colour: p.iconInfo)
-  of fcFailed: MarkStyle(colour: p.iconError)
-  of fcEnded: MarkStyle(colour: p.endedMark)
-
 proc statusColour(p: AhPalette; category: FleetCategory): string =
   case category
   of fcNeedsInput: p.textWarning
@@ -116,7 +108,16 @@ proc drawRow(c: var AhCanvas; parent: AhNode; vm: FleetSnapshotVM; row: FleetRow
                  [("row", id), ("category", $row.category), ("selected", $sel),
                   ("expanded", $row.expanded)])
   c.target(top, col, width, height, proc() = vm.select(id))
-  discard c.mark(n, top, col + 1, c.p.markOf(row.category))
+  # The row's progress pie (CTF-P1d), read from the viewmodel
+  # (`FleetRow.pie`), in the inks resolved for the row's own ground. The
+  # selected row's action surface is no ground its inks hold their floors
+  # on, so there the pie's cell keeps the panel's ground as a plate (the
+  # web's and GPUI's `PiePlatePx`).
+  if sel:
+    c.fill(top, col + 1, 1, 1, c.tone.body)
+    discard c.pie(n, top, col + 1, row.pie, c.tone.body)
+  else:
+    discard c.pie(n, top, col + 1, row.pie, ground)
   let mc = col + 3
   # What follows the main column on the first line: the agent's column when
   # wide, the age at sidebar width. A text cut before it keeps its gap.

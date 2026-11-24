@@ -1,14 +1,14 @@
  Inbox  ⚲ ✕
- ○ WAITING FOR YOUR NEXT INSTRUCTION  Tidy the upload client's logging                                                                                                 Priority… ▾
+                                           ○ WAITING FOR YOUR NEXT INSTRUCTION  Tidy the upload client's logging              Priority ▾
                                                                                                                                                                                     
- THE AGENT'S LAST REPLY
- Done. The upload client logs through its module logger now; the old print calls are gone.
+                                           THE AGENT'S LAST REPLY
+                                           Done. The upload client logs through its module logger now; the old print calls are gone.
                                                                                                                                                                                     
-  Your next instruction
+                                            Your next instruction
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     
-  Send
+                                            Send
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     

@@ -411,6 +411,13 @@ func markGlyph*(m: EditorMark): string =
 const
   InlineValuesAttribute* = "data-ct-inline-values"
     ## On a row's inline values: `inlineValueText`'s spelling of them.
+  PluginMarkerAttribute* = "data-ct-plugin-marker"
+    ## On a gutter mark lane drawing a plugin's marker: the plugin's id.
+  PluginDecorationAttribute* = "data-ct-plugin-decoration"
+    ## On a row's plugin decorations: the plugins' ids, comma-separated.
+  PluginMarkColour = DesignTokenHex[dtColorsUiTextPrimaryLabelSubtle][dmDark]
+    ## A plugin's marker and decoration: the subdued annotation tier, so a
+    ## plugin's mark never outshouts the debugger's own.
   InlineChipGround = DesignTokenHex[dtColorsUiSurfacePrimaryDefault][dmDark]
     ## `.ct-omni-value`'s ground (#1b1b1b).
   InlineMoreGround = DesignTokenHex[dtColorsUiSurfacePrimaryTertiary][dmDark]
@@ -1476,6 +1483,11 @@ func extrasOn(surface: EditorSurface; line: int): seq[int] =
     if c.line == line:
       result.add c.column
 
+func hasGutterMark(marks: openArray[EditorPluginMark]): bool =
+  for m in marks:
+    if m.gutter: return true
+  false
+
 proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
                      numberWidth = 1; skipCols = 0;
                      caretColumn = 0;
@@ -1486,7 +1498,8 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
                      foldable = false; bracketDepth = 0;
                      guides = 0; stickyHeader = false;
                      markersView = HorizontalView();
-                     diagnostics: openArray[EditorDiagnostic] = []):
+                     diagnostics: openArray[EditorDiagnostic] = [];
+                     pluginMarks: openArray[EditorPluginMark] = []):
                      GpuiElement =
   ## One row of the source editor. `stickyHeader`: drawn as Monaco's sticky
   ## widget draws a scope's first line — no number, a dim chevron after the
@@ -1610,6 +1623,15 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
         r.setStyle(disc, "background-color", runs3[1].colour)
         r.setStyle(disc, "flex-shrink", "0")
         r.appendChild(lane, disc)
+      elif hasGutterMark(pluginMarks):
+        # A plugin's marker surface (§11.4.4) takes the mark column only where
+        # no breakpoint or tracepoint is: it never covers one.
+        for m in pluginMarks:
+          if m.gutter:
+            r.setAttribute(lane, PluginMarkerAttribute, m.plugin)
+            r.setStyle(lane, "color", PluginMarkColour)
+            r.appendChild(lane, r.createTextNode(m.glyph))
+            break
       elif row.hinted:
         # Gesture 7a: `gutter.breakpoint.hint`, a colour of its own.
         let disc = r.createElement("div")
@@ -1956,6 +1978,29 @@ proc renderEditorRow(r: GpuiRenderer; row: EditorRow; runs: seq[TokenRun];
       r.appendChild(chip, value)
       r.appendChild(ann, chip)
     r.appendChild(column, ann)
+  # A plugin's decorations (§11.4.4): its glyph and text after the code and
+  # the inline values, in the subdued annotation colour, one run per
+  # decoration. Drawn from what the plugin pushed; nothing here asks it.
+  var decorations: seq[string]
+  var decoratedBy: seq[string]
+  for m in pluginMarks:
+    if not m.gutter:
+      decorations.add m.glyph & " " & m.text
+      decoratedBy.add m.plugin
+  if decorations.len > 0:
+    let dec = r.createElement("div")
+    r.setAttribute(dec, PluginDecorationAttribute, decoratedBy.join(","))
+    r.setStyle(column, "position", "relative")
+    r.setStyle(dec, "position", "absolute")
+    let afterCols = row.text.runeLen + 1 +
+                    (if annotation.len > 0: annotation.runeLen + 2 else: 0)
+    r.setStyle(dec, "left", $(int(round(float(afterCols) * InlineChipCh -
+                                         float(skipCols) * EditorColumnPx))) & "px")
+    r.setStyle(dec, "top", "2px")
+    r.setStyle(dec, "white-space", "nowrap")
+    r.setStyle(dec, "color", PluginMarkColour)
+    r.appendChild(dec, r.createTextNode(decorations.join("   ")))
+    r.appendChild(column, dec)
   r.appendChild(el, column)
   el
 
@@ -2338,6 +2383,9 @@ proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
     var ownDiagnostics: seq[EditorDiagnostic] = @[]
     for d in surface.diagnostics:
       if d.line == row.line: ownDiagnostics.add d
+    var ownPluginMarks: seq[EditorPluginMark] = @[]
+    for m in surface.pluginMarks:
+      if m.line == row.line: ownPluginMarks.add m
     # PLAT-60: the Low Level Code listing's cross-reference — the line its
     # selected instruction came from — on the hover ground.
     let crossRef = surface.crossRefLine > 0 and row.line == surface.crossRefLine
@@ -2348,13 +2396,14 @@ proc renderEditor*(r: GpuiRenderer; parent: GpuiElement;
     let digest = hash((row, runs[i], widest, scroll.leftCols, caretColumn,
                        extras, selected, found, folds[i], depths[i],
                        guideCounts[i], markersView, ownDiagnostics, crossRef,
-                       inset))
+                       inset, ownPluginMarks))
     let rowEl = pool.keyed("row:" & $row.line, digest):
       let rowEl = renderEditorRow(r, row, runs[i], widest,
                                   scroll.leftCols, caretColumn, extras,
                                   selected, found, folds[i], depths[i],
                                   guideCounts[i], markersView = markersView,
-                                  diagnostics = ownDiagnostics)
+                                  diagnostics = ownDiagnostics,
+                                  pluginMarks = ownPluginMarks)
       if crossRef:
         r.setAttribute(rowEl, EditorCrossRefAttribute, "true")
         r.setStyle(rowEl, "background-color", EditorCrossRefGround)
@@ -4908,6 +4957,9 @@ proc renderPaneView(r: GpuiRenderer; parent: GpuiElement;
     r.appendChild(parent, binding.root)
   pv.report.len == 0
 
+const ContributedPaneInk = DesignTokenHex[dtColorsUiTextPrimaryBody][dmDark]
+  ## A plugin pane's text: the panes' body colour.
+
 const ContributedPaneAttribute* = "data-ct-contributed-pane"
   ## A contributed leaf drawing its plugin's view names the qualified pane id
   ## it drew (`renderContributedView`).
@@ -4925,7 +4977,16 @@ proc renderContributedView*(r: GpuiRenderer; parent: GpuiElement;
   ## A contributed pane's view, through the vocabulary's GPUI binding — the
   ## binding every built-in pane's generic view is drawn by.
   r.setAttribute(parent, ContributedPaneAttribute, leaf.paneId)
-  r.appendChild(parent, renderGpui(r, view).root)
+  # The vocabulary's binding draws structure and no ink (its elements carry
+  # no colour), so the view sits on a body that gives its text the panes'
+  # body colour; without one it was drawn in the renderer's default, dark on
+  # the dark pane, and could not be read.
+  let body = r.createElement("div")
+  r.setStyle(body, "color", ContributedPaneInk)
+  r.setStyle(body, "padding-left", "8px")
+  r.setStyle(body, "padding-top", "4px")
+  r.appendChild(body, renderGpui(r, view).root)
+  r.appendChild(parent, body)
 
 proc paneTitleElement(r: GpuiRenderer; leaf: GpuiLeaf): GpuiElement =
   ## A leaf's title, carrying its TEXT ROLE, its metric and its token.

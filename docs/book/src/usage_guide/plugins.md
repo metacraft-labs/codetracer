@@ -30,7 +30,7 @@ user directory and are removed when the package is uninstalled.
 | `:plugins disable-all` | Stop every plugin for this session |
 | `:plugins recover` | Take the keyboard back from every plugin (as triple Escape does) |
 | `:plugins bisect`, then `:plugins bisect yes` or `no` | Find the plugin causing a problem |
-| `:plugins log` | The plugin log for this session |
+| `:plugins log` | The plugin log for this session: what the host recorded, and everything a plugin program wrote to its stdout or stderr |
 
 The palette lists every plugin command and pane, and four entries no plugin can
 shadow: *Plugins: Show status*, *Plugins: Recover input*, *Plugins: Disable all

@@ -232,7 +232,7 @@ class Arm:
     expect: str = "verdict-fails"   # "verdict-fails" | "script-fails"
 
 
-# THE PROBE IS COMPILED WITH `-d:ctPlat18Slice`, which is what brings the
+# THE PROBE IS COMPILED WITH `-d:ctWasmCore`, which is what brings the
 # wire/meter cross-check into it. Without the define the probe measures the
 # meter alone and six of the nine arms below have nothing to break.
 G_PROBE = Grader("probe", PROBE)
@@ -928,18 +928,18 @@ BECAUSE: dict = {
     # SIZE of the disagreement, so the clauses are ` && `-joined and the
     # numbers are kept. See `derived_because` for why that is the opposite of
     # §17a's usual rule here and why it is right.
-    'M1': 'decode returned 368 byte(s) of 0 && decode returned 4001 byte(s) of 0 && decode returned 6603 byte(s) of 0 && decode returned 667203 byte(s) of 0 && wire/meter disagree on EXPAND: meter 668785 byte(s), wire 1335988 && wire/meter disagree on MOUNT: meter 3059 byte(s), wire 9662',
+    'M1': 'decode returned 368 byte(s) of 0 && decode returned 4001 byte(s) of 0 && decode returned 6603 byte(s) of 0 && decode returned 667203 byte(s) of 0 && wire/meter disagree on EXPAND: meter 668785 byte(s), wire 1335988 && wire/meter disagree on MOUNT: meter 3072 byte(s), wire 9681',
     'M2': 'frame size disagreed with frameBytesFor 188 time(s) && frame size disagreed with frameBytesFor 23 time(s) && frame size disagreed with frameBytesFor 29 time(s) && frame size disagreed with frameBytesFor 41428 time(s)',
     # M3 is M2's set PLUS the cross-check's, and that is what separates them:
     # M2 breaks the size predicate alone, M3 stops measuring the bytes at all.
-    'M3': 'frame size disagreed with frameBytesFor 188 time(s) && frame size disagreed with frameBytesFor 23 time(s) && frame size disagreed with frameBytesFor 29 time(s) && frame size disagreed with frameBytesFor 41428 time(s) && wire/meter disagree on EXPAND: meter 668785 byte(s), wire 1335988 && wire/meter disagree on MOUNT: meter 3059 byte(s), wire 9662',
+    'M3': 'frame size disagreed with frameBytesFor 188 time(s) && frame size disagreed with frameBytesFor 23 time(s) && frame size disagreed with frameBytesFor 29 time(s) && frame size disagreed with frameBytesFor 41428 time(s) && wire/meter disagree on EXPAND: meter 668785 byte(s), wire 1335988 && wire/meter disagree on MOUNT: meter 3072 byte(s), wire 9681',
     'M4': 'decode returned 0 byte(s) of 368 && decode returned 0 byte(s) of 4001 && decode returned 0 byte(s) of 6603 && decode returned 0 byte(s) of 667203',
     'M5': 'structural figures not stable across samples (24/651 vs 24/652)',
     # M6 and M7 print the same SENTENCE and different totals: on the EXPAND
     # each undercharges four bytes per operation, so 45,604 bytes is 11,401
     # element creations and 60,008 is 15,002 appends (2026-10-26 figures).
-    'M6': 'wire/meter disagree on EXPAND: meter 1335988 byte(s), wire 1283184 && wire/meter disagree on MOUNT: meter 9662 byte(s), wire 9418',
-    'M7': 'wire/meter disagree on EXPAND: meter 1335988 byte(s), wire 1263980 && wire/meter disagree on MOUNT: meter 9662 byte(s), wire 9334',
+    'M6': 'wire/meter disagree on EXPAND: meter 1335988 byte(s), wire 1283184 && wire/meter disagree on MOUNT: meter 9681 byte(s), wire 9437',
+    'M7': 'wire/meter disagree on EXPAND: meter 1335988 byte(s), wire 1263980 && wire/meter disagree on MOUNT: meter 9681 byte(s), wire 9353',
     # M8 counts three elements per row; M9 wires no rows at all.
     'M8': 'COLLAPSE drew 6 row(s), expected 2 && EXPAND drew 1806 row(s), expected 602 && MOUNT drew 6 row(s), expected 2 && STEP drew 1806 row(s), expected 602',
     'M9': 'COLLAPSE drew 0 row(s), expected 2 && EXPAND drew 0 row(s), expected 602 && MOUNT drew 0 row(s), expected 2 && STEP drew 0 row(s), expected 602',
@@ -1294,12 +1294,12 @@ def run_grader(g: Grader) -> RunResult:
     cache = CACHE_ROOT / "probe"
     deps_cache = CACHE_ROOT / "probe-deps"
     artifact = CACHE_ROOT / "probe.bin"
-    # `-d:ctPlat18Slice` is what brings the wire/meter cross-check in, and
+    # `-d:ctWasmCore` is what brings the wire/meter cross-check in, and
     # `--mm:orc` is named rather than defaulted (§12b: a measurement names its
     # memory manager, and so does the run that grades one). ONE flag list for
     # both passes below, so the pass that is checked and the pass that is run
     # resolve their imports from the same command line.
-    flags = ["--hints:off", "--warnings:off", "--mm:orc", "-d:ctPlat18Slice",
+    flags = ["--hints:off", "--warnings:off", "--mm:orc", "-d:ctWasmCore",
              "--path:src/frontend/viewmodel"]
     # ISONIM_SRC IS THE MUTATED TREE'S, whatever the caller's was. It is the
     # only lever there is: config.nims adds it after the sibling, and is read

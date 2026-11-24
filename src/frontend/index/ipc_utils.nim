@@ -10,6 +10,7 @@ import
   file_tree_operations,
   tab_answers,
   window_routing,
+  plugin_sessions,
   ipc_subsystems/[ dap, socket, acp_ipc ],
   results,
   ../lib/[ jslib, misc_lib, electron_lib ],
@@ -468,6 +469,13 @@ proc configureIpcMain* =
     # into `keybindings.json` (`index/keybindings.onKeybindingsImport`).
     "keybindings-import"
     "keybindings-request"
+    # Installed plugins beside each replay session (Extensibility-Model.md
+    # §11.2.1; `index/plugin_sessions`): the desktop's sync primary for a
+    # tab's plugins, and the renderer's keys, Escapes, view events and
+    # `:plugins` verbs.
+    "plugins-open"
+    "plugins-sync"
+    "plugins-message"
     # PLAT-70 Part B: the table panes' remembered column widths, one
     # document with the terminal and GPUI (`index/table_columns`).
     "table-columns-request"
@@ -685,6 +693,9 @@ proc ready*(): Future[void] {.async.} =
       clients.mayStopReplay(replayId)
     replayStopped = proc(replayId: int) =
       clients.forgetStoppedReplay(replayId)
+    # A client's `plugins-*` messages reach its own tabs' plugins only.
+    serverSessionFor = proc(tab: int): PluginSession =
+      clients.currentTabPlugins(tab)
 
   when not defined(server):
     # Skip the install dialog entirely when running in test mode

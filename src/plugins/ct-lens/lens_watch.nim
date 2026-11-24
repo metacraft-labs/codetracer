@@ -9,10 +9,7 @@
 
 import std/[algorithm, sets, strutils, tables]
 
-import codetracer_plugin_sdk
-# The State ViewModel's change set is a `Signal[VariableDiff]`, but the SDK
-# does not export the module that declares it.
-import ../../frontend/viewmodel/viewmodels/value_changes
+import codetracer_plugin_sdk   # exports the mirrored types (value_changes, …)
 
 const
   WatchId* = "ct-lens.watch"

@@ -192,6 +192,37 @@ _tlf_js_only_suites() {
 	return 0
 }
 
+# _TLF_VM_UNIT_JS_NOT_SHIPPED — the `vm-unit` suites whose subject is compiled
+# into NO bundle that ships under `nim js`, so `vm-unit-js` does not run them.
+#
+# The panes' ViewModels run in the WebAssembly core, and what still ships
+# under `nim js` is the renderer's shell (`ui_js.nim`, desktop and web, with
+# the wasm panes), the main process and `ct host` (`index.nim`), the
+# subwindow, the VS Code host and panel, and BlockTracer's Embed SDK bundle
+# (`codetracer_embed.nim`). The JS lane tests that, and nothing else: a suite
+# whose project imports reach none of those bundles' modules runs on
+# `vm-unit` and `vm-unit-wasm` only. `ci/test/vm-unit-js-ships-under-nim-js.sh`
+# builds the bundles' module graphs and holds this list against them in both
+# directions — a suite listed here whose subject a bundle now compiles, and a
+# suite in the lane whose subject none compiles, both fail it.
+#
+# The shell still compiles almost the whole ViewModel tree (the panes' too),
+# which is why the list is short; see that script for the counts.
+#
+#   agent-harbor views (fleet, pie, link ink, session tabs, results): the GPUI and TUI
+#       front-ends draw them; no `nim js` bundle imports them.
+#   `codetracer_ui_components` (the editor gutter lanes) and the TUI
+#       vocabulary generator: native front-ends only.
+_TLF_VM_UNIT_JS_NOT_SHIPPED=(
+	'/test_agent_harbor_fleet_activity_error\.nim$'
+	'/test_agent_harbor_link_ink\.nim$'
+	'/test_agent_harbor_pie\.nim$'
+	'/test_agent_harbor_session_list_view\.nim$'
+	'/test_ctf_p2c_results_followups\.nim$'
+	'/test_editor_gutter_lanes\.nim$'
+	'/test_editor_vocabulary_laws\.nim$'
+)
+
 # _tlf_vm_unit_candidates — the ViewModel unit suites that belong to neither
 # the recorder-gated lane nor the collab lane, on EITHER backend. `vm-unit` is
 # this minus the JS-only suites, and `vm-unit-js` adds those JS-only suites
@@ -1488,6 +1519,17 @@ test_lane_files() {
 		# being quoted), the origins of each kind of bind, and
 		# CODETRACER_HOST_ALLOWED_ORIGINS.
 		echo src/frontend/tests/host_session_guard_test.nim
+		#
+		# `plugin_sessions_test.nim` (Extensibility-Model.md §11.2.1) runs the
+		# desktop main process's and `ct host`'s installed plugins
+		# (`index/plugin_sessions`) against REAL plugin processes, which node
+		# spawns through `process_link`'s `child_process` arm: consent, one
+		# process for a package's plugins, the desktop's mirror of a renderer
+		# tab's session and the relay of a plugin's step back to it, the key
+		# snapshot decided as the supervisor decides, and one process per
+		# session with neither seeing the other. Builds the `acme-tools` test
+		# package with the lane's `nim`; writes under its scratch directory.
+		echo src/frontend/tests/plugin_sessions_test.nim
 		;;
 
 	frontend-native-units)
@@ -1755,7 +1797,12 @@ test_lane_files() {
 				'/test_view_census\.nim$' \
 				'/test_vcs_working_tree\.nim$' \
 				'/test_vcs_content_id\.nim$' \
-				'/test_native_file_tree_operations\.nim$'
+				'/test_native_file_tree_operations\.nim$' |
+			_tlf_reject "${_TLF_VM_UNIT_JS_NOT_SHIPPED[@]}"
+		# The second rejection is a different kind of reason from the first:
+		# those suites compile here, but their subject ships in no `nim js`
+		# bundle (`_TLF_VM_UNIT_JS_NOT_SHIPPED`, above).
+		#
 		# `test_plugin_process_host` (Extensibility-Model.md §11) starts REAL
 		# plugin processes with `fork`/`execve` over `std/posix` pipes — the
 		# native front-ends' plugin supervisor — which this backend has no
@@ -2350,6 +2397,7 @@ test_lane_files() {
 			src/ct_test/noir_providers_test.nim \
 			src/ct_test/js_providers_test.nim \
 			src/ct_test/ruby_providers_test.nim \
+			src/ct_test/cs_m14_ct_test_collects_through_entry_test.nim \
 			src/ct_test/contracts_test.nim \
 			src/ct_test/discovery_test.nim \
 			src/ct_test/run_orchestration_test.nim \

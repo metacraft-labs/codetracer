@@ -1,56 +1,56 @@
  Inbox  ⚲ ✕
  INBOX  this server                                                                                                                                         40 waiting · 40 blocked
   ←  40 waiting  →     Auto-switch: off
- ● Invented session 1                                                                                                                                                           2m █
-   needs your answer                                                                                                                                                               █
-   Waiting 2 minutes.                                                                                                                                                              █
- ● Invented session 2                                                                                                                                                           4m █
-   needs your answer                                                                                                                                                               █
-   Waiting 4 minutes.                                                                                                                                                              █
- ○ Invented session 3                                                                                                                                                           6m █
-   waiting for your next instruction                                                                                                                                               █
-   Waiting 6 minutes.                                                                                                                                                              █
- ● Invented session 4                                                                                                                                                           8m █
-   needs your answer                                                                                                                                                               █
-   Waiting 8 minutes.                                                                                                                                                              █
- ● Port the route cache's eviction policy to the new storage layer and keep the old one behind a flag until the migration has run on every region                              10m █
-   needs your answer                                                                                                                                                               █
-   Waiting 10 minutes.                                                                                                                                                             █
- ○ Invented session 6                                                                                                                                                          12m █
-   waiting for your next instruction                                                                                                                                               █
-   Waiting 12 minutes.                                                                                                                                                             █
- ● Invented session 7                                                                                                                                                          14m █
-   needs your answer                                                                                                                                                               █
-   Waiting 14 minutes.                                                                                                                                                             █
- ● Invented session 8                                                                                                                                                          16m █
-   needs your answer                                                                                                                                                               █
-   Waiting 16 minutes.                                                                                                                                                             ▅
- ○ Invented session 9                                                                                                                                                          18m
+ ● Invented session 1                           2m █
+   needs your answer                               █
+   Waiting 2 minutes.                              █
+ ● Invented session 2                           4m █
+   needs your answer                               █
+   Waiting 4 minutes.                              █
+ ○ Invented session 3                           6m █
+   waiting for your next instruction               █
+   Waiting 6 minutes.                              █
+ ● Invented session 4                           8m █
+   needs your answer                               █
+   Waiting 8 minutes.                              █
+ ● Port the route cache's eviction policy to…  10m █
+   needs your answer                               █
+   Waiting 10 minutes.                             █
+ ○ Invented session 6                          12m █
+   waiting for your next instruction               █
+   Waiting 12 minutes.                             █
+ ● Invented session 7                          14m █
+   needs your answer                               █
+   Waiting 14 minutes.                             █
+ ● Invented session 8                          16m █
+   needs your answer                               █
+   Waiting 16 minutes.                             ▅
+ ○ Invented session 9                          18m
    waiting for your next instruction
-   Waiting 18 minutes.
- ● Port the route cache's eviction policy to the new storage layer and keep the old one behind a flag until the migration has run on every region                              20m
+   Waiting 18 minutes.                                                                      Select an item, or press ] for the one at the top
+ ● Port the route cache's eviction policy to…  20m
    needs your answer
    Waiting 20 minutes.
- ● Invented session 11                                                                                                                                                         22m
+ ● Invented session 11                         22m
    needs your answer
    Waiting 22 minutes.
- ○ Invented session 12                                                                                                                                                         24m
+ ○ Invented session 12                         24m
    waiting for your next instruction
    Waiting 24 minutes.
- ● Invented session 13                                                                                                                                                         26m
+ ● Invented session 13                         26m
    needs your answer
    Waiting 26 minutes.
- ● Invented session 14                                                                                                                                                         28m
+ ● Invented session 14                         28m
    needs your answer
    Waiting 28 minutes.
- ○ Port the route cache's eviction policy to the new storage layer and keep the old one behind a flag until the migration has run on every region                              30m
+ ○ Port the route cache's eviction policy to…  30m
    waiting for your next instruction
    Waiting 30 minutes.
- ● Invented session 16                                                                                                                                                         32m
+ ● Invented session 16                         32m
    needs your answer
    Waiting 32 minutes.
- ● Invented session 17                                                                                                                                                         34m
+ ● Invented session 17                         34m
    needs your answer
    Waiting 34 minutes.
- ○ Invented session 18                                                                                                                                                         36m
+ ○ Invented session 18                         36m
    waiting for your next instruction

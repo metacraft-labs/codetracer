@@ -133,6 +133,12 @@ fi
 # its link directives and leave 81 undefined `mcr*` symbols), so the only place
 # the workspace can be diagnosed by name is here, up front.
 "${BASH:-bash}" "$SCRIPT_DIR/require-siblings.sh"
+# A caller that needs the build-input siblings to be exactly the locked ones
+# (the launcher <-> recorder E2E gate) asks for it here, naming at most one
+# sibling it deliberately builds off-lock: the recorder under test.
+if [ -n "${CODETRACER_OFF_LOCK_SIBLING:-}" ] || [ "${CODETRACER_REQUIRE_LOCKED_SIBLINGS:-}" = 1 ]; then
+	"${BASH:-bash}" "$CT_ROOT/ci/sibling-lock-agreement.sh" "$CT_ROOT"
+fi
 
 "$SCRIPT_DIR/build-tailwind.sh"
 

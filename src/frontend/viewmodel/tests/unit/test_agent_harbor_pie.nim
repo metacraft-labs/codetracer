@@ -4,7 +4,10 @@
 ## equal to what the palette resolves; the pie's shape (a ring in the role's
 ## ink, the wedge filled inside it in the same ink, the rest the ground) and
 ## its geometry at native size; the wedge's stop and gradient spellings
-## every front end shares; the web view's classes; and the story's data.
+## every front end shares; the web view's classes; the story's data; and
+## the two pies no viewmodel carries, which every host reads from one place:
+## a `+N` chip's (`agent_harbor_words.chipPie`) and CodeTracer's own agent
+## tab's (`headless_app/session_tabs.pieOf`), their roles, shapes and words.
 ##
 ## The rules (the ink, the wedge's and the edge's, 3.3:1 on the ground, WCAG
 ## 2.2 SC 1.4.11's 3:1, https://www.w3.org/TR/WCAG22/#non-text-contrast,
@@ -18,10 +21,15 @@
 ## production ones; nothing is drawn (the wedge's pixels are counted from the
 ## pie's own geometry, `pieWedgeInsetPx`, by supersampling).
 
-import std/[math, sequtils, strutils, tables, unittest]
+import std/[math, options, sequtils, strutils, tables, unittest]
 import isonim/testing/mock_dom
 import ../../views/agent_harbor_palette
 import ../../views/isonim_agent_harbor_pie_view
+from ../../views/agent_harbor_words import HiddenSummary, HiddenSeverity,
+  hiddenSummary, hiddenSessions, chipTitle, chipPie
+from ../../store/types import AgentServiceLifecycle
+from headless_app/session_tabs import SessionTabAgent, agentStateText,
+  pieRoleOf, pieOf
 
 const PieInksSheet = staticRead("../../../styles/components/agent_harbor_pie_inks.styl")
 const PieSheet = staticRead("../../../styles/components/agent_harbor_pie.styl")
@@ -443,3 +451,105 @@ suite "the story's data":
   test "an unknown fixture is refused":
     expect ValueError:
       discard pieStoryBands("no-such-fixture", dmDark)
+
+suite "the pie a +N chip draws":
+  test "nothing that waits or failed: no pie, as there was no mark":
+    check chipPie(hiddenSessions([saRunning, saIdle, saEnded, saQueued]), "tab", "tabs").isNone
+    check chipPie(hiddenSummary(0, 0, 0), "tab", "tabs").isNone
+
+  test "the worst hidden state's role, a failure over a wait":
+    let waiting = chipPie(hiddenSessions([saRunning, saNeedsInput]), "tab", "tabs")
+    check waiting.isSome
+    check waiting.get.role == prWarning
+    let failed = chipPie(hiddenSessions([saNeedsInput, saFailed, saNeedsInput]), "tab", "tabs")
+    check failed.isSome
+    check failed.get.role == prError
+    # Every severity that draws a pie has a role, and a different one.
+    var roles: seq[PieRole]
+    for severity in HiddenSeverity:
+      let h = HiddenSummary(hidden: 3, waiting: 1, failed: 1, severity: severity)
+      let pie = chipPie(h, "tab", "tabs")
+      check pie.isSome == (severity != hsNone)
+      if pie.isSome: roles.add pie.get.role
+    check roles == @[prWarning, prError]
+
+  test "no wedge: the unknown shape, never a 0 % ring":
+    for h in [hiddenSummary(1, 0, 4), hiddenSummary(0, 2, 2), hiddenSummary(3, 1, 9)]:
+      let pie = chipPie(h, "tab", "tabs").get
+      check not pie.known
+      check pie.fraction == 0.0
+      check pie.done == 0 and pie.total == 0 and pie.percent == 0
+      check pieShapeOf(pie) == psUnknown
+      check pieStopPercent(pie) == "0%"
+    # The web draws it as the unknown pie: the ring and the dot.
+    let r = MockRenderer()
+    let drawn = pieIndicator[MockRenderer, MockNode](
+      r, chipPie(hiddenSummary(1, 1, 3), "tab", "tabs").get, pgActiveTab)
+    check "ah-pie-unknown" in drawn.attributes["class"]
+    check "ah-pie-error" in drawn.attributes["class"]
+    check drawn.children.len == 1
+
+  test "its words are the chip's, not \"progress unknown\"":
+    let h = hiddenSessions([saFailed, saNeedsInput, saRunning])
+    let pie = chipPie(h, "tab", "tabs").get
+    check pie.label == chipTitle(h, "tab", "tabs")
+    check pie.label == "3 more tabs, 1 failed, 1 needing input"
+    check ProgressUnknownWords notin pie.label
+    check chipPie(hiddenSessions([saNeedsInput]), "tab", "tabs").get.label ==
+      "1 more tab, 1 needing input"
+    let r = MockRenderer()
+    check pieIndicator[MockRenderer, MockNode](r, pie, pgMenu).attributes["aria-label"] ==
+      pie.label
+
+suite "the pie of CodeTracer's own agent tab":
+  const Roles = [
+    (aslDisconnected, prIdle), (aslConnecting, prSuccess), (aslRunning, prSuccess),
+    (aslCompleted, prEnded), (aslCancelled, prEnded), (aslError, prError)]
+
+  test "a tab with no agent draws no pie":
+    check pieOf(SessionTabAgent()).isNone
+    check pieOf(SessionTabAgent(present: false, running: true, lifecycle: aslRunning,
+                                completed: 3, total: 4)).isNone
+
+  test "every lifecycle has its role":
+    var seen: seq[AgentServiceLifecycle]
+    for (lifecycle, role) in Roles:
+      checkpoint $lifecycle
+      seen.add lifecycle
+      check pieRoleOf(lifecycle) == role
+      let pie = pieOf(SessionTabAgent(present: true, lifecycle: lifecycle,
+                                      completed: 1, total: 2)).get
+      check pie.role == role
+    check seen.len == ord(high(AgentServiceLifecycle)) + 1
+
+  test "its progress is the milestones, completed of total":
+    let pie = pieOf(SessionTabAgent(present: true, running: true, lifecycle: aslRunning,
+                                    task: "Port the parser", completed: 13, total: 24)).get
+    check pie.known
+    check pie.done == 13 and pie.total == 24
+    check abs(pie.fraction - 13 / 24) < 1e-9
+    check pie.percent == 54
+    check pie.label == "working, 13 of 24 milestones, 54%"
+    check pieShapeOf(pie) == psRing
+    # One milestone of one: the singular, and a whole pie.
+    let whole = pieOf(SessionTabAgent(present: true, lifecycle: aslCompleted,
+                                      completed: 1, total: 1)).get
+    check whole.label == "completed, 1 of 1 milestone, 100%"
+    check whole.fraction == 1.0
+
+  test "no milestones declared is unknown progress, never 0 %":
+    for (lifecycle, _) in Roles:
+      let pie = pieOf(SessionTabAgent(present: true, lifecycle: lifecycle)).get
+      check not pie.known
+      check pieShapeOf(pie) == psUnknown
+      check pie.label == agentStateText(lifecycle) & ", " & ProgressUnknownWords
+    check pieOf(SessionTabAgent(present: true, lifecycle: aslRunning, completed: 5,
+                                total: 0)).get.label == "working, progress unknown"
+
+  test "counts out of range are kept inside the plan":
+    let over = pieOf(SessionTabAgent(present: true, lifecycle: aslRunning,
+                                     completed: 30, total: 24)).get
+    check over.done == 24 and over.fraction == 1.0 and over.percent == 100
+    let under = pieOf(SessionTabAgent(present: true, lifecycle: aslRunning,
+                                      completed: -2, total: 24)).get
+    check under.done == 0 and under.fraction == 0.0 and under.known

@@ -4,17 +4,17 @@
    needs your answer
    Waiting 28 minutes.                                31 of 40 · Waiting 62 minutes.
  ○ Port the route cache's eviction policy to…  30m
-   waiting for your next instruction                  ● NEEDS YOUR ANSWER  Invented session 31                                                                         Priority… ▾
+   waiting for your next instruction                                 ● NEEDS YOUR ANSWER  Invented session 31                                           Priority ▾
    Waiting 30 minutes.
- ● Invented session 16                         32m    ● Agent has stopped and is waiting for your answer
+ ● Invented session 16                         32m                   ● Agent has stopped and is waiting for your answer
    needs your answer
-   Waiting 32 minutes.                                Invented question 31: keep going as planned?
+   Waiting 32 minutes.                                               Invented question 31: keep going as planned?
  ● Invented session 17                         34m
-   needs your answer                                   Your answer
+   needs your answer                                                  Your answer
    Waiting 34 minutes.
  ○ Invented session 18                         36m
    waiting for your next instruction
-   Waiting 36 minutes.                                 Submit
+   Waiting 36 minutes.                                                Submit
  ● Invented session 19                         38m
    needs your answer
    Waiting 38 minutes.

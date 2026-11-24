@@ -1,21 +1,21 @@
  Inbox  ⚲ ✕
- ● ASKS FOR FEEDBACK  Write the release notes                                                                                                                          Priority… ▾
+                                           ● ASKS FOR FEEDBACK  Write the release notes                                       Priority ▾
                                                                                                                                                                                     
- Which changes belong in the highlights?
+                                           Which changes belong in the highlights?
                                                                                                                                                                                     
- ATTACHMENTS
- draft-notes.md (text)
+                                           ATTACHMENTS
+                                           draft-notes.md (text)
                                                                                                                                                                                     
- ▎ DRAFT  confidence high · by release-manager
- ▎ These three changed behaviour users see.
- ▎ The route cache, the schema migration and the logging clean-up.
- ▎  Send draft
+                                           ▎ DRAFT  confidence high · by release-manager
+                                           ▎ These three changed behaviour users see.
+                                           ▎ The route cache, the schema migration and the logging clean-up.
+                                           ▎  Send draft
                                                                                                                                                                                     
-  Your response
+                                            Your response
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     
-  Submit
+                                            Submit
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     

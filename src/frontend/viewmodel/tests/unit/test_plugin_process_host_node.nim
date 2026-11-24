@@ -15,10 +15,14 @@
 ## the handshake and two plugins in one pid, crash attribution and restart (a
 ## signal NAME from Node read back as SIGSEGV), hang attribution, the stop
 ## sequence's SIGTERM to the group, `--no-extensions`, a start that fails, a
-## child that stops reading its stdin (the write queue), and what ends a
+## child that stops reading its channel (the write queue), a plugin's stdout
+## going to its log rather than the protocol, and what ends a
 ## plugin when the main process ends — SIGTERM, and SIGKILL with and without
 ## `setpriv`. For the last three the suite starts ITSELF a second time as the
-## main process (`--guard-child`), and kills that process.
+## main process (`--guard-child`), and kills that process. And a `setpriv`
+## that is on `PATH` but cannot run here (`NoNewPrivs` with an empty bounding
+## set makes util-linux's exit 1 before it execs): the link probes it, starts
+## the plugins without it, and the supervisor logs why; no plugin is blamed.
 ##
 ## ## THE STAND-INS, AND WHY THEY ARE NOT MOCKS
 ##
@@ -28,6 +32,14 @@
 ##   The debugger's stop is written into the store as a replay's answer would
 ##   write it. The real replay and the real recording are the desktop's and
 ##   `ct host`'s end-to-end suites'.
+## * The `setpriv` case puts a stand-in `setpriv` (a shell script) first on
+##   `PATH`. What it stands in for is a host property, not code: whether
+##   util-linux `setpriv` can set `PR_SET_PDEATHSIG` depends on the sandbox the
+##   suite runs in, and a suite that only met the failure on locked-down hosts
+##   would prove nothing on the others. The stand-in fails exactly as the real
+##   one does there (its message, status 1, before any exec), so every host
+##   runs the case. The real `setpriv` on such a host is met by every other
+##   section, which starts real plugins through whatever this host's is.
 ## * The write-queue case starts `sleep` (coreutils) as the "plugin": the
 ##   property is about a real child that never reads its stdin, and a real
 ##   process that never reads is the honest one. No plugin protocol is spoken
@@ -73,6 +85,33 @@ proc nodeExe(): cstring {.importjs: "(process.execPath)".}
 proc setEnv(k, v: cstring) {.importjs: "process.env[#] = #".}
 proc deleteEnv(k: cstring) {.importjs: "delete process.env[#]".}
 proc exitNow(code: int) {.importjs: "process.exit(#)".}
+proc getEnvJs(k: cstring): cstring {.importjs: "(process.env[#] || '')".}
+proc makeExecutable(path: cstring) {.importjs:
+  "require('fs').chmodSync(#, 0o755)".}
+
+proc standInSetpriv(dir: string; works: bool): string =
+  ## A `setpriv` in `dir` that appends its arguments to `dir/calls.log`.
+  ## `works = false`: fails as util-linux's does under `NoNewPrivs` with an
+  ## empty bounding set. `works = true`: execs what follows `--`, as the real
+  ## one does once `PR_SET_PDEATHSIG` is set (the bit itself is not the
+  ## subject here; the SIGKILL case of `main-ends` proves it on a real one).
+  createDir(dir)
+  result = dir / "setpriv"
+  # `--version` (the probe's exec of itself) answers before the log, so the
+  # log holds what the LINK ran: the probe, then each start through it.
+  let version = if works: "[ \"$1\" = --version ] && exit 0\n" else: ""
+  let body = if works:
+      "while [ \"$1\" != -- ]; do shift; done; shift; exec \"$@\"\n"
+    else:
+      "echo 'setpriv: keep process capabilities failed: Operation not " &
+      "permitted' >&2\nexit 1\n"
+  writeFileBytes(result, "#!/bin/sh\n" & version &
+    "echo \"$*\" >> \"$(dirname \"$0\")/calls.log\"\n" & body)
+  makeExecutable(cstring(result))
+
+proc callsOf(dir: string): seq[string] =
+  if fileExists(dir / "calls.log"):
+    result = readFile(dir / "calls.log").splitLines.filterIt(it.len > 0)
 
 proc pidAlive(pid: int): bool {.importjs: """
   (function (pid) {
@@ -115,10 +154,24 @@ proc settle(sup: Supervisor; ms: int): Future[void] {.async.} =
     sup.poll()
     await sleep(2)
 
-proc shutdownAndWait(sup: Supervisor): Future[void] =
+proc jsSetTimeout(cb: proc(); ms: int) {.importjs: "setTimeout(#, #)".}
+
+proc shutdownAndWait(sup: Supervisor; ceilingMs = Ceiling): Future[void] =
   ## `shutdown` on this backend returns at once and reports through `onDone`.
+  ## Bounded: a stop sequence whose signals reach nothing never reports, and
+  ## an unbounded wait would turn that failure into a suite that never ends.
   newPromise(proc(resolve: proc()) =
-    sup.shutdown(onDone = resolve))
+    var settled = false
+    sup.shutdown(onDone = proc() =
+      if not settled:
+        settled = true
+        resolve())
+    jsSetTimeout(proc() =
+      if not settled:
+        settled = true
+        ck false, "shutdown finished within " & $(ceilingMs div 1000) &
+          " s (the stop sequence's signals reached its processes)"
+        resolve(), ceilingMs))
 
 type Rig = object
   sup: Supervisor
@@ -302,8 +355,11 @@ proc main() {.async.} =
       r.sup.renderSurface("acme-tools.metrics/overview").allText.contains("main.nim:42")),
       "the mirrored stop reaches the plugin and its pane follows"
     await r.sup.shutdownAndWait()
-    ck not pidAlive(pid), "shutdown reaps the process (Node's event loop not blocked)"
-    ck pid notin liveProcessGroups(), "and forgets its group"
+    # The group first: a shutdown that reports before it has seen the exit
+    # still lists the group, every time, while whether the SIGKILLed process
+    # is already gone is a race the host's load decides.
+    ck pid notin liveProcessGroups(), "shutdown waits for the exit and forgets the group"
+    ck not pidAlive(pid), "and the process is reaped (Node's event loop not blocked)"
     ck r.sup.events.anyIt(it == "stopped acme-tools"), "it stopped gracefully"
 
   if section("no-extensions", "--no-extensions starts no plugin process"):
@@ -376,6 +432,38 @@ proc main() {.async.} =
       r.active("acme-tools.metrics")), "metrics is back"
     await r.sup.shutdownAndWait()
 
+  if section("echo", "§11.4.1: a plugin's stdout is its log, not the protocol"):
+    var r = newRig("echo")
+    r.both()
+    ck await r.sup.waitUntil("both active", r.bothActive), "both active"
+    let pid = r.sup.pidOf("acme-tools.flame")
+    let id = r.sup.invoke("acme-tools.flame", "flame.refresh")
+    ck await r.sup.waitUntil("done", proc(): bool =
+      r.sup.answers.anyIt(it.id == id and it.kind == "done")),
+      "flame.refresh is answered after the plugin echoed to stdout"
+    ck await r.sup.waitUntil("pane", proc(): bool =
+      r.sup.renderSurface("acme-tools.flame/flame").allText.contains("echoed")),
+      "and its pane is drawn from what it pushed on the protocol"
+    let logFile = r.sup.logDir / "acme-tools.stderr.log"
+    ck await r.sup.waitUntil("log", proc(): bool =
+      fileExists(logFile) and
+        readFile(logFile).contains("flame: refreshing (a line on stdout)")),
+      "what it echoed is in the plugin log"
+    ck r.sup.faults.len == 0, "no protocol violation: " &
+      r.sup.faults.mapIt(it.detail).join("; ")
+    ck r.sup.pidOf("acme-tools.flame") == pid, "the process was not restarted"
+    await r.sup.shutdownAndWait()
+
+  if section("protocol", "§11.6.1: garbage on the protocol's descriptor is a violation"):
+    var r = newRig("protocol")
+    r.both()
+    ck await r.sup.waitUntil("both active", r.bothActive), "both active"
+    discard r.sup.invoke("acme-tools.flame", "flame.refresh")
+    ck await r.sup.waitUntil("violation", proc(): bool =
+      r.sup.faults.anyIt(it.kind == fkProtocol)),
+      "a frame of garbage on descriptor 4 is a protocol violation"
+    await r.sup.shutdownAndWait()
+
   if section("stop", "§11.8: the stop sequence signals the group: SIGTERM for a stuck process"):
     var r = newRig("hang-invoke")
     r.sup.shutdownGraceMs = 300
@@ -389,6 +477,9 @@ proc main() {.async.} =
     r.sup.setEnabled("acme-tools.flame", false, persist = false)
     ck await r.sup.waitUntil("stopped", proc(): bool = not pidAlive(pid)),
       "a process stuck in a handler is stopped"
+    # A process the stop sequence failed to end is the failure just
+    # reported; ending it here keeps Node's loop from waiting on it for ever.
+    if pidAlive(pid): killPid(pid, int(SIGKILL))
     ck await r.sup.waitUntil("the stop observed", proc(): bool =
       r.sup.events.anyIt(it == "stopped acme-tools")), "as a stop, not a fault"
     ck r.sup.faults.len == 0, "no fault is recorded for a stop"
@@ -413,6 +504,60 @@ proc main() {.async.} =
         route & ": " & (if f.len > 0: f[0].detail else: "")
       await r.sup.shutdownAndWait()
       if not viaSetpriv: deleteEnv("CODETRACER_PLUGIN_NO_SETPRIV")
+
+  if section("setpriv-probe",
+             "§11.6, §11.8: a setpriv that cannot run here is not used, and no plugin is blamed"):
+    let savedPath = $getEnvJs("PATH")
+    let savedNoSetpriv = $getEnvJs("CODETRACER_PLUGIN_NO_SETPRIV")
+    deleteEnv("CODETRACER_PLUGIN_NO_SETPRIV")
+    let base = scratchRoot() / ("setpriv-" & $getCurrentProcessId())
+    let broken = base / "broken"
+    let brokenExe = standInSetpriv(broken, works = false)
+    setEnv("PATH", cstring(broken & ":" & savedPath))
+    ck not usesPdeathHelper(), "a setpriv whose probe fails is not used"
+    ck pdeathHelperNote().contains(brokenExe) and
+      pdeathHelperNote().contains("exited with status 1") and
+      pdeathHelperNote().contains("keep process capabilities failed"),
+      "the note names the helper, its status and its message: " & pdeathHelperNote()
+    var r = newRig()
+    r.both()
+    ck await r.sup.waitUntil("both active", r.bothActive),
+      "both plugins start and activate without it"
+    ck r.sup.faults.len == 0, "no fault: the launcher is the host's, not a plugin's"
+    ck r.sup.slot("acme-tools.metrics").totalStrikes == 0 and
+      r.sup.slot("acme-tools.flame").totalStrikes == 0, "no strike"
+    ck r.sup.events.anyIt(it.startsWith("acme-tools: started without " &
+      "PR_SET_PDEATHSIG: " & brokenExe & " cannot run here")),
+      "the supervisor's log says the plugin started without it, and why"
+    ck callsOf(broken).len == 1,
+      "the helper is probed once, and never started a plugin: " &
+        $callsOf(broken)
+    await r.sup.shutdownAndWait()
+    # A helper that works is still used: the probe is not a blanket opt-out.
+    let working = base / "working"
+    let workingExe = standInSetpriv(working, works = true)
+    setEnv("PATH", cstring(working & ":" & savedPath))
+    ck usesPdeathHelper() and pdeathHelperNote().len == 0,
+      "a setpriv whose probe passes is used: " & pdeathHelperNote()
+    var w = newRig()
+    w.both()
+    ck await w.sup.waitUntil("both active", w.bothActive),
+      "both plugins start through it"
+    let wcalls = callsOf(working)
+    ck wcalls.len == 2 and wcalls[0].endsWith(workingExe & " --version") and
+      wcalls[1].startsWith("--pdeathsig KILL -- "),
+      "one probe, then the plugin's start through it: " & $wcalls
+    ck not w.sup.events.anyIt(it.contains("started without PR_SET_PDEATHSIG")),
+      "and nothing is logged as missing"
+    await w.sup.shutdownAndWait()
+    # Absent: the same fallback, and the same log line, as before.
+    setEnv("PATH", cstring(base / "empty"))
+    ck not usesPdeathHelper() and
+      pdeathHelperNote() == "started without PR_SET_PDEATHSIG: setpriv is not on PATH",
+      "absent: " & pdeathHelperNote()
+    setEnv("PATH", cstring(savedPath))
+    if savedNoSetpriv.len > 0:
+      setEnv("CODETRACER_PLUGIN_NO_SETPRIV", cstring(savedNoSetpriv))
 
   if section("write-queue", "a child that stops reading: the write queue holds the bytes"):
     let link = spawnPluginProcess("sleep", @["600"])
@@ -452,7 +597,8 @@ proc main() {.async.} =
       await mainEnds(int(SIGKILL), false, true,
         "SIGKILL, a stuck plugin, through setpriv --pdeathsig")
     else:
-      echo "  (setpriv is not on PATH: the SIGKILL-through-setpriv case is not run)"
+      echo "  (the SIGKILL-through-setpriv case is not run: plugins ",
+        pdeathHelperNote(), ")"
     await mainEnds(int(SIGKILL), true, false,
       "SIGKILL, without setpriv (the plugin reads end-of-file on its stdin)")
     # What the module header says remains: SIGKILL, no setpriv, a plugin
@@ -466,5 +612,8 @@ proc main() {.async.} =
     {.emit: "process.exitCode = 1;".}
   else:
     echo "[OK] plugin processes on Node"
+  # End here rather than when the event loop drains: a plugin a failed case
+  # could not stop keeps its pipes open, and the suite would never exit.
+  {.emit: "process.exit(process.exitCode || 0);".}
 
 discard main()

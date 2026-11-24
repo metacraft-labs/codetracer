@@ -23,8 +23,8 @@
    needs your answer                        █
    Waiting 14 minutes.                      █
  ● Invented session 8                   16m █
-   needs your answer                        █
-   Waiting 16 minutes.                      ▅
+   needs your answer                        ▃
+   Waiting 16 minutes.
  ○ Invented session 9                   18m
    waiting for your next instruction
    Waiting 18 minutes.

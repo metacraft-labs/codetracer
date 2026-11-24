@@ -119,9 +119,10 @@ function Assert-NonInteractiveDebugger {
   # debug mode at None, nothing can enter the debugger, so the step ends
   # instead of waiting on a prompt nothing answers
   # (ci/test/windows-debugger-guard-test.sh).
+  # This one is applied on every host, so it is not reported as an
+  # intervention: the return value names only what the runner arrived with.
   try {
     $Host.Runspace.Debugger.SetDebugMode([System.Management.Automation.DebugModes]::None)
-    $applied += "debug mode set to None (Ctrl+Break and Wait-Debugger cannot open a prompt)"
   } catch {
     $applied += "could not set the debug mode to None: $($_.Exception.Message)"
   }

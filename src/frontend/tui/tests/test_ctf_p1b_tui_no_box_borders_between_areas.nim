@@ -335,7 +335,8 @@ suite "CTF-P1c: an ended mark and word keep their contrast on every surface":
     for (selector, property, word) in [
         (".ah-tab-mark", "background", false),
         (".ah-ist-ended > .ah-tab-mark,", "background", false),
-        (".ah-fleet-cat-ended .ah-fleet-dot", "background", false),
+        # The fleet's rows draw the progress pie (CTF-P1d), whose inks the
+        # pie's own unit test holds (`test_agent_harbor_pie`): no ended mark.
         (".ah-att-ended .ah-session-row-status", "color", true)]:
       let value = declaration(selector, property)
       var names = @[value, value]
@@ -356,7 +357,7 @@ suite "CTF-P1c: an ended mark and word keep their contrast on every surface":
             " (" & names[k] & "), the palette's ended colour is " & want
         else: inc resolved
     for problem in problems: echo "  ", problem
-    ck problems.len == 0 and resolved == 8
+    ck problems.len == 0 and resolved == 6
 
 suite "CTF-P1b: assertion count":
   test "every assertion ran":

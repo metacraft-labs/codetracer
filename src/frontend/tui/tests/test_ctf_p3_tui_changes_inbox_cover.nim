@@ -20,7 +20,11 @@
 ##     the full tab labels on a narrow panel, a Code tab file row drawn by a
 ##     copy of the VCS row rather than by the VCS pane's spans (broken copy B14,
 ##     in process), the item on screen moved after drawing, an inbox step in
-##     the wrong ink, a text fact naming a word its cells do not show.
+##     the wrong ink, a text fact naming a word its cells do not show, the
+##     inbox's hint gone, an approval's command run on into its purpose, a
+##     Code-tab mark short where the row has room or with no tooltip, a
+##     choice drawn with another control, a page wider than the reading
+##     measure (step 3d).
 ##
 ## And it drives the views as a reader does, through the story host's press
 ## handling (`handleInput` with SGR mouse reports, as the terminal sends
@@ -46,7 +50,12 @@ import ./ctf_p3_tui_cover
 const
   Sizes = [("laptop", 180, 56), ("panel", 95, 40), ("sidebar", 45, 56)]
   Modes = [dmDark, dmLight]
-  ExpectedAssertions = 104 + 3 * (3 + 4 + 4)
+  StepThreeD = 6 + 4 + 6 + 5 + 6
+    ## The step-3d suite's assertions (the hint, the approval, the marks,
+    ## the controls and the reading measure, the priority dropdown).
+  SendDraftCompact = 3 * 3
+    ## The Send-draft suite's assertions: three at each size.
+  ExpectedAssertions = 104 + 3 * (3 + 4 + 4) + StepThreeD + SendDraftCompact
 
 var countedAssertions = 0
 template ck(cond: untyped) =
@@ -404,6 +413,94 @@ suite "CTF-P3: a story opened by the keys shows what the keyboard is on":
       ck top > 0
       ck m.onScreen("item", current)
       ck m.problemsOf.len == 0
+
+suite "CTF-P3 step 3d: the review's follow-ups in the terminal":
+  test "the inbox's hint stands in the page's place, beside the rows at laptop, and opens nothing":
+    let m = mountStory(storyOf("agent-harbor-inbox", "populated"), 180, 56, dmDark)
+    defer: m.dispose()
+    ck m.inbox.current.val.isNone and m.inbox.wantsItemHint
+    ck m.view.values("item-hint") == @[itemHintText()]
+    # Beside: the rows keep the list's 26rem; the hint is past the gap.
+    let hint = m.view.first("item-hint")
+    ck hint != nil and hint.col > ListBesideCells
+    ck m.problemsOf.len == 0
+    if hint != nil: hint.tag("item-hint", "")
+    ck checkChangesInbox(m).join(" ").contains("item hint")
+    let walked = mountStory(storyOf("agent-harbor-inbox", "prev-next"), 95, 40, dmDark)
+    defer: walked.dispose()
+    ck walked.view.values("item-hint").len == 0
+
+  test "an approval's command stands on its own line, apart from its purpose":
+    let m = mountStory(storyOf("agent-harbor-inbox-item", "sudo"), 180, 56, dmLight)
+    defer: m.dispose()
+    ck m.problemsOf.len == 0
+    let subject = m.view.first("approval-subject")
+    let purpose = m.view.first("approval-purpose")
+    ck subject != nil and purpose != nil and purpose.row > subject.row
+    if subject != nil:
+      subject.tag("approval-subject", approvalSummary(m.inboxItem.detail.approvals[0]))
+    let problems = checkChangesInbox(m).join(" ")
+    ck problems.contains("approval commands")
+    ck problems.contains("runs on into its purpose")
+
+  test "the Code tab's marks carry their tooltips, and the legend says what they stand for":
+    let m = mountStory(storyOf("agent-harbor-changes", "code"), 180, 56, dmDark)
+    defer: m.dispose()
+    ck m.problemsOf.len == 0
+    ck m.view.values("code-legend") == @[CodeMarksLegend]
+    let mark = m.view.first("mark-word")
+    if mark != nil: mark.tag("mark-title", "")
+    ck checkChangesInbox(m).join(" ").contains("has no tooltip")
+    let narrow = mountStory(storyOf("agent-harbor-changes", "code"), 45, 56, dmDark)
+    defer: narrow.dispose()
+    ck narrow.view.values("code-legend") == @[CodeMarksLegend]
+    ck narrow.problemsOf.len == 0
+    let legend = narrow.view.first("code-legend")
+    if legend != nil: legend.tag("code-legend", "")
+    ck checkChangesInbox(narrow).join(" ").contains("marks legend")
+
+  test "a choice drawn with another control, or a page past the reading measure, is reported":
+    let m = mountStory(storyOf("agent-harbor-inbox-item", "question-single"), 180, 56, dmDark)
+    defer: m.dispose()
+    ck m.problemsOf.len == 0
+    ck m.view.values("control") == @["toggle", "toggle"]
+    let control = m.view.first("control")
+    if control != nil: control.tag("control", "checkbox")
+    ck checkChangesInbox(m).join(" ").contains("choice controls")
+    let multi = mountStory(storyOf("agent-harbor-inbox-item", "question-multi"), 180, 56, dmDark)
+    defer: multi.dispose()
+    ck multi.view.values("control") == @["checkbox", "checkbox", "checkbox"]
+    let reading = multi.view.first("reading-width")
+    if reading != nil: reading.tag("reading-width", "178")
+    ck checkChangesInbox(multi).join(" ").contains("past the reading measure")
+
+  test "the priority dropdown reads its value whole and keeps the page's inset":
+    for (size, cols, rows) in Sizes:
+      let m = mountStory(storyOf("agent-harbor-inbox-item", "question"), cols, rows, dmDark)
+      defer: m.dispose()
+      let menu = m.view.first("priority-menu")
+      ck menu != nil and menu.attr("priority-menu") == PriorityLabel
+      ck menu.col + menu.width <= cols - 1
+      discard size
+
+suite "CTF-P3: Send draft is a compact button, as Submit is":
+  test "Send draft drawn across the draft's column, out of its actions row, is reported":
+    for (size, cols, rows) in Sizes:
+      let m = mountStory(storyOf("agent-harbor-inbox-item", "draft"), cols, rows, dmLight)
+      defer: m.dispose()
+      ck m.problemsOf.len == 0
+      var send: AhNode = nil
+      for b in m.view.all("button"):
+        if b.attr("button") == SendDraftLabel: send = b
+      let draft = m.view.first("draft")
+      ck send != nil and draft != nil
+      if send != nil and draft != nil:
+        # A drawing that stretches it: the button a child of the draft's
+        # column itself, as wide as the column.
+        send.width = draft.width
+        draft.children.add send
+      ck checkChangesInbox(m).join(" ").contains("the button 'Send draft' is")
+      discard size
 
 suite "CTF-P3: assertion count":
   test "every assertion ran":

@@ -36,6 +36,10 @@
 ## in order to know which `ct uninstall` would remove the thing they are
 ## looking at, since `ct uninstall` only removes user-level components.
 ##
+## Within ONE level the launcher takes the first match in directory-listing
+## order; `selectedVersionsAt` returns a level's components in that order (see
+## there).
+##
 ## ## THE VERSION IS CHOSEN BEFORE THE FILE IS READ, WHICH IS THE LAUNCHER'S ORDER
 ##
 ## `scanLevelForCommand` filters by pin, then by `active/<name>`, then by
@@ -44,7 +48,7 @@
 ## component that STOPPED being a plugin at 2.0.0 go on loading its 1.0.0
 ## manifest for ever, silently, which is the shape §4.1 exists to refuse.
 
-import std/[json, strutils]
+import std/[algorithm, json, strutils]
 when defined(js):
   # Node: `std/os`'s file procedures are not this backend's (common/node_os).
   import ../../common/node_os
@@ -163,10 +167,16 @@ proc activeVersionAt*(levelPath, name: string): string =
 
 proc scanLevel(levelPath: string): tuple[
     byName: seq[tuple[name: string; versions: seq[string]]];
-    badDirs: seq[string]] =
+    badDirs: seq[string];
+    listing: seq[string]] =
   ## Group a level's component directories by name. `active` is skipped
   ## because the launcher skips it by name too, and a dot-directory is skipped
   ## because `install_one` uses `.tmp` for its staging area.
+  ##
+  ## `listing` is every `<name>@<version>` directory in the order the
+  ## directory listing returned it, which `selectedVersionsAt` needs (see
+  ## there). `byName` is in first-seen order of the NAME, which is not the
+  ## same thing once a name has several versions.
   var order: seq[string] = @[]
   var versions: seq[seq[string]] = @[]
   for kind, child in walkDir(levelPath):
@@ -182,6 +192,7 @@ proc scanLevel(levelPath: string): tuple[
       if fileExists(child / PluginManifestFile):
         result.badDirs.add base
       continue
+    result.listing.add base
     var idx = -1
     for i, n in order:
       if n == cref.name: idx = i
@@ -209,11 +220,40 @@ proc selectedVersionsAt*(levelPath: string; pins: openArray[CtrcPin]):
   ## A selection whose `version` is empty (`vsrNone`, `vsrPinnedMissing`)
   ## means the level offers nothing for that name, and the launcher goes on to
   ## the next level.
+  ##
+  ## THE RESULT IS IN THE LAUNCHER'S ORDER WITHIN THE LEVEL: the order in which
+  ## the directory listing returns each SELECTED `<name>@<version>` directory.
+  ## The launcher's `scanLevelForCommand` (codetracer-launcher
+  ## `src/launcher.nim`) walks `readdir`, skips every version it did not
+  ## select, and keeps the FIRST component declaring the command; a later one
+  ## replaces it only with a more specific match (extension, project marker)
+  ## or from a higher level, never at equal rank in the same level. So when
+  ## two components in one level declare a command, the one listed first runs
+  ## it. That is the launcher's actual behaviour, measured on
+  ## codetracer-launcher `agents` cc04d24 with `aaa` and `zzz` created in
+  ## both orders, and no specification states a tie-break. `walkDir` reads the
+  ## same `readdir` stream, and an unchanged directory lists in the same order
+  ## each time, so a caller taking the first declaring entry gets the
+  ## launcher's answer. The first-seen order of the NAME (`scanLevel.byName`)
+  ## would not: with `xx@1`, `yy@1`, `xx@2` listed in that order the launcher
+  ## reaches `yy@1` before the `xx@2` it selected. Selections with an empty
+  ## version come last. (reprobuild-pm issues/2026-11-21-ct-help-describes-a-
+  ## command-with-a-component-the-launcher-does-not-run-for-it.md)
   if not dirExists(levelPath): return
-  for entry in scanLevel(levelPath).byName:
-    result.add (name: entry.name,
-                selection: selectVersion(entry.versions, pinFor(pins, entry.name),
-                                         activeVersionAt(levelPath, entry.name)))
+  let scan = scanLevel(levelPath)
+  var placed: seq[tuple[pos: int; name: string; selection: VersionSelection]]
+  for entry in scan.byName:
+    let sel = selectVersion(entry.versions, pinFor(pins, entry.name),
+                            activeVersionAt(levelPath, entry.name))
+    var pos = high(int)
+    if sel.version.len > 0:
+      let idx = scan.listing.find(entry.name & ComponentSeparator & sel.version)
+      if idx >= 0: pos = idx
+    placed.add (pos: pos, name: entry.name, selection: sel)
+  # Stable, so equal positions (only the empty-version ones) keep name order.
+  placed.sort(proc (a, b: typeof(placed[0])): int = cmp(a.pos, b.pos))
+  for p in placed:
+    result.add (name: p.name, selection: p.selection)
 
 # ---------------------------------------------------------------------------
 # The walk

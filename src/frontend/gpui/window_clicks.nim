@@ -91,6 +91,10 @@ type
     gcpOriginHop = "hop"
       ## A hop of an open origin chain; the key is its index, its variable's
       ## path after `#` (`StateOriginHopAttribute`).
+    gcpPluginNode = "pluginnode"
+      ## A row or control of a plugin's contributed pane: the key is the
+      ## pane's qualified id, `node` the view node, `index` its option or row
+      ## (-1 for the node itself). Sent to the plugin as a `view-event`.
 
   GClickButton* = enum
     gbLeft = "left"
@@ -102,6 +106,8 @@ type
     part*: GClickPart
     key*: string
       ## A Files node's id, a variable's path, a tab's pane id.
+    node*: string
+      ## A plugin pane's view node id (`gcpPluginNode`).
     index*: int64
       ## An event row's index, a call's trace index.
     line*: int
@@ -176,6 +182,20 @@ func contextOfViewId(id: string): string =
   of "vcs.commits.list": "vcsCommits"
   else: ""
 
+const PluginContextPrefix = "plugin:"
+  ## A row's context inside a plugin's contributed pane: the prefix, then the
+  ## pane's qualified id (`leaves.ContributedPaneAttribute`).
+
+func contextOf(viewId, contributedPane: string): string =
+  ## The pane a node opens, when it is a pane's root: a built-in pane's view
+  ## root, or the element a contributed pane's view is drawn into.
+  if contributedPane.len > 0: PluginContextPrefix & contributedPane
+  else: contextOfViewId(viewId)
+
+const PluginPressableKinds = ["Button", "Checkbox", "Toggle", "Collapsible", "Tree"]
+  ## The vocabulary nodes a press activates by themselves (an option's or a
+  ## table row's press names its owner and its index instead).
+
 template classifyClick(at: int; ctx: string; attrAt, up: untyped): GPaneClick =
   ## The click a press on node `at` reports, read off the tree through
   ## `attrAt(node, name)` and `up(node)` (its parent, -1 above the top):
@@ -185,7 +205,23 @@ template classifyClick(at: int; ctx: string; attrAt, up: untyped): GPaneClick =
     let id = attrAt(at, ViewIdAttribute)
     let kind = attrAt(at, ViewKindAttribute)
     var c = GPaneClick(part: gcpNone)
-    if kind == "Tree" and ctx == "fileTree" and id.startsWith("fileTree"):
+    if ctx.startsWith(PluginContextPrefix):
+      # A plugin pane: the press names the view node and its option or row,
+      # read off the attributes the vocabulary's binding stamps. Nothing else
+      # in a plugin's tree is one of the window's own rows.
+      let pane = ctx[PluginContextPrefix.len .. ^1]
+      let option = attrAt(at, "data-option-index")
+      let row = attrAt(at, "data-row-index")
+      if option.len > 0 or row.len > 0:
+        let owner = attrAt(up(at), ViewIdAttribute)
+        if owner.len > 0:
+          try:
+            c = GPaneClick(part: gcpPluginNode, key: pane, node: owner,
+                           index: parseInt(if option.len > 0: option else: row))
+          except ValueError: discard
+      elif id.len > 0 and kind in PluginPressableKinds:
+        c = GPaneClick(part: gcpPluginNode, key: pane, node: id, index: -1)
+    elif kind == "Tree" and ctx == "fileTree" and id.startsWith("fileTree"):
       c = GPaneClick(part: gcpFileNode, key: id)
     elif kind == "Tree" and ctx == "state" and id != "state.root" and
          id.len > 0:
@@ -292,7 +328,8 @@ proc liveClickOf(r: GpuiRenderer; el: GpuiElement): GPaneClick =
   var ctx = ""
   var k = 0
   while ctx.len == 0 and not nodeAt(k).isNil:
-    ctx = contextOfViewId(getAttribute(nodeAt(k), ViewIdAttribute))
+    ctx = contextOf(getAttribute(nodeAt(k), ViewIdAttribute),
+                    getAttribute(nodeAt(k), ContributedPaneAttribute))
     inc k
   classifyClick(0, ctx, attrAt, up)
 
@@ -352,7 +389,8 @@ proc wireWindowClicks*(r: GpuiRenderer; nodes: var seq[SnapshotNode];
     template n: untyped = nodes[i]
     # A row's pane is named by its nearest enclosing pane root.
     var ctx = if n.parent >= 0: contexts[n.parent] else: ""
-    let own = contextOfViewId(n.attr(ViewIdAttribute))
+    let own = contextOf(n.attr(ViewIdAttribute),
+                        n.attr(ContributedPaneAttribute))
     if own.len > 0: ctx = own
     contexts[i] = ctx
     let wired = n.attr(WiredAttribute).len > 0
@@ -398,6 +436,19 @@ proc findClickTarget*(r: GpuiRenderer; root: GpuiElement; part: GClickPart;
       not row.isNil and getAttribute(row, EditorRowAttribute) == key
     of gcpPoint:
       getAttribute(el, "data-option-index") == key
+    of gcpPluginNode:
+      # `<node>` or `<node>#<option>`: the node's own element, or its
+      # option's (or table row's) under it.
+      let hash = key.find('#')
+      if hash < 0:
+        getAttribute(el, ViewIdAttribute) == key
+      else:
+        let owner = r.parentNode(el)
+        let index = key[hash + 1 .. ^1]
+        not owner.isNil and
+          getAttribute(owner, ViewIdAttribute) == key[0 ..< hash] and
+          (getAttribute(el, "data-option-index") == index or
+           getAttribute(el, "data-row-index") == index)
     of gcpVcsFile, gcpVcsCommit:
       getAttribute(el, "data-option-id") == key or
         (childCount(el) > 0 and textContent(nthChild(el, 0)).endsWith(key))

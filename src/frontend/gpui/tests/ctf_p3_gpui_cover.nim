@@ -29,8 +29,19 @@
 ##     order, the item on screen and each row's explanation; the page under
 ##     the rows and its explanation strip;
 ##   * an item's page: its load state, kind, banner, validation and answer
-##     state, a login's state, Cancel and Continue, the expired badge, and
-##     each choice and whether it is chosen.
+##     state, a login's state, Cancel and Continue, the expired badge, each
+##     choice, whether it is chosen and the control it is drawn with (the
+##     design system's checkbox for several, the composer's toggle for one),
+##     each queued approval's command or domain and its purpose apart, the
+##     priority dropdown's value whole, every form button in an actions row
+##     (compact, `Send draft` as `Submit`), and the column its parts keep to
+##     (the reading measure);
+##   * the Inbox's hint in the page's place while items wait and none is on
+##     screen, and nothing on screen that the reader did not put there;
+##   * the Code tab's marks, each with its tooltip, and the legend that says
+##     what the short marks stand for;
+##   * a scrolling region: what the keyboard is on (the keyboard's card or
+##     file, the item on screen) lies in the window it shows.
 ##
 ## Every fact that names a text is also held to the text drawn under it
 ## (`p3DrawnTextProblems`), so a view that tags one word and draws another is
@@ -59,6 +70,14 @@ const
     ## `agent_harbor_changes.styl`: `@container ah-changes (max-width: 30rem)`.
   InboxCompactStepperMaxPx = 50 * 16
     ## `agent_harbor_inbox.styl`: `@container ah-inbox (max-width: 50rem)`.
+  InboxPageBesideMinPx = 60 * 16
+    ## `agent_harbor_inbox.styl`: `@container ah-inbox (min-width: 60rem)`.
+  InboxListBesidePx = 26 * 16
+    ## `.ah-inbox-list`: `flex: 0 0 26rem` beside the page.
+  ItemReadingMaxPx* = 48 * 16
+    ## `AH_ITEM_READING_WIDTH`: an item page's parts at most 48rem wide.
+  PageInsetPx = 2 * 8
+    ## `.ah-item-page`: `PANEL_INSET` each side.
 
   P3DrawnTextFacts* = [
     "state-word", "tab-label", "card-title", "card-path", "card-summary", "question",
@@ -68,7 +87,8 @@ const
     "position", "auto-switch-text", "degraded", "server-name", "strip", "kind-words",
     "item-session", "banner", "prose", "last-reply", "draft-text", "context",
     "approval-summary", "choice-label", "login-provider", "login-state", "login-error",
-    "validation", "phase-text", "no-options", "attachment", "executive-summary"]
+    "validation", "phase-text", "no-options", "attachment", "executive-summary",
+    "approval-subject", "approval-purpose", "item-hint", "code-legend", "mark-word"]
     ## The P3 views' facts that name a text the element draws.
 
 # ---------------------------------------------------------------------------
@@ -167,6 +187,27 @@ proc checkSpecCards(view: GpuiElement; vm: ChangesVM): seq[string] =
       let status = actionStatusText(c.action, c.actionReason, c.actionKind)
       result.expect("last write of " & c.key, e.values("action-status-text"), shown(status))
 
+proc inWindow(view: GpuiElement; fact, value: string): string =
+  ## "" when the part named `value` (the keyboard's card or file, the item
+  ## on screen: `scroll-key`) lies in its scrolling region's window (its top
+  ## shown, and all of it when it fits); else what is wrong, named by
+  ## `fact`. A view drawn without a region (no height given) has nothing to
+  ## check; a region that holds no such part either.
+  let regions = view.all("scroll-region")
+  if regions.len == 0 or value.len == 0: return ""
+  for region in regions:
+    for e in region.all("scroll-key"):
+      if e.fact("scroll-key") != value: continue
+      let top = parseInt(region.fact("scroll-top"))
+      let viewPx = parseInt(region.fact("scroll-view"))
+      let y = parseInt(getAttribute(e, "data-ah-scroll-y"))
+      let h = parseInt(getAttribute(e, "data-ah-scroll-h"))
+      if y < top or y + min(h, viewPx) > top + viewPx:
+        return fact & " " & value & " lies at " & $y & "+" & $h & ", outside the window " &
+               $top & "+" & $viewPx & " of region " & region.fact("scroll-region")
+      return ""
+  ""
+
 proc checkCode(view: GpuiElement; vm: ChangesVM): seq[string] =
   result.expect("summary line", view.values("code-summary"), @[vm.summaryLine])
   let notice = vm.filesNotice
@@ -191,6 +232,19 @@ proc checkCode(view: GpuiElement; vm: ChangesVM): seq[string] =
   result.expect("key-file marks", view.values("key-file"), keys)
   result.expect("selected file", view.values("file-selected"), selected)
   result.expect("file diff", view.values("file-diff"), diffs)
+  # The marks: short, each with its tooltip, and the legend saying what
+  # they stand for.
+  var marks: seq[string]
+  for row in vm.files:
+    marks.add originShort(row.file.origin)
+    if row.key: marks.add KeyFileMark
+    if row.file.binary: marks.add BinaryLabel
+  result.expect("file marks", view.values("mark-word"), marks)
+  for e in view.all("mark-word"):
+    if e.fact("mark-title").len == 0:
+      result.add "the mark " & e.fact("mark-word") & " has no tooltip"
+  result.expect("marks legend", view.values("code-legend"),
+                if vm.files.len > 0: @[CodeMarksLegend] else: @[])
   if diffs.len > 0:
     result.expect("file position", view.values("file-position"), shown(vm.selectedPosition))
 
@@ -247,13 +301,32 @@ proc checkChanges*(view: GpuiElement; vm: ChangesVM; widthPx: int;
     result.expect("details", view.values("details"), ids)
     result.expect("key source files", view.values("key-file"), files)
   of rtCode: result.add checkCode(view, vm)
+  let kept = view.inWindow(if tab == rtCode: "file" else: "card", vm.focus.val)
+  if kept.len > 0: result.add "the keyboard's item is out of view: " & kept
 
 # ---------------------------------------------------------------------------
 # An item's page
 # ---------------------------------------------------------------------------
 
-proc checkItemPage*(view: GpuiElement; page: InboxItemVM; ctx: AgentHarborInboxItemContext): seq[string] =
-  ## The drawn page (its body, or the whole standalone view) against `page`.
+proc looseButtons(node: GpuiElement; inRow: bool; into: var seq[string]) =
+  if node.isNil: return
+  let row = inRow or node.fact("actions").len > 0
+  if not row and node.fact("button").len > 0: into.add node.fact("button")
+  for i in 0 ..< childCount(node): looseButtons(nthChild(node, i), row, into)
+
+proc buttonRowProblems*(view: GpuiElement): seq[string] =
+  ## Every form button of the page in an actions row (`.ah-item-actions`),
+  ## where it is as wide as its label, as `Submit` is: one put in a column
+  ## directly (`Send draft` in the draft's) is stretched across it.
+  var loose: seq[string]
+  looseButtons(view, false, loose)
+  for label in loose:
+    result.add "the button '" & label & "' is not in an actions row"
+
+proc checkItemPage*(view: GpuiElement; page: InboxItemVM; ctx: AgentHarborInboxItemContext;
+                    pageWidthPx = 0): seq[string] =
+  ## The drawn page (its body, or the whole standalone view) against `page`;
+  ## given the page's width, the column its parts keep to too.
   result.expect("page state", view.values("page-state"), @[loadState(page.state.val)])
   commonLoad(view, page.state.val, page.error.val, result)
   if page.state.val != asReady: return
@@ -267,6 +340,19 @@ proc checkItemPage*(view: GpuiElement; page: InboxItemVM; ctx: AgentHarborInboxI
   let phase = page.phaseText
   result.expect("answer state", view.values("phase-text"), shown(phase))
   result.expect("summary first", view.values("summary-first").len, ord(page.leadsWithSummary))
+  result.expect("priority dropdown", view.values("priority-menu"), @[PriorityLabel])
+  if pageWidthPx > 0:
+    result.expect("reading column", view.values("reading-width"),
+                  @[$min(pageWidthPx - PageInsetPx, ItemReadingMaxPx)])
+  var subjects, purposes: seq[string]
+  for a in d.approvals:
+    subjects.add approvalSubject(a)
+    if approvalPurposeText(a).len > 0: purposes.add approvalPurposeText(a)
+  result.expect("approval commands", view.values("approval-subject"), subjects)
+  result.expect("approval purposes", view.values("approval-purpose"), purposes)
+  for subject in view.values("approval-subject"):
+    if " in order to" in subject: result.add "an approval's command runs on into its purpose: " & subject
+  result.add buttonRowProblems(view)
   let buttons = view.values("button")
   if d.kind == ikLoginRequest:
     result.expect("login", view.values("login"),
@@ -297,6 +383,10 @@ proc checkItemPage*(view: GpuiElement; page: InboxItemVM; ctx: AgentHarborInboxI
       checked.add $(o.id in chosen)
     result.expect("choices", shown, ids)
     result.expect("chosen", view.values("checked"), checked)
+    let single = d.kind != ikAsyncFeedback and d.form == qfSingle
+    var controls: seq[string]
+    for o in options: controls.add(if single: "toggle" else: "checkbox")
+    result.expect("choice controls", view.values("control"), controls)
 
 # ---------------------------------------------------------------------------
 # The Inbox panel
@@ -339,6 +429,12 @@ proc checkInbox*(view: GpuiElement; vm: InboxVM; widthPx: int;
   result.expect("explanations", view.values("explanation"), explanations)
   let page = vm.page
   result.expect("item page", view.values("page"), if page.isNil: @[] else: @["inbox"])
+  result.expect("item hint", view.values("item-hint"),
+                if vm.wantsItemHint: @[itemHintText()] else: @[])
+  if vm.wantsItemHint and not vm.current.val.isNone:
+    result.add "the hint is drawn while an item is on screen"
+  let kept = view.inWindow("item", if page.isNil: "" else: vm.current.val.id)
+  if kept.len > 0: result.add "the item on screen is out of view: " & kept
   if not page.isNil:
     let strip = vm.explanationStrip
     result.expect("explanation strip", view.values("strip"), shown(strip))
@@ -346,7 +442,8 @@ proc checkInbox*(view: GpuiElement; vm: InboxVM; widthPx: int;
     if drawnPage != nil:
       var itemCtx = AgentHarborInboxItemContext(nowMs: ctx.nowMs, onOpenSignIn: ctx.onOpenSignIn,
                                                 onContinue: proc() = discard)
-      result.add checkItemPage(drawnPage, page, itemCtx)
+      let pageW = if widthPx >= InboxPageBesideMinPx: widthPx - InboxListBesidePx else: widthPx
+      result.add checkItemPage(drawnPage, page, itemCtx, pageW)
 
 proc inboxInkProblems*(view: GpuiElement; p: AhPalette): seq[string] =
   ## Previous and Next in the body colour while they can be pressed, the

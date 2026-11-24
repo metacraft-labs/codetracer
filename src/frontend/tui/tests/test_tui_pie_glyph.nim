@@ -3,13 +3,14 @@
 ## glyph carries the share in quarters, by the terminal's glyph tier, in the
 ## wedge's ink for its ground.
 ##
-## - The quarters' table at each boundary: under 12.5 % ○, from 12.5 % ◔,
-##   from 37.5 % ◑, from 62.5 % ◕, from 87.5 % ● (Unicode's Geometric Shapes
-##   circles, https://www.unicode.org/charts/PDF/U25A0.pdf); no known
-##   progress ○, as at 0 %.
-## - The tiers' fallback: `basic` ○ / ● (WGL4 carries no quarter circle),
-##   `ascii` and the ambiguous-wide screen `o` / `*`; the screen-reader mode
-##   says the pie's words in the glyph's place.
+## - The quarters' table at each boundary: 0 % ○, under 37.5 % ◔, from
+##   37.5 % ◑, from 62.5 % ◕, 100 % ● (Unicode's Geometric Shapes circles,
+##   https://www.unicode.org/charts/PDF/U25A0.pdf): a pie part done is never
+##   ○ or ●; no known progress ◌.
+## - The tiers' fallback: `basic` ○ ½ ● ? (WGL4 carries no quarter circle
+##   and no ◌), `ascii` and the ambiguous-wide screen `o + * ?`; in every
+##   tier none, some, all and not known are four different glyphs. The
+##   screen-reader mode says the pie's words in the glyph's place.
 ## - A drawn pie: its glyph in the wedge's ink on its ground, its facts.
 ##
 ## No mocks: the canvas is the views' own (`StyledGrid`), the pies are the
@@ -25,16 +26,18 @@ proc pieAt(percentOf200: int): ProgressPie =
   pieOf(saRunning, percentOf200, 200)
 
 suite "the glyph table, at each boundary":
-  test "quarters, rounded to the nearest":
+  test "quarters, rounded to the nearest; part done is never none or all":
     check pieGlyph(pieAt(0)) == "○"
-    check pieGlyph(pieAt(24)) == "○"       # 12 %
+    check pieGlyph(pieAt(1)) == "◔"        # 0.5 %: started, not ○
+    check pieGlyph(pieAt(24)) == "◔"       # 12 %
     check pieGlyph(pieAt(25)) == "◔"       # 12.5 %
     check pieGlyph(pieAt(74)) == "◔"       # 37 %
     check pieGlyph(pieAt(75)) == "◑"       # 37.5 %
     check pieGlyph(pieAt(124)) == "◑"      # 62 %
     check pieGlyph(pieAt(125)) == "◕"      # 62.5 %
     check pieGlyph(pieAt(174)) == "◕"      # 87 %
-    check pieGlyph(pieAt(175)) == "●"      # 87.5 %
+    check pieGlyph(pieAt(175)) == "◕"      # 87.5 %: not done
+    check pieGlyph(pieAt(199)) == "◕"      # 99.5 %: not done
     check pieGlyph(pieAt(200)) == "●"
 
   test "the story's shares":
@@ -54,23 +57,60 @@ suite "the tiers' fallback":
   let ascii = GlyphProfile(tier: tierAscii)
   let wide = GlyphProfile(tier: tierExtended, ambiguousWide: true)
   let wideBasic = GlyphProfile(tier: tierBasic, ambiguousWide: true)
-  test "basic: ○ for none, ● for any quarter":
-    check pieGlyph(pieAt(24), basic) == "○"
-    check pieGlyph(pieAt(25), basic) == "●"
-    check pieGlyph(pieAt(100), basic) == "●"
-    # WGL4 has no ◌: unknown keeps ○, and the words tell it from 0 %.
-    check pieGlyph(pieOf(saIdle, 0, 0), basic) == "○"
-    check pieGlyph(pieOf(saRunning, 0, 0), basic) == "○"
+  test "basic: ○ none, ½ some, ● all, ? not known":
+    check pieGlyph(pieAt(0), basic) == "○"
+    for k in [1, 24, 25, 32, 100, 168, 199]:
+      checkpoint $k
+      check pieGlyph(pieAt(k), basic) == "½"
+    check pieGlyph(pieAt(200), basic) == "●"
+    # WGL4 has no ◌: unknown is `?`, never ○.
+    check pieGlyph(pieOf(saIdle, 0, 0), basic) == "?"
+    check pieGlyph(pieOf(saRunning, 0, 0), basic) == "?"
 
-  test "ascii and the ambiguous-wide screen: o and *":
+  test "ascii and the ambiguous-wide screen: o none, + some, * all, ? not known":
     for profile in [ascii, wide, wideBasic]:
       check pieGlyph(pieAt(0), profile) == "o"
-      check pieGlyph(pieAt(60), profile) == "*"
+      check pieGlyph(pieAt(1), profile) == "+"
+      check pieGlyph(pieAt(32), profile) == "+"
+      check pieGlyph(pieAt(199), profile) == "+"
       check pieGlyph(pieAt(200), profile) == "*"
-      check pieGlyph(pieOf(saRunning, 0, 0), profile) == "o"
+      check pieGlyph(pieOf(saRunning, 0, 0), profile) == "?"
     for k in 0 .. 200:
       let g = pieGlyph(pieAt(k), ascii)
       check g.len == 1 and g[0].ord < 0x80
+
+  test "every tier draws the four kinds as four glyphs":
+    let tiers = [GlyphProfile(tier: tierExtended), basic, ascii, wide]
+    for profile in tiers:
+      checkpoint $profile
+      # One glyph per kind, whatever the share within it.
+      var glyphOf: array[PieCellKind, seq[string]]
+      for k in 0 .. 200:
+        let pie = pieAt(k)
+        let g = pieGlyph(pie, profile)
+        if pie.pieCellKind != pckPartial and g notin glyphOf[pie.pieCellKind]:
+          glyphOf[pie.pieCellKind].add g
+      glyphOf[pckUnknown].add pieGlyph(pieOf(saRunning, 0, 0), profile)
+      check glyphOf[pckEmpty].len == 1 and glyphOf[pckFull].len == 1
+      var partials: seq[string]
+      for k in 1 .. 199:
+        let g = pieGlyph(pieAt(k), profile)
+        if g notin partials: partials.add g
+      check glyphOf[pckEmpty][0] notin partials
+      check glyphOf[pckFull][0] notin partials
+      check glyphOf[pckUnknown][0] notin partials
+      check glyphOf[pckEmpty][0] != glyphOf[pckFull][0]
+      check glyphOf[pckUnknown][0] != glyphOf[pckEmpty][0]
+      check glyphOf[pckUnknown][0] != glyphOf[pckFull][0]
+
+  test "the four kinds, at their edges":
+    check pieCellKind(pieOf(saRunning, 0, 0)) == pckUnknown
+    check pieCellKind(pieOf(saRunning, 0, 50)) == pckEmpty
+    check pieCellKind(pieOf(saRunning, 1, 50)) == pckPartial
+    check pieCellKind(pieOf(saRunning, 49, 50)) == pckPartial
+    check pieCellKind(pieOf(saRunning, 50, 50)) == pckFull
+    check pieCellKind(pieOf(saRunning, 60, 50)) == pckFull
+    check pieCellKind(pieOf(saEnded, 7, 0)) == pckUnknown
 
   test "the screen-reader mode says the words in the glyph's place":
     let quiet = GlyphProfile(tier: tierAscii, quiet: true)
@@ -124,7 +164,7 @@ suite "a drawn pie":
       var line = ""
       for e in t.all("pie"): line.add cellsText(c.grid, e.row, e.col, 1)
       drawn.add line
-    check drawn == @["○◔◑◕●◌", "○●●●●○", "o****o"]
+    check drawn == @["○◔◑◕●◌", "○½½½●?", "o+++*?"]
     # The screen reader's words for 16 % and unknown.
     check c.root.values("pie-words") ==
       @["reader: running, 8 of 50 steps, 16%", "reader: running, progress unknown"]

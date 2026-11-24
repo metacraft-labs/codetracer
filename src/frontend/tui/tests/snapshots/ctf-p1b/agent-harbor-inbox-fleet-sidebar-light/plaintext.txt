@@ -18,8 +18,8 @@
    waiting for your next instruction
    Waiting longest of the normal items.
                                              
-                                             
-                                             
+  Select an item, or press ] for the one at
+                   the top
                                              
                                              
                                              

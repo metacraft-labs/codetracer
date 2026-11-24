@@ -97,6 +97,7 @@ import ../../agent_harbor/ah_tui_fleet_panel
 import ../../agent_harbor/ah_tui_composer
 import ../../agent_harbor/ah_tui_results
 import ../../agent_harbor/ah_tui_pie
+from ../../app/views/glyph_table import GlyphProfile
 import ../../agent_harbor/ah_tui_session_activity
 import ../../agent_harbor/ah_tui_suggested_actions
 import ../../agent_harbor/[ah_tui_control_center, ah_tui_gaze_mark, ah_tui_process_switcher]
@@ -688,7 +689,47 @@ proc checkProgress(view: AhNode; vm: InitiativeProgressVM): seq[string] =
   result.expect("executive summary", view.values("executive-summary"),
                 @[if summary.len > 0: summary else: "The plan states no executive summary."])
 
-proc checkFleet(view: AhNode; vm: FleetSnapshotVM): seq[string] =
+proc contrastRatio(a, b: string): float
+
+proc saysShare(words: string): bool =
+  ## Whether `words` print a count or a share the pie now shows: a `%`, or
+  ## a number, `/` and a number (`3/19`).
+  if '%' in words: return true
+  for i in 1 ..< words.high:
+    if words[i] == '/' and words[i - 1] in Digits and words[i + 1] in Digits: return true
+
+proc pieProblems(m: AhTuiMount; e: AhNode; pie: ProgressPie; at: string;
+                 plate = false): seq[string] =
+  ## One site's drawn pie against the viewmodel's `pie` (CTF-P1d): one
+  ## pie, with the same role, share (or unknown) and words; its cell holds
+  ## the tier's glyph for that pie in the ink the palette resolves for the
+  ## cell's own ground, at 3:1 or more -- so a view that recomputes a pie, or
+  ## draws another item's, differs. With `plate`, the cell's ground is the
+  ## panel's (`tone.body`) whatever the row's surface.
+  let pies = e.all("pie")
+  if pies.len != 1:
+    return @[at & " draws " & $pies.len & " pies, not one"]
+  let d = pies[0]
+  result.expect("pie role at " & at, d.attr("pie"), $pie.role)
+  result.expect("pie share at " & at, d.attr("pie-fraction"),
+                if pie.known: pie.pieStopPercent else: "unknown")
+  result.expect("pie words at " & at, d.attr("pie-label"), pie.label)
+  let ground = d.attr("pie-ground")
+  let p = ahPalette(m.mode)
+  result.expect("pie ink at " & at, d.attr("pie-ink"), p.pieInks(pie.role, ground).wedge)
+  if plate:
+    result.expect("pie plate at " & at, ground, m.canvas.tone.body)
+  # A row the screen shows: its cell holds the glyph, in that ink, on that
+  # ground (a row scrolled past the screen's last line has no cell).
+  if d.row < m.canvas.rows:
+    result.expect("pie glyph at " & at, cellsText(m.canvas.grid, d.row, d.col, 1),
+                  pie.pieGlyph(m.canvas.glyphs))
+    let look = styleAt(m.canvas.grid, d.row, d.col)
+    result.expect("pie cell at " & at, (look.fg, look.bg), (d.attr("pie-ink"), ground))
+    if contrastRatio(look.fg, look.bg) < 3.0:
+      result.add "the pie at " & at & " is under 3:1 on its ground"
+
+proc checkFleet(view: AhNode; vm: FleetSnapshotVM; m: AhTuiMount): seq[string] =
   result.expect("state", view.attr("state"), stateName(vm.state.val))
   commonState(view, vm.state.val, vm.error.val, result)
   if vm.state.val != asReady: return
@@ -723,6 +764,12 @@ proc checkFleet(view: AhNode; vm: FleetSnapshotVM): seq[string] =
         result.expect("activity of " & row.shortId, e.values("activity"),
                       row.activity[0 ..< shown])
         result.expect("title of " & row.shortId, e.first("title").attr("title"), row.title)
+        # The fleet's rows: the row's pie, a plate of the panel when selected; its
+        # status word stays and says no count or share.
+        result.add pieProblems(m, e, row.pie, "row " & row.shortId, plate = row.selected)
+        let status = e.first("status")
+        if not status.isNil and saysShare(status.attr("status")):
+          result.add "the status of " & row.shortId & " says a share: " & status.attr("status")
 
 proc checkComposer(view: AhNode; vm: OmniboxComposerVM): seq[string] =
   ## The composer's drawing against its viewmodel (CTF-P2c): the phase and
@@ -984,8 +1031,6 @@ proc checkGazeMark(view: AhNode; vm: GazeStatusVM): seq[string] =
   result.expect("mark words", marks[0].attr("accessible-name"), vm.text)
   result.expect("tooltip", marks[0].attr("tooltip"), vm.tooltip)
 
-proc contrastRatio(a, b: string): float
-
 proc checkPieStory(m: AhTuiMount): seq[string] =
   ## The progress pie's story against its data (`agent_harbor_pie_stories`):
   ## a band per ground in order, a row per role, a pie per column, each with
@@ -1027,6 +1072,35 @@ proc checkPieStory(m: AhTuiMount): seq[string] =
         result.expect("ground at " & at, look.bg, ground)
         if contrastRatio(look.fg, ground) < 3.0:
           result.add "the pie at " & at & " is under 3:1 on its ground"
+  # The glyph tiers: the running row in each tier, each pie the tier's glyph
+  # for it, and the four kinds (none, some, all, not known) four glyphs, so
+  # a part-done session never reads as done nor an unknown one as not
+  # started, whatever the terminal's glyphs.
+  let running = pieStoryRows()[1]
+  for t in view.all("pie-tier"):
+    let name = t.attr("pie-tier")
+    var profile: GlyphProfile
+    var found = false
+    for (n, pr) in PieStoryTiers:
+      if n == name: (profile, found) = (pr, true)
+    if not found:
+      result.add "the story draws an unknown glyph tier " & name
+      continue
+    let pies = t.all("pie")
+    result.expect("pies of tier " & name, pies.len, running.pies.len)
+    var byKind: array[PieCellKind, seq[string]]
+    for k, pie in running.pies:
+      if k >= pies.len: break
+      let g = cellsText(m.canvas.grid, pies[k].row, pies[k].col, 1)
+      result.expect("glyph of tier " & name & " at " & PieStoryColumns[k], g,
+                    pie.pieGlyph(profile))
+      if g notin byKind[pie.pieCellKind]: byKind[pie.pieCellKind].add g
+    for a in PieCellKind:
+      for b in PieCellKind:
+        if a < b:
+          for g in byKind[a]:
+            if g in byKind[b]:
+              result.add "tier " & name & " draws " & $a & " and " & $b & " alike: " & g
 
 proc checkProcessSwitcher(view: AhNode; vm: ProcessSwitcherVM): seq[string] =
   ## The multi-process recording's tab against its viewmodel (CTF-P2c step
@@ -1065,7 +1139,7 @@ proc checkStory(m: AhTuiMount): seq[string] =
   of "agent-harbor-initiative-tabs": checkInitiativeTabs(view, m.initiativeTabs)
   of "agent-harbor-initiatives": checkInitiatives(view, m.initiatives)
   of "agent-harbor-initiative-progress": checkProgress(view, m.progress)
-  of "agent-harbor-fleet": checkFleet(view, m.fleet)
+  of "agent-harbor-fleet": checkFleet(view, m.fleet, m)
   of "agent-harbor-composer": checkComposer(view, m.composer)
   of "agent-harbor-results": checkResults(view, m.results)
   of "agent-harbor-suggested-actions":
