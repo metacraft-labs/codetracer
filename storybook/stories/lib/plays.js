@@ -82,12 +82,18 @@ const progressCheck = (assert) => hostCheck(".agent-harbor-progress", assert);
 const initiativeTabsCheck = (assert) => hostCheck(".ah-initiative-tab-bar", assert);
 
 // What every story of the initiative bar with tabs must draw: the tabs, each
-// with its progress and its state class, and exactly one active.
+// with its progress pie (one, named by its words) and its state class, its
+// `n/m` in its tooltip rather than on the tab, and exactly one active.
 async function initiativeTabsDrawn(el) {
   await waitFor(el, ".ah-initiative-tab");
   expect(el.querySelectorAll(".ah-initiative-tab").length).toBeGreaterThan(0);
   for (const tab of el.querySelectorAll(".ah-initiative-tab")) {
-    expect(tab.querySelector(".ah-tab-progress")?.textContent).toMatch(/^\d+\/\d+$/);
+    const pies = tab.querySelectorAll(":scope > .ah-tab-pie > .ah-pie");
+    expect(pies.length).toBe(1);
+    expect(pies[0].getAttribute("role")).toBe("img");
+    expect(pies[0].getAttribute("aria-label")).toMatch(/\S/);
+    expect(tab.querySelector(".ah-tab-progress")).toBeNull();
+    expect(tab.getAttribute("title")).toMatch(/\d+\/\d+ milestones/);
     expect([...tab.classList].some((c) => c.startsWith("ah-ist-"))).toBe(true);
   }
   expect(el.querySelectorAll(".ah-initiative-tab.active").length).toBe(1);

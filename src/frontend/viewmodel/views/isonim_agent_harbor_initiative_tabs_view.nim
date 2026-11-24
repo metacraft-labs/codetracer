@@ -43,6 +43,7 @@ when defined(js):
   from ./isonim_agent_harbor_session_tabs_view import hangOverflowMenu, onFontsLoaded
 import ./isonim_recording_switcher_view
 import ./isonim_agent_harbor_initiatives_view
+import ./isonim_agent_harbor_pie_view
 
 export signals, computation, components, initiative_tabs_vm
 
@@ -105,18 +106,20 @@ proc renderInitiativeTab[R](r: R; vm: InitiativeTabStripVM; tab: StripTab): auto
   let key = initiativeKey(tab.id)
   let id = tab.id
   var node, switchHost: typeof(r.createElement("div"))
+  var pieHost: typeof(r.createElement("span"))
+  # The tab's pie says its state and its milestones' share; `n/m` is in its
+  # tooltip (`StripTab.tooltip`), no longer on the tab.
   let res = ui(r):
     tdiv(ref = node, class = tabClass(tab.active) & " ah-tab ah-initiative-tab " &
                              stateClass(tab.state),
          title = tab.tooltip, role = "button", tabindex = "0",
          onclick = proc() = discard vm.activate(key)):
-      span(class = "ah-tab-mark"):
+      span(ref = pieHost, class = "ah-tab-pie"):
         discard
       span(`data-ah-cut` = "line", class = SessionTabLabelClass):
         text tab.title
-      span(class = "ah-tab-progress"):
-        text tab.progressText
       tdiv(ref = switchHost, class = "ah-tab-recordings")
+  r.appendRendered(pieHost, tabPie(r, tab.pie, tab.active))
   if tab.active:
     let buttons = vm.recordingButtonsOf(id)
     if buttons.buttons.len > 0:
@@ -137,17 +140,20 @@ proc renderInitiativeTab[R](r: R; vm: InitiativeTabStripVM; tab: StripTab): auto
 
 proc renderSessionTab[R](r: R; vm: InitiativeTabStripVM; tab: StripTab): auto =
   let key = sessionKey(tab.id)
-  ui(r):
+  var pieHost: typeof(r.createElement("span"))
+  let node = ui(r):
     tdiv(class = tabClass(tab.active) & " ah-tab ah-att-" & $tab.session.attention,
          title = tab.tooltip, role = "button", tabindex = "0",
          onclick = proc() = discard vm.activate(key)):
-      span(class = "ah-tab-mark"):
+      span(ref = pieHost, class = "ah-tab-pie"):
         discard
       span(`data-ah-cut` = "line", class = SessionTabLabelClass):
         text tab.title
       if tab.session.originShort.len > 0:
         span(class = "ah-tab-origin", title = "started from " & tab.session.originLabel):
           text tab.session.originShort
+  r.appendRendered(pieHost, tabPie(r, tab.pie, tab.active))
+  node
 
 proc renderOverflowTab[R](r: R; vm: InitiativeTabStripVM; tab: StripTab): auto =
   let key = if tab.kind == stkInitiative: initiativeKey(tab.id) else: sessionKey(tab.id)

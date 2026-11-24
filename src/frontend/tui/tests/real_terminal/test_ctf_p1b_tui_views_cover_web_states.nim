@@ -470,7 +470,57 @@ proc severityOf(failed, waiting: bool): string =
   ## here: a failure over a wait over nothing.
   if failed: "failed" elif waiting: "needs-input" else: "none"
 
-proc checkSessionTabs(view: AhNode; vm: SessionTabStripVM): seq[string] =
+proc contrastRatio(a, b: string): float
+
+proc saysShare(words: string): bool =
+  ## Whether `words` print a count or a share the pie now shows: a `%`, or
+  ## a number, `/` and a number (`3/19`).
+  if '%' in words: return true
+  for i in 1 ..< words.high:
+    if words[i] == '/' and words[i - 1] in Digits and words[i + 1] in Digits: return true
+
+proc pieProblems(m: AhTuiMount; e: AhNode; pie: ProgressPie; at: string;
+                 plate = false): seq[string] =
+  ## One site's drawn pie against the viewmodel's `pie` (CTF-P1d): one
+  ## pie, with the same role, share (or unknown) and words; its cell holds
+  ## the tier's glyph for that pie in the ink the palette resolves for the
+  ## cell's own ground, at 3:1 or more -- so a view that recomputes a pie, or
+  ## draws another item's, differs. With `plate`, the cell's ground is the
+  ## panel's (`tone.body`) whatever the row's surface.
+  let pies = e.all("pie")
+  if pies.len != 1:
+    return @[at & " draws " & $pies.len & " pies, not one"]
+  let d = pies[0]
+  result.expect("pie role at " & at, d.attr("pie"), $pie.role)
+  result.expect("pie share at " & at, d.attr("pie-fraction"),
+                if pie.known: pie.pieStopPercent else: "unknown")
+  result.expect("pie words at " & at, d.attr("pie-label"), pie.label)
+  let ground = d.attr("pie-ground")
+  let p = ahPalette(m.mode)
+  result.expect("pie ink at " & at, d.attr("pie-ink"), p.pieInks(pie.role, ground).wedge)
+  if plate:
+    result.expect("pie plate at " & at, ground, m.canvas.tone.body)
+  # A row the screen shows: its cell holds the glyph, in that ink, on that
+  # ground (a row scrolled past the screen's last line has no cell).
+  if d.row < m.canvas.rows:
+    result.expect("pie glyph at " & at, cellsText(m.canvas.grid, d.row, d.col, 1),
+                  pie.pieGlyph(m.canvas.glyphs))
+    let look = styleAt(m.canvas.grid, d.row, d.col)
+    result.expect("pie cell at " & at, (look.fg, look.bg), (d.attr("pie-ink"), ground))
+    if contrastRatio(look.fg, look.bg) < 3.0:
+      result.add "the pie at " & at & " is under 3:1 on its ground"
+
+proc tabPieProblems(m: AhTuiMount; e: AhNode; pie: ProgressPie; at: string): seq[string] =
+  ## A tab's pie, on the tab's own cell ground, and no count or share
+  ## printed on the tab: an initiative's `n/m` is in its tooltip now.
+  result = pieProblems(m, e, pie, at)
+  if e.all("progress").len > 0:
+    result.add at & " still prints its progress"
+  let label = e.first("label")
+  if not label.isNil and saysShare(label.attr("label")):
+    result.add at & "'s label says a share: " & label.attr("label")
+
+proc checkSessionTabs(view: AhNode; vm: SessionTabStripVM; m: AhTuiMount): seq[string] =
   result.expect("state", view.attr("state"), stateName(vm.state.val))
   commonState(view, vm.state.val, vm.error.val, result)
   if vm.state.val != asReady: return
@@ -502,6 +552,11 @@ proc checkSessionTabs(view: AhNode; vm: SessionTabStripVM): seq[string] =
   result.expect("tab labels", labels, wantedLabels)
   result.expect("tab attention", attention, wantedAttention)
   result.expect("active tab", active, vm.activeId.val)
+  # Each drawn tab's pie, read from its session.
+  for e in view.all("tab"):
+    for t in tabs:
+      if t.id == e.attr("tab"):
+        result.add tabPieProblems(m, e, t.pie, "tab " & t.shortId)
   result.expect("+N chip", view.values("overflow"),
                 if overflow.len > 0: @[$overflow.len] else: @[])
   var failed, waiting = false
@@ -562,7 +617,7 @@ proc checkSessionList(view: AhNode; vm: SessionTabStripVM): seq[string] =
     if e.attr("active") == "true":
       result.expect("active row", e.attr("row"), vm.activeId.val)
 
-proc checkInitiativeTabs(view: AhNode; vm: InitiativeTabStripVM): seq[string] =
+proc checkInitiativeTabs(view: AhNode; vm: InitiativeTabStripVM; m: AhTuiMount): seq[string] =
   let tabs = vm.tabs
   let ready = vm.state.val == asReady
   result.expect("state", view.attr("state"),
@@ -579,6 +634,12 @@ proc checkInitiativeTabs(view: AhNode; vm: InitiativeTabStripVM): seq[string] =
   for e in view.all("tab"):
     if e.attr("active") == "true": active = e.attr("tab")
   result.expect("active tab", active, vm.activeTab.val)
+  # Each drawn tab's pie, read from its initiative or session.
+  for e in view.all("tab"):
+    for t in tabs:
+      let key = if t.kind == stkInitiative: initiativeKey(t.id) else: sessionKey(t.id)
+      if key == e.attr("tab"):
+        result.add tabPieProblems(m, e, t.pie, "bar tab " & t.title)
   result.expect("+N chip", view.values("overflow"),
                 if layout.overflow.len > 0: @[$layout.overflow.len] else: @[])
   var barFailed, barWaiting = false
@@ -688,46 +749,6 @@ proc checkProgress(view: AhNode; vm: InitiativeProgressVM): seq[string] =
   let summary = vm.current.executiveSummary
   result.expect("executive summary", view.values("executive-summary"),
                 @[if summary.len > 0: summary else: "The plan states no executive summary."])
-
-proc contrastRatio(a, b: string): float
-
-proc saysShare(words: string): bool =
-  ## Whether `words` print a count or a share the pie now shows: a `%`, or
-  ## a number, `/` and a number (`3/19`).
-  if '%' in words: return true
-  for i in 1 ..< words.high:
-    if words[i] == '/' and words[i - 1] in Digits and words[i + 1] in Digits: return true
-
-proc pieProblems(m: AhTuiMount; e: AhNode; pie: ProgressPie; at: string;
-                 plate = false): seq[string] =
-  ## One site's drawn pie against the viewmodel's `pie` (CTF-P1d): one
-  ## pie, with the same role, share (or unknown) and words; its cell holds
-  ## the tier's glyph for that pie in the ink the palette resolves for the
-  ## cell's own ground, at 3:1 or more -- so a view that recomputes a pie, or
-  ## draws another item's, differs. With `plate`, the cell's ground is the
-  ## panel's (`tone.body`) whatever the row's surface.
-  let pies = e.all("pie")
-  if pies.len != 1:
-    return @[at & " draws " & $pies.len & " pies, not one"]
-  let d = pies[0]
-  result.expect("pie role at " & at, d.attr("pie"), $pie.role)
-  result.expect("pie share at " & at, d.attr("pie-fraction"),
-                if pie.known: pie.pieStopPercent else: "unknown")
-  result.expect("pie words at " & at, d.attr("pie-label"), pie.label)
-  let ground = d.attr("pie-ground")
-  let p = ahPalette(m.mode)
-  result.expect("pie ink at " & at, d.attr("pie-ink"), p.pieInks(pie.role, ground).wedge)
-  if plate:
-    result.expect("pie plate at " & at, ground, m.canvas.tone.body)
-  # A row the screen shows: its cell holds the glyph, in that ink, on that
-  # ground (a row scrolled past the screen's last line has no cell).
-  if d.row < m.canvas.rows:
-    result.expect("pie glyph at " & at, cellsText(m.canvas.grid, d.row, d.col, 1),
-                  pie.pieGlyph(m.canvas.glyphs))
-    let look = styleAt(m.canvas.grid, d.row, d.col)
-    result.expect("pie cell at " & at, (look.fg, look.bg), (d.attr("pie-ink"), ground))
-    if contrastRatio(look.fg, look.bg) < 3.0:
-      result.add "the pie at " & at & " is under 3:1 on its ground"
 
 proc checkFleet(view: AhNode; vm: FleetSnapshotVM; m: AhTuiMount): seq[string] =
   result.expect("state", view.attr("state"), stateName(vm.state.val))
@@ -1134,9 +1155,9 @@ proc checkStory(m: AhTuiMount): seq[string] =
   if view.attr("surface") != m.surface:
     return @["the view's root says surface '" & view.attr("surface") & "'"]
   case m.surface
-  of "agent-harbor-session-tabs": checkSessionTabs(view, m.sessions)
+  of "agent-harbor-session-tabs": checkSessionTabs(view, m.sessions, m)
   of "agent-harbor-session-list": checkSessionList(view, m.sessions)
-  of "agent-harbor-initiative-tabs": checkInitiativeTabs(view, m.initiativeTabs)
+  of "agent-harbor-initiative-tabs": checkInitiativeTabs(view, m.initiativeTabs, m)
   of "agent-harbor-initiatives": checkInitiatives(view, m.initiatives)
   of "agent-harbor-initiative-progress": checkProgress(view, m.progress)
   of "agent-harbor-fleet": checkFleet(view, m.fleet, m)
@@ -1393,8 +1414,10 @@ proc styleProblems(m: AhTuiMount; look: LookOf): seq[string] =
                        if active: p.activeTabText else: p.textCaption)
       for tab in vm.tabs:
         if tab.id == e.attr("tab"):
-          result.expectInk(look, e.first("mark"), rows, "the mark of " & tab.id,
-                           markInk(p.markOf(tab.attention)))
+          # The tab's pie, as the terminal shows it: its role's ink on the
+          # tab's ground.
+          result.expectInk(look, e.first("pie"), rows, "the pie of " & tab.id,
+                           p.pieInks(tab.pie.role, if active: p.activeTab else: t.frame).wedge)
       # The focused initiative's tabs: underlined in the action role
       # (`colors-ui-border-action`, the web's 2px line), the underline's own
       # colour, under the tab's inner cells.
@@ -1428,6 +1451,13 @@ proc styleProblems(m: AhTuiMount; look: LookOf): seq[string] =
         result.expectGround(look, label, rows, "the active tab's title", p.activeTab)
       else:
         result.expectGround(look, e, rows, "tab " & e.attr("tab"), t.frame)
+      # The tab's pie, as the terminal shows it: its role's ink on the
+      # tab's ground.
+      for tab in vm.tabs:
+        let key = if tab.kind == stkInitiative: initiativeKey(tab.id) else: sessionKey(tab.id)
+        if key == e.attr("tab"):
+          result.expectInk(look, e.first("pie"), rows, "the pie of " & key,
+                           p.pieInks(tab.pie.role, if active: p.activeTab else: t.frame).wedge)
     for e in view.all("recording"):
       if e.attr("recording-active") == "true":
         result.expectGround(look, e, rows, "the active recording",

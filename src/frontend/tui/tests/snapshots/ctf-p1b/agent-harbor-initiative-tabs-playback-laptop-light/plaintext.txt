@@ -1,4 +1,4 @@
- ● Telemetry upload retries 0/3   +                                                                                                            ← inbox empty  →   Auto-switch: off
+ ○ Telemetry upload retries   +                                                                                                                ← inbox empty  →   Auto-switch: off
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     

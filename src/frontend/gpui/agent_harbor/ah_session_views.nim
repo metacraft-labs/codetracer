@@ -29,6 +29,7 @@ from ../../viewmodel/views/agent_harbor_words import
   hiddenSessions, chipTitle, countsFloor
 
 import ./ah_theme
+import ./ah_pie
 
 export session_tabs_vm, ah_theme
 
@@ -65,12 +66,12 @@ const
 # ---------------------------------------------------------------------------
 
 proc tabContentWidth*(tab: SessionItem; closable: bool): int =
-  ## A single-line tab's content width (its max-content: padding, mark,
+  ## A single-line tab's content width (its max-content: padding, pie,
   ## title, origin and, active, the close control), unclamped: the FLEX
   ## BASE SIZE of a `flex: 0 1 auto` tab (CSS Flexbox §9.2 step 3,
   ## https://www.w3.org/TR/css-flexbox-1/#algo-main-item), which the shrink
   ## starts from, not the width its min/max clamp it to.
-  result = 2 * TabPadPx + MarkPx + TabInnerGapPx + textPx(tabLabelOf(tab), TabTitlePx)
+  result = 2 * TabPadPx + PieTabPx + TabInnerGapPx + textPx(tabLabelOf(tab), TabTitlePx)
   if tab.originShort.len > 0: result += TabInnerGapPx + textPx(tab.originShort, TabOriginPx)
   if closable and tab.active: result += TabInnerGapPx + TabClosePx
 
@@ -197,7 +198,9 @@ proc drawTab(r: GpuiRenderer; p: AhPalette; vm: SessionTabStripVM;
   r.tag(result, "attention", $tab.attention)
   r.tag(result, "active", $tab.active)
   r.tag(result, "tooltip", tab.tooltip)
-  r.appendChild(result, r.mark(p.markOf(tab.attention)))
+  # The tab's progress pie, read from the viewmodel (`SessionItem.pie`), on
+  # the tab's own ground: the active tab's fill, else the window.
+  r.appendChild(result, r.drawPie(p, tab.pie, p.pieGroundColour(tabPieGround(tab.active)), PieTabPx))
   let title = r.text(tabLabelOf(tab), TabTitlePx,
                      if tab.active: p.activeTabText else: p.textCaption,
                      pairs = [("flex-grow", "1")])

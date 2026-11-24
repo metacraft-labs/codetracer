@@ -40,6 +40,7 @@ import nim_agents_isonim_viewmodels/agent_harbor/session_tabs_vm
 import ./isonim_session_tabs_view
 
 import ./agent_harbor_words
+import ./isonim_agent_harbor_pie_view
 
 export signals, computation, components, session_tabs_vm, agent_harbor_words
 
@@ -90,12 +91,12 @@ proc renderTab[R](r: R; vm: SessionTabStripVM; cb: AgentHarborTabCallbacks;
   ## One tab: mark, title, origin, close. A proc of its own so each closure
   ## owns its session id.
   let id = tab.id
-  var close: typeof(r.createElement("span"))
+  var close, pieHost: typeof(r.createElement("span"))
   let node = ui(r):
     tdiv(class = vm.tabClassOf(tab), id = "ah-tab-" & tab.shortId,
          title = tab.tooltip, role = "button", tabindex = "0",
          onclick = proc() = vm.invokeActivate(cb, id)):
-      span(class = "ah-tab-mark"):
+      span(ref = pieHost, class = "ah-tab-pie"):
         discard
       span(`data-ah-cut` = "line", class = SessionTabLabelClass):
         text tabLabelOf(tab)
@@ -106,6 +107,7 @@ proc renderTab[R](r: R; vm: SessionTabStripVM; cb: AgentHarborTabCallbacks;
         span(ref = close, class = SessionTabCloseClass, title = "Close tab",
              onclick = proc() = vm.invokeClose(cb, id)):
           discard
+  r.appendRendered(pieHost, tabPie(r, tab.pie, tab.active))
   when defined(js):
     when typeof(close) is isonim_dom.Element:
       if closable:
