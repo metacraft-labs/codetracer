@@ -84,7 +84,7 @@ export GIT_CONFIG_KEY_1=tag.gpgsign GIT_CONFIG_VALUE_1=false
 # while `command -v python3` said yes throughout. Requirements are declared here
 # in the form `require-tools.sh` can actually check.
 lint_step "tools this stage invokes are present" \
-	bash ci/lib/require-tools.sh shellcheck bash just git python3 python3:yaml node awk diff sort comm timeout openssl sha256sum curl pre-commit prek
+	bash ci/lib/require-tools.sh shellcheck bash just git python3 python3:yaml node awk diff sort comm timeout openssl sha256sum curl pre-commit prek direnv
 
 # In parallel, a few files per shellcheck: with `external-sources=true` every
 # script re-analyses what it sources, so single files take 10-30 s, and one
@@ -563,6 +563,15 @@ lint_step "contract suite: submodule unfold for path: flake inputs" \
 # `exec: direnv: not found` / exit 127. Static, pure bash, no nix.
 lint_step "contract suite: direnv comes from a dev shell we define" \
 	bash ci/test/direnv-provenance-test.sh
+
+# .envrc fetched the direnv flake-overrides plugin from a redirect to a moving
+# branch; when its bytes changed, direnv logged a hash mismatch and the dev
+# shell loaded with NO sibling overrides and exit 0, so `direnv exec` builds
+# silently used the flake-locked inputs. The suite runs the committed .envrc
+# under the real direnv with a fetch that fails, with a plugin that defines
+# nothing, and with a sibling plugin as a positive control. Bash + direnv + git, no nix, no network.
+lint_step "contract suite: .envrc stops without the flake-overrides plugin" \
+	bash ci/test/envrc-flake-overrides-plugin-test.sh
 
 # push-gpg-public-key and push-install-script have failed in every completed
 # `dev` run for weeks with "experimental Nix feature 'nix-command' is disabled",
