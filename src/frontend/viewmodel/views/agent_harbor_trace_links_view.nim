@@ -12,15 +12,18 @@
 ##
 ## - a trace Agent Harbor holds (`agent-harbor://trace/<id>`, or its https
 ##   form on the session's server) is a link in the palette's `link` role,
-##   followed on the same line by its button: `Load trace` (outlined,
-##   small), `Connecting to the replay…` while it connects (no press),
-##   `Show trace` once it replays; `Replay unavailable: <reason>` in the
-##   error role with `Retry` (none for a trace that is gone); and a quiet
-##   `Download`, then `Downloading…`, `Saved <name>` or `Download failed:
-##   <reason>`. The button's tooltip says what it opens and where (the Test
-##   Results pane's placement sentence);
+##   drawn as a short label (`trace 3f9b2c1e`, `trace 8d7e6f5a on <host>`:
+##   the words module's `traceLinkLabel`) with the URL as written in its
+##   tooltip, followed on the same line by its button: `Load trace`
+##   (outlined, small), `Connecting to the replay…` while it connects (no
+##   press), `Show trace` once it replays; `Replay unavailable: <reason>` in
+##   the error role with `Retry` (none for a trace that is gone); and
+##   `Download`, the same small secondary button, then `Downloading…`,
+##   `Saved <name>` or `Download failed: <reason>`. The button's tooltip says
+##   what it opens and where (the Test Results pane's placement sentence);
 ## - a recording on this machine (`codetracer://recordings/<test>`) is a link
-##   followed by `Open recording`: no replay, no download, no action sent;
+##   labelled `recording <test>`, its URL in its tooltip, followed by `Open
+##   recording`: no replay, no download, no action sent;
 ## - text that looks like a trace or recording link and is not one stays
 ##   plain text, its tooltip `Not a trace link: <why>`;
 ## - a plain https link is a link that asks the host to open it;
@@ -31,7 +34,10 @@
 ##
 ## Every link takes keyboard focus and is named by its target (`Trace
 ## <id>`, `Recording <test>`, `File <path>`, `Link <url>`: the timeline's
-## `linkName`); nothing is added to the line's text or its copy.
+## `linkName`); nothing is added to the line's text or its copy. A trace
+## link's label is drawn only: the line's `text` and `copyText` (what its
+## Copy copies) keep the message's URL, and the link carries it as
+## `data-ah-url`.
 ##
 ## **The test-run summary item** (`renderTestRunItem`): a cardless timeline
 ## line, `Ran 6 tests on 2 platforms: 4 passed, 1 failed, 1 skipped` in its
@@ -143,7 +149,7 @@ proc renderTraceActions*[R, N](r: R; reference: TraceReference;
     if phase in {dpIdle, dpFailed}:
       var d: N
       let b = ui(r):
-        button(ref = d, class = "ah-trace-download",
+        button(ref = d, class = "ct-button-sm-secondary ah-trace-button ah-trace-download",
                title = "Download the trace to open it on this machine"):
           text DownloadText
       r.press(d, TraceDownloadOperation, proc() = opener.download(reference))
@@ -166,12 +172,9 @@ proc renderTraceLink[R, N](r: R; link: LinkPart; ctx: AgentHarborTraceLinksConte
   result = ui(r):
     span(class = "ah-trace"):
       span(ref = anchor, class = "ah-link ah-trace-link", role = "link", tabindex = "0",
-           `aria-label` = linkName(link),
-           title = reference.url & (if reference.httpsUrl.len > 0 and
-                                       reference.httpsUrl != link.text:
-                                      "\n" & reference.httpsUrl else: ""),
-           `data-ah-link` = $reference.kind):
-        text link.text
+           `aria-label` = linkName(link), title = traceLinkTitle(link),
+           `data-ah-link` = $reference.kind, `data-ah-url` = link.text):
+        text traceLinkLabel(link)
   let opener = ctx.opener
   if opener.canPress(reference):
     r.press(anchor, TraceLoadOperation, proc() = opener.load(reference))

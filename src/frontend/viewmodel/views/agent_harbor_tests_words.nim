@@ -231,27 +231,83 @@ proc cellRecordTitle*(cell: TestCellView): string =
   if cell.recordAbsence.len > 0: cell.recordAbsence
   else: "Record this test on " & cell.label & "; a recorded run never reuses"
 
-proc rowRunTitle*(vm: TestRunsVM; row: TestRowView): string =
-  ## A test's Run: on every platform switched on that can run it.
-  for c in row.cells:
-    if c.runAbsence.len == 0: return "Run " & row.name & " on the platforms switched on"
-  if row.cells.len == 0: NoPlatformSwitchedOnText else: row.cells[0].runAbsence
-
 proc rowCanRun*(row: TestRowView): bool =
   for c in row.cells:
     if c.runAbsence.len == 0: return true
   false
 
-proc rowRecordTitle*(vm: TestRunsVM; row: TestRowView): string =
-  for c in row.cells:
-    if c.recordAbsence.len == 0:
-      return "Record " & row.name & " on the platforms switched on that can record"
-  if row.cells.len == 0: NoPlatformSwitchedOnText else: row.cells[0].recordAbsence
-
 proc rowCanRecord*(row: TestRowView): bool =
   for c in row.cells:
     if c.recordAbsence.len == 0: return true
   false
+
+proc rowRunName*(row: TestRowView): string =
+  ## A test's Run (the row's trailing play icon), named by what it does
+  ## whether or not it can: the icon has no text, so this is its
+  ## accessible name. Its scope is the test on every platform switched on
+  ## (`RunScope(kind: scTest)`).
+  "Run " & row.name & " on the platforms switched on"
+
+proc rowRecordName*(row: TestRowView): string =
+  ## A test's Record (the row's trailing record icon), named as `rowRunName`.
+  "Record " & row.name & " on the platforms switched on that can record"
+
+proc rowRunTitle*(vm: TestRunsVM; row: TestRowView): string =
+  ## A test's Run's tooltip: what it does and, when it cannot, why not.
+  result = rowRunName(row)
+  if not row.rowCanRun:
+    result.add "\n" & (if row.cells.len == 0: NoPlatformSwitchedOnText
+                       else: row.cells[0].runAbsence)
+
+proc rowRecordTitle*(vm: TestRunsVM; row: TestRowView): string =
+  ## A test's Record's tooltip, as `rowRunTitle`'s.
+  result = rowRecordName(row)
+  if not row.rowCanRecord:
+    result.add "\n" & (if row.cells.len == 0: NoPlatformSwitchedOnText
+                       else: row.cells[0].recordAbsence)
+
+const
+  RecordWaitsOnEveryPlatformText* =
+    "Waiting for the Run on every platform, which is being sent"
+    ## An opened row's Record on every platform waits behind that platform's
+    ## Run (study D31), said once for the row rather than once per sub-row.
+
+proc rowRecordWaitingText*(row: TestRowView): string =
+  ## What an opened row says once, above its sub-rows, when the Record of
+  ## every one of its platforms (two or more) waits behind a Run being sent;
+  ## "" otherwise. When it is said, no sub-row repeats it
+  ## (`cellSaysRecordWaiting`); where the platforms differ, each waiting
+  ## sub-row says its own words.
+  if row.cells.len < 2: return ""
+  for c in row.cells:
+    if not c.recordWaiting: return ""
+  RecordWaitsOnEveryPlatformText
+
+proc cellSaysRecordWaiting*(row: TestRowView; cell: TestCellView): bool =
+  ## Whether an opened row's sub-row says its Record's waiting words beside
+  ## the control: when it waits and the row does not already say it for
+  ## every platform.
+  cell.recordWaiting and rowRecordWaitingText(row).len == 0
+
+const
+  NotInThisRunText* = "not in this run"
+    ## A platform switched on that the shown run does not include: said under
+    ## its Switch, so a platform is never switched on and silent while its
+    ## cells read `not run`.
+
+proc platformRunWord*(vm: TestRunsVM; head: PlatformHeadView): string =
+  ## What a platform's Switch says about the shown run: the viewmodel's
+  ## `runWord` (`queued on …`, `running on …`, the counts, `cancelled`) or,
+  ## for a platform switched on that the shown run, which has started on
+  ## other platforms, does not include, `not in this run`; "" before any
+  ## run, and for a platform switched off.
+  if head.runWord.len > 0: return head.runWord
+  if not head.enabled: return ""
+  let run = vm.shownRun
+  if run.id.len == 0 or run.platformRuns.len == 0: return ""
+  for p in run.platformRuns:
+    if platformKey(p.platform) == head.key: return ""
+  NotInThisRunText
 
 proc showsOpenInCell*(cell: TestCellView): bool =
   ## Whether a closed row's cell draws the open control: where a trace is
@@ -377,6 +433,69 @@ const
   RecordingNotKeptMark* = "\xE2\x80\x94"
     ## — where a test's recording was not kept: no open control.
   FileMenuTitle* = "Several files match; choose one"
+
+proc isUuid(id: string): bool =
+  ## Whether `id` is a UUID as RFC 9562 §4 writes one: 8-4-4-4-12 hex
+  ## digits (https://www.rfc-editor.org/rfc/rfc9562#section-4).
+  if id.len != 36: return false
+  for i, ch in id:
+    if i in [8, 13, 18, 23]:
+      if ch != '-': return false
+    elif ch notin HexDigits: return false
+  true
+
+proc shortTraceId(id: string): string =
+  ## A trace id as a label shows it: a UUID's first group (`3f9b2c1e`), any
+  ## other id of more than 12 characters its first 8, `…` and its last 4
+  ## (`nightly-…n-42`), a shorter id whole. Only a UUID is cut to a prefix:
+  ## another id's prefix may be shared by its neighbours (`nightly-run-42`,
+  ## `nightly-run-43`), so its end stays visible. The whole id stays in the
+  ## link's tooltip and accessible name.
+  if id.isUuid: id[0 ..< 8]
+  elif id.len > 12: id[0 ..< 8] & "\xE2\x80\xA6" & id[^4 .. ^1]
+  else: id
+
+proc hostOf(url: string): string =
+  ## The host of an `https://host[:port]/…` URL as written; "" for none.
+  const scheme = "https://"
+  if not url.toLowerAscii.startsWith(scheme): return ""
+  let rest = url[scheme.len .. ^1]
+  var stop = rest.len
+  for i, ch in rest:
+    if ch in {'/', '?', '#'}:
+      stop = i
+      break
+  rest[0 ..< stop]
+
+proc traceLinkLabel*(link: LinkPart): string =
+  ## What a trace or recording link in an agent's message draws in place of
+  ## its URL (study L1, L2, L13): `trace 3f9b2c1e` for a trace Agent Harbor
+  ## holds, `trace 8d7e6f5a on harbor.example.invalid` for its https form,
+  ## `recording test_queue_bound_holds` for a recording on this machine. The
+  ## two kinds keep labels of their own, as their buttons do (`Load trace`,
+  ## `Open recording`). A label only: the line's `text` and `copyText` are
+  ## the message's, URL and all, and the URL is the link's tooltip
+  ## (`traceLinkTitle`). "" for a part that is not a trace link.
+  if link.kind != lpTrace: return ""
+  let reference = link.reference
+  case reference.kind
+  of trkAgentHarbor:
+    result = "trace " & shortTraceId(reference.id)
+    let host = hostOf(link.text)
+    if host.len > 0: result.add " on " & host
+  of trkLocalRecording:
+    result = "recording " & reference.id
+
+proc traceLinkTitle*(link: LinkPart): string =
+  ## A trace or recording link's tooltip: the URL as the message writes it,
+  ## then the trace's other form when it has one (its `agent-harbor://`
+  ## form under an https link, its https form under an `agent-harbor://`
+  ## link), one per line.
+  let reference = link.reference
+  var lines = @[link.text]
+  for form in [reference.url, reference.httpsUrl]:
+    if form.len > 0 and form notin lines: lines.add form
+  lines.join("\n")
 
 proc runLineTitle*(state: TestRunState): string =
   ## A test-run summary line's tooltip: its run and platforms.
