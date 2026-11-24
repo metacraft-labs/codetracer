@@ -171,7 +171,7 @@ export asyncdispatch except waitFor, runForever
 # admitted import the control's negative half needs.
 import std/strutils
 import std/[asyncdispatch, asyncfile, asyncnet, nativesockets, net, openssl,
-            os, osproc, posix, strtabs]
+            os, osproc, posix]
 
 const
   PluginDeniedSyncIo*: array[3,
@@ -1346,7 +1346,7 @@ import codetracer_embed
 # checks is a case that has stopped saying which one it is about.
 import std/strutils
 import std/[asyncdispatch, asyncfile, asyncnet, nativesockets, net, openssl,
-            os, osproc, posix, strtabs]
+            os, osproc, posix]
 
 const
   PluginDeniedSyncIo*: array[0,
@@ -1610,7 +1610,7 @@ sed -i '0,/array\[3, tuple/s//array[4, tuple/' \
 	"${t}/${COMMON}/plugin_model/source_admission.nim"
 assert_fires "${t}" "allow-list-scan-discriminates" \
 	"admitting an operating-system module moves the control's pinned count, and the gate says by how much" \
-	"expected 10"
+	"expected 9"
 
 # ---------------------------------------------------------------------------
 # THE FOREIGN-FUNCTION PRAGMA — checks 21 and 22
