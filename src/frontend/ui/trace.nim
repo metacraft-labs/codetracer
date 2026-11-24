@@ -16,6 +16,7 @@ from ./editor_points import gutterMarkFor, breakpointsInFile, EditorMark, emNone
   emBreakpointTracepoint,
   emBreakpointDisabled, emTracepoint
 import ./presented_value
+from ./plugin_hooks import pluginEditorMarks, PluginEditorMark
 import ./editor_surface
 import ../viewmodel/input/element_operations
 from ../lib/monaco_appearance import editorGutterLineHtml
@@ -1163,6 +1164,31 @@ proc gutterTestLinesFor*(path: cstring): seq[int] =
 proc gutterHasTest(path: cstring; line: int): bool =
   line in gutterTestLinesFor(path)
 
+proc ensurePluginGlyphClass(glyph: string): cstring =
+  ## A glyph-margin class drawing `glyph` (a plugin marker's), its rule added
+  ## to the document once: Monaco takes a class, not the glyph itself.
+  var hex = ""
+  for c in glyph: hex.add toHex(ord(c), 2)
+  result = cstring("ct-plugin-glyph-" & hex)
+  let name = result
+  let content = cstring(glyph.replace("\\", "\\\\").replace("\"", "\\\""))
+  {.emit: """
+  if (!document.getElementById('ct-plugin-glyph-style')) {
+    var st = document.createElement('style');
+    st.id = 'ct-plugin-glyph-style';
+    document.head.appendChild(st);
+  }
+  var sheet = document.getElementById('ct-plugin-glyph-style').sheet;
+  var sel = '.' + `name` + '::before';
+  var have = false;
+  for (var i = 0; i < sheet.cssRules.length; i++) {
+    if (sheet.cssRules[i].selectorText === sel) { have = true; break; }
+  }
+  if (!have) {
+    sheet.insertRule(sel + ' { content: "' + `content` + '"; }', sheet.cssRules.length);
+  }
+  """.}
+
 proc updateGlyphMarks*(self: EditorViewComponent) =
   ## The glyph column (Editor-Pane.md MC.5): each line's mark, one per line, as
   ## Monaco glyph-margin decorations, from the session store (`gutterMarkFor`,
@@ -1215,6 +1241,33 @@ proc updateGlyphMarks*(self: EditorViewComponent) =
   # A `JsAssoc[int, _]`'s keys come back as JavaScript strings.
   for key, _ in self.traces:
     mark(parseJSInt(cast[cstring](key)))
+  # §11.4.4: THE PLUGINS' MARKS. A marker is a glyph in the glyph margin,
+  # never over a breakpoint or tracepoint (a line already marked keeps its
+  # mark); a decoration is drawn after the line's code. Read from what the
+  # plugins pushed (`plugin_panes`), never by running plugin code.
+  if not pluginEditorMarks.isNil:
+    for m in pluginEditorMarks($self.path):
+      let line = m.line - firstLine + 1
+      if line < 1: continue
+      if m.marker:
+        if m.line in seen or m.glyph.len == 0: continue
+        seen.add m.line
+        decorations.add(DeltaDecoration(
+          `range`: newMonacoRange(line, 1, line, 1),
+          options: js{
+            glyphMarginClassName: cstring"ct-plugin-marker " &
+                                  ensurePluginGlyphClass(m.glyph),
+            glyphMarginHoverMessage: js{value: cstring(m.plugin & ": " & m.text)},
+            stickiness: 1}))
+      else:
+        let endColumn = self.monacoEditor.getModel().getLineMaxColumn(line)
+        decorations.add(DeltaDecoration(
+          `range`: newMonacoRange(line, endColumn, line, endColumn),
+          options: js{
+            showIfCollapsed: true,
+            after: js{content: cstring("  " & m.glyph & " " & m.text &
+                                       " (" & m.plugin & ")"),
+                      inlineClassName: cstring"ct-plugin-decoration"}}))
   # The hover hint, only where the line has no mark.
   if self.glyphHintLine > 0 and self.glyphHintLine + firstLine - 1 notin seen:
     decorations.add(DeltaDecoration(

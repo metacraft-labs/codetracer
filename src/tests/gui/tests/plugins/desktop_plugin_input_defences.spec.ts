@@ -259,3 +259,32 @@ test.describe("desktop: a press on a plugin pane's row", () => {
       .toContain("work 40% (activated)");
   });
 });
+
+test.describe("desktop: a plugin's marks in the editor", () => {
+  let home: PluginHome;
+  test.beforeAll(() => { home = installAcmeTools(); });
+  test.use({
+    sourcePath: "calc/main.py",
+    launchMode: "trace",
+    launchEnv: async ({}, use) => { await use(pluginEnv(home)); },
+  });
+
+  test("its decoration is drawn after the current line's code and its marker in the glyph margin", async ({ ctPage }) => {
+    await grantBoth(ctPage);
+    await expect.poll(async () => pluginOf(await pluginState(ctPage), METRICS)?.state ?? "",
+      { timeout: 180_000 }).toBe("running");
+    // metrics decorates and marks the line the debugger is on (`hotspot`).
+    const line = async () => (await pluginState(ctPage))?.editorMarks?.decorations?.[0]?.line ?? 0;
+    await expect.poll(line, { timeout: 60_000 }).toBeGreaterThan(0);
+    const decoration = ctPage.locator(".monaco-editor .ct-plugin-decoration");
+    await expect(decoration.first()).toBeVisible({ timeout: 60_000 });
+    await expect(decoration.first()).toContainText(/metrics:\s+line\s+\d+/);
+    await expect(decoration.first()).toContainText(METRICS);
+    await expect(ctPage.locator(".monaco-editor .glyph-margin .ct-plugin-marker, .monaco-editor .ct-plugin-marker").first())
+      .toBeAttached({ timeout: 60_000 });
+    // A plugin that is off draws none.
+    await new CommandPalette(ctPage).executeCommand("Plugins - Disable all for this session");
+    await expect(decoration).toHaveCount(0, { timeout: 60_000 });
+    await expect(ctPage.locator(".monaco-editor .ct-plugin-marker")).toHaveCount(0, { timeout: 60_000 });
+  });
+});

@@ -95,6 +95,8 @@ type
     statusLineAtMs: float
     notesShown: seq[string]
       ## The fault notifications already raised (`plugin|atMs|text`).
+    lastMarks: string
+      ## The editor marks last drawn, as JSON text.
 
 var ui: PluginUi
 
@@ -414,6 +416,10 @@ proc onState(payload: JsonNode) =
   if payload{"recoveryOpen"}.getBool(false) and not wasRecovery:
     control(@["recovery-dialog"])
   raiseFaultNotifications(payload)
+  let marks = $payload{"editorMarks"}
+  if marks != ui.lastMarks:
+    ui.lastMarks = marks
+    if not pluginMarksChanged.isNil: pluginMarksChanged()
 
 # ---------------------------------------------------------------------------
 # Keys (§11.7)
@@ -541,6 +547,27 @@ proc releaseSessionPlugins*(tab: int) =
 # Installing
 # ---------------------------------------------------------------------------
 
+proc sameDocument(a, b: string): bool =
+  ## The session names a file as its recording did (often absolute); the
+  ## editor as it opened it. The same file either way.
+  a == b or (a.len > 0 and b.len > 0 and
+             (a.endsWith("/" & b) or b.endsWith("/" & a)))
+
+proc editorMarksFor(path: string): seq[PluginEditorMark] =
+  ## `pluginEditorMarks`: the tab on screen's plugin marks for `path`.
+  let st = activeState()
+  if st.isNil: return
+  let marks = st{"editorMarks"}
+  if marks.isNil or not sameDocument(marks{"file"}.getStr(""), path): return
+  for d in marks{"decorations"}.getElems():
+    result.add (line: d{"line"}.getInt(0), glyph: d{"glyph"}.getStr(""),
+                text: d{"text"}.getStr(""), plugin: d{"plugin"}.getStr(""),
+                marker: false)
+  for m in marks{"markers"}.getElems():
+    result.add (line: m{"line"}.getInt(0), glyph: m{"glyph"}.getStr(""),
+                text: m{"text"}.getStr(""), plugin: m{"plugin"}.getStr(""),
+                marker: true)
+
 proc refreshForActiveTab*() =
   ## The tab on screen changed: show its plugins.
   if ui.isNil: return
@@ -551,6 +578,8 @@ proc refreshForActiveTab*() =
   ui.lastCommands = commandsSignature(st)
   if not pluginPaletteChanged.isNil: pluginPaletteChanged()
   if not pluginStatusChanged.isNil: pluginStatusChanged()
+  ui.lastMarks = ""
+  if not pluginMarksChanged.isNil: pluginMarksChanged()
 
 proc pluginPaneHit(target, ev: JsObject): ElementHit =
   ## The plugin pane's hit test (§5.3): the option, table row or node the
@@ -608,6 +637,7 @@ proc installPluginUi*(ipc: JsObject; activeTab: proc(): int;
   pluginPaletteCommands = paletteCommands
   pluginTabSwitched = refreshForActiveTab
   pluginTabClosed = releaseSessionPlugins
+  pluginEditorMarks = editorMarksFor
   # A page that loaded after its plugins' state was first sent asks again.
   send("state")
 
