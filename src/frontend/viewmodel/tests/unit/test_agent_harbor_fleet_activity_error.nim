@@ -18,7 +18,11 @@
 ## (`newFixtureDataSource`, no mock), with ONE failed session given the
 ## running status, served through the production `SnapshotDataSource` seam.
 ## Its error-level log line is then an activity line on a row with no
-## failure line. The mock renderer is the one both `vm-unit` lanes drive.
+## failure line. The first case is made from it too: a failed row shows its
+## newest error-level line once, as the failure line, so one failed session
+## is given a second, older error-level line (`withSecondError`), which is an
+## activity line under a failure line. The mock renderer is the one both
+## `vm-unit` lanes drive.
 
 import std/[unittest, tables, strutils]
 
@@ -73,6 +77,24 @@ proc withRunningFailure(snapshot: FleetSnapshot): (FleetSnapshot, string) =
           return
   doAssert false, "the fixture holds a failed session with an error-level line"
 
+proc withSecondError(snapshot: FleetSnapshot): FleetSnapshot =
+  ## The snapshot with a second, older error-level line logged by its first
+  ## failed session that has one. A failed row shows its newest error-level
+  ## line once, as the failure line, and leaves it out of the activity lines
+  ## (`fleet_vm.toRow`), so the story data alone has no error-level ACTIVITY
+  ## line under a failure line; this one is.
+  result = snapshot
+  for s in result.sessions.mitems:
+    if s.status == fsFailed:
+      for i, a in s.recent:
+        if a.level == "error":
+          var older = a
+          older.text = "an earlier error, before the reason the session failed"
+          older.timestampMs = a.timestampMs - 1
+          s.recent.insert(older, i)
+          return
+  doAssert false, "the fixture holds a failed session with an error-level line"
+
 proc mountFleet(snapshot: FleetSnapshot): (FleetSnapshotVM, MockNode) =
   var panel: MockNode
   var vm: FleetSnapshotVM
@@ -94,15 +116,16 @@ suite "the shared rule":
 
 suite "the web fleet view sets the error class by the rule":
   test "under a failure line no activity line carries it":
-    let (vm, panel) = mountFleet(fixtureSnapshot())
+    let (vm, panel) = mountFleet(withSecondError(fixtureSnapshot()))
     var underFailure, errorLevel = 0
     for row in vm.rows:
       if row.failureText.len == 0: continue
       for i in 0 ..< row.activityLevels.len:
         if row.activityLevels[i] == "error": inc errorLevel
       inc underFailure
-    # The story data does hold error-level lines under failure lines, so a
-    # view that set the class from the level alone would fail here.
+    # There is an error-level activity line under a failure line
+    # (`withSecondError`), so a view that set the class from the level alone
+    # would fail here.
     ck underFailure > 0
     ck errorLevel > 0
     ck panel.all(ErrorClass).len == 0
