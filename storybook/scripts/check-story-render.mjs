@@ -355,11 +355,19 @@ const PLANTS = {
   "missing-glyph": {
     // A control drawn as a character no face on the page (nor any fallback)
     // has, as the Test Results pane's open control once drew: a boxed "?"
-    // where U+23F5 should be.
+    // where U+23F5 should be. The plant is not U+23F5 itself: which real
+    // symbols have no fallback face depends on the host's fontconfig (Unifont
+    // and Adwaita Mono draw U+23F5), so on such a host the plant drew and the
+    // arm could not fail. It is U+10FFFE, a noncharacter: Unicode never
+    // assigns one (https://www.unicode.org/faq/private_use.html#noncharacters),
+    // so no face maps it on any host, and it is a different code point from
+    // the judge's reference U+10FFFD, so the arm still proves the judge
+    // matches a box drawn for one code point against the box drawn for
+    // another.
     expect: "missing-glyph",
     code: `mountCodeTracerStory = (function (real) { return function (c, k, n, f) {
       const dispose = real(c, k, n, f);
-      const b = document.createElement("span"); b.className = "planted-control"; b.textContent = "\u23F5";
+      const b = document.createElement("span"); b.className = "planted-control"; b.textContent = "\\u{10FFFE}";
       c.appendChild(b); return dispose; }; })(mountCodeTracerStory);`,
   },
   "icon-font-not-loaded": {
