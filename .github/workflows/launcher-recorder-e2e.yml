@@ -78,77 +78,36 @@
 #   `nix build ".?submodules=1#codetracer"` from today, private
 #   `libs/tree-sitter-nim` submodule included.
 #
-# SIBLING PINNING -- the workspace lock, per policy (LRC-6)
-#   Almost every sibling below is a BARE REPO NAME.  `clone-siblings` then
-#   resolves each revision from the per-commit WORKSPACE LOCK published for the
-#   commit under test (its NEED_LOCK=1 path: it clones
-#   metacraft-labs/metacraft-manifests@latest and reads the lock through the
-#   bundled resolve-sibling-rev.sh).  The set of names comes from this repo's
-#   blessed clone-list, `.github/sibling-repos`.  Both halves are
-#   metacraft-dev-guidelines/policies/ci-shared-dev-env.md section 3.2, which is
-#   the org-wide rule and not this gate's to re-decide.
+# SIBLING PINNING -- codetracer's committed locks (2026-11-24, replacing LRC-6)
+#   Every repository this gate clones is pinned by codetracer, at the
+#   codetracer revision under test, exactly as for every other codetracer CI
+#   job (codetracer-specs Testing/Cross-Repo-CI-Integration.md, "Where sibling
+#   pins live"; reprobuild-pm Unified-Locking-And-Hooks.md §14, owner-decided
+#   2026-09-30: a commit's committed lock records its develop set, and a record
+#   store is consulted only on opt-in):
 #
-#   THREE ENTRIES ARE THE STATED EXCEPTION, and they carry a 40-hex commit
-#   SHA: `isonim`, `isonim-tui` and `runquota` were not declared in codetracer's
-#   project manifest, so the lock had no revision for them and a bare entry
-#   failed `Setup dev env` outright.  (Measured 2026-11-01: the manifest declares
-#   all three now, and repro.lock pins them in codetracer, the launcher and the
-#   python, ruby, js, beam and native recorders, so that condition no longer
-#   holds; going bare is a separate change.)  A commit SHA is the other
-#   reproducible shape `clone-siblings` accepts -- unlike `=<branch>`, it names
-#   the same tree on every re-run.  All three are flake inputs, and each SHA is
-#   the one `flake.lock` pins (ci/test/launcher-recorder-e2e-workflow-test.sh
-#   fails when they drift apart).  The full reasoning, the measurement behind it
-#   and the condition for removing it are at the `siblings:` block itself; see
-#   "THE FLAKE-INPUT THREE" there.  (The io-mon family is SHA-pinned too, for a
-#   different reason, stated beside those entries.)
+#     * the codetracer revision is `github.sha` when codetracer calls the gate,
+#       else what the caller's committed repro.lock pins for codetracer, else
+#       the `codetracer-revision` input -- never a branch tip;
+#     * public siblings: codetracer's repro.lock (every solved build input,
+#       which `provision-repro-lock-siblings` clones) or the test lock
+#       ci/test/siblings/repro.lock (named in its `test-siblings`);
+#     * private siblings (the launcher, the native backend and recorder): their
+#       one home, flake.lock's locked.rev or ci/toolchain.pin's
+#       PRIVATE_SIBLING_<NAME>, cloned as `<name>=<rev>`;
+#     * a planned sibling none of those pins fails the job by name
+#       (ci/launcher-recorder-e2e-resolve-siblings.sh).
 #
-#   THE REPO UNDER TEST IS STILL PINNED TO `github.sha`, and gets there without
-#   an input: it is the PRIMARY `actions/checkout` (see WORKSPACE LAYOUT
-#   above), never a sibling, and inside a reusable workflow `github.sha` is the
-#   CALLER's commit.  So the checkout step below says `ref: ${{ github.sha }}`
-#   and every caller is relieved of a `*-ref` input it could only ever set to
-#   that same value.
+#   The calling repo is never cloned or reset: it is the primary checkout at
+#   `github.sha`, and it is excluded from provisioning.
 #
-#   WHAT THIS REPLACED.  Until LRC-6 every entry carried an explicit
-#   `name=<branch>` override, so the lock was never consulted (NEED_LOCK=0) and
-#   each sibling was cloned at whatever its mainline branch pointed at when the
-#   job happened to run -- a different revision on every re-run of the same
-#   commit.  `clone-siblings` reported exactly that, one
-#   `::warning:: ... is therefore not reproducible` per entry.  Those warnings
-#   were the workflow correctly saying it did not follow the policy above; they
-#   are gone because the deviation is.  The same migration was done for the
-#   IsoNim sibling set in commit 23d3965b ("ci: pin the IsoNim siblings by
-#   workspace lock instead of a branch tip"), which this follows.
-#
-#   PRECONDITION, AND IT IS NOT MET ON ANY EDGE TODAY.  A bare entry needs a
-#   workspace lock keyed by the TRIGGERING repo's commit
-#   (locks/<project>/<trigger>/<sha>.toml).  Measured against
-#   metacraft-labs/metacraft-manifests@latest on 2026-08-21, with this repo's
-#   own scripts/resolve-sibling-rev.sh: NONE OF THE FIVE REPOS' CURRENT `dev`
-#   HEADS HAS A LOCK -- all five resolve exit 3, "no workspace lock found".
-#   `codetracer` is the only one still being published for at all (its newest
-#   lock is for 23d3965b, this repo's HEAD~1, published 2026-08-21); the newest
-#   for `codetracer-launcher` is 2026-06-10 (one lock, ever), for
-#   `codetracer-python-recorder` 2026-07-06, for `codetracer-ruby-recorder`
-#   2026-07-07 and for `codetracer-js-recorder` 2026-08-16.
-#
-#   So EVERY edge is red until the workspace tooling publishes locks:
-#     * on `pull_request`, `clone-siblings` probes only the PR base SHA, and
-#       that is almost never a locked commit -- only 2 of `codetracer`'s last 25
-#       first-parent `dev` commits carry a lock, and the launcher and recorder
-#       repos have nothing recent at all -- so every edge, the desktop one
-#       included, fails in `Setup dev env` with "No workspace lock for <repo>";
-#     * on `push`, `github.event.before` is probed as a second candidate, so a
-#       `codetracer` push whose predecessor happens to be locked gets past
-#       `Setup dev env` and fails instead at the fixture check below.
-#   Both are loud failures naming the repo and the fix ("the commit must be
-#   published through the workspace tooling"), which is the intended behaviour
-#   for a missing pin and is strictly better than an unreproducible green -- but
-#   note that NOBODY WORKING IN THESE FIVE REPOS CAN CLEAR IT: the remedy is a
-#   `repro workspace lock` plus a push to the manifest repo.  Recorded against
-#   milestone LRC-6, whose "confirm the lock-publication path is green first"
-#   sub-deliverable is deliberately left unticked because of this.
+#   WHAT THIS REPLACED. LRC-6 cloned bare names resolved against the per-commit
+#   WORKSPACE lock in metacraft-manifests, plus hand-written `=<sha>` pins for
+#   isonim, isonim-tui, runquota and the io-mon family. Publication of those
+#   lock records stopped once the record store became opt-in (2026-09-30), so a
+#   bare name resolved against the caller's own lock, which does not record
+#   codetracer's develop set, and the hand pins drifted from the codetracer
+#   being built (isonim 196dfe18 against a lock expecting 38ace5de).
 #
 # THE TWO PREREQUISITE BLOCKS THE DRIVER DELIBERATELY DOES NOT PROVIDE
 #   (inherited from LRC-2's step-2 deviation; see the milestones file)
@@ -229,7 +188,7 @@
 #   needs -- in particular `<recorder>/cross-repo/launcher-compat.yml`, without
 #   which the driver hard-fails.  The lock currently published for
 #   codetracer@23d3965b pins recorder revisions from 2026-07-13/2026-07-31,
-#   which predate that fixture; the workspace lock has to be refreshed from a
+#   which predate that fixture; codetracer's lock has to be refreshed from a
 #   workspace whose recorder checkouts carry it.  The workspace-shape step
 #   below now names that failure explicitly instead of leaving it to the
 #   driver's later "contract fixture not found".
@@ -288,29 +247,34 @@ on:
 
 
           Entries are BARE names for the same reason every other sibling is:
-          the revision comes from the per-commit workspace lock.  The planner
+          the revision comes from codetracer's locks.  The planner
           refuses an entry carrying `=<ref>`, and refuses one naming the
           triggering repo, exactly as it does for the fixed four.
         required: false
         default: ""
         type: string
-      # NO `*-ref` INPUTS, deliberately (LRC-6).  There used to be four --
-      # `codetracer-ref`, `launcher-ref`, `recorder-ref`,
-      # `trace-format-nim-ref` -- and every one of them was redundant:
-      #
-      #   * the TRIGGERING repo's revision is `github.sha`, which this workflow
-      #     can read for itself (in a reusable workflow the `github` context is
-      #     the caller's), so a caller passing `<self>-ref: ${{ github.sha }}`
-      #     was telling this workflow something it already knew;
-      #   * the OTHER three repos' revisions come from the workspace lock, per
-      #     metacraft-dev-guidelines/policies/ci-shared-dev-env.md section 3.2 --
-      #     see "SIBLING PINNING" in this file's header.  An input that could
-      #     override that would reintroduce exactly the unreproducible pin the
-      #     migration removed.
-      #
-      # A one-off experiment that genuinely needs a different sibling revision
-      # is a `workflow_dispatch` on the sibling's own repo plus a refreshed
-      # workspace lock, not a knob here.
+      codetracer-revision:
+        description: >
+          The codetracer commit (40-hex) to build and test against, used ONLY
+          when the calling repo's committed repro.lock does not pin codetracer.
+          The lock wins when it does, and codetracer calling this gate always
+          tests itself at github.sha. Never a branch: with neither the lock
+          nor this input the gate fails rather than build a tip. This is the
+          "explicit workflow input override" codetracer-specs
+          Testing/Cross-Repo-CI-Integration.md allows; every other sibling
+          revision comes from codetracer's locks at that commit.
+        required: false
+        default: ""
+        type: string
+      # No other `*-ref` inputs. The triggering repo is `github.sha`, and every
+      # sibling is pinned by codetracer at the codetracer revision under test
+      # (see "Resolve every gate sibling" below): repro.lock and
+      # ci/test/siblings/repro.lock for public repositories, flake.lock or
+      # ci/toolchain.pin PRIVATE_SIBLING_* for private ones. LRC-6 took these
+      # revisions from the per-commit WORKSPACE lock; reprobuild retired that
+      # as CI's source on 2026-09-30 (reprobuild-pm Unified-Locking-And-Hooks
+      # §14), and a bare name here then resolved against the caller's own lock,
+      # which does not record codetracer's develop set.
     secrets:
       CI_TOKEN_PROVIDER_APP_ID:
         # Optional because some repos carry the App ID as a repository/org
@@ -394,11 +358,10 @@ jobs:
           fi
 
           # The four repos this gate spans, minus whichever one is the primary
-          # checkout, as BARE clone-siblings entries. Bare is the whole point:
-          # `clone-siblings` resolves each name against the workspace lock
-          # published for the commit under test (NEED_LOCK=1). A `name=<ref>`
-          # entry would take the override path instead, pin nothing, and earn a
-          # `::warning:: ... not reproducible` -- see "SIBLING PINNING" above.
+          # checkout, by NAME only. Each one's revision comes from codetracer's
+          # locks or its private home at the codetracer revision under test
+          # (ci/launcher-recorder-e2e-resolve-siblings.sh); a `name=<ref>`
+          # entry here would bypass that -- see "SIBLING PINNING" above.
           SIB_NAMES=(codetracer codetracer-launcher "${RECORDER_REPO}" codetracer-trace-format-nim)
           SIB_ENTRIES=()
           for n in "${SIB_NAMES[@]}"; do
@@ -451,7 +414,7 @@ jobs:
             fi
             case "${e}" in
               *=*)
-                echo "::error::sibling entry '${e}' carries an explicit '=<ref>'. Sibling revisions come from the per-commit workspace lock (metacraft-dev-guidelines/policies/ci-shared-dev-env.md section 3.2); an override pins nothing and makes the run unreproducible. Refresh the workspace lock instead."
+                echo "::error::sibling entry '${e}' carries an explicit '=<ref>'. Sibling revisions come from codetracer's locks at the codetracer revision under test; an override pins nothing and makes the run unreproducible. Declare the repository in codetracer's repro.nim or ci/test/siblings/repro.nim instead."
                 exit 1
                 ;;
             esac
@@ -461,7 +424,7 @@ jobs:
           echo "triggering repo (primary):    ${SELF} @ ${SELF_SHA}"
           echo "recorder:                     ${RECORDER_REPO} (lang: ${RECORDER_LANG})"
           echo "codetracer checkout will be:  ${CT_DIR}"
-          echo "siblings to clone beside it (revisions from the workspace lock):"
+          echo "siblings to clone beside it (revisions from codetracer's locks):"
           for e in "${SIB_ENTRIES[@]}"; do echo "  ${e}"; done
 
           {
@@ -507,210 +470,99 @@ jobs:
           submodules: recursive
           token: ${{ steps.ci_token.outputs.token }}
 
-      - name: Pin the private siblings codetracer's public lock cannot
-        # The planner's entries are BARE, and `clone-siblings` resolves each
-        # against the TRIGGERING repo's lock. On the launcher and recorder
-        # edges that lock is a private repo's, and it pins every corner
-        # (codetracer-native-recorder's pins codetracer-launcher and
-        # codetracer-native-backend). On the desktop edge it is codetracer's,
-        # which is public and so can neither declare nor pin a private repo
-        # (bbf7dbed4a6; sibling-provisioning-test's UNLOCKED_SIBLINGS). A bare
-        # codetracer-launcher there resolves to nothing. So, on that edge only,
-        # this step gives the launcher the revision this commit records,
-        # ci/toolchain.pin's PRIVATE_SIBLING_CODETRACER_LAUNCHER, as tui-tests
-        # does. Any other private name the desktop edge comes to emit fails
-        # here by name, rather than at clone time. The planner's own rule (no
-        # `=` in what it emits) is unchanged; this is the one place a revision
-        # is added, and only from a file the commit carries.
-        id: private_pins
+      - name: Resolve the codetracer revision under test
+        # SIBLING PINNING (2026-11-24). Every repo this gate clones is pinned by
+        # codetracer: its `repro.lock` and the test lock
+        # `ci/test/siblings/repro.lock` for public repos, and for the private
+        # ones their one home, `flake.lock` or `ci/toolchain.pin`
+        # `PRIVATE_SIBLING_*` (codetracer-specs Testing/Cross-Repo-CI-Integration.md,
+        # "Where sibling pins live"; reprobuild Unified-Locking-And-Hooks §14).
+        # Those are read at the codetracer revision under test, so the siblings
+        # always match the codetracer that is built. That revision is:
+        #   * the commit under test, when codetracer is the caller;
+        #   * otherwise the revision the CALLER's committed repro.lock pins for
+        #     codetracer;
+        #   * otherwise the `codetracer-revision` input (40-hex).
+        # Never a branch tip; with none of the three, the gate fails here.
+        id: ct_rev
+        shell: bash
         env:
           SELF: ${{ steps.plan.outputs.self }}
+          SELF_SHA: ${{ github.sha }}
+          INPUT_REV: ${{ inputs.codetracer-revision }}
+        run: |
+          set -euo pipefail
+          rev="" source=""
+          if [ "${SELF}" = codetracer ]; then
+            rev="${SELF_SHA}" source="the commit under test"
+          else
+            if [ -f "${GITHUB_WORKSPACE}/repro.lock" ]; then
+              # One `deps` entry per `{ ... }`; take the one named exactly
+              # "codetracer" and its 40-hex revision.
+              while IFS= read -r entry; do
+                if [[ "${entry}" =~ name\ =\ \"codetracer\" ]] && [[ "${entry}" =~ revision\ =\ \"([0-9a-f]{40})\" ]]; then
+                  rev="${BASH_REMATCH[1]}"
+                fi
+              done < <(grep '^deps' "${GITHUB_WORKSPACE}/repro.lock" | tr '{' '\n')
+              [ -z "${rev}" ] || source="${SELF}'s committed repro.lock"
+            fi
+            if [ -z "${rev}" ] && [ -n "${INPUT_REV}" ]; then
+              rev="${INPUT_REV}" source="the codetracer-revision input"
+            fi
+          fi
+          if ! [[ "${rev}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::no codetracer revision to test against: ${SELF}'s committed repro.lock does not pin codetracer, and the caller passed no 40-hex codetracer-revision input (got '${rev}'). This gate never builds a branch tip."
+            exit 1
+          fi
+          echo "codetracer revision under test: ${rev} (from ${source})"
+          echo "- codetracer revision under test: \`${rev}\` (from ${source})" >>"${GITHUB_STEP_SUMMARY}"
+          echo "rev=${rev}" >>"${GITHUB_OUTPUT}"
+
+      - name: Clone codetracer at that revision
+        if: steps.plan.outputs.self != 'codetracer'
+        uses: metacraft-labs/metacraft-github-actions/git-auth@a190f3a8b37c5a239d88b8c964b6d13f64fbaa0d
+        with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          working-directory: ${{ github.workspace }}
+          run: |
+            set -euo pipefail
+            ct_dir="${{ steps.plan.outputs.ct-dir }}"
+            rm -rf "${ct_dir}"
+            git init -q "${ct_dir}"
+            git -C "${ct_dir}" remote add origin https://github.com/metacraft-labs/codetracer
+            git -C "${ct_dir}" fetch -q --depth 1 origin "${{ steps.ct_rev.outputs.rev }}"
+            git -C "${ct_dir}" -c advice.detachedHead=false checkout -q FETCH_HEAD
+            git -C "${ct_dir}" submodule update -q --init --recursive --depth 1
+            echo "codetracer at $(git -C "${ct_dir}" rev-parse HEAD)"
+
+      - name: Resolve every gate sibling from codetracer's locks and homes
+        # Each name the planner emits (except codetracer and the calling repo)
+        # is either PRIVATE -- cloned below as `<name>=<rev>` from its one home
+        # at this codetracer revision -- or PUBLIC, cloned by
+        # provision-repro-lock-siblings from codetracer's repro.lock or test
+        # lock. A name in none of them FAILS here by name: that is the negative
+        # control ci/test/launcher-recorder-e2e-workflow-test.sh drives.
+        id: resolve
+        shell: bash
+        env:
+          SELF: ${{ steps.plan.outputs.self }}
+          CT_DIR: ${{ steps.plan.outputs.ct-dir }}
           PLANNED: ${{ steps.plan.outputs.siblings }}
         run: |
           set -euo pipefail
-          out=()
-          while IFS= read -r e; do
-            [ -n "${e}" ] || continue
-            if [ "${SELF}" = codetracer ]; then
-              case "${e}" in
-                codetracer-launcher)
-                  rev=""
-                  while IFS= read -r line; do
-                    [[ "${line}" =~ ^PRIVATE_SIBLING_CODETRACER_LAUNCHER=([0-9a-f]{40})$ ]] && rev="${BASH_REMATCH[1]}"
-                  done <ci/toolchain.pin
-                  [ -n "${rev}" ] || { echo "::error::ci/toolchain.pin has no 40-hex PRIVATE_SIBLING_CODETRACER_LAUNCHER"; exit 1; }
-                  e="${e}=${rev}"
-                  ;;
-                codetracer-native-backend | codetracer-native-recorder | codetracer-visual-replay | codetracer-native-test-programs | codetracer-snapshot-codecs)
-                  echo "::error::the desktop edge would clone the private '${e}' bare, and codetracer's public repro.lock cannot pin it; give it a recorded revision in this step"
-                  exit 1
-                  ;;
-              esac
-            fi
-            out+=("${e}")
-          done <<<"${PLANNED}"
-          {
-            echo "siblings<<LRC6_PINNED_EOF"
-            printf '%s\n' "${out[@]}"
-            echo "LRC6_PINNED_EOF"
-          } >>"${GITHUB_OUTPUT}"
-          printf '  %s\n' "${out[@]}"
+          bash "${CT_DIR}/ci/launcher-recorder-e2e-resolve-siblings.sh" \
+            --ct-dir "${CT_DIR}" --self "${SELF}" --planned "${PLANNED}" \
+            --out "${GITHUB_OUTPUT}"
 
-      - name: Setup dev env + clone the remaining siblings
-        # setup-dev-env installs Nix (with the Attic substituter + keys) and
-        # delegates sibling cloning to `clone-siblings`, which places each one
-        # adjacent to this checkout (../<name>) -- exactly the layout
-        # scripts/detect-siblings.sh and the driver expect, and it `rm -rf`s
-        # each destination first, which is what the NixOS "self-hosted runners
-        # reuse workspaces" gotcha requires.  The triggering repo is NOT in the
-        # list: that `rm -rf` would land on $GITHUB_WORKSPACE itself.
-        #
-        # Every entry is a BARE repo name, so `clone-siblings` takes its
-        # NEED_LOCK=1 path: it clones the manifest repo and resolves each
-        # revision from the per-commit workspace lock through the bundled
-        # resolve-sibling-rev.sh.  The names are a subset of this repo's
-        # `.github/sibling-repos` clone-list -- a subset because the gate needs
-        # one recorder per matrix row and because the triggering repo cannot be
-        # its own sibling.  See "SIBLING PINNING" in this file's header, and
-        # metacraft-dev-guidelines/policies/ci-shared-dev-env.md section 3.2.
-        #
-        # TWO LISTS, AND THEY ANSWER DIFFERENT QUESTIONS.  The planner's three
-        # are the REPOS UNDER TEST -- the other corners of the edge this gate
-        # asserts.  The literal block after it is the WORKSPACE THE CORE BUILD
-        # NEEDS, which is a different set and was simply absent: `Build the
-        # codetracer-desktop core` runs `just build-once`, whose very first act
-        # is `scripts/require-siblings.sh`, and that refused every run of this
-        # gate that ever reached it -- all three matrix arms, identically,
-        # 0.45s in, before a compiler was ever started:
-        #
-        #   Cannot start the CodeTracer build: 8 required sibling repo(s) are
-        #   missing.
-        #     * isonim ... * nim-agents ... * nim-agent-harbor ... * nim-acp
-        #     * nim-everywhere ... * codetracer-trace-format
-        #     * codetracer-native-recorder ... * runquota
-        #
-        # Nothing about the lock or the recorder pins was wrong when that
-        # happened: the three planner siblings resolved, and the contract
-        # fixture check two steps below passed.  The workspace was just three
-        # repos where the build needs eleven.
-        #
-        # SIX OF THE EIGHT ARE ADDED HERE, BARE, and bare is not a shortcut: the
-        # workspace lock published for this commit pins every one of them, so
-        # `clone-siblings` resolves each through NEED_LOCK=1 exactly as it does
-        # the planner's three.  `codetracer-trace-format-nim` is repeated from
-        # the planner's list deliberately -- it is the other half of
-        # `codetracer-trace-format`'s FFI boundary and the two are only ever
-        # correct together (ci/test/sibling-provisioning-test.sh asserts that
-        # per BLOCK, and a block naming one half only is the defect it names).
-        # The repeat costs one extra clone of an already-pinned revision.
-        #
-        # THE FLAKE-INPUT THREE ARE PINNED BY COMMIT SHA, because the lock
-        # could not answer for them (it can now; see the 2026-11-01 measurement
-        # at the top of this file).  `isonim` and `runquota` were the first two
-        # (below); `isonim-tui` joined them on 2026-09-24, see "ISONIM-TUI"
-        # after this block.  `isonim` and `runquota` were absent from the
-        # `codetracer` project in metacraft-labs/metacraft-manifests, so a BARE
-        # entry did not merely fail to help -- it failed this step outright with
-        #
-        #   The workspace lock for codetracer@<sha> pins no revision for these
-        #   sibling(s): isonim runquota
-        #
-        # That those two, and only those two, are what still stops this gate was
-        # MEASURED, not inferred.  Run 33816756641 (dev @ cf503bc22d8e6c9c) is
-        # the six-repo version of this block: `clone-siblings` resolved all ten
-        # bare entries from the lock without a warning ("Cloned 10 sibling(s)"),
-        # and `just build-once` then died 30 seconds later with
-        #
-        #   Cannot start the CodeTracer build: 2 required sibling repo(s) are
-        #   missing.
-        #     * isonim    -- .../_work/codetracer/isonim/src/isonim.nim
-        #     * runquota  -- .../_work/codetracer/runquota/libs/
-        #                    runquota_process/src/runquota_process.nim
-        #
-        # on all three matrix arms, before a compiler was started.  The other
-        # six of the original eight had already been closed; these are the last
-        # two, and they are the whole of defect #152.
-        #
-        # WHY A 40-HEX SHA AND NOT `=dev`.  `clone-siblings` accepts four entry
-        # shapes and only two of them are reproducible: a bare (lock-resolved)
-        # entry, and an immutable commit SHA.  `=dev` is a branch TIP -- a
-        # different revision on every re-run of the same commit -- which
-        # `clone-siblings` itself emits a `::warning:: ... not reproducible` for,
-        # and which ci/test/sibling-provisioning-test.sh caps with a SHRINK-ONLY
-        # ceiling that this block must not push past.  That suite classifies a
-        # 40-hex ref as `sha` and accepts it silently, so these two entries cost
-        # nothing against the ceiling and re-running an old job still clones the
-        # tree that job was built against.
-        #
-        # WHERE THESE TWO SHAS COME FROM -- this repo's own `flake.lock`, which
-        # is the only defensible source for them.  `isonim` and `runquota` are
-        # flake INPUTS here, and their locked revs are what the `ci` dev shell
-        # and the reprobuild driver COMPILE against.  The build's Nim search path
-        # (config.nims) also reads `../isonim` and `../runquota` by relative
-        # path, and so reads these CHECKOUTS.  Pinning the checkouts to the same revs
-        # as flake.lock is what keeps those two resolvers looking at one tree.
-        # Run 33021054045 is what the mismatch costs: the `ci` shell would not
-        # compile against the runquota revision this repo pinned, and the direnv
-        # step below reported it as a missing direnv.  So when flake.lock's
-        # `isonim` / `isonim-tui` / `runquota` inputs are bumped, bump these
-        # with them -- each is one pin spelled in several places (this block
-        # and, for `isonim` and `isonim-tui`, deploy-web-codetracer.yml), not
-        # several independent knobs.  That sentence was not enough on its own: by
-        # 2026-09-24 `isonim` here still said 9936c544 and `runquota` f1ca742d
-        # while flake.lock had moved `isonim` off 9936c544 on 2026-09-16
-        # (b18a3ff8f; at 172ce7fb since 36c173693) and `runquota` off f1ca742d
-        # on 2026-09-10 (cb3fff2e6; at 093f520d since 574a7502b), so the build
-        # compiled the renderer against an IsoNim 82 commits older than
-        # the one the `ci` shell pins.  It drifted again within a day: the
-        # 2026-09-25 flake.lock rolls (47f37ed52, 5df6d5c12) moved isonim,
-        # isonim-tui, runquota, io-mon and nim-stackable-hooks while this
-        # block kept the old SHAs.  ci/test/launcher-recorder-e2e-workflow-
-        # test.sh now reads both files and fails when any flake-input entry
-        # here disagrees with flake.lock.
-        #
-        # ISONIM-TUI.  The 2026-09-18 editor work (421b1dcbb..195f9195c) made
-        # src/frontend/viewmodel/editor/{selection,selection_ops,wrap}.nim
-        # import `isonim_tui/text/width`, and ui_js.nim reaches them, so the
-        # `ui.js` action needs ../isonim-tui.  Without it every arm of this
-        # gate died in `Build the codetracer-desktop core` with
-        #
-        #   src/frontend/viewmodel/editor/selection.nim(162, 30) Error: cannot
-        #   open file: isonim_tui/text/width
-        #
-        # (desktop run 35974652142 on all four arms; recorder runs 35985937174
-        # native and 35985941156 js).  scripts/require-siblings.sh lists it as
-        # REQUIRED since the same change, so ci/test/build-once-workspace-test.sh
-        # fails if this block drops it.  Like `isonim` and `runquota` it is
-        # absent from the lock records these edges resolve (checked on the
-        # native ccbe5866 and js 634bce37 records: neither names it; it only
-        # appears in records whose publisher's workspace happened to carry the
-        # isonim project), so a bare entry would fail this step and it takes
-        # the same flake.lock SHA shape.  isonim-gpui / nim-termctl are on the
-        # same `--path` list but nothing this build imports them (only
-        # the terminal and GPUI front-ends do); they stay unprovisioned and
-        # require-siblings.sh keeps them advisory.
-        #
-        # NIM-PTY.  It was in that advisory list until 2026-11-08, and was
-        # wrong to be from 4e856d570 on: `ct` itself compiles
-        # src/common/shell_session.nim (for `ct shell-session`), which imports
-        # `nim_pty`.  Without it every arm of this gate died in `Build the
-        # codetracer-desktop core` with
-        #
-        #   src/common/shell_session.nim(40, 8) Error: cannot open file: nim_pty
-        #
-        # (codetracer-beam-recorder PR #16 at bdfa491, job 128550018745).
-        # require-siblings.sh lists it as REQUIRED since the fix, so
-        # ci/test/build-once-workspace-test.sh fails if this block drops it.
-        #
-        # THE PROPER FIX IS STILL IN ANOTHER REPOSITORY, and this is a bridge to
-        # it, not a replacement for it: declare `isonim`, `isonim-tui` and
-        # `runquota` in codetracer's project manifest and publish a lock
-        # (`repro workspace lock --trigger-repo=codetracer`, in a workspace
-        # whose `.repro/manifests` is a real git checkout -- where it is a
-        # plain directory the lock is generated and then silently dropped).  When that lands, delete the
-        # `=<sha>` from the three entries and they resolve like every other
-        # name here.
+      - name: Setup dev env + clone the private gate siblings
+        # Only the PRIVATE gate siblings go through here, each as an explicit
+        # `<name>=<rev>` read from its one home at the codetracer revision
+        # under test. The calling repo is listed too: clone-siblings skips an
+        # entry naming the triggering repository, so it is a no-op that keeps
+        # the list non-empty (an empty list would fall back to the caller's own
+        # .github/sibling-repos).
         uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
+
         with:
           env-flavor: nix
           gh-token: ${{ steps.ci_token.outputs.token }}
@@ -737,70 +589,37 @@ jobs:
           trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
           attic-token: ${{ secrets.ATTIC_TOKEN }}
           attic-cache: ${{ vars.ATTIC_CACHE }}
-          # `clone-siblings` tokenises this value on whitespace after stripping
-          # `#` comments, so the expression's three names and the literal names
-          # below arrive as one flat list.
           siblings: |
-            ${{ steps.private_pins.outputs.siblings }}
-            nim-everywhere
-            nim-acp
-            nim-agent-harbor
-            nim-agents
-            codetracer-trace-format
-            codetracer-trace-format-nim
-            # Private, so the public repro.lock cannot pin it: flake.lock's revision.
-            codetracer-native-recorder=6142cc6a30bc3057ee01c6a8c417436744e393ed
-            # The io-mon family. `ct` itself imports io_mon/depfile from
-            # src/ct_test/incremental/io_mon_capture.nim, so WITHOUT these the
-            # core build dies with `cannot open file: io_mon/depfile`, no
-            # src/build-debug-repro/bin/ct is emitted, and this gate fails in its
-            # artifact check having never reached the launcher or a recorder.
-            # SHA-pinned, not lock-resolved. All four follow flake.lock (below),
-            # and the main CI lane (.github/workflows/codetracer.yml) carries the
-            # same io-mon and nim-shm-* revs. Not bare, because a published
-            # workspace lock still carries an io-mon rev that predates
-            # depfile.nim, so a bare `io-mon` here can silently resolve to a
-            # revision that cannot build `ct`.
-            # nim-stackable-hooks is SHA-pinned here (the main lane still says
-            # `=dev`) because ci-contract-suites ratchets the number of mutable
-            # branch-tip entries and that ceiling is only ever lowered.
-            # All four are ALSO flake inputs (flake.nix pins the two nim-shm-*
-            # repos by URL), so their SHAs must equal flake.lock's for the same
-            # reason as the three below
-            # (ci/test/launcher-recorder-e2e-workflow-test.sh compares every
-            # entry whose name is a flake input).  nim-stackable-hooks was still
-            # the 2026-08-29 `dev` tip, d51b571a, long after flake.lock had moved
-            # on; it follows flake.lock now, and so does io-mon (the 2026-09-25
-            # flake.lock roll moved it off 3b6196ef).
-            # Re-aligned to flake.lock on 2026-11-01 after the flake.lock rolls
-            # up to 5044c35b9 (io-mon's new pin still carries
-            # src/io_mon/depfile.nim). Re-aligned again 2026-11-09 after the
-            # flake.lock re-pins ffbaf94f3 and 1471ea29b, and on 2026-11-11 after
-            # d91a98626 moved io-mon and nim-shm-gset.
-            # runquota is locked as a `follows` of reprobuild's `runquota-src`;
-            # the pin below is that node's rev.
-            io-mon=6a6713e53f4cf1d863a8d94e3353ecd0581da85f
-            nim-shm-queue=0d6049997d77421b6e4748f819657cf6042e9508
-            nim-shm-gset=fc0c74478d945161574a9fc49389c8fd65f09d2e
-            nim-stackable-hooks=07319306758cf608e664fe9e64ab7e0bed5ca186
-            # Pinned to flake.lock's revs. See "THE FLAKE-INPUT THREE" above
-            # before changing any of these. isonim-tui is in codetracer's
-            # repro.lock since 6850efc5e, and took the SHA shape because the
-            # recorder repos' lock records these edges also resolve did not
-            # carry it. They do now; going bare is a separate change.
-            isonim=d906e7ce3bad73a587d3fe718364ab063f21fe16
-            isonim-tui=8e43ce06f7f078530c7a8585c210ad7648fa0051
-            runquota=b63c6c17ffd9f046baa70a62cbeb067c3a0a2745
-            # Required by scripts/require-siblings.sh (`ct` links its reference
-            # library). SHA, not bare: this workflow is also called from recorder
-            # repos, whose repro.lock need not pin it. It is a flake input, so the
-            # SHA is the one flake.lock pins.
-            test-certificates-tools=a726655886808d1062390d05c50f4fce03150eb4
-            # Required by scripts/require-siblings.sh (`ct shell-session`
-            # imports `nim_pty`; see "NIM-PTY" above). SHA, not bare, for the
-            # same reason as test-certificates-tools: recorder repos' locks need
-            # not pin it. It is a flake input, so the SHA is flake.lock's.
-            nim-pty=6ffb8d788e8a740ca78ec29c7a3a489a13818bcb
+            ${{ steps.plan.outputs.self }}
+            ${{ steps.resolve.outputs.private }}
+
+      - name: Stage codetracer's provisioning action at the revision under test
+        # `uses:` cannot take an expression, so the action is copied from the
+        # codetracer checkout into this workspace and used from there: the
+        # action that provisions the siblings is the one at the codetracer
+        # revision whose locks it reads.
+        shell: bash
+        env:
+          CT_DIR: ${{ steps.plan.outputs.ct-dir }}
+        run: |
+          set -euo pipefail
+          src="${CT_DIR}/.github/actions/provision-repro-lock-siblings/action.yml"
+          if ! grep -q '^  codetracer-dir:' "${src}"; then
+            echo "::error::codetracer $(git -C "${CT_DIR}" rev-parse HEAD) predates provision-repro-lock-siblings' codetracer-dir input, so this gate cannot provision from it. Test against a codetracer revision that carries it."
+            exit 1
+          fi
+          mkdir -p "${GITHUB_WORKSPACE}/.lrc-actions/provision-repro-lock-siblings"
+          cp "${src}" "${GITHUB_WORKSPACE}/.lrc-actions/provision-repro-lock-siblings/action.yml"
+
+      - name: Clone the public gate siblings from codetracer's locks
+        uses: ./.lrc-actions/provision-repro-lock-siblings
+        with:
+          codetracer-dir: ${{ steps.plan.outputs.ct-dir }}
+          exclude: ${{ steps.plan.outputs.self }}
+          test-siblings: ${{ steps.resolve.outputs.test-siblings }}
+          root-default-shell: "false"
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID || vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Check the workspace has the shape the driver expects
         # Cheap, and it turns the one class of failure a local rehearsal cannot
@@ -835,8 +654,9 @@ jobs:
 
           # THE SCRIPTS LATER STEPS RUN, CHECKED AGAINST THE REVISION THEY WILL
           # RUN FROM. This file is resolved at `@dev` by every remote caller,
-          # but the codetracer checkout it drives comes from the workspace lock
-          # -- two different revisions of one repo. When a step here starts
+          # but the codetracer checkout it drives is the codetracer revision
+          # under test (the caller's lock or the codetracer-revision input) --
+          # two different revisions of one repo. When a step here starts
           # running a script that an older codetracer does not have, every edge
           # whose lock pins that older codetracer dies in that step, after the
           # ten-minute core build, as `bash: <script>: No such file or
@@ -855,23 +675,23 @@ jobs:
           for script in scripts/build-siblings.sh ci/test/launcher-recorder-decode-test.sh; do
             if [ ! -f "${CT_DIR}/${script}" ]; then
               echo "  MISSING ${CT_DIR}/${script}"
-              echo "::error::the codetracer revision this run resolved from the workspace lock ($(git -C "${CT_DIR}" rev-parse HEAD 2>/dev/null || echo unknown)) predates ${script}, which a later step of this workflow runs. This workflow is taken from codetracer@dev, the checkout it drives is taken from the lock, and the lock published for the commit under test pins a codetracer that is too old for it. Refresh the workspace lock ('repro workspace lock --trigger-repo=${GITHUB_REPOSITORY##*/}' from a workspace whose codetracer checkout carries ${script}, then push the manifest repo); do NOT paper over it with a 'codetracer=<ref>' sibling override."
+              echo "::error::the codetracer revision under test ($(git -C "${CT_DIR}" rev-parse HEAD 2>/dev/null || echo unknown)) predates ${script}, which a later step of this workflow runs. This workflow is taken from codetracer@dev, the checkout it drives is taken from the lock, and the lock published for the commit under test pins a codetracer that is too old for it. Test against a codetracer revision that carries ${script}: move the codetracer pin in the caller's repro.lock (or the codetracer-revision input) forward."
               exit 1
             fi
             echo "  OK   ${CT_DIR}/${script}"
           done
 
           # THE REVISION, NOT JUST THE DIRECTORY (added by LRC-6).  Sibling
-          # revisions now come from the workspace lock, so "the recorder is
+          # revisions come from codetracer's locks, so "the recorder is
           # checked out" no longer implies "the recorder is checked out at a
-          # revision this gate can use": a lock published before the contract
+          # revision this gate can use": a lock written before the contract
           # fixture landed pins a revision that has no
           # cross-repo/launcher-compat.yml, and the driver would fail forty
           # minutes later with "contract fixture not found" and no hint as to
           # why.  Name it here instead, with the remedy.
           FIXTURE="${CT_DIR}/../${RECORDER_REPO}/cross-repo/launcher-compat.yml"
           if [ ! -f "${FIXTURE}" ]; then
-            echo "::error::${RECORDER_REPO} is checked out but carries no cross-repo/launcher-compat.yml. Its revision came from the workspace lock published for this commit, so the lock pins a revision that PREDATES the contract fixture. Refresh the workspace lock ('repro workspace lock' in a workspace whose ${RECORDER_REPO} checkout carries the fixture, then push the manifest repo); do NOT paper over it with a '<name>=<ref>' sibling override."
+            echo "::error::${RECORDER_REPO} is checked out but carries no cross-repo/launcher-compat.yml. Its revision came from codetracer's lock at the codetracer revision under test, which pins a revision that PREDATES the contract fixture. Refresh codetracer's repro.lock from a workspace whose ${RECORDER_REPO} checkout carries the fixture; do NOT pin it in this workflow."
             exit 1
           fi
           echo "  OK   ${FIXTURE}"
@@ -1168,6 +988,13 @@ jobs:
         shell: bash
         env:
           CT_DIR: ${{ steps.plan.outputs.ct-dir }}
+          # Every build-input sibling must sit at the revision codetracer's
+          # repro.lock pins, except the calling repo, which is the commit
+          # under test. build-once prints that one override (name, lock
+          # revision, actual revision) to the log and the job summary, and
+          # fails on any other disagreement (ci/sibling-lock-agreement.sh).
+          CODETRACER_REQUIRE_LOCKED_SIBLINGS: "1"
+          CODETRACER_OFF_LOCK_SIBLING: ${{ steps.resolve.outputs.off-lock }}
         run: |
           set -euo pipefail
           cd "${CT_DIR}"
