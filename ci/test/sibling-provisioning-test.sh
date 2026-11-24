@@ -1361,12 +1361,27 @@ fi
 # develop set, checked out beside this repo -- that carries
 # git-auth/action.yml. A missing sibling or an unfetched commit is a failure
 # with its remedy, not a skip: the check is no weaker for being offline.
-GIT_AUTH_SIBLING="$REPO_ROOT/../metacraft-github-actions"
+#
+# The sibling is a workspace checkout when this runs inside a repro workspace,
+# and CI's guard job clones it beside the checkout. A standalone clone has
+# neither, so the check provisions a throwaway clone of the public repo for
+# itself (CODETRACER_GIT_AUTH_SIBLING names a different checkout). Only when
+# that clone cannot be made does the check fail, naming the prerequisite.
+GIT_AUTH_SIBLING="${CODETRACER_GIT_AUTH_SIBLING:-$REPO_ROOT/../metacraft-github-actions}"
+GIT_AUTH_REMOTE="https://github.com/metacraft-labs/metacraft-github-actions"
 git_auth_pin_defects=()
-if [ "${#git_auth_pins[@]}" -eq 0 ]; then
+if [ "${#git_auth_pins[@]}" -gt 0 ] && ! git -C "$GIT_AUTH_SIBLING" rev-parse --git-dir >/dev/null 2>&1; then
+	git_auth_tmp="$(mktemp -d)"
+	if git clone --quiet --filter=blob:none --no-checkout "$GIT_AUTH_REMOTE" "$git_auth_tmp/metacraft-github-actions" >/dev/null 2>&1; then
+		GIT_AUTH_SIBLING="$git_auth_tmp/metacraft-github-actions"
+	else
+		git_auth_pin_defects+=("prerequisite missing: no metacraft-github-actions checkout at $GIT_AUTH_SIBLING, and cloning $GIT_AUTH_REMOTE failed; check it out beside codetracer, or point CODETRACER_GIT_AUTH_SIBLING at a checkout")
+	fi
+fi
+if [ "${#git_auth_pin_defects[@]}" -gt 0 ]; then
+	:
+elif [ "${#git_auth_pins[@]}" -eq 0 ]; then
 	git_auth_pin_defects+=("no git-auth pin was found to check (see the assertion above)")
-elif ! git -C "$GIT_AUTH_SIBLING" rev-parse --git-dir >/dev/null 2>&1; then
-	git_auth_pin_defects+=("no metacraft-github-actions checkout at $GIT_AUTH_SIBLING; check it out beside codetracer")
 else
 	for pin in "${git_auth_pins[@]}"; do
 		if ! git -C "$GIT_AUTH_SIBLING" cat-file -e "${pin}^{commit}" 2>/dev/null; then
@@ -1376,6 +1391,7 @@ else
 		fi
 	done
 fi
+[ -n "${git_auth_tmp:-}" ] && rm -rf "$git_auth_tmp"
 if [ "${#git_auth_pin_defects[@]}" -eq 0 ]; then
 	ok "its git-auth pin names a metacraft-github-actions commit that carries the action"
 else
