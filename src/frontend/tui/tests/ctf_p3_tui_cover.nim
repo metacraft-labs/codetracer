@@ -34,7 +34,8 @@
 ##     badge, each choice, whether it is chosen and its control (the
 ##     checkbox for several, the composer's toggle for one), each queued
 ##     approval's command and purpose apart, the priority dropdown's value
-##     whole, and its parts within the reading measure;
+##     whole, every form button in an actions row at its label's width
+##     (`Send draft` as `Submit`), and its parts within the reading measure;
 ##   * the Inbox's hint in the page's place while items wait and none is on
 ##     screen;
 ##   * the Code tab's marks, each with its tooltip, and the legend that says
@@ -69,6 +70,7 @@ from std/unicode import runes, `$`
 
 import ../agent_harbor/ah_tui_stories
 import ../app/views/vcs_pane
+from ../agent_harbor/ah_tui_changes_inbox_parts import buttonCells
 
 const
   ChangesCompactTabsMaxPx = 30 * 16
@@ -377,6 +379,25 @@ proc checkChanges*(view: AhNode; vm: ChangesVM; context: AgentHarborChangesConte
 # An item's page
 # ---------------------------------------------------------------------------
 
+proc looseButtons(n: AhNode; inRow: bool; into: var seq[AhNode]) =
+  if n.isNil: return
+  let row = inRow or n.has("actions")
+  if n.has("button") and (not row or n.width > buttonCells(n.attr("button").strip)):
+    into.add n
+  for ch in n.children: looseButtons(ch, row, into)
+
+proc buttonRowProblems*(view: AhNode): seq[string] =
+  ## Every form button of the page in an actions row (`.ah-item-actions`)
+  ## and as wide as its label and the cell each side, as `Submit` is: one
+  ## put in a column directly (`Send draft` in the draft's) is stretched
+  ## across it.
+  var loose: seq[AhNode]
+  looseButtons(view, false, loose)
+  for n in loose:
+    result.add "the button '" & n.attr("button") & "' is " & $n.width &
+               " cells wide, not in an actions row at its label's " &
+               $buttonCells(n.attr("button").strip)
+
 proc checkItemPage*(view: AhNode; page: InboxItemVM; ctx: AgentHarborInboxItemContext): seq[string] =
   ## The drawn page (under a panel's rows, or standing alone) against `page`.
   result.expect("page state", view.values("page-state"), @[loadState(page.state.val)])
@@ -403,6 +424,7 @@ proc checkItemPage*(view: AhNode; page: InboxItemVM; ctx: AgentHarborInboxItemCo
   result.expect("approval purposes", view.values("approval-purpose"), purposes)
   for subject in view.values("approval-subject"):
     if " in order to" in subject: result.add "an approval's command runs on into its purpose: " & subject
+  result.add buttonRowProblems(view)
   let buttons = view.values("button")
   if d.kind == ikLoginRequest:
     result.expect("login", view.values("login"),

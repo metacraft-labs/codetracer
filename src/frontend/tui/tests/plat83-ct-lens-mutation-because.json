@@ -1,0 +1,15 @@
+{
+  "M1": "\"History of apply (calc.py:4-6)\" in text",
+  "M10": "sess.commandShows(\"plugins\", \"ct-lens.history  running\")",
+  "M11": "sess.statusHas(\"history: \" &",
+  "M12": "r.sup.waitUntil(\"the decoration\", proc (): bool =",
+  "M13": "r.sup.waitUntil(\"the jump reached the backend\", proc (): bool =",
+  "M2": "r.sup.waitUntil(\"deadline\", proc (): bool =",
+  "M3": "Unhandled exception: viewmodel/tests/unit/ct_lens_fixture.nim(58, 3) `code == 0` building the ct-lens package failed:",
+  "M4": "r.sup.waitUntil(\"disabled with the reason\", proc (): bool =",
+  "M5": "r.sup.waitUntil(\"disabled with the reason\", proc (): bool =",
+  "M6": "r.sup.waitUntil(\"the primary watches a\", proc (): bool =",
+  "M7": "r.sup.waitUntil(\"context key\", proc (): bool =",
+  "M8": "r.sup.waitUntil(\"history of apply\", proc (): bool =",
+  "M9": "r.sup.waitUntil(\"visualiser published\", proc (): bool ="
+}

@@ -396,7 +396,37 @@ proc fleetInkProblems(view: GpuiElement; vm: FleetSnapshotVM; p: AhPalette): seq
       result.add "the count of filter " & e.attr("filter") & " is drawn in " &
                  (if count.isNil: "nothing" else: count.attr("ink")) & ", not " & wanted
 
-proc checkFleet(view: GpuiElement; vm: FleetSnapshotVM): seq[string] =
+proc saysShare(words: string): bool =
+  ## Whether `words` print a count or a share the pie now shows: a `%`, or
+  ## a number, `/` and a number (`3/19`).
+  if '%' in words: return true
+  for i in 1 ..< words.high:
+    if words[i] == '/' and words[i - 1] in Digits and words[i + 1] in Digits: return true
+
+proc pieProblems(e: GpuiElement; pie: ProgressPie; ground: string; p: AhPalette;
+                 at: string; plate = false): seq[string] =
+  ## One site's drawn pie against the viewmodel's `pie` (CTF-P1d): the
+  ## same role, the same share (or unknown), the same words as its
+  ## accessible name, its shape, the inks the palette resolves for `ground`
+  ## -- so a view that recomputes a pie, or draws another item's, differs --
+  ## and, with `plate`, the disc of `ground` it sits on.
+  let pies = e.all("pie")
+  if pies.len != 1:
+    return @[at & " draws " & $pies.len & " pies, not one"]
+  let d = pies[0]
+  result.expect("pie role at " & at, d.attr("pie"), $pie.role)
+  result.expect("pie share at " & at, d.attr("pie-fraction"),
+                if pie.known: pie.pieStopPercent else: "unknown")
+  result.expect("pie words at " & at, d.attr("pie-label"), pie.label)
+  result.expect("pie name at " & at, getAttribute(d, "aria-label"), pie.label)
+  result.expect("pie shape at " & at, d.attr("pie-shape"), $pie.pieShapeOf)
+  let inks = p.pieInks(pie.role, ground)
+  result.expect("pie inks at " & at, (d.attr("pie-wedge"), d.attr("pie-ground")),
+                (inks.wedge, ground))
+  result.expect("pie plate at " & at, d.values("pie-plate"),
+                if plate: @[ground] else: @[])
+
+proc checkFleet(view: GpuiElement; vm: FleetSnapshotVM; mode = dmDark): seq[string] =
   result.expect("state", view.attr("state"), stateName(vm.state.val))
   commonState(view, vm.state.val, vm.error.val, result)
   if vm.state.val != asReady: return
@@ -428,6 +458,14 @@ proc checkFleet(view: GpuiElement; vm: FleetSnapshotVM): seq[string] =
         let shown = if row.expanded: row.activity.len else: min(1, row.activity.len)
         result.expect("activity of " & row.shortId, e.values("activity"), row.activity[0 ..< shown])
         result.expect("title of " & row.shortId, e.first("title").attr("title"), row.title)
+        # The fleet's rows: the row's pie, on the panel, on a plate when selected;
+        # its status word stays and says no count or share.
+        let p = ahPalette(mode)
+        result.add pieProblems(e, row.pie, p.panel, p, "row " & row.shortId,
+                               plate = row.selected)
+        let status = e.first("status").attr("status")
+        if saysShare(status):
+          result.add "the status of " & row.shortId & " says a share: " & status
 
 const
   TextMinContrast = 4.5
@@ -850,7 +888,7 @@ proc checkStory(m: AhStoryMount; mode = dmDark): seq[string] =
   of "agent-harbor-initiative-tabs": checkInitiativeTabs(view, m.initiativeTabs)
   of "agent-harbor-initiatives": checkInitiatives(view, m.initiatives)
   of "agent-harbor-initiative-progress": checkProgress(view, m.progress)
-  of "agent-harbor-fleet": checkFleet(view, m.fleet)
+  of "agent-harbor-fleet": checkFleet(view, m.fleet, mode)
   of "agent-harbor-composer": checkComposer(view, m.composer)
   of "agent-harbor-results": checkResults(view, m.results)
   of "agent-harbor-suggested-actions":

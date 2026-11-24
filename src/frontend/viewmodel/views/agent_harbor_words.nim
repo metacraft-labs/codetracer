@@ -3,7 +3,8 @@
 ## The words the Agent Harbor views of every front-end say: the notices of
 ## their load states, and the texts a view composes from viewmodel facts
 ## (a tab's label, a group's counts, a row's meta line, the fleet header's
-## summary, a recording button's state suffix).
+## summary, a recording button's state suffix), and what a `+N` chip says
+## about the items it hides, in words and in its progress pie (`chipPie`).
 ##
 ## ## Why this module exists
 ##
@@ -20,7 +21,7 @@
 ## The pure-module pattern is the one `debug_control_marks.nim` set for the
 ## debugger toolbar's marks, which the web, TUI and GPUI front-ends share.
 
-import std/strutils
+import std/[options, strutils]
 
 import ./cut_text_rules
 export cut_text_rules
@@ -29,6 +30,7 @@ import isonim/core/signals
 import nim_agents_isonim_viewmodels/agent_harbor/[session_tabs_vm, initiative_progress_vm,
                                                    fleet_vm, recording_switcher,
                                                    initiative_tabs_vm]
+import nim_agents_isonim_viewmodels/agent_harbor/progress_pie
 
 const
   AgentHarborTabsLoadingText* = "Loading sessions\xE2\x80\xA6"
@@ -250,6 +252,23 @@ proc chipTitle*(h: HiddenSummary; noun, nouns: string): string =
     result.add ", " & $h.failed & (if noun == "recording": " failed to load" else: " failed")
   if h.waiting > 0:
     result.add ", " & $h.waiting & (if noun == "recording": " missing" else: " needing input")
+
+proc chipPie*(h: HiddenSummary; noun, nouns: string): Option[ProgressPie] =
+  ## The progress pie a `+N` chip draws beside its count: the role of the
+  ## most severe hidden item (a failure the error role, a wait the warning
+  ## role), with no wedge, since a chip counts items and has no progress of
+  ## its own. Its shape is therefore the pie's unknown shape (the ring and
+  ## the dot), never a 0 % ring, which would claim a share. Its accessible
+  ## name is the chip's own words (`chipTitle`), not "progress unknown",
+  ## which would claim the chip had a progress to know. A chip hiding nothing
+  ## that waits or failed (`hsNone`) draws no pie, as it drew no mark before:
+  ## `none`. One rule for the three front ends, so no host decides the
+  ## chip's role or words itself.
+  let role = case h.severity
+    of hsNone: return none(ProgressPie)
+    of hsNeedsInput: prWarning
+    of hsFailed: prError
+  some(ProgressPie(role: role, known: false, label: chipTitle(h, noun, nouns)))
 
 proc hiddenBarTabs*(tabs: openArray[StripTab]; hidden: openArray[int]): HiddenSummary =
   ## The initiative bar's tabs a chip hides (indexes into `tabs`): an

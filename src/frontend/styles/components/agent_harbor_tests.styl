@@ -1,0 +1,1026 @@
+// Agent Harbor Tests panel (isonim_agent_harbor_tests_view.nim) and the
+// trace links of the session timeline (agent_harbor_trace_links_view.nim).
+// A file of its own, so its rules stay apart from the files other Agent
+// Harbor work edits.
+//
+// The Tests panel is the Test Results pane in its Agent Harbor mode: its
+// rows take the pane's own row classes and marks (`.test-results-row`,
+// `.test-results-mark`, `.test-results-open-btn`, ns9_panes.styl), so the
+// pane's mark colours and its open control's drawn marks are the pane's.
+// It reuses the Agent Harbor panels' parts (agent_harbor.styl: the header
+// strip, the centred notices, the error block) and the Changes panel's
+// (agent_harbor_changes.styl: the state roles `.ah-role-*`, the chip, the
+// compact select and the design system's Dropdown).
+//
+// Cardless, the agentic panels' calm posture (ACI-AREQ1): no border,
+// outline or box around a test, a cell or a sub-row. Areas are set apart by
+// GROUNDS, never by boxes, and two neighbouring areas never share one: the
+// control deck (the run band and the platform strip) and a file group's
+// head sit on the card ground, a step off the panel's; the rows are on the
+// panel; an opened row's sub-rows sit in the recessed canvas ground under
+// it. An opened row carries the focus inset bar, the selected test the
+// selection's raised ground and that bar, and the keyboard's row or cell a
+// focus ring. Every colour is a design-system role (generated/mapped.styl),
+// its Light value under COLOR_MODE = "Light"; a link's ink is the palette's
+// `link` role (agent_harbor_link_inks.styl).
+
+AH_TESTS_LINE = 1.75rem          // a test row's line
+AH_TESTS_MARK = 0.875rem         // the pane's mark column (ns9_panes.styl)
+AH_TESTS_CELL = 6.25rem          // a platform's column at `panel`
+AH_TESTS_CELL_WIDE = 9.5rem      // and at `laptop`, where a cell shows its duration
+AH_TESTS_ACTIONS = 3rem          // a row's Run and Record
+
+.agent-harbor-tests
+  height: 100%
+  display: flex
+  flex-direction: column
+  overflow: hidden
+  background: colors-ui-surface-base-panel
+  color: colors-ui-text-primary-body
+  font-size: ah-rem(type-ui-size-body-md)
+  // The matrix turns to a strip of marks by the panel's own width.
+  container-type: inline-size
+  container-name: ah-tests
+
+  &:focus
+    outline: 0
+
+.ah-tests-head-host
+  flex-shrink: 0
+
+.ah-tests-body
+  flex: 1 1 auto
+  display: flex
+  flex-direction: column
+  min-height: 0
+
+// A centred notice and, under it, what would fill the pane.
+.ah-tests-notice
+  flex: 1 1 auto
+  display: flex
+  flex-direction: column
+  align-items: center
+  justify-content: center
+  gap: 0.375rem
+  text-align: center
+
+.ah-tests-notice-hint
+  font-size: ah-rem(type-ui-size-caption-md)
+  line-height: ah-rem(type-ui-lineheight-caption-md)
+  color: colors-ui-text-primary-caption
+
+// ---------------------------------------------------------------------------
+// The control deck: the run band and the platform strip
+// ---------------------------------------------------------------------------
+
+.ah-tests-bands
+  flex-shrink: 0
+  display: flex
+  flex-direction: column
+  background: colors-ui-surface-base-card
+
+.ah-tests-band
+  display: flex
+  flex-direction: column
+  gap: 0.25rem
+  padding: 0.375rem PANEL_INSET
+
+.ah-tests-platform-band
+  padding-top: 0.125rem
+  padding-bottom: 0.5rem
+
+.ah-tests-run-row
+  display: flex
+  flex-wrap: wrap
+  align-items: center
+  gap: 0.375rem 0.75rem
+  min-width: 0
+
+// The Test Results headline: it takes the slack and is cut, so the
+// controls are never pushed off the band.
+.ah-tests-headline
+  flex: 1 1 10rem
+  min-width: 0
+  padding: 0
+  opacity: 1
+  font-size: ah-rem(type-ui-size-body-md)
+  white-space: nowrap
+  overflow: hidden
+
+.ah-tests-controls
+  display: flex
+  flex-wrap: wrap
+  align-items: center
+  gap: 0.375rem
+  min-width: 0
+
+.ah-tests-button
+  height: CONTROL_HEIGHT_SM
+  padding: 0 0.625rem
+  font-family: inherit
+  font-size: ah-rem(type-ui-size-label-md)
+  white-space: nowrap
+
+  &:disabled
+    cursor: default
+
+.ah-tests-confirm-question
+  font-size: ah-rem(type-ui-size-body-md)
+  color: colors-ui-text-primary-body
+
+.ah-tests-cancelling
+  font-size: ah-rem(type-ui-size-caption-md)
+
+// The design system's Checkbox, as a control of its own (no native input).
+.ah-tests-check
+  cursor: pointer
+  padding: 0
+  font-size: ah-rem(type-ui-size-label-md)
+  color: colors-ui-text-primary-label
+
+  &:focus-visible
+    outline: 0.0625rem solid colors-ui-border-focus
+    outline-offset: 0.125rem
+    border-radius: 0.25rem
+
+.ah-tests-says
+  display: flex
+  flex-direction: column
+  gap: 0.125rem
+
+  &:empty
+    display: none
+
+.ah-tests-say
+  font-size: ah-rem(type-ui-size-caption-md)
+  line-height: ah-rem(type-ui-lineheight-caption-md)
+  word-break: break-word
+
+// The platform strip: one head per platform, side by side, wrapping.
+.ah-tests-platforms
+  display: flex
+  flex-wrap: wrap
+  gap: 0.25rem 1.25rem
+
+.ah-tests-platform
+  display: flex
+  flex-direction: column
+  gap: 0.0625rem
+  min-width: 0
+  max-width: 100%
+
+.ah-tests-platform-off
+  .ah-tests-platform-label,
+  .ah-tests-platform-words
+    color: colors-ui-text-primary-disabled
+
+.ah-tests-platform-line
+  display: flex
+  align-items: center
+  gap: 0.375rem
+  min-height: 1.5rem
+  min-width: 0
+
+.ah-tests-switch
+  cursor: pointer
+
+  &:focus-visible
+    outline: 0.0625rem solid colors-ui-border-focus
+    outline-offset: 0.125rem
+
+.ah-tests-platform-label
+  min-width: 0
+  white-space: nowrap
+  overflow: hidden
+  font-size: ah-rem(type-ui-size-label-md)
+  color: colors-ui-text-primary-body
+
+// The recordability mark: the pane's record mark in the role's ink; struck
+// through and dim where no runner of the platform records.
+.ah-tests-record-mark
+  flex-shrink: 0
+  position: relative
+  display: inline-block
+  width: 0.75rem
+  height: 0.75rem
+  font-size: 0
+  background-color: colors-ui-icon-error-primary
+  mask: TEST_MARK_RECORD center / contain no-repeat
+
+.ah-tests-record-mark-off
+  background-color: colors-ui-icon-primary-subtle
+  opacity: 0.8
+
+  &::after
+    content: ""
+    position: absolute
+    left: -0.125rem
+    right: -0.125rem
+    top: 50%
+    height: 0.09375rem
+    background: colors-ui-icon-primary-subtle
+    transform: rotate(-45deg)
+
+.ah-tests-platform-words
+  display: flex
+  flex-direction: column
+  padding-left: 2.5rem
+
+  .ah-tests-say
+    white-space: nowrap
+    overflow: hidden
+    text-overflow: clip
+
+.ah-tests-chip
+  height: 1rem
+  padding: 0 0.3125rem
+  background: colors-ui-surface-primary-secondary-hover
+  color: colors-ui-text-primary-label
+  font-size: ah-rem(type-ui-size-caption-md)
+
+// The legend: its toggle at the strip's end; open, a term and its meaning
+// per line, in two columns where the panel is wide.
+.ah-tests-legend
+  display: flex
+  flex-direction: column
+  gap: 0.25rem
+
+.ah-tests-legend-toggle
+  align-self: flex-start
+  display: inline-flex
+  align-items: center
+  gap: 0.25rem
+  cursor: pointer
+  font-size: ah-rem(type-ui-size-caption-md)
+  color: colors-ui-text-primary-caption
+
+  &:hover
+    color: colors-ui-text-primary-label
+
+  &:focus-visible
+    outline: 0.0625rem solid colors-ui-border-focus
+    outline-offset: 0.0625rem
+
+.ah-tests-legend-list
+  display: grid
+  grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr))
+  gap: 0.125rem 1rem
+  padding-left: 1.125rem
+
+.ah-tests-legend-item
+  display: flex
+  align-items: baseline
+  gap: 0.5rem
+  min-width: 0
+  font-size: ah-rem(type-ui-size-caption-md)
+  line-height: ah-rem(type-ui-lineheight-caption-md)
+
+.ah-tests-legend-term
+  flex: 0 0 8rem
+  display: inline-flex
+  align-items: baseline
+  gap: 0.25rem
+  // The pane's row class is on it for the mark's colour only.
+  padding: 0
+  background: transparent
+
+  &:hover
+    background: transparent
+
+.ah-tests-legend-meaning
+  min-width: 0
+  color: colors-ui-text-primary-caption
+
+// ---------------------------------------------------------------------------
+// The search and the status filter
+// ---------------------------------------------------------------------------
+
+.ah-tests-filters
+  flex-shrink: 0
+  display: flex
+  align-items: center
+  gap: 0.5rem
+  padding: 0.375rem PANEL_INSET
+
+.ah-tests-search
+  flex: 1 1 auto
+  min-width: 0
+  max-width: 24rem
+
+// ---------------------------------------------------------------------------
+// The matrix
+// ---------------------------------------------------------------------------
+
+.ah-tests-list
+  flex: 1 1 auto
+  min-height: 0
+  overflow-y: auto
+  overflow-x: hidden
+  outline: none
+  --ah-tests-cell: AH_TESTS_CELL
+
+// The platforms' columns: one head over each, then every row's cells under
+// it. Both are a grid of the same column template.
+.ah-tests-cells
+  display: grid
+  grid-template-columns: repeat(var(--ah-tests-platforms, 1), var(--ah-tests-cell))
+  column-gap: 0.25rem
+  flex-shrink: 0
+  min-width: 0
+
+.ah-tests-columns
+  position: sticky
+  top: 0
+  z-index: 2
+  display: flex
+  align-items: center
+  min-height: 1.5rem
+  padding: 0 PANEL_INSET 0 calc(PANEL_INSET + 2.375rem)
+  background: colors-ui-surface-base-panel
+  font-size: ah-rem(type-ui-size-caption-md)
+  color: colors-ui-text-primary-caption
+  user-select: none
+
+.ah-tests-columns-name
+  flex: 1 1 auto
+
+.ah-tests-columns .ah-tests-cells
+  margin-right: AH_TESTS_ACTIONS
+
+.ah-tests-column
+  white-space: nowrap
+  overflow: hidden
+  text-transform: uppercase
+  letter-spacing: 0.03125em
+  font-weight: 600
+
+// A file's group: its head on the card ground, its fold and count.
+.ah-tests-group
+  flex-shrink: 0
+
+.ah-tests-group-head
+  display: flex
+  align-items: center
+  gap: 0.375rem
+  min-height: 1.625rem
+  min-width: 0
+  padding: 0 PANEL_INSET
+  background: colors-ui-surface-base-card
+  font-size: ah-rem(type-ui-size-caption-md)
+  color: colors-ui-text-primary-label
+  cursor: pointer
+  user-select: none
+
+  &:hover
+    color: colors-ui-text-primary-body
+
+.ah-tests-group-head-static
+  cursor: default
+  text-transform: uppercase
+  letter-spacing: 0.03125em
+  font-weight: 600
+
+.ah-tests-group-name
+  min-width: 0
+  white-space: nowrap
+  overflow: hidden
+
+.ah-tests-group-count
+  flex-shrink: 0
+  color: colors-ui-text-primary-caption
+
+.ah-fold
+  flex-shrink: 0
+  width: 0.875rem
+  color: colors-ui-text-primary-caption
+  font-size: ah-rem(type-ui-size-caption-md)
+
+// A test's row. Its line is the pane's row (`.test-results-row`, for its
+// state's mark colour and its hover), laid out as the matrix's line: the
+// fold, the mark, the name with its tags, the cells, the row's actions.
+.ah-tests-row
+  position: relative
+
+.ah-tests-line.test-results-row
+  display: flex
+  align-items: center
+  gap: 0.375rem
+  min-height: AH_TESTS_LINE
+  padding: 0 PANEL_INSET
+  cursor: pointer
+  // The pane dims a not-run row as a whole; here the cells say what ran.
+  opacity: 1
+
+  &.selected
+    background: colors-ui-surface-primary-secondary-hover
+    box-shadow: inset 0.125rem 0 0 colors-ui-border-action
+
+.ah-tests-line-static
+  cursor: default
+
+.ah-tests-mark
+  flex: 0 0 AH_TESTS_MARK
+  text-align: center
+
+.ah-tests-name-cell
+  flex: 1 1 auto
+  display: flex
+  align-items: center
+  gap: 0.375rem
+  min-width: 0
+
+// The name outranks its tags: they give way first, then the name is cut.
+.ah-tests-name
+  flex: 0 1 auto
+  min-width: 10rem
+  white-space: nowrap
+  overflow: hidden
+  text-overflow: clip
+  color: colors-ui-text-primary-body
+
+.ah-tests-tags
+  flex: 0 1000 auto
+  display: inline-flex
+  flex-wrap: wrap
+  align-content: flex-start
+  align-items: center
+  gap: 0.25rem
+  min-width: 0
+  height: 1.125rem
+  // The strip's own line height, so a tag's text line is no taller than the
+  // strip and the first line is centred on the name.
+  line-height: 1.125rem
+  overflow: hidden
+
+  // A tag that does not fit is dropped whole, never clipped: a line
+  // number cut from `:12` to `:1` would name another line. The empty first
+  // item makes every real tag one that can wrap, onto the hidden second
+  // line, rather than the line's first, which flex never wraps. It is as
+  // tall as the strip, so the first line is the strip's height and its tags
+  // sit centred on the name, as without it (an empty item otherwise takes a
+  // whole text line's height and pushes them down).
+  &::before
+    content: ""
+    width: 0
+    height: 1.125rem
+    // The gap after it is taken back, so the first tag stands where it did.
+    margin-right: -0.25rem
+
+.ah-tests-at
+  flex-shrink: 0
+  font-size: ah-rem(type-ui-size-caption-md)
+
+.ah-tests-milestone
+  flex-shrink: 0
+  color: colors-ui-text-primary-caption
+
+// An opened row: the focus inset bar, never a fill.
+.ah-tests-row-open > .ah-tests-line
+  box-shadow: inset 0.125rem 0 0 colors-ui-border-action
+
+// The keyboard's row and cell: a focus ring inside them.
+.ah-tests-row-keyboard > .ah-tests-line,
+.ah-tests-cell-keyboard,
+.ah-tests-sub-keyboard
+  outline: 0.0625rem solid colors-ui-border-focus
+  outline-offset: -0.0625rem
+
+// A platform's cell: the pane's mark and the status word, then a reused
+// pass's chip, a duration (wide panels) or the open control.
+.ah-tests-cell
+  display: flex
+  align-items: center
+  gap: 0.25rem
+  min-width: 0
+  height: 1.375rem
+  padding: 0 0.25rem
+  border-radius: 0.25rem
+  font-size: ah-rem(type-ui-size-caption-md)
+  white-space: nowrap
+
+.ah-tests-cell-mark
+  flex: 0 0 0.75rem
+  text-align: center
+  color: colors-ui-text-primary-caption
+
+.ah-tests-cell.passed .ah-tests-cell-mark
+  color: colors-ui-text-success-primary
+
+.ah-tests-cell.failed .ah-tests-cell-mark,
+.ah-tests-cell.errored .ah-tests-cell-mark
+  color: colors-ui-text-error-primary
+
+.ah-tests-cell.running .ah-tests-cell-mark
+  color: colors-ui-icon-information-primary
+
+.ah-tests-cell-word
+  flex: 0 1 auto
+  min-width: 0
+  white-space: nowrap
+  overflow: hidden
+
+// Queued and not run read as quiet; a queued cell is not a failure.
+.ah-tests-cell.not-run .ah-tests-cell-word
+  color: colors-ui-text-primary-caption
+
+.ah-tests-cell .ah-tests-chip
+  flex-shrink: 1
+  min-width: 0
+  overflow: hidden
+
+.ah-tests-duration
+  flex-shrink: 0
+  display: none
+  color: colors-ui-text-primary-caption
+  font-size: ah-rem(type-ui-size-caption-md)
+
+.ah-tests-sub .ah-tests-duration
+  display: inline
+
+// The open control in a cell: the pane's, persistently visible.
+.ah-tests-open.test-results-open-btn
+  flex-shrink: 0
+  margin-left: auto
+  opacity: 0.95
+  color: colors-ui-text-primary-label
+  cursor: pointer
+
+  &.disabled
+    cursor: default
+    opacity: 0.6
+
+// A row's Run and Record: the pane's marks as icon buttons.
+.ah-tests-row-actions
+  flex: 0 0 AH_TESTS_ACTIONS
+  display: inline-flex
+  justify-content: flex-end
+  gap: 0.125rem
+
+.ah-tests-icon-btn
+  display: inline-flex
+  align-items: center
+  justify-content: center
+  width: 1.25rem
+  height: 1.25rem
+  padding: 0
+  border: 0
+  border-radius: 0.1875rem
+  background: transparent
+  color: colors-ui-text-primary-label
+  opacity: 0.55
+  cursor: pointer
+
+  &::before
+    content: ""
+    width: 0.75rem
+    height: 0.75rem
+    background-color: currentColor
+    mask: center / contain no-repeat
+
+  &:hover:not(:disabled)
+    opacity: 1
+    background: colors-ui-surface-primary-secondary-hover
+
+  &:disabled
+    color: colors-ui-text-primary-disabled
+    cursor: default
+
+.ah-tests-line:hover .ah-tests-icon-btn:not(:disabled)
+  opacity: 0.95
+
+.ah-tests-icon-play::before
+  mask-image: TEST_MARK_PLAY
+
+.ah-tests-icon-record::before
+  mask-image: TEST_MARK_RECORD
+
+// The opened row's sub-rows: the recessed canvas ground, one platform each.
+.ah-tests-subs
+  display: flex
+  flex-direction: column
+  padding: 0.25rem 0 0.375rem
+  background: colors-ui-surface-base-canvas
+  box-shadow: inset 0.125rem 0 0 colors-ui-border-action
+
+.ah-tests-sub.test-results-row
+  display: flex
+  flex-direction: column
+  gap: 0.125rem
+  padding: 0.25rem PANEL_INSET 0.25rem calc(PANEL_INSET + 2.375rem)
+  cursor: default
+
+  &:hover
+    background: transparent
+
+.ah-tests-sub-head
+  display: flex
+  flex-wrap: wrap
+  align-items: center
+  gap: 0.25rem 0.5rem
+  min-width: 0
+  min-height: 1.5rem
+  font-size: ah-rem(type-ui-size-caption-md)
+
+.ah-tests-sub-platform
+  flex: 0 0 7rem
+  min-width: 0
+  white-space: nowrap
+  overflow: hidden
+  color: colors-ui-text-primary-body
+  font-size: ah-rem(type-ui-size-label-md)
+
+.ah-tests-sub-runner
+  color: colors-ui-text-primary-caption
+
+.ah-tests-sub-status
+  display: inline-flex
+  align-items: center
+  gap: 0.25rem
+
+  .ah-tests-mark
+    flex-basis: 0.75rem
+
+.ah-tests-sub-actions
+  display: inline-flex
+  align-items: center
+  gap: 0.375rem
+  margin-left: auto
+
+  .ah-tests-button
+    height: CONTROL_HEIGHT_XS
+    padding: 0 0.5rem
+
+  .ah-tests-open.test-results-open-btn
+    margin-left: 0
+
+.ah-tests-not-kept,
+.ah-tests-waiting-word
+  font-size: ah-rem(type-ui-size-caption-md)
+
+// D31's waiting Record says so beside it, and wraps rather than pushing the
+// sub-row's controls out of a narrow panel.
+.ah-tests-waiting-word
+  min-width: 0
+  white-space: normal
+
+.ah-tests-sub-detail
+  display: flex
+  flex-direction: column
+  gap: 0.25rem
+  // A detail is read, not scanned: capped at the reading width.
+  max-width: 48rem
+
+  &:empty
+    display: none
+
+.ah-tests-detail-label
+  flex-shrink: 0
+  font-size: ah-rem(type-ui-size-caption-md)
+  font-weight: 600
+  text-transform: uppercase
+  letter-spacing: 0.03125em
+  color: colors-ui-text-primary-label
+
+.ah-tests-failure
+  display: flex
+  flex-wrap: wrap
+  align-items: baseline
+  gap: 0.125rem 0.5rem
+  font-size: ah-rem(type-ui-size-caption-md)
+  line-height: ah-rem(type-ui-lineheight-caption-md)
+
+.ah-tests-failure-message
+  min-width: 0
+  word-break: break-word
+
+.ah-tests-where
+  max-width: 100%
+  min-width: 0
+  white-space: nowrap
+  overflow: hidden
+  cursor: pointer
+
+.ah-tests-output
+  display: flex
+  flex-direction: column
+  gap: 0.125rem
+
+.ah-tests-output-lines
+  display: flex
+  flex-direction: column
+  font-size: ah-rem(type-ui-size-caption-md)
+  line-height: ah-rem(type-ui-lineheight-caption-md)
+
+.ah-tests-output-line
+  display: flex
+  gap: 0.5rem
+  min-width: 0
+
+.ah-tests-stream
+  flex: 0 0 3.25rem
+  color: colors-ui-text-primary-caption
+
+.ah-tests-output-text
+  min-width: 0
+  white-space: pre-wrap
+  word-break: break-word
+  color: colors-ui-text-primary-label
+
+.ah-tests-stream-stderr .ah-tests-output-text
+  color: colors-ui-text-warning-primary
+
+.ah-tests-sub-detail .ah-tests-say
+  font-size: ah-rem(type-ui-size-caption-md)
+
+.ah-tests-unmatched-word
+  flex-shrink: 0
+  margin-right: AH_TESTS_ACTIONS
+  font-size: ah-rem(type-ui-size-caption-md)
+
+// A laptop-wide panel: wider cells, each with its duration.
+@container ah-tests (min-width: 70rem)
+  .ah-tests-list
+    --ah-tests-cell: 9.5rem
+
+  .ah-tests-duration
+    display: inline
+
+// A sidebar-narrow panel: the cells are a strip of marks, each mark's
+// platform in its tooltip and the legend; an opened row gives the words.
+// (Written out: Stylus does not substitute variables inside `@container`.)
+@container ah-tests (max-width: 34rem)
+  .ah-tests-list
+    --ah-tests-cell: 1.125rem
+
+  .ah-tests-cells
+    column-gap: 0.125rem
+
+  .ah-tests-columns
+    display: none
+
+  .ah-tests-cell
+    justify-content: center
+    padding: 0
+
+  .ah-tests-cell .ah-tests-cell-word,
+  .ah-tests-cell .ah-tests-chip,
+  .ah-tests-cell .ah-tests-duration,
+  .ah-tests-cell .ah-tests-open
+    display: none
+
+  .ah-tests-tags
+    display: none
+
+  // Too narrow to keep a name's floor: the name gives way to the marks.
+  .ah-tests-name
+    min-width: 0
+
+  .ah-tests-unmatched-word
+    margin-right: 0
+
+  .ah-tests-sub.test-results-row
+    padding-left: calc(PANEL_INSET + 1.25rem)
+
+  .ah-tests-sub-actions
+    margin-left: 0
+    flex-basis: 100%
+
+  .ah-tests-platform-words
+    padding-left: 0
+
+// ---------------------------------------------------------------------------
+// Links (the session timeline's, and the Tests panel's location)
+// ---------------------------------------------------------------------------
+// The palette's `link` role, per ground (agent_harbor_link_inks.styl), and
+// an underline, so a link never reads as the prose around it.
+
+.ah-link
+  color: var(--ah-link-ink-panel)
+  text-decoration: underline
+  text-decoration-thickness: 0.0625rem
+  text-underline-offset: 0.15em
+  cursor: pointer
+  border-radius: 0.125rem
+
+  &:hover
+    text-decoration-thickness: 0.125rem
+
+  &:focus-visible
+    outline: 0.0625rem solid colors-ui-border-focus
+    outline-offset: 0.0625rem
+
+.ah-tests-where.ah-file-link
+  color: var(--ah-link-ink-panel)
+
+.ah-tests-subs .ah-link,
+.ah-tests-subs .ah-tests-where.ah-file-link
+  color: var(--ah-link-ink-window)
+
+.ah-dropdown-menu .ah-link
+  color: var(--ah-link-ink-menu)
+
+// A trace link and its actions stay on the prose's line; the id wraps, it
+// is never cut.
+.ah-trace
+  overflow-wrap: anywhere
+
+.ah-trace-link
+  overflow-wrap: anywhere
+
+.ah-trace-actions
+  display: inline-flex
+  flex-wrap: wrap
+  align-items: center
+  gap: 0.25rem 0.375rem
+  // A gap before the actions only: the prose after a link brings its own
+  // space, and punctuation (`.`, `,`) follows the last action directly.
+  margin: 0 0 0 0.375rem
+  vertical-align: middle
+  white-space: nowrap
+
+.ah-trace-button
+  height: CONTROL_HEIGHT_XS
+  padding: 0 0.5rem
+  font-family: inherit
+  font-size: ah-rem(type-ui-size-caption-md)
+  line-height: 1
+
+  &:disabled
+    cursor: default
+
+.ah-trace-after
+  display: inline-flex
+  flex-wrap: wrap
+  align-items: center
+  gap: 0.25rem 0.375rem
+
+  &:empty
+    display: none
+
+.ah-trace-error,
+.ah-trace-download-status
+  font-size: ah-rem(type-ui-size-caption-md)
+  white-space: normal
+
+// Download: quiet, a word rather than a second button.
+.ah-trace-download
+  height: CONTROL_HEIGHT_XS
+  padding: 0 0.25rem
+  border: 0
+  background: transparent
+  font-family: inherit
+  font-size: ah-rem(type-ui-size-caption-md)
+  color: colors-ui-text-primary-caption
+  cursor: pointer
+
+  &:hover
+    color: colors-ui-text-primary-label
+    text-decoration: underline
+
+// A link-like text that is not a link, and a file with nothing to open:
+// plain text with a tooltip, and a dotted underline that says it has one.
+.ah-link-refused,
+.ah-link-none
+  text-decoration: underline dotted
+  text-decoration-color: colors-ui-text-primary-caption
+  text-underline-offset: 0.15em
+  cursor: help
+
+// A file link is a path: cut in its middle where it is wider than its line.
+.ah-file-link-target,
+.ah-link-none.ah-mono
+  display: inline-block
+  max-width: 100%
+  vertical-align: bottom
+  white-space: nowrap
+  overflow: hidden
+
+.ah-file-menu-anchor
+  position: relative
+  display: inline-block
+  max-width: 100%
+  vertical-align: bottom
+
+.ah-file-menu-host
+  white-space: normal
+
+// ---------------------------------------------------------------------------
+// The test-run summary item
+// ---------------------------------------------------------------------------
+
+.ah-tr-item
+  cursor: default
+
+.ah-tr-text
+  display: flex
+  flex-direction: column
+  align-items: stretch
+  gap: 0
+
+.ah-tr-head
+  display: flex
+  align-items: center
+  gap: 0.375rem
+  min-width: 0
+  cursor: pointer
+
+  .ah-tests-mark
+    flex-basis: 0.75rem
+    padding: 0
+    background: transparent
+
+.ah-tr-summary
+  flex: 0 1 auto
+
+.ah-tr-open-tests
+  flex-shrink: 0
+  margin-left: auto
+  font-size: ah-rem(type-ui-size-caption-md)
+
+.ah-tr-tests
+  display: flex
+  flex-direction: column
+
+  &:empty
+    display: none
+
+.ah-tr-test-head
+  display: flex
+  align-items: center
+  gap: 0.375rem
+  min-width: 0
+  min-height: 1.375rem
+  font-size: ah-rem(type-ui-size-caption-md)
+  cursor: pointer
+  padding: 0
+  background: transparent
+
+  &:hover
+    background: colors-ui-surface-primary-secondary-hover
+
+  .ah-tests-mark
+    flex-basis: 0.75rem
+
+.ah-tr-test-name
+  flex: 0 1 auto
+  min-width: 0
+  white-space: nowrap
+  overflow: hidden
+  color: colors-ui-text-primary-body
+
+.ah-tr-marks
+  display: inline-flex
+  flex-wrap: wrap
+  gap: 0 0.5rem
+  margin-left: auto
+
+  .ah-tests-cell
+    height: auto
+    padding: 0
+
+.ah-tr-mark-platform
+  color: colors-ui-text-primary-caption
+
+.ah-tr-test-detail
+  display: flex
+  flex-direction: column
+  padding-left: 1.25rem
+
+  &:empty
+    display: none
+
+.ah-tr-platform
+  display: flex
+  flex-wrap: wrap
+  align-items: center
+  gap: 0.125rem 0.5rem
+  min-height: 1.375rem
+  padding: 0
+  font-size: ah-rem(type-ui-size-caption-md)
+  background: transparent
+
+  &:hover
+    background: transparent
+
+  .ah-tests-mark
+    flex-basis: 0.75rem
+
+  .ah-trace-actions
+    margin: 0
+
+.ah-tr-platform-label
+  flex: 0 0 6.5rem
+  color: colors-ui-text-primary-label
+
+.ah-tr-failure
+  min-width: 0
+  word-break: break-word
+
+// The headline's counts in the body's ink.
+.ah-tests-headline.ah-role-body
+  color: colors-ui-text-primary-body
+
+// The status filter keeps its value whole beside the search at any width.
+.ah-tests-filters .ah-dropdown
+  flex: 0 0 auto
+  min-width: 6.5rem

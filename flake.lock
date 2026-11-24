@@ -7438,7 +7438,7 @@
       "flake": false,
       "locked": {
         "lastModified": 1795334570,
-        "narHash": "sha256-F+imBl7i127SqVjXF+174cW46UCb/d6M2FzNkyJ6RA4=",
+        "narHash": "sha256-4kSraJJH+WolgUVGzr5z41vyQyudcXK/O6CFb3CaTqs=",
         "owner": "metacraft-labs",
         "repo": "isonim",
         "rev": "d906e7ce3bad73a587d3fe718364ab063f21fe16",
@@ -7824,11 +7824,11 @@
     "nim-agents": {
       "flake": false,
       "locked": {
-        "lastModified": 1795272762,
-        "narHash": "sha256-Jbh6OSts7uV+rJAuZWukrZgdOCD0mHdvub0nLznI0Kg=",
+        "lastModified": 1795449035,
+        "narHash": "sha256-yw17wb0zcKlDCoJb7q8FHWApKKhaeDNx2nyfOXvk8cU=",
         "owner": "metacraft-labs",
         "repo": "nim-agents",
-        "rev": "e071705e8b811309bdde41b1d0c57f6ee083e92b",
+        "rev": "d9dfa8f13d028404334dbab9d282412e2743a8ee",
         "type": "github"
       },
       "original": {
@@ -8030,11 +8030,11 @@
     "nim-langserver": {
       "flake": false,
       "locked": {
-        "lastModified": 1794458642,
-        "narHash": "sha256-5Ja6q8923q10FA341va7vKoRR45qNuzGk3AP6QPFsTE=",
+        "lastModified": 1795408825,
+        "narHash": "sha256-C0R2GthZ+knleJFAgnY3ueRF1XCreQDkGvufK4QQmnY=",
         "owner": "metacraft-labs",
         "repo": "langserver",
-        "rev": "45b5a5bdcb4d6752c1bd244f212a7f40b88f4cf3",
+        "rev": "8c11da9ee979d558cdf7e6dc2bd72fc0fe388ba8",
         "type": "github"
       },
       "original": {
@@ -13020,17 +13020,17 @@
     "noir": {
       "flake": false,
       "locked": {
-        "lastModified": 1795120076,
-        "narHash": "sha256-HTY/ArI5xvxnpA0ZKeACEU6R2i6k2ShrWSVeMLcHXSc=",
+        "lastModified": 1795455980,
+        "narHash": "sha256-4rtFbKsv/z5N6fvw1wWD6jsbLYuMjpE2Xb1MpW8+dq0=",
         "ref": "codetracer",
-        "rev": "f09f459714b839a5952b59e09ce0546a936c797e",
-        "revCount": 8656,
+        "rev": "6a3d93ddfaf6c3e77d9d24a6923f9802bdf4df5e",
+        "revCount": 8657,
         "type": "git",
         "url": "https://github.com/metacraft-labs/noir.git"
       },
       "original": {
         "ref": "codetracer",
-        "rev": "f09f459714b839a5952b59e09ce0546a936c797e",
+        "rev": "6a3d93ddfaf6c3e77d9d24a6923f9802bdf4df5e",
         "type": "git",
         "url": "https://github.com/metacraft-labs/noir.git"
       }
@@ -13933,11 +13933,11 @@
         "runquota-package-catalog": "runquota-package-catalog_2"
       },
       "locked": {
-        "lastModified": 1795300027,
-        "narHash": "sha256-OdnOyVugEwYX12Z4ZwBC38Hjd7SLVoz8mQHjyCNH9tc=",
+        "lastModified": 1795429727,
+        "narHash": "sha256-jhOaXCoc9NbSzELJqklgix6a8rwdlpooZnIq4D1gAzY=",
         "owner": "metacraft-labs",
         "repo": "runquota",
-        "rev": "814b991861f64ad0e524c696fc1251ff1fbb6c67",
+        "rev": "b63c6c17ffd9f046baa70a62cbeb067c3a0a2745",
         "type": "github"
       },
       "original": {

@@ -94,8 +94,13 @@ test.describe("the renderer's cold start and memory", () => {
     let workingSetKb = -1;
     if (electronApp !== null) {
       workingSetKb = await electronApp.evaluate(({ app }) => {
-        const renderers = app.getAppMetrics().filter((m) => m.type === "Tab" || m.type === "Renderer");
-        return renderers.reduce((n, m) => n + (m.memory?.workingSetSize ?? 0), 0);
+        // Typed here: where the electron types do not resolve, `app` is `any`
+        // and the callbacks' parameters would be implicitly `any` (TS7006).
+        type Metric = { type: string; memory?: { workingSetSize?: number } };
+        const renderers = (app.getAppMetrics() as Metric[]).filter(
+          (m: Metric) => m.type === "Tab" || m.type === "Renderer",
+        );
+        return renderers.reduce((n: number, m: Metric) => n + (m.memory?.workingSetSize ?? 0), 0);
       });
     }
     console.log(`PLAT87-RENDERER build=${wasmPanes ? "wasm-panes" : "nim-js"} first_calltrace_row_ms=${firstRowMs.toFixed(1)}` +

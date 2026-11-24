@@ -2,7 +2,7 @@
 # subjects AND the suites the arms are graded by.
 # Refreshed with --record-control-hashes, gated by the
 # needle scan.
-4a709e46e1c01539fda428f6784b3535f3a42183eb307651eea4fa86b87714f0  src/frontend/tui/app/theme/capabilities.nim
+a1a223ba76a4b30733d0b71c46886747b42d7b9ca0a7b0e8d5e9221a77c0889f  src/frontend/tui/app/theme/capabilities.nim
 f10f7110453df54a68784ec44af2ff981d0385ab03d8ceb826f70bbf78d446c2  src/frontend/tui/host/terminal_probe.nim
 f53f2ef2d01ee89e78f90c5c6324f753a5519704c2bf69abfc10c508600de980  src/frontend/tui/host/terminal_driver.nim
 47d1c433c9838314c782aa53510815f5fdf60c93486b1da9a63f1f9719f04c2a  src/frontend/tui/app/tests/test_plat71_terminal_profile.nim

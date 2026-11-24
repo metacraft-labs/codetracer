@@ -211,8 +211,9 @@ proc drawChoices(r: GpuiRenderer; c: PageCtx; options: seq[AnswerOption];
 
 proc drawDraft(r: GpuiRenderer; c: PageCtx; draft: Draft; disabled: bool): GpuiElement =
   ## A manager's draft (`.ah-item-draft`): 8px in past an inset bar in the
-  ## information border role; its provenance, rationale and text, `Send
-  ## draft`.
+  ## information border role; its provenance, rationale and text, and `Send
+  ## draft` in an actions row of its own, as compact as `Submit` and at the
+  ## row's start (the web's `.ah-item-actions` inside the draft).
   result = r.section(c, DraftHead, confidenceText(draft))
   r.styles(result, [("padding-left", "8px"), ("position", "relative")])
   r.appendChild(result, r.insetBar(c.ink.borderInfo, BarPx))
@@ -221,13 +222,13 @@ proc drawDraft(r: GpuiRenderer; c: PageCtx; draft: Draft; disabled: bool): GpuiE
   if draft.text.len > 0: r.appendChild(result, r.prose(c, draft.text, fact = "draft-text"))
   if draft.choices.len > 0:
     r.appendChild(result, r.prose(c, draft.choices.join(", "), fact = "draft-text"))
-  # The web view appends `Send draft` to the draft's column itself, not in
-  # an actions row, so the button takes the column's whole width.
+  # The row wraps within the draft's column: the page's width less the 8px
+  # the draft stands in.
   let page = c.page
-  let send = r.actionButton(c.p, c.ink, SendDraftLabel, true,
-                            proc() = discard page.sendDraft(), disabled)
-  r.setStyle(send, "justify", "start")
-  r.appendChild(result, send)
+  var inner = c
+  inner.avail = c.avail - 8
+  r.appendChild(result, r.actions(inner, @[(SendDraftLabel, true, disabled,
+                                            proc() = discard page.sendDraft())]))
 
 proc drawBanner(r: GpuiRenderer; c: PageCtx; text, role: string): GpuiElement =
   ## A question's banner (`.ah-item-banner`): a band on the raised ground,
@@ -530,12 +531,13 @@ proc gapped(parts: seq[int]; gap: int): int =
   if n > 1: result += (n - 1) * gap
 
 proc draftPx(c: PageCtx; draft: Draft): int =
-  ## `drawDraft`: its head, rationale, text, choices and `Send draft`, 4px
-  ## apart, 8px in.
+  ## `drawDraft`: its head, rationale, text, choices and `Send draft`'s
+  ## actions row, 4px apart, 8px in.
   let w = c.avail - 8
   gapped(@[BodyLinePx, ShortLinePx * textRows(draft.rationale, CaptionPx, w),
            BodyLinePx * textRows(draft.text, BodyPx, w),
-           BodyLinePx * textRows(draft.choices.join(", "), BodyPx, w), ControlPx], 4)
+           BodyLinePx * textRows(draft.choices.join(", "), BodyPx, w),
+           actionsPx(@[SendDraftLabel], w)], 4)
 
 proc bannerPx(c: PageCtx; text: string): int =
   ## `drawBanner`: 6px above and below, the words wrapped past the dot.

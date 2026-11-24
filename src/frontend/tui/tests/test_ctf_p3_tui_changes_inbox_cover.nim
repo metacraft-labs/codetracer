@@ -53,7 +53,9 @@ const
   StepThreeD = 6 + 4 + 6 + 5 + 6
     ## The step-3d suite's assertions (the hint, the approval, the marks,
     ## the controls and the reading measure, the priority dropdown).
-  ExpectedAssertions = 104 + 3 * (3 + 4 + 4) + StepThreeD
+  SendDraftCompact = 3 * 3
+    ## The Send-draft suite's assertions: three at each size.
+  ExpectedAssertions = 104 + 3 * (3 + 4 + 4) + StepThreeD + SendDraftCompact
 
 var countedAssertions = 0
 template ck(cond: untyped) =
@@ -479,6 +481,25 @@ suite "CTF-P3 step 3d: the review's follow-ups in the terminal":
       let menu = m.view.first("priority-menu")
       ck menu != nil and menu.attr("priority-menu") == PriorityLabel
       ck menu.col + menu.width <= cols - 1
+      discard size
+
+suite "CTF-P3: Send draft is a compact button, as Submit is":
+  test "Send draft drawn across the draft's column, out of its actions row, is reported":
+    for (size, cols, rows) in Sizes:
+      let m = mountStory(storyOf("agent-harbor-inbox-item", "draft"), cols, rows, dmLight)
+      defer: m.dispose()
+      ck m.problemsOf.len == 0
+      var send: AhNode = nil
+      for b in m.view.all("button"):
+        if b.attr("button") == SendDraftLabel: send = b
+      let draft = m.view.first("draft")
+      ck send != nil and draft != nil
+      if send != nil and draft != nil:
+        # A drawing that stretches it: the button a child of the draft's
+        # column itself, as wide as the column.
+        send.width = draft.width
+        draft.children.add send
+      ck checkChangesInbox(m).join(" ").contains("the button 'Send draft' is")
       discard size
 
 suite "CTF-P3: assertion count":

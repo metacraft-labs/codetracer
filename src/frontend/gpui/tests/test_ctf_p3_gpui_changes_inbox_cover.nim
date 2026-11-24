@@ -370,6 +370,26 @@ suite "CTF-P3 step 3d: the review's follow-ups in GPUI":
     ck checkChanges(m.view, m.changesInbox.changes, width, ctx).join("; ").contains(
       "the keyboard's item is out of view")
 
+suite "CTF-P3: Send draft is a compact button, as Submit is":
+  test "Send draft drawn in the draft's column, out of its actions row, is reported":
+    for (size, widthPx) in Widths:
+      let (view, page, ctx) = drawnItem("draft", widthPx, dmLight)
+      ck checkItemPage(view, page, ctx).len == 0
+      var send: GpuiElement = nil
+      for b in view.all("button"):
+        if b.fact("button") == "Send draft": send = b
+      let draft = view.firstOf("draft")
+      ck send != nil and draft != nil
+      if send != nil and draft != nil:
+        # The drawing before the fix: the button a child of the draft's
+        # column itself.
+        send.remove()
+        r.appendChild(draft, send)
+      ck checkItemPage(view, page, ctx).join("; ").contains(
+        "the button 'Send draft' is not in an actions row")
+      page.dispose()
+      discard size
+
 suite "CTF-P3: assertion count":
   test "every assertion ran":
-    check countedAssertions == 39 + 12 + 9 + 5 + 4 + 6 + 6 + 2
+    check countedAssertions == 39 + 12 + 9 + 5 + 4 + 6 + 6 + 2 + 3 * 3

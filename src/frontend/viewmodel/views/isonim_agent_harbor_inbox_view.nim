@@ -205,8 +205,11 @@ proc renderChoices[R, N](r: R; page: InboxItemVM; options: seq[AnswerOption];
 
 proc renderDraft[R, N](r: R; page: InboxItemVM; draft: Draft; disabled: bool): N =
   ## A manager's prepared draft: its provenance, rationale and text, and
-  ## `Send draft`.
-  var host: N
+  ## `Send draft` in an actions row of its own (`.ah-item-actions`), a
+  ## compact button at the row's start as `Submit` is at its form's. Put in
+  ## the draft's column directly, the column would stretch it across its
+  ## whole width.
+  var host, actions: N
   let provenance = confidenceText(draft)
   result = ui(r):
     tdiv(ref = host, class = "ah-item-section ah-item-draft", `data-ah-draft` = "true"):
@@ -225,8 +228,9 @@ proc renderDraft[R, N](r: R; page: InboxItemVM; draft: Draft; disabled: bool): N
       if draft.choices.len > 0:
         tdiv(class = "ah-item-prose ah-item-draft-text"):
           text draft.choices.join(", ")
-  r.appendRendered(host, renderButton(r, SendDraftLabel, true, disabled,
-                                      proc() = discard page.sendDraft()))
+      tdiv(ref = actions, class = "ah-item-actions")
+  r.appendRendered(actions, renderButton(r, SendDraftLabel, true, disabled,
+                                         proc() = discard page.sendDraft()))
 
 proc renderStatusLines[R, N](r: R; page: InboxItemVM; host: N) =
   ## Why a press sent nothing, and the page's last action's state: in their

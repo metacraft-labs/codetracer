@@ -684,32 +684,48 @@ MUTATIONS: list[Mutation] = [
                         "      result[\"pane\"] = %($node.pane)",
     ),
     Mutation(
+        # Re-aimed 2026-11-24: the same `if problem != pipOk` / raiseDecode
+        # pair now also guards a docked entry's `besideContributedPane`, so the
+        # find takes the leaf decoder's following `result.contributedPane = id`
+        # line (the occurrence this arm's description is about).
         "M32", LAYOUT,
         "      if problem != pipOk:\n"
-        "        raiseDecode(ldeBadContributedPane, describe(problem, id))",
+        "        raiseDecode(ldeBadContributedPane, describe(problem, id))\n"
+        "      result.contributedPane = id",
         "      if false:\n"
-        "        raiseDecode(ldeBadContributedPane, describe(problem, id))",
+        "        raiseDecode(ldeBadContributedPane, describe(problem, id))\n"
+        "      result.contributedPane = id",
         V_BADDOC, NIM_VM, "ldeBadContributedPane",
         "a malformed id in a saved layout is accepted, so a slot nothing can "
         "resolve reaches the shell — and there is no extension to name in the "
         "report, because the id cannot be attributed to one",
         control_name="the problem is compared through an explicit equality",
         control_find="      if problem != pipOk:\n"
-                     "        raiseDecode(ldeBadContributedPane, describe(problem, id))",
+                     "        raiseDecode(ldeBadContributedPane, describe(problem, id))\n"
+                     "      result.contributedPane = id",
         control_replace="      if not (problem == pipOk):\n"
-                        "        raiseDecode(ldeBadContributedPane, describe(problem, id))",
+                        "        raiseDecode(ldeBadContributedPane, describe(problem, id))\n"
+                        "      result.contributedPane = id",
     ),
     Mutation(
+        # Re-aimed 2026-11-24: the docked-entry decoder gained an identical
+        # `if hasBuiltin and hasContributed:`; the find takes the leaf
+        # decoder's `j.hasKey(...)` line above it (the docked one reads
+        # `entry.hasKey`).
         "M33", LAYOUT,
+        '    let hasContributed = j.hasKey("contributedPane")\n'
         "    if hasBuiltin and hasContributed:",
+        '    let hasContributed = j.hasKey("contributedPane")\n'
         "    if false:",
         V_BOTHKEYS, NIM_VM, "ldePaneAndContributedPane",
         "a leaf claiming BOTH namespaces is decoded as whichever the reader "
         "happens to check first, so a document written by something that does "
         "not understand the format silently places a pane nobody asked for",
         control_name="the two flags are tested in the other order",
-        control_find="    if hasBuiltin and hasContributed:",
-        control_replace="    if hasContributed and hasBuiltin:",
+        control_find='    let hasContributed = j.hasKey("contributedPane")\n'
+                     "    if hasBuiltin and hasContributed:",
+        control_replace='    let hasContributed = j.hasKey("contributedPane")\n'
+                        "    if hasContributed and hasBuiltin:",
     ),
     Mutation(
         "M34", LAYOUT,

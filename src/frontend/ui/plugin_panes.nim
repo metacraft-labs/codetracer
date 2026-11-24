@@ -43,6 +43,15 @@ import ../viewmodel/plugin_host/[protocol, key_snapshot]
 import ../viewmodel/session_vm
 import ../viewmodel/sync/[transport, sync_host]
 import ./plugin_hooks
+import ../viewmodel/input/dom_pointer
+
+const
+  PluginPaneKind* = "pluginPane"
+    ## A contributed pane's kind for presses (`data-ct-pane`).
+  PluginPaneActivate* = "plugin-pane.activate"
+    ## The operation a press on a plugin pane's row or control carries.
+  PluginDialogRun* = "plugin-dialog.run"
+    ## The operation a button of the plugins' dialog carries.
 
 const
   PluginsStateChannel = cstring"CODETRACER::plugins-state"
@@ -84,6 +93,10 @@ type
     lastStatus: string
     statusLine: string
     statusLineAtMs: float
+    notesShown: seq[string]
+      ## The fault notifications already raised (`plugin|atMs|text`).
+    lastMarks: string
+      ## The editor marks last drawn, as JSON text.
 
 var ui: PluginUi
 
@@ -106,12 +119,21 @@ proc clearChildren(e: Element) {.importjs: "#.replaceChildren()".}
 proc appendEl(p, c: Element) {.importjs: "#.appendChild(#)".}
 proc isConnected(e: Element): bool {.importjs:
   "(function (e) { return !!(e && e.isConnected); })(#)".}
-proc onClick(e: Element; cb: proc(target: JsObject)) {.importjs:
-  "#.addEventListener('click', function (ev) { (#)(ev.target); })".}
-proc closestViewId(target: JsObject): cstring {.importjs: """
+proc closestPressable(target: JsObject): JsObject {.importjs: """
   (function (t) {
-    var el = t && t.closest ? t.closest('[data-view-id]') : null;
-    return el ? el.getAttribute('data-view-id') : '';
+    return (t && t.closest) ? t.closest('[data-option-index], [data-row-index], [data-view-id]') : null;
+  })(#)""".}
+proc closestOwnerId(e: JsObject): cstring {.importjs: """
+  (function (e) {
+    var o = e && e.parentElement ? e.parentElement.closest('[data-view-id]') : null;
+    return o ? o.getAttribute('data-view-id') : '';
+  })(#)""".}
+proc attrOr(e: JsObject; name: cstring): cstring {.importjs: """
+  (function (e, n) { return (e && e.getAttribute && e.getAttribute(n)) || ''; })(#, #)""".}
+proc closestPaneId(e: JsObject): cstring {.importjs: """
+  (function (e) {
+    var el = e && e.closest ? e.closest('[data-contributed-pane]') : null;
+    return el ? el.getAttribute('data-contributed-pane') : '';
   })(#)""".}
 proc stateField(state: JsObject; name: cstring): cstring {.importjs:
   "(String((# || {})[#] || ''))".}
@@ -209,14 +231,13 @@ proc mountPluginPane*(container: JsObject; state: JsObject) =
   let host = newDiv()
   host.setAttr("class", "plugin-pane")
   host.setAttr("data-contributed-pane", cstring(id))
+  # A press on the pane's rows is the pointer keymap's (`dom_pointer`): the
+  # pane names its kind for presses, and its hit test (`installPluginUi`)
+  # names the row or control under the press.
+  host.setAttr("data-ct-pane", cstring(PluginPaneKind))
   root.appendEl(host)
   let m = MountedPane(id: id, host: host,
                       tab: (if ui.isNil: -1 else: ui.activeTab()))
-  host.onClick(proc(target: JsObject) =
-    let node = $closestViewId(target)
-    if node.len > 0:
-      send("view-event", %*{"surface": id,
-                            "event": {"kind": "activate", "node": node}}))
   if not ui.isNil:
     ui.panes.add m
   m.renderPane()
@@ -247,16 +268,22 @@ proc openPluginPane*(id, title: string) =
 # ---------------------------------------------------------------------------
 
 proc dialogButton(d: Element; label: string; words: seq[string]): Element =
-  ## A button running `words` (or closing the recovery dialog). A factory, not
-  ## a closure built in `showDialog`'s loop, which would share the loop's one
-  ## environment: every button would run the last button's words.
+  ## A button running `words` (or closing the recovery dialog): it carries
+  ## `PluginDialogRun` and its words (`data-plugin-verb`), and the pointer
+  ## router runs the operation on the press (`dom_pointer`, `dialogPressed`).
   result = createEl("button")
   result.setText(cstring(label))
   result.setAttr("data-plugin-verb", cstring(words.join(" ")))
-  result.onClick(proc(target: JsObject) =
-    d.closeDialog()
-    if words.len > 0: control(words)
-    else: send("close-recovery"))
+  result.setAttr(cstring(OperationAttribute), cstring(PluginDialogRun))
+
+proc dialogPressed(press: ElementPress): bool =
+  ## `PluginDialogRun`: the pressed button's words, as `:plugins` verbs; a
+  ## button with none closes the recovery dialog.
+  let verb = $attrOr(press.element, cstring"data-plugin-verb")
+  if not ui.isNil and not ui.dialog.isNil: ui.dialog.closeDialog()
+  if verb.len > 0: control(verb.splitWhitespace)
+  else: send("close-recovery")
+  true
 
 proc showDialog(title, body: string; buttons: seq[(string, seq[string])]) =
   ## A plain `<dialog>`: the text the plugins' `control` answered, and a
@@ -312,7 +339,10 @@ proc onControlResult(payload: JsonNode) =
 
 proc commandsSignature(st: JsonNode): string =
   if st.isNil: return ""
-  $st{"commands"} & $st{"panes"}.getElems().len & $st{"awaitingConsent"}
+  var stopped = ""
+  for pl in st{"plugins"}.getElems():
+    if pl{"breaker"}.getStr("") == "open": stopped.add pl{"id"}.getStr("") & ","
+  $st{"commands"} & $st{"panes"}.getElems().len & $st{"awaitingConsent"} & stopped
 
 proc statusOf(st: JsonNode): tuple[text, title: string] =
   if st.isNil: return ("", "")
@@ -335,6 +365,39 @@ proc statusOf(st: JsonNode): tuple[text, title: string] =
     parts.add line
   (parts.join("  "), st{"statusText"}.getStr(""))
 
+proc controlEntry(label: string; words: seq[string]): PluginPaletteCommand =
+  ## One palette entry running `words`. A factory, not a closure built in the
+  ## loop below: a closure there would share the loop's one environment, and
+  ## every entry would run the LAST iteration's words.
+  (label: label, run: proc() = control(words))
+
+proc faultActionWords(action, plugin: string): seq[string] =
+  ## A fault notification's action (`Supervisor.notifications`) as the
+  ## `:plugins` verb it runs.
+  case action
+  of "Re-enable": @["re-enable", plugin]
+  of "Disable": @["disable", plugin]
+  of "Show log": @["log", plugin]
+  else: @[]
+
+proc raiseFaultNotifications(st: JsonNode) =
+  ## Each fault notification not raised yet, through the desktop's own
+  ## notifications (`pluginNotify`), its actions as the notification's
+  ## buttons: the terminal prints the sentence and lists the verbs, GPUI
+  ## offers them in its omnibar, the desktop has buttons.
+  if pluginNotify.isNil: return
+  for n in st{"notifications"}.getElems():
+    let plugin = n{"plugin"}.getStr("")
+    let key = plugin & "|" & $n{"atMs"}.getBiggestInt(0) & "|" & n{"text"}.getStr("")
+    if key in ui.notesShown: continue
+    ui.notesShown.add key
+    var actions: seq[PluginPaletteCommand]
+    for a in n{"actions"}.getElems():
+      let words = faultActionWords(a.getStr(""), plugin)
+      if words.len > 0:
+        actions.add controlEntry(a.getStr("") & " " & plugin, words)
+    pluginNotify(n{"text"}.getStr(""), actions)
+
 proc onState(payload: JsonNode) =
   let tab = payload{"sessionId"}.getInt(-1)
   let before = ui.states.getOrDefault(tab, nil)
@@ -352,6 +415,11 @@ proc onState(payload: JsonNode) =
     if not pluginStatusChanged.isNil: pluginStatusChanged()
   if payload{"recoveryOpen"}.getBool(false) and not wasRecovery:
     control(@["recovery-dialog"])
+  raiseFaultNotifications(payload)
+  let marks = $payload{"editorMarks"}
+  if marks != ui.lastMarks:
+    ui.lastMarks = marks
+    if not pluginMarksChanged.isNil: pluginMarksChanged()
 
 # ---------------------------------------------------------------------------
 # Keys (§11.7)
@@ -372,7 +440,7 @@ proc decideKey(name: string; ev: JsObject; hostModalOpen: bool): bool =
   if st.isNil or not st{"extensionsEnabled"}.getBool(true): return false
   let snap = st{"keys"}
   let key = pluginKeyName(name)
-  if key in ["esc", "escape"]:
+  if isRecoveryChordKey(key):
     send("escape")
     let t = jsNowMs()
     var kept: seq[float]
@@ -408,12 +476,6 @@ proc label(text: string): string =
   ## Step forward` is offered as `Metrics - Step forward`.
   text.replace(": ", " - ").replace(":", " ")
 
-proc controlEntry(label: string; words: seq[string]): PluginPaletteCommand =
-  ## One palette entry running `words`. A factory, not a closure built in the
-  ## loop below: a closure there would share the loop's one environment, and
-  ## every entry would run the LAST iteration's words.
-  (label: label, run: proc() = control(words))
-
 proc paneEntry(label, id, title: string): PluginPaletteCommand =
   (label: label, run: proc() = openPluginPane(id, title))
 
@@ -425,6 +487,14 @@ proc paletteCommands(): seq[PluginPaletteCommand] =
   for id in st{"awaitingConsent"}.getElems():
     let plugin = id.getStr("")
     result.add controlEntry("Plugins - Review " & plugin, @["review", plugin])
+  # A plugin its breaker stopped (§11.7.5): Re-enable, Disable and Show log,
+  # as GPUI's omnibar offers them (`gpui_plugins.faultEntries`).
+  for pl in st{"plugins"}.getElems():
+    if pl{"breaker"}.getStr("") == "open":
+      let plugin = pl{"id"}.getStr("")
+      result.add controlEntry("Plugins - Re-enable " & plugin, @["re-enable", plugin])
+      result.add controlEntry("Plugins - Disable " & plugin, @["disable", plugin])
+      result.add controlEntry("Plugins - Show log " & plugin, @["log", plugin])
   for c in st{"commands"}.getElems():
     let plugin = c{"plugin"}.getStr("")
     let op = c{"op"}.getStr("")
@@ -477,6 +547,27 @@ proc releaseSessionPlugins*(tab: int) =
 # Installing
 # ---------------------------------------------------------------------------
 
+proc sameDocument(a, b: string): bool =
+  ## The session names a file as its recording did (often absolute); the
+  ## editor as it opened it. The same file either way.
+  a == b or (a.len > 0 and b.len > 0 and
+             (a.endsWith("/" & b) or b.endsWith("/" & a)))
+
+proc editorMarksFor(path: string): seq[PluginEditorMark] =
+  ## `pluginEditorMarks`: the tab on screen's plugin marks for `path`.
+  let st = activeState()
+  if st.isNil: return
+  let marks = st{"editorMarks"}
+  if marks.isNil or not sameDocument(marks{"file"}.getStr(""), path): return
+  for d in marks{"decorations"}.getElems():
+    result.add (line: d{"line"}.getInt(0), glyph: d{"glyph"}.getStr(""),
+                text: d{"text"}.getStr(""), plugin: d{"plugin"}.getStr(""),
+                marker: false)
+  for m in marks{"markers"}.getElems():
+    result.add (line: m{"line"}.getInt(0), glyph: m{"glyph"}.getStr(""),
+                text: m{"text"}.getStr(""), plugin: m{"plugin"}.getStr(""),
+                marker: true)
+
 proc refreshForActiveTab*() =
   ## The tab on screen changed: show its plugins.
   if ui.isNil: return
@@ -487,6 +578,39 @@ proc refreshForActiveTab*() =
   ui.lastCommands = commandsSignature(st)
   if not pluginPaletteChanged.isNil: pluginPaletteChanged()
   if not pluginStatusChanged.isNil: pluginStatusChanged()
+  ui.lastMarks = ""
+  if not pluginMarksChanged.isNil: pluginMarksChanged()
+
+proc pluginPaneHit(target, ev: JsObject): ElementHit =
+  ## The plugin pane's hit test (§5.3): the option, table row or node the
+  ## vocabulary's web binding drew under the press. It carries
+  ## `PluginPaneActivate`, which the pointer router runs on the press.
+  let el = closestPressable(target)
+  if el.isNil or el.isUndefined: ElementHit()
+  else: ElementHit(element: el, kind: "button", operation: PluginPaneActivate)
+
+proc activatePressed(press: ElementPress): bool =
+  ## `PluginPaneActivate` on the element pressed: the view node and its
+  ## option (or table row) go to the plugin as a `view-event`, which the main
+  ## process applies as the terminal's and GPUI's presses are applied
+  ## (`plugin_panes.paneClickNode`).
+  let el = press.element
+  let pane = $closestPaneId(el)
+  if pane.len == 0: return false
+  let option = $attrOr(el, cstring"data-option-index")
+  let row = $attrOr(el, cstring"data-row-index")
+  var node = ""
+  var index = -1
+  if option.len > 0 or row.len > 0:
+    node = $closestOwnerId(el)
+    try: index = parseInt(if option.len > 0: option else: row)
+    except ValueError: return false
+  else:
+    node = $attrOr(el, cstring"data-view-id")
+  if node.len == 0: return false
+  send("view-event", %*{"surface": pane,
+    "event": {"kind": "activate", "node": node, "option": index}})
+  true
 
 proc installPluginUi*(ipc: JsObject; activeTab: proc(): int;
                       userBound: proc(key: string): bool = nil) =
@@ -506,10 +630,14 @@ proc installPluginUi*(ipc: JsObject; activeTab: proc(): int;
     if ui.syncChannels.hasKey(tab) and not msg{"msg"}.isNil:
       ui.syncChannels[tab].deliver(msg["msg"]))
   pluginKeyHook = decideKey
+  registerHitTest(PluginPaneKind, pluginPaneHit)
+  registerElementOperation(PluginPaneActivate, activatePressed)
+  registerElementOperation(PluginDialogRun, dialogPressed)
   pluginStatusText = proc(): tuple[text, title: string] = statusOf(activeState())
   pluginPaletteCommands = paletteCommands
   pluginTabSwitched = refreshForActiveTab
   pluginTabClosed = releaseSessionPlugins
+  pluginEditorMarks = editorMarksFor
   # A page that loaded after its plugins' state was first sent asks again.
   send("state")
 

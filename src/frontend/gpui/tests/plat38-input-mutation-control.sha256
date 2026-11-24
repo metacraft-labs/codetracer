@@ -15,7 +15,7 @@
 # re-recording from a tree whose arms have stopped matching certifies the arms
 # along with the bytes.
 cc4fe56ac37d481b7c4995a4495bad5741341473994a7e0b46d02b8a8206d615  src/tests/visual/plat38-keystrokes.json
-2f665b501f1b09784be12cc15786beed92c492743a81d6a22ede5b1fb2b1f568  src/frontend/view_vocabulary/gpui_binding.nim
-e6cbb30b6b657c1e14ab3965b10398a6bdfc236a423ef52366a45a96b38ac558  src/common/view_vocabulary/gpui_gaps.nim
+201b98448ba75ba8f27ae9af3e9b7e7cc2f316f8e5795f094304e7870f4dc26f  src/frontend/view_vocabulary/gpui_binding.nim
+6aff91c3af03e857abe9efdaa33c6c6902c7fa9618c5a179aad33d27741701e5  src/common/view_vocabulary/gpui_gaps.nim
 64419c7909c6446d5984345f786a9aae6be6fe3364b2238df0c777d8812420e1  src/frontend/gpui/tests/plat38_keys.nim
-e0032c13d630560f01df585e39d07ffc8cd07789d3feee8ec3072b75c14f3c39  src/frontend/gpui/tests/test_gpui_key_delivery.nim
+ed4704ee6dae316f0fc14cb1aefb05bf3a2429171775edef9a4718cee3cc859f  src/frontend/gpui/tests/test_gpui_key_delivery.nim

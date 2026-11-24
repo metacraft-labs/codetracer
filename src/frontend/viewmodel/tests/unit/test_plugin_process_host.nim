@@ -734,8 +734,12 @@ suite "§11.7.2: the plugin pass and pushed state":
   test "a static binding resolves on the plugin's last pushed context, never asking it":
     var r = newRig()
     r.both()
-    check r.sup.waitUntil("context pushed", proc(): bool =
-      r.sup.contextKeys.getOrDefault("plugin.acme-tools.metrics.ready", false))
+    # The context key and the operation's enablement are separate pushes;
+    # the binding resolves only once both arrived (it read false 1 run in 6
+    # at load ~150, waiting on the context key alone).
+    check r.sup.waitUntil("context and enablement pushed", proc(): bool =
+      r.sup.contextKeys.getOrDefault("plugin.acme-tools.metrics.ready", false) and
+        r.sup.enablementOf("acme-tools.metrics", "metrics.step").enabled)
     let route = r.sup.resolveStaticKey("ctrl+alt+m", "")
     check route.found
     check route.plugin == "acme-tools.metrics"
@@ -1014,30 +1018,48 @@ suite "§11.6.2: liveness has a channel of its own":
     check link.send(%*{"type": "invoke", "plugin": "acme-tools.metrics",
       "id": "flood", "op": "metrics.views", "args": {"count": 400}})
     link.flushWrites()
-    # Wait until the plugin is blocked inside the handler: a pong says so.
+    var seqNo = 0
+    proc ping(): JsonNode =
+      ## One ping and its pong; nil when none came within five times the
+      ## host's own deadline (a pong that late is the fault under test, and
+      ## waiting longer would only slow the red down).
+      inc seqNo
+      let want = seqNo
+      check link.send(%*{"type": "ping", "seq": want})
+      link.flushWrites()
+      let t0 = monotonicMs()
+      while monotonicMs() - t0 < 5 * PongDeadlineMs:
+        for f in link.readPongs():
+          let m = parseJson(f)
+          if m{"type"}.getStr == "pong" and m{"seq"}.getInt == want:
+            m["latencyMs"] = %int(monotonicMs() - t0)
+            return m
+        os.sleep(1)
+    # Wait on state, not time: ping until a pong names the plugin busy, so
+    # its handler has started. A loaded host may take a while to get there.
+    var started = false
+    let waitFrom = monotonicMs()
+    while not started and monotonicMs() - waitFrom < Ceiling:
+      let pong = ping()
+      check not pong.isNil
+      if pong.isNil: break
+      started = pong{"busy"}.getStr == "acme-tools.metrics"
+      if not started: os.sleep(20)
+    check started
+    # From here the handler cannot finish: 400 trees are megabytes, and the
+    # protocol is never read, so its main thread stays blocked in a write
+    # holding the frame lock. Every pong must still come, and name it.
     var latencies: seq[int]
     var busyNamed = 0
     for i in 1 .. 40:
-      check link.send(%*{"type": "ping", "seq": i})
-      link.flushWrites()
-      let t0 = monotonicMs()
-      var pong: JsonNode
-      # Five times the host's own deadline: a pong this late is the fault
-      # under test, and waiting longer would only slow the red down.
-      while pong.isNil and monotonicMs() - t0 < 5 * PongDeadlineMs:
-        for f in link.readPongs():
-          let m = parseJson(f)
-          if m{"type"}.getStr == "pong" and m{"seq"}.getInt == i: pong = m
-        if pong.isNil: os.sleep(1)
+      let pong = ping()
       check not pong.isNil
       if pong.isNil: break
-      latencies.add int(monotonicMs() - t0)
+      latencies.add pong{"latencyMs"}.getInt
       if pong{"busy"}.getStr == "acme-tools.metrics": inc busyNamed
       os.sleep(20)
     check latencies.len == 40
-    # The protocol was never read during the pings: the plugin was blocked
-    # writing for all of them.
-    check busyNamed >= 30
+    check busyNamed == 40
     let sortedL = latencies.sorted
     let p50 = sortedL[sortedL.len div 2]
     let p99 = sortedL[^1]

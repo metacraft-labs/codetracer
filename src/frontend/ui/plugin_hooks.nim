@@ -39,5 +39,22 @@ var pluginTabSwitched*: proc()
   ## Called by `session_switch` when the tab on screen changes: the palette
   ## and the status bar show THAT tab's plugins.
 
+var pluginNotify*: proc(text: string; actions: seq[PluginPaletteCommand])
+  ## Set by the status bar: show a plugin's fault notification (§11.6.5) with
+  ## its actions (`Re-enable`, `Disable`, `Show log`) as the notification's
+  ## buttons.
+
+type
+  PluginEditorMark* = tuple[line: int; glyph, text, plugin: string; marker: bool]
+    ## A plugin's mark on a source line: a decoration (after the code) or a
+    ## marker (`marker`, a glyph in the glyph margin).
+
+var pluginEditorMarks*: proc(path: string): seq[PluginEditorMark]
+  ## Set by `plugin_panes`: the running plugins' marks for the file at `path`.
+
+var pluginMarksChanged*: proc()
+  ## Set by the editor: draw the plugin marks again, the plugins having
+  ## pushed new ones.
+
 var pluginTabClosed*: proc(tab: int)
   ## Called by `session_switch` when a tab closes: its plugins stop.

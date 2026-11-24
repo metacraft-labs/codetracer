@@ -125,7 +125,10 @@
     "is the story's whole window (`.ah-pie-story`); `pie-first` is the first pie",
     "drawn (the window band's needs-input row at 0 %) and `pie-band-menu` the last",
     "band, each compared in pixels too (`px`): a pie a pixel larger, or a row a",
-    "pixel taller, moves every pie below it. `pie-head-100` and `pie-head-unknown`",
+    "pixel taller, moves every pie below it. `pie-first` is taken only `within`",
+    "the story's window, so the pies the other stories draw at their tabs, lines",
+    "and rows are not compared in pixels by it: each of those is held by its own",
+    "story's regions. `pie-head-100` and `pie-head-unknown`",
     "are the words of the last two columns' heads, the pair that crowds first:",
     "each is centred over its column's pies, and their x and width are compared",
     "in pixels.",
@@ -935,6 +938,12 @@
       "web": ".ah-pie",
       "gpui": {
         "data-ah-pie": ""
+      },
+      "within": {
+        "web": ".ah-pie-story",
+        "gpui": {
+          "data-ah-surface": "agent-harbor-pie"
+        }
       },
       "px": [
         "x",

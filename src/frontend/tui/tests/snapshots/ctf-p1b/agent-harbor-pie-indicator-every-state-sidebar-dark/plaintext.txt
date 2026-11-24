@@ -34,8 +34,8 @@
                                              
  Glyph tiers, running/working
  extended        ○  ◔   ◑   ◕     ●      ◌
- basic           ○  ●   ●   ●     ●      ○
- ascii           o  *   *   *     *      o
+ basic           ○  ½   ½   ½     ●      ?
+ ascii           o  +   +   +     *      ?
                                              
  reader: running, 8 of 50 steps, 16%
  reader: running, progress unknown

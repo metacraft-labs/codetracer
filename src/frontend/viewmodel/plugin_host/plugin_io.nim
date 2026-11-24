@@ -602,7 +602,7 @@ when defined(js) or defined(wasm32):
 
 else:
   import std/[asyncdispatch, asyncfile, asyncnet, monotimes, nativesockets,
-              os, osproc, strtabs, times]
+              os, osproc, times]
   when defined(posix):
     import std/posix
   when defined(ssl):
@@ -874,6 +874,104 @@ else:
       ## 0.2 ms between `waitpid(WNOHANG)` polls: long enough to give the dying
       ## child the CPU, short enough that the common case costs one pause.
 
+  when defined(posix):
+    proc posix_spawn_file_actions_addchdir_np(fa: var Tposix_spawn_file_actions;
+                                              path: cstring): cint {.
+      importc, header: "<spawn.h>".}
+      ## glibc >= 2.29 and macOS >= 10.15. `std/posix` does not declare it.
+
+    type GroupedChild = object
+      pid: Pid
+      stdinFd, stdoutFd, stderrFd: cint
+
+    proc spawnGrouped(exe: string; args: seq[string];
+                      env: seq[(string, string)];
+                      workingDir: string): GroupedChild =
+      ## The child in a process group of ITS OWN, set by the kernel at spawn
+      ## (`POSIX_SPAWN_SETPGROUP`, pgroup 0), so `rawKill`'s one `killpg`
+      ## reaches every descendant.
+      ##
+      ## ## WHY NOT `startProcess(…, {poDaemon})` (changed 2026-11-23)
+      ##
+      ## That was this proc's body, and it is only as good as the stdlib that
+      ## compiles the plugin. Stock Nim 2.2.4's `osproc` never takes its
+      ## `posix_spawn` path on Linux (`useProcessAuxSpawn` excludes
+      ## `defined(linux)`), and its fork path ignores `poDaemon`: the child
+      ## stayed in the plugin process's group, `rawKill` fell back to the one
+      ## pid, and a tool past its deadline left its grandchildren running
+      ## (codetracer-pm issue 2026-11-23-stock-nim-2-2-4-osproc-ignores-
+      ## podaemon-on-linux…). A plugin's author picks the compiler, so the
+      ## group cannot depend on which one it was.
+      ##
+      ## The working directory is a spawn file action, not the stdlib's
+      ## `setCurrentDir` around the spawn, which changes the cwd of the whole
+      ## plugin process while it lasts.
+      var pin, pout, perr: array[0..1, cint]
+      if pipe(pin) != 0: raiseOSError(osLastError(), "pipe")
+      if pipe(pout) != 0:
+        discard close(pin[0]); discard close(pin[1])
+        raiseOSError(osLastError(), "pipe")
+      if pipe(perr) != 0:
+        for fd in [pin[0], pin[1], pout[0], pout[1]]: discard close(fd)
+        raiseOSError(osLastError(), "pipe")
+      # The parent's ends must not leak into this child (or a later one).
+      for fd in [pin[1], pout[0], perr[0]]:
+        discard fcntl(fd, F_SETFD, FD_CLOEXEC)
+      var argv = @[exe] & args
+      var envs: seq[string]
+      for (k, v) in env: envs.add k & "=" & v
+      let cargv = allocCStringArray(argv)
+      let cenv = allocCStringArray(envs)
+      var attr: Tposix_spawnattr
+      var fops: Tposix_spawn_file_actions
+      var failed = ""
+      template chk(what: string; e: cint) =
+        if failed.len == 0 and e != 0'i32: failed = what
+      chk("posix_spawn_file_actions_init", posix_spawn_file_actions_init(fops))
+      chk("posix_spawnattr_init", posix_spawnattr_init(attr))
+      var mask: Sigset
+      chk("sigemptyset", sigemptyset(mask))
+      chk("posix_spawnattr_setsigmask", posix_spawnattr_setsigmask(attr, mask))
+      chk("posix_spawnattr_setpgroup", posix_spawnattr_setpgroup(attr, 0'i32))
+      chk("posix_spawnattr_setflags", posix_spawnattr_setflags(attr,
+        POSIX_SPAWN_SETPGROUP or POSIX_SPAWN_SETSIGMASK))
+      chk("adddup2 stdin", posix_spawn_file_actions_adddup2(fops, pin[0], 0))
+      chk("adddup2 stdout", posix_spawn_file_actions_adddup2(fops, pout[1], 1))
+      chk("adddup2 stderr", posix_spawn_file_actions_adddup2(fops, perr[1], 2))
+      for fd in [pin[0], pin[1], pout[0], pout[1], perr[0], perr[1]]:
+        if fd > 2:
+          chk("addclose", posix_spawn_file_actions_addclose(fops, fd))
+      if workingDir.len > 0:
+        chk("addchdir", posix_spawn_file_actions_addchdir_np(fops,
+                                                             workingDir.cstring))
+      var pid: Pid
+      var res = 0'i32
+      if failed.len == 0:
+        res = posix_spawn(pid, exe.cstring, fops, attr, cargv, cenv)
+      discard posix_spawn_file_actions_destroy(fops)
+      discard posix_spawnattr_destroy(attr)
+      deallocCStringArray(cargv)
+      deallocCStringArray(cenv)
+      # The child's ends belong to the child now.
+      for fd in [pin[0], pout[1], perr[1]]: discard close(fd)
+      if failed.len > 0 or res != 0'i32:
+        for fd in [pin[1], pout[0], perr[0]]: discard close(fd)
+        if failed.len > 0: raiseOSError(osLastError(), failed)
+        raiseOSError(OSErrorCode(res), exe)
+      GroupedChild(pid: pid, stdinFd: pin[1], stdoutFd: pout[0],
+                   stderrFd: perr[0])
+
+    proc peekCode(pid: int): int =
+      ## `waitpid(WNOHANG)`, reported as `osproc.peekExitCode` reports it:
+      ## -1 while running (or when somebody else reaped it), the exit status,
+      ## or 128 + the signal that killed it, the shell's convention.
+      var status: cint
+      let r = waitpid(Pid(pid), status, WNOHANG)
+      if r != Pid(pid): return -1
+      if WIFEXITED(status): int(WEXITSTATUS(status))
+      elif WIFSIGNALED(status): 128 + int(WTERMSIG(status))
+      else: -1
+
   proc rawKill(p: PluginProcess) =
     ## The closer registered for the process handle, and the whole of
     ## §8.1.1's "Deactivation closes them — the reason a plugin cannot leak a
@@ -955,7 +1053,7 @@ else:
     while true:
       var code = -1
       try:
-        code = p.proc0.peekExitCode()
+        code = (when defined(posix): peekCode(p.pid) else: p.proc0.peekExitCode())
       except CatchableError, Defect:
         # The POSIX `peekExitCode` does not raise; another platform's might,
         # and a closer that cannot ask has nothing more it can do.
@@ -1031,38 +1129,26 @@ else:
       # the host's environment when `env` is nil, and the host's environment
       # holds whatever CodeTracer was started with — tokens included. A plugin
       # gets what it named and nothing else.
-      var envTable = newStringTable(modeCaseSensitive)
-      for (k, v) in env:
-        envTable[k] = v
-
-      var p: Process
+      var child: GroupedChild
       try:
-        # NO `poEvalCommand` and NO `poUsePath`: `exe` is already absolute and
-        # `args` reaches `execve` as argv. There is no command line, so there
-        # is no shell and nothing to quote.
-        #
-        # `poDaemon` IS THE TEARDOWN, not a detachment. On nim's POSIX
-        # `posix_spawn` path it is exactly `POSIX_SPAWN_SETPGROUP` with a
-        # pgroup of `0` and nothing else — no `setsid`, no change to the three
-        # pipes below, no controlling-terminal work — so the child becomes its
-        # own process-group leader and `rawKill` can reach its descendants with
-        # one `killpg`. See `rawKill` for what that is worth and for the guard
-        # that keeps it from ever reaching CodeTracer's own group.
-        p = startProcess(exe, workingDir = workingDir, args = args,
-                         env = envTable, options = {poDaemon})
+        # NO shell and NO PATH search: `exe` is already absolute and `args`
+        # reaches `execve` as argv. There is no command line, so there is
+        # nothing to quote. The child is its own process-group leader, which
+        # is the teardown (`spawnGrouped`, `rawKill`).
+        child = spawnGrouped(exe, args, env, workingDir)
       except CatchableError as e:
         return SpawnOutcome(status: ioFailed,
           message: "spawning '" & name & "' failed: " & e.msg)
 
-      let inH = int(p.inputHandle)
-      let outH = int(p.outputHandle)
-      let errH = int(p.errorHandle)
+      let inH = int(child.stdinFd)
+      let outH = int(child.stdoutFd)
+      let errH = int(child.stderrFd)
       setNonBlocking(inH)
       setNonBlocking(outH)
       setNonBlocking(errH)
 
       var res = PluginProcess(ctx: ctx, name: name, argv: args,
-                              pid: p.processID, proc0: p, exitCode: -1)
+                              pid: int(child.pid), exitCode: -1)
       let rp = res
       res.handle = ctx.state.handles.registerHandle(hkProcess,
         name & " (pid " & $res.pid & ")", proc() = rawKill(rp))
@@ -1138,7 +1224,7 @@ else:
     while true:
       var code = -1
       try:
-        code = p.proc0.peekExitCode()
+        code = (when defined(posix): peekCode(p.pid) else: p.proc0.peekExitCode())
       except CatchableError as e:
         return ExitOutcome(status: ioFailed, message: e.msg)
       if code >= 0:

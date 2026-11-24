@@ -1048,11 +1048,31 @@ function inboxHintProblems(panel) {
 }
 
 // An item's page (step 3d): a queued approval's command on a line of its
-// own in code (Space Mono), its purpose apart; and, on a pane wider than
-// the reading measure, every part kept to it and centred.
+// own in code (Space Mono), its purpose apart; every form button compact;
+// and, on a pane wider than the reading measure, every part kept to it and
+// centred.
 const READING_PX = 48 * 16;
+// A form button's padding and border each side (`ct-button-sm-*`: 7.5px
+// and a hairline) with room to spare; a button wider than its label by more
+// than this has been stretched across the column it stands in.
+const BUTTON_CHROME_PX = 32;
 function itemPageProblems(panel) {
   const problems = [];
+  // Every form button (`Send draft` in a draft included) stands in an
+  // actions row (`.ah-item-actions`) at its label's width, as `Submit`
+  // does: a button put in a column directly is stretched across it.
+  for (const b of panel.querySelectorAll(".ah-item-action")) {
+    if (!shownEl(b)) continue;
+    const label = b.textContent.trim();
+    if (!b.parentElement?.classList.contains("ah-item-actions")) problems.push(`the button "${label}" is not in an actions row`);
+    const text = document.createRange();
+    text.selectNodeContents(b);
+    const textPx = text.getBoundingClientRect().width;
+    const width = b.getBoundingClientRect().width;
+    if (width > textPx + BUTTON_CHROME_PX) {
+      problems.push(`the button "${label}" is ${Math.round(width)}px wide for a ${Math.round(textPx)}px label (stretched)`);
+    }
+  }
   for (const a of panel.querySelectorAll(".ah-item-approval")) {
     const subject = a.querySelector(".ah-item-approval-subject");
     if (!subject) { problems.push("an approval with no command line"); continue; }
@@ -1919,6 +1939,8 @@ export const plays = {
   "agent-harbor-inbox-prev-next-end": async ({ canvasElement }) => {
     const panel = await changesInboxChecks(canvasElement, inboxPanel, { rows: true });
     stepperIs(panel, "5 of 5", { prev: false, next: true });
+    // Its page holds a manager's draft: `Send draft` compact, as `Submit`.
+    expect(itemPageProblems(panel)).toEqual([]);
   },
   // An empty inbox: the notice, no row, both steps disabled.
   "agent-harbor-inbox-empty": async ({ canvasElement }) => {

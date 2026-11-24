@@ -580,3 +580,27 @@ func typeChar*(c: char): KeyPress =
   KeyPress(key: kChar, ch: Rune(ord(c)))
 
 func typeRune*(r: Rune): KeyPress = KeyPress(key: kChar, ch: r)
+
+proc keyPressOfCanonical*(name: string): (bool, KeyPress) =
+  ## A key's CANONICAL name, the router's spelling lower-cased (`enter`,
+  ## `down`, `a`), as the vocabulary's medium-independent key, or false for a
+  ## key no entry reads. A front-end that routes a focused view's keys by
+  ## canonical name (the terminal's and GPUI's plugin panes) hands them here,
+  ## so the spelling is decoded in one place, beside the machine it feeds.
+  case name
+  of "enter", "return": (true, KeyPress(key: kEnter))
+  of "space", " ": (true, KeyPress(key: kSpace))
+  of "esc", "escape": (true, KeyPress(key: kEscape))
+  of "up": (true, KeyPress(key: kUp))
+  of "down": (true, KeyPress(key: kDown))
+  of "left": (true, KeyPress(key: kLeft))
+  of "right": (true, KeyPress(key: kRight))
+  of "home": (true, KeyPress(key: kHome))
+  of "end": (true, KeyPress(key: kEnd))
+  of "backspace": (true, KeyPress(key: kBackspace))
+  of "delete": (true, KeyPress(key: kDelete))
+  else:
+    if name.runeLen == 1:
+      (true, KeyPress(key: kChar, ch: name.runeAt(0)))
+    else:
+      (false, KeyPress(key: kNone))

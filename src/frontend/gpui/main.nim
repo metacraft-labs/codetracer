@@ -718,7 +718,7 @@ func parseGpuiCommand*(argv: openArray[string]): GpuiCommand =
         # the copy nothing exercised was the wrong one. The op is now driven
         # by `test_plat48_gpui_plan.nim`, so an arm added to one and not the
         # other reddens by name instead of being discovered by hand.
-        if head notin ["key", "press", "contextmenu", "move", "release", "menu", "control",
+        if head notin ["key", "press", "contextmenu", "move", "release", "menu", "control",  # ir1-gate: not a key (`--window-ops` op names)
                        "label", "pin", "unpin", "drag", "hold",
                        "hover-label", "wait", "tab", "tab-close",
                        "tab-add", "hwheel", "swheel", "hbar", "click",
@@ -13919,10 +13919,18 @@ proc routeWindowKey(r: GpuiRenderer; key: string; mods: seq[string]) =
   # in flight — closes it BEFORE the key is routed; it never reaches the
   # focused editor (whose Vim layer would take it as "back to normal mode"
   # and leave the revealed pane standing).
-  if name == "Esc" and (gGestures.active or gGestures.revealing) and
-     cancelWindowGesture():
-    traceGesture("dismissed by Esc")
-    return
+  # The router decides which key that is, with the gesture's layer pushed
+  # (`syncOverlayLayers`): `Esc`, or the key the user bound
+  # `layout.cancel-drag` to, as in an Edit window (`editDismissalRoutes`).
+  if gGestures.active or gGestures.revealing:
+    syncOverlayLayers()
+    var probe = gRouter
+    let res = probe.route(windowSessionFacts(), windowScopePath(), nmNormal,
+                          name, int64(epochTime() * 1000))
+    if res.kind == erOperation and res.operation == "layout.cancel-drag" and
+       cancelWindowGesture():
+      traceGesture("dismissed by " & name)
+      return
   let nowMs = int64(epochTime() * 1000)
   # The user's file changed since it loaded: the key resolves under the new
   # rows (the window's loop has no frame hook of its own to poll from).
@@ -15685,7 +15693,7 @@ proc runWindowOp(r: GpuiRenderer; op: string; release = true): string =
       else:
         return "unknown scrub event '" & parts[2] & "'"
     of "press": windowPointer(r, gekPointerDown, at(1), at(2))
-    of "contextmenu":
+    of "contextmenu":  # ir1-gate: not a key (the `contextmenu:` window-op, a dispatch)
       # the `contextmenu` event a right-click sends after its press
       windowPointer(r, gekContextMenu, at(1), at(2))
     of "move": windowPointer(r, gekPointerMove, at(1), at(2))

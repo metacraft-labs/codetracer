@@ -33,7 +33,8 @@
 ##     choice, whether it is chosen and the control it is drawn with (the
 ##     design system's checkbox for several, the composer's toggle for one),
 ##     each queued approval's command or domain and its purpose apart, the
-##     priority dropdown's value whole, and the column its parts keep to
+##     priority dropdown's value whole, every form button in an actions row
+##     (compact, `Send draft` as `Submit`), and the column its parts keep to
 ##     (the reading measure);
 ##   * the Inbox's hint in the page's place while items wait and none is on
 ##     screen, and nothing on screen that the reader did not put there;
@@ -307,6 +308,21 @@ proc checkChanges*(view: GpuiElement; vm: ChangesVM; widthPx: int;
 # An item's page
 # ---------------------------------------------------------------------------
 
+proc looseButtons(node: GpuiElement; inRow: bool; into: var seq[string]) =
+  if node.isNil: return
+  let row = inRow or node.fact("actions").len > 0
+  if not row and node.fact("button").len > 0: into.add node.fact("button")
+  for i in 0 ..< childCount(node): looseButtons(nthChild(node, i), row, into)
+
+proc buttonRowProblems*(view: GpuiElement): seq[string] =
+  ## Every form button of the page in an actions row (`.ah-item-actions`),
+  ## where it is as wide as its label, as `Submit` is: one put in a column
+  ## directly (`Send draft` in the draft's) is stretched across it.
+  var loose: seq[string]
+  looseButtons(view, false, loose)
+  for label in loose:
+    result.add "the button '" & label & "' is not in an actions row"
+
 proc checkItemPage*(view: GpuiElement; page: InboxItemVM; ctx: AgentHarborInboxItemContext;
                     pageWidthPx = 0): seq[string] =
   ## The drawn page (its body, or the whole standalone view) against `page`;
@@ -336,6 +352,7 @@ proc checkItemPage*(view: GpuiElement; page: InboxItemVM; ctx: AgentHarborInboxI
   result.expect("approval purposes", view.values("approval-purpose"), purposes)
   for subject in view.values("approval-subject"):
     if " in order to" in subject: result.add "an approval's command runs on into its purpose: " & subject
+  result.add buttonRowProblems(view)
   let buttons = view.values("button")
   if d.kind == ikLoginRequest:
     result.expect("login", view.values("login"),
