@@ -9,10 +9,9 @@ name: zgui front-end
 #
 # The Linux job records `calc` with `ct` (`just build-once` of its target) and
 # hands the recording to the macOS job, which replays it with a replay-server
-# built for macOS. `build-once` does not run on macOS while
-# locks/arm64-macosx.lock trails repro.lock (codetracer-pm issues 2026-11-04
-# and 2026-11-08): it refuses the drift, and with the drift allowed it
-# refuses the lock's cargo pin.
+# built for macOS with cargo. The macOS job does not use `build-once`, so it
+# does not depend on locks/arm64-macosx.lock keeping up with repro.lock
+# (darwin-lock-resolve.yml re-solves that file on a macOS runner).
 #
 # isonim-zgui is private, so the public repro.lock can neither declare nor pin
 # it (ci/test/sibling-provisioning-test.sh UNLOCKED_SIBLINGS); its revision is
