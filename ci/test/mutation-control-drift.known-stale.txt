@@ -484,7 +484,6 @@ src/frontend/tui/tests/plat59-visual-replay-mutation-control.sha256	src/frontend
 # suite off the JS and WASM lanes (plat17, plat33, plat34).
 src/frontend/viewmodel/tests/unit/plat10-distribution-mutation-control.sha256	src/ct/launch/plugin_components.nim	2448cca0305e39e7c9c00b717561d5ccbbe8b392394b5e193774c9c166b9f570	0c346dfa2ceb0e75157e15cf2c570561663317fbfac55ae71b5900e00a31b294
 src/frontend/viewmodel/tests/unit/plat10-distribution-mutation-control.sha256	src/ct/launch/grant_store.nim	855ffe542a0a6508269696da474d5b1da309d2464d70a628cfb84e6d9c6f703a	f9f2b5ff5eb212c5537a1f0eab37929d98a8fa08e0daa59d37ffbbf3ada76a3a
-src/frontend/viewmodel/tests/unit/plat9-surface-mutation-control.sha256	src/frontend/viewmodel/plugin_host/surface_host.nim	ce85f5f1bcaa85a0abbf6fbeae95f639cc7abedd39f2817b5a04726f4134625a	3fddebc1d5a1d4df6d8846db8374b95600bb0b09dd3d28b102283f41a0d3bbec
 
 # 2026-11-20, the zgui front-end: its lane and recipes edit ci/lib/test-lane-files.sh
 # and the justfile again. plat17, plat33 and plat34 already owed a re-grade for those
@@ -526,7 +525,6 @@ src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/headle
 src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/headless_app/layout_interaction.nim	457818f1b9f7c579c90ea2044fdeb4f3884dcd6da63202a098c72a88cbe03a3b	895162855b3fdb5a311777d54909a38eb1949fb4ad88833802187478ccf3fa94
 src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_shared_default_layout.nim	d1e9317120c943e2daa39b4009be6a8b105b4e6de27df14f14231814babf06f2	4a975465805cf407b18ed0c5e49557580787e5367f81df8f82c64cbb87b2d3e4
 src/frontend/tui/tests/plat63-verification-mutation-control.sha256	src/frontend/headless_app/layout_model.nim	fd45e337f8b5507051da0584a1f774975362ee016c4d4e71490239beafd6943d	a1083e69d55c7d701ff22aceaf6a37c6fdb6a9a2920db19103313446bde1d55d
-src/frontend/viewmodel/tests/unit/plat9-surface-mutation-control.sha256	src/frontend/headless_app/layout_model.nim	fd45e337f8b5507051da0584a1f774975362ee016c4d4e71490239beafd6943d	a1083e69d55c7d701ff22aceaf6a37c6fdb6a9a2920db19103313446bde1d55d
 # 2026-11-21: the terminal docks extension panes (projection, binding, motions, profile, shell, runtime); these harnesses digest those subjects and owe a re-grade.
 src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/tui/app/layout/binding.nim	888258b08925921faf187bd8e0114b2770355693ae7908fbf1d28c72951c41e0	8c3fb489dcb8c3afbdf3a6e8ff802b07e6635ce6362e5f8b48f1eb66c9867599
 src/frontend/tui/tests/plat48-topbar-mutation-control.sha256	src/frontend/tui/app/layout/binding.nim	888258b08925921faf187bd8e0114b2770355693ae7908fbf1d28c72951c41e0	8c3fb489dcb8c3afbdf3a6e8ff802b07e6635ce6362e5f8b48f1eb66c9867599
@@ -673,7 +671,6 @@ src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/fronten
 src/frontend/gpui/tests/plat38-input-mutation-control.sha256	src/frontend/view_vocabulary/gpui_binding.nim	2f665b501f1b09784be12cc15786beed92c492743a81d6a22ede5b1fb2b1f568	201b98448ba75ba8f27ae9af3e9b7e7cc2f316f8e5795f094304e7870f4dc26f
 src/frontend/gpui/tests/plat38-input-mutation-control.sha256	src/common/view_vocabulary/gpui_gaps.nim	e6cbb30b6b657c1e14ab3965b10398a6bdfc236a423ef52366a45a96b38ac558	6aff91c3af03e857abe9efdaa33c6c6902c7fa9618c5a179aad33d27741701e5
 src/frontend/gpui/tests/plat38-input-mutation-control.sha256	src/frontend/gpui/tests/test_gpui_key_delivery.nim	e0032c13d630560f01df585e39d07ffc8cd07789d3feee8ec3072b75c14f3c39	ed4704ee6dae316f0fc14cb1aefb05bf3a2429171775edef9a4718cee3cc859f
-src/frontend/viewmodel/tests/unit/plat9-surface-mutation-control.sha256	src/common/view_vocabulary/mappings.nim	94ea3492c3d54dfa538b570f1209ac11774c7403838477524c21a522b5f5095a	948134d2b08461716340b07d652342ec2c6eb7b6141a18bee6dd74839f17cb6d
 
 # 2026-11-22, the terminal's gutter marks come from the shared ranking (editor_rows.markFor),
 # one mark per line. plat22 was re-graded (20 of 20 KILLED) and its record kept; the harnesses
