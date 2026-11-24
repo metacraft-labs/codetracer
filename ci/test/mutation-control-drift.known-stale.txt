@@ -500,7 +500,6 @@ src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/fro
 # 2026-11-21, plugins' TLS connections check the certificate's name and honour
 # SSL_CERT_FILE / SSL_CERT_DIR (plugin_io, plat8); the plugin-tls lane and its
 # recipe (test-lane-files, justfile: plat17, plat33, plat34).
-src/frontend/viewmodel/tests/unit/plat8-io-mutation-control.sha256	src/frontend/viewmodel/plugin_host/plugin_io.nim	52bc1afdd35a4cfcfc29a5b7d3742d43b3e167a309a6362daa50d11c129f9c06	d5de198bc351a80da5aa4c73b99ed7c6fd48d90d8a9a55ad3a59df7e1e664b26
 
 # 2026-11-20, the wasm32 developer profile: the wasm lane compiles through
 # ci/lib/wasm-cc.sh, and the justfile gained the profile's, the second pane's
@@ -714,7 +713,6 @@ src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	ci/test/inpu
 # the TLS name check. plat81 (process, Node twin) owes a re-grade over these bytes
 # together with the SDK rework; plat7/plat8 owe one for the boundary script.
 src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/process_link.nim	92855333df47ca9e0a3bdb7b026ff27a9620efda405af90a379c7fce665fd526	67a0095978446fcf0f5c4b2ab6e769482b685d4041d552431b9bad3e9362de98
-src/frontend/viewmodel/tests/unit/plat8-io-mutation-control.sha256	ci/test/plugin-reactive-boundary.sh	6e9f1bda4d55463800d5d327bdc5a960c330d6c63a3f7205ebe6797b705dff86	80987fdfec08ede87826699cef3508cdb66e67b4d0073f52da0cfe5038f54044
 src/frontend/tui/tests/plat48-topbar-mutation-control.sha256	src/frontend/headless_app/session_tabs.nim	c72286ec25128109200b493778f0a00a9743141cbbc2192e4678492f850bf25f	c66912fe4778eba9c45303e6c76454263d2e4d6b6dc0a29321e4826186578740
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/headless_app/session_tabs.nim	c72286ec25128109200b493778f0a00a9743141cbbc2192e4678492f850bf25f	c66912fe4778eba9c45303e6c76454263d2e4d6b6dc0a29321e4826186578740
 
