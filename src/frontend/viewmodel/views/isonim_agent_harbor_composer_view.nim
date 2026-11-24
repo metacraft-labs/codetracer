@@ -261,10 +261,12 @@ proc renderField[R](r: R; label, value: string; problem = "";
 
 proc renderChoice[R](r: R; label: string; options: openArray[string];
                      chosen: openArray[string]; problem = "";
-                     several = false): auto =
+                     several = false; locked = false): auto =
   ## A field whose value is chosen among a few options: a row of toggles,
   ## the chosen ones pressed (the VCS panel's mode toggles). `several`: any
   ## number may be chosen, and each chosen one carries a check mark.
+  ## `locked`: the toggles are disabled (a launch waiting for its answer).
+  mixin setAttribute
   var host: typeof(r.createElement("div"))
   let node = ui(r):
     tdiv(class = "ah-composer-field ah-composer-field-wide" &
@@ -286,22 +288,24 @@ proc renderChoice[R](r: R; label: string; options: openArray[string];
       button(class = "ah-composer-toggle" & (if on: " active" else: ""),
              `aria-pressed` = (if on: "true" else: "false"), `data-ah-action` = "choose-option"):
         text shown
+    if locked: r.setAttribute(t, "disabled", "true")
     r.appendRendered(host, t)
   node
 
-proc renderLaunchForm*[R, N](r: R; vm: OmniboxComposerVM; host: N) =
+proc renderLaunchForm*[R, N](r: R; vm: OmniboxComposerVM; host: N; locked = false) =
   ## The launch form's fields into `host` (the composer's sheet, the control
-  ## center's launch column).
+  ## center's launch column). `locked`: its toggles disabled, while the
+  ## control center's launch waits for its answer.
   let o = vm.launch
   let problems = vm.problems
   r.appendRendered(host, renderField(r, "Repository", o.repository,
     problemOf(problems, "repository"), placeholder = "Choose a repository"))
   r.appendRendered(host, renderField(r, "Branch", o.branch, placeholder = "default branch"))
   r.appendRendered(host, renderChoice(r, "Agents", vm.agentChoices, o.agents,
-    problemOf(problems, "agents"), several = true))
+    problemOf(problems, "agents"), several = true, locked = locked))
   var runOn: seq[string]
   for v in RunOn: runOn.add $v
-  r.appendRendered(host, renderChoice(r, "Runs on", runOn, [$o.runOn]))
+  r.appendRendered(host, renderChoice(r, "Runs on", runOn, [$o.runOn], locked = locked))
   if o.runOn == roExecutor:
     r.appendRendered(host, renderField(r, "Executor", o.executor,
       problemOf(problems, "executor"), placeholder = "Choose an executor"))
@@ -309,7 +313,7 @@ proc renderLaunchForm*[R, N](r: R; vm: OmniboxComposerVM; host: N) =
     placeholder = "named by the server"))
   var openIn: seq[string]
   for v in OpenIn: openIn.add $v
-  r.appendRendered(host, renderChoice(r, "Opens in", openIn, [$o.openIn]))
+  r.appendRendered(host, renderChoice(r, "Opens in", openIn, [$o.openIn], locked = locked))
   let s = o.schedule
   let (scheduleSummary, scheduleHasProblem) = vm.scheduleSummary
   var sched: N
@@ -335,13 +339,13 @@ proc renderLaunchForm*[R, N](r: R; vm: OmniboxComposerVM; host: N) =
       problemOf(problems, "jitter")))
     var conc: seq[string]
     for v in Concurrency: conc.add $v
-    r.appendRendered(sched, renderChoice(r, "Concurrency", conc, [$s.concurrency]))
+    r.appendRendered(sched, renderChoice(r, "Concurrency", conc, [$s.concurrency], locked = locked))
     var mis: seq[string]
     for v in Misfire: mis.add $v
-    r.appendRendered(sched, renderChoice(r, "Misfire", mis, [$s.misfire]))
+    r.appendRendered(sched, renderChoice(r, "Misfire", mis, [$s.misfire], locked = locked))
   r.appendRendered(host, schedNode)
 
-proc renderInitiativeForm*[R, N](r: R; vm: OmniboxComposerVM; host: N) =
+proc renderInitiativeForm*[R, N](r: R; vm: OmniboxComposerVM; host: N; locked = false) =
   ## The new-initiative form's fields into `host`, as `renderLaunchForm`.
   let f = vm.initiative
   let problems = vm.problems
@@ -349,7 +353,7 @@ proc renderInitiativeForm*[R, N](r: R; vm: OmniboxComposerVM; host: N) =
     wide = true, placeholder = "What the initiative is for"))
   var modes: seq[string]
   for v in IterationMode: modes.add $v
-  r.appendRendered(host, renderChoice(r, "Iterations", modes, [$f.iteration]))
+  r.appendRendered(host, renderChoice(r, "Iterations", modes, [$f.iteration], locked = locked))
   if f.iteration == imCount:
     r.appendRendered(host, renderField(r, "Number of iterations", $f.iterations,
       problemOf(problems, "iterations")))

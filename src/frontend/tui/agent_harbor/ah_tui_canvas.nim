@@ -363,6 +363,31 @@ proc elide*(s: string; cells: int): string =
   let kept = trimCut(cellSlice(s, 0, cells - 1))
   if kept.len == 0: Ellipsis else: kept & Ellipsis
 
+const WordCutPunctuation* = {',', ';', ':', '.'}
+  ## The punctuation a word cut (`elideAtWord`) drops from its last kept
+  ## word: the "…" stands for the rest of the sentence, so a clause's comma,
+  ## semicolon or colon, or a sentence's full stop, left before it reads as
+  ## a stray mark (`loader;…`). A `?` or `!` says something about the words
+  ## before it, and stays.
+
+proc elideAtWord*(s: string; cells: int): string =
+  ## `s` in at most `cells` columns, cut at a word boundary: whole when it
+  ## fits, else its leading whole words that fit before "…", trimmed by the
+  ## one rule (`trimBeforeEllipsis`: no space or separator before it) and
+  ## without the last word's trailing `WordCutPunctuation`. A first word
+  ## wider than the room is cut inside it (`elide`), as nothing whole would
+  ## be left to show.
+  if cells <= 0: return ""
+  if widthOf(s) <= cells: return s
+  var kept = ""
+  for word in s.splitWhitespace:
+    let next = if kept.len == 0: word else: kept & " " & word
+    if widthOf(next) + widthOf(Ellipsis) > cells: break
+    kept = next
+  if kept.len == 0: return elide(s, cells)
+  let trimmed = trimCut(trimCut(kept).strip(leading = false, chars = WordCutPunctuation))
+  if trimmed.len == 0: Ellipsis else: trimmed & Ellipsis
+
 const MiddleCutStartCells* = 8
   ## The most a middle cut (`elideMiddle`) keeps of a value's start: enough
   ## to say what the value begins with (`mileston…`), so every other cell
@@ -627,15 +652,20 @@ proc text*(c: var AhCanvas; parent: AhNode; row, col, cells: int; s, fg: string;
   w
 
 proc para*(c: var AhCanvas; parent: AhNode; row, col, cells: int; s, fg: string;
-           fact = ""; alignRight = false; bold = false): int =
+           fact = ""; alignRight = false; bold = false; breakSeparators = false): int =
   ## `s` wrapped to `cells` columns (`wrapCells`) from (`row`, `col`), each
   ## line right-aligned in the cells when `alignRight` — the web's
   ## `white-space: normal`, where a terminal line cannot hold what the web's
   ## does. Never ellipsised: the whole text is drawn. `fact` tags ONE node
-  ## over the lines' rectangle with the full text. Returns the rows drawn
-  ## (none for an empty text).
+  ## over the lines' rectangle with the full text. `breakSeparators`: a
+  ## separator (` · `, ` — `) the wrap left at a line's end is dropped, as
+  ## the line break separates the parts (`Started on hub-a ·` reads
+  ## `Started on hub-a`), by the one trim rule (`trimBeforeEllipsis`).
+  ## Returns the rows drawn (none for an empty text).
   if s.len == 0: return 0
-  let lines = wrapCells(s, cells)
+  var lines = wrapCells(s, cells)
+  if breakSeparators:
+    for i in 0 ..< lines.high: lines[i] = trimCut(lines[i])
   let shown = lines.len
   var left = col + cells
   var right = col

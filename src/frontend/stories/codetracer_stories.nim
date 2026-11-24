@@ -206,8 +206,15 @@ func controlCenterStories(): seq[CodeTracerStory] =
            "No initiative and no session: the launch form and No initiatives yet.",
            state = "empty"),
     center("ControlCenterLaunching", "Control Center: Launching", "launching",
+           "Launch pressed for a task for Shield model hardening, Agent Harbor not " &
+             "answering yet: the form locked, Launch busy, Launching... under it"),
+    center("ControlCenterLaunched", "Control Center: Launched", "launched",
            "A task launched for Shield model hardening: Agent Harbor's notice under " &
-             "the form, the new session queued under its initiative"),
+             "the form, the form ready for the next one, the new session queued " &
+             "under its initiative"),
+    center("ControlCenterLaunchFailed", "Control Center: Launch Failed", "launch-failed",
+           "Agent Harbor refused a launch: Could not launch under the form, the " &
+             "instruction back in the field to try again"),
     center("ControlCenterLoading", "Control Center: Loading", "loading",
            "The initiatives not answered yet; the launch form ready", state = "loading"),
     center("ControlCenterError", "Control Center: Error", "error",
@@ -221,15 +228,17 @@ func controlCenterStories(): seq[CodeTracerStory] =
 
 func gazeStories(): seq[CodeTracerStory] =
   ## The status line's gaze mark (`agent-harbor-status-gaze`, CTF-P2c step
-  ## 4): the window's status line with the mark at its end
-  ## (`stories/agent_harbor_gaze_stories.nim`). Off is the control: no mark.
+  ## 4): the window's status line with the mark at the start of its
+  ## right-hand zone, under the control center as L7 shows it
+  ## (`stories/agent_harbor_gaze_stories.nim`). Off is the control: no mark
+  ## (tracking is opt-in, study D66).
   const surface = "agent-harbor-status-gaze"
   func gaze(exportName, name, fixture, description: string): CodeTracerStory =
     story(exportName, name, "view", surface, fixture,
           "agent-harbor-status-gaze-" & fixture, description)
   @[
     gaze("StatusGazeOff", "Status Line: Gaze Off", "off",
-         "Gaze tracking off: no mark in the status line"),
+         "Gaze tracking off: no mark in the status line under the control center"),
     gaze("StatusGazeTracking", "Status Line: Gaze Tracking", "tracking",
          "Gaze tracked: the eye and Gaze in the quiet role; its tooltip names the " &
            "key that pauses it"),
@@ -258,6 +267,9 @@ func processSwitcherStories(): seq[CodeTracerStory] =
     ps("ProcessSwitcherMany", "Process Switcher: Many Processes", "many",
        "Eight processes: five buttons and +3, which carries the failed worker's " &
          "error severity"),
+    ps("ProcessSwitcherManyRinged", "Process Switcher: Ringed Behind +N", "many-ringed",
+       "Eight processes; the marker leads to the sixth worker, behind +N: the chip " &
+         "carries the ring"),
     ps("ProcessSwitcherLoading", "Process Switcher: Loading and Missing", "loading-and-missing",
        "The back end's trace still loading, the worker's missing from the bundle"),
   ]

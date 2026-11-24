@@ -122,7 +122,7 @@ proc drawRecordingButton*(c: var AhCanvas; parent: AhNode; vm: InitiativeTabStri
   w
 
 proc drawRecordingsMore*(c: var AhCanvas; parent: AhNode; buttons: RecordingButtons;
-                         row, at: int): int =
+                         row, at: int; noun = "recording"; nouns = "recordings"): int =
   ## The recordings' `+N` from `at`, a button like the numbered ones: their
   ## ground (the panel's) and padding, never the tab's own (the web's
   ## `.ah-rec-more`; follow-up review: on the tab's ground it read as no
@@ -140,7 +140,7 @@ proc drawRecordingsMore*(c: var AhCanvas; parent: AhNode; buttons: RecordingButt
                         [("recordings-hidden", $buttons.hidden),
                          ("recordings-hidden-severity", $h.severity),
                          ("recordings-hidden-ringed", $buttons.hiddenRinged),
-                         ("tooltip", chipTitle(h, "recording", "recordings"))])
+                         ("tooltip", chipTitle(h, noun, nouns))])
   if h.severity != hsNone:
     discard c.mark(moreNode, row, at + 1,
                    c.p.markOf(if h.severity == hsFailed: saFailed else: saNeedsInput))

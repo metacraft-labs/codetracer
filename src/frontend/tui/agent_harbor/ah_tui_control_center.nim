@@ -68,11 +68,12 @@ proc launchCellsOf*(width: int): int =
 
 proc chipRow(c: var AhCanvas; parent: AhNode; ink: Inks; row, col, width: int;
              chips: seq[(string, string, string, bool)];
-             press: ControlCenterPress): int =
+             press: ControlCenterPress; locked = false): int =
   ## Chips (label, operation, target, chosen) flowed into `width` cells from
   ## (`row`, `col`), a cell apart, each on its own ground; the chosen ones
   ## on the chosen ground, bold and underlined in the action colour (the
-  ## composer's choices). Returns the rows taken.
+  ## composer's choices). `locked` (a launch waiting for its answer): no
+  ## chip takes a press. Returns the rows taken.
   var r = row
   var at = col
   for (label, operation, target, on) in chips:
@@ -81,34 +82,23 @@ proc chipRow(c: var AhCanvas; parent: AhNode; ink: Inks; row, col, width: int;
     if at > col and at + w > col + width:
       inc r
       at = col
-    let (fg, bg) = if on: (ink.citedText, ink.cited) else: (c.p.textLabel, ink.quiet)
+    # Locked, an option not chosen loses its chip's ground: it is no longer
+    # one to press, and the disabled role holds 3:1 on the column's ground
+    # (it fell to 2.7:1 on Light's chip ground; review of the step-4
+    # follow-up). "" keeps the ground already there.
+    let (fg, bg) = if on: (ink.citedText, ink.cited)
+                   elif locked: (c.p.textDisabled, "")
+                   else: (c.p.textLabel, ink.quiet)
     discard c.put(r, at, shown, fg, bold = on, bg = bg)
     if on:
       # Underlined in the action border's colour, as the form's chosen
       # options are (`ah_tui_composer.putMarked`).
       c.putMarked(r, at + 1, shown[1 .. ^2], fg, bg, c.p.borderAction, bold = true)
-    let n = c.node(parent, r, at, w, 1, [("toggle", label), ("chosen", $on)])
-    c.pressable(n, press, operation, target)
+    let n = c.node(parent, r, at, w, 1, [("toggle", label), ("chosen", $on),
+                                         ("disabled", $locked)])
+    c.pressable(n, if locked: nil else: press, operation, target)
     at += w + 1
   r - row + 1
-
-proc formSummary*(vm: ControlCenterVM): tuple[text: string, problem: bool] =
-  ## The launch form as one line, for a one-column terminal (study D75):
-  ## where and how the launch goes, or the form's first problem.
-  let c = vm.composer
-  let problems = c.problems
-  if problems.len > 0: return (problems[0].text, true)
-  if c.intent == riNewInitiative:
-    let f = c.initiative
-    return ($f.iteration & " iterations" & " \xC2\xB7 " & c.planPreview, false)
-  let o = c.launch
-  var parts = @[o.repository]
-  if o.branch.len > 0: parts.add o.branch
-  parts.add o.agents.join(", ")
-  parts.add $o.runOn
-  parts.add $o.openIn
-  parts.add c.scheduleSummary.text
-  (parts.join(" \xC2\xB7 "), false)
 
 proc drawLaunch(c: var AhCanvas; parent: AhNode; vm: ControlCenterVM;
                 row, col, width, height: int; press: ControlCenterPress;
@@ -123,6 +113,9 @@ proc drawLaunch(c: var AhCanvas; parent: AhNode; vm: ControlCenterVM;
   let inner = max(1, width - 2)
   let bottom = row + height
   let composer = vm.composer
+  # While a launch waits for its answer the form is locked (study D74):
+  # drawn as it was sent, no part of it pressable, `Launch` busy.
+  let locked = vm.launching
   # The head band every panel of the tab has (the Initiatives panel's own),
   # so the columns' heads line up.
   var r = row + c.drawSectionHeader(host, row, col, width, LaunchHeading, "", "")
@@ -132,49 +125,71 @@ proc drawLaunch(c: var AhCanvas; parent: AhNode; vm: ControlCenterVM;
   var modes: seq[(string, string, string, bool)]
   for (_, label, operation, on) in vm.modeChoices: modes.add (label, operation, "", on)
   let modesNode = c.node(host, r, left, inner, 1, [("cc-modes", $vm.mode)])
-  r += c.chipRow(modesNode, ink, r, left, inner, modes, press)
+  r += c.chipRow(modesNode, ink, r, left, inner, modes, press, locked)
   r += 1
   discard c.text(host, r, left, inner, ForLabel, c.p.textLabel, fact = "field-name")
   r += 1
   var choices: seq[(string, string, string, bool)]
   for choice in vm.launchChoices:
     choices.add (choice.title, ControlCenterLaunchForOperation, choice.id, choice.chosen)
-  r += c.chipRow(host, ink, r, left, inner, choices, press)
+  r += c.chipRow(host, ink, r, left, inner, choices, press, locked)
   r += 1
   discard c.text(host, r, left, inner, InstructionLabel, c.p.textLabel, fact = "field-name")
   r += 1
-  discard c.put(r, left, repeat(' ', inner), c.p.textBody, bg = ink.field)
+  # The instruction's field: never cut (study D84), its words wrapped onto
+  # as many rows as they take. Locked (a launch in flight): no field ground,
+  # the words in the label role (study D74), so the form reads as what was
+  # sent and stays above the options not chosen.
+  let fieldBg = if locked: c.tone.body else: ink.field
   let whole = composer.text
   if whole.len > 0:
-    discard c.put(r, left + 1, elideMiddle(whole, max(1, inner - 2)), c.p.textBody,
-                  bg = ink.field)
-    discard c.node(host, r, left + 1, inner - 2, 1, [("value", whole)])
+    let lines = wrapCells(whole, max(1, inner - 2))
+    for i, line in lines:
+      discard c.put(r + i, left, repeat(' ', inner), c.p.textBody, bg = fieldBg)
+      # Locked, no field ground and no inset: the words start under the
+      # label (study D74).
+      discard c.put(r + i, (if locked: left else: left + 1), line,
+                    if locked: c.p.textLabel else: c.p.textBody, bg = fieldBg)
+    discard c.node(host, r, (if locked: left else: left + 1), inner - 2, lines.len,
+                   [("value", whole), ("readonly", $locked)])
+    r += lines.len
   else:
+    discard c.put(r, left, repeat(' ', inner), c.p.textBody, bg = fieldBg)
     discard c.text(host, r, left + 1, inner - 2, vm.instructionPlaceholder,
-                   readable(c.p, ink.field), bg = ink.field, fact = "value")
-  r += 1
+                   readable(c.p, fieldBg), bg = fieldBg, fact = "value")
+    r += 1
   let sendPress = proc(operation, target: string) =
     if press != nil: press(operation, target)
-  if composer.showsForm and folded:
+  let formPress: ComposerPress = if locked: nil else: sendPress
+  if vm.showsLaunchForm and folded:
+    # The whole summary, wrapped: a cut summary would hide where and how
+    # the launch runs (manager note 167).
     let (summary, problem) = vm.formSummary
     r += 1
-    discard c.text(host, r, left, inner, summary,
-                   if problem: ink.bandError else: c.p.textCaption, fact = "form-summary")
-    r += 1
-  elif composer.showsForm:
+    # Locked, it is what is being launched: the label role, as the whole
+    # form's values are (study D74; terminal review of 2026-11-24).
+    r += c.para(host, r, left, inner, summary,
+                if problem: ink.bandError elif locked: c.p.textLabel else: c.p.textCaption,
+                fact = "form-summary", breakSeparators = true)
+  elif vm.showsLaunchForm:
     r += 1
     # Whole fields only, as far as the column goes; the rest of the column
     # follows them, clipped at the screen's foot with everything below it.
-    r += c.drawLaunchForm(composer, host, r, left, inner, max(0, bottom - r), sendPress)
+    r += c.drawLaunchForm(composer, host, r, left, inner, max(0, bottom - r), formPress,
+                          locked = locked)
   if composer.showsSendLine:
     r += 1
-    c.drawSendLine(ink, sendPress, composer, host, r, left, inner)
+    c.drawSendLine(ink, sendPress, composer, host, r, left, inner, busy = locked,
+                   label = vm.launchSendLabel)
     r += 1
-  let (words, failed, pending) = vm.launchNotice
+  let (words, failed, _) = vm.launchNotice
   if words.len > 0:
     r += 1
-    let fg = if failed: ink.bandError elif pending: ink.bandCaption else: c.p.textBody
-    r += c.para(host, r, left, inner, words, fg, fact = "cc-notice-line")
+    let fg = if noticeRole(failed) == "error": ink.bandError else: c.p.textBody
+    # A ` · ` the wrap leaves at a line's end is dropped (review of the
+    # step-4 follow-up: `Plan started on hub-a ·`).
+    r += c.para(host, r, left, inner, words, fg, fact = "cc-notice-line",
+                breakSeparators = true)
   block:
     r += 1
     discard c.text(host, r, left, inner, RecentLaunchesLabel, c.p.textLabel, bold = true,
@@ -197,8 +212,13 @@ proc whyLines(row: WaitingRow; cells: int): seq[string] =
   if why.len == 0: return
   result = wrapCells(why, cells)
   if result.len > 2:
+    # The rest of the question on the second line, cut at a word boundary
+    # by the one rule (`elideAtWord`: whole words, no space or separator
+    # before its `…`; TUI reviews of 2026-11-24 found `over to …` and then
+    # `loader; o…`).
+    let rest = result[1 .. ^1].join(" ")
     result.setLen 2
-    result[1] = elide(result[1] & " " & "\xE2\x80\xA6", cells)
+    result[1] = elideAtWord(rest, cells)
 
 proc waitingRows*(vm: ControlCenterVM; cells: int): int =
   ## The rows the waiting section's content takes: its head band, then each
@@ -271,8 +291,17 @@ proc drawWaiting(c: var AhCanvas; host: AhNode; vm: ControlCenterVM;
     let word = row.stateWordOf
     let wordW = c.text(n, r + 1, col + 1, inner, word, c.stateInk(row.item.attention),
                        fact = "state-word")
-    discard c.text(n, r + 1, col + 1 + wordW + 2, max(1, inner - wordW - 2), row.waitingMeta,
-                   c.p.textCaption)
+    # Its initiative and age: where the line is too narrow the initiative is
+    # cut and the age kept (TUI review of 2026-11-24: `· 9m` was lost).
+    let metaAt = col + 1 + wordW + 2
+    let metaRoom = max(1, inner - wordW - 2)
+    let (initiative, age) = row.waitingMetaParts
+    let ageW = widthOf(age)
+    if widthOf(initiative) + ageW > metaRoom and ageW < metaRoom:
+      let initW = c.text(n, r + 1, metaAt, metaRoom - ageW, initiative, c.p.textCaption)
+      discard c.text(n, r + 1, metaAt + initW, ageW, age, c.p.textCaption)
+    else:
+      discard c.text(n, r + 1, metaAt, metaRoom, row.waitingMeta, c.p.textCaption)
     for k, line in why:
       discard c.put(r + 2 + k, col + 1, line, c.p.textBody)
     c.pressable(n, press, ControlCenterOpenSessionOperation, row.item.id)
@@ -353,11 +382,19 @@ proc drawControlCenter*(c: var AhCanvas; vm: ControlCenterVM; row, col, width, h
                            press, bounded = true)
   else:
     # The launch column as tall as its content: measured on a canvas of its
-    # own first, so its area ends where the overview's begins.
-    var scratch = newAhCanvas(c.cols, c.rows, c.p)
-    let launchH = min(height, scratch.drawLaunch(nil, vm, row, col, width, height, nil,
-                                                 folded = true) + 1)
-    discard c.drawLaunch(host, vm, row, col, width, launchH, press, folded = true)
+    # own first, so its area ends where the overview's begins. The form folds
+    # to its summary only where the screen cannot hold it whole with the
+    # overview under it (study D75, D84): an empty fleet's short overview
+    # leaves room for the whole form.
+    var scratch = newAhCanvas(c.cols, max(c.rows, 1000), c.p)
+    let wholeH = scratch.drawLaunch(nil, vm, row, col, width, 1000, nil)
+    var scratch2 = newAhCanvas(c.cols, max(c.rows, 1000), c.p)
+    let overviewH = scratch2.drawOverview(nil, vm, row, col, width, 1000, nil, bounded = false)
+    let fold = wholeH + 1 + 1 + overviewH > height
+    var scratch3 = newAhCanvas(c.cols, max(c.rows, 1000), c.p)
+    let launchH = min(height, scratch3.drawLaunch(nil, vm, row, col, width, 1000, nil,
+                                                  folded = fold) + 1)
+    discard c.drawLaunch(host, vm, row, col, width, launchH, press, folded = fold)
     # The overview under it, as tall as it needs: what is below the screen
     # is clipped at its foot, where the web's tab scrolls.
     discard c.drawOverview(host, vm, row + launchH + 1, col, width,

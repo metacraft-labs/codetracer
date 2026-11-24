@@ -24,6 +24,10 @@
 ##   waited, and the line that says why (the agent's question). Its pie's
 ##   words are its accessible name; it draws no dot and no pie of its own.
 ## - Narrow: one column, launching first.
+## - While a launch waits for Agent Harbor's answer (`launching`), the form
+##   stays drawn and is locked: its toggles and `For` take no press, the
+##   field takes no typing, `Launch` is busy and disabled, and `Launching…`
+##   stands where the answer will go, in the body role (study D70, D74).
 ##
 ## Presses and keys are routed (Input-Routing-And-Keymaps.md §4 and §5.1):
 ## the control center is the `controlCenter` scope; the mode toggles carry
@@ -89,15 +93,21 @@ proc stateRole*(attention: SessionAttention): string =
   ## question, the caption role for an ended turn (P2a's roles).
   if attention == saNeedsInput: "warning" else: "caption"
 
+proc waitingMetaParts*(row: WaitingRow): tuple[initiative, age: string] =
+  ## The row's second part in its two pieces: its initiative (`No
+  ## initiative` for a session in none), and how long it has waited, with
+  ## the separator before it (` · 12m`; "" when unknown). A host that must
+  ## cut the line cuts the initiative and keeps the age.
+  result.initiative = if row.item.initiativeTitle.len > 0: row.item.initiativeTitle
+                      else: noInitiativeLabel()
+  result.age = if row.item.ageLabel.len > 0: Dot & row.item.ageLabel else: ""
+
 proc waitingMeta*(row: WaitingRow): string =
   ## The row's second part: its initiative (`No initiative` for a session in
   ## none) and how long it has waited (`Shield model hardening · 12m`), after
   ## the state word.
-  var parts: seq[string]
-  parts.add(if row.item.initiativeTitle.len > 0: row.item.initiativeTitle
-            else: noInitiativeLabel())
-  if row.item.ageLabel.len > 0: parts.add row.item.ageLabel
-  parts.join(Dot)
+  let (initiative, age) = row.waitingMetaParts
+  initiative & age
 
 proc waitingWhy*(row: WaitingRow): string =
   ## What the row says it waits for: the agent's last line (its question),
@@ -109,6 +119,69 @@ proc waitingWhy*(row: WaitingRow): string =
 
 proc stateWordOf*(row: WaitingRow): string = attentionWord(row.item.attention)
 
+proc showsLaunchForm*(vm: ControlCenterVM): bool =
+  ## The launch or initiative form is drawn: while composing (the
+  ## composer's rule), and while a launch waits for its answer, locked
+  ## (`launching`), so the operator sees what is being launched.
+  vm.composer.showsForm or vm.launching
+
+proc formSummary*(vm: ControlCenterVM): tuple[text: string, problem: bool] =
+  ## The launch form folded to one summary, where a host that cannot scroll
+  ## has no room for the whole form (study D75): the repository, the branch,
+  ## the agents, then only what differs from the form's defaults -- a host
+  ## other than the server's choice (`This machine`, or the executor's
+  ## name), a place other than a new tab, a schedule -- so the summary says
+  ## what the operator chose and stays short enough to sit whole, uncut, over
+  ## what follows it (study D84). An initiative: its iterations and plan
+  ## file. The form's first problem instead, while it has one.
+  let c = vm.composer
+  let problems = c.problems
+  if problems.len > 0: return (problems[0].text, true)
+  if c.intent == riNewInitiative:
+    let f = c.initiative
+    return ($f.iteration & " iterations" & Dot & c.planPreview, false)
+  let o = c.launch
+  var parts = @[o.repository]
+  if o.branch.len > 0: parts.add o.branch
+  parts.add o.agents.join(", ")
+  case o.runOn
+  of roServerChoice: discard
+  of roExecutor: parts.add(if o.executor.len > 0: o.executor else: $o.runOn)
+  else: parts.add $o.runOn
+  if o.openIn != oiNewTab: parts.add $o.openIn
+  if o.schedule.enabled: parts.add c.scheduleSummary.text
+  (parts.join(Dot), false)
+
+proc launchSendHint*(vm: ControlCenterVM): tuple[hint, more: string; blocked: bool] =
+  ## The send line's hint beside `Launch`: the composer's, except while a
+  ## launch waits for its answer, when the line under the form says
+  ## `Launching…` and the hint says nothing (one status, not two).
+  if vm.launching: ("", "", false) else: vm.composer.sendHint
+
+proc launchSendLabel*(vm: ControlCenterVM): string =
+  ## The primary button's label: `Launch` (or `Start initiative`) for what
+  ## the form launches, also while that launch waits for its answer (the
+  ## composer's own label falls back to `Send` once sent).
+  if vm.launching: sendLabel(vm.composer.draft.sentIntent) else: vm.composer.sendLabel
+
+proc breakableWords*(line: string): seq[string] =
+  ## `line`'s words as a host may break between them: split at its spaces,
+  ## a lone separator (`·`, `—`) kept with the word after it, so a wrapped
+  ## line never ends in one (`Plan started on hub-a ·`; review of the
+  ## step-4 follow-up, study D74). Joined with single spaces they give the
+  ## line back.
+  for w in line.splitWhitespace:
+    if result.len > 0 and result[^1] in ["\xC2\xB7", "\xE2\x80\x94"]:
+      result[^1] = result[^1] & " " & w
+    else:
+      result.add w
+
+proc noticeRole*(failed: bool): string =
+  ## The role of the line under the form: the error role for
+  ## `Could not launch: …`; the body role for `Launching…` and for Agent
+  ## Harbor's notice (study D74).
+  if failed: "error" else: "body"
+
 proc centerFacts*(vm: ControlCenterVM; width: int): seq[(string, string)] =
   ## The facts the control center carries in every host (`data-ah-*`),
   ## read back by the hosts' tests and the play checks.
@@ -117,7 +190,8 @@ proc centerFacts*(vm: ControlCenterVM; width: int): seq[(string, string)] =
     ("cc-columns", $vm.layoutFor(width)), ("cc-mode", $vm.mode),
     ("cc-launch-for", vm.launchForTitle), ("cc-waiting", $vm.waiting.len),
     ("cc-recent", $vm.recent.len), ("cc-notice", notice),
-    ("cc-notice-failed", $failed), ("cc-empty", $vm.isEmptyFleet)]
+    ("cc-notice-failed", $failed), ("cc-launching", $vm.launching),
+    ("cc-empty", $vm.isEmptyFleet)]
 
 proc waitingFacts*(row: WaitingRow; focused: bool): seq[(string, string)] =
   @[("waiting-session", row.item.id), ("waiting-title", row.item.title),

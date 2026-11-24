@@ -59,7 +59,7 @@ proc switcherDraw(c: var AhCanvas; parent: AhNode; buttons: RecordingButtons;
     at += c.drawRecordingButton(switcher, nil, "", rb, row, at, select)
   if buttons.hidden > 0:
     at += RecordingGap
-    at += c.drawRecordingsMore(switcher, buttons, row, at)
+    at += c.drawRecordingsMore(switcher, buttons, row, at, "process", "processes")
 
 let RecordingSwitcherSlot* = SwitcherSlot(cells: recordingsCells, draw: switcherDraw)
   ## The recording switcher's own drawing (`ah_tui_initiative_tab_bar`).

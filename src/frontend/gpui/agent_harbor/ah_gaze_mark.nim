@@ -7,8 +7,10 @@
 ## and `Gaze paused`; when off, nothing.
 ##
 ## The story draws it where the web story does: in the window's status line
-## (24px, the panel's ground, the language and the encoding at its start), at
-## the start of its right-hand zone, 12px in from the edge. A press on it is
+## (24px, the window frame's ground as the web status bar's, the language and
+## the encoding at its start), at
+## the start of its right-hand zone, 12px in from the edge, under the control
+## center as L7 shows it. A press on it is
 ## routed: it carries `gaze.toggle-pause` and reports the press to the
 ## host's `GazePress`.
 ##
@@ -24,7 +26,11 @@ import ../../styles/generated/design_tokens
 export agent_harbor_gaze_words
 
 const
-  StatusLinePx* = 24     ## CONTROL_HEIGHT_SM, the status bar's line
+  StatusLinePx* = 24     ## CONTROL_HEIGHT_SM: the gaze mark's own line
+  StatusBarPx* = 32
+    ## The status line itself: the web's `STATUS_BAR_CONTENT_HEIGHT` (2rem,
+    ## status_bar.styl), measured 32px in the web captures. (It was drawn at
+    ## the mark's 24px; GPUI review of 2026-11-24.)
   MarkGapPx* = 4         ## between the eye and the words (0.25rem)
   EdgePx* = 12           ## the mark's margin from the right-hand zone's end
 
@@ -57,33 +63,36 @@ proc drawGazeMark*(r: GpuiRenderer; p: AhPalette; vm: GazeStatusVM;
     r.addEventListener(result, "mousedown", proc(ev: GpuiEvent) =  # ir1-gate: hit test
       press(GazeTogglePauseOperation))
 
-proc drawGazeStory*(r: GpuiRenderer; host: GpuiElement; vm: GazeStatusVM;
-                    p: AhPalette; widthPx, heightPx: int; items: string;
-                    press: GazePress = nil) =
-  ## The story's window: an empty working area over the status line, the
-  ## mark at the start of its right-hand zone.
+proc drawStatusLine(r: GpuiRenderer; line: GpuiElement; vm: GazeStatusVM;
+                    p: AhPalette; items: string; press: GazePress) =
+  ## The status line's parts: the items at its start, the mark at the start
+  ## of its right-hand zone.
+  r.clearChildren(line)
+  r.appendChild(line, r.text(items, CaptionPx, p.textCaption, shrink = false))
+  r.appendChild(line, r.box(pairs = [("flex-grow", "1")]))
+  let mark = r.drawGazeMark(p, vm, press)
+  if mark != nil: r.appendChild(line, mark)
+
+proc mountGazeStory*(r: GpuiRenderer; host: GpuiElement; vm: GazeStatusVM;
+                     p: AhPalette; widthPx, heightPx: int; items: string;
+                     press: GazePress = nil; above: GpuiElement = nil) =
+  ## The story's window: `above` (the control center as L7 shows it, which
+  ## draws itself; nil: an empty working area) over the status line, the
+  ## mark at the start of its right-hand zone. The status line and the
+  ## story's facts are drawn again whenever the mark's state moves.
   r.clearChildren(host)
   r.styles(host, [("display", "flex"), ("flex-direction", "column"),
                   ("width", $widthPx & "px"), ("height", $heightPx & "px"),
                   ("background", DesignTokenHex[dtColorsUiSurfaceBaseCanvas][p.mode])])
   r.tag(host, "surface", GazeSurface)
-  for (k, v) in vm.markFacts: r.tag(host, k, v)
-  let work = r.box(pairs = [("flex-grow", "1")])
+  let work = if above.isNil: r.box(pairs = [("flex-grow", "1")]) else: above
   r.appendChild(host, work)
-  let line = r.box(pairs = [("height", $StatusLinePx & "px"), ("items", "center"),
+  let line = r.box(pairs = [("height", $StatusBarPx & "px"), ("items", "center"),
                             ("padding-left", "8px"), ("padding-right", $EdgePx & "px"),
-                            ("background", p.panel), ("flex-shrink", "0")])
-  r.tag(line, "status-line", "")
-  r.appendChild(line, r.text(items, CaptionPx, p.textCaption, shrink = false))
-  r.appendChild(line, r.box(pairs = [("flex-grow", "1")]))
-  let mark = r.drawGazeMark(p, vm, press)
-  if mark != nil: r.appendChild(line, mark)
+                            ("background", p.ground), ("flex-shrink", "0")])
+  r.tag(line, "status-line", "true")
   r.appendChild(host, line)
-
-proc mountGazeStory*(r: GpuiRenderer; host: GpuiElement; vm: GazeStatusVM;
-                     p: AhPalette; widthPx, heightPx: int; items: string;
-                     press: GazePress = nil) =
-  ## Draws the story, and again whenever the mark's state moves.
   createRenderEffect proc() =
     discard vm.state.val
-    drawGazeStory(r, host, vm, p, widthPx, heightPx, items, press)
+    for (k, v) in vm.markFacts: r.tag(host, k, v)
+    drawStatusLine(r, line, vm, p, items, press)

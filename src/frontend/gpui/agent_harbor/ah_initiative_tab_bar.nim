@@ -183,6 +183,11 @@ proc initiativeTabMinWidth(vm: InitiativeTabStripVM; tab: StripTab): float =
     if tab.active: result += recordingsWidth(vm, vm.recordingButtonsOf(tab.id))
   result = max(result, float(TabMinPx))
 
+const RingMarginPx* = 4
+  ## A ringed button's margin either side: with the buttons' 2px gap its
+  ## ring (3px out) stays 3px clear of its neighbours, its own 1px gap and
+  ## 2px ring (the web's `.ah-rec-ringed` margin, 0.25rem; P2c study D81).
+
 proc ringInk*(p: AhPalette): string =
   ## The ring's ink, the web's `by-mode(colors-brand-400, colors-brand-700)`:
   ## the ring is the only mark of its state, so it holds 3:1 (WCAG 2.2
@@ -194,22 +199,19 @@ proc ringInk*(p: AhPalette): string =
   DesignTokenHex[dtColorsUiSurfaceActionPrimaryHover][other]
 
 proc recordingRing(r: GpuiRenderer; p: AhPalette): GpuiElement =
-  ## The quiet ring a correlation marker puts around a recording button
-  ## (`.ah-rec-ringed`: 1px in `ringInk` over a 1px halo of the
-  ## window's ground, just outside the button's own outline; P2c study D81),
-  ## drawn over the button.
+  ## The ring a correlation marker puts around a recording button, drawn
+  ## over the button as the web's `.ah-rec-ringed` outline (P2c study D81,
+  ## manager note 239): 2px in `ringInk`, 1px clear of the button's own
+  ## outline, the tab's fill between; no halo in either theme. An absolute
+  ## child is placed from the button's padding edge, inside its 1px border,
+  ## so the ring's outer edge is 4px out from there: 3px out from the
+  ## button's outer edge, its 2px ring, then 1px of the tab's fill.
   result = r.createElement("div")
-  r.styles(result, [("position", "absolute"), ("left", "-2px"), ("top", "-2px"),
-                    ("right", "-2px"), ("bottom", "-2px"), ("rounded", "5px"),
-                    ("border-width", "1px"), ("border-color", ringInk(p))])
+  r.styles(result, [("position", "absolute"), ("left", "-4px"), ("top", "-4px"),
+                    ("right", "-4px"), ("bottom", "-4px"), ("rounded", "7px"),
+                    ("border-width", "2px"), ("border-color", ringInk(p))])
   r.tag(result, "recording-ring", "true")
-  let halo = r.createElement("div")
-  r.styles(halo, [("position", "absolute"), ("left", "0px"), ("top", "0px"),
-                  ("right", "0px"), ("bottom", "0px"), ("rounded", "4px"),
-                  ("border-width", "1px"),
-                  ("border-color", DesignTokenHex[dtColorsUiSurfaceBaseCanvas][p.mode])])
-  r.tag(halo, "recording-ring-halo", "true")
-  r.appendChild(result, halo)
+  r.tag(result, "recording-ring-width", "2")
 
 proc drawRecordingButton*(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM;
                           initiativeId: string; rb: RecordingButton;
@@ -256,8 +258,9 @@ proc drawRecordingButton*(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripV
                                shrink = false, tabular = true))
   if rb.ringed:
     r.setStyle(result, "position", "relative")
-    # Clear of its neighbours, 2px away, as the web's `.ah-rec-ringed`.
-    r.styles(result, [("margin-left", "2px"), ("margin-right", "2px")])
+    # Its ring 3px clear of its neighbours, as the web's `.ah-rec-ringed`.
+    r.styles(result, [("margin-left", $RingMarginPx & "px"),
+                      ("margin-right", $RingMarginPx & "px")])
     r.tag(result, "recording-ringed", "true")
     r.appendChild(result, r.recordingRing(p))
   let target = vm
@@ -266,7 +269,8 @@ proc drawRecordingButton*(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripV
     if select != nil: select(id)
     else: discard target.selectRecording(initiativeId, id))
 
-proc drawRecordingsMore*(r: GpuiRenderer; p: AhPalette; buttons: RecordingButtons): GpuiElement =
+proc drawRecordingsMore*(r: GpuiRenderer; p: AhPalette; buttons: RecordingButtons;
+                         noun = "recording"; nouns = "recordings"): GpuiElement =
   ## The recordings that did not fit: a count in a recording button's
   ## outline (`.ah-rec-more`: the label role, outlined `by-mode(border-primary,
   ## text-primary-caption)` so it shows on the active tab's fill in Light
@@ -293,11 +297,12 @@ proc drawRecordingsMore*(r: GpuiRenderer; p: AhPalette; buttons: RecordingButton
   r.appendChild(result, words)
   r.tag(result, "recordings-hidden", $buttons.hidden)
   r.tag(result, "recordings-hidden-severity", $h.severity)
-  r.tag(result, "tooltip", chipTitle(h, "recording", "recordings"))
+  r.tag(result, "tooltip", chipTitle(h, noun, nouns))
   if buttons.hiddenRinged:
     r.setStyle(result, "position", "relative")
-    # Clear of its neighbours, 2px away, as the web's `.ah-rec-ringed`.
-    r.styles(result, [("margin-left", "2px"), ("margin-right", "2px")])
+    # Its ring 3px clear of its neighbours, as the web's `.ah-rec-ringed`.
+    r.styles(result, [("margin-left", $RingMarginPx & "px"),
+                      ("margin-right", $RingMarginPx & "px")])
     r.tag(result, "recordings-hidden-ringed", "true")
     r.appendChild(result, r.recordingRing(p))
 

@@ -1,56 +1,56 @@
+ LAUNCH
+  New task   New initiative
+                                             
+ For
+  No initiative   Shield model hardening
+  Tests on the arm64 and macOS runners
+  Asteroid fields as fixtures   Release 0.4
+                                             
+ Instruction
+  What the task should do
+                                             
+ noir-space-ship · Claude
+                                             
+    Type the instruction to launch   Launch
+                                             
+ Plan started on hub-a
+ milestones/seeded-fields.milestones.org
+                                             
+ RECENT LAUNCHES
+ Asteroid fields generated from seeds, end…
+ Agent Harbor · Plan started on hub-a · mil…
+ Make the regeneration cap configurable per…
+ Manager of Shield model hardening · Starte…
                                              
                                              
+ WAITING FOR YOU                  3 sessions
+ Make calculate_damage safe for masses abov…
+ needs input  Shield model hardening · 12m
+ Cast the masses to u64 before multiplying,
+ or keep Field arithmetic and range-check…
                                              
+ Fix the negative-field test that times out…
+ needs input  Tests on the arm64 and m… · 9m
+ negative_field_fails takes 41 s on
+ macos-arm64 against 6 s on Linux; raise…
                                              
+ Write the 0.4 changelog
+ idle  Release 0.4 · 31m
+ The 0.4 changelog lists the clamp, the
+ regeneration cap and the fixture loader…
                                              
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
+ INITIATIVES
+ invented project noir-space-ship
+               4 initiatives · 11 sessions ·
+           2 need input · 1 in no initiative
+ ▾ ● Shield model hardening        2/5 · 40%
+     ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀       ● 2  ● 2  ● 1
+     CURRENT SH-M1: Clamp at zero
+     noir-space-ship · manager sh-manager
+      ● Make calculate_damage…   needs input
+      ● Cap shield regeneration at…  running
+      ● Clamp the shield at zero…  completed
+      ● Add a test for an astero…  completed
+       +1 more
+ ▾ ● Tests on the arm64 and macO…  1/4 · 25%
  Noir  UTF-8                   ⊘ Gaze paused

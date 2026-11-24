@@ -806,8 +806,18 @@ proc checkControlCenter(view: GpuiElement; panels: seq[GpuiElement]; vm: Control
   if vm.state != asReady:
     result.expect("waiting", view.values("waiting-session").len, 0)
     return
-  result.expect("waiting", view.values("waiting-session"), vm.waiting.mapIt(it.item.id))
-  result.expect("waiting words", view.values("waiting-words"), vm.waiting.mapIt(it.words))
+  # Whole rows only: the rows drawn are the first of the viewmodel's, in its
+  # order, and a `+N more` line counts the rest (study D84).
+  let drawn = view.values("waiting-session")
+  let more = view.values("waiting-more")
+  let ids = vm.waiting.mapIt(it.item.id)
+  let shown = min(drawn.len, ids.len)
+  result.expect("waiting", drawn, ids[0 ..< shown])
+  result.expect("waiting words", view.values("waiting-words"),
+                vm.waiting.mapIt(it.words)[0 ..< shown])
+  result.expect("waiting counted", (if more.len == 1: parseInt(more[0]) else: 0),
+                ids.len - shown)
+  if shown == 0 and ids.len > 0: result.add "no waiting row is drawn"
 
 proc checkGazeMark(view: GpuiElement; vm: GazeStatusVM): seq[string] =
   ## The status line's gaze mark against its viewmodel (CTF-P2c step 4):
@@ -904,6 +914,10 @@ proc checkProcessSwitcher(view: GpuiElement; vm: ProcessSwitcherVM): seq[string]
                 b.buttons.mapIt(it.ringed))
   result.expect("hidden", t.all("recordings-hidden").mapIt(it.attr("recordings-hidden")),
                 (if b.hidden > 0: @[$b.hidden] else: newSeq[string]()))
+  # The chip carries the ring when it hides the ringed process (study D80).
+  result.expect("hidden ring",
+                t.all("recordings-hidden").mapIt(it.attr("recordings-hidden-ringed") == "true"),
+                (if b.hidden > 0: @[b.hiddenRinged] else: newSeq[bool]()))
 
 proc checkStory(m: AhStoryMount; mode = dmDark): seq[string] =
   ## The drawn tree against the viewmodel the story built; empty when they

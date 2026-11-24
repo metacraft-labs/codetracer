@@ -92,6 +92,80 @@ AH_CC_GAP = 0.25rem          // between the columns: the layout's splitter
   flex-direction: column
   gap: 0.5rem
   padding: 0.5rem AH_CC_PAD
+  container-type: inline-size
+  container-name: ah-cc-launch
+
+// The form's fields one per line when the launch column's content is under
+// 30rem (480px), as GPUI's and the terminal's control center lay them out
+// (`ah_control_center.launchColumn`: `inner < 480`; 60 cells): at a panel's
+// width the column is 45% of the tab, too narrow for two fields side by
+// side, and a half-width field cut its value (`named by the serv…`, manager
+// note 167). The composer's own `@media (max-width: 30rem)` asks the
+// window, not the column. (Written out: Stylus does not substitute
+// variables inside `@container`.)
+@container ah-cc-launch (max-width: 29.99rem)
+  .ah-cc-form.ah-composer-form-grid,
+  .ah-cc-form .ah-composer-form-grid
+    grid-template-columns: minmax(0, 1fr)
+
+// While a launch waits for its answer the form is locked (study D74): its
+// toggles are disabled, the options not chosen in the disabled role, the
+// chosen ones as they were, so the form still says what is being launched.
+// The disabled role is the shared `button:disabled` rule's (button.styl,
+// D-20); the chosen ones keep their words as they were (`!important` to
+// outrank that rule's), so the form still says what is being launched.
+.ah-cc-launch .ah-composer-toggle.active:disabled
+  color: colors-ui-text-primary-body !important
+
+// And its fields are no longer boxes to type into: the instruction and the
+// form's values lose their field's fill and outline (and the focus ring),
+// and the inset that kept their words off the outline, so the whole form
+// reads as what was sent, not as something still to edit (step-4 follow-up
+// review). Their words take the label role: what is being launched must
+// stand above the options not chosen (the disabled role), and the caption
+// role fell under it in Light (3.55:1 against 3.73:1). The
+// instruction is a read-only input: the shared input rule (input.styl) sets
+// its fill, border and colour with `!important` for a field with a value
+// (`input:not(:placeholder-shown):not(:disabled)`) and for focus, so this
+// one does too, at a higher specificity; its disabled look is not used, as
+// Light's disabled fill (`surface/primary/disabled`, warm/700) leaves the
+// words unreadable.
+.ah-control-center input.ah-cc-input[aria-readonly="true"],
+.ah-control-center input.ah-cc-input[aria-readonly="true"]:focus,
+.ah-control-center input.ah-cc-input[aria-readonly="true"]:focus-visible,
+.ah-control-center input.ah-cc-input[aria-readonly="true"]:hover
+  background: transparent !important
+  border-color: transparent !important
+  box-shadow: none !important
+  outline: none !important
+  padding-left: 0 !important
+  color: colors-ui-text-primary-label !important
+
+.ah-cc-form[data-ah-locked="true"] .ah-composer-field-value
+  background: transparent
+  border-color: transparent
+  padding-left: 0
+
+.ah-cc-form[data-ah-locked="true"] .ah-composer-field-value:not(.ah-composer-field-empty)
+  color: colors-ui-text-primary-label
+
+// A field left empty is not a value: locked, its placeholder takes the
+// disabled role, as the options not chosen do (in Dark the caption role it
+// has while the form is open is too near the label role, so an unset
+// `Session name` read as a chosen value; web review round 2).
+.ah-cc-form[data-ah-locked="true"] .ah-composer-field-value.ah-composer-field-empty
+  color: colors-ui-text-primary-disabled
+
+// The schedule's summary is part of what is being launched: the label role
+// while locked, as the form's values (a problem keeps the error role).
+.ah-cc-form[data-ah-locked="true"] .ah-composer-schedule-summary
+  color: colors-ui-text-primary-label
+
+// The schedule's disclosure is not one to open while locked: its fold in the
+// disabled role, as the options not chosen (the disabled icon role all but
+// vanishes on Light's panel).
+.ah-cc-form[data-ah-locked="true"] .ah-composer-fold
+  color: colors-ui-text-primary-disabled
 
 // Every line of the tab has its own pitch, so GPUI and the terminal lay it
 // out to the same heights: a section label 1.5rem, a title 1.25rem, a
@@ -110,6 +184,38 @@ AH_CC_GAP = 0.25rem          // between the columns: the layout's splitter
 
   &:focus
     border-color: colors-ui-border-action
+
+// A busy `Launch` (a launch waiting for its answer, `aria-busy`): the design
+// system's indeterminate activity spinner (`spinner`, size small) before its
+// label, so it is not read as the plain disabled `Launch` over an empty
+// field. A ring in the action colour's ring step (brand/400 Dark, brand/700
+// Light, the correlation ring's ink, 3:1 or more on the panel), its last
+// quarter open, turning; still where motion is reduced.
+.ah-cc-send .ah-composer-send-button[aria-busy="true"]
+  display: inline-flex
+  align-items: center
+  gap: 0.375rem
+
+.ah-busy-spinner
+  display: inline-block
+  flex-shrink: 0
+  width: 0.75rem
+  height: 0.75rem
+  box-sizing: border-box
+  border-radius: 50%
+  border: 0.125rem solid by-mode(colors-brand-400, colors-brand-700)
+  border-right-color: transparent
+  animation: ah-busy-spin 0.9s linear infinite
+
+@media (prefers-reduced-motion: reduce)
+  .ah-busy-spinner
+    animation: none
+
+@keyframes ah-busy-spin
+  from
+    transform: rotate(0deg)
+  to
+    transform: rotate(360deg)
 
 .ah-cc-form:empty,
 .ah-cc-send:empty,
@@ -131,6 +237,14 @@ AH_CC_GAP = 0.25rem          // between the columns: the layout's splitter
 
   &.ah-role-error
     color: colors-ui-text-error-primary
+
+// A word of the notice holding `-` or `/` (a path, a host) stays whole where
+// the line can hold it: an inline block breaks inside only when it is wider
+// than the whole line.
+.ah-cc-nobreak
+  display: inline-block
+  max-width: 100%
+  overflow-wrap: anywhere
 
 .ah-cc-recent
   display: flex

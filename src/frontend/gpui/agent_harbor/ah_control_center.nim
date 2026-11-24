@@ -34,6 +34,8 @@
 ## `cc-launch` and `cc-overview` on the columns, `waitingFacts` on each
 ## waiting row, `recentFacts` on each recent launch, `cc-notice-line`.
 
+import std/strutils
+
 import isonim/core/computation
 import nim_agents_isonim_viewmodels/agent_harbor/control_center_vm
 import ../../styles/generated/design_tokens
@@ -62,6 +64,8 @@ const
   TitleLinePx = 20        ## a waiting row's title, a recent launch's text
   RowPadPx = 6            ## a waiting row's padding
   RecentPadPx = 4         ## a recent launch's padding
+  MoreLinePx = 20         ## the waiting list's `+N more` line
+  EmptyLinePx = 12 + 16   ## an empty fleet's `No initiatives yet.`, 12px down
 
 proc renameFact(r: GpuiRenderer; e: GpuiElement; name, to: string) =
   ## Every `data-ah-<name>` in `e`'s tree moved to `data-ah-<to>` (the old
@@ -82,6 +86,23 @@ proc acts(r: GpuiRenderer; el: GpuiElement; operation, target: string;
     r.addEventListener(el, "mousedown", proc(ev: GpuiEvent) =  # ir1-gate: hit test
       press(operation, target))
 
+const
+  WaitingRowMostPx = 2 * RowPadPx + TitleLinePx + 1 + 16 + 1 + 2 * 16
+    ## A waiting row at its tallest: its title, its state line and two
+    ## lines of its question (`waitingRowHeightPx`).
+  InitiativesFloorPx* = 120
+    ## What the Initiatives panel keeps under its head band in one column:
+    ## about one initiative's title, bar and current milestone (GPUI review
+    ## round 3, 2026-11-24: capped only to the overview less the panel's
+    ## head, the waiting list left the panel its head and one title at the
+    ## sidebar size; study D84).
+  OverviewFloorPx* = HeadPx + 2 * ListPadPx + WaitingRowMostPx + MoreLinePx +
+                     ColumnGapPx + HeadPx + InitiativesFloorPx
+    ## The least height the overview keeps under the launch column in one
+    ## column: the waiting list's head, one whole row and its `+N more`
+    ## line, then the Initiatives panel's head and `InitiativesFloorPx`.
+    ## Under it the form folds to its summary (study D84).
+
 proc launchWidthPx*(widthPx: int): int =
   ## The launch column's width in two columns: 45% of the tab, never under
   ## 320px and never over 640px (the web's `minmax(20rem, min(45%, 40rem))`).
@@ -94,19 +115,22 @@ proc sectionLabel(r: GpuiRenderer; p: AhPalette; words: string): GpuiElement =
   r.tag(result, "section", words)
 
 proc toggleEl(r: GpuiRenderer; p: AhPalette; label, operation, target: string;
-              on: bool; press: ControlCenterPress): (GpuiElement, int) =
+              on: bool; press: ControlCenterPress; locked = false): (GpuiElement, int) =
   ## A toggle as the composer's form draws one: 24px, 8px each side, the
-  ## chosen one in the action border.
+  ## chosen one in the action border. `locked` (a launch waiting for its
+  ## answer): disabled, it takes no press.
   let el = r.box(pairs = [("height", $ControlPx & "px"), ("items", "center"),
                           ("padding-left", "8px"), ("padding-right", "8px"),
                           ("flex-shrink", "0"), ("rounded", $ControlRadiusPx & "px"),
                           ("border-width", "1px"),
                           ("border-color", if on: p.borderAction else: p.borderSecondary)])
-  r.appendChild(el, r.text(label, CaptionPx, if on: p.textBody else: p.textLabel,
+  r.appendChild(el, r.text(label, CaptionPx,
+                           if on: p.textBody elif locked: p.textDisabled else: p.textLabel,
                            shrink = false))
   r.tag(el, "toggle", label)
   r.tag(el, "chosen", $on)
-  r.acts(el, operation, target, press)
+  r.tag(el, "disabled", $locked)
+  r.acts(el, operation, target, if locked: nil else: press)
   (el, textPx(label, CaptionPx) + 18)
 
 proc toggleRow(r: GpuiRenderer; items: seq[FlowItem]; widthPx: int): (GpuiElement, int) =
@@ -123,11 +147,60 @@ proc caption(r: GpuiRenderer; s, ink: string; widthPx: int; maxLines = 0): (Gpui
                            ("overflow", "hidden")])
   (el, 16 * lines)
 
+proc wrapWords(s: string; sizePx, availPx: int): seq[string] =
+  ## `s` broken into the lines `wrappedRows` counts at `availPx` (word by
+  ## word at the face's kerned widths, each of its own lines apart), never
+  ## after a lone separator (`breakableWords`).
+  for para in s.splitLines:
+    var line = ""
+    var used = 0.0
+    for word in breakableWords(para):
+      let w = textWidth(word, sizePx)
+      let space = if used > 0: textWidth(" ", sizePx) else: 0.0
+      if used > 0 and used + space + w > float(availPx):
+        result.add line
+        line = word
+        used = w
+      else:
+        line = if line.len > 0: line & " " & word else: word
+        used += space + w
+    result.add line
+  if result.len == 0: result.add ""
+
+proc clampedCaption(r: GpuiRenderer; s, ink: string; widthPx, maxLines: int): (GpuiElement, int) =
+  ## A caption of at most `maxLines` lines, each line its own one-line text
+  ## (GPUI review: a pre-wrapped caption the text system broke onto one
+  ## more line than measured lost its last word under the clip, with no
+  ## `…`). The text past the last line rides on it, so that line ends in
+  ## `…` by the views' one cut rule (`r.text`'s elision) instead of being
+  ## cut silently; a line the face draws a little wider than measured is
+  ## elided the same way.
+  let lines = wrapWords(s, CaptionPx, widthPx)
+  let shown = max(1, min(lines.len, maxLines))
+  let el = r.box(column = true, pairs = [("width", $widthPx & "px"),
+                                         ("height", $(16 * shown) & "px"),
+                                         ("overflow", "hidden"), ("flex-shrink", "0")])
+  for i in 0 ..< shown:
+    let words = if i == shown - 1 and lines.len > shown: lines[i .. ^1].join(" ")
+                else: lines[i]
+    r.appendChild(el, r.text(words, CaptionPx, ink,
+                             pairs = [("width", $widthPx & "px"), ("height", "16px"),
+                                      ("line-height", "16px")]))
+  (el, 16 * shown)
+
 proc launchColumn(r: GpuiRenderer; p: AhPalette; vm: ControlCenterVM;
-                  widthPx: int; press: ControlCenterPress): (GpuiElement, int) =
+                  widthPx: int; press: ControlCenterPress;
+                  folded = false): (GpuiElement, int) =
   ## The launch column's parts, `widthPx` wide, and the height they take.
+  ## `folded`: the form is its summary (`formSummary`, wrapped whole), as
+  ## the terminal folds it where the column cannot hold the whole form with
+  ## what follows it (study D75, D84): a GPUI window cannot scroll the tab
+  ## as the web does.
   let inner = widthPx - 2 * PadXPx
   let c = vm.composer
+  # While a launch waits for its answer the form is locked (study D74):
+  # drawn as it was sent, no part of it pressable, `Launch` busy.
+  let locked = vm.launching
   let col = r.box(column = true, pairs = [("width", $widthPx & "px"),
                                           ("background", p.panel),
                                           ("overflow", "hidden"), ("flex-shrink", "0")])
@@ -151,7 +224,7 @@ proc launchColumn(r: GpuiRenderer; p: AhPalette; vm: ControlCenterVM;
     inc parts
   var modes: seq[FlowItem]
   for (_, label, operation, on) in vm.modeChoices:
-    let (el, w) = r.toggleEl(p, label, operation, "", on, press)
+    let (el, w) = r.toggleEl(p, label, operation, "", on, press, locked)
     modes.add FlowItem(el: el, widthPx: w)
   let (modesEl, modesH) = r.toggleRow(modes, inner)
   r.tag(modesEl, "cc-modes", $vm.mode)
@@ -165,7 +238,7 @@ proc launchColumn(r: GpuiRenderer; p: AhPalette; vm: ControlCenterVM;
   var choices: seq[FlowItem]
   for choice in vm.launchChoices:
     let (el, w) = r.toggleEl(p, choice.title, ControlCenterLaunchForOperation, choice.id,
-                             choice.chosen, press)
+                             choice.chosen, press, locked)
     choices.add FlowItem(el: el, widthPx: w)
   let (choicesEl, choicesH) = r.toggleRow(choices, inner)
   r.appendChild(forEl, choicesEl)
@@ -177,37 +250,61 @@ proc launchColumn(r: GpuiRenderer; p: AhPalette; vm: ControlCenterVM;
   r.appendChild(fieldEl, r.text(InstructionLabel, CaptionPx, p.textLabel, shrink = false,
                                 pairs = [("height", $FieldLabelPx & "px"),
                                          ("line-height", $FieldLabelPx & "px")]))
+  # Locked: read-only and drawn as the form's values are (no fill, outline
+  # or inset; the words in the label role, study D74).
   let box = r.box(pairs = [("height", $ControlPx & "px"), ("items", "start"),
-                           ("padding-left", "8px"), ("padding-right", "8px"),
+                           ("padding-left", if locked: "0px" else: "8px"),
+                           ("padding-right", "8px"),
                            ("rounded", $ControlRadiusPx & "px"), ("border-width", "1px"),
-                           ("border-color", p.borderSecondary), ("background", p.ground),
+                           ("border-color", if locked: p.panel else: p.borderSecondary),
+                           ("background", if locked: p.panel else: p.ground),
                            ("overflow", "hidden")])
   let shown = if whole.len > 0: inputValueShown(whole, inner) else: vm.instructionPlaceholder
-  let t = r.text(shown, BodyPx, if whole.len > 0: p.textBody else: p.textCaption,
+  let t = r.text(shown, BodyPx, if whole.len == 0: p.textCaption
+                                elif locked: p.textLabel else: p.textBody,
                  pairs = [("height", $ControlPx & "px"), ("line-height", $ControlPx & "px")])
   r.tag(t, "value", whole)
+  r.tag(box, "readonly", $locked)
   r.appendChild(box, t)
   r.appendChild(fieldEl, box)
   add(fieldEl, FieldLabelPx + 3 + ControlPx)
   # The composer's own form, its parts padded to the column's sides: drawn
   # into the column's inner width, the padding taken back (the web's grid
   # sits in the column's padding box).
-  if c.showsForm:
-    let (form, formH) = r.drawLaunchForm(p, c, inner, inner < 480,
-      proc(operation, target: string) =
-        if press != nil: press(operation, target), padPx = 0)
+  if vm.showsLaunchForm and folded:
+    let (summary, problem) = vm.formSummary
+    # Locked, it is what is being launched: the label role, as the whole
+    # form's values are (study D74).
+    # Wrapped by words (`clampedCaption`), so no line ends in its ` · `.
+    let (s, sh) = r.clampedCaption(summary, if problem: p.textError
+                                            elif locked: p.textLabel else: p.textCaption,
+                                   inner, maxLines = 8)
+    r.tag(s, "form-summary", summary)
+    add(s, sh)
+  elif vm.showsLaunchForm:
+    let formPress: ComposerPress =
+      if locked: nil
+      else: (proc(operation, target: string) =
+               if press != nil: press(operation, target))
+    let (form, formH) = r.drawLaunchForm(p, c, inner, inner < 480, formPress, padPx = 0,
+                                         locked = locked)
     r.tag(form, "form", $c.intent)
+    r.tag(form, "locked", $locked)
     add(form, formH)
   if c.showsSendLine:
     let line = r.sendLine(p, c, proc(operation, target: string) =
-      if press != nil: press(operation, target), ruled = false)
+      if press != nil: press(operation, target), ruled = false,
+      busy = locked, label = vm.launchSendLabel)
     r.setStyle(line, "width", $inner & "px")
     r.tag(line, "send-for", launchForLabel(vm.launchForTitle))
     add(line, ControlPx)
-  let (words, failed, pending) = vm.launchNotice
+  let (words, failed, _) = vm.launchNotice
   if words.len > 0:
-    let ink = if failed: p.textError elif pending: p.textCaption else: p.textBody
-    let (n, nh) = r.caption(words, ink, inner)
+    let ink = if noticeRole(failed) == "error": p.textError else: p.textBody
+    # Broken between words only (`clampedCaption`), so a path or a host
+    # (`milestones/seeded-fields.milestones.org`, `noir-space-ship`) is never
+    # split at its `/` or `-`; one wider than the column ends in `…`.
+    let (n, nh) = r.clampedCaption(words, ink, inner, maxLines = 4)
     r.tag(n, "cc-notice-line", words)
     add(n, nh)
   # Recent launches, 8px further down.
@@ -280,12 +377,14 @@ proc drawWaitingRow(r: GpuiRenderer; p: AhPalette; row: WaitingRow; innerPx: int
   r.appendChild(result, meta)
   let why = row.waitingWhy
   if why.len > 0:
-    let (w, _) = r.caption(why, p.textBody, innerPx, maxLines = 2)
+    let (w, _) = r.clampedCaption(why, p.textBody, innerPx, maxLines = 2)
+    r.tag(w, "waiting-why", why)
     r.appendChild(result, w)
   r.acts(result, ControlCenterOpenSessionOperation, row.item.id, press)
 
 proc overviewColumn(r: GpuiRenderer; p: AhPalette; vm: ControlCenterVM;
-                    widthPx, heightPx: int; press: ControlCenterPress): GpuiElement =
+                    widthPx, heightPx: int; press: ControlCenterPress;
+                    waitingCapPx = -1): GpuiElement =
   ## The waiting sessions over the Initiatives panel, `widthPx` ×
   ## `heightPx` (study D73): the waiting list as tall as its rows and at
   ## most 45%, the panel filling the rest.
@@ -294,17 +393,38 @@ proc overviewColumn(r: GpuiRenderer; p: AhPalette; vm: ControlCenterVM;
                                          ("gap", $ColumnGapPx & "px"),
                                          ("overflow", "hidden"), ("flex-shrink", "0")])
   r.tag(result, "cc-overview", "overview")
+  r.tag(result, "overview-px", $heightPx)
   let inner = widthPx - 2 * PadXPx
   let ready = vm.state == asReady
-  let waitingH = if ready: min(heightPx * 45 div 100, vm.waitingHeightPx(inner)) else: 0
+  # Whole rows only (GPUI follow-up review): a window that cannot scroll
+  # never cuts a waiting row through its letters. The rows that fit within
+  # 45% are drawn whole; the rest are counted on a `+N more` line, as the
+  # Initiatives panel counts its sessions.
+  let rows = if ready: vm.waiting else: @[]
+  # Two columns: at most 45% (D73). One column: the web's list is not capped
+  # there (its tab scrolls); a GPUI window does not, so the list keeps to
+  # the overview's visible height (`waitingCapPx`), leaving the Initiatives
+  # panel its head and `InitiativesFloorPx` under it.
+  let capPx = if waitingCapPx >= 0: waitingCapPx else: heightPx * 45 div 100
+  var shown = rows.len
+  var waitingH = if ready: vm.waitingHeightPx(inner) else: 0
+  if ready and waitingH > capPx and rows.len > 0:
+    var used = HeadPx + 2 * ListPadPx + MoreLinePx
+    shown = 0
+    for row in rows:
+      let h = waitingRowHeightPx(row, inner)
+      if used + h > capPx: break
+      used += h
+      inc shown
+    waitingH = used
   let restH = heightPx - (if waitingH > 0: waitingH + ColumnGapPx else: 0)
   if ready:
     let waiting = r.box(column = true, pairs = [("width", $widthPx & "px"),
                                                 ("height", $waitingH & "px"),
                                                 ("background", p.panel),
                                                 ("overflow", "hidden"), ("flex-shrink", "0")])
-    r.tag(waiting, "waiting-section", $vm.waiting.len)
-    let rows = vm.waiting
+    r.tag(waiting, "waiting-section", $rows.len)
+    r.tag(waiting, "waiting-px", $waitingH)
     let head = r.drawSectionHeader(p, WaitingHeading, "", waitingCountText(rows.len), widthPx)
     r.tag(head, "head", "waiting")
     # The count sits where a panel has its summary, but the tab's summary is
@@ -319,8 +439,16 @@ proc overviewColumn(r: GpuiRenderer; p: AhPalette; vm: ControlCenterVM;
       let (none, _) = r.caption(NothingWaitingWords, p.textCaption, inner)
       r.appendChild(list, none)
     let focused = vm.focused.val
-    for row in rows:
+    for i, row in rows:
+      if i >= shown: break
       r.appendChild(list, r.drawWaitingRow(p, row, inner, row.item.id == focused, press))
+    if shown < rows.len:
+      let more = "+" & $(rows.len - shown) & " more"
+      let m = r.text(more, CaptionPx, p.textCaption, shrink = false,
+                     pairs = [("height", $MoreLinePx & "px"),
+                              ("line-height", $MoreLinePx & "px")])
+      r.tag(m, "waiting-more", $(rows.len - shown))
+      r.appendChild(list, m)
     r.appendChild(waiting, list)
     r.appendChild(result, waiting)
   if vm.isEmptyFleet:
@@ -334,7 +462,8 @@ proc overviewColumn(r: GpuiRenderer; p: AhPalette; vm: ControlCenterVM;
     let head = r.drawSectionHeader(p, "Initiatives", vm.initiatives.sourceLabel, "", widthPx)
     r.tag(head, "head", "initiatives")
     r.appendChild(empty, head)
-    let lineBox = r.box(pairs = [("padding-left", $PadXPx & "px"), ("padding-top", "12px")])
+    let lineBox = r.box(pairs = [("padding-left", $PadXPx & "px"),
+                                 ("padding-top", $(EmptyLinePx - 16) & "px")])
     let (line, _) = r.caption(NoInitiativesWords, p.textCaption, inner)
     r.tag(line, "cc-empty-line", NoInitiativesWords)
     r.appendChild(lineBox, line)
@@ -363,19 +492,37 @@ proc drawControlCenter*(r: GpuiRenderer; host: GpuiElement; vm: ControlCenterVM;
   r.tag(host, "columns", $layout)
   if layout == clTwoColumns:
     let launchW = launchWidthPx(widthPx)
-    let (launch, _) = r.launchColumn(p, vm, launchW, press)
+    var (launch, launchH) = r.launchColumn(p, vm, launchW, press)
+    if launchH > heightPx:
+      # The whole form leaves the answer and the recent launches below the
+      # window: fold it to its summary (study D75, D84).
+      (launch, launchH) = r.launchColumn(p, vm, launchW, press, folded = true)
     r.setStyle(launch, "height", $heightPx & "px")
     r.appendChild(host, launch)
     r.appendChild(host, r.overviewColumn(p, vm, widthPx - ColumnGapPx - launchW,
                                          heightPx, press))
   else:
     # One column, launching first; what is below the window is clipped.
-    let (launch, launchH) = r.launchColumn(p, vm, widthPx, press)
+    # The form folds to its summary where the whole form would leave the
+    # overview under it less than `OverviewFloorPx` (study D84): a GPUI
+    # window does not scroll, so the waiting list and the initiatives would
+    # be cut off below it.
+    var (launch, launchH) = r.launchColumn(p, vm, widthPx, press)
+    # An empty fleet's overview draws only its two head bands and their
+    # lines: that, not `OverviewFloorPx`, is what it must keep, so the whole
+    # form stays (GPUI review of 2026-11-24: about 500px left blank under a
+    # folded form at the sidebar size; the terminal folds by the same rule).
+    let floor = if vm.isEmptyFleet:
+                  vm.waitingHeightPx(widthPx - 2 * PadXPx) + ColumnGapPx + HeadPx + EmptyLinePx
+                else: OverviewFloorPx
+    if heightPx - launchH - ColumnGapPx < floor:
+      (launch, launchH) = r.launchColumn(p, vm, widthPx, press, folded = true)
     r.setStyle(launch, "height", $launchH & "px")
     r.appendChild(host, launch)
     let rest = max(0, heightPx - launchH - ColumnGapPx)
     if rest > 0:
-      r.appendChild(host, r.overviewColumn(p, vm, widthPx, max(rest, 240), press))
+      r.appendChild(host, r.overviewColumn(p, vm, widthPx, max(rest, floor), press,
+                                           waitingCapPx = max(0, rest - HeadPx - InitiativesFloorPx)))
 
 proc mountControlCenter*(r: GpuiRenderer; host: GpuiElement; vm: ControlCenterVM;
                          p: AhPalette; widthPx, heightPx: int;

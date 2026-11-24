@@ -1148,6 +1148,10 @@ proc checkProcessSwitcher(view: AhNode; vm: ProcessSwitcherVM): seq[string] =
                 b.buttons.mapIt(it.ringed))
   result.expect("hidden", t.all("recordings-hidden").mapIt(it.attr("recordings-hidden")),
                 (if b.hidden > 0: @[$b.hidden] else: newSeq[string]()))
+  # The chip carries the ring when it hides the ringed process (study D80).
+  result.expect("hidden ring",
+                t.all("recordings-hidden").mapIt(it.attr("recordings-hidden-ringed") == "true"),
+                (if b.hidden > 0: @[b.hiddenRinged] else: newSeq[bool]()))
 
 proc checkStory(m: AhTuiMount): seq[string] =
   let view = m.view

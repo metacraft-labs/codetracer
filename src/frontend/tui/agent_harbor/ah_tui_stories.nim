@@ -490,9 +490,14 @@ proc draw*(m: AhTuiMount) =
     c.drawControlCenter(m.center, top, 0, m.cols, h, proc(operation, target: string) =
       discard mount.pressControlCenter(operation, target))
   of "agent-harbor-status-gaze":
+    # The status line under the control center, as L7 shows it (manager
+    # note 167): `ControlCenter`'s story, its presses routed.
     let mount = m
+    let cols = m.cols
     c.drawGazeStory(m.gaze, top, 0, m.cols, h, GazeStoryStatusItemsTui, proc(operation: string) =
-      discard mount.pressGaze(operation))
+      discard mount.pressGaze(operation), above = proc(c: var AhCanvas) =
+        c.drawControlCenter(mount.center, top, 0, cols, max(0, h - 1),
+          proc(operation, target: string) = discard mount.pressControlCenter(operation, target)))
   of ProcessSwitcherSurface:
     let mount = m
     c.drawProcessSwitcherStory(m.processes, top, 0, m.cols, h, OtherTabTitle,
@@ -612,7 +617,9 @@ proc mountAgentHarborStoryTui*(surface, fixture: string; cols, rows: int;
     result.timeline = story.timeline
     result.suggestion = story.suggestion
   of "agent-harbor-control-center": result.center = createControlCenterStoryVM(fixture, pb)
-  of "agent-harbor-status-gaze": result.gaze = createGazeStoryVM(fixture, gazePauseChord())
+  of "agent-harbor-status-gaze":
+    result.gaze = createGazeStoryVM(fixture, gazePauseChord())
+    result.center = createControlCenterStoryVM("populated")
   of "agent-harbor-changes", "agent-harbor-inbox", "agent-harbor-inbox-item":
     # Built inside a reactive root, as the web and GPUI mounts build them,
     # so what a constructor registers for its cleanup (the Inbox playback's

@@ -2303,13 +2303,17 @@ var shownGaze: GazeStatusVM
 proc mountAgentHarborStatusGaze(container: isonim_dom.Element;
                                 fixture: string): DisposeProc =
   ## The window's status line (`renderStoryStatusBar`, the production status
-  ## view at the story's stopped location) with the gaze mark at the start of
-  ## its right-hand zone, under an empty working area; the mark's tooltip
-  ## names the key the base keymap binds to the pause (`gazePauseChord`).
+  ## view at the story's stopped location, the one L7 draws) with the gaze
+  ## mark at the start of its right-hand zone, under the control center as
+  ## L7 shows it (`ControlCenter`'s story, its presses routed), so the mark
+  ## is seen in the window it belongs to (manager note 167); the mark's
+  ## tooltip names the key the base keymap binds to the pause
+  ## (`gazePauseChord`).
   let story = createHost(container, "div", "ah-gaze-story")
   isonim_dom.setAttribute(story, cstring"class", cstring"ah-gaze-story")
   let work = createHost(story, "div", "ah-gaze-window")
   isonim_dom.setAttribute(work, cstring"class", cstring"ah-gaze-window")
+  let center = mountControlCenterIn(work, "populated")
   let status = renderStoryStatusBar(WebRenderer(), story, false, replayReadyToast = false)
   let host = isonim_dom.createElement(isonim_dom.document, cstring"span")
   isonim_dom.setAttribute(host, cstring"class", cstring"ah-gaze-status-host")
@@ -2325,6 +2329,7 @@ proc mountAgentHarborStatusGaze(container: isonim_dom.Element;
   return proc() =
     shownGaze = nil
     dispose()
+    center()
     container.innerHTML = ""
 
 var shownProcesses: ProcessSwitcherVM

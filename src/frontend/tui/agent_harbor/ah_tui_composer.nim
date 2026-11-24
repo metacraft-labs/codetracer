@@ -67,6 +67,7 @@ import nim_agents_isonim_viewmodels/agent_harbor/omnibox_composer_vm
 import ../../viewmodel/views/agent_harbor_composer_words
 
 import ./ah_tui_canvas
+from ./ah_tui_changes_inbox_parts import SpinnerFrames
 
 export omnibox_composer_vm, agent_harbor_composer_words, ah_tui_canvas
 
@@ -127,6 +128,8 @@ type
     narrow: bool
     ink: Inks
     press: ComposerPress
+    locked: bool
+      ## The control center's launch in flight: the form's toggles disabled.
     buttonsBelow: bool
       ## Every row's buttons on a line of their own under its label (right-
       ## aligned), when one row's label and buttons do not fit on its title
@@ -688,15 +691,26 @@ proc fieldBlock(host: AhNode; lay: Layout; col, cells: int; label, value, proble
   Block(rows: rows, draw: proc(c: var AhCanvas; row: int) =
     let n = c.node(host, row, col, cells, rows, [("field-label", label)])
     discard c.text(n, row, col, cells, label, c.p.textLabel, fact = "field-name")
-    let ground = lay.ink.field
+    # Locked (the control center's launch in flight): no field ground, the
+    # value in the label role (above the options not chosen, in the disabled
+    # role; study D74), as the web's locked form draws it.
+    let ground = if lay.locked: c.tone.body else: lay.ink.field
     discard c.put(row + 1, col, repeat(' ', cells), c.p.textBody, bg = ground)
     let room = max(1, cells - 2)
+    # Locked, the value loses the field's 1-cell inset with its ground, so it
+    # starts under its label (study D74).
+    let at = if lay.locked: col else: col + 1
     if value.len > 0:
-      discard c.put(row + 1, col + 1, elideMiddle(value, room), c.p.textBody, bg = ground)
-      discard c.node(n, row + 1, col + 1, room, 1, [("value", value)])
+      discard c.put(row + 1, at, elideMiddle(value, room),
+                    if lay.locked: c.p.textLabel else: c.p.textBody, bg = ground)
+      discard c.node(n, row + 1, at, room, 1, [("value", value),
+                                               ("readonly", $lay.locked)])
     else:
       # The placeholder is a hint, not a value: cut at its end like any text.
-      discard c.text(n, row + 1, col + 1, room, placeholder, readable(c.p, ground),
+      # Locked, it takes the disabled role, as the options not chosen do
+      # (study D74).
+      discard c.text(n, row + 1, at, room, placeholder,
+                     if lay.locked: c.p.textDisabled else: readable(c.p, ground),
                      bg = ground, fact = "value")
     if problem.len > 0:
       # The field the problem is about carries the error role's inset bar,
@@ -733,10 +747,15 @@ proc choiceBlock(host: AhNode; lay: Layout; col, cells: int; label: string;
       let on = o in chosen
       let st = if on: ChipStyle(fg: ink.citedText, bg: ink.cited, mark: c.p.borderAction,
                                 bold: true)
+               # Locked, an option not chosen loses its chip's ground (the
+               # control center's `chipRow` does the same): the disabled role
+               # holds 3:1 on the band, not on Light's chip ground (2.7:1).
+               elif lay.locked: ChipStyle(fg: c.p.textDisabled, bg: "")
                else: ChipStyle(fg: c.p.textLabel, bg: ink.quiet)
       let drawn = c.drawChipLines(r, col + at, cells - at, @[shown[i]], st)
       discard c.node(n, r, col + at, drawn, 1,
-                     [("toggle", o), ("chosen", $on), ("action", "choose-option")])
+                     [("toggle", o), ("chosen", $on), ("action", "choose-option"),
+                      ("disabled", $lay.locked)])
     if problem.len > 0:
       discard c.drawPara(n, row + 1 + placed.rows, col, cells, problem, lay.ink.bandError,
                          "problem"))
@@ -810,13 +829,22 @@ proc formBlocks(vm: OmniboxComposerVM; host: AhNode; lay: Layout): seq[Block] =
     result.add Block(rows: 1, schedule: not open, draw: proc(c: var AhCanvas; row: int) =
       let n = c.node(form, row, left, width, 1,
                      [("schedule", $open), ("action", "schedule")])
+      # Locked (the control center's launch in flight), the disclosure is
+      # not one to open: its fold in the disabled role, as the options not
+      # chosen (study D74; the disabled icon role all but vanishes on Light's
+      # panel).
       discard c.put(row, left, if open: UnfoldedGlyph else: FoldedGlyph,
-                    tokenHexOf(dtColorsUiIconPrimaryDefault, c.p.mode))
+                    if lay.locked: c.p.textDisabled
+                    else: tokenHexOf(dtColorsUiIconPrimaryDefault, c.p.mode))
+      if lay.locked: discard c.node(n, row, left, 1, 1, [("schedule-fold-disabled", "true")])
       discard c.text(n, row, left + 2, width - 2, ScheduleLabel, c.p.textLabel,
                      fact = "field-name")
       let at = left + 2 + widthOf(ScheduleLabel) + GapCells
+      # Locked, the schedule is part of what is being launched: the label
+      # role, as the form's values (study D74).
       discard c.text(n, row, at, max(1, left + width - at), summary,
-                     if problem: lay.ink.bandError else: lay.ink.bandCaption,
+                     if problem: lay.ink.bandError
+                     elif lay.locked: c.p.textLabel else: lay.ink.bandCaption,
                      fact = "schedule-summary"))
     if open:
       let s = o.schedule
@@ -918,20 +946,38 @@ proc showsSendFooter(vm: OmniboxComposerVM): bool =
   ## and never with nothing typed (`Recent` instead).
   vm.showsSendLine and not vm.isEmptyField
 
+proc busyInk*(c: AhCanvas): string =
+  ## The busy spinner's ink: the action colour's ring step (brand/400 in
+  ## Dark, brand/700 in Light), the web's `.ah-busy-spinner` and GPUI's
+  ## `busySpinner`. It is the only mark of the busy state, so it holds 3:1
+  ## (WCAG 2.2 SC 1.4.11) on the disabled button's ground, which the action
+  ## border (brand/500) does not in Light (2.5:1). The palette has neither
+  ## step; each is the other mode's `surface/action/primary-hover`.
+  let other = if c.p.mode == dmDark: dmLight else: dmDark
+  tokenHexOf(dtColorsUiSurfaceActionPrimaryHover, other)
+
 proc drawSendLine*(c: var AhCanvas; ink: Inks; press: ComposerPress; vm: OmniboxComposerVM;
                   host: AhNode;
-                  row, left, width: int) =
+                  row, left, width: int; busy = false; label = "") =
   ## The hint (the reason it cannot send, in the error role), the count of
   ## further problems (never cut), and the button at the end, on the band.
+  ## `busy` (the control center's launch waiting for its answer): no hint,
+  ## the button disabled and busy; `label`, when given, the button's label
+  ## in place of the composer's.
   let sending = vm.phase == cpSending
-  let canSend = vm.canSend and not sending
-  let (hint, more, blocked) = vm.sendHint
-  let label = vm.sendLabel
-  let button = " " & label & " "
+  let canSend = vm.canSend and not sending and not busy
+  let (hint, more, blocked) = if busy: ("", "", false) else: vm.sendHint
+  let label = if label.len > 0: label else: vm.sendLabel
+  # Busy: the terminal's spinner (`SpinnerFrames`, the design system's
+  # indeterminate activity spinner as the Inbox draws it) before the label,
+  # so a busy button is told from a merely disabled one.
+  let spinner = if busy: SpinnerFrames[0] & " " else: ""
+  let button = " " & spinner & label & " "
   let bw = widthOf(button)
   let bcol = left + width - bw
   let send = c.node(host, row, left, width, 1,
-                    [("send", label), ("send-enabled", $canSend), ("send-blocked", $blocked)])
+                    [("send", label), ("send-enabled", $canSend), ("send-blocked", $blocked),
+                     ("send-busy", $busy)])
   let moreW = widthOf(more)
   let hintRoom = max(1, bcol - GapCells - moreW - left)
   let hintW = min(widthOf(hint), hintRoom)
@@ -948,11 +994,16 @@ proc drawSendLine*(c: var AhCanvas; ink: Inks; press: ComposerPress; vm: Omnibox
   let (fg, bg) = if canSend: (c.p.onAction, c.p.action)
                  else: (c.p.textDisabled, ink.quiet)
   discard c.put(row, bcol, button, fg, bg = bg)
+  if busy:
+    # The spinner in the action colour's ring step (`busyInk`).
+    discard c.put(row, bcol + 1, SpinnerFrames[0], c.busyInk, bg = bg)
+    discard c.node(send, row, bcol + 1, 1, 1, [("busy-spinner", SpinnerFrames[0])])
   let b = c.node(send, row, bcol, bw, 1, [("action", "send"), ("button", label)])
   c.pressable(b, press, ComposerSendOperation, "")
 
 proc drawLaunchForm*(c: var AhCanvas; vm: OmniboxComposerVM; host: AhNode;
-                     row, col, width, maxRows: int; press: ComposerPress = nil): int =
+                     row, col, width, maxRows: int; press: ComposerPress = nil;
+                     locked = false): int =
   ## The launch or initiative form's fields at (`row`, `col`), `width`
   ## cells, without the sheet's form title (a host that draws the form
   ## outside the sheet, the control center, has a heading of its own); at
@@ -960,7 +1011,7 @@ proc drawLaunchForm*(c: var AhCanvas; vm: OmniboxComposerVM; host: AhNode;
   ## (`formBlocks`), on the band's inks, so the host draws them on the band's
   ## ground. Returns the rows drawn.
   let lay = Layout(left: col, width: width, narrow: width < 60, ink: inksFor(c),
-                   press: press)
+                   press: press, locked: locked)
   let blocks = formBlocks(vm, host, lay)
   var at = row
   for i, b in blocks:

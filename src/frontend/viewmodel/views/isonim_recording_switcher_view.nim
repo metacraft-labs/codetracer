@@ -63,8 +63,11 @@ proc renderRecordingButton[R](r: R; rb: RecordingButton;
   res
 
 proc renderRecordingSwitcher*[R, N](r: R; buttons: RecordingButtons;
-                                    onSelect: proc(id: string) = nil): N =
-  ## The buttons, and `+N` for the recordings beyond them.
+                                    onSelect: proc(id: string) = nil;
+                                    noun = "recording"; nouns = "recordings"): N =
+  ## The buttons, and `+N` for the recordings beyond them; `noun` / `nouns`
+  ## name them in `+N`'s tooltip (a multi-process recording's tab: its
+  ## processes).
   var host: N
   let res = ui(r):
     tdiv(ref = host, class = RecordingSwitcherClass, role = "group",
@@ -79,7 +82,7 @@ proc renderRecordingSwitcher*[R, N](r: R; buttons: RecordingButtons;
       span(class = "ah-rec-more" &
                    (if hidden.severity != hsNone: " ah-att-" & $hidden.severity else: "") &
                    (if buttons.hiddenRinged: " ah-rec-ringed" else: ""),
-           title = chipTitle(hidden, "recording", "recordings")):
+           title = chipTitle(hidden, noun, nouns)):
         text "+" & $buttons.hidden
     r.appendRendered(host, more)
   res

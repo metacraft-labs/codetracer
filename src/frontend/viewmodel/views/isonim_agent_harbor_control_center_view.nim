@@ -47,6 +47,8 @@ when defined(js):
   import isonim/web/dom_api as isonim_dom
 
   proc setInputValue(node: isonim_dom.Node; value: cstring) {.importjs: "#.value = #".}
+  proc setReadOnly(node: isonim_dom.Node; locked: bool) {.importjs: "#.readOnly = #".}
+  proc blurNode(node: isonim_dom.Node) {.importjs: "#.blur()".}
   proc inputValueOf(node: isonim_dom.Node): cstring {.importjs: "(#.value || '')".}
   proc widthOfNode(node: isonim_dom.Node): int {.importjs: "(#.getBoundingClientRect().width | 0)".}
   proc observeWidth(node: isonim_dom.Node; cb: proc()) {.importjs: """
@@ -81,14 +83,19 @@ proc sectionLabel[R](r: R; words: string): auto =
     tdiv(class = "ah-composer-section-label ah-cc-section-label"):
       text words
 
-proc toggle[R](r: R; label, operation, target: string; on: bool): auto =
+proc toggle[R](r: R; label, operation, target: string; on: bool;
+               locked = false): auto =
   ## One of a row of toggles, the composer form's own (`ah-composer-toggle`),
-  ## carrying its operation.
-  ui(r):
+  ## carrying its operation. `locked`: disabled, while a launch waits for
+  ## its answer.
+  mixin setAttribute
+  let node = ui(r):
     button(class = "ah-composer-toggle" & (if on: " active" else: ""),
            `aria-pressed` = (if on: "true" else: "false"),
            `data-ct-operation` = operation, `data-ah-target` = target):
       text label
+  if locked: r.setAttribute(node, "disabled", "true")
+  node
 
 proc renderWaitingRow[R, N](r: R; row: WaitingRow; focused: bool): N =
   ## A waiting session: its title, then its state word (its role), its
@@ -187,9 +194,10 @@ proc renderAgentHarborControlCenter*[R, N](r: R; vm: ControlCenterVM;
     # The mode and what the launch is for.
     discard vm.composer.revision.val
     discard vm.launchFor.val
+    let locked = vm.launching
     r.clearChildren(modes)
     for (_, label, operation, on) in vm.modeChoices:
-      r.appendRendered(modes, toggle(r, label, operation, "", on))
+      r.appendRendered(modes, toggle(r, label, operation, "", on, locked))
     r.clearChildren(forRow)
     let forLabel = ui(r):
       span(class = "ah-composer-field-label"):
@@ -202,30 +210,37 @@ proc renderAgentHarborControlCenter*[R, N](r: R; vm: ControlCenterVM;
     r.appendRendered(forRow, togglesNode)
     for choice in vm.launchChoices:
       r.appendRendered(toggles, toggle(r, choice.title, ControlCenterLaunchForOperation,
-                                       choice.id, choice.chosen))
+                                       choice.id, choice.chosen, locked))
   createRenderEffect proc() =
     # The field, the form, the send line and the notice.
     discard vm.composer.revision.val
     discard vm.composer.scheduleOpen.val
     let c = vm.composer
     let whole = c.text
+    # While a launch waits for its answer the form is locked (study D74):
+    # drawn as it was sent, the field read-only, every toggle disabled,
+    # `Launch` busy.
+    let locked = vm.launching
     when defined(js):
       when N is isonim_dom.Element:
         if $inputValueOf(isonim_dom.Node(field)) != whole:
           setInputValue(isonim_dom.Node(field), cstring(whole))
+        setReadOnly(isonim_dom.Node(field), locked)
+        if locked: blurNode(isonim_dom.Node(field))
     r.setAttribute(field, "value", whole)
+    r.setAttribute(field, "aria-readonly", $locked)
     r.setAttribute(field, "placeholder", vm.instructionPlaceholder)
     r.clearChildren(form)
     r.clearChildren(send)
     r.clearChildren(notice)
     r.setAttribute(form, "data-ah-form", $c.intent)
-    if c.showsForm:
-      if c.intent == riLaunchTask: renderLaunchForm(r, c, form)
-      else: renderInitiativeForm(r, c, form)
+    r.setAttribute(form, "data-ah-locked", $locked)
+    if vm.showsLaunchForm:
+      if c.intent == riLaunchTask: renderLaunchForm(r, c, form, locked)
+      else: renderInitiativeForm(r, c, form, locked)
     if c.showsSendLine:
-      let sending = c.phase == cpSending
-      let canSend = c.canSend and not sending
-      let (hint, more, blocked) = c.sendHint
+      let canSend = c.canSend and not locked and c.phase != cpSending
+      let (hint, more, blocked) = vm.launchSendHint
       var button: N
       let line = ui(r):
         tdiv(class = "ah-composer-send" & (if blocked: " ah-composer-send-blocked" else: "")):
@@ -236,17 +251,37 @@ proc renderAgentHarborControlCenter*[R, N](r: R; vm: ControlCenterVM;
           button(ref = button, class = "ah-composer-send-button",
                  `data-ct-operation` = ComposerSendOperation,
                  title = launchForLabel(vm.launchForTitle)):
-            text c.sendLabel
+            # Busy (a launch waiting for its answer): the design system's
+            # indeterminate activity spinner (`spinner`, small) before the
+            # label, so a busy `Launch` is told from a disabled one.
+            if locked:
+              span(class = "ah-busy-spinner", `aria-hidden` = "true")
+            text vm.launchSendLabel
       if not canSend: r.setAttribute(button, "disabled", "true")
+      if locked: r.setAttribute(button, "aria-busy", "true")
       r.appendRendered(send, line)
-    let (words, failed, pending) = vm.launchNotice
+    let (words, failed, _) = vm.launchNotice
     if words.len > 0:
-      let n = ui(r):
-        tdiv(class = "ah-cc-notice-line" & (if failed: " ah-role-error"
-                                            elif pending: " ah-role-caption" else: ""),
-             role = "status"):
-          text words
-      r.appendRendered(notice, n)
+      var n: N
+      let line = ui(r):
+        tdiv(ref = n, class = "ah-cc-notice-line ah-role-" & noticeRole(failed), role = "status")
+      # Word by word (`breakableWords`: a separator kept with the word after
+      # it, so no line ends in ` ·`), a word holding `-` or `/`, or a
+      # separator and its word, kept whole where it fits (`.ah-cc-nobreak`),
+      # so a path or a host is not split at its hyphen (`seeded-` /
+      # `fields`, `noir-` / `space-ship`; review of 2026-11-24). The spaces
+      # stay between the words, so the text reads the same.
+      for i, w in pairs(breakableWords(words)):
+        if i > 0:
+          let gap = ui(r):
+            span(class = "ah-cc-space"):
+              text " "
+          r.appendRendered(n, gap)
+        let part = ui(r):
+          span(class = (if '-' in w or '/' in w or ' ' in w: "ah-cc-nobreak" else: "")):
+            text w
+        r.appendRendered(n, part)
+      r.appendRendered(notice, line)
   createRenderEffect proc() =
     # Recent launches.
     discard vm.composer.revision.val

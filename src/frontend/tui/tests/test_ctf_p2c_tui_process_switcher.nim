@@ -101,6 +101,27 @@ suite "CTF-P2c: the terminal process switcher's tab":
     check m.tab.all("recording").allIt(it.attr("recording-ringed") == "false")
     m.dispose()
 
+  test "+N is a button on the numbered buttons' ground, not the tab's":
+    # The web's `.ah-rec-more`: a button like its siblings. Its control: the
+    # chip's old ground, `tone.chip`, IS the active tab's fill in both
+    # themes, so the old drawing showed no button at all (follow-up review).
+    for mode in [dmDark, dmLight]:
+      for cols in [180, 45]:
+        let m = mount("many", cols, mode = mode)
+        let chips = m.view.all("recordings-hidden")
+        check chips.len == 1
+        if chips.len == 1:
+          let chip = chips[0]
+          let numbered = m.view.all("recording").filterIt(it.attr("recording-active") != "true")
+          check numbered.len > 0
+          for col in chip.col ..< chip.col + chip.width:
+            check m.canvas.bgAt(chip.row, col) == m.canvas.p.panel
+            check m.canvas.bgAt(chip.row, col) != m.canvas.p.activeTab
+          if numbered.len > 0:
+            check m.canvas.bgAt(numbered[0].row, numbered[0].col) == m.canvas.p.panel
+        check m.canvas.tone.chip == m.canvas.p.activeTab   # the old ground
+        m.dispose()
+
   test "a click on a button is routed and selects its process":
     let m = mount("correlation")
     let b = m.tab.all("recording")[1]

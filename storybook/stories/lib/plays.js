@@ -1233,6 +1233,30 @@ async function toggleRoundTrip(panel, id, labelAfter) {
 // The control center: launching on the left, the Initiatives panel and the
 // sessions waiting for the operator on the right, one column under 720px
 // (`data-ah-columns`); every fact is the view's own (`centerFacts`).
+// A computed colour's channels and alpha (`rgb(...)` / `rgba(...)`): the
+// ring check walks out to the first opaque grounds; `contrastOf` (above)
+// measures it.
+function rgbOf(css) {
+  const m = css.match(/rgba?\(([^)]+)\)/);
+  if (!m) return [0, 0, 0, 0];
+  const p = m[1].split(/[ ,\/]+/).filter(Boolean).map(Number);
+  return [p[0], p[1], p[2], p.length > 3 ? p[3] : 1];
+}
+
+// A ringed button's ring (1px clear, 2px wide: 3px out from its outline)
+// stays clear of each neighbouring button by at least that much again, 3px
+// (D81, the coordinator's follow-up to the step-4 batch review): the ring
+// reads as its own button's, not as shared with the next.
+function expectRingClear(el) {
+  const own = el.getBoundingClientRect();
+  for (const nb of [el.previousElementSibling, el.nextElementSibling]) {
+    if (!nb || !nb.matches(".ah-rec-button, .ah-rec-more")) continue;
+    const r = nb.getBoundingClientRect();
+    const between = r.left >= own.right ? r.left - own.right : own.left - r.right;
+    expect(between - 3).toBeGreaterThanOrEqual(3);
+  }
+}
+
 const centerOf = (el) => el.querySelector(".ah-control-center");
 const waitingIds = (center) => [...center.querySelectorAll(".ah-cc-waiting-row")]
   .map((r) => r.getAttribute("data-ah-waiting-session"));
@@ -1254,6 +1278,17 @@ function centerCheck(assert) {
     else expect(o.left).toBeGreaterThanOrEqual(l.right - 1);
     expect(launch.getAttribute("data-ct-pane")).toBe("composer");
     expect(center.getAttribute("data-ct-pane")).toBe("controlCenter");
+    // The answer is never split at a path's or a host's `-` or `/`: such a
+    // word is whole on one line where the line can hold it.
+    const noticeLine = center.querySelector(".ah-cc-notice-line");
+    if (noticeLine) {
+      for (const w of noticeLine.querySelectorAll(".ah-cc-nobreak")) {
+        if (w.getBoundingClientRect().width < noticeLine.clientWidth) {
+          expect(w.getClientRects().length).toBe(1);
+          expect(w.getBoundingClientRect().height).toBeLessThanOrEqual(17);
+        }
+      }
+    }
     // Each column opens with a panel's head band, the Initiatives panel's
     // own (study D73), so the heads line up.
     expect(center.querySelector(".ah-cc-launch .ah-fleet-head .ah-fleet-title")?.textContent).toBe("Launch");
@@ -1262,6 +1297,13 @@ function centerCheck(assert) {
       expect(row.getAttribute("data-ct-operation")).toBe("control-center.open-session");
       expect(row.querySelector(".ah-fleet-dot, .ah-tab-mark, .ah-pie")).toBeNull();
       expect(row.getAttribute("aria-label")).toContain(row.getAttribute("data-ah-waiting-words"));
+    }
+    // No field of the launch form cuts what it shows (manager note 167: at a
+    // panel's width the half-width Session name read `named by the serv…`):
+    // below 30rem of column the fields take a row each, as GPUI's and the
+    // terminal's do.
+    for (const value of center.querySelectorAll(".ah-cc-form .ah-composer-field-value")) {
+      expect(value.scrollWidth).toBeLessThanOrEqual(value.clientWidth + 1);
     }
     await assert(center, canvasElement);
   };
@@ -1292,6 +1334,11 @@ const gazeHost = (el) => el.querySelector(".ah-gaze-host");
 function gazeCheck(assert) {
   return async ({ canvasElement }) => {
     await waitFor(canvasElement, "#status .status-right .ah-gaze-host");
+    // In context (manager note 167): the status line under the control
+    // center, as L7 shows it.
+    const center = await waitFor(canvasElement, ".ah-gaze-story .ah-control-center");
+    expect(center.getBoundingClientRect().bottom)
+      .toBeLessThanOrEqual(canvasElement.querySelector("#status").getBoundingClientRect().top + 1);
     await assert(gazeHost(canvasElement), canvasElement);
   };
 }
@@ -1329,11 +1376,96 @@ const centerChecks = {
   }),
   "agent-harbor-control-center-empty": centerCheck(async (center) => {
     expect(center.getAttribute("data-ah-cc-empty")).toBe("true");
+    // A disabled `Launch` over an empty field is not busy: no spinner.
+    const idle = center.querySelector(".ah-cc-send .ah-composer-send-button");
+    expect(idle.disabled).toBe(true);
+    expect(idle.getAttribute("aria-busy")).toBeNull();
+    expect(idle.querySelector(".ah-busy-spinner")).toBeNull();
     expect(center.querySelector(".ah-cc-empty-line")?.textContent).toBe("No initiatives yet.");
     expect(getComputedStyle(center.querySelector(".ah-cc-initiatives")).display).toBe("none");
     expect(center.querySelector('.ah-cc-form [data-ah-field="Repository"]')).toBeTruthy();
   }),
   "agent-harbor-control-center-launching": centerCheck(async (center) => {
+    // Launch pressed, Agent Harbor not answering yet (D70, D74): the form
+    // drawn as it was sent and locked, Launch busy and disabled,
+    // `Launching…` in the body role where the answer will go.
+    expect(center.getAttribute("data-ah-cc-launching")).toBe("true");
+    expect(center.getAttribute("data-ah-cc-launch-for")).toBe("Shield model hardening");
+    const field = center.querySelector(".ah-cc-input");
+    expect(field.value).toBe("Add a test for a hit on an empty shield");
+    expect(field.readOnly).toBe(true);
+    const form = center.querySelector(".ah-cc-form");
+    expect(form.getAttribute("data-ah-locked")).toBe("true");
+    expect(form.querySelector('[data-ah-field="Branch"]')?.textContent).toContain("test/empty-shield");
+    for (const t of center.querySelectorAll(".ah-cc-launch .ah-composer-toggle")) {
+      expect(t.disabled).toBe(true);
+    }
+    const button = center.querySelector(".ah-cc-send .ah-composer-send-button");
+    expect(button.textContent).toBe("Launch");
+    expect(button.disabled).toBe(true);
+    expect(button.getAttribute("aria-busy")).toBe("true");
+    // Busy is seen, not only announced: the design system's spinner before
+    // the label, in the action colour's ring step at 3:1 or more on the
+    // panel; the plain disabled `Launch` (ControlCenterEmpty) draws none.
+    const spinner = button.querySelector(".ah-busy-spinner");
+    expect(spinner).toBeTruthy();
+    const spin = getComputedStyle(spinner);
+    expect(spin.display).not.toBe("none");
+    expect(spinner.getBoundingClientRect().width).toBeGreaterThan(0);
+    let panel = "rgb(255, 255, 255)";
+    for (let g = button; g; g = g.parentElement) {
+      const bg = getComputedStyle(g).backgroundColor;
+      if (rgbOf(bg)[3] > 0) { panel = bg; break; }
+    }
+    expect(contrastOf(spin.borderTopColor, panel)).toBeGreaterThanOrEqual(3);
+    expect(center.querySelector(".ah-cc-send .ah-composer-send-hint").textContent).toBe("");
+    const notice = center.querySelector(".ah-cc-notice-line");
+    expect(notice?.textContent).toBe("Launching\u2026");
+    expect(notice.classList.contains("ah-role-body")).toBe(true);
+    // What is being launched stays above what was not chosen (D74, follow-up
+    // review): the locked values and the instruction, in the label role,
+    // stand off their ground further than an option not chosen does, in
+    // both themes (the caption role, 3.55:1 in Light, fell under the
+    // disabled role's 3.73:1).
+    const groundOf = (el) => {
+      for (let g = el; g; g = g.parentElement) {
+        const bg = getComputedStyle(g).backgroundColor;
+        if (rgbOf(bg)[3] > 0) return bg;
+      }
+      return "rgb(255, 255, 255)";
+    };
+    const inkOn = (el) => contrastOf(getComputedStyle(el).color, groundOf(el));
+    const notChosen = form.querySelector(".ah-composer-toggle:not(.active)");
+    expect(notChosen).toBeTruthy();
+    const floor = inkOn(notChosen);
+    // The schedule's disclosure is not one to open while locked: its fold
+    // in the disabled role, as an option not chosen.
+    const fold = form.querySelector(".ah-composer-fold");
+    expect(fold).toBeTruthy();
+    expect(getComputedStyle(fold).color).toBe(getComputedStyle(notChosen).color);
+    // The schedule's summary is part of what is launched: the label role, as
+    // the form's values.
+    const scheduleSummary = form.querySelector(".ah-composer-schedule-summary");
+    expect(scheduleSummary).toBeTruthy();
+    expect(inkOn(scheduleSummary)).toBeGreaterThan(floor);
+    const values = [field, ...form.querySelectorAll(".ah-composer-field-value:not(.ah-composer-field-empty)")];
+    expect(values.length).toBeGreaterThan(2);
+    for (const v of values) expect(inkOn(v)).toBeGreaterThan(floor);
+  }),
+  "agent-harbor-control-center-launch-failed": centerCheck(async (center) => {
+    // Refused (D74): `Could not launch: …` in the error role, the
+    // instruction back in the field, the form open and Launch ready.
+    expect(center.getAttribute("data-ah-cc-launching")).toBe("false");
+    const notice = center.querySelector(".ah-cc-notice-line");
+    expect(notice?.textContent).toBe("Could not launch: hub-a has no executor free for noir-space-ship");
+    expect(notice.classList.contains("ah-role-error")).toBe(true);
+    const field = center.querySelector(".ah-cc-input");
+    expect(field.value).toBe("Add a test for a hit on an empty shield");
+    expect(field.readOnly).toBe(false);
+    expect(center.querySelector('.ah-cc-form [data-ah-field="Repository"]')).toBeTruthy();
+    expect(center.querySelector(".ah-cc-send .ah-composer-send-button").disabled).toBe(false);
+  }),
+  "agent-harbor-control-center-launched": centerCheck(async (center) => {
     // The form is ready for the next launch, the answer under it (D74).
     expect(center.querySelector('.ah-cc-form [data-ah-field="Repository"]')).toBeTruthy();
     expect(center.querySelector(".ah-cc-send .ah-composer-send-button").disabled).toBe(true);
@@ -1341,6 +1473,7 @@ const centerChecks = {
       .toBe("Add a test for a hit on an empty shield");
     const notice = center.querySelector(".ah-cc-notice-line");
     expect(notice?.textContent).toBe("Started on hub-a \u00b7 executor ws-ada \u00b7 session 8c1a13");
+    expect(notice.classList.contains("ah-role-body")).toBe(true);
     expect(center.getAttribute("data-ah-cc-launch-for")).toBe("Shield model hardening");
     // The new session, queued, under its initiative in the Initiatives panel.
     const row = [...center.querySelectorAll(".ah-initiative-row")]
@@ -1402,8 +1535,23 @@ const centerChecks = {
     expect(tab.getAttribute("data-ah-process-ringed")).toBe("2");
     const ringed = processButtons(tab).filter((b) => b.classList.contains("ah-rec-ringed"));
     expect(ringed.map((b) => b.textContent)).toEqual(["2"]);
-    // The ring and its halo: two box shadows outside the button (D81).
-    expect(getComputedStyle(ringed[0]).boxShadow.split("px,").length).toBe(2);
+    // The ring (D81, manager note 239): a 2px outline 1px clear of the
+    // button, at 3:1 or more against the tab's fill under it and against the
+    // bar the tab sits in (WCAG 2.2 SC 1.4.11).
+    const ringStyle = getComputedStyle(ringed[0]);
+    expect(ringStyle.outlineStyle).toBe("solid");
+    expect(ringStyle.outlineWidth).toBe("2px");
+    expect(ringStyle.outlineOffset).toBe("1px");
+    const grounds = [];
+    for (let el = ringed[0].parentElement; el && grounds.length < 2; el = el.parentElement) {
+      const bg = getComputedStyle(el).backgroundColor;
+      if (rgbOf(bg)[3] > 0 && (grounds.length === 0 || bg !== grounds[0])) grounds.push(bg);
+    }
+    expectRingClear(ringed[0]);
+    expect(grounds.length).toBe(2);   // the tab's fill, then the bar
+    for (const ground of grounds) {
+      expect(contrastOf(ringStyle.outlineColor, ground)).toBeGreaterThanOrEqual(3);
+    }
     expect(tab.getAttribute("data-ah-process-active")).toBe("1");
     expect(processButtons(tab)[1].getAttribute("title"))
       .toContain("a correlation marker (envelope-flow, step 1 204) leads here");
@@ -1415,6 +1563,23 @@ const centerChecks = {
     expect(more.textContent).toBe(narrow ? "+6" : "+3");
     // The failed worker is behind +N: the chip takes its error severity.
     expect(more.classList.contains("ah-att-failed")).toBe(true);
+    // Its tooltip names what it hides: processes, not recordings.
+    expect(more.getAttribute("title")).toMatch(/^\d+ more processes, 1 failed to load/);
+  }),
+  "agent-harbor-process-switcher-many-ringed": processCheck(async (tab, narrow) => {
+    // The marker leads to process 8, behind +N at every size: no shown
+    // button is ringed, the chip carries the ring (D80) at its weight
+    // (D81, manager note 239) and the tab says which process.
+    expect(tab.getAttribute("data-ah-process-ringed")).toBe("8");
+    expect(processButtons(tab).filter((b) => b.classList.contains("ah-rec-ringed")).length).toBe(0);
+    const more = tab.querySelector(".ah-rec-more");
+    expect(more.textContent).toBe(narrow ? "+6" : "+3");
+    expect(more.classList.contains("ah-rec-ringed")).toBe(true);
+    const ring = getComputedStyle(more);
+    expect(ring.outlineStyle).toBe("solid");
+    expect(ring.outlineWidth).toBe("2px");
+    expect(ring.outlineOffset).toBe("1px");
+    expectRingClear(more);
   }),
   "agent-harbor-process-switcher-loading-and-missing": processCheck(async (tab, narrow) => {
     const buttons = processButtons(tab);

@@ -247,11 +247,14 @@ proc hiddenRecordings*(states: openArray[RecordingState]): HiddenSummary =
 proc chipTitle*(h: HiddenSummary; noun, nouns: string): string =
   ## The chip's accessible name and tooltip: `3 more tabs, 1 failed, 1
   ## needing input`, so what the chip's colour says is also said in words.
+  ## A recording switcher's chip names what its buttons are: `recording`,
+  ## or `process` on a multi-process recording's tab (`ProcessNoun`).
+  let loaded = noun in ["recording", "process"]
   result = $h.hidden & " more " & (if h.hidden == 1: noun else: nouns)
   if h.failed > 0:
-    result.add ", " & $h.failed & (if noun == "recording": " failed to load" else: " failed")
+    result.add ", " & $h.failed & (if loaded: " failed to load" else: " failed")
   if h.waiting > 0:
-    result.add ", " & $h.waiting & (if noun == "recording": " missing" else: " needing input")
+    result.add ", " & $h.waiting & (if loaded: " missing" else: " needing input")
 
 proc chipPie*(h: HiddenSummary; noun, nouns: string): Option[ProgressPie] =
   ## The progress pie a `+N` chip draws beside its count: the role of the

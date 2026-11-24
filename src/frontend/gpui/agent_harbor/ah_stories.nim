@@ -590,9 +590,15 @@ proc mountAgentHarborStoryGpui*(r: GpuiRenderer; surface, fixture: string;
       r.mountControlCenter(host, m.center, p, bodyW, heightPx,
                            controlCenterPresses(keymap, m.center))
     of "agent-harbor-status-gaze":
+      # The status line under the control center, as L7 shows it (manager
+      # note 167): `ControlCenter`'s story, its presses routed.
       m.gaze = createGazeStoryVM(fixture, gazePauseChord())
+      m.center = createControlCenterStoryVM("populated")
+      let above = r.createElement("div")
+      r.mountControlCenter(above, m.center, p, bodyW, heightPx - StatusBarPx,
+                           controlCenterPresses(keymap, m.center))
       r.mountGazeStory(host, m.gaze, p, bodyW, heightPx,
-                       GazeStoryStatusItems, gazePresses(keymap, m.gaze))
+                       GazeStoryStatusItems, gazePresses(keymap, m.gaze), above)
     of ProcessSwitcherSurface:
       m.processes = createProcessSwitcherStoryVM(fixture)
       r.mountProcessSwitcherStory(host, m.processes, p, bodyW, heightPx, OtherTabTitle,

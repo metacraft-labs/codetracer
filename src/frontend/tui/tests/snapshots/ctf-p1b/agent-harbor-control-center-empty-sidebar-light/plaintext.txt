@@ -7,7 +7,27 @@
  Instruction
   What the task should do
                                              
- noir-space-ship · Claude · The server's ch…
+ Repository
+  noir-space-ship
+                                             
+ Branch
+  default branch
+                                             
+ Agents
+  ✓ Claude   Codex   Grok   Opencode
+  Antigravity
+                                             
+ Runs on
+  This machine   Executor
+  The server's choice
+                                             
+ Session name
+  named by the server
+                                             
+ Opens in
+  New tab   Split   Beside
+                                             
+ ▸ Schedule  Runs once, now
                                              
     Type the instruction to launch   Launch
                                              
@@ -21,26 +41,6 @@
  INITIATIVES  empty server
                                              
  No initiatives yet.
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
-                                             
                                              
                                              
                                              

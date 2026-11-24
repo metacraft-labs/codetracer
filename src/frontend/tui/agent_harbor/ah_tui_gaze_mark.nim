@@ -2,15 +2,16 @@
 ## status line gaze mark, over `GazeStatusVM` (nim-agents-isonim-viewmodels),
 ## drawn as the web's `isonim_agent_harbor_gaze_mark_view` draws it, from the
 ## same words (`agent_harbor_gaze_words`): while gaze is tracked `◉ Gaze` in
-## the caption role; while paused `⊘ Gaze paused` (the eye struck through);
-## when off, nothing.
+## the status line's ink (`statusLineInks`); while paused `⊘ Gaze paused`
+## (the eye struck through); when off, nothing.
 ##
 ## The story draws it where the web story does: on the window's last row,
-## the status line (the panel's ground, the language and the encoding at its
-## start), at the end of the line, a cell in from the edge. A press on it is
-## routed: it carries `gaze.toggle-pause` and reports the press to the
-## host's `GazePress`. A terminal maps gaze to cells only when the provider
-## can (Eye-Tracking-Context "Privacy and control"); the mark is the same.
+## the status line (on `statusLineInks`' ground, the language and the
+## encoding at its start), at the end of the line, a cell in from the edge,
+## under the control center as L7 shows it. A press on it is routed: it
+## carries `gaze.toggle-pause` and reports the press to the host's
+## `GazePress`. A terminal maps gaze to cells only when the provider can
+## (Eye-Tracking-Context "Privacy and control"); the mark is the same.
 ##
 ## Facts: `markFacts` on the story's root, `gaze-mark` on the mark.
 
@@ -27,24 +28,45 @@ proc markText*(vm: GazeStatusVM): string =
   ## What the mark draws: the glyph and the words; "" when off.
   if not vm.shown: "" else: vm.glyphOf & " " & vm.text
 
+proc statusLineInks*(c: AhCanvas): tuple[ground, ink: string] =
+  ## The status line's ground and its items' ink, on a ground no area of the
+  ## control center above it takes. Dark: `surface/base/raised` (#161616),
+  ## the items in the caption role (about 9:1). Light: `surface/base/card`
+  ## (#dbd6cc, 1.34:1 off a highlighted row's #f8f6f2 and 1.12:1 off the
+  ## panel), where the caption role falls to 3.2:1, so the items and the
+  ## mark take the label role (follow-up review round 2: `raised` was 1.03:1
+  ## off a highlighted initiative row at the sidebar's foot).
+  if c.p.mode == dmDark: (tokenHexOf(dtColorsUiSurfaceBaseRaised, c.p.mode), c.p.textCaption)
+  else: (tokenHexOf(dtColorsUiSurfaceBaseCard, c.p.mode), c.p.textLabel)
+
 proc drawGazeStory*(c: var AhCanvas; vm: GazeStatusVM; row, col, width, height: int;
-                    items: string; press: GazePress = nil) =
-  ## The story's window: an empty working area over the status line, the
-  ## mark at the line's end.
+                    items: string; press: GazePress = nil;
+                    above: proc(c: var AhCanvas) = nil) =
+  ## The story's window: the working area over the status line, the mark at
+  ## the line's end. `above` draws the working area (the control center as
+  ## L7 shows it, manager note 167), after the story's node, so the story's
+  ## node stays the view's root, and before the line, so nothing it draws
+  ## past its foot covers the line; nil: an empty working area on the web
+  ## story's canvas role. The line is on `statusLineInks`' ground, one no
+  ## area of the control center above it takes, in its ink.
   var facts = @[("surface", GazeSurface)]
   facts.add vm.markFacts
   let host = c.node(nil, row, col, width, height, facts)
-  # The working area above it: the web story's canvas role.
-  c.area("window", row, col, width, height - 1, tokenHexOf(dtColorsUiSurfaceBaseCanvas, c.p.mode))
+  if above.isNil:
+    c.area("window", row, col, width, height - 1,
+           tokenHexOf(dtColorsUiSurfaceBaseCanvas, c.p.mode))
+  else:
+    above(c)
   let line = row + height - 1
-  c.area("status-line", line, col, width, 1, c.tone.body)
-  let status = c.node(host, line, col, width, 1, [("status-line", "")])
-  discard c.text(status, line, col + 1, max(1, width - 2), items, c.p.textCaption)
+  let (lineGround, lineInk) = statusLineInks(c)
+  c.area("status-line", line, col, width, 1, lineGround)
+  let status = c.node(host, line, col, width, 1, [("status-line", "true")])
+  discard c.text(status, line, col + 1, max(1, width - 2), items, lineInk)
   let shown = vm.markText
   if shown.len == 0: return
   let w = widthOf(shown)
   let at = col + max(1, width - 1 - w)
-  discard c.put(line, at, shown, c.p.textCaption)
+  discard c.put(line, at, shown, lineInk)
   let mark = c.node(status, line, at, w, 1,
                     [("gaze-mark", $vm.state.val), ("tooltip", vm.tooltip),
                      ("accessible-name", vm.text), ("operation", GazeTogglePauseOperation)])

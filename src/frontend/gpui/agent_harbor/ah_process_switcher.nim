@@ -62,7 +62,7 @@ proc switcherDraw(r: GpuiRenderer; p: AhPalette; buttons: RecordingButtons;
   for rb in buttons.buttons:
     r.appendChild(result, r.drawRecordingButton(p, nil, "", rb, select))
   if buttons.hidden > 0:
-    r.appendChild(result, r.drawRecordingsMore(p, buttons))
+    r.appendChild(result, r.drawRecordingsMore(p, buttons, "process", "processes"))
 
 let RecordingSwitcherSlot* = SwitcherSlot(draw: switcherDraw)
   ## The recording switcher's own drawing (`ah_initiative_tab_bar`).

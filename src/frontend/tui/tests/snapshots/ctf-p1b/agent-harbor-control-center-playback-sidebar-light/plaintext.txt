@@ -8,7 +8,7 @@
  Instruction
   What the task should do
                                              
- noir-space-ship · Claude · The server's ch…
+ noir-space-ship · Claude
                                              
     Type the instruction to launch   Launch
                                              

@@ -93,7 +93,8 @@ proc renderAgentHarborProcessSwitcher*[R, N](r: R; vm: ProcessSwitcherVM;
       # `onSelect` until its buttons carry `data-ct-operation`.
       r.appendRendered(switchHost, renderRecordingSwitcher[R, N](r, buttons,
         proc(recordingId: string) =
-          if route != nil: route(ProcessSelectOperation, recordingId)))
+          if route != nil: route(ProcessSelectOperation, recordingId),
+        noun = "process", nouns = "processes"))
     r.appendRendered(bar, tabNode)
     let other = ui(r):
       tdiv(class = SessionTabClass):

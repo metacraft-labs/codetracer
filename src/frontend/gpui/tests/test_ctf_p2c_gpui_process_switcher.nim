@@ -24,7 +24,7 @@ import isonim_gpui/renderer
 from isonim_gpui/bindings import gpui_reset_tree
 
 import ../agent_harbor/ah_stories
-from ../agent_harbor/ah_initiative_tab_bar import ringInk
+from ../agent_harbor/ah_initiative_tab_bar import ringInk, RingMarginPx, RecordingButtonGapPx
 from ../chrome import contrastRatio
 import ../../styles/generated/design_tokens
 import ../../stories/agent_harbor_process_switcher_stories
@@ -113,6 +113,26 @@ suite "CTF-P2c: the GPUI process switcher's buttons":
     check b[0].tagged("recording-ring").len == 0
     m.dispose()
 
+  test "the ring is 2px, 1px clear of the button, with no halo":
+    # Manager note 239: the 1px ring read as another button's outline; the
+    # ring is 2px in the ring ink, 1px clear, the tab's fill between (no
+    # halo in either theme; study D81).
+    for mode in [dmDark, dmLight]:
+      let m = mount("correlation", mode = mode)
+      let rings = m.tab.tagged("recording-ring")
+      check rings.len == 1
+      check m.tab.tagged("recording-ring-halo").len == 0
+      check m.styleOf("recording-ring", "", "border_width") == "2px"
+      # From the button's padding edge, inside its 1px border: the ring's
+      # 2px end 1px clear of the button's outline.
+      check m.styleOf("recording-ring", "", "left") == "-4px"
+      # Clear of its neighbours by as much as its own gap and ring (3px): a
+      # 4px margin either side, with the buttons' 2px gap.
+      check m.styleOf("recording-ringed", "true", "margin_left") == $RingMarginPx & "px"
+      check m.styleOf("recording-ringed", "true", "margin_right") == $RingMarginPx & "px"
+      check RingMarginPx + RecordingButtonGapPx - 3 >= 3
+      m.dispose()
+
   test "the ring holds 3:1 against the tab's fill and its halo":
     # The ring is the only mark of its state (WCAG 2.2 SC 1.4.11; study
     # D81). Its control: the action border, which the ring first used, is
@@ -122,6 +142,8 @@ suite "CTF-P2c: the GPUI process switcher's buttons":
       let halo = DesignTokenHex[dtColorsUiSurfaceBaseCanvas][mode]
       check contrastRatio(ringInk(p), p.activeTab) >= 3.0
       check contrastRatio(ringInk(p), halo) >= 3.0
+      # And against the bar the tab sits in (manager note 239).
+      check contrastRatio(ringInk(p), p.ground) >= 3.0
     check contrastRatio(ahPalette(dmDark).borderAction, ahPalette(dmDark).activeTab) < 3.0
 
   test "behind +N, the ring is on the chip":
@@ -129,6 +151,7 @@ suite "CTF-P2c: the GPUI process switcher's buttons":
     check m.processes.markCorrelation("envelope-worker-6", "x")
     let more = m.tab.tagged("recordings-hidden")[0]
     check more.fact("recordings-hidden-ringed") == "true"
+    check more.fact("tooltip").startsWith("3 more processes")   # not recordings
     check more.tagged("recording-ring").len == 1
     check m.tab.tagged("recording").allIt(it.fact("recording-ringed") == "")
     m.dispose()

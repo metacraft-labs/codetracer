@@ -1,0 +1,56 @@
+ LAUNCH                                                                           WAITING FOR YOU                                                                        3 sessions
+  New task   New initiative                                                       Make calculate_damage safe for masses above u32
+                                                                                  needs input  Shield model hardening · 12m
+ For                                                                              Cast the masses to u64 before multiplying, or keep Field arithmetic and range-check the product?
+  No initiative   Shield model hardening
+  Tests on the arm64 and macOS runners   Asteroid fields as fixtures              Fix the negative-field test that times out on macOS
+  Release 0.4                                                                     needs input  Tests on the arm64 and macOS runners · 9m
+                                                                                  negative_field_fails takes 41 s on macos-arm64 against 6 s on Linux; raise its timeout, or split
+ Instruction                                                                      the field into two tests?
+  Add a test for a hit on an empty shield
+                                                                                  Write the 0.4 changelog
+ Repository                              Branch                                   idle  Release 0.4 · 31m
+  noir-space-ship                         test/empty-shield                       The 0.4 changelog lists the clamp, the regeneration cap and the fixture loader; over to you for
+                                                                                  the wording.
+ Agents
+  ✓ Claude   Codex   Grok   Opencode   Antigravity                                INITIATIVES  invented project noir-space-ship
+                                                                                                                    4 initiatives · 11 sessions · 2 need input · 1 in no initiative
+ Runs on                                                                          ▾ ● Shield model hardening                                                              2/5 · 40%
+  This machine   Executor   The server's choice                                       ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀       ● 2  ● 2  ● 1
+                                                                                      CURRENT SH-M1: Clamp at zero
+ Session name                                                                         noir-space-ship · manager sh-manager
+  named by the server                                                                  ● Make calculate_damage safe for masses above u32                                needs input
+                                                                                       ● Cap shield regeneration at the initial shield                                      running
+ Opens in                                                                              ● Clamp the shield at zero after a hit                                             completed
+  New tab   Split   Beside                                                             ● Add a test for an asteroid field that drains the shield                          completed
+                                                                                        +1 more
+ ▸ Schedule  Runs once, now                                                       ▾ ● Tests on the arm64 and macOS runners                                                1/4 · 25%
+                                                                                      ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  ● 1  ● 1  ● 1  ● 1
+                                                                Enter   Launch        CURRENT RR-M1: Remote test runs
+                                                                                      noir-space-ship · manager rr-manager
+ Could not launch: hub-a has no executor free for noir-space-ship                      ● Fix the negative-field test that times out on macOS                            needs input
+                                                                                       ● Run nargo test on the arm64 and macOS runners                                      running
+ RECENT LAUNCHES                                                                       ● Upload the test recordings from the remote runners                                  failed
+ Asteroid fields generated from seeds, end to end                                 ▾ ● Asteroid fields as fixtures                                                         2/4 · 50%
+ Agent Harbor · Plan started on hub-a · milestones/seeded-fields.milestones.org       ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀       ● 2  ● 1  ● 1
+ Make the regeneration cap configurable per ship                                      CURRENT AF-M2: Fixture loader
+ Manager of Shield model hardening · Started on hub-a · executor linux-x64-4…         noir-space-ship
+                                                                                       ● Load the asteroid fields from fixtures/*.toml                                      running
+                                                                                       ● Generate the negative asteroid field from a seed                                    queued
+                                                                                  ▾ ○ Release 0.4                                                                          0/3 · 0%
+                                                                                      ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀            ● 1  ● 2
+                                                                                      CURRENT R4-M0: Changelog
+                                                                                      noir-space-ship
+                                                                                       ○ Write the 0.4 changelog                                                               idle
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    
+                                                                                                                                                                                    

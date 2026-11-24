@@ -5,27 +5,27 @@
   No initiative   Shield model hardening    Field arithmetic and range-check the product?
   Tests on the arm64 and macOS runners
   Asteroid fields as fixtures               Fix the negative-field test that times out on mac…
-  Release 0.4                               needs input  Tests on the arm64 and macOS runners…
+  Release 0.4                               needs input  Tests on the arm64 and macOS ru… · 9m
                                             negative_field_fails takes 41 s on macos-arm64
  Instruction                                against 6 s on Linux; raise its timeout, or split…
-  What the task should do
-                                            Write the 0.4 changelog
- noir-space-ship · Claude · The server's…   idle  Release 0.4 · 31m
-                                            The 0.4 changelog lists the clamp, the
- Type the instruction to launch   Launch    regeneration cap and the fixture loader; over to …
+ Add a test for a hit on an
+ empty shield                               Write the 0.4 changelog
+                                            idle  Release 0.4 · 31m
+ noir-space-ship                            The 0.4 changelog lists the clamp, the
+ test/empty-shield · Claude                 regeneration cap and the fixture loader; over to…
                                                                                                
- Started on hub-a ·                         INITIATIVES  invented project noir-space-ship
- executor ws-ada · session 8c1a13                                4 initiatives · 12 sessions ·
-                                                             2 need input · 1 in no initiative
- RECENT LAUNCHES                            ▾ ● Shield model hardening               2/5 · 40%
- Add a test for a hit on an empty shield        ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀       ● 2  ● 2  ● 1
- Manager of Shield model hardening · Sta…       CURRENT SH-M1: Clamp at zero
- Asteroid fields generated from seeds, e…       noir-space-ship · manager sh-manager
- Agent Harbor · Plan started on hub-a…           ● Make calculate_damage safe fo…  needs input
- Make the regeneration cap configurable…         ● Cap shield regeneration at the in…  running
- Manager of Shield model hardening · Sta…        ● Add a test for a hit on an empty s…  queued
+                                ⠋ Launch    INITIATIVES  invented project noir-space-ship
+                                                                 4 initiatives · 11 sessions ·
+ Launching…                                                  2 need input · 1 in no initiative
+                                            ▾ ● Shield model hardening               2/5 · 40%
+ RECENT LAUNCHES                                ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀       ● 2  ● 2  ● 1
+ Asteroid fields generated from seeds, e…       CURRENT SH-M1: Clamp at zero
+ Agent Harbor · Plan started on hub-a…          noir-space-ship · manager sh-manager
+ Make the regeneration cap configurable…         ● Make calculate_damage safe fo…  needs input
+ Manager of Shield model hardening · Sta…        ● Cap shield regeneration at the in…  running
                                                  ● Clamp the shield at zero after…   completed
-                                                  +2 more
+                                                 ● Add a test for an asteroid fiel…  completed
+                                                  +1 more
                                             ▾ ● Tests on the arm64 and macOS runne…  1/4 · 25%
                                                 ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  ● 1  ● 1  ● 1  ● 1
                                                 CURRENT RR-M1: Remote test runs

@@ -7,36 +7,36 @@
   Release 0.4                                                                     needs input  Tests on the arm64 and macOS runners · 9m
                                                                                   negative_field_fails takes 41 s on macos-arm64 against 6 s on Linux; raise its timeout, or split the field into two tests?
  Instruction
-  What the task should do                                                         Write the 0.4 changelog
+ Add a test for a hit on an empty shield                                          Write the 0.4 changelog
                                                                                   idle  Release 0.4 · 31m
  Repository                              Branch                                   The 0.4 changelog lists the clamp, the regeneration cap and the fixture loader; over to you for the wording.
-  noir-space-ship                         default branch
-                                                                                  INITIATIVES  invented project noir-space-ship                                                 4 initiatives · 12 sessions · 2 need input · 1 in no initiative
+ noir-space-ship                         test/empty-shield
+                                                                                  INITIATIVES  invented project noir-space-ship                                                 4 initiatives · 11 sessions · 2 need input · 1 in no initiative
  Agents                                                                           ▾ ● Shield model hardening                                     2/5 · 40%    ● Make calculate_damage safe for masses above u32                     needs input
   ✓ Claude   Codex   Grok   Opencode   Antigravity                                    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀       ● 2  ● 2  ● 1     ● Cap shield regeneration at the initial shield                           running
-                                                                                      CURRENT SH-M1: Clamp at zero                                            ● Add a test for a hit on an empty shield                                  queued
- Runs on                                                                              noir-space-ship · manager sh-manager                                    ● Clamp the shield at zero after a hit                                  completed
-  This machine   Executor   The server's choice                                                                                                                +2 more
+                                                                                      CURRENT SH-M1: Clamp at zero                                            ● Clamp the shield at zero after a hit                                  completed
+ Runs on                                                                              noir-space-ship · manager sh-manager                                    ● Add a test for an asteroid field that drains the shield               completed
+  This machine   Executor   The server's choice                                                                                                                +1 more
                                                                                   ▾ ● Tests on the arm64 and macOS runners                       1/4 · 25%    ● Fix the negative-field test that times out on macOS                 needs input
  Session name                                                                         ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀  ● 1  ● 1  ● 1  ● 1     ● Run nargo test on the arm64 and macOS runners                           running
-  named by the server                                                                 CURRENT RR-M1: Remote test runs                                         ● Upload the test recordings from the remote runners                       failed
+ named by the server                                                                  CURRENT RR-M1: Remote test runs                                         ● Upload the test recordings from the remote runners                       failed
                                                                                       noir-space-ship · manager rr-manager
  Opens in                                                                         ▾ ● Asteroid fields as fixtures                                2/4 · 50%    ● Load the asteroid fields from fixtures/*.toml                           running
   New tab   Split   Beside                                                            ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀       ● 2  ● 1  ● 1     ● Generate the negative asteroid field from a seed                         queued
                                                                                       CURRENT AF-M2: Fixture loader
  ▸ Schedule  Runs once, now                                                           noir-space-ship
                                                                                   ▾ ○ Release 0.4                                                 0/3 · 0%    ○ Write the 0.4 changelog                                                    idle
-                                       Type the instruction to launch   Launch        ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀            ● 1  ● 2
+                                                                      ⠋ Launch        ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀            ● 1  ● 2
                                                                                       CURRENT R4-M0: Changelog
- Started on hub-a · executor ws-ada · session 8c1a13                                  noir-space-ship
+ Launching…                                                                           noir-space-ship
                                                                                                                                                                                                                                                 
  RECENT LAUNCHES
- Add a test for a hit on an empty shield
- Manager of Shield model hardening · Started on hub-a · executor ws-ada · sess…
  Asteroid fields generated from seeds, end to end
  Agent Harbor · Plan started on hub-a · milestones/seeded-fields.milestones.org
  Make the regeneration cap configurable per ship
  Manager of Shield model hardening · Started on hub-a · executor linux-x64-4…
+                                                                                                                                                                                                                                                
+                                                                                                                                                                                                                                                
                                                                                                                                                                                                                                                 
                                                                                                                                                                                                                                                 
                                                                                                                                                                                                                                                 

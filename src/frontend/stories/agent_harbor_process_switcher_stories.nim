@@ -33,7 +33,11 @@ const
   CorrelationWords* = "a correlation marker (envelope-flow, step 1 204) leads here"
     ## What the ringed button's tooltip adds: the marker at the reader's
     ## position whose counterpart is in that process.
-  processSwitcherFixtures* = ["three", "correlation", "many", "loading-and-missing"]
+  HiddenCorrelationWords* = "a correlation marker (envelope-flow, step 2 311) leads here"
+    ## The many-ringed story's marker: its counterpart is in the sixth
+    ## worker, a process behind `+N`.
+  processSwitcherFixtures* = ["three", "correlation", "many", "many-ringed",
+                              "loading-and-missing"]
     ## Every fixture an `agent-harbor-process-switcher` story may name.
 
 proc process(id, role: string; pid: int; binary: string;
@@ -82,6 +86,12 @@ proc createProcessSwitcherStoryVM*(fixture: string): ProcessSwitcherVM =
     vm
   of "many":
     newProcessSwitcherVM(EnvelopeFlowTitle, manyProcesses(), "envelope-frontend")
+  of "many-ringed":
+    # The marker leads to the sixth worker, process 8: behind `+N` at every
+    # size, so the chip carries the ring (study D80).
+    let vm = newProcessSwitcherVM(EnvelopeFlowTitle, manyProcesses(), "envelope-frontend")
+    doAssert vm.markCorrelation("envelope-worker-6", HiddenCorrelationWords)
+    vm
   of "loading-and-missing":
     newProcessSwitcherVM(EnvelopeFlowTitle, loadingProcesses(), "envelope-frontend")
   else:

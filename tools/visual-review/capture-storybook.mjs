@@ -351,11 +351,13 @@ for (const [name, storyId] of Object.entries(agentHarborViews)) {
 // is captured at a window's sizes as well as a panel's and a sidebar's (its
 // one-column state), in the family `agent-harbor-control-center`; and the
 // status line's gaze mark, in `agent-harbor-status-gaze`, at the laptop and
-// sidebar sizes.
+// sidebar sizes: the status line under the control center, as L7 shows it.
 const controlCenterExports = [
   "ControlCenter",
   "ControlCenterEmpty",
   "ControlCenterLaunching",
+  "ControlCenterLaunched",
+  "ControlCenterLaunchFailed",
   "ControlCenterLoading",
   "ControlCenterError",
   "ControlCenterPlayback",
@@ -365,7 +367,8 @@ const gazeExports = ["StatusGazeOff", "StatusGazeTracking", "StatusGazePaused"];
 // step 5), in the family `agent-harbor-process-switcher`, at the panel,
 // sidebar and laptop sizes.
 const processSwitcherExports = ["ProcessSwitcher", "ProcessSwitcherCorrelation",
-                                "ProcessSwitcherMany", "ProcessSwitcherLoading"];
+                                "ProcessSwitcherMany", "ProcessSwitcherManyRinged",
+                                "ProcessSwitcherLoading"];
 for (const name of controlCenterExports) {
   const view = `agent-harbor-${kebab(name)}`;
   agentHarborViews[view] = `codetracer-agent-harbor--${kebab(name)}`;

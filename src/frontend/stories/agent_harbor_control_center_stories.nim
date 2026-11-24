@@ -30,7 +30,8 @@ import ./agent_harbor_stories
 export control_center_vm
 
 const
-  controlCenterFixtures* = ["populated", "empty", "launching", "loading", "error"]
+  controlCenterFixtures* = ["populated", "empty", "launching", "launched", "launch-failed",
+                           "loading", "error"]
     ## Every fixture an `agent-harbor-control-center` story may name besides
     ## its playback (`playback-front-ends`).
   ControlCenterSurfaceName* = "agent-harbor-control-center"
@@ -43,7 +44,9 @@ const
   SeededFieldsInitiative* = "Asteroid fields generated from seeds, end to end"
   EmptyShieldTask* = "Add a test for a hit on an empty shield"
   LaunchedSession* = "5c1a3e70-7b2d-4c11-9a0e-3f6d2b8c1a13"
-    ## The session the launching story's launch starts.
+    ## The session the launched story's launch starts.
+  LaunchFailure* = "hub-a has no executor free for noir-space-ship"
+    ## Agent Harbor's answer to the launch-failed story's launch (invented).
 
 proc noticeFor(session, executor: string): string =
   "Started on hub-a" & Dot & "executor " & executor & Dot & "session " & session
@@ -139,17 +142,26 @@ proc createControlCenterStoryVM*(fixture: string; playback: AhPlayback = nil): C
     result = newStoryControlCenter(newSnapshotDataSource(
       FleetSnapshot(capturedAtMs: ControlCenterNowMs, sourceLabel: "empty server"),
       "empty server"), actions)
-  of "launching":
+  of "launching", "launched", "launch-failed":
+    # The same launch at three moments: `Launch` pressed and Agent Harbor
+    # not answering yet (the form locked); answered, its session queued
+    # under its initiative (the form ready for the next one); refused (the
+    # instruction back in the field). Study D70, D74.
     let source = projectSource()
     result = newStoryControlCenter(source, actions)
     result.launchHistory(actions)
     result.chooseInitiative(ShieldInitiative)
-    actions.script.setRule(oaLaunchTask, confirmedWith(noticeFor("8c1a13", "ws-ada")))
+    actions.script.setRule(oaLaunchTask,
+      case fixture
+      of "launching": neverAnswered()
+      of "launch-failed": failedWith(LaunchFailure)
+      else: confirmedWith(noticeFor("8c1a13", "ws-ada")))
     result.composer.setText(EmptyShieldTask)
     result.composer.updateLaunch(launchOptions("test/empty-shield"))
     result.composer.submit()
-    # The server's next frame: the session the launch started, queued.
-    discard source.sendFrame(FleetFrame(kind: ffSession, session: launchedSession()))
+    if fixture == "launched":
+      # The server's next frame: the session the launch started, queued.
+      discard source.sendFrame(FleetFrame(kind: ffSession, session: launchedSession()))
   else:
     result = newStoryControlCenter(projectSource(), actions)
     result.launchHistory(actions)

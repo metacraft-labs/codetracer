@@ -9,11 +9,11 @@
  Instruction
   What the task should do
                                              
- noir-space-ship · Claude · The server's ch…
+ noir-space-ship · Claude
                                              
     Type the instruction to launch   Launch
                                              
- Plan started on hub-a ·
+ Plan started on hub-a
  milestones/seeded-fields.milestones.org
                                              
  RECENT LAUNCHES
@@ -27,17 +27,17 @@
  Make calculate_damage safe for masses abov…
  needs input  Shield model hardening · 12m
  Cast the masses to u64 before multiplying,
- or keep Field arithmetic and range-check …
+ or keep Field arithmetic and range-check…
                                              
  Fix the negative-field test that times out…
- needs input  Tests on the arm64 and macOS…
+ needs input  Tests on the arm64 and m… · 9m
  negative_field_fails takes 41 s on
- macos-arm64 against 6 s on Linux; raise it…
+ macos-arm64 against 6 s on Linux; raise…
                                              
  Write the 0.4 changelog
  idle  Release 0.4 · 31m
  The 0.4 changelog lists the clamp, the
- regeneration cap and the fixture loader; …
+ regeneration cap and the fixture loader…
                                              
  INITIATIVES
  invented project noir-space-ship
