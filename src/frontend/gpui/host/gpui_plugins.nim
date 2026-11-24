@@ -76,18 +76,55 @@ proc openWindowPlugins*(session: SessionViewModel; noExtensionsFlag: bool;
                               surfaces = feGpui)
   result.attach(session, id)
 
+const
+  GpuiPluginJumpPrefix* = "jump:"
+    ## A queued call-trace jump: `jump:<plugin>\t<line index>`.
+  GpuiPluginWatchPrefix* = "watch:"
+    ## A queued watch: `watch:<plugin>\t<expression>`.
+
 proc routeMovesToControls*(p: SessionPlugins; queue: ref seq[string]) =
-  ## Take the plugins' debugger moves into `queue` (transport control ids),
-  ## for the window's loop to run as its own.
+  ## Take the plugins' relayed moves into `queue` for the window's loop to run
+  ## as its own: a debugger move as its transport control id, a call-trace
+  ## jump as `jump:` and an added watch as `watch:`. Each then takes the
+  ## window's own path (the toolbar press, the call trace row's jump, the
+  ## Watches edit) and the window redraws what it moved; applied on the
+  ## session behind the window's loop, a jump or a watch was not drawn until
+  ## the next step.
   if p.isNil: return
   p.sup.actionHook = proc(msg: JsonNode; refusal: var string): bool =
-    if msg{"vm"}.getStr("") != "debugControls": return false
+    let vm = msg{"vm"}.getStr("")
     let action = msg{"action"}.getStr("")
-    for (name, control) in GpuiPluginMoves:
-      if name == action:
-        queue[].add control
-        return true
-    false
+    let plugin = msg{"plugin"}.getStr("")
+    let args = msg{"args"}
+    case vm
+    of "debugControls":
+      for (name, control) in GpuiPluginMoves:
+        if name == action:
+          queue[].add control
+          return true
+      false
+    of "calltrace":
+      if action != "doubleClickEntry": return false
+      if args.isNil or args{"lineIndex"}.isNil:
+        refusal = "a call-trace jump names no call"
+        return false
+      queue[].add GpuiPluginJumpPrefix & plugin & "\t" & $args{"lineIndex"}.getBiggestInt
+      true
+    of "state":
+      if action != "addWatch": return false
+      let expression = if args.isNil: "" else: args{"expression"}.getStr("")
+      if expression.strip.len == 0:
+        refusal = "a watch names no expression"
+        return false
+      queue[].add GpuiPluginWatchPrefix & plugin & "\t" & expression
+      true
+    else:
+      false
+
+proc refuseRelayed*(p: SessionPlugins; plugin, why: string) =
+  ## A relayed jump or watch the window could not carry out, refused like any
+  ## other push: the status line and the notes name the plugin.
+  if not p.isNil: p.sup.refuseRelayed(plugin, why)
 
 func pluginKeyName*(canonical: string): string =
   ## A window key's canonical name (`gpui_keys.canonicalKeyOfGpui`) as the
