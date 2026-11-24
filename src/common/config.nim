@@ -134,13 +134,12 @@ type
     ui* {.defaultVal: "".}:                               string
 
     ## The desktop's editor pane draws the shared editing core (the editor the
-    ## terminal and the GPUI window use) instead of Monaco. A DEVELOPER
-    ## setting, off by default; `CODETRACER_SHARED_EDITOR=1` / `=0` overrides
-    ## it for one launch, and the command palette's "Developer: Toggle Shared
-    ## Editor" switches an open window without a restart
-    ## (codetracer-pm Editor-ViewModel.md §3.2a; the parity table is
-    ## docs/shared-editor-parity.md).
-    sharedEditor* {.defaultVal: false.}:                  bool
+    ## terminal and the GPUI window use). On by default; `false` keeps Monaco.
+    ## `CODETRACER_SHARED_EDITOR=0` / `=1` overrides it for one launch, and the
+    ## command palette's "Developer: Toggle Shared Editor" switches an open
+    ## window without a restart (codetracer-pm Editor-ViewModel.md §3.2a; the
+    ## parity table is docs/shared-editor-parity.md).
+    sharedEditor* {.defaultVal: true.}:                   bool
 
     ## The Agent Harbor server worktree agent sessions start on
     ## (Agentic-Coding-Integration.md §6.8).

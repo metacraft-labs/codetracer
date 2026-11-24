@@ -2,7 +2,7 @@ scenario: 1
 name: keymaps/monaco-unbound-f7-does-nothing
 pack: codetracer
 summary: >-
-  In Monaco, the default editor (the sharedEditor setting is off), a
+  In Monaco (the sharedEditor setting off, which this scenario sets), a
   shortcut that no keymap binds does nothing. Monaco's own F7 and Shift+F7
   move to the next or previous occurrence of the word under the caret, and
   the CUA base gives them to the diff editor only. With the caret on `left`
@@ -14,6 +14,8 @@ summary: >-
 stage:
   - use: record-program
     with: { program: calc }
+  - use: front-end-options
+    with: { env: { CODETRACER_SHARED_EDITOR: "0" } }
   - use: open-recording
 
 steps:

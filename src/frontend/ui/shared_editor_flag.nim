@@ -1,9 +1,9 @@
 ## ui/shared_editor_flag.nim — which editor the desktop's editor pane draws.
 ##
-## The developer setting `sharedEditor` (`common/config.nim`; off by default,
-## `CODETRACER_SHARED_EDITOR=1` / `=0` overrides it for one launch,
-## `index/config.loadConfig`) chooses between Monaco and the shared editing
-## core (`ui/shared_editor`). The command palette's **Developer: Toggle Shared
+## The setting `sharedEditor` (`common/config.nim`; on by default,
+## `CODETRACER_SHARED_EDITOR=0` / `=1` overrides it for one launch,
+## `index/config.loadConfig`) chooses between the shared editing core
+## (`ui/shared_editor`) and Monaco. The command palette's **Developer: Toggle Shared
 ## Editor** flips it in a running window (`setSharedEditorOverride`); the
 ## editor pane then re-mounts every open source editor with the other editor
 ## (`editor.remountSourceEditors`), keeping each one's caret line.
@@ -18,9 +18,11 @@ var runtimeOverride = -1
   ## window.
 
 proc configuredSharedEditor(config: Config): bool =
-  if config.isNil: return false
-  var on = false
-  {.emit: [on, " = !!(", config, " && ", config, ".sharedEditor === true);"].}
+  ## On unless the configuration says `false`: a configuration without the
+  ## key (an older file) gets the default, the shared editor.
+  if config.isNil: return true
+  var on = true
+  {.emit: [on, " = (", config, ".sharedEditor !== false);"].}
   on
 
 proc sharedEditorEnabled*(config: Config): bool =

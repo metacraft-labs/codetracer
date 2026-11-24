@@ -6062,6 +6062,11 @@ plat35-capture-electron *args:
   # (`lib/performance-limits.ts`, `CODETRACER_PERF_LIMIT_SCALE`).
   export CODETRACER_PERF_LIMIT_SCALE="${CODETRACER_PERF_LIMIT_SCALE:-4}"
   export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
+  # The editor the oracle's readings (LAW-R5, the tier-4 readings) were taken
+  # on: Monaco, behind the `sharedEditor` setting since the shared editor
+  # became the default. Re-measure on the shared editor before dropping this
+  # (codetracer-pm issues/2026-11-23-electron-captures-pinned-to-monaco-…).
+  export CODETRACER_SHARED_EDITOR="${CODETRACER_SHARED_EDITOR:-0}"
   # THE `calc` RECORDING, recorded when this host has none (a CI job that runs
   # no terminal lane first) — the spec refuses without it.
   bash scripts/record-calc-fixture.sh
@@ -6090,7 +6095,9 @@ plat35-capture-electron *args:
 # Xvfb, as `plat35-capture-electron` does, when no display is set.
 [positional-arguments]
 plat45-capture-electron *args:
-  bash scripts/plat45-capture-electron.sh "$@"
+  # Measured on Monaco: pinned to it until re-measured on the shared editor
+  # (codetracer-pm issues/2026-11-23-electron-captures-pinned-to-monaco-…).
+  CODETRACER_SHARED_EDITOR="${CODETRACER_SHARED_EDITOR:-0}" bash scripts/plat45-capture-electron.sh "$@"
 
 # PLAT-45: the GPUI window's FIRST SCREEN, on a headless sway, with no
 # remembered layout — the frame `plat45-window-record` reads the arrangement
@@ -6314,6 +6321,11 @@ plat69-window-chrome *scenarios:
 plat46-capture-electron *args:
   #!/usr/bin/env bash
   set -euo pipefail
+  # Measured on Monaco: pinned to it (CODETRACER_SHARED_EDITOR=0) since the
+  # shared editor became the default; the re-measure on the shared editor is
+  # owed (codetracer-pm issues/2026-11-23-electron-captures-pinned-to-monaco-
+  # owe-a-re-measure-on-the-shared-editor.md).
+  export CODETRACER_SHARED_EDITOR="${CODETRACER_SHARED_EDITOR:-0}"
   export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
   case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*|*_NT*|Darwin)
@@ -6337,7 +6349,9 @@ plat46-capture-electron *args:
 # JavaScript in a prefix of its own (scripts/plat45-desktop-prefix.sh).
 [positional-arguments]
 plat47-capture-electron *args:
-  bash scripts/plat47-capture-electron.sh "$@"
+  # Measured on Monaco: pinned to it until re-measured on the shared editor
+  # (codetracer-pm issues/2026-11-23-electron-captures-pinned-to-monaco-…).
+  CODETRACER_SHARED_EDITOR="${CODETRACER_SHARED_EDITOR:-0}" bash scripts/plat47-capture-electron.sh "$@"
 
 # PLAT-48: the desktop's menu drawn from the shared Menu ViewModel (the
 # verification gate: a ViewModel-only highlight change moves the DOM's), its
@@ -6353,7 +6367,9 @@ plat48-capture-electron *args:
 # `src/tests/visual/answers/plat49-chrome.electron.json`.
 [positional-arguments]
 plat49-capture-electron *args:
-  bash scripts/plat49-capture-electron.sh "$@"
+  # Measured on Monaco: pinned to it until re-measured on the shared editor
+  # (codetracer-pm issues/2026-11-23-electron-captures-pinned-to-monaco-…).
+  CODETRACER_SHARED_EDITOR="${CODETRACER_SHARED_EDITOR:-0}" bash scripts/plat49-capture-electron.sh "$@"
 
 # PLAT-54: the desktop's Agent Activity pane over the AA suites' replayed agent
 # sessions — every evidence card and the `ct test` run card, word for word —
@@ -6361,7 +6377,9 @@ plat49-capture-electron *args:
 # which the terminal's Agent Activity suite asserts its feed against.
 [positional-arguments]
 plat54-capture-electron *args:
-  bash scripts/plat54-capture-electron.sh "$@"
+  # Measured on Monaco: pinned to it until re-measured on the shared editor
+  # (codetracer-pm issues/2026-11-23-electron-captures-pinned-to-monaco-…).
+  CODETRACER_SHARED_EDITOR="${CODETRACER_SHARED_EDITOR:-0}" bash scripts/plat54-capture-electron.sh "$@"
 
 # PLAT-58: the desktop's REQUESTS panel on the RS-M4 demo session, as the
 # terminal's and GPUI's Requests panes are measured against it — written to
@@ -6382,7 +6400,9 @@ plat61-capture-electron *args:
 # written to `src/tests/visual/answers/plat50-desktop.electron.json`.
 [positional-arguments]
 plat50-capture-electron *args:
-  bash scripts/plat50-capture-electron.sh "$@"
+  # Measured on Monaco: pinned to it until re-measured on the shared editor
+  # (codetracer-pm issues/2026-11-23-electron-captures-pinned-to-monaco-…).
+  CODETRACER_SHARED_EDITOR="${CODETRACER_SHARED_EDITOR:-0}" bash scripts/plat50-capture-electron.sh "$@"
 
 # The desktop's Terminal Output pane as the terminal's and GPUI's are measured
 # against it: its lines and their computed styles, a click on a fragment, its
@@ -6408,7 +6428,9 @@ plat53-capture-electron *args:
 # `src/tests/visual/answers/plat62-constraints.electron.json`.
 [positional-arguments]
 plat62-capture-electron *args:
-  bash scripts/plat62-capture-electron.sh "$@"
+  # Measured on Monaco: pinned to it until re-measured on the shared editor
+  # (codetracer-pm issues/2026-11-23-electron-captures-pinned-to-monaco-…).
+  CODETRACER_SHARED_EDITOR="${CODETRACER_SHARED_EDITOR:-0}" bash scripts/plat62-capture-electron.sh "$@"
 
 # PLAT-55: the desktop's Problems panel is the reference the terminal's and the
 # GPUI window's are measured against: its rows after a real `nargo compile` of
@@ -6417,7 +6439,9 @@ plat62-capture-electron *args:
 # `src/tests/visual/answers/plat55-problems.electron.json`.
 [positional-arguments]
 plat55-capture-electron *args:
-  bash scripts/plat55-capture-electron.sh "$@"
+  # Measured on Monaco: pinned to it until re-measured on the shared editor
+  # (codetracer-pm issues/2026-11-23-electron-captures-pinned-to-monaco-…).
+  CODETRACER_SHARED_EDITOR="${CODETRACER_SHARED_EDITOR:-0}" bash scripts/plat55-capture-electron.sh "$@"
 
 # PLAT-56: the desktop's BUILD panel and status bar are the reference the
 # terminal's and the GPUI window's Build Output panes are measured against:
@@ -6427,7 +6451,9 @@ plat55-capture-electron *args:
 # `src/tests/visual/answers/plat56-build-output.electron.json`.
 [positional-arguments]
 plat56-capture-electron *args:
-  bash scripts/plat56-capture-electron.sh "$@"
+  # Measured on Monaco: pinned to it until re-measured on the shared editor
+  # (codetracer-pm issues/2026-11-23-electron-captures-pinned-to-monaco-…).
+  CODETRACER_SHARED_EDITOR="${CODETRACER_SHARED_EDITOR:-0}" bash scripts/plat56-capture-electron.sh "$@"
 
 # Build-Output-Pane.md §3.2, §3.6, §3.8, §3.9, §3.11, §3.12: the desktop's
 # build tasks, task picker, Stop, BUILD panel reveal and editor diagnostics,
@@ -6756,6 +6782,11 @@ plat40-capture-window:
 plat40-capture-electron *args:
   #!/usr/bin/env bash
   set -euo pipefail
+  # Measured on Monaco: pinned to it (CODETRACER_SHARED_EDITOR=0) since the
+  # shared editor became the default; the re-measure on the shared editor is
+  # owed (codetracer-pm issues/2026-11-23-electron-captures-pinned-to-monaco-
+  # owe-a-re-measure-on-the-shared-editor.md).
+  export CODETRACER_SHARED_EDITOR="${CODETRACER_SHARED_EDITOR:-0}"
   export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
   case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*|*_NT*|Darwin)
@@ -6791,6 +6822,11 @@ plat41-capture-window:
 plat41-capture-electron *args:
   #!/usr/bin/env bash
   set -euo pipefail
+  # Measured on Monaco: pinned to it (CODETRACER_SHARED_EDITOR=0) since the
+  # shared editor became the default; the re-measure on the shared editor is
+  # owed (codetracer-pm issues/2026-11-23-electron-captures-pinned-to-monaco-
+  # owe-a-re-measure-on-the-shared-editor.md).
+  export CODETRACER_SHARED_EDITOR="${CODETRACER_SHARED_EDITOR:-0}"
   export CODETRACER_ELECTRON_ARGS="${CODETRACER_ELECTRON_ARGS:---no-sandbox --no-zygote --disable-gpu --disable-gpu-compositing --disable-dev-shm-usage}"
   case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*|*_NT*|Darwin)

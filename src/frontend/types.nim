@@ -2346,8 +2346,9 @@ type
       ## file has none. `index/config` applies `CODETRACER_AGENT_HARBOR_URL`
       ## and `CODETRACER_AGENT_HARBOR_API_KEY` over it.
       ## `sharedEditor:` (see `common/config.nim`): the editor pane draws the
-      ## shared editing core instead of Monaco. js-yaml leaves it undefined
-      ## (falsy) in a config written before it existed; `index/config`
+      ## shared editing core, or Monaco when it is `false`. js-yaml leaves it
+      ## undefined in a config written before it existed, which
+      ## `shared_editor_flag` reads as the default (on); `index/config`
       ## applies `CODETRACER_SHARED_EDITOR` over it.
     window*:                  WindowConfig
       ## PLAT-69: the `window:` entry, as js-yaml read it. nil (undefined)

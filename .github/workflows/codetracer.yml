@@ -6811,6 +6811,30 @@ jobs:
           build-dir: build
           name: scenario-runs-electron
 
+      - name: Scenarios — the desktop lane with Monaco
+        # The same lane with the editor pane drawn by Monaco
+        # (`CODETRACER_SHARED_EDITOR=0`; the shared editor is the default, and
+        # Monaco stays behind the `sharedEditor` setting until it is dropped —
+        # docs/shared-editor-parity.md). Scenarios that pin an editor in their
+        # stage (`front-end-options`) keep it. The run before this one is the
+        # default, the shared editor.
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.platform == 'nixos' }}
+        env:
+          CODETRACER_PRIVATE_RECORDINGS: ${{ github.workspace }}/../codetracer-private-recordings
+          CT_SYMBOL_SERVER: "off"
+          CODETRACER_SHARED_EDITOR: "0"
+        run: |
+          nix develop .#devShells.x86_64-linux.default --command bash -c '
+            set -e
+            just scenario-lane-xvfb electron'
+
+      - name: Upload the failed scenario runs (desktop, Monaco)
+        if: ${{ failure() && matrix.platform == 'nixos' }}
+        uses: metacraft-labs/DemoVideoScript/.github/actions/upload-failed-runs@028ea4f6704fc5377e2c6b7021a9e048c15c9f92
+        with:
+          build-dir: build
+          name: scenario-runs-electron-monaco
+
       - name: Event Log stays static across a jump
         # Only with a ct, or an earlier failure resurfaces as `ct ENOENT`.
         if: ${{ !cancelled() && (steps.ct.outcome == 'success' || steps.ct-darwin.outcome == 'success') }}
