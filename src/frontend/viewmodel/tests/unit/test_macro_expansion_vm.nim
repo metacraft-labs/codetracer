@@ -12,15 +12,24 @@
 ## `tui/tests/test_macro_expansion_native.nim` and `test_pane_server`'s §E15
 ## case. The expansion's text comes from a stub `SourceProvider`, the seam
 ## the ViewModel reads through.
+##
+## Each toggle is followed by `replayAnswers()`: under `nim js` a completed
+## future's callback is queued, not run (`async_compat.onComplete`), so the
+## answer lands when the platform's callbacks are drained, as the event loop
+## would drain them.
 
 import std/[json, options, unittest]
 
-import isonim/core/[signals]
+import isonim/core/[signals, async_compat]
 
 import backend/[backend_service, mock_backend]
 import store/[replay_data_store, types]
 import viewmodels/[macro_expansion_vm, source_vm]
 import sdk/source_provider
+
+proc replayAnswers() =
+  ## The replay's answer arrives: run the callbacks the sends queued.
+  drainPlatformCallbacks()
 
 const
   Main = "/work/nim_macro_steps/main.nim"
@@ -91,6 +100,7 @@ suite "§E15: MacroExpansionVM":
     mock.expect("ct/update-expansion", expandAnswer())
     var said = ""
     vm.toggle(Main, 17, proc(ok: bool; detail: string) = said = detail)
+    replayAnswers()
     let sent = mock.findCommand("ct/update-expansion")
     check sent.isSome
     if sent.isSome:
@@ -110,6 +120,7 @@ suite "§E15: MacroExpansionVM":
     mock.expect("ct/update-expansion", nothingAnswer())
     var answer = (ok: true, detail: "")
     vm.toggle(Main, 16, proc(ok: bool; detail: string) = answer = (ok, detail))
+    replayAnswers()
     check answer == (ok: false, detail: "No macro expansion at main.nim:16")
     check vm.expansions.val.len == 0
 
@@ -117,6 +128,7 @@ suite "§E15: MacroExpansionVM":
     let (mock, store, vm) = setup()
     mock.expect("ct/update-expansion", expandAnswer())
     vm.toggle(Main, 17)
+    replayAnswers()
     store.applyCompleteMove(insideMove())
     let e = vm.expansions.val[0]
     check vm.executionRow(e) == 3
@@ -136,10 +148,12 @@ suite "§E15: MacroExpansionVM":
     let (mock, _, vm) = setup()
     mock.expect("ct/update-expansion", expandAnswer())
     vm.toggle(Main, 17)
+    replayAnswers()
     mock.clearReceivedCommands()
     mock.expect("ct/update-expansion", %*{"success": true, "body": {}})
     var said = ""
     vm.toggle(Main, 17, proc(ok: bool; detail: string) = said = detail)
+    replayAnswers()
     check not vm.isOpen(Main, 17)
     check said == "the expansion of main.nim:17 closed"
     let sent = mock.findCommand("ct/update-expansion")
