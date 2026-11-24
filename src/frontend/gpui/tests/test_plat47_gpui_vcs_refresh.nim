@@ -43,6 +43,18 @@
 ## entry point for exactly that (the counterpart of `gpui_notify_resize`),
 ## and the live sampling it stands in for (`NimRootView::render` →
 ## `update_chrome_state`) is the same function call with a sampled state.
+##
+## THE READ IS FOREGROUND HERE (`refreshGpuiVcs(..., background = false)`).
+## The window reads on a worker thread since 2026-11-18 (`vcs_refresh_worker`):
+## each call asks for a read and applies the one that came back since the last
+## call, so a change shows one tick later. That made `background` the default,
+## and every call in this suite then asserted right after a read that had only
+## been requested: "a re-read picks up another program's changes" and "returning
+## to the window re-reads the repository" failed on `agents` from that day
+## (codetracer-pm issue 2026-11-19). What these cases measure is the re-read and
+## when it is triggered, not the thread, so they read in the foreground, the mode
+## `refreshGpuiVcs` documents for an in-process suite. The thread and its poll are
+## `test_gpui_vcs_off_loop_window.nim`'s, in a real window.
 
 import std/[os, osproc, sequtils, strutils, tempfiles, unittest]
 
@@ -87,23 +99,23 @@ suite "PLAT-47 deliverable 4: GPUI's VCS pane refreshes like the desktop's":
     let vm = openGpuiVcs(repo)
     ck "? scratch.txt" in labelsOf(vm)
     # Nothing moved: no redraw.
-    ck not refreshGpuiVcs(vm, repo)
+    ck not refreshGpuiVcs(vm, repo, background = false)
     # Another program writes a file: the next tick redraws, and the pane
     # lists it with the desktop's untracked state.
     writeFile(repo / "late.txt", "written while the window was open\n")
-    ck refreshGpuiVcs(vm, repo)
+    ck refreshGpuiVcs(vm, repo, background = false)
     let after = labelsOf(vm)
     checkpoint($after)
     ck "? late.txt" in after
     ck after.anyIt(it.startsWith(VCSWorkingTreeTitle & " (4)"))
     # And the tick after that has nothing new.
-    ck not refreshGpuiVcs(vm, repo)
+    ck not refreshGpuiVcs(vm, repo, background = false)
     # A commit made elsewhere moves the history.
     let (_, committed) = execCmdEx("git -C " & quoteShell(repo) &
       " -c user.name=x -c user.email=x@invalid -c commit.gpgsign=false" &
       " commit -q -m later")
     ck committed == 0
-    ck refreshGpuiVcs(vm, repo)
+    ck refreshGpuiVcs(vm, repo, background = false)
     ck labelsOf(vm).anyIt(it.endsWith(" later"))
     # The interval the window arms is the desktop's.
     ck VCSRefreshIntervalMs == 5000
@@ -134,7 +146,7 @@ suite "PLAT-47 deliverable 4: GPUI's VCS pane refreshes when the window is activ
       proc() = discard,
       proc() =
         inc refreshes
-        if refreshGpuiVcs(vm, repo): inc changed)
+        if refreshGpuiVcs(vm, repo, background = false): inc changed)
     # The window comes up and is focused: its first activation.
     gpui_notify_window_state(win.id, 0, 0, 15, 0, 1, "")
     ck refreshes == 1
