@@ -209,12 +209,13 @@ _tlf_js_only_suites() {
 # The shell still compiles almost the whole ViewModel tree (the panes' too),
 # which is why the list is short; see that script for the counts.
 #
-#   agent-harbor views (fleet, pie, session tabs, results): the GPUI and TUI
+#   agent-harbor views (fleet, pie, link ink, session tabs, results): the GPUI and TUI
 #       front-ends draw them; no `nim js` bundle imports them.
 #   `codetracer_ui_components` (the editor gutter lanes) and the TUI
 #       vocabulary generator: native front-ends only.
 _TLF_VM_UNIT_JS_NOT_SHIPPED=(
 	'/test_agent_harbor_fleet_activity_error\.nim$'
+	'/test_agent_harbor_link_ink\.nim$'
 	'/test_agent_harbor_pie\.nim$'
 	'/test_agent_harbor_session_list_view\.nim$'
 	'/test_ctf_p2c_results_followups\.nim$'

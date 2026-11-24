@@ -40,6 +40,7 @@ import ../tui/host/plugin_processes
 import ../tui/host/plugin_panes as host_panes
 import ../viewmodel/plugin_host/[protocol, supervisor, key_snapshot]
 import ../viewmodel/session_vm
+import isonim/core/signals   # the session store's `val`
 import ../viewmodel/sync/[transport, mirror_session]
 
 const
@@ -64,7 +65,10 @@ type
     mirror*: MirrorSession
       ## The desktop's mirror of the renderer's session; nil under `ct host`.
     panes: PluginPanes
-      ## The panes as presses act on them (`paneClickNode`), made on first use.
+      ## The panes as presses act on them (`paneClickNode`) and the editor's
+      ## plugin marks are read (`decorationsFor`, `markersFor`); made on first use.
+    session: SessionViewModel
+      ## The session the plugins see: the desktop's mirror, `ct host`'s primary.
     lastSent: string
     lastSentMs: float
     lastBuiltMs: float
@@ -160,6 +164,20 @@ proc stateOf*(ps: PluginSession): JsonNode =
   for n in sup.notifications:
     notes.add %*{"plugin": n.plugin, "text": n.text, "actions": n.actions,
                  "atMs": n.atMs}
+  # The editor's plugin marks for the file the session is stopped in
+  # (§11.4.4): decorations after a line's code, markers in the glyph margin.
+  var marks = %*{"file": "", "decorations": [], "markers": []}
+  if not ps.session.isNil:
+    let file = ps.session.store.debugger.val.location.file
+    if file.len > 0:
+      if ps.panes.isNil: ps.panes = newPluginPanes(ps.plugins)
+      marks["file"] = %file
+      for d in ps.panes.decorationsFor(file):
+        marks["decorations"].add %*{"line": d.line, "glyph": d.glyph,
+                                    "text": d.text, "plugin": d.plugin}
+      for m in ps.panes.markersFor(file):
+        marks["markers"].add %*{"line": m.line, "glyph": m.glyph,
+                                "text": m.text, "plugin": m.plugin}
   var plugins = newJArray()
   for id, s in sup.slots:
     let (p50, p99) = s.latency
@@ -174,7 +192,7 @@ proc stateOf*(ps: PluginSession): JsonNode =
      "statusLine": sup.statusLine, "statusText": p.statusText(),
      "layerLabel": sup.topLayerLabel,
      "recoveryOpen": sup.recoveryOpen, "recoveryPlugins": sup.recoveryPlugins,
-     "plugins": plugins, "problems": p.problems,
+     "plugins": plugins, "problems": p.problems, "editorMarks": marks,
      "keys": sup.snapshotOf}
 
 proc send(ps: PluginSession; force = false) =
@@ -246,7 +264,7 @@ proc openPluginSession*(key: string; tab: int; session: SessionViewModel;
     sessions[key].plugins.close()
     sessions.del(key)
   let dir = if startDir.len > 0: startDir else: $jsCwd()
-  result = PluginSession(key: key, tab: tab, deliver: deliver)
+  result = PluginSession(key: key, tab: tab, deliver: deliver, session: session)
   try:
     result.plugins = openSessionPlugins(session, sessionId, extensionsEnabled(),
                                         dir, frontEnd = frontEnd,

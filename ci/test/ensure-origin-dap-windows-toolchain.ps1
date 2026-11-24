@@ -164,6 +164,8 @@ function Invoke-Test {
 $helper = Join-Path $PSScriptRoot "..\ensure-origin-dap-windows-toolchain.ps1"
 $toolchainFile = Join-Path $PSScriptRoot `
   "..\..\non-nix-build\windows\toolchain-versions.env"
+# Functions only: see the entry-point guard at the end of the helper.
+$CodeTracerOriginDapToolchainLibraryOnly = $true
 . $helper
 
 $script:TestRoot = Join-Path ([IO.Path]::GetTempPath()) `

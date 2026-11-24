@@ -14,6 +14,7 @@ import
 from welcome_screen import resetView
 from breakpoint_condition_dialog import showBreakpointConditionDialog
 from std/os import extractFilename
+from ./plugin_hooks import pluginMarksChanged
 
 proc findTRNode(node: js): js =
   ## The table row `node` is in (or is).
@@ -142,6 +143,16 @@ proc watchEditorPoints(store: ReplayDataStore) =
       for path, editor in data.ui.editors:
         if not editor.isNil and not editor.monacoEditor.isNil:
           editor.applyEventualStylesLines()
+
+# §11.4.4: the plugins' marks are drawn again in every open editor when the
+# plugins push new ones (`plugin_panes` calls this; the marks are drawn by
+# `updateGlyphMarks`).
+pluginMarksChanged = proc() =
+  if data.isNil or data.ui.isNil or data.ui.editors.isNil:
+    return
+  for path, editor in data.ui.editors:
+    if not editor.isNil and not editor.monacoEditor.isNil:
+      editor.updateGlyphMarks()
 
 proc initEditorVMFromSession*(vm: EditorVM) =
   ## Hand the pane the session's `EditorVM` — the one

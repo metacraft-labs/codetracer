@@ -61,6 +61,9 @@ type
     iconSuccess*: string
     iconError*: string
     iconInfo*: string
+    textInfo*: string
+      ## text/information/primary: the `link` role's own ink, before a
+      ## ground (`linkInk` resolves it per ground).
     iconSubtle*: string      ## icon/primary/subtle
     endedMark*: string
       ## An ended session's, initiative's or fleet row's grey mark:
@@ -149,6 +152,7 @@ proc ahPalette*(mode: DesignMode): AhPalette =
     iconSuccess: t(dtColorsUiIconSuccessPrimary),
     iconError: t(dtColorsUiIconErrorPrimary),
     iconInfo: t(dtColorsUiIconInformationPrimary),
+    textInfo: t(dtColorsUiTextInformationPrimary),
     iconSubtle: t(dtColorsUiIconPrimarySubtle),
     endedMark: (if mode == dmDark: t(dtColorsUiIconPrimarySubtle)
                 else: t(dtColorsUiIconPrimaryDefaultHover)),
@@ -768,3 +772,99 @@ proc pieStylesheet*(): string =
       result.add "\n.ah-pie-on-" & $ground & ".ah-pie-" & $role & "\n"
       result.add "  --ah-pie-wedge: by-mode(" & d.wedge & ", " & l.wedge & ")\n"
       result.add "  --ah-pie-edge: by-mode(" & d.edge & ", " & l.edge & ")\n"
+
+
+# ---------------------------------------------------------------------------
+# The `link` role: a link in an agent's message, a test's location
+# ---------------------------------------------------------------------------
+#
+# A link (a trace, a recording, a file, a web link in an agent's message;
+# a failure's location in the Tests panel) is drawn in one ink, the `link`
+# role's, resolved here per ground for every front end under the rules the
+# pie's roles keep (the section above):
+#
+# - the ink holds `PieInkFloor` (3.3:1) against the ground it sits on
+#   (WCAG 2.2 SC 1.4.11's 3:1 with the pie's margin; a link's words are
+#   also underlined, so the ink is not all that tells them apart);
+# - it stands `PieRoleDeltaE` (20) or more in CIEDE2000 from every pie
+#   role's ink on that ground (`roleInks`), and from the body text's ink,
+#   so a link never reads as a status mark or as the prose around it.
+#
+# The role's own ink is the design system's information text
+# (`textInfo`); the ink taken is the candidate nearest it (`inkCandidates`,
+# the info role's search) that holds both rules. Where none does, the one
+# with the most contrast that keeps the 20 is taken, and failing that the
+# role's own ink, and the shortfall is reported (`linkInkReport`).
+#
+# The web reads the inks from `agent_harbor_link_inks.styl`, written from
+# `linkStylesheet` and held equal to it by `test_agent_harbor_link_ink`;
+# GPUI (`ah_theme`) and the terminal canvas read `linkInk` itself, as they
+# read the pie's inks.
+
+type
+  LinkInkReport* = object
+    ## How a ground's link ink was resolved: the ink, and the rule it falls
+    ## short of ("" when it meets both).
+    ink*: string
+    shortOf*: string
+
+var linkInkMemo: seq[(string, LinkInkReport)]
+
+proc linkInkReport*(p: AhPalette; ground: string): LinkInkReport =
+  ## The `link` role's ink on `ground` (see the section's header).
+  let key = ground & "|" & p.textInfo & "|" & p.textBody
+  for (k, v) in linkInkMemo:
+    if k == key: return v
+  let roles = p.roleInks(ground)
+  var others: seq[string]
+  for role in PieRole: others.add roles[role]
+  others.add p.textBody
+  let base = p.textInfo
+  var best = ""
+  var bestScore = Inf
+  var fallback = ""
+  var fallbackContrast = 0.0
+  for ink in inkCandidates(base, prInfo):
+    var apart = true
+    for o in others:
+      if deltaE2000(ink, o) < PieRoleDeltaE:
+        apart = false
+        break
+    if not apart: continue
+    let contrast = inkContrast(ink, ground)
+    if contrast >= PieInkFloor:
+      let score = deltaE2000(ink, base)
+      if score < bestScore:
+        best = ink
+        bestScore = score
+    elif contrast > fallbackContrast:
+      fallback = ink
+      fallbackContrast = contrast
+  result = if best.len > 0: LinkInkReport(ink: best)
+           elif fallback.len > 0: LinkInkReport(ink: fallback, shortOf: "contrast")
+           else: LinkInkReport(ink: base, shortOf: "role-delta-e")
+  linkInkMemo.add (key, result)
+
+proc linkInk*(p: AhPalette; ground: string): string =
+  ## The `link` role's ink on `ground` (`#rrggbb`).
+  p.linkInkReport(ground).ink
+
+proc linkInk*(p: AhPalette; ground: PieGround): string =
+  p.linkInk(p.pieGroundColour(ground))
+
+proc linkStylesheet*(): string =
+  ## The web's link inks (`styles/components/agent_harbor_link_inks.styl`):
+  ## the `link` role's ink on each ground, `by-mode(<Dark>, <Light>)`, as
+  ## custom properties every view's link rule reads (`--ah-link-ink-<ground>`).
+  ## The committed sheet is this text; `test_agent_harbor_link_ink` holds
+  ## them equal, so the web cannot draw a link in another ink than GPUI and
+  ## the terminal do.
+  let dark = ahPalette(dmDark)
+  let light = ahPalette(dmLight)
+  result = "// GENERATED from `viewmodel/views/agent_harbor_palette.nim` " &
+    "`linkStylesheet`; do not edit.\n" &
+    "// The `link` role's ink per ground (`linkInk`), each `by-mode(<Dark>, <Light>)`.\n" &
+    "\n:root\n"
+  for ground in PieGround:
+    result.add "  --ah-link-ink-" & $ground & ": by-mode(" & dark.linkInk(ground) & ", " &
+      light.linkInk(ground) & ")\n"
