@@ -40,15 +40,18 @@
 ## (Uniform-WASM-Core.md §9.2). The host calls in after `main`, so on wasm32
 ## `main` ends in `emscripten_exit_with_live_runtime()`.
 
-import std/[json, options]
+import std/[json, options, strutils]
 
-import isonim/core/[signals, owner, async_compat]
+import isonim/core/[signals, owner, computation, async_compat]
 import isonim/web/frame_renderer
 
 import ../viewmodel/codetracer_embed
 import ../viewmodel/backend/worker_backend
 import ../viewmodel/viewport
 import ../viewmodel/input/pane_presses
+import ../viewmodel/viewmodels/[calltrace_vm, state_vm, event_log_vm, terminal_output_vm, origin_chain_vm, origin_chain_bridges, scratchpad_vm]
+from ../viewmodel/store/types import Location
+from ../viewmodel/store/types import CallLine
 from ../viewmodel/views/state_view import fullValueOf
 import ../viewmodel/views/isonim_state_view
 import ../viewmodel/views/isonim_calltrace_view
@@ -62,10 +65,12 @@ import ../viewmodel/views/[isonim_build_view, isonim_command_palette_view,
 when defined(emscripten):
   proc hostPostRaw(json: cstring) {.importc: "ctwHostPost".}
     ## Provided by the host through `--js-library web_core_library.js`.
+  proc hostActionRaw(json: cstring) {.importc: "ctwHostAction".}
   proc emscriptenExitWithLiveRuntime()
       {.importc: "emscripten_exit_with_live_runtime", header: "<emscripten.h>".}
 elif defined(js):
   proc hostPostRaw(json: cstring) {.importjs: "globalThis.ctwHostPost(#)".}
+  proc hostActionRaw(json: cstring) {.importjs: "(globalThis.ctwHostAction && globalThis.ctwHostAction(#))".}
 else:
   {.error: "web_core.nim is the browser front-end's core: build it for wasm32 or nim js".}
 
@@ -93,6 +98,53 @@ proc ctwBoot() {.exportc.} =
   session = newDebuggerSession(worker.toBackendService())
   mounted = false
 
+var pendingMirror: seq[JsonNode] = @[]
+  ## What the page mirrored into the event log before the panes were up.
+var mirroring = false
+  ## The event log's columns are being set from the page's: not a change of
+  ## this pane's to send back.
+
+proc applyEventLogMirror(vm: EventLogVM; m: JsonNode) =
+  ## The page's own Event Log state, which the shell's integrations keep —
+  ## the filter (`kinds`), the columns (`columns`: widths remembered across
+  ## sessions, the Columns menu, the header grips) and a reload after a
+  ## tracepoint run or a new recording (`reload`) — set on this core's.
+  if m.hasKey("kinds") and m["kinds"].kind == JArray:
+    var kinds: seq[bool] = @[]
+    for k in m["kinds"]: kinds.add k.getBool
+    if kinds != vm.selectedKinds.val:
+      vm.setSelectedKinds(kinds)
+  if m.hasKey("columns"):
+    let columns = columnsFromJson(m["columns"], vm.columns.val)
+    if columns != vm.columns.val:
+      mirroring = true
+      try: vm.columns.val = columns
+      finally: mirroring = false
+  if m{"reload"}.getBool(false):
+    vm.reload()
+
+proc applyShellMirror(m: JsonNode) =
+  let s = session.session
+  if not s.eventLogVM.isNil:
+    applyEventLogMirror(s.eventLogVM, m)
+  if m.hasKey("codeStateLine") and not s.store.isNil:
+    let line = m["codeStateLine"].getStr
+    if s.store.locals.codeStateLine.val != line:
+      s.store.locals.codeStateLine.val = line
+
+proc watchEventLogColumns(vm: EventLogVM) =
+  ## A change this pane makes to its columns (a column shown or hidden from
+  ## its Columns menu, a header's sort) goes back to the page, whose
+  ## EventLogVM the shell remembers and resizes.
+  var first = true
+  createEffect proc() =
+    let columns = vm.columns.val
+    if first:
+      first = false
+      return
+    if not mirroring:
+      hostActionRaw(cstring($(%*{"eventLogColumns": columnsToJson(columns)})))
+
 proc mountPanes() =
   ## The panes need their ViewModels, and `DebuggerSession` builds those when
   ## the trace is open.
@@ -100,6 +152,20 @@ proc mountPanes() =
     return
   mounted = true
   let s = session.session
+  # THE VALUE-ORIGIN BRIDGES, as the desktop's shell installs them on its
+  # own StateVM (`ui/state.createSessionOriginChainVM`), on this core's: the
+  # in-row chain a row's badge expands is fetched and drawn here.
+  if not s.stateVM.isNil and s.originChainVM.isNil:
+    let originVM = createOriginChainVM(s.stateVM.store)
+    wireOriginChainBridges(s.stateVM, originVM, proc(): ScratchpadVM = nil)
+    s.attachOriginChainVM(originVM)
+    # The side panel is the shell's: "Show in side panel", and "Show value
+    # origin" on a row whose chain the engine has not summarised, open it
+    # through the shell's own bridge (`ui/panel_host.shellAction`).
+    s.stateVM.onShowOriginProc = proc(expression: string; location: Location) =
+      hostActionRaw(cstring($(%*{"showOrigin": {"expression": expression,
+        "file": location.file, "line": location.line,
+        "column": location.column}})))
   createRoot proc(dispose: proc()) =
     panes[0] = paneContainer("state")
     r.appendChild(panes[0], renderStatePanel[FrameRenderer, FrameNode](r, s.stateVM))
@@ -111,6 +177,10 @@ proc mountPanes() =
   # every other front-end's host sets it up (`ui/panel_host.prepare`).
   if not s.eventLogVM.isNil:
     s.eventLogVM.followStop()
+    watchEventLogColumns(s.eventLogVM)
+  for m in pendingMirror:
+    applyShellMirror(m)
+  pendingMirror = @[]
 
 const ExtraPanes* = ["build", "command-palette", "errors", "filesystem",
                      "low-level-code", "point-list", "repl", "scratchpad",
@@ -138,7 +208,11 @@ proc renderExtraPane(name: string): bool =
   of "scratchpad": panel = renderScratchpadPanel[FrameRenderer, FrameNode](r, s.scratchpadVM)
   of "search-results": panel = renderSearchResultsPanel[FrameRenderer, FrameNode](r, s.searchResultsVM)
   of "step-list": panel = renderStepListPanel[FrameRenderer, FrameNode](r, s.stepListVM)
-  of "terminal-output": panel = renderTerminalOutputPanel[FrameRenderer, FrameNode](r, s.terminalOutputVM)
+  of "terminal-output":
+    panel = renderTerminalOutputPanel[FrameRenderer, FrameNode](r, s.terminalOutputVM)
+    # The desktop's shell hands the pane the recording's writes; this core
+    # has no shell, so the ViewModel asks the engine for them.
+    s.terminalOutputVM.loadWrites()
   of "trace-log": panel = renderTraceLogPanel[FrameRenderer, FrameNode](r, s.traceLogVM)
   else: return false
   r.appendChild(box, panel)
@@ -236,6 +310,30 @@ proc ctwSetViewport(pane, rows, cols, firstRow: cint) {.exportc.} =
   else: discard
   ctwPump()
 
+proc ctwMeasured(pane: cstring; rows, cols, firstRow: cint; rowPx: cdouble) {.exportc.} =
+  ## What the page measured for pane `pane` (the core's pane names) the way
+  ## the desktop measures its own panes (`views/pane_measure_dom`): the rows
+  ## shown, the columns, the first row (the scroll position) and the rows'
+  ## measured pitch. Reported to the pane's ViewModel as the desktop reports
+  ## it to its own.
+  if not mounted:
+    return
+  let v = Viewport(rows: int(rows), cols: int(cols), firstRow: int(firstRow))
+  let s = session.session
+  case $pane
+  of "calltrace":
+    if not s.calltraceVM.isNil:
+      s.calltraceVM.setRowHeightPx(float(rowPx))
+      s.calltraceVM.setViewport(v)
+  of "state":
+    if not s.stateVM.isNil: s.stateVM.setViewport(v)
+  of "terminal-output":
+    if not s.terminalOutputVM.isNil: terminal_output_vm.setViewport(s.terminalOutputVM, v)
+  of "event-log":
+    if not s.eventLogVM.isNil: s.eventLogVM.reportMeasure(v, float(rowPx))
+  else: discard
+  ctwPump()
+
 proc ctwMounted(): cint {.exportc.} = cint(ord(mounted))
 
 # What the host's decoration (`web_core_decorations.nim`) asks of the panes'
@@ -251,6 +349,18 @@ proc ctwEventLogMetrics(cells: cint; charPx: cdouble) {.exportc.} =
   ## The event log's columns viewport, in characters of its font.
   if not mounted: return
   session.session.eventLogVM.setTableMetrics(int(cells), float(charPx))
+  ctwPump()
+
+proc ctwShellMirror(json: cstring) {.exportc.} =
+  ## What the page keeps of the panes' state, mirrored into this core's:
+  ## the Event Log's (`applyEventLogMirror`) and the Variables pane's code
+  ## line, which the page's editor fills from the source it shows
+  ## (`ui/editor.syncCodeStateLine`). Held until the panes are up.
+  let m = try: parseJson($json) except CatchableError: newJObject()
+  if mounted:
+    applyShellMirror(m)
+  else:
+    pendingMirror.add m
   ctwPump()
 
 proc ctwEventLogSearch(query: cstring) {.exportc.} =
@@ -287,6 +397,95 @@ proc ctwPress(operation, attrsJson: cstring): cint {.exportc.} =
   result = cint(ord(performSessionPress(session.session, $operation, reader)))
   ctwPump()
 
+# ---------------------------------------------------------------------------
+# Right-click menus on the core's panes. The shell opens them (its
+# `context-menu.open`, `input/dom_pane_presses`) at the press, with the shared
+# right-click menu; the ENTRIES and what they do are this core's, on its
+# ViewModels — the shell's never see these panes' rows.
+# ---------------------------------------------------------------------------
+
+type MenuEntry = object
+  label, hint: string
+  enabled: bool
+  run: proc(): string  ## what the host must still do ("" for nothing)
+
+var openMenu: seq[MenuEntry] = @[]
+
+proc callLineAt(vm: CalltraceVM; index: int): CallLine =
+  for line in vm.store.calltrace.lines.val:
+    if line.index == int64(index):
+      return line
+  CallLine(index: -1)
+
+proc stateMenuEntry(entry: OriginContextMenuEntry): MenuEntry =
+  ## One entry of a State-pane row's menu. Its own proc, so the closure has
+  ## an environment of its own: one made in the loop body over the entries
+  ## came out without one, and the core's call of it trapped.
+  let action = entry.action
+  MenuEntry(label: entry.label, hint: entry.hint, enabled: true,
+    run: proc(): string =
+      if not action.isNil: action()
+      "")
+
+proc menuEntries(pane: string; attr: proc(name: string): string): seq[MenuEntry] =
+  let s = session.session
+  case pane
+  of "calltrace":
+    let vm = s.calltraceVM
+    if vm.isNil: return
+    let argName = attr("data-arg-name")
+    if argName.len > 0:
+      # The value goes to the shell's Scratchpad, which the shell draws: the
+      # host does it with what this answers.
+      let text = attr("data-arg-text")
+      result.add MenuEntry(label: "Add value to scratchpad", enabled: true,
+        run: proc(): string = $(%*{"scratchpad": {"name": argName, "text": text}}))
+      return
+    let index = try: parseInt(attr("data-call-index")) except ValueError: -1
+    let line = vm.callLineAt(index)
+    if line.index >= 0:
+      let label = if line.hasChildren and line.isExpanded: "Collapse Call Children"
+                  else: "Expand Call Children"
+      let lineIndex = line.index
+      result.add MenuEntry(label: label, enabled: true,
+        run: proc(): string =
+          vm.toggleExpandCallChildren(lineIndex)
+          "")
+  of "state":
+    let vm = s.stateVM
+    let path = attr("data-variable-path")
+    if vm.isNil or path.len == 0: return
+    for e in vm.openVariableRowMenu(path):
+      result.add stateMenuEntry(e)
+  else: discard
+
+proc ctwMenu(pane, attrsJson: cstring): cstring {.exportc.} =
+  ## The right-click menu of the element `attrsJson` describes (its
+  ## attributes and its ancestors', the nearest first) in `pane` (the shell's
+  ## menu pane names: "calltrace", "state"), as JSON:
+  ## `[{"label", "hint", "enabled"}]`, empty for no menu. The entries stay
+  ## open for `ctwMenuChoose` until the next call.
+  openMenu = @[]
+  if mounted:
+    let attrs = try: parseJson($attrsJson) except CatchableError: newJObject()
+    let reader = proc(name: string): string =
+      if attrs.kind == JObject: attrs{name}.getStr("") else: ""
+    openMenu = menuEntries($pane, reader)
+  var arr = newJArray()
+  for e in openMenu:
+    arr.add %*{"label": e.label, "hint": e.hint, "enabled": e.enabled}
+  ctwPump()
+  cstring($arr)
+
+proc ctwMenuChoose(index: cint): cstring {.exportc.} =
+  ## Perform entry `index` of the menu `ctwMenu` last answered. Answers what
+  ## the host must still do, as JSON (`{"scratchpad": {"name", "text"}}`), or
+  ## "" when the core did it all.
+  result = cstring""
+  if index >= 0 and index < cint(openMenu.len) and not openMenu[index].run.isNil:
+    result = cstring(openMenu[index].run())
+  ctwPump()
+
 proc ctwExpire(requestSeq: cint): cint {.exportc.} =
   ## The host's request timeout: settle `requestSeq` as failed when it is
   ## still waiting (`WorkerBackend.expire`). 1 when it was.
@@ -311,7 +510,7 @@ when defined(js):
   {.emit: """
 globalThis.ctwJsCore = {
   boot: `ctwBoot`, pump: `ctwPump`, deliver: `ctwDeliver`, openFolder: `ctwOpenFolder`,
-  attach: `ctwAttach`, mountPane: `ctwMountPane`, press: `ctwPress`,
+  attach: `ctwAttach`, mountPane: `ctwMountPane`, press: `ctwPress`, menu: `ctwMenu`, measured: `ctwMeasured`, menuChoose: `ctwMenuChoose`,
   expire: `ctwExpire`,
   phase: `ctwPhase`, failure: `ctwFailure`, step: `ctwStep`, stepping: `ctwStepping`,
   position: `ctwPosition`, readCrossings: `ctwReadCrossings`,
@@ -319,6 +518,7 @@ globalThis.ctwJsCore = {
   fullValueOf: `ctwFullValueOf`, eventLogMetrics: `ctwEventLogMetrics`,
   eventLogSearch: `ctwEventLogSearch`, eventLogTotal: `ctwEventLogTotal`,
   eventLogCurrent: `ctwEventLogCurrent`, eventLogRowPx: `ctwEventLogRowPx`,
+  shellMirror: `ctwShellMirror`,
   calltraceMeasured: `ctwCalltraceMeasured`,
   frameBytes: function() { return globalThis.isonimFrameBytes(); },
   frameOps: `frameOps`, frameReset: `frameReset`, frameManifest: `frameManifest`,

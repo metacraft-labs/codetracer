@@ -116,6 +116,56 @@ proc main() {.async.} =
   ck responseSucceeded(reply)
   ck responseBody(reply){"marker"}.getInt(0) == 1234
 
+  echo "[Suite] the core's answer is its own"
+  beginCase("the renderer's subscribers and trackers are not handed it; the renderer's own answer still is")
+  # The core keeps its own ViewModels: an answer the core asked for, handed
+  # to the renderer's subscribers as well, reached ViewModels that did not
+  # ask — a value origin the core's row asked for opened the renderer's side
+  # panel. The renderer's own request is the control: its answer still fans
+  # out, so a subscription that never fires cannot pass this case.
+  var shellSaw = 0
+  var shellNamed = 0
+  dapApi.on(CtLoadLocalsResponse, proc(kind: CtEventKind; value: JsObject) =
+    inc shellSaw)
+  let noteSent = proc(requestId: cstring) = inc shellNamed
+  let noteAnswered = proc(requestId: cstring) = discard
+  trackCtRequests(CtLoadLocals, onSent = noteSent, onAnswered = noteAnswered)
+  sentPackets.setLen(0)
+  var coreReply: JsonNode = nil
+  onComplete(backend.send("ct/load-locals", %*{"rrTicks": 6}),
+    onSuccess = proc(r: JsonNode) = coreReply = r,
+    onError = proc(m: string) = discard)
+  let coreSeq = sentPackets[0]["seq"].to(int)
+  let coreBody = JsObject{}
+  coreBody["marker"] = 77
+  let coreFrame = JsObject{}
+  coreFrame["type"] = cstring"response"
+  coreFrame["request_seq"] = coreSeq
+  coreFrame["success"] = true
+  coreFrame["command"] = cstring"ct/load-locals"
+  coreFrame["body"] = coreBody
+  deliverDapResponse(dapApi, dapApi, coreFrame)
+  await settle()
+  drainPlatformCallbacks()
+  ck not coreReply.isNil
+  ck responseBody(coreReply){"marker"}.getInt(0) == 77
+  ck shellSaw == 0
+  ck shellNamed == 0
+  sentPackets.setLen(0)
+  dapApi.sendCtRequest(CtLoadLocals, JsObject{})
+  ck shellNamed == 1
+  let ownSeq = sentPackets[0]["seq"].to(int)
+  let ownFrame = JsObject{}
+  ownFrame["type"] = cstring"response"
+  ownFrame["request_seq"] = ownSeq
+  ownFrame["success"] = true
+  ownFrame["command"] = cstring"ct/load-locals"
+  ownFrame["body"] = JsObject{}
+  deliverDapResponse(dapApi, dapApi, ownFrame)
+  await settle()
+  drainPlatformCallbacks()
+  ck shellSaw == 1
+
   echo "[Suite] a refusal"
   beginCase("reaches the core as a failed response, with the engine's message")
   sentPackets.setLen(0)

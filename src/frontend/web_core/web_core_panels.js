@@ -38,6 +38,11 @@
     document.body.appendChild(mount);
     const host = root.CtWebCoreHost.startWebCore({
       core: Module, mount, transport, paneRoot: document,
+      // The panel host measures each pane as it measures its own.
+      pageMeasures: true,
+      // The shell does what this tab's core asks of the page
+      // (`ui/panel_host`'s `ctwShellAction`).
+      onAction: (json) => { if (root.ctwShellAction) root.ctwShellAction(json, session || null); },
     });
     host.attach('renderer-session');
     // The first tab's host, for a caller that knows of one core only.
@@ -59,7 +64,11 @@
   }
 
   function hostOf(el) {
-    const pane = el && el.closest ? el.closest('.ct-web-core-pane') : null;
+    // The core pane `el` is in — or, for the page's pane host element, the
+    // one placed inside it.
+    const pane = !el ? null
+      : (el.closest && el.closest('.ct-web-core-pane'))
+        || (el.querySelector && el.querySelector('.ct-web-core-pane'));
     return pane && pane.__ctwHost ? pane.__ctwHost : null;
   }
 
@@ -77,6 +86,31 @@
     press(op, el) {
       const host = hostOf(el);
       return host ? host.press(op, el) : false;
+    },
+    // The right-click menu of `el` in `pane`, from the core that draws it:
+    // `[{label, hint, enabled, choose()}]`; choose() performs the entry and
+    // answers what the shell must still do (JSON, or "").
+    // The panel host's measurement of the pane `el` is in (`ctwMeasured`).
+    measured(el, pane, rows, cols, firstRow, rowPx) {
+      const host = hostOf(el);
+      if (host) host.measured(pane, rows, cols, firstRow, rowPx);
+    },
+    // The event log's whole length and row pitch, for its scroll extent.
+    eventLogExtent(el) {
+      const host = hostOf(el);
+      return host ? [host.eventLogTotal(), host.eventLogRowPx()] : [0, 0];
+    },
+    // The tab's Event Log state, mirrored into its core's once that is up.
+    shellMirror(session, json) {
+      const key = session || noSession;
+      let booting = hosts.get(key);
+      if (!booting) { booting = boot(session); hosts.set(key, booting); }
+      booting.then((host) => host.shellMirror(json)).catch(() => {});
+    },
+    menu(pane, el) {
+      const host = hostOf(el);
+      if (!host || !host.menu) return [];
+      return host.menu(pane, el).map((e, i) => Object.assign(e, { choose: () => host.menuChoose(i) }));
     },
   };
 })(typeof globalThis !== 'undefined' ? globalThis : this);

@@ -447,6 +447,14 @@ type
 
 var ctRequestTrackers: seq[CtRequestTracker] = @[]
 
+var privateCtRequests = JsAssoc[cstring, bool]{}
+  ## The requests (`ctRequestId`) whose answers are their sender's alone: a
+  ## WebAssembly core's, sent through its tab's connection
+  ## (`web_core/renderer_transport.nim`). The core keeps its own ViewModels;
+  ## fanning its answers out as well would hand them to the renderer's, which
+  ## did not ask — a value origin the core's row asked for would open the
+  ## renderer's side panel as if "Show value origin" had been chosen there.
+
 const CtRequestIdField* = cstring"ctRequestId"
   ## The key under which `deliverDapResponse` writes the answering request's
   ## identity into a TRACKED response's `body`, before the fan-out. A
@@ -704,7 +712,8 @@ when not defined(ctInExtension):
   proc dispatchCtRequest(dap: DapApi,
                          kind: CtEventKind,
                          rawValue: JsObject,
-                         onOutcome: proc(outcome: DapRequestOutcome)) =
+                         onOutcome: proc(outcome: DapRequestOutcome);
+                         private = false) =
     ## Write one `ct/...` request frame and hand its OUTCOME to `onOutcome`.
     ##
     ## The single send path. It exists so that the two ways of issuing a
@@ -781,7 +790,11 @@ when not defined(ctInExtension):
         sessionId: api.sessionId)), DAP_RESPONSE_TIMEOUT_MS)
     # THE REQUEST IS NAMED BEFORE IT IS WRITTEN, from this one send path, so
     # no caller can issue a tracked request its answer cannot be matched to.
-    if isTracked(kind):
+    # A PRIVATE request's answer is its sender's alone (`privateCtRequests`):
+    # nobody else tracks it either.
+    if private:
+      privateCtRequests[ctRequestId(api, requestSeq)] = true
+    elif isTracked(kind):
       let requestId = ctRequestId(api, requestSeq)
       for t in ctRequestTrackers:
         if t.kind == kind and not t.onSent.isNil:
@@ -791,12 +804,15 @@ when not defined(ctInExtension):
   proc sendCtRequestForOutcome*(dap: DapApi,
                                 kind: CtEventKind,
                                 rawValue: JsObject,
-                                onOutcome: proc(outcome: DapRequestOutcome)) =
+                                onOutcome: proc(outcome: DapRequestOutcome);
+                                private = false) =
     ## `dispatchCtRequest` for a caller that relays the whole outcome rather
     ## than reading a body: the WebAssembly panes' transport
     ## (`web_core/renderer_transport.nim`), which answers its core in DAP's
     ## own shape and so has to tell a refusal and a timeout from an answer.
-    dap.dispatchCtRequest(kind, rawValue, onOutcome)
+    ## `private`: the answer goes to `onOutcome` only, not to the renderer's
+    ## subscribers (`privateCtRequests`).
+    dap.dispatchCtRequest(kind, rawValue, onOutcome, private)
 
   proc asyncSendCtRequest*(dap: DapApi,
                          kind: CtEventKind,
@@ -953,6 +969,12 @@ proc deliverDapResponse*(fanOut: DapApi; responseDap: DapApi; raw: JsObject) =
   resolvePendingDapResponse(responseDap, raw)
   if raw.isNil:
     return
+  when not defined(ctInExtension):
+    if jsHasOwn(raw, cstring"request_seq") and not responseDap.isNil:
+      let own = ctRequestId(responseDap, raw["request_seq"].to(int))
+      if privateCtRequests[own]:
+        privateCtRequests.jsDeleteKey(own)
+        return
   let command = raw["command"].to(cstring)
   var body = raw["body"]
   var requestId = cstring""

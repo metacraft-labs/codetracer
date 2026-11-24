@@ -1757,3 +1757,56 @@ proc createEventLogVM*(store: ReplayDataStore): EventLogVM =
       untrack proc() = vm.appendLiveDebuggerStop(stop)
 
     vm
+
+# ---------------------------------------------------------------------------
+# The columns as JSON: one ViewModel's columns given to another
+# ---------------------------------------------------------------------------
+
+proc columnsToJson*(columns: EventLogColumns): JsonNode =
+  ## `columns` as JSON, each column by its name: what a renderer whose Event
+  ## Log is drawn by its WebAssembly core sends that core, and the core sends
+  ## back when its own pane changed them (`columnsFromJson`).
+  var order = newJArray()
+  for col in columns.order:
+    order.add %($col)
+  var hidden = newJArray()
+  var widths = newJObject()
+  for col in EventLogColumn:
+    if col in columns.hidden:
+      hidden.add %($col)
+    widths[$col] = %columns.widths[col]
+  %*{"order": order, "hidden": hidden, "widths": widths,
+     "focused": $columns.focused}
+
+proc columnsFromJson*(node: JsonNode; base: EventLogColumns): EventLogColumns =
+  ## `columnsToJson`'s value read back over `base`: a name this build does not
+  ## know is skipped, and a column `order` does not name keeps its place
+  ## after the named ones, so the result always holds every column once.
+  result = base
+  if node.isNil or node.kind != JObject:
+    return
+  if node.hasKey("order") and node["order"].kind == JArray:
+    var order: seq[EventLogColumn] = @[]
+    for item in node["order"]:
+      let (known, col) = parseEventLogColumn(item.getStr)
+      if known and col notin order:
+        order.add col
+    for col in base.order:
+      if col notin order:
+        order.add col
+    result.order = order
+  if node.hasKey("hidden") and node["hidden"].kind == JArray:
+    result.hidden = {}
+    for item in node["hidden"]:
+      let (known, col) = parseEventLogColumn(item.getStr)
+      if known:
+        result.hidden.incl col
+  if node.hasKey("widths") and node["widths"].kind == JObject:
+    for name, width in node["widths"]:
+      let (known, col) = parseEventLogColumn(name)
+      if known and width.kind == JInt:
+        result.widths[col] = width.getInt
+  if node.hasKey("focused"):
+    let (known, col) = parseEventLogColumn(node["focused"].getStr)
+    if known:
+      result.focused = col

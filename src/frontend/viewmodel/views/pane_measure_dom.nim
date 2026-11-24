@@ -263,3 +263,67 @@ proc startMeasuringPane*(host: dom_api.Element; pane: MeasuredPane;
   createEffect proc() =
     spec.changed()
     paneSetTimeout(measure, 0)
+
+proc watchRows(el: dom_api.Element; onChange: proc()): StopMeasuring {.importjs:
+  """((el, cb) => {
+    var frame = 0;
+    var mo = new MutationObserver(() => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => { frame = 0; cb(); });
+    });
+    mo.observe(el, {childList: true, subtree: true});
+    return () => { if (frame) { cancelAnimationFrame(frame); frame = 0; } mo.disconnect(); };
+  })(#, #)""".}
+  ## Call `onChange` once in the frame after the rows under `el` change.
+
+proc whenPresent(host: dom_api.Element; selector: cstring;
+                 found: proc(el: dom_api.Element)): StopMeasuring {.importjs:
+  """((host, sel, found) => {
+    var el = host.querySelector(sel);
+    if (el) { found(el); return () => {}; }
+    var mo = new MutationObserver(() => {
+      var e = host.querySelector(sel);
+      if (e) { mo.disconnect(); mo = null; found(e); }
+    });
+    mo.observe(host, {childList: true, subtree: true});
+    return () => { if (mo) mo.disconnect(); };
+  })(#, #, #)""".}
+  ## `found` with the first element under `host` matching `selector`, now or
+  ## as soon as one is added; the result stops waiting.
+
+proc startMeasuringPaneFor*(host: dom_api.Element; pane: MeasuredPane;
+                            session: SessionViewModel;
+                            report: proc(v: Viewport; rowPx: float);
+                            project: proc(scroller: dom_api.Element) = nil):
+    StopMeasuring =
+  ## `startMeasuringPane`'s measurement of `pane` rendered inside `host`, the
+  ## same scroller, rows, pitch and viewport, reported to `report` instead of
+  ## `session`'s ViewModel: for a pane another core draws (the WebAssembly
+  ## panes, `web_core/web_core_panels.js`), whose ViewModel this page cannot
+  ## read. That pane arrives in `host` after its core boots, so the scroller
+  ## is waited for; its rows are watched in the document (a DOM mutation)
+  ## rather than through the ViewModel's signals. `session` gives the pane's
+  ## fallback row pitch only. `project` replaces the pane's own projection.
+  let spec = measureOf(pane, session)
+  if spec.report.isNil:
+    return nil
+  var stops: seq[StopMeasuring] = @[]
+  let start = proc(scroller: dom_api.Element) =
+    let measure = proc() =
+      var rowPx = rowPitchIn(scroller, spec.row)
+      if rowPx <= 0.0:
+        rowPx = spec.fallbackRowPx()
+      let v = pixelPaneViewport(scroller.paneClientHeight,
+                                scroller.paneClientWidth, rowPx,
+                                scroller.paneScrollTop, spec.pxPerLevel,
+                                countPartialRow = spec.countPartialRow)
+      if v.measured or spec.reportHidden:
+        report(v, rowPx)
+      if not project.isNil:
+        project(scroller)
+    stops.add watchPane(scroller, measure)
+    stops.add watchRows(scroller, measure)
+    paneSetTimeout(measure, 0)
+  stops.add whenPresent(host, spec.scroller, start)
+  result = proc() =
+    for stop in stops: stop()
