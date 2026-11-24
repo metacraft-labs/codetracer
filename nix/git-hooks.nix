@@ -230,7 +230,8 @@ in
   # job on gpu-server-002 in sibling provisioning (run 44081496736: GPUI 1,
   # TUI 2, 4 and 8). On a workstation a foreign hook still means a different
   # `repro` supplies the shell, which the operator reconciles, so it fails
-  # there as before.
+  # there, but with a report that names both builds and both ways to reconcile
+  # them (below, after `ensure`).
   ct_repro_anchor=()
   if [ "''${GITHUB_ACTIONS:-}" = true ]; then
     ct_repro_anchor=(--re-anchor)
@@ -251,32 +252,82 @@ in
     ct_repro_git_dir="$(git -C "$ROOT_PATH" rev-parse --path-format=absolute --git-dir 2>/dev/null || true)"
     ct_repro_common_dir="$(git -C "$ROOT_PATH" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
   fi
+  # ct_repro_scan_foreign: put each managed hook's contract token to this build
+  # with `repro hooks protocol` (the handshake the hooks themselves make).
+  # Sets ct_repro_hooks_dir, ct_repro_seen (1 when any managed hook exists),
+  # ct_repro_foreign (the managed hooks this build does not generate) and
+  # ct_repro_writers (the distinct builds those hooks recorded as their writer
+  # in `REPRO_INSTALLING_BUILD=`; reprobuild 4c49e746a6 and later write it,
+  # older bodies have none).
+  ct_repro_scan_foreign() {
+    local hook token writer known
+    # Never fails: on the `ensure` error path a checkout git cannot read must
+    # still reach the plain error rather than stop here under `set -e`.
+    ct_repro_hooks_dir="$(git -C "$ROOT_PATH" rev-parse --path-format=absolute --git-path hooks 2>/dev/null || true)"
+    ct_repro_seen=0
+    ct_repro_foreign=()
+    ct_repro_writers=()
+    [ -n "$ct_repro_hooks_dir" ] || return 0
+    for hook in "$ct_repro_hooks_dir"/*.repro-managed; do
+      [ -f "$hook" ] || continue
+      ct_repro_seen=1
+      token="$(grep -o 'reprobuild\.managed-hook\.v1\.[a-z-]*\.[0-9a-f]*' "$hook" | head -n 1 || true)"
+      if [ -n "$token" ] &&
+        ${repro}/bin/repro hooks protocol --require=2 --hook-contract="$token" >/dev/null 2>&1; then
+        continue
+      fi
+      ct_repro_foreign+=("''${hook##*/}")
+      writer="$(sed -n 's/^REPRO_INSTALLING_BUILD=//p' "$hook" | head -n 1)"
+      writer="''${writer:-<not recorded in the hook bodies: written by a Repro build older than 4c49e746a6>}"
+      for known in "''${ct_repro_writers[@]}"; do
+        [ "$known" = "$writer" ] && continue 2
+      done
+      ct_repro_writers+=("$writer")
+    done
+  }
   if [ -n "$ROOT_PATH" ] && [ -n "$ct_repro_git_dir" ] && [ "$ct_repro_git_dir" != "$ct_repro_common_dir" ] &&
     [ "''${CT_REPRO_HOOKS_WRITE:-}" != 1 ]; then
-    ct_repro_hooks_dir="$(git -C "$ROOT_PATH" rev-parse --path-format=absolute --git-path hooks)"
-    ct_repro_foreign=()
-    ct_repro_seen=0
-    for ct_repro_hook in "$ct_repro_hooks_dir"/*.repro-managed; do
-      [ -f "$ct_repro_hook" ] || continue
-      ct_repro_seen=1
-      ct_repro_token="$(grep -o 'reprobuild\.managed-hook\.v1\.[a-z-]*\.[0-9a-f]*' "$ct_repro_hook" | head -n 1)"
-      if [ -z "$ct_repro_token" ] ||
-        ! ${repro}/bin/repro hooks protocol --require=2 --hook-contract="$ct_repro_token" >/dev/null 2>&1; then
-        ct_repro_foreign+=("''${ct_repro_hook##*/}")
-      fi
-    done
+    ct_repro_scan_foreign
     if [ "$ct_repro_seen" = 0 ]; then
       echo "repro hooks: the shared hooks in $ct_repro_hooks_dir are not installed; this linked worktree does not write them. Enter the dev shell from the main checkout ($(dirname "$ct_repro_common_dir")), or set CT_REPRO_HOOKS_WRITE=1 here." >&2
     elif [ "''${#ct_repro_foreign[@]}" -gt 0 ]; then
       echo "repro hooks: ''${ct_repro_foreign[*]} in $ct_repro_hooks_dir were written by a different Repro build than this shell's (${repro}); this linked worktree leaves them as they are. The main checkout's shell, or CT_REPRO_HOOKS_WRITE=1 here, re-anchors them -- only once the build every checkout should run is agreed." >&2
     fi
-    unset ct_repro_hooks_dir ct_repro_foreign ct_repro_seen ct_repro_hook ct_repro_token
   elif [ -n "$ROOT_PATH" ]; then
     ${repro}/bin/repro hooks ensure --vcs "''${ct_repro_anchor[@]}" "$ROOT_PATH" || {
-      echo "ERROR: CodeTracer could not install the Repro publication gate." >&2
+      # `ensure` failed. When managed hooks this build does not generate are
+      # left, the cause is its deliberate refusal to re-author another build's
+      # hooks (refused-foreign-contract). Which build should win is the
+      # operator's call, so the shell still stops; it names both builds and
+      # both ways to reconcile them, so the call can be made (codetracer-pm
+      # spec/Working-with-the-CodeTracer-Repos.md, "Repro hooks another build
+      # wrote"). Any other failure keeps the plain error.
+      ct_repro_scan_foreign
+      if [ "''${#ct_repro_foreign[@]}" -gt 0 ]; then
+        {
+          echo "ERROR: CodeTracer could not install the Repro publication gate: ''${ct_repro_foreign[*]} in $ct_repro_hooks_dir were written by a different Repro build than the one this shell pins, and a plain 'repro hooks ensure' does not re-author another build's hooks."
+          for ct_repro_writer in "''${ct_repro_writers[@]}"; do
+            echo "  hooks written by:  $ct_repro_writer"
+          done
+          echo "  this shell pins:   ${repro}/bin/repro ($(${repro}/bin/repro --version 2>/dev/null | head -n 1 || true))"
+          echo "  Reconcile them in one of two ways, then enter the shell again:"
+          echo "    - if the pinned build is the one this checkout should run, re-anchor the hooks to it:"
+          echo "        ${repro}/bin/repro hooks ensure --vcs --re-anchor $ROOT_PATH"
+          echo "      A 'repro hooks ensure' run later by the other build refuses these hooks in turn, so also"
+          echo "      move whatever supplies that build (e.g. the workspace root's dev shell) to this revision."
+          echo "    - otherwise move CodeTracer's reprobuild pin (flake.lock) to the build that wrote the hooks,"
+          echo "      or move that build's reprobuild pin to CodeTracer's (workspace AGENTS.md, \"Rolling the pin forward instead\")."
+        } >&2
+        unset ct_repro_writer
+      else
+        echo "ERROR: CodeTracer could not install the Repro publication gate." >&2
+      fi
+      unset -f ct_repro_scan_foreign
       return 1 2>/dev/null || exit 1
     }
   fi
+  unset -f ct_repro_scan_foreign
+  unset ct_repro_hooks_dir ct_repro_seen ct_repro_foreign ct_repro_writers
   unset ct_repro_anchor ct_repro_git_dir ct_repro_common_dir
   if [ "$ct_hooks_status" -ne 0 ]; then
     echo "ERROR: CodeTracer could not install its configured Git checks." >&2
