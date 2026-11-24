@@ -83,17 +83,20 @@ proc referenceChordFor(router: KeymapRouter; operation, argument: string;
                        facts: SessionFacts; path: ScopePath;
                        navMode: NavigationMode): string =
   ## The definition, through `route` on a copy of the router per row.
+  ##
+  ## The rows naming the operation are read with `bindingsFor`, which copies
+  ## only them. `bindings` copies a whole table, and asked for every operation
+  ## that made this suite's time grow with the table's size times the number
+  ## of operations: under node at load 90 it ran close to, and past, the
+  ## lane's 30-minute bound.
   var candidates: seq[tuple[b: EditingBinding, user: bool]] = @[]
-  for i in countdown(router.user.bindings.len - 1, 0):
-    candidates.add (router.user.bindings[i], true)
-  for b in router.effective.bindings: candidates.add (b, false)
-  # One copy, its prefix cancelled before each row: `route` changes nothing on
-  # the router but its pending prefix (`keymap_router.resolveKey`), so a
-  # cancelled prefix is a fresh copy. A copy per row is a deep copy under the
-  # JS backend, and made this suite run past the lane's 30-minute bound.
-  var probe = router
+  let userRows = router.user.bindingsFor(operation, argument)
+  for i in countdown(userRows.len - 1, 0):
+    candidates.add (userRows[i], true)
+  for b in router.effective.bindingsFor(operation, argument):
+    candidates.add (b, false)
   for (b, user) in candidates:
-    if b.operation != operation or b.argument != argument: continue
+    var probe = router
     probe.cancelPending()
     var res: EditingResolution
     for c in b.chords:
@@ -130,11 +133,11 @@ proc compareAll(router: KeymapRouter; facts: SessionFacts; path: ScopePath;
     # The one-shot wrapper answers the same.
     check router.chordFor(op, facts, path, navMode, arg) == want
 
-# The reference copies the router once per operation, which the JS backend
-# does by deep copy, so the full matrix is slow under node. The JS lane runs
-# the same comparison over the read-only debug session in two scopes, which
-# still covers every base, user keymap, pushed layer and multi-chord row; the
-# C lane runs it all.
+# The reference copies the router once per candidate row, which the JS backend
+# does by deep copy: the full matrix takes about 80 s on C and about ten
+# minutes under node. The JS lane runs the same comparison over the
+# read-only debug session in two scopes, which still covers every base, user
+# keymap, pushed layer and multi-chord row; the C lane runs it all.
 let
   Facts = (when defined(js): @[debugFacts()]
            else: @[debugFacts(), debugFacts(readOnly = false), editFacts()])
