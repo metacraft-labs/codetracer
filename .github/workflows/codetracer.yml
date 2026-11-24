@@ -789,7 +789,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}\ct-diy
-          key: windows-diy-origin-dap-v1-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}
+          key: windows-diy-origin-dap-v2-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}
           lookup-only: true
 
       - name: Bootstrap the toolchain through env.ps1
@@ -806,13 +806,29 @@ jobs:
           $started = Get-Date
           . ./env.ps1
           Write-Host "env.ps1 bootstrap of $env:WINDOWS_DIY_ONLY into $env:WINDOWS_DIY_INSTALL_ROOT took $([int]((Get-Date) - $started).TotalMinutes) min"
+          # Hard links become plain copies before the cache is saved. Rustup's
+          # proxies in cargo\bin are hard links to one rustup.exe; tar stores
+          # them as links, and Windows tar cannot recreate a link whose target
+          # runs through `..`, which every path here does (the root is outside
+          # the workspace): the v1 cache failed to restore with "Can't create
+          # '\\?\...\..\..\_temp\ct-diy\cargo\bin\cargo.exe': Invalid argument"
+          # (run 45471393785). Rustup's proxies work as copies.
+          $linked = @(Get-ChildItem -LiteralPath $env:WINDOWS_DIY_INSTALL_ROOT -Recurse -File |
+            Where-Object { $_.LinkType -eq "HardLink" })
+          foreach ($f in $linked) {
+            $copy = "$($f.FullName).unlinked"
+            Copy-Item -LiteralPath $f.FullName -Destination $copy
+            Remove-Item -LiteralPath $f.FullName -Force
+            Move-Item -LiteralPath $copy -Destination $f.FullName
+          }
+          Write-Host "Replaced $($linked.Count) hard-linked file(s) with copies"
 
       - name: Save the toolchain cache
         if: steps.lookup.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}\ct-diy
-          key: windows-diy-origin-dap-v1-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}
+          key: windows-diy-origin-dap-v2-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}
 
   origin-dap-windows-nightly:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
@@ -898,7 +914,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}\ct-diy
-          key: windows-diy-origin-dap-v1-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}
+          key: windows-diy-origin-dap-v2-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}
           fail-on-cache-miss: true
 
       - name: Setup db-backend siblings
