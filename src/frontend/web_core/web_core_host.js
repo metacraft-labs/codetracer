@@ -58,6 +58,7 @@
       eventLogCurrent: c('ctwEventLogCurrent', 'number'),
       eventLogRowPx: c('ctwEventLogRowPx', 'number'),
       shellMirror: c('ctwShellMirror', null, ['string']),
+      terminalWindow: c('ctwTerminalWindow', 'string'),
       calltraceMeasured: c('ctwCalltraceMeasured', null, ['number', 'number', 'number']),
       frameOps: c('isonimFrameOps', 'number'),
       frameReset: c('isonimFrameReset', null),
@@ -198,6 +199,7 @@
       eventLogCurrent: () => core.eventLogCurrent(),
       eventLogRowPx: () => core.eventLogRowPx(),
       calltraceMeasured: call(core.calltraceMeasured),
+      terminalWindow: () => core.terminalWindow(),
     };
     const decorate = () => {
       if (core.mounted() && root.ctwDecoratePanes) root.ctwDecoratePanes(paneScope, decorationApi);

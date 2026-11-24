@@ -365,11 +365,23 @@ proc prepare(session: SessionViewModel) =
     return
   # The desktop and the web mark the call the debugger is in after every
   # move, as the Call Trace component did before it was mounted here.
-  if not session.calltraceVM.isNil:
+  #
+  # A pane the WebAssembly core draws follows the debugger in the core
+  # (`web_core.mountPanes`): the tab's own ViewModel following it as well
+  # would ask the engine for every move's call-trace section and event a
+  # second time, for a pane nobody sees, and the engine answers one request
+  # at a time — the editor's flow waited behind them.
+  when defined(ctWasmPanes):
+    let calltraceHere = not drawnByWasmCore(Content.Calltrace)
+    let eventLogHere = not drawnByWasmCore(Content.EventLog)
+  else:
+    const calltraceHere = true
+    const eventLogHere = true
+  if calltraceHere and not session.calltraceVM.isNil:
     session.calltraceVM.followDebuggerCall()
   # The Event Log marks the current event, and asks for it after a move, as
   # the terminal's and GPUI's do (HSF-D6).
-  if not session.eventLogVM.isNil:
+  if eventLogHere and not session.eventLogVM.isNil:
     session.eventLogVM.followStop()
 
 proc panelHostComponentId*(host: dom_api.Element): int {.importjs:

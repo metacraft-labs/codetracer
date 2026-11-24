@@ -56,7 +56,7 @@ iife() { {
 echo "--- building the wasm32 core (${build_label}) ---"
 exports="_main,_ctwBoot,_ctwPump,_ctwDeliver,_ctwOpenFolder,_ctwAttach,_ctwMountPane,_ctwPress,_ctwMenu,_ctwMenuChoose,_ctwMeasured,_ctwExpire,_ctwPhase,_ctwFailure,_ctwStep,_ctwStepping,_ctwPosition"
 exports="${exports},_ctwReadCrossings,_ctwSetViewport,_ctwMounted,_ctwPending"
-exports="${exports},_ctwFullValueOf,_ctwEventLogMetrics,_ctwEventLogSearch,_ctwEventLogTotal,_ctwEventLogCurrent,_ctwEventLogRowPx,_ctwShellMirror,_ctwCalltraceMeasured"
+exports="${exports},_ctwFullValueOf,_ctwEventLogMetrics,_ctwEventLogSearch,_ctwEventLogTotal,_ctwEventLogCurrent,_ctwEventLogRowPx,_ctwShellMirror,_ctwTerminalWindow,_ctwCalltraceMeasured"
 exports="${exports},_isonimFrameBase,_isonimFrameLen,_isonimFrameOps,_isonimFrameReset,_isonimFrameManifest,_isonimFrameDispatch,_isonimFrameForget"
 if ! nim c "${nim_common[@]}" "${opt_flags[@]}" \
 	--cpu:wasm32 --os:linux -d:emscripten \

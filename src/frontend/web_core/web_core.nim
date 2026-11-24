@@ -47,6 +47,7 @@ import isonim/web/frame_renderer
 
 import ../viewmodel/codetracer_embed
 import ../viewmodel/backend/worker_backend
+import ../viewmodel/sdk/stop_loader
 import ../viewmodel/viewport
 import ../viewmodel/input/pane_presses
 import ../viewmodel/viewmodels/[calltrace_vm, state_vm, event_log_vm, terminal_output_vm, origin_chain_vm, origin_chain_bridges, scratchpad_vm]
@@ -152,6 +153,15 @@ proc mountPanes() =
     return
   mounted = true
   let s = session.session
+  # THE FLOW IS THE PAGE'S. No pane this core draws shows it (the editor and
+  # its inline flow are the shell's), and the flow's window arrives as
+  # `ct/updated-flow` EVENTS, which every listener on the tab's connection
+  # is handed: a window this core asked for, at its own stop and in its own
+  # mode, was drawn in the shell's editor between the shell's own, and the
+  # editor's values flickered between the two.
+  if not session.stops.isNil:
+    session.stops.setPaneOpen(spFlow, false)
+    session.stops.setPaneOpen(spDiffFlow, false)
   # THE VALUE-ORIGIN BRIDGES, as the desktop's shell installs them on its
   # own StateVM (`ui/state.createSessionOriginChainVM`), on this core's: the
   # in-row chain a row's badge expands is fetched and drawn here.
@@ -368,6 +378,18 @@ proc ctwEventLogSearch(query: cstring) {.exportc.} =
   session.session.eventLogVM.setSearchQuery($query)
   ctwPump()
 
+proc ctwTerminalWindow(): cstring {.exportc.} =
+  ## The Terminal Output's line counts for the page's decoration
+  ## (`web_core_decorations.decorateTerminalOutput`): every line, the
+  ## current one, the first held, how many are held, and whether it holds a
+  ## window ("1") or every line ("0").
+  let vm = session.session.terminalOutputVM
+  if not mounted or vm.isNil:
+    return cstring"0,0,0,0,0"
+  cstring($vm.lineCount() & "," & $vm.currentLine() & "," &
+          $vm.linesStart.val & "," & $vm.lines.val.len & "," &
+          (if vm.windowed: "1" else: "0"))
+
 proc ctwEventLogTotal(): cint {.exportc.} =
   if not mounted: 0.cint else: cint(session.session.eventLogVM.listTotal)
 
@@ -518,7 +540,7 @@ globalThis.ctwJsCore = {
   fullValueOf: `ctwFullValueOf`, eventLogMetrics: `ctwEventLogMetrics`,
   eventLogSearch: `ctwEventLogSearch`, eventLogTotal: `ctwEventLogTotal`,
   eventLogCurrent: `ctwEventLogCurrent`, eventLogRowPx: `ctwEventLogRowPx`,
-  shellMirror: `ctwShellMirror`,
+  shellMirror: `ctwShellMirror`, terminalWindow: `ctwTerminalWindow`,
   calltraceMeasured: `ctwCalltraceMeasured`,
   frameBytes: function() { return globalThis.isonimFrameBytes(); },
   frameOps: `frameOps`, frameReset: `frameReset`, frameManifest: `frameManifest`,
