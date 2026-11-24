@@ -266,8 +266,11 @@ ARMS = [
     # THE REGISTER AND THE SCAN — the bookkeeping, and its own controls
     # ------------------------------------------------------------------
     Arm("G1", GAPS,
-        "  FiledGpuiGaps*: seq[GpuiGap] = @[\n    GpuiGap(",
-        "  FiledGpuiGaps*: seq[GpuiGap] = @[\n    GpuiGap(\n      id: \"PLAT21-VG3\",\n      entries: @[pkModal],\n      subject: gsRenderer,\n      what: \"a repaired gap put back in the register by a mutation arm, which is what this arm is for and is long enough to pass the field checks\",\n      measured: \"a repaired gap put back in the register by a mutation arm, which is what this arm is for and is long enough to pass the field checks\",\n      remedy: \"a repaired gap put back in the register by a mutation arm, which is what this arm is for and is long enough to pass the field checks\"),\n    GpuiGap(",
+        # Re-aimed 2026-11-24: b5010d581 retired the last filed gap, so the
+        # register is now the empty literal `@[]` and there is no following
+        # `GpuiGap(` entry; the arm puts a repaired gap into the empty register.
+        "  FiledGpuiGaps*: seq[GpuiGap] = @[]",
+        "  FiledGpuiGaps*: seq[GpuiGap] = @[\n    GpuiGap(\n      id: \"PLAT21-VG3\",\n      entries: @[pkModal],\n      subject: gsRenderer,\n      what: \"a repaired gap put back in the register by a mutation arm, which is what this arm is for and is long enough to pass the field checks\",\n      measured: \"a repaired gap put back in the register by a mutation arm, which is what this arm is for and is long enough to pass the field checks\",\n      remedy: \"a repaired gap put back in the register by a mutation arm, which is what this arm is for and is long enough to pass the field checks\")]",
         SUITE,
         "THE CENSUS — escapes taken on a run EQUAL the filed register",
         CTL[GAPS][0], CTL[GAPS][1],

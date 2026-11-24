@@ -661,9 +661,6 @@ src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/fronten
 # 2026-11-22, the GPUI vocabulary: Image carries its picture, the pass-through tags match
 # the render plan, and the escape census records gap ids. plat21 was re-graded (28 of 28
 # KILLED) and its record kept; the harnesses below digest the same files and owe a re-grade.
-src/frontend/gpui/tests/plat38-input-mutation-control.sha256	src/frontend/view_vocabulary/gpui_binding.nim	2f665b501f1b09784be12cc15786beed92c492743a81d6a22ede5b1fb2b1f568	201b98448ba75ba8f27ae9af3e9b7e7cc2f316f8e5795f094304e7870f4dc26f
-src/frontend/gpui/tests/plat38-input-mutation-control.sha256	src/common/view_vocabulary/gpui_gaps.nim	e6cbb30b6b657c1e14ab3965b10398a6bdfc236a423ef52366a45a96b38ac558	6aff91c3af03e857abe9efdaa33c6c6902c7fa9618c5a179aad33d27741701e5
-src/frontend/gpui/tests/plat38-input-mutation-control.sha256	src/frontend/gpui/tests/test_gpui_key_delivery.nim	e0032c13d630560f01df585e39d07ffc8cd07789d3feee8ec3072b75c14f3c39	ed4704ee6dae316f0fc14cb1aefb05bf3a2429171775edef9a4718cee3cc859f
 
 # 2026-11-22, the terminal's gutter marks come from the shared ranking (editor_rows.markFor),
 # one mark per line. plat22 was re-graded (20 of 20 KILLED) and its record kept; the harnesses
