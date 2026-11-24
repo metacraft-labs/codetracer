@@ -759,7 +759,6 @@ src/frontend/tui/tests/plat70g-multiclick-mutation-control.sha256	src/frontend/u
 # 2026-11-24, ci/lib/test-lane-files.sh moved in 24bb8bb4a10 (agent-harbor web views
 # for a change's tests and trace links) without its ledger lines; recorded here so the
 # gate is green. plat17, plat33 and plat34 owe re-grades for it.
-src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	ci/lib/test-lane-files.sh	2f5606de487077bdda9b83ccc6ae3b961c68bb94a1ad98b051ce56c00a7b9f30	f84ed976b90a0326f2564aaddf1ff1da4a89f86eaa50830b2c1b77c744513f96
 src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	ci/lib/test-lane-files.sh	2f5606de487077bdda9b83ccc6ae3b961c68bb94a1ad98b051ce56c00a7b9f30	f84ed976b90a0326f2564aaddf1ff1da4a89f86eaa50830b2c1b77c744513f96
 
 # 2026-11-21, a plugin's relayed actions take the terminal's own routes: plugin_service
