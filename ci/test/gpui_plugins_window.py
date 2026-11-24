@@ -11,7 +11,8 @@ INSTALLED AS A COMPONENT (`plugin_process_fixture.installPackage`, through
 `src/frontend/gpui/tests/gpui_plugins_install.nim`), and drives it the way a
 user does: REAL keys through the compositor's virtual keyboard
 (`ci/test/wtype-keys.sh`), the omnibar opened with F1 and a line
-typed into it. Four windows:
+typed into it. Six windows; the sixth installs the `ct-lens` package
+(`src/plugins/ct-lens/`, `ct_lens_fixture.installLens`) instead:
 
   consent-and-run   no plugin process before consent; `:plugins review` shows
                     the grant screen; both plugins granted and running in ONE
@@ -33,6 +34,28 @@ typed into it. Four windows:
                     layer is transparent: the footer no longer names it);
                     `k` and `l` reach the window, and the third key opens
                     the plugin's breaker.
+  pane-key-and-decoration
+                    both plugins granted: `metrics`'s decoration and its
+                    `hotspot` marker are on the execution line (the window's
+                    `plugin marks` trace), the footer repeats the decoration
+                    and a frame's OCR reads it in the editor; *Show pane:
+                    Flame* docks and focuses `flame`'s list, whose Down and
+                    Enter go to its view (`plugin view key`), and the plugin's
+                    answer marks the activated row; a REAL press on the other
+                    row (a virtual pointer at the row the frame's OCR found)
+                    activates that one (`plugin view click`).
+  ct-lens           the three ct-lens plugins granted from the omnibar:
+                    history and watch in one process, jump in its own;
+                    *Show pane: Line history* draws the history of the
+                    function the debugger is in, and its status item reaches
+                    the footer; steps until the watch plugin's status item
+                    names one changed value, then F7 goes to the plugin and
+                    watches it (the command then says why it is off);
+                    Shift+F7's mode is named on the footer, a digit jumps
+                    through the calltrace (the history pane follows to
+                    another function) and closes it; opened again, three
+                    Escapes take the keyboard back and RECOVER INPUT names
+                    it.
 
 What each window did is read from the window's OWN output — its gesture trace
 (`CODETRACER_GPUI_GESTURE_TRACE=1`, the lines `main.nim`'s plugin pump writes:
@@ -70,7 +93,11 @@ BIN = os.environ.get("CODETRACER_GPUI_PLUGINS_BIN",
 INSTALLER = os.environ.get("CODETRACER_GPUI_PLUGINS_INSTALLER",
                            os.path.join(OUT, "gpui_plugins_install"))
 PLUGIN_EXE = "acme-tools@1.0.0/bin/acme-tools-plugins"
+LENS_EXE = "ct-lens@0.1.0/bin/ct-lens-plugins"
 QUIT_AFTER_MS = 300000
+VPOINTER = os.environ.get("CODETRACER_VIRTUAL_POINTER", os.path.join(
+    os.path.dirname(ROOT), "isonim-gpui", "build", "virtual-pointer"))
+FRAME_W, FRAME_H = 1920, 1080  # wayland-run-test.sh's headless output
 
 
 def fail(msg):
@@ -119,6 +146,20 @@ def hold_keyboard():
     time.sleep(1.0)
 
 
+def no_key_repeat():
+    """Turn the compositor's key repeat off for every keyboard on the seat.
+
+    A key `wtype` holds down past the repeat delay — on a loaded host the
+    gap between its press and release can be that long — repeats in the
+    window as if a user held it: measured 2026-11-24 at load about 140, the
+    omnibar's query read `:plugins  grant` (one space typed, two arrived) and
+    the line was refused. A user's typing does not repeat, so the window must
+    not see repeats the injection made. Rate 0 is the protocol's "no
+    repeat" (`wl_keyboard.repeat_info`)."""
+    subprocess.run(["swaymsg", "input type:keyboard repeat_rate 0"],
+                   capture_output=True, text=True, check=False)
+
+
 def release_keyboard():
     if _HOLDER is not None and _HOLDER.poll() is None:
         _HOLDER.kill()
@@ -133,17 +174,57 @@ def keys(*args, lead_ms=500):
     subprocess.run(["bash", WTYPE_KEYS, *args], env=env, check=False)
 
 
-def plugin_pids(home):
+class Pointer:
+    """A REAL pointer device on the headless compositor (isonim-gpui's
+    `virtual-pointer`, wlroots' virtual-pointer protocol): absolute motion
+    over the output and button presses, as a mouse sends them."""
+
+    def __init__(self):
+        self.proc = subprocess.Popen([VPOINTER, str(FRAME_W), str(FRAME_H)],
+                                     stdin=subprocess.PIPE, text=True)
+
+    def send(self, *cmds):
+        for c in cmds:
+            self.proc.stdin.write(c + "\n")
+        self.proc.stdin.flush()
+
+    def click(self, x, y):
+        self.send(f"abs {x} {y}", "sleep 150", "down left", "sleep 120", "up left", "sleep 300")
+
+    def close(self):
+        if self.proc.poll() is None:
+            self.send("quit")
+            self.proc.stdin.close()
+            self.proc.wait(timeout=20)
+
+
+def ocr_word_at(png, word):
+    """The centre of the first word `word` in a frame (tesseract's word
+    boxes, in the output's pixels), or None."""
+    r = subprocess.run(["tesseract", png, "-", "--psm", "11", "tsv"],
+                       capture_output=True, text=True)
+    for row in r.stdout.splitlines()[1:]:
+        f = row.split("\t")
+        if len(f) >= 12 and f[11].strip() == word:
+            x, y, w, h = (int(v) for v in f[6:10])
+            return x + w // 2, y + h // 2
+    return None
+
+
+def plugin_pids(home, exe=PLUGIN_EXE):
     # The installed package's executable, under THIS window's components root.
-    out = subprocess.run(["pgrep", "-f", os.path.join(home, "components", PLUGIN_EXE)],
+    out = subprocess.run(["pgrep", "-f", os.path.join(home, "components", exe)],
                          capture_output=True, text=True).stdout
     return sorted(int(x) for x in out.split())
 
 
 class Window:
-    def __init__(self, name, home, extra=(), state=None):
+    def __init__(self, name, home, extra=(), state=None, exe=PLUGIN_EXE,
+                 quit_after_ms=QUIT_AFTER_MS):
         self.name = name
         self.home = home
+        self.exe = exe
+        self.quit_after_ms = quit_after_ms
         self.dir = os.path.join(OUT, name)
         shutil.rmtree(self.dir, ignore_errors=True)
         os.makedirs(self.dir)
@@ -170,7 +251,7 @@ class Window:
             ":" + os.environ.get("LD_LIBRARY_PATH", "")
         self.started = time.time()
         self.proc = subprocess.Popen(
-            [BIN, "--quit-after-ms=%d" % QUIT_AFTER_MS, "--width=1440",
+            [BIN, "--quit-after-ms=%d" % quit_after_ms, "--width=1440",
              "--height=900", *extra, traces[0]],
             stdout=open(self.log, "w"), stderr=subprocess.STDOUT, env=env)
         self.pos = 0
@@ -272,18 +353,19 @@ class Window:
         elapsed = int((time.time() - self.started) * 1000)
         time.sleep(1)
         return {"rc": rc, "elapsedMs": elapsed,
-                "endedOnDeadline": elapsed >= QUIT_AFTER_MS - 500,
-                "pluginPidsAfterExit": plugin_pids(self.home)}
+                "endedOnDeadline": elapsed >= self.quit_after_ms - 500,
+                "pluginPidsAfterExit": plugin_pids(self.home, self.exe)}
 
 
-def new_home(name, capture=False, settings=None):
+def new_home(name, capture=False, settings=None, package="acme-tools"):
     home = os.path.join(OUT, name + "-home")
     shutil.rmtree(home, ignore_errors=True)
     os.makedirs(os.path.join(home, "components"))
-    args = [INSTALLER, os.path.join(home, "components")] + (["capture"] if capture else [])
+    mode = ["capture"] if capture else (["ct-lens"] if package == "ct-lens" else [])
+    args = [INSTALLER, os.path.join(home, "components")] + mode
     r = subprocess.run(args, capture_output=True, text=True)
     if r.returncode != 0:
-        fail("installing acme-tools failed: " + r.stdout + r.stderr)
+        fail("installing " + package + " failed: " + r.stdout + r.stderr)
     if settings is not None:
         os.makedirs(os.path.join(home, "user-root"))
         with open(os.path.join(home, "user-root", "plugin-settings.json"), "w") as f:
@@ -473,6 +555,192 @@ def run_swallowed_key():
     return r
 
 
+def run_pane_key_and_decoration():
+    home = new_home("panekey")
+    w = Window("pane-key-and-decoration", home)
+    r = {"mapped": w.mapped()}
+    w.wait(r"^plugins awaiting consent acme-tools\.", 60)
+    time.sleep(1)
+    m = w.mark()
+    grant_both(w)
+    _, running = w.wait(r"^plugins state .*acme-tools\.metrics  running.*acme-tools\.flame  running"
+                        r"|^plugins state .*acme-tools\.flame  running.*acme-tools\.metrics  running",
+                        90, m)
+    r["bothRunningState"] = running
+    # The execution line carries metrics's decoration and its hotspot marker.
+    _, marks = w.wait(r"^plugin marks \S+: (?=.*decoration (\d+) ◆ metrics: line \1 \(acme-tools\.metrics\))"
+                      r"(?=.*marker \d+ ★ )", 90, m)
+    r["marks"] = marks
+    _, foot = w.wait(r"^plugins footer .*◆ metrics: line \d+", 30, m)
+    r["footerDecoration"] = foot
+    time.sleep(1.5)
+    r["decorationOcr"] = w.grab_showing("decoration", "metrics: line")
+    # flame's list, docked and focused from the omnibar, takes its own keys.
+    m = w.mark()
+    w.omnibar(":Show pane: Flame")
+    _, drew = w.wait(r"^plugin pane acme-tools\.flame/flame drew: .*work 40%", 60, m)
+    r["flameDrew"] = drew
+    m = w.mark()
+    keys("-k", "Down")
+    r["downKey"] = w.wait(r"^plugin view key (Down|ArrowDown) on acme-tools\.flame/flame$", 20, m)[1]
+    m2 = w.mark()
+    keys("-k", "Return")
+    r["enterKey"] = w.wait(r"^plugin view key (Enter|Return) on acme-tools\.flame/flame$", 20, m2)[1]
+    _, answered = w.wait(r"^plugin pane acme-tools\.flame/flame drew: .*work 40% \(activated\)", 60, m)
+    r["flameAnswered"] = answered
+    time.sleep(1.5)
+    r["flameOcr"] = w.grab_showing("flame-activated", "activated")
+    # A REAL press on the other row: the pane's row is found in the frame by
+    # its label, and clicking it activates it (`plugin view click`).
+    at = None
+    end = time.time() + 30
+    while at is None and time.time() < end:
+        w.grab("flame-before-click")
+        at = ocr_word_at(os.path.join(w.dir, "flame-before-click.png"), "main")
+        if at is None:
+            time.sleep(2)
+    r["clickAt"] = list(at) if at else None
+    m = w.mark()
+    if at:
+        ptr = Pointer()
+        try:
+            time.sleep(0.5)
+            ptr.click(*at)
+        finally:
+            ptr.close()
+    r["clickRouted"] = w.wait(r"^plugin view click flame\.list#0 on acme-tools\.flame/flame$", 20, m)[1]
+    r["clickAnswered"] = w.wait(r"^plugin pane acme-tools\.flame/flame drew: .*main 60% \(activated\)", 60, m)[1]
+    r.update(w.finish())
+    return r
+
+
+LENS_RUNNING = (r"^plugins state (?=.*ct-lens\.history  running)(?=.*ct-lens\.watch  running)"
+                r"(?=.*ct-lens\.jump  running)")
+
+
+def open_jump_mode(w, tries=3):
+    """Shift+F7 until the footer names the jump mode: each press waits for
+    `ct-lens.jump` to be running (not held as not responding)."""
+    for _ in range(tries):
+        end = time.time() + 60
+        while time.time() < end:
+            states = [l for l in w.lines() if l.startswith("plugins state ")]
+            if states and "ct-lens.jump  running" in states[-1]:
+                break
+            time.sleep(0.5)
+        m = w.mark()
+        keys("-M", "shift", "-k", "F7", "-m", "shift")
+        _, mode = w.wait(r"^plugins footer JUMP MODE \(ct-lens\.jump\).* 2 \S", 60, m)
+        if mode:
+            return mode
+    return ""
+
+
+def run_ct_lens():
+    home = new_home("ct-lens", package="ct-lens")
+    # Three plugins, two processes and a dozen omnibar lines take longer than
+    # the other windows on a loaded host.
+    w = Window("ct-lens", home, exe=LENS_EXE, quit_after_ms=900000)
+    r = {"mapped": w.mapped()}
+    _, awaiting = w.wait(r"^plugins awaiting consent ct-lens\.", 60)
+    r["awaitingConsent"] = awaiting
+    time.sleep(2)
+    r["pidsBeforeConsent"] = plugin_pids(home, LENS_EXE)
+    m = w.mark()
+    for pid in ("ct-lens.history", "ct-lens.watch", "ct-lens.jump"):
+        w.omnibar(":plugins grant " + pid)
+    _, running = w.wait(LENS_RUNNING, 120, m)
+    r["allRunningState"] = running
+    time.sleep(1.5)
+    r["pidsRunning"] = plugin_pids(home, LENS_EXE)
+    # The history pane, docked from its omnibar entry, follows the debugger.
+    m = w.mark()
+    w.omnibar(":Show pane: Line history")
+    _, drew = w.wait(r"^plugin pane ct-lens\.history/history drew: .*History of ", 90, m)
+    r["historyDrew"] = drew
+    r["historyDocked"] = w.wait(r"^applied addContributedPane\(ct-lens\.history/history", 5, m)[0] >= 0
+    # Its status item may have reached the footer before the pane was shown.
+    _, footer = w.wait(r"^plugins footer .*history: ", 60, 0)
+    r["historyFooter"] = footer
+    # Step until the watch plugin's status item names ONE changed value, then
+    # F7: the binding is the plugin's while something is left to watch.
+    changed = ""
+    steps = 0
+    while not changed and steps < 40:
+        m = w.mark()
+        keys("-k", "F10")
+        steps += 1
+        if w.wait(r"^control next tick=\d+", 30, m)[0] < 0:
+            continue
+        i, line = w.wait(r"^plugins footer .*changed: (?!none|…)[^,]+?(  |$)", 15, m)
+        if i >= 0:
+            changed = re.search(r"changed: ([^ ,]+)", line).group(1)
+            r["changedFooter"] = line
+    r["changed"] = changed
+    r["stepsToChange"] = steps
+    m = w.mark()
+    keys("-k", "F7")
+    _, routed = w.wait(r"^plugin key (?i:f7)$", 20, m)
+    r["f7Routed"] = routed
+    # Everything the step changed is watched now: the command says why it is off.
+    refused = ""
+    end = time.time() + 60
+    while time.time() < end and not refused:
+        m = w.mark()
+        w.omnibar(":plugins run ct-lens.watch watch.add-changed")
+        _, refused = w.wait(r"^plugins run ct-lens\.watch watch\.add-changed -> "
+                            r".*every changed value is already watched", 10, m)
+        if refused:
+            break
+        keys("-k", "q")
+        time.sleep(2)
+    r["watchRefused"] = refused
+    keys("-k", "q")
+    time.sleep(0.5)
+    # The jump pane, docked too: it says where a jump went.
+    m = w.mark()
+    w.omnibar(":Show pane: Jump to call")
+    r["jumpPaneDrew"] = w.wait(r"^plugin pane ct-lens\.jump/calls drew: .*Jump to call", 60, m)[1]
+    # Shift+F7: the jump mode, named on the footer with the numbered calls; a
+    # digit jumps through the calltrace and closes it, and the jump pane says
+    # where. A key the plugin is slow to acknowledge is still delivered (the
+    # mode opens late); a plugin the host then holds as not responding gets
+    # no keys until it answers a probe, so each press waits for it to run.
+    r["modeFooter"] = open_jump_mode(w)
+    pick = re.search(r" 2 (\S+)", r["modeFooter"])
+    r["picked"] = pick.group(1) if pick else ""
+    ticks = [l for l in w.lines() if l.startswith("control next tick=")]
+    r["tickBeforeJump"] = ticks[-1] if ticks else ""
+    m = w.mark()
+    keys("2")
+    r["digitRouted"] = w.wait(r"^plugin key 2$", 20, m)[1]
+    _, closed = w.wait(r"^plugins footer (?!JUMP MODE)", 30, m)
+    r["modeClosedFooter"] = closed
+    _, jumped = w.wait(r"^plugin pane ct-lens\.jump/calls drew: .*jumped to ", 60, m)
+    r["jumpedPane"] = jumped
+    # Whether the window shows the relayed jump at once (the history pane
+    # follows the stop), and what the next step starts from: a step after
+    # the jump starts inside the call it jumped to.
+    r["historyAtOnce"] = w.wait(r"^plugin pane ct-lens\.history/history drew: .*History of " +
+                                re.escape(r["picked"] or "\0") + r" ", 20, m)[1]
+    m = w.mark()
+    keys("-k", "F10")
+    r["tickAfterJump"] = w.wait(r"^control next tick=\d+", 30, m)[1]
+    r["historyAfterStep"] = w.wait(r"^plugin pane ct-lens\.history/history drew: .*History of "
+                                   r"(?!<__main__>)", 60, m)[1]
+    # Opened again: three Escapes take the keyboard back from it.
+    r["modeAgain"] = open_jump_mode(w)
+    m = w.mark()
+    keys("-k", "Escape", "-s", "200", "-k", "Escape", "-s", "200", "-k", "Escape")
+    _, dialog = w.wait(r"^plugins dialog RECOVER INPUT: ", 30, m)
+    r["dialog"] = dialog
+    _, after = w.wait(r"^plugins footer (?!JUMP MODE)", 30, m)
+    r["footerAfterChord"] = after
+    keys("-k", "q")
+    r.update(w.finish())
+    return r
+
+
 def capture():
     # The installer and the package build live in OUT too: only this
     # capture's own outputs are replaced.
@@ -482,6 +750,8 @@ def capture():
             os.remove(os.path.join(OUT, stale))
     if not os.access(BIN, os.X_OK):
         fail(BIN + " is not built (a codetracer-gpui against the windowed shim)")
+    if not os.access(VPOINTER, os.X_OK):
+        fail(VPOINTER + " is not built (isonim-gpui's scripts/build-virtual-pointer.sh)")
     if not os.access(INSTALLER, os.X_OK):
         fail(INSTALLER + " is not built (gpui-plugins-window.sh builds it)")
     result = {
@@ -495,12 +765,15 @@ def capture():
                                 capture_output=True, text=True).stdout.strip() != "",
         "windows": {},
     }
+    no_key_repeat()
     hold_keyboard()
     try:
         for name, fn in [("consentAndRun", run_consent_and_run),
                          ("noExtensions", run_no_extensions),
                          ("recoveryChord", run_recovery_chord),
-                         ("swallowedKey", run_swallowed_key)]:
+                         ("swallowedKey", run_swallowed_key),
+                         ("paneKeyAndDecoration", run_pane_key_and_decoration),
+                         ("ctLens", run_ct_lens)]:
             result["windows"][name] = fn()
             with open(os.path.join(OUT, "result.json"), "w") as f:
                 json.dump(result, f, indent=1)
