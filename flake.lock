@@ -8030,11 +8030,11 @@
     "nim-langserver": {
       "flake": false,
       "locked": {
-        "lastModified": 1794458642,
-        "narHash": "sha256-5Ja6q8923q10FA341va7vKoRR45qNuzGk3AP6QPFsTE=",
+        "lastModified": 1795408825,
+        "narHash": "sha256-C0R2GthZ+knleJFAgnY3ueRF1XCreQDkGvufK4QQmnY=",
         "owner": "metacraft-labs",
         "repo": "langserver",
-        "rev": "45b5a5bdcb4d6752c1bd244f212a7f40b88f4cf3",
+        "rev": "8c11da9ee979d558cdf7e6dc2bd72fc0fe388ba8",
         "type": "github"
       },
       "original": {
