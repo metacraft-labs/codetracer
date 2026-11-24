@@ -28,7 +28,9 @@
 ##   * K17 / K18 / K19 — Files (on `multi_root`): a file opens in the editor
 ##     (its tab names it), a folder collapses, a node opens the Files pane's
 ##     menu — Create, Rename, Delete read-only in a replay with their reason,
-##     Edit opening the file;
+##     Edit opening the file; M102 (#877): with the editor's tab Closed, or
+##     behind another tab of its stack, the open brings the editor back in
+##     front, drawing the file;
 ##   * K23 / K33 — an argument pinned to the scratchpad, its close button;
 ##   * K26 — an event-log header orders the log, again reverses it;
 ##   * K14 / K15 — Alt+click adds a cursor, Ctrl+Alt+click and
@@ -68,7 +70,9 @@ template ck(cond: untyped) =
   check(cond)
 
 const
-  ExpectedAssertions = 131
+  ExpectedAssertions = 144
+    ## 131 -> 144: M102 (#877) — a file opened from Files with the editor's
+    ## tab Closed, or behind another tab, brings the editor to the front.
     ## 129 -> 131: the note keeps its words; the location is cut in its
     ## middle down to its floor, then the certificate label is left out.
     ## 124 -> 129: the status bar's note and location sharing their row.
@@ -466,6 +470,80 @@ suite "PLAT-50 GPUI: Files":
                               mr, trace = trace)
       ck edited.menuEntries.len == 0
       ck edited.textOf.contains("def add(left, right):")
+
+proc tabStrip(plan: JsonNode; pane: string): seq[(string, bool)] =
+  ## The tab strip that holds `pane`'s tab, as (pane, active) pairs in its
+  ## order; empty when no strip draws `pane`.
+  proc walk(n: JsonNode; acc: var seq[(string, bool)]) =
+    if n.kind != JObject or acc.len > 0: return
+    var tabs: seq[(string, bool)] = @[]
+    for c in n{"children"}.getElems:
+      if c.has("data-ct-tab-pane"):
+        tabs.add (c.attr("data-ct-tab-pane"),
+                  c.attr("data-ct-tab-active") == "true")
+    for (p, _) in tabs:
+      if p == pane:
+        acc = tabs
+        return
+    for c in n{"children"}.getElems: walk(c, acc)
+  walk(plan, result)
+
+proc editorShown(plan: JsonNode): bool =
+  ## The editor's tab is in the arrangement and in front of its strip.
+  for (p, active) in plan.tabStrip("editor"):
+    if p == "editor": return active
+  false
+
+suite "PLAT-50 GPUI: Files brings a closed editor back (M102, #877)":
+  # Filesystem-Pane.md § "Opening a file": the opened file is the ACTIVE
+  # EDITOR, "its tab is the one on screen". A tab's Close removes the editor
+  # from the arrangement; before M102 a press on a Files row then drew the
+  # recording's file into an editor no pane showed. Each case proves the
+  # condition first (no editor drawn, or its tab behind another), then that
+  # the open shows the file in the editor, in front. (Edit mode's arm is in
+  # `test_files_edit_gpui_plan.nim`.)
+
+  test "a press on a row, and the menu's Edit, re-add a closed editor":
+    let mr = multiRoot()
+    ck mr.len > 0
+    if mr.len > 0:
+      var helpers = ""
+      for n in windowPlan("", mr).nodesWith("data-ct-clicks"):
+        if n.attr("data-ct-clicks") == "file" and
+           n.textOf.startsWith("helpers.py"):
+          helpers = n.attr("data-view-id")
+      ck helpers.startsWith("fileTree.")
+      const Close = "click:tab:editor:right,ctx:Close"
+      let closed = windowPlan(Close, mr)
+      ck closed.tabStrip("editor").len == 0
+      ck not closed.textOf.contains("def add(left, right):")
+      var trace = ""
+      let pressed = windowPlan(Close & ",click:file:" & helpers & ":left", mr,
+                               trace = trace)
+      checkpoint("trace: " & trace)
+      ck trace.contains("opened ")
+      ck pressed.editorShown
+      ck pressed.textOf.contains("def add(left, right):")
+      let edited = windowPlan(Close & ",click:file:" & helpers &
+                              ":right,ctx:Edit", mr)
+      ck edited.editorShown
+      ck edited.textOf.contains("def add(left, right):")
+      # Behind another tab of its stack: the re-added editor sits beside
+      # another pane; that pane's tab pressed hides it, and a press on the
+      # row brings it to the front again.
+      var other = ""
+      for (p, _) in pressed.tabStrip("editor"):
+        if p != "editor" and other.len == 0: other = p
+      checkpoint("strip: " & $pressed.tabStrip("editor"))
+      ck other.len > 0
+      if other.len > 0:
+        let behind = Close & ",click:file:" & helpers & ":left,click:tab:" &
+                     other & ":left"
+        let hidden = windowPlan(behind, mr)
+        ck hidden.tabStrip("editor").len > 0 and not hidden.editorShown
+        let front = windowPlan(behind & ",click:file:" & helpers & ":left", mr)
+        ck front.editorShown
+        ck front.textOf.contains("def add(left, right):")
 
 suite "PLAT-50 GPUI: the sweep's other rows":
 

@@ -2461,6 +2461,11 @@ proc writeGeometry() =
       var pins = newJArray()
       for p in n.pins: pins.add rect(p)
       j["pins"] = pins
+      # And each tab's close icon (`layout.close-pane`), the one way an Edit
+      # window removes a pane: its tab menu is a replay window's.
+      var closes = newJArray()
+      for p in n.closes: closes.add rect(p)
+      j["closes"] = closes
     nodes.add j
   var dividers = newJArray()
   for d in gGeom.dividers:
@@ -6926,6 +6931,10 @@ proc openEditFile(path: string): bool =
   focusEditKeys()
   true
 
+proc revealOpenedEditor(r: GpuiRenderer)
+  ## M102 (#877): forward-declared for the Files pane's open paths; defined
+  ## beside `showPaneFromMenu`, whose rule it uses.
+
 proc editFileOperationDone(root: string; res: FileTreeOperationResult) =
   ## The disk's answer to a Create, Rename or Delete: the folder listed
   ## again, a new file opened in the editor (Filesystem-Pane.md, "Create
@@ -6936,7 +6945,8 @@ proc editFileOperationDone(root: string; res: FileTreeOperationResult) =
   if res.error.len == 0 and not vm.isNil:
     relistEditFiles(vm, root)
   if res.error.len == 0 and res.operation == ftaCreate:
-    discard openEditFile(res.path)
+    if openEditFile(res.path):
+      revealOpenedEditor(r)
   filesSay(describeFileTreeOperation(res, root))
   redrawPaneOf(r, paneFileTree)
 
@@ -7504,6 +7514,26 @@ proc showPaneFromMenu(r: GpuiRenderer; pane: PaneKind) =
     gFocusShown = true
     focusWindowPane(r, $pane)
   discard drawArrangement(r)
+
+proc revealOpenedEditor(r: GpuiRenderer) =
+  ## M102 (#877): a file opened from the Files pane is the ACTIVE EDITOR —
+  ## *"its tab is the one on screen and the one the editor's commands act
+  ## on"* (codetracer-pm `spec/GUI/Core-Panes/Filesystem-Pane.md` § "Opening
+  ## a file"). Drawing the file into the editor's leaf is not enough when no
+  ## pane shows that leaf: a tab's Close removes the editor from the
+  ## arrangement (`layout_model.lcRemovePane` does not protect it), and the
+  ## arrangement is remembered across launches, so a later start can have no
+  ## editor at all; or the editor's tab can sit behind another of its stack.
+  ## The editor is brought forward by the View menu's rule
+  ## (`showPaneFromMenu`): re-added when the arrangement does not place it
+  ## (PLAT-50), its tab activated when it is behind another, then focused —
+  ## the terminal's `revealEditor`. The leaf is moved into the arrangement,
+  ## never rebuilt, so the file already drawn into it stays.
+  showPaneFromMenu(r, paneEditor)
+  # An Edit window reads its keys from the edit arm's own listener, not the
+  # pane's element `showPaneFromMenu` focused (`focusEditKeys`).
+  if not openArm.isNil:
+    focusEditKeys()
 
 proc windowPluginEntries(): seq[OmnibarEntry] =
   ## Extensibility-Model §11.7.6: the reserved *Plugins: …* entries, every
@@ -11812,13 +11842,19 @@ proc runWatchCommand(r: GpuiRenderer; query: string): bool =
 
 proc openTreeFile(r: GpuiRenderer; path: string) =
   ## K17 (and the Files menu's Edit): the file in the editor, as the
-  ## desktop's `FilesystemVM.openFile` opens it.
+  ## desktop's `FilesystemVM.openFile` opens it, and the editor brought
+  ## forward to show it (M102, `revealOpenedEditor`).
   gViewedFile = path
   if gViewedFile == gSession.getCurrentFile():
     gViewedFile = ""
     refreshReplayWindow(r)
   else:
     showViewedFile(r)
+    if gViewedFile.len == 0:
+      # It could not be read; `showViewedFile` said why. Nothing was opened,
+      # so the arrangement is left as it is.
+      return
+  revealOpenedEditor(r)
 
 proc runContextAction(r: GpuiRenderer; action: ContextAction;
                       target: ContextTarget) =
@@ -12000,7 +12036,8 @@ proc runContextAction(r: GpuiRenderer; action: ContextAction;
       if why.len > 0:
         filesSay(why)
       elif not openArm.isNil:
-        discard openEditFile(target.path)
+        if openEditFile(target.path):
+          revealOpenedEditor(r)
       else:
         openTreeFile(r, target.path)
       return
@@ -13397,7 +13434,8 @@ proc buildWindowOperationTables(r: GpuiRenderer) =
       vm.toggleExpanded(e.path)
       redrawPaneOf(r, paneFileTree)
     elif not openArm.isNil:
-      discard openEditFile(e.path)
+      if openEditFile(e.path):
+        revealOpenedEditor(r)
     else:
       openTreeFile(r, e.path)
   # What the other panes' elements run (`pointer_rows`, and the operation a

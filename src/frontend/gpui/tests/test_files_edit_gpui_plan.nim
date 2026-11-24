@@ -18,6 +18,11 @@
 ##   * Find in Files, which Edit mode docks, searches the opened folder;
 ##   * a click on a file opens it in the editor, and the first file's unsaved
 ##     buffer is still there when it is opened again;
+##   * M102 (codetracer#877): opening a file SHOWS it (§ "Opening a file":
+##     *"its tab is the one on screen"*) — with the editor's tab Closed by
+##     its close icon, a press on a row and the menu's Edit put the editor back,
+##     in front, drawing the file and taking the keys; with the editor's tab
+##     behind another of its stack, a press brings it to the front;
 ##   * a file's menu: the four entries, all enabled; the folder's own row:
 ##     Rename and Delete disabled with the reason drawn;
 ##   * Create: the field under the folder, a taken name refused with the
@@ -50,7 +55,7 @@ import ./gpui_child_env
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 77
+const ExpectedAssertions = 92
 
 var countedAssertions = 0
 
@@ -276,6 +281,127 @@ suite "GPUI Edit mode: the opened folder's tree":
     ck back.tabsText.contains("README.md ●")
     # Nothing was written: the buffer is unsaved.
     ck readFile(project / "README.md") == "# readme\n"
+    removeDir(project)
+    removeDir(data)
+
+proc tabStrip(plan: JsonNode; pane: string): seq[(string, bool)] =
+  ## The tab strip that holds `pane`'s tab, as (pane, active) pairs in its
+  ## order; empty when no strip draws `pane` (the arrangement does not place
+  ## it).
+  proc walk(n: JsonNode; acc: var seq[(string, bool)]) =
+    if n.kind != JObject or acc.len > 0: return
+    var tabs: seq[(string, bool)] = @[]
+    for c in n{"children"}.getElems:
+      if c.has("data-ct-tab-pane"):
+        tabs.add (c.attr("data-ct-tab-pane"),
+                  c.attr("data-ct-tab-active") == "true")
+    for (p, _) in tabs:
+      if p == pane:
+        acc = tabs
+        return
+    for c in n{"children"}.getElems: walk(c, acc)
+  walk(plan, result)
+
+proc editorShown(plan: JsonNode): bool =
+  ## The editor's tab is in the arrangement and is the one its strip shows.
+  for (p, active) in plan.tabStrip("editor"):
+    if p == "editor": return active
+  false
+
+proc closeEditorOp(project, dataHome: string): string =
+  ## The `--window-ops` press on the editor tab's close icon
+  ## (`layout.close-pane`), aimed from the geometry the Edit window drew. An
+  ## Edit window has no tab menu (its panes' right-clicks are the Files
+  ## tree's and the editor's), so the icon is the Close it offers.
+  var t = ""
+  var g: JsonNode
+  discard editWindow(project, dataHome, "", t, "", g)
+  for n in g{"nodes"}.getElems:
+    if n{"kind"}.getStr != "tabs": continue
+    let at = n["panes"].to(seq[string]).find("editor")
+    if at >= 0:
+      let c = n["closes"][at]
+      return "press:" & $(c[0].getInt + c[2].getInt div 2) & ":" &
+             $(c[1].getInt + c[3].getInt div 2)
+  checkpoint("geometry: " & $g)
+  raise newException(ValueError, "the Edit window drew no editor tab")
+
+suite "GPUI Edit mode: opening a file brings the editor back (M102, #877)":
+  # Filesystem-Pane.md § "Opening a file": the opened file becomes the
+  # ACTIVE EDITOR — "its tab is the one on screen and the one the editor's
+  # commands act on". A tab's close icon removes the editor from the
+  # arrangement (`lcRemovePane` does not protect it), and before M102 a press on a Files
+  # row then loaded the file into an editor no pane drew. Each case first
+  # proves the condition (no editor in the window, or the editor's tab behind
+  # another), then that the open puts it back, drawing the file, focused: a
+  # typed key edits the opened document.
+
+  test "a press on a row, and the menu's Edit, re-add a closed editor":
+    let project = newProject()
+    let data = createTempDir("files-edit-gpui-data-", "")
+    let (o, plan0) = openSrc(project, data)
+    let util = plan0.rowId("util.py")
+    let main = plan0.rowId("main.py")
+    let readme = plan0.rowId("README.md")
+    let closeEditor = closeEditorOp(project, data)
+    # The condition: Close on the editor's tab leaves no editor drawn.
+    let closed = editWindow(project, data, o & closeEditor)
+    ck closed.tabStrip("editor").len == 0
+    ck not closed.textOf.contains("# readme")
+    # A press on a row: the editor is placed again, its tab in front,
+    # drawing the file, and the keys are its own.
+    var t = ""
+    let pressed = editWindow(project, data, o & closeEditor &
+                             ",click:file:" & util & ":left", t)
+    checkpoint("trace: " & t)
+    ck pressed.editorShown
+    ck pressed.textOf.contains("def util():")
+    # Re-added beside another pane, the editor's tab is not named after the
+    # file (a strip names the file only on a lone editor tab, `loneLabels`),
+    # so the keys are shown landing in the file's text instead.
+    let typed = editWindow(project, data, o & closeEditor &
+                           ",click:file:" & util & ":left,key:x")
+    ck typed.textOf.contains("xdef util():")
+    # The menu's Edit does the same.
+    let edited = editWindow(project, data, o & closeEditor &
+                            ",click:file:" & main & ":right,ctx:Edit")
+    ck edited.menuEntries.len == 0
+    ck edited.editorShown
+    ck edited.textOf.contains("print('main')")
+    # So does the file the closed editor was showing (the window opens on
+    # README.md): opening it again is still an open.
+    let same = editWindow(project, data, o & closeEditor &
+                          ",click:file:" & readme & ":left")
+    ck same.editorShown
+    ck same.textOf.contains("# readme")
+    removeDir(project)
+    removeDir(data)
+
+  test "a press on a row brings the editor's tab in front of another":
+    let project = newProject()
+    let data = createTempDir("files-edit-gpui-data-", "")
+    let (o, plan0) = openSrc(project, data)
+    let util = plan0.rowId("util.py")
+    let main = plan0.rowId("main.py")
+    let closeEditor = closeEditorOp(project, data)
+    # Re-added, the editor is a tab beside another pane; that pane's tab
+    # pressed puts the editor behind it.
+    let readded = o & closeEditor & ",click:file:" & util & ":left"
+    let strip = editWindow(project, data, readded).tabStrip("editor")
+    checkpoint("strip: " & $strip)
+    var other = ""
+    for (p, _) in strip:
+      if p != "editor" and other.len == 0: other = p
+    ck other.len > 0
+    if other.len > 0:
+      let behind = readded & ",click:tab:" & other & ":left"
+      let hidden = editWindow(project, data, behind)
+      ck hidden.tabStrip("editor").len > 0 and not hidden.editorShown
+      ck not hidden.textOf.contains("def util():")
+      let front = editWindow(project, data, behind & ",click:file:" & main &
+                             ":left")
+      ck front.editorShown
+      ck front.textOf.contains("print('main')")
     removeDir(project)
     removeDir(data)
 
