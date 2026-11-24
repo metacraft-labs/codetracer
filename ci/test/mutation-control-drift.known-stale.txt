@@ -397,7 +397,6 @@ src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/tui/
 # src/frontend/tui/app/runtime.nim: plugin status items are drawn beside the status
 # line's note. Re-grade the harnesses below.
 src/frontend/tui/tests/plat81-plugin-panes-mutation-control.sha256	src/frontend/tui/app/runtime.nim	82b115fdd074aa9019a32993aad694c5d64c13676f7c0e3adeb9e0b34afc9710	44d968e50c635c06040e3b6c4198fe2c748584d80ac55290aeee3283a918fd96
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/tui/app/runtime.nim	82b115fdd074aa9019a32993aad694c5d64c13676f7c0e3adeb9e0b34afc9710	44d968e50c635c06040e3b6c4198fe2c748584d80ac55290aeee3283a918fd96
 ci/test/plat70c-find-mutation-control.sha256	src/frontend/tui/app/runtime.nim	a7a3bb422082c3ce0dbfd6321695a4a8876ce902281ec4c17f02c3bc4e1bbeb8	44d968e50c635c06040e3b6c4198fe2c748584d80ac55290aeee3283a918fd96
 ci/test/plat70i-fit-mutation-control.sha256	src/frontend/tui/app/runtime.nim	7f58388446ab2135d8e46b5e2b43760bb553d63e4b64674516a8278c4be8b794	44d968e50c635c06040e3b6c4198fe2c748584d80ac55290aeee3283a918fd96
 src/frontend/tui/tests/build-residuals-mutation-control.sha256	src/frontend/tui/app/runtime.nim	53320025781afb2fe860cce22059b942cbec3679f513c1b66a06f6ac1fc61570	44d968e50c635c06040e3b6c4198fe2c748584d80ac55290aeee3283a918fd96
@@ -557,7 +556,6 @@ src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend
 
 src/frontend/tui/tests/plat48-topbar-mutation-control.sha256	src/frontend/gpui/app/dock_projection.nim	27c38086df7cebe1d7bc4df208fa4540c40f407d6820740857a9ba7bf97d6016	f4998d738cb3713af13a6925b305689bc8c94c58dd21da84aade7b4830ceee2f
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/gpui/app/shell.nim	a9552e68369b3bcf30263e986c7563b2770d0dd974bc196c8280d80fc29cf2bb	b632fc2203960410939c43373a48c225e54816129f2d61d746b77593b76222b0
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/tui/host/plugin_service.nim	fb22daa37972e25772347ced09b19bbc5b00c832386053d98e5d7f0ff804cd3c	b1bf1fde41673cacebe77f0dc26c683be3fad804ef03f79529a58a8e66e7c5eb
 
 # 2026-11-21, a healthy plugin gets its bindings back after the recovery chord
 # (codetracer-pm issue 2026-11-21-after-the-recovery-chord-a-healthy-plugin-stays-
@@ -565,9 +563,6 @@ src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/fronten
 # activates reaches it: the supervisor, the host suite and the real-terminal
 # suite moved under plat81's record, and the supervisor under its Node twin's
 # (plat81-node-plugin-host). Both owe a re-grade for these bytes.
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/supervisor.nim	9c5739a3e43b891145fb03985c8d59531341c4bc0fd40d5f612789cdf476b6e0	37a911c95f7ce375ba18f590470046ad9550343fadf19166e6bf8ec65e2bd4fe
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_plugin_process_host.nim	25a46e3c835516db9e2260705fe51667c06efe3317a7afec196b152333b3071e	a89551d91a97127efb3167bff332656b21a67e21ce5bdc6e9222924210b3d119
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/tui/tests/real_terminal/test_plat81_plugin_processes_pty.nim	656dd8f478424c872f60f3a72b0d8fc37bf2f7d67b509bbbbcf8e6a41984831a	c749e75d8ec3e5c6204ea252f66eb94ea466498c2e48449cf6fba9818c95522e
 src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/viewmodel/plugin_host/supervisor.nim	1c8a1e016ccdd015111f497d22c2b3fe9ebbcf7c3cd21f4e720b09f991cf2a31	37a911c95f7ce375ba18f590470046ad9550343fadf19166e6bf8ec65e2bd4fe
 
 # 2026-11-23, the native plugin SDK rework: the protocol on descriptors 3-6 with a
@@ -643,9 +638,6 @@ src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/fronten
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/viewmodel/viewmodels/event_log_vm.nim	75c008b2da091f77fed96996db91d7ad8cd44393c2e1c06705bb8444c5f7f32b	826bdadedb493db77e782fa39cb37ff64eab510e256a7e28b1ab33d7719c5e9a
 src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/viewmodel/viewmodels/event_log_vm.nim	75c008b2da091f77fed96996db91d7ad8cd44393c2e1c06705bb8444c5f7f32b	826bdadedb493db77e782fa39cb37ff64eab510e256a7e28b1ab33d7719c5e9a
 src/frontend/tui/tests/plat70b-table-mutation-control.sha256	src/frontend/viewmodel/viewmodels/event_log_vm.nim	75c008b2da091f77fed96996db91d7ad8cd44393c2e1c06705bb8444c5f7f32b	826bdadedb493db77e782fa39cb37ff64eab510e256a7e28b1ab33d7719c5e9a
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/plugin_sdk/codetracer_plugin_sdk.nim	a0c27d2992078e2221c721cd86f40c68f545b6014df880843d59676df9b9ea50	2d4903eaa226c5295c0ced78d7a2666d9ecabd473c9bf9d3066d0a009d782fee
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/common/plugin_model/package.nim	45537e6ad4b07bf40f4a92f9cef0e77a67f0dbab044276cc5d5bf9e60aa129a3	8865847078cd9069068d6e9c24e4111507a49784b4d0eef0d6fe4662371787b4
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/plugin_io.nim	22f2d01676fd1fc37defd8244c0c97352f008deaa9435f9dfd1c029d2b7435df	d5de198bc351a80da5aa4c73b99ed7c6fd48d90d8a9a55ad3a59df7e1e664b26
 
 # 2026-11-22, the GPUI vocabulary: Image carries its picture, the pass-through tags match
 # the render plan, and the escape census records gap ids. plat21 was re-graded (28 of 28
@@ -712,7 +704,6 @@ src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	ci/test/inpu
 # helper confirms each step, and the plugin boundary script's pinned counts move for
 # the TLS name check. plat81 (process, Node twin) owes a re-grade over these bytes
 # together with the SDK rework; plat7/plat8 owe one for the boundary script.
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/process_link.nim	92855333df47ca9e0a3bdb7b026ff27a9620efda405af90a379c7fce665fd526	67a0095978446fcf0f5c4b2ab6e769482b685d4041d552431b9bad3e9362de98
 src/frontend/tui/tests/plat48-topbar-mutation-control.sha256	src/frontend/headless_app/session_tabs.nim	c72286ec25128109200b493778f0a00a9743141cbbc2192e4678492f850bf25f	c66912fe4778eba9c45303e6c76454263d2e4d6b6dc0a29321e4826186578740
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/headless_app/session_tabs.nim	c72286ec25128109200b493778f0a00a9743141cbbc2192e4678492f850bf25f	c66912fe4778eba9c45303e6c76454263d2e4d6b6dc0a29321e4826186578740
 
@@ -787,7 +778,6 @@ src/frontend/tui/tests/plat58-requests-mutation-control.sha256	src/frontend/tui/
 src/frontend/tui/tests/plat61-shell-mutation-control.sha256	src/frontend/tui/main.nim	634de7f0b7b8a822b4bc8b07b3c1106143ffeedf6dde1f2d77e2e24d7607d507	022256c74ff14ca3aea002295a0688ac96d1b9d7866a336cce13ff912d83ca18
 src/frontend/tui/tests/plat65-nim-tracing-mutation-control.sha256	src/frontend/tui/main.nim	634de7f0b7b8a822b4bc8b07b3c1106143ffeedf6dde1f2d77e2e24d7607d507	022256c74ff14ca3aea002295a0688ac96d1b9d7866a336cce13ff912d83ca18
 src/frontend/tui/tests/plat72-screen-reader-mutation-control.sha256	src/frontend/tui/main.nim	634de7f0b7b8a822b4bc8b07b3c1106143ffeedf6dde1f2d77e2e24d7607d507	022256c74ff14ca3aea002295a0688ac96d1b9d7866a336cce13ff912d83ca18
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/tui/main.nim	634de7f0b7b8a822b4bc8b07b3c1106143ffeedf6dde1f2d77e2e24d7607d507	022256c74ff14ca3aea002295a0688ac96d1b9d7866a336cce13ff912d83ca18
 
 # 2026-11-21, plugin key bindings in canonical key names: key_names gains
 # bindingKeyName (the modifiers' spelling folded, a bare letter's case kept), read by
