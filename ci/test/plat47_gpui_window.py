@@ -627,8 +627,20 @@ def capture():
         # interval (5 s, `vcs_vm.VCSRefreshIntervalMs`) and a margin.
         # The refreshes counted are the ones after this write: the pane's
         # first read is applied in the background and traced the same way.
-        with open(os.path.join(OUT, "a.run.log")) as f:
-            seen = sum(1 for l in f.read().splitlines() if l == "gesture vcs refreshed")
+        # So that first read must be in before the write. Under load it came
+        # back after the count was taken and was counted as the refresh: the
+        # capture then showed "Working Tree (3)" with no late.txt and no
+        # pixel changed (two of five runs, 2026-11-23, 50 stress-ng workers).
+        def vcs_refreshes():
+            with open(os.path.join(OUT, "a.run.log")) as f:
+                return sum(1 for l in f.read().splitlines() if l == "gesture vcs refreshed")
+        deadline = time.time() + 120.0
+        while vcs_refreshes() == 0:
+            if time.time() > deadline:
+                raise RuntimeError("PLAT-47: the VCS pane's first read was never "
+                                   "applied (no 'gesture vcs refreshed' within 120s)")
+            time.sleep(0.25)
+        seen = vcs_refreshes()
         with open(os.path.join(OUT, "vcs-refresh.before"), "w") as f:
             f.write(str(seen))
         with open(os.path.join(repo, "late.txt"), "w") as f:
@@ -638,9 +650,7 @@ def capture():
         # after the write, then for a frame drawn after it.
         deadline = time.time() + 120.0
         while time.time() < deadline:
-            with open(os.path.join(OUT, "a.run.log")) as f:
-                now = sum(1 for l in f.read().splitlines() if l == "gesture vcs refreshed")
-            if now > seen:
+            if vcs_refreshes() > seen:
                 break
             time.sleep(0.25)
         else:
