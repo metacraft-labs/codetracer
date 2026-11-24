@@ -395,6 +395,11 @@ lint_step "a CI dev shell re-anchors hooks another Repro build wrote" \
 lint_step "a linked worktree's dev shell never rewrites the shared Repro hooks" \
 	bash ci/test/repro-hooks-worktree-check-test.sh
 
+# When the pinned `repro hooks ensure` refuses hooks another Repro build wrote,
+# the dev shell's error names both builds and the commands that reconcile them.
+lint_step "a refused foreign Repro hook names both builds and the remedy" \
+	bash ci/test/repro-hooks-foreign-refusal-test.sh
+
 # codetracer-native-backend's submodules are checked out, with the job's
 # credentials, before the visual replay Git policy applies to a Nix fetch of it.
 lint_step "native-backend's submodules are checked out before the visual replay policy" \

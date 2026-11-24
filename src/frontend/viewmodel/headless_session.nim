@@ -34,9 +34,14 @@ import isonim/core/[signals, computation, async_compat]
 
 import backend/[backend_service, stdio_backend]
 export stdio_backend.DapReadBound, stdio_backend.DapStalledError,
-       stdio_backend.DapInterruptedError, stdio_backend.DapLaunchRefusedError
+       stdio_backend.DapInterruptedError, stdio_backend.DapLaunchRefusedError,
+       stdio_backend.DapRequestRefusedError
 import store/[replay_data_store, types, locals_answer]
 export locals_answer
+# The one wording of a refused sweep, for every host that runs one through
+# `runTracepoints` (the terminal, GPUI, the menus' "Run All Tracepoints").
+export replay_data_store.TracepointRunRefused,
+       replay_data_store.tracepointRefusalText
 # PLAT-2's value-presentation pipeline. `json_adapter` is qualified at its call
 # sites because `toPValue` also exists on the `Value` side of the bridge, and a
 # reader of `headless_session` has to be able to tell which one is meant — this
@@ -1388,6 +1393,19 @@ proc runTracepoints*(s: HeadlessDebugSession;
   ## "the sweep found nothing" and "the sweep never answered" are different
   ## facts and only one of them is a result.
   ##
+  ## ## A REFUSED SWEEP ENDS THE WAIT
+  ##
+  ## The engine can refuse a sweep: any error in ``handle_trace_steps`` (and
+  ## a panic) returns before ``ct/tracepoint-results`` is sent, and the
+  ## request is answered ``success: false`` with the engine's sentence and no
+  ## event. So the wait ends on EITHER this sweep's event OR the response to
+  ## this sweep's request (``waitForEvent``'s ``answerOf``, the request's own
+  ## ``seq``); a refusal raises ``DapRequestRefusedError`` carrying the
+  ## engine's sentence, and the session is left as usable as the engine left
+  ## it. Until then an attended terminal — no clock on a sweep, no interrupt
+  ## — waited for that event for ever (codetracer#880). A slow sweep is still
+  ## waited out: the response is what ends the wait, not a clock.
+  ##
   ## ## THE SWEEP IS SILENT UNTIL IT IS DONE, AND ITS ANSWER IS ITS OWN
   ##
   ## Nothing at all arrives while the engine sweeps, so the wait is an
@@ -1411,14 +1429,14 @@ proc runTracepoints*(s: HeadlessDebugSession;
   # sides and is gone from both).
   inc s.lastSweepId
   let sweepId = s.lastSweepId
-  s.backend.sendDapRequestNoResponse("ct/run-tracepoints",
-                                     tracepointSweepRequest(specs,
-                                                            sweepId = sweepId))
+  let requestSeq = s.backend.sendDapRequestNoResponse(
+    "ct/run-tracepoints", tracepointSweepRequest(specs, sweepId = sweepId))
   let event = s.backend.waitForEvent("ct/tracepoint-results",
                                      maxMessages = maxMessages,
                                      operation = true,
                                      accept = proc(e: JsonNode): bool =
-    e{"body", "sessionId"}.getInt(-1) == sweepId)
+    e{"body", "sessionId"}.getInt(-1) == sweepId,
+                                     answerOf = requestSeq)
   let body = event.getOrDefault("body")
   if body.isNil or body.kind != JObject:
     return

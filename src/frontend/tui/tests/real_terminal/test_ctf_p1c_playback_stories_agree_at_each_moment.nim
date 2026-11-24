@@ -186,6 +186,13 @@ proc fact[N](root: N; name: string): string =
   let n = root.first(name)
   if n.isNil: "" else: n.attr(name)
 
+proc drawnPieFacts[N](n: N): string =
+  ## Every pie under `n` in a GPUI or terminal drawing: ` | pie <role>
+  ## <share>`, the share `unknown` with no known progress.
+  mixin all, attr
+  for d in n.all("pie"):
+    result.add " | pie " & d.attr("pie") & " " & d.attr("pie-fraction")
+
 proc activeMark(active: string): string = (if active == "true": " active" else: "")
 
 proc stateMark(label: string): string =
@@ -212,8 +219,7 @@ proc drawnFacts[N](view: N; surface: string): seq[string] =
   case surface
   of "agent-harbor-session-tabs":
     for t in view.all("tab"):
-      result.add "tab " & t.fact("label") & " [" & t.attr("attention") & "]" &
-                 activeMark(t.attr("active"))
+      result.add "tab " & t.fact("label") & t.drawnPieFacts & activeMark(t.attr("active"))
     for o in view.all("overflow"):
       result.add "+N " & o.attr("overflow") & " [" & o.attr("overflow-severity") & "]"
   of "agent-harbor-session-list":
@@ -226,11 +232,9 @@ proc drawnFacts[N](view: N; surface: string): seq[string] =
                  row.attr("attention") & "]" & activeMark(row.attr("active"))
   of "agent-harbor-initiative-tabs":
     for t in view.all("tab"):
-      let progress = t.fact("progress")
-      let state = t.attr("state")
-      result.add "tab " & t.fact("label") & (if progress.len > 0: " | " & progress else: "") &
-                 (if state.len > 0: " [" & state & "]" else: "") &
-                 activeMark(t.attr("active"))
+      # A tab's pie, by its role and share; an initiative's `n/m` is in its
+      # tooltip, not on the tab.
+      result.add "tab " & t.fact("label") & t.drawnPieFacts & activeMark(t.attr("active"))
     for b in view.all("recording"):
       result.add "recording " & b.attr("recording") & " " & b.attr("recording-state") &
                  activeMark(b.attr("recording-active")) & stateMark(b.attr("recording-label"))
@@ -336,11 +340,17 @@ proc pieFacts(n: MockNode): string =
                 else: d.attributes["data-ah-pie-p"]
     result.add " | pie " & d.attributes["data-ah-pie-role"] & " " & share
 
+proc tabPieFacts(tab: MockNode): string =
+  ## A web tab's own pie (in its `span.ah-tab-pie`, not a popup's under it),
+  ## as `pieFacts` spells it.
+  for ch in tab.children:
+    if ch.hasClass("ah-tab-pie"): result.add ch.pieFacts
+
 proc webFacts(view: MockNode; surface: string): seq[string] =
   case surface
   of "agent-harbor-session-tabs":
     for t in view.byClass("ah-tab"):
-      result.add "tab " & t.textOf(SessionTabLabelClass) & " [" & t.tokenAfter("ah-att-") & "]" &
+      result.add "tab " & t.textOf(SessionTabLabelClass) & t.tabPieFacts &
                  (if t.hasClass("active"): " active" else: "")
     for o in view.byClass("ah-tab-overflow-count"):
       let severity = o.tokenAfter("ah-att-")
@@ -359,11 +369,7 @@ proc webFacts(view: MockNode; surface: string): seq[string] =
   of "agent-harbor-initiative-tabs":
     for t in view.byClass("ah-tab"):
       if t.hasClass("ah-tab-notice"): continue
-      let progress = t.textOf("ah-tab-progress")
-      let state = t.tokenAfter("ah-ist-")
-      result.add "tab " & t.textOf(SessionTabLabelClass) &
-                 (if progress.len > 0: " | " & progress else: "") &
-                 (if state.len > 0: " [" & state & "]" else: "") &
+      result.add "tab " & t.textOf(SessionTabLabelClass) & t.tabPieFacts &
                  (if t.hasClass("active"): " active" else: "")
     for b in view.byClass("ah-rec-button"):
       var number = ""
@@ -651,15 +657,15 @@ let SpotChecks: seq[SpotCheck] = @[
   # at +330 s.
   ("agent-harbor-session-tabs", "", @[
     "playback paused | first frame | +0:00",
-    "tab " & Importer & " [running] active", "tab " & Migration & " [running]",
-    "tab " & Port & " [running]", "tab " & Config & " [needs-input]"]),
+    "tab " & Importer & " | pie success unknown active", "tab " & Migration & " | pie success unknown",
+    "tab " & Port & " | pie success unknown", "tab " & Config & " | pie warning unknown"]),
   ("agent-harbor-session-tabs", "new-session", @[
     "playback paused | new-session | +0:30",
-    "tab " & Bench & " [queued]"]),
+    "tab " & Bench & " | pie info unknown"]),
   ("agent-harbor-session-tabs", "bench-asks", @[
-    "tab " & Port & " [needs-input]", "tab " & Bench & " [needs-input]"]),
+    "tab " & Port & " | pie warning unknown", "tab " & Bench & " | pie warning unknown"]),
   ("agent-harbor-session-tabs", "migration-fails", @[
-    "tab " & Migration & " [failed]", "tab " & Port & " [running]"]),
+    "tab " & Migration & " | pie error unknown", "tab " & Port & " | pie success unknown"]),
   # The tree: the route cache's node and the node of no initiative, their
   # counts following the sessions; a row's status follows its session.
   ("agent-harbor-session-list", "port-asks", @[
@@ -670,22 +676,23 @@ let SpotChecks: seq[SpotCheck] = @[
     "row " & Migration & " | failed [failed]"]),
   ("agent-harbor-session-list", "importer-removed", @[
     "summary 4 sessions" & Dot & "1 running" & Dot & "1 failed" & Dot & "2 ended"]),
-  # The initiative bar over initiative-run: its n/m and its recordings,
+  # The initiative bar over initiative-run: its pie (its milestones' share)
+  # and its recordings,
   # numbered in the order they appeared, the first active.
   ("agent-harbor-initiative-tabs", "", @[
-    "tab Telemetry upload retries | 0/3 [working] active"]),
+    "tab Telemetry upload retries | pie success 0% active"]),
   ("agent-harbor-initiative-tabs", "trace-loading", @[
-    "tab Telemetry upload retries | 1/3 [working] active",
+    "tab Telemetry upload retries | pie success 33.333% active",
     "recording 1 loading active marked \xE2\x80\xA6"]),
   ("agent-harbor-initiative-tabs", "trace-ready", @["recording 1 ready active"]),
   ("agent-harbor-initiative-tabs", "recording-fails", @[
     "recording 1 ready active", "recording 2 failed marked \xE2\x9C\x95"]),
   ("agent-harbor-initiative-tabs", "recording-reloaded", @[
-    "tab Telemetry upload retries | 2/3 [working] active",
+    "tab Telemetry upload retries | pie success 66.667% active",
     "recording 1 ready active", "recording 2 ready", "recording 3 ready"]),
   # The plan done and the session ended: the initiative's tab ends.
   ("agent-harbor-initiative-tabs", "session-ends", @[
-    "tab Telemetry upload retries | 3/3 [ended] active"]),
+    "tab Telemetry upload retries | pie ended 100% active"]),
   # The Initiatives panel over front-ends: the route cache's progress and
   # current milestone move at +210 s.
   ("agent-harbor-initiatives", "", @[

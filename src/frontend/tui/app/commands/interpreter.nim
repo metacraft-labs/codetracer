@@ -249,12 +249,24 @@ type
       ## variable/expression under cursor".
     functions*: seq[FunctionSite]
 
+  TracepointRefusedError* = object of CatchableError
+    ## Raised by `CommandServices.runTracepoint` when the ENGINE refused the
+    ## sweep. `msg` is the sentence to show, the engine's own words included.
+    ##
+    ## Its own type, in this layer, because `app/` may not reach the backend
+    ## module the engine's refusal is typed in (this file's LAYER RULE): the
+    ## host translates that refusal into this one, and `dispatchTracepoint`
+    ## turns it into the command's outcome — a refusal reported on the
+    ## notification line (§3.3.6) like every other refusal, never a frozen
+    ## screen or an escaped exception (codetracer#880).
+
   CommandServices* = object
     ## The seams no ViewModel owns. Every field may be nil, and a nil one makes
     ## its command REPORT that it is not wired — see this module's header.
     setBreakpoint*: proc(path: string; line: int): bool {.closure.}
     runTracepoint*: proc(request: TracepointRequest): int {.closure.}
-      ## Returns the number of hits the sweep answered.
+      ## Returns the number of hits the sweep answered. Raises
+      ## `TracepointRefusedError` when the engine refused the sweep.
     threads*: proc(): JsonNode {.closure.}
       ## The DAP `threads` response BODY, unmodified — CTUI-6's
       ## `call_stack_binding.threadsFrom` is what reads it.
@@ -857,9 +869,16 @@ proc dispatchTracepoint(d: Dispatcher; ctx: CommandContext;
     return unavailable(kaNone,
       "composed a tracepoint on `" & expression & "` at " & ctx.file & ":" &
       $ctx.line & ", but no sweep service is wired to run it")
-  let hits = d.services.runTracepoint(outcome.tracepoint)
-  done(kaNone, "tracepoint `" & expression & "` at " & ctx.file & ":" &
-       $ctx.line & " — " & $hits & " hit(s)")
+  let where = "tracepoint `" & expression & "` at " & ctx.file & ":" &
+              $ctx.line
+  var hits = 0
+  try:
+    hits = d.services.runTracepoint(outcome.tracepoint)
+  except TracepointRefusedError as e:
+    # The engine REFUSED the sweep: `drUnavailable`'s "it refused", with the
+    # engine's sentence, on the notification line.
+    return unavailable(kaNone, where & " — " & e.msg)
+  done(kaNone, where & " — " & $hits & " hit(s)")
 
 proc dispatchFrame(d: Dispatcher; ctx: CommandContext;
                    index: int): DispatchResult =

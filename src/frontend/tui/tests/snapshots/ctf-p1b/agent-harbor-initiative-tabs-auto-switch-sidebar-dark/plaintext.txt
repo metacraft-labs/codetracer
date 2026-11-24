@@ -1,4 +1,4 @@
- ● CI runner migration 4/10   +4   +
+ ◑ CI runner migration   +4   +
  8    ←  →   ● Auto: on
                                              
                                              

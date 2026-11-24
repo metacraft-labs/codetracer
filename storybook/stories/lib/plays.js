@@ -82,12 +82,18 @@ const progressCheck = (assert) => hostCheck(".agent-harbor-progress", assert);
 const initiativeTabsCheck = (assert) => hostCheck(".ah-initiative-tab-bar", assert);
 
 // What every story of the initiative bar with tabs must draw: the tabs, each
-// with its progress and its state class, and exactly one active.
+// with its progress pie (one, named by its words) and its state class, its
+// `n/m` in its tooltip rather than on the tab, and exactly one active.
 async function initiativeTabsDrawn(el) {
   await waitFor(el, ".ah-initiative-tab");
   expect(el.querySelectorAll(".ah-initiative-tab").length).toBeGreaterThan(0);
   for (const tab of el.querySelectorAll(".ah-initiative-tab")) {
-    expect(tab.querySelector(".ah-tab-progress")?.textContent).toMatch(/^\d+\/\d+$/);
+    const pies = tab.querySelectorAll(":scope > .ah-tab-pie > .ah-pie");
+    expect(pies.length).toBe(1);
+    expect(pies[0].getAttribute("role")).toBe("img");
+    expect(pies[0].getAttribute("aria-label")).toMatch(/\S/);
+    expect(tab.querySelector(".ah-tab-progress")).toBeNull();
+    expect(tab.getAttribute("title")).toMatch(/\d+\/\d+ milestones/);
     expect([...tab.classList].some((c) => c.startsWith("ah-ist-"))).toBe(true);
   }
   expect(el.querySelectorAll(".ah-initiative-tab.active").length).toBe(1);
@@ -1844,6 +1850,28 @@ export const plays = {
     expect(activeTab()).not.toBe(start.tab);
     expect(await pressKey(panel, "ArrowLeft")).toBe(true);
     expect(activeTab()).toBe(start.tab);
+    // The same parts, pressed: each carries its operation
+    // (`data-ct-operation`) and the page's one pointer listener runs the
+    // procedure bound to it, so a press that reached no procedure leaves the
+    // drawing as it was. A card's head opens and closes it; a tab shows it.
+    const head = (key) => panel.querySelector(`.ah-spec-card[data-ah-card="${key}"] .ah-spec-card-head`);
+    const key = panel.querySelector(".ah-spec-card").getAttribute("data-ah-card");
+    expect(head(key).getAttribute("data-ct-operation")).toBe("changes.toggle-card");
+    head(key).click();
+    await twoFrames();
+    expect(openCards()).not.toEqual(start.open);
+    head(key).click();
+    await twoFrames();
+    expect(openCards()).toEqual(start.open);
+    const tabs = () => [...panel.querySelectorAll(".ah-changes-tab")];
+    const other = tabs().find((t) => !t.classList.contains("ah-changes-tab-active"));
+    expect(other.getAttribute("data-ct-operation")).toBe("changes.select-tab");
+    other.click();
+    await twoFrames();
+    expect(activeTab()).not.toBe(start.tab);
+    tabs().find((t) => t.textContent === start.tab).click();
+    await twoFrames();
+    expect(activeTab()).toBe(start.tab);
     // A tab step leaves the keyboard on no card; Down twice puts it back on
     // the second, as the story's constructor did.
     await pressKey(panel, "ArrowDown");
@@ -1926,7 +1954,17 @@ export const plays = {
     expect(position()).not.toBe("3 of 5");
     expect(await pressKey(panel, "[", "BracketLeft")).toBe(true);
     stepperIs(panel, "3 of 5", { prev: true, next: true });
-    const field = panel.querySelector(".ah-item-page textarea, .ah-item-page input[type=password]");
+    // Previous and Next, pressed: each carries the operation its key runs
+    // and the page's one pointer listener runs the procedure bound to it.
+    const step = (which) => panel.querySelector(`.ah-inbox-stepper .ah-step-${which}`);
+    expect(step("next").getAttribute("data-ct-operation")).toBe("inbox.next");
+    expect(step("prev").getAttribute("data-ct-operation")).toBe("inbox.previous");
+    step("next").click();
+    await waitUntil(() => position() !== "3 of 5", "Next, pressed");
+    step("prev").click();
+    await waitUntil(() => position() === "3 of 5", "Previous, pressed");
+    stepperIs(panel, "3 of 5", { prev: true, next: true });
+    const field =panel.querySelector(".ah-item-page textarea, .ah-item-page input[type=password]");
     expect(field).toBeTruthy();
     expect(await pressKey(field, "]", "BracketRight")).toBe(false);
     expect(await pressKey(field, "1", "Digit1")).toBe(false);

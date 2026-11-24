@@ -2,9 +2,9 @@
 # subjects AND the suites the arms are graded by.
 # Refreshed with --record-control-hashes, gated by the
 # needle scan.
-1c8a1e016ccdd015111f497d22c2b3fe9ebbcf7c3cd21f4e720b09f991cf2a31  src/frontend/viewmodel/plugin_host/supervisor.nim
+37a911c95f7ce375ba18f590470046ad9550343fadf19166e6bf8ec65e2bd4fe  src/frontend/viewmodel/plugin_host/supervisor.nim
 67a0095978446fcf0f5c4b2ab6e769482b685d4041d552431b9bad3e9362de98  src/frontend/viewmodel/plugin_host/process_link.nim
-e0e66066d97b1bdcdf6603b2b72352602b768e400bf7b7e95b79680ec6bdaff7  src/frontend/viewmodel/plugin_host/key_snapshot.nim
-1d5997145c23620ac0eba8ab310bef10d73fc0cb408132791bf9c16ed064dfe7  src/frontend/index/plugin_sessions.nim
+8984dc2bd2cabcd13b9940ed6f160b5846d01712d855359a4a367de15f376a45  src/frontend/viewmodel/plugin_host/key_snapshot.nim
+b11872bdb3846299913918257d3bc9359c239ffa43078d3562efdf7ca18796f8  src/frontend/index/plugin_sessions.nim
 8cd92231210a16d4e518ad20be98821460cf6caf2ab94a05a7b4f2d94b04dc49  src/frontend/viewmodel/tests/unit/test_plugin_process_host_node.nim
 fd4f7b3978e1f47d5713a0acb99d6396e370d838454132d8872b94513d38cd87  src/frontend/tests/plugin_sessions_test.nim

@@ -75,6 +75,9 @@ applicable:
   - ../terminal/keymaps-switch-to-emacs.yaml
   - ../terminal/keymaps-flag-holds-for-the-session.yaml
   - ../terminal/find-ctrl-f-seeds-and-walks.yaml
+  - ../terminal/find-regex-alt-r.yaml
+  - ../terminal/find-in-selection-alt-l.yaml
+  - ../terminal/find-in-selection-needs-a-selection.yaml
   - ../terminal/find-ctrl-f3-whole-word.yaml
   - ../terminal/grep-vim-prompt.yaml
   - ../terminal/origin-menu-and-a-hop-press.yaml

@@ -51,7 +51,7 @@ import std/[algorithm, strutils, unittest]
 
 import ./plugin_model
 
-const ExpectedAssertions = 716
+const ExpectedAssertions = 741
   ## Written from a run, and asserted against the tally at the end of the file.
   ## `ci/lib/run-nim-test-lane.sh` reads this name.
 
@@ -799,7 +799,8 @@ type
 const
   ForbiddenNeedles = ["download", "http", "curl", "wget", "mirror", "registry",
                       "createDir", "removeDir", "writeFile", "readFile",
-                      "moveFile", "execProcess", "startProcess", "os."]
+                      "moveFile", "execProcess", "startProcess", "os.",
+                      "child_process"]
     ## §8.3's gate: "If you find yourself writing a downloader, a version
     ## resolver or a directory layout, stop — the launcher has them."
 
@@ -829,8 +830,15 @@ const
         # implementing one, and the alternative (dropping `registry` from the
         # list for this module) would also permit a `registry` of its own.
         "registry"],
-      imports: @["import ../../common/plugin_model", "import ./component_roots",
-                 "import std/[os, strutils]"],
+      # Reviewed imports. The C backend takes `std/os`; the Node backend
+      # (`when defined(js)`) takes `common/node_os` instead, because `std/os`'s
+      # file procedures are not that backend's. `node_os` is file access only
+      # (`require('fs')`, `process.pid`): it opens no socket and spawns
+      # nothing, which is why the file reads the discovery needs are allowed on
+      # both backends. `std/algorithm` sorts the discovered components.
+      imports: @["import ../../common/node_os",
+                 "import ../../common/plugin_model", "import ./component_roots",
+                 "import std/[algorithm, json, strutils]", "import std/os"],
       anchor: "proc discoverPlugins*",
       minCodeLines: 100),
     ScanSubject(
@@ -853,9 +861,32 @@ const
       imports: @["import ../../common/ct_home",
                  "import ../../common/plugin_model/diagnostics",
                  "import ../../common/plugin_model/grant_ledger",
-                 "import std/[os, strutils]", "import std/posix"],
+                 # The Node backend's file access, in place of `std/os`: the
+                 # grant store must persist grants there too. `node_os` is
+                 # file access only (`require('fs')`, `process.pid`); it opens
+                 # no socket and spawns nothing. `std/os` and `std/strutils`
+                 # are the same reviewed imports as before, one per line.
+                 "import ../../common/node_os",
+                 "import std/os", "import std/posix", "import std/strutils"],
       anchor: "proc saveGrantLedgerTo*",
       minCodeLines: 40)]
+
+proc needleHits(name, source: string; allowed: openArray[string]): seq[string] =
+  ## The forbidden-needle scan, as ONE routine: the real subjects and the
+  ## planted negative controls below both run through it, so a control cannot
+  ## pass against a scanner the gate itself does not use.
+  for needle in ForbiddenNeedles:
+    if needle in allowed: continue
+    for l in codeLines(source):
+      if l.toLowerAscii.contains(needle.toLowerAscii):
+        result.add name & ": " & needle & " -> " & l.strip()
+
+proc importLinesOf(source: string): seq[string] =
+  ## The import lines of `source`, indentation stripped (so an import inside
+  ## `when defined(js):` counts), comments and literals already removed.
+  for l in codeLines(source):
+    let s = l.strip()
+    if s.startsWith("import "): result.add s
 
 suite "PLAT-10: the verification gate, over this module's own code":
 
@@ -908,14 +939,8 @@ suite "PLAT-10: the verification gate, over this module's own code":
     var hits: seq[string] = @[]
     for subject in ScanSubjects:
       inc checkedSubjects
-      var n = 0
-      for needle in ForbiddenNeedles:
-        inc n
-        if needle in subject.allowed: continue
-        for l in codeLines(subject.source):
-          if l.toLowerAscii.contains(needle.toLowerAscii):
-            hits.add subject.name & ": " & needle & " -> " & l.strip()
-      ckEq n, 14
+      ckEq ForbiddenNeedles.len, 15
+      hits.add needleHits(subject.name, subject.source, subject.allowed)
     ckEq checkedSubjects, 3
     checkpoint(hits.join("\n"))
     ckEq hits.len, 0
@@ -945,12 +970,43 @@ suite "PLAT-10: the verification gate, over this module's own code":
     for subject in ScanSubjects:
       inc checkedSubjects
       checkpoint("subject: " & subject.name)
-      var imports: seq[string] = @[]
-      for l in codeLines(subject.source):
-        let s = l.strip()
-        if s.startsWith("import "): imports.add s
-      ckEq imports.sorted(), subject.imports.sorted()
+      ckEq importLinesOf(subject.source).sorted(), subject.imports.sorted()
     ckEq checkedSubjects, 3
+
+  test "the gate still refuses network and process access in the two file-I/O modules":
+    # NEGATIVE CONTROL (Verification-Harness-Traps §4a). `plugin_components`
+    # and `grant_store` may touch files, on both backends, and nothing else.
+    # Each row appends one line of the kind the gate exists to stop to the
+    # module's REAL text and feeds it to the same `needleHits` / `importLinesOf`
+    # the subjects above use; the gate must turn red (a needle hit, or an
+    # import the reviewed list does not name). The unplanted text is the
+    # control's own control: it must be clean, or "red" proves nothing.
+    var checkedModules = 0
+    for idx in [1, 2]:
+      let subject = ScanSubjects[idx]
+      inc checkedModules
+      checkpoint("subject: " & subject.name)
+      ckEq needleHits(subject.name, subject.source, subject.allowed).len, 0
+      ckEq importLinesOf(subject.source).sorted(), subject.imports.sorted()
+      let plants = [
+        "import std/net",
+        "import std/httpclient",
+        "import std/osproc",
+        "import ../../common/child_process",
+        "when defined(js):\n  import std/asyncnet",
+        "let r = execProcess(\"curl\")",
+        "let r = startProcess(\"sh\")",
+        "discard downloadFile(\"u\", \"p\")",
+        "let c = newHttpClient()",
+        "discard child_process.execSync(\"id\")"]
+      for plant in plants:
+        checkpoint("plant: " & plant)
+        let planted = subject.source & "\n" & plant & "\n"
+        let hits = needleHits(subject.name, planted, subject.allowed)
+        let importsMatch = importLinesOf(planted).sorted() ==
+                           subject.imports.sorted()
+        ck hits.len > 0 or not importsMatch
+    ckEq checkedModules, 2
 
 # ---------------------------------------------------------------------------
 

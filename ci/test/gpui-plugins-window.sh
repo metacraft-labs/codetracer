@@ -48,7 +48,11 @@ for tool in sway swaymsg wayland-info wtype grim tesseract pgrep python3 nim; do
 	command -v "${tool}" >/dev/null 2>&1 ||
 		fail "'${tool}' is not on PATH; this lane refuses rather than running without it"
 done
-compgen -G "${root}/test-logs/tui-fixtures/calc-*" >/dev/null ||
+# A glob, not `compgen -G`: the lane runs under isonim-gpui's dev shell,
+# whose non-interactive bash has no completion builtins ("compgen: command
+# not found"), and that refusal named a recording that was there.
+calc_recordings=("${root}"/test-logs/tui-fixtures/calc-*)
+[ -e "${calc_recordings[0]}" ] ||
 	fail "no calc recording in test-logs/tui-fixtures/ (the capture lane's fixture step records it)"
 
 # The installer: the plugin-process suite's own fixture, which builds the

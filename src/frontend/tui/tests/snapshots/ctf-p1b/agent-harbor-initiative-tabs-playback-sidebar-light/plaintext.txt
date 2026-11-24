@@ -1,4 +1,4 @@
- ● Telemetry upload retries 0/3   +
+ ○ Telemetry upload retries   +
  ←  →   Auto: off
                                              
                                              

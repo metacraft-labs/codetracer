@@ -67,7 +67,6 @@ proc recordingsCells*(buttons: RecordingButtons): int =
 proc tabContent(vm: InitiativeTabStripVM; tab: StripTab): int =
   result = 1 + 2 + widthOf(tab.title) + 1
   if tab.kind == stkInitiative:
-    result += 1 + widthOf(tab.progressText)
     if tab.active: result += recordingsCells(vm.recordingButtonsOf(tab.id))
   elif tab.session.originShort.len > 0:
     result += 1 + widthOf(tab.session.originShort)
@@ -82,7 +81,6 @@ proc tabMinCellsOf(vm: InitiativeTabStripVM; tab: StripTab): int =
   ## `.ah-bar-compact`) and the parts it cannot lose.
   result = 1 + 2 + (if vm.compact: 5 else: 10) + 1
   if tab.kind == stkInitiative:
-    result += 1 + widthOf(tab.progressText)
     if tab.active: result += recordingsCells(vm.recordingButtonsOf(tab.id))
   result = max(result, TabMinCells)
 
@@ -159,27 +157,23 @@ proc drawBarTab(c: var AhCanvas; parent: AhNode; vm: InitiativeTabStripVM;
                  [("tab", key), ("active", $tab.active), ("tooltip", tab.tooltip)])
   if tab.active: c.fill(row, col, width, 1, c.p.activeTab)
   let target = vm
+  # The tab's progress pie, read from the viewmodel (`StripTab.pie`), on the
+  # tab's own ground; an initiative's `n/m` is in its tooltip.
+  discard c.pie(n, row, col + 1, tab.pie, c.bgAt(row, col + 1))
   if tab.kind == stkInitiative:
     n.tag("state", $tab.state)
-    discard c.mark(n, row, col + 1, c.p.markOf(tab.state))
     c.target(row, col, width, 1, proc() = discard target.activate(key),
              hover = proc() = target.popupId.val = id)
   else:
     n.tag("attention", $tab.session.attention)
-    discard c.mark(n, row, col + 1, c.p.markOf(tab.session.attention))
     c.target(row, col, width, 1, proc() = discard target.activate(key))
-  # From the right: the recording buttons, `n/m`, then the title takes the rest.
+  # From the right: the recording buttons, then the title takes the rest.
   var right = col + width - 1
-  var nextAt = -1   # where `n/m` or the origin starts: a cut title keeps its gap
+  var nextAt = -1   # where the switcher or the origin starts: a cut title keeps its gap
   if tab.kind == stkInitiative:
     var buttons: RecordingButtons
     if tab.active: buttons = vm.recordingButtonsOf(id)
     let rw = recordingsCells(buttons)
-    let pw = widthOf(tab.progressText)
-    let progressCol = right - rw - pw
-    discard c.text(n, row, progressCol, pw, tab.progressText,
-                   if tab.active: c.p.activeRowQuiet else: c.p.textCaption,
-                   fact = "progress")
     if buttons.buttons.len > 0:
       let switcher = c.node(n, row, right - rw + 1, rw, 1,
                             [("recordings", $buttons.buttons.len)])
@@ -191,8 +185,9 @@ proc drawBarTab(c: var AhCanvas; parent: AhNode; vm: InitiativeTabStripVM;
         # The recordings' `+N` (`drawRecordingsMore`).
         at += RecordingGap
         at += c.drawRecordingsMore(switcher, buttons, row, at)
-    right = progressCol - 1
-    nextAt = progressCol
+    if rw > 0:
+      nextAt = right - rw + 1
+      right -= rw
   elif tab.session.originShort.len > 0:
     let ow = widthOf(tab.session.originShort)
     discard c.put(row, right - ow, tab.session.originShort, c.p.textCaption)

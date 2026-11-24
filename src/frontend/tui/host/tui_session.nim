@@ -1832,10 +1832,20 @@ proc runTracepointSweep(s: TuiSession; rt: TuiRuntime;
   ## PLAT-50: one tracepoint swept over the recording; its hits shown, the
   ## panes refreshed (the point list and the gutter carry it). Answers how
   ## many hits.
+  ##
+  ## A sweep the engine REFUSED raises `TracepointRefusedError` with the
+  ## engine's sentence, which the interpreter reports as the command's
+  ## outcome on the notification line. The panes are refreshed first: the
+  ## session goes on, and the screen shows it at the stop it is at.
   inc s.tracepointsRun
-  var hits = s.session.runTracepoints(@[TracepointSweepSpec(
-    tracepointId: s.tracepointsRun - 1, path: request.path,
-    line: request.line, expression: request.expression)])
+  var hits: seq[TracepointSweepHit] = @[]
+  try:
+    hits = s.session.runTracepoints(@[TracepointSweepSpec(
+      tracepointId: s.tracepointsRun - 1, path: request.path,
+      line: request.line, expression: request.expression)])
+  except DapRequestRefusedError as e:
+    s.refresh(rt)
+    raise newException(TracepointRefusedError, tracepointRefusalText(e.msg))
   s.showTracepointHits(rt, hits,
     "tracepoint `" & request.expression & "` at " &
     request.path.extractFilename & ":" & $request.line & " — " &

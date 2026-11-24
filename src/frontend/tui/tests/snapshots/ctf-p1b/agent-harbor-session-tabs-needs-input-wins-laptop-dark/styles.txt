@@ -6,7 +6,7 @@
 4 #f3f3f3/#1b1b1b
 5 #4ade80/#1b1b1b
 6 #b4b4b4/#1b1b1b
-7 #fca5a5/#1b1b1b
+7 #e89595/#1b1b1b
 8 #919191/#1b1b1b
 9 #fdba74/#1b1b1b
 10 #c8c8c8/#1b1b1b
