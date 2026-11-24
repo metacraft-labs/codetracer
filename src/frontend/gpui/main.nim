@@ -2435,9 +2435,17 @@ proc editorVScrollbarGeometry(rect: proc (p: PxRect): JsonNode): JsonNode =
 
 proc unpinButtonRect(): PxRect
 
-proc writeGeometry() =
+var gGeometryChangedAt = -1'i64
+  ## The shim's drawn-frame count when the window's state last CHANGED (a
+  ## `writeGeometry` call from an input, a refresh, a redraw, not from the
+  ## per-frame callback). `frames > changedAt` in the report means a frame
+  ## was drawn after the last change, however late the reader looks.
+
+proc writeGeometry(afterFrame = false) =
   if geometryOut.len == 0:
     return
+  if not afterFrame:
+    gGeometryChangedAt = int64(gpui_frames_drawn())
   proc rect(p: PxRect): JsonNode = %*[p.x, p.y, p.w, p.h]
   var nodes = newJArray()
   for n in gGeom.nodes:
@@ -2499,7 +2507,12 @@ proc writeGeometry() =
     let openDock =
       if gGeom.openDock.isEmpty: newJNull()
       else: %*{"pane": gGeom.openDockPane, "rect": rect(gGeom.openDock)}
-    writeFile(geometryOut, $(%*{"area": rect(gGeom.area),
+    # Written to a sibling file and renamed over the report: since the report
+    # is rewritten after every drawn frame, a capture reading it mid-write
+    # read an empty or partial file (JSONDecodeError at plat47's VCS step,
+    # load loop under generated load). A rename is atomic on one file system.
+    let geometryTmp = geometryOut & ".tmp"
+    writeFile(geometryTmp, $(%*{"area": rect(gGeom.area),
                                 "inner": rect(gGeom.inner), "nodes": nodes,
                                 "dividers": dividers, "strips": strips,
                                 "revealed": revealed, "topBar": top,
@@ -2513,10 +2526,13 @@ proc writeGeometry() =
                                 # still screen can be one not yet redrawn.
                                 "input": %*{"handled": gGeometryInputs,
                                             "keys": gGeometryKeys,
+                                            "frames": gpui_frames_drawn(),
+                                            "changedAt": gGeometryChangedAt,
                                             "pointer": [gGeometryPointer.x,
                                                         gGeometryPointer.y]},
                                 "gesture": %*{"active": gGestures.active,
                                               "revealing": gGestures.revealing}}))
+    moveFile(geometryTmp, geometryOut)
   except IOError:
     discard
 
@@ -16445,6 +16461,19 @@ proc applyWindowPolicy(cmd: var GpuiCommand) =
   cmd.width = gLaunch.width
   cmd.height = gLaunch.height
 
+proc geometryAfterFrame() {.cdecl.} =
+  ## The shim's drawn-frame callback (`gpui_on_frame_drawn`), registered only
+  ## when a capture asked for the geometry report: the report is written
+  ## again after each DRAWN frame, carrying the shim's monotonic frame count
+  ## (`input.frames`). A capture waits for that count to pass the one the
+  ## report carried when its input was handled, so it reads a frame drawn
+  ## after the input. A still screen is not that: under load a window that has
+  ## handled an input and not yet drawn it shows the old frame, still (the
+  ## plat47 suite read pre-move and pre-Esc frames that way). The shim calls
+  ## this once per drawn frame, after the paint, and never while nothing is
+  ## drawn, so it is coalesced to the frames there are.
+  writeGeometry(afterFrame = true)
+
 proc launchWindow(cmd: GpuiCommand; title: string;
                   outcome: LeafRenderOutcome; dock: JsonNode = nil): int =
   ## Open the window, run the event loop, and return when it stops.
@@ -16494,6 +16523,10 @@ proc launchWindow(cmd: GpuiCommand; title: string;
   # with the desktop; `gpui_launch`'s size is the windowed (restore) size.
   gWindowTitle = title
   prepareWindowLaunch(gLaunch)
+  # Only for a capture: a window opened without CODETRACER_GPUI_GEOMETRY_OUT
+  # registers no drawn-frame callback and writes nothing per frame.
+  if geometryOut.len > 0:
+    gpui_on_frame_drawn(geometryAfterFrame)
   let startedAt = epochTime()
   gpui_launch(title.cstring, float(cmd.width), float(cmd.height),
               paintWindowChrome)

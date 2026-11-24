@@ -185,6 +185,37 @@ def handled(win):
         return -1
 
 
+def frames(win):
+    """(drawn, changedAt): how many frames the window has DRAWN (the shim's
+    monotonic count, `input.frames`, the report rewritten after each drawn
+    frame) and that count when its state last CHANGED (`input.changedAt`: an
+    input handled, a refresh applied, a redraw asked for). (-1, -1) from a
+    window that does not report them."""
+    try:
+        inp = win.geom().get("input", {})
+        return inp.get("frames", -1), inp.get("changedAt", -1)
+    except (OSError, ValueError):
+        return -1, -1
+
+
+def drawn_after_change(win, what, ceiling_s=60.0):
+    """Wait until the window has drawn a frame AFTER its last state change.
+    Under load a window that has handled an input but not drawn it shows the
+    old frame, and the old frame is STILL: `settle` alone grabbed pre-move and
+    pre-Esc frames that way (load loop #2 under generated load, 2026-11-21:
+    drop-split 0 changed pixels, the cancel still tinted). The report carries
+    both counts, so this holds however late it looks. A window that does not
+    report them is not waited for."""
+    deadline = time.time() + ceiling_s
+    while time.time() < deadline:
+        drawn, changed = frames(win)
+        if drawn < 0 or changed < 0 or drawn > changed:
+            return
+        time.sleep(0.05)
+    raise RuntimeError(f"PLAT-47: the window drew no frame after {what} "
+                       f"within {ceiling_s:.0f}s")
+
+
 def keys(win):
     """How many KEY events the window has handled (`input.keys`), apart from
     pointer events. `key_handled` decides by this whether its key arrived:
@@ -240,6 +271,8 @@ def await_input(win, before, what, pointer=None, gesture_active=None,
         if ok and revealing is not None:
             ok = g.get("gesture", {}).get("revealing") == revealing
         if ok:
+            # Handled, in the state asked for: now a frame DRAWN after it.
+            drawn_after_change(win, what, max(1.0, deadline - time.time()))
             return
         time.sleep(0.1)
     raise RuntimeError(f"PLAT-47: the window never handled {what} within {ceiling_s:.0f}s")
@@ -600,7 +633,20 @@ def capture():
             f.write(str(seen))
         with open(os.path.join(repo, "late.txt"), "w") as f:
             f.write("written while the window was open\n")
-        time.sleep(7.0)
+        # Not a fixed sleep: under load one refresh interval and a margin did
+        # not see the refresh applied. Wait for the window to trace a refresh
+        # after the write, then for a frame drawn after it.
+        deadline = time.time() + 120.0
+        while time.time() < deadline:
+            with open(os.path.join(OUT, "a.run.log")) as f:
+                now = sum(1 for l in f.read().splitlines() if l == "gesture vcs refreshed")
+            if now > seen:
+                break
+            time.sleep(0.25)
+        else:
+            raise RuntimeError("PLAT-47: the VCS pane traced no refresh within 120s "
+                               "of a file written into its repository")
+        drawn_after_change(win, "the VCS refresh")
         steps["vcs-refresh"] = settle("vcs-refresh")
         # --- a docked pane stays reachable: dock the Variables pane with its
         # tab's pin icon (`.lm_pin_tab`, the desktop's way: GoldenLayout docks
@@ -658,16 +704,43 @@ def capture():
         # Turn the wheel until the pane stops moving (its last row is then
         # the trace's last call), a burst at a time.
         last = None
+        unchanged = 0
         for _ in range(40):
             for _ in range(10):
                 ptr.send("wheel 3", "sleep 30")
             ptr.send("sleep 400")
             time.sleep(1.5)
+            # The burst HANDLED (the count stops moving) and a frame drawn
+            # after it, before the top is compared: a window still working
+            # through the burst under load showed the same top twice and
+            # ended the turning early (`endText` not the trace's last call).
+            # "Still" is two seconds without a handled event: under load the
+            # window can pause between a burst's queued events for longer
+            # than half a second (load loop run #2: the turning ended a
+            # page short).
+            settled_at = time.time() + 60.0
+            n = handled(win)
+            still_since = time.time()
+            while time.time() < settled_at:
+                time.sleep(0.25)
+                m = handled(win)
+                if m != n:
+                    n = m
+                    still_since = time.time()
+                elif time.time() - still_since >= 2.0:
+                    break
+            drawn_after_change(win, "the wheel burst")
             tops = [l for l in open(os.path.join(OUT, "b.run.log")).read().splitlines()
                     if l.startswith("gesture calltrace top=")]
             top = tops[-1] if tops else None
+            # The end is the same top after THREE bursts in a row: one burst
+            # the window took late must not read as the end.
             if top is not None and top == last:
-                break
+                unchanged += 1
+                if unchanged >= 2:
+                    break
+            else:
+                unchanged = 0
             last = top
         steps["pages-end"] = settle("pages-end")
     finally:
