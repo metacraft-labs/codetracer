@@ -18,6 +18,7 @@ ah-rem(px)
 // A pie on a line or a row (the palette's `PieLinePx`, CTF-P1d), and the
 // plate it keeps on a surface it was not resolved for (`PiePlatePx`).
 AH_PIE_LINE = 0.75rem
+AH_PIE_TAB = 0.625rem
 AH_PIE_PLATE = 0.125rem
 
 // ---------------------------------------------------------------------------
@@ -582,6 +583,14 @@ AH_MARK = 0.5rem
 .ah-att-idle .ah-tab-mark
   background: transparent
   box-shadow: inset 0 0 0 0.09375rem colors-ui-icon-primary-default
+
+// A tab's progress pie (the palette's `PieTabPx`): its state and share; an
+// initiative's `n/m` is in the tab's tooltip.
+.ah-tab-pie
+  display: flex
+  flex-shrink: 0
+  width: AH_PIE_TAB
+  height: AH_PIE_TAB
 
 // The wrapper the view returns stays out of the caption bar's flex row.
 .ah-tab-strip-host

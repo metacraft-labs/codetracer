@@ -2,7 +2,7 @@
 0 #f3f3f3/#1b1b1b
 1 #4ade80/#1b1b1b
 2 #b4b4b4/#1b1b1b
-3 #fca5a5/#1b1b1b
+3 #e89595/#1b1b1b
 4 #919191/#1b1b1b
 5 #f3f3f3/#3c3c3c
 6 #4ade80/#3c3c3c

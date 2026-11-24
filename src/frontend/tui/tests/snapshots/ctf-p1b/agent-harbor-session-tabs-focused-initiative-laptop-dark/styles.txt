@@ -7,7 +7,7 @@
 5 #f3f3f3/#3c3c3c+underline:usSingle+ul:#6366f1
 6 #ffffff/#3c3c3c+underline:usSingle+ul:#6366f1
 7 #b0b0b0/#3c3c3c+underline:usSingle+ul:#6366f1
-8 #fca5a5/#1b1b1b
+8 #e89595/#1b1b1b
 9 #919191/#1b1b1b+underline:usSingle+ul:#6366f1
 10 #f3f3f3/#1b1b1b+underline:usSingle+ul:#6366f1
 11 #b4b4b4/#1b1b1b+underline:usSingle+ul:#6366f1

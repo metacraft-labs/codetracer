@@ -1,8 +1,8 @@
- ● Telemetry upload re…  1/4   ● Route cache on the…   2/6   ● Settings rede…  3/8   ● Release…   5/12   +3   +     26  Agent Harbor sessions   ← 14 waiting  →   Auto-switch: off
+ ◔ Telemetry upload retries   ◔ Route cache on the new stor…   ◑ Settings redesign   ◑ Release 3.0    +3   +        26  Agent Harbor sessions   ← 14 waiting  →   Auto-switch: off
                                                                                                                                                                                     
-                                                          ● CI runner migration                        4/10
-                                                          ● Audit the session token lifetimes
-                                                          ● Profile the importer on the large fixture
+                                                       ● CI runner migration                        4/10
+                                                       ● Audit the session token lifetimes
+                                                       ● Profile the importer on the large fixture
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     

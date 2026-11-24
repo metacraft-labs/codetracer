@@ -64,8 +64,8 @@
     "as far as the window requires. `strip-overflow-menu` and `strip-overflow`",
     "are the session strip's menu and chip, held to the same rule.",
     "",
-    "`bar-active-tab-label`, `-progress` and `-recordings` are the initiative bar's",
-    "active tab's title, its `n/m` and its recording buttons. They are compared as",
+    "`bar-active-tab-label` and `-recordings` are the initiative bar's active tab's",
+    "title and its recording buttons. They are compared as",
     "pane rectangles only, not in pixels: GPUI sets each run of text in a box its",
     "width rounded up to a whole pixel, so a row of runs differs from the browser's",
     "by up to a pixel a run. What must agree exactly is whether the title is cut",
@@ -74,6 +74,9 @@
     "`playback-moment` are the story hosts' playback bar's readout and the moment",
     "it names, whose width (`px`) is what the bar left it: a moment cut to two",
     "letters on one side, or dropped, is a different width from the whole one.",
+    "`bar-active-tab-pie` is the active tab's progress pie, which takes the place",
+    "its `n/m` had: a box of whole pixels in both hosts, so it is compared in",
+    "pixels (`px`): a pie a pixel off, or the wrong size, moves the title after it.",
     "",
     "A region with `elision` is a line of text, and each side also reports whether",
     "it is cut (`cut`: its words wider than its box; the browser measures them",
@@ -545,11 +548,17 @@
       "elision": "never"
     },
     {
-      "name": "bar-active-tab-progress",
-      "web": ".ah-initiative-tab-bar .session-tab.ah-tab:not(.ah-tab-notice).active .ah-tab-progress",
+      "name": "bar-active-tab-pie",
+      "web": ".ah-initiative-tab-bar .session-tab.ah-tab:not(.ah-tab-notice).active > .ah-tab-pie > .ah-pie",
       "gpui": {
-        "data-ah-bar-tab-progress": "true"
-      }
+        "data-ah-bar-tab-pie": "true"
+      },
+      "px": [
+        "x",
+        "y",
+        "w",
+        "h"
+      ]
     },
     {
       "name": "bar-active-tab-recordings",

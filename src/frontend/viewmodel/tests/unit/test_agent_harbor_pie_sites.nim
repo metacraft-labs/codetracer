@@ -14,7 +14,9 @@
 ##   * the site's own words print no count or share (`3/19`, `16%`): the pie
 ##     says it now.
 ##
-## The sites so far: the fleet's rows. The GPUI and terminal
+## The sites so far: the fleet's rows, and the tabs of the session strip
+## and of the initiative bar (each tab's pie on its own ground; an
+## initiative's `n/m` only in its tooltip). The GPUI and terminal
 ## hosts hold the same rules in their cover tests
 ## (`test_ctf_p1b_gpui_views_cover_web_states`,
 ## `test_ctf_p1b_tui_views_cover_web_states`).
@@ -22,7 +24,7 @@
 ## No mocks of the subject: the viewmodels read the committed synthetic
 ## fixture set; the mock renderer is the one both `vm-unit` lanes drive.
 
-import std/[strutils, tables, unittest]
+import std/[sequtils, strutils, tables, unittest]
 
 import isonim/core/owner
 import isonim/testing/mock_dom
@@ -30,6 +32,8 @@ import isonim/testing/mock_dom
 import ../../../stories/codetracer_stories
 import ../../../stories/agent_harbor_stories
 import ../../views/isonim_agent_harbor_fleet_view
+import ../../views/isonim_agent_harbor_session_tabs_view
+import ../../views/isonim_agent_harbor_initiative_tabs_view
 import ../../views/isonim_agent_harbor_pie_view
 
 proc classes(n: MockNode): seq[string] =
@@ -113,6 +117,71 @@ proc fleetProblems(fixture: string): (seq[string], int) =
     done()
   (problems, rows)
 
+const StripWidthPx = 1440
+  ## The strips' width: the laptop window the stories are captured at.
+
+proc tabProblems(tab: MockNode; pie: ProgressPie; active: bool; at: string): seq[string] =
+  ## A tab's one pie (`span.ah-tab-pie`, its first child) on its tab's
+  ## ground, and no count or share on the tab.
+  let hosts = tab.children.filterIt(it.hasClass("ah-tab-pie"))
+  if hosts.len != 1:
+    return @[at & ": " & $hosts.len & " pie holders, not one"]
+  result = pieProblems(hosts[0], pie, tabPieGround(active), at)
+  if tab.byClass("ah-tab-progress").len > 0:
+    result.add at & ": still prints its progress"
+  for l in tab.byClass("session-tab-label"):
+    if saysShare(l.textContent): result.add at & ": the label says a share: " & l.textContent
+
+proc sessionTabsProblems(fixture: string): (seq[string], int) =
+  ## The session strip story `fixture`, each drawn tab against its session.
+  let r = MockRenderer()
+  var problems: seq[string]
+  var tabs = 0
+  createRoot proc(done: proc()) =
+    let vm = createSessionTabsStoryVM(fixture)
+    vm.stripWidthPx.val = StripWidthPx
+    let view = renderAgentHarborTabStrip[MockRenderer, MockNode](r, vm)
+    let items = vm.tabs
+    for t in view.byClass("ah-tab"):
+      if t.hasClass("ah-tab-notice") or t.attr("id").len == 0: continue
+      var found = false
+      for item in items:
+        if t.attr("id") == "ah-tab-" & item.shortId:
+          problems.add tabProblems(t, item.pie, item.active, fixture & " tab " & item.shortId)
+          found = true
+          inc tabs
+      if not found: problems.add fixture & ": a tab no session draws: " & t.attr("id")
+    vm.dispose()
+    done()
+  (problems, tabs)
+
+proc initiativeTabsProblems(fixture: string): (seq[string], int) =
+  ## The initiative bar story `fixture`, each drawn tab (in the bar's order)
+  ## against its initiative or session.
+  let r = MockRenderer()
+  var problems: seq[string]
+  var tabs = 0
+  createRoot proc(done: proc()) =
+    let vm = createInitiativeTabsStoryVM(fixture)
+    vm.stripWidth.val = StripWidthPx
+    let view = renderAgentHarborInitiativeTabBar[MockRenderer, MockNode](r, vm)
+    let want = vm.tabs
+    var visible: seq[StripTab]
+    for i in vm.singleLine.visible: visible.add want[i]
+    var drawn: seq[MockNode]
+    for bar in view.byClass("ah-initiative-tab-bar"):
+      for t in bar.byClass("ah-tab"):
+        if t.hasClass("session-tab") and not t.hasClass("ah-tab-notice"): drawn.add t
+    if drawn.len != visible.len:
+      problems.add fixture & ": " & $drawn.len & " tabs drawn, " & $visible.len & " shown"
+    for i in 0 ..< min(drawn.len, visible.len):
+      problems.add tabProblems(drawn[i], visible[i].pie, visible[i].active,
+                               fixture & " bar tab " & visible[i].title)
+      inc tabs
+    vm.dispose()
+    done()
+  (problems, tabs)
+
 suite "CTF-P1d: the web draws each site's pie from its viewmodel":
   test "the fleet: every row of every fleet story":
     var problems: seq[string]
@@ -130,6 +199,27 @@ suite "CTF-P1d: the web draws each site's pie from its viewmodel":
     # rows drawn: a family that lost its stories cannot pass by drawing none.
     check stories == fleetFixtures.len
     check rows > 0
+
+  test "every tab of every session strip and initiative bar story":
+    var problems: seq[string]
+    var strips, bars, tabs = 0
+    for story in agentHarborSection().stories:
+      if isPlaybackStory(story.surface, story.fixture): continue
+      case story.surface
+      of "agent-harbor-session-tabs":
+        let (found, n) = sessionTabsProblems(story.fixture)
+        problems.add found
+        tabs += n
+        inc strips
+      of "agent-harbor-initiative-tabs":
+        let (found, n) = initiativeTabsProblems(story.fixture)
+        problems.add found
+        tabs += n
+        inc bars
+      else: discard
+    for p in problems: echo "  ", p
+    check problems.len == 0
+    check strips > 0 and bars > 0 and tabs > 0
 
   test "a recomputed pie is a mismatch":
     var fleet: seq[string]
