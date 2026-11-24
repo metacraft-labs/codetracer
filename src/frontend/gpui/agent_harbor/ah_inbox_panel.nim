@@ -48,6 +48,8 @@ import nim_agents/agent_harbor/fleet_records
 import nim_agents_isonim_viewmodels/agent_harbor/[inbox_vm, inbox_item_vm]
 import ../../viewmodel/views/agent_harbor_changes_inbox_words
 
+import ../../viewmodel/keymap/user_keymap
+from ../../viewmodel/keymap/scope_path import InboxPanelScope
 import ./ah_changes_inbox_parts
 from ./ah_initiative_panels import drawSectionHeader
 
@@ -99,7 +101,8 @@ proc actions(r: GpuiRenderer; c: PageCtx; buttons: seq[(string, bool, bool, proc
   ## `.ah-item-actions`: the buttons 6px apart, wrapping onto 24px lines.
   var items: seq[FlowItem]
   for (label, primary, disabled, action) in buttons:
-    items.add FlowItem(el: r.actionButton(c.p, c.ink, label, primary, action, disabled),
+    items.add FlowItem(el: r.actionButton(c.p, c.ink, label, primary, InboxItemActionOperation,
+                                          action, disabled),
                        widthPx: actionButtonPx(label))
   result = r.flowLines(items, c.avail, 6, ControlPx, 6)
   r.setStyle(result, "flex-shrink", "0")
@@ -140,11 +143,20 @@ proc choicePress(page: InboxItemVM; id: string): proc() =
 
 proc pressChoice(r: GpuiRenderer; el: GpuiElement; page: InboxItemVM; id: string) =
   ## The one press a choice takes, whichever control draws it (a single
-  ## choice's toggle, one of several's checkbox line): choosing it. One
-  ## place for both, so the drawings cannot disagree on what a press does,
-  ## and the one site the pointer keymap will take over when the panel's
-  ## presses are routed.
-  r.addEventListener(el, "click", choicePress(page, id))
+  ## choice's toggle, one of several's checkbox line): choosing it, as
+  ## `inbox.choose-option` (`pressable`). One place for both, so the
+  ## drawings cannot disagree on what a press does.
+  r.pressable(el, InboxChooseOptionOperation, choicePress(page, id))
+
+proc decisionPress(page: InboxItemVM; requestId: string; decision: ApprovalDecision): proc() =
+  ## An approval's button: a proc of its own so each closure owns its
+  ## decision (a closure made in a Nim loop body shares the body's variables
+  ## with every other iteration's: every button sent the last one's).
+  result = proc() = discard page.decideApproval(requestId, decision)
+
+proc permissionPress(page: InboxItemVM; id: string): proc() =
+  ## A permission option's button, its id its own (as `decisionPress`).
+  result = proc() = discard page.choosePermission(id)
 
 proc choicesItems(options: seq[AnswerOption]): seq[FlowItem] =
   ## The single choice's toggles as a wrapping row measures them: each
@@ -342,9 +354,8 @@ proc drawApproval(r: GpuiRenderer; c: PageCtx; a: ApprovalRequest): GpuiElement 
   for (label, primary, decision) in [(ApproveLabel, true, adApprove),
                                      (ApproveForSessionLabel, false, adApproveForSession),
                                      (DenyLabel, false, adDeny)]:
-    let choice = decision
-    items.add FlowItem(el: r.actionButton(c.p, c.ink, label, primary,
-                                          proc() = discard page.decideApproval(requestId, choice)),
+    items.add FlowItem(el: r.actionButton(c.p, c.ink, label, primary, InboxItemActionOperation,
+                                          decisionPress(page, requestId, decision)),
                        widthPx: actionButtonPx(label))
   let row = r.flowLines(items, c.avail, 6, ControlPx, 6)
   r.tag(row, "actions", $items.len)
@@ -356,8 +367,7 @@ proc drawPermission(r: GpuiRenderer; c: PageCtx; d: InboxItemDetail; body: GpuiE
   if d.permissionOptions.len > 0:
     var buttons: seq[(string, bool, bool, proc())]
     for i, o in d.permissionOptions:
-      let id = o.id
-      buttons.add (o.label, i == 0, false, proc() = discard page.choosePermission(id))
+      buttons.add (o.label, i == 0, false, permissionPress(page, o.id))
     let a = r.actions(c, buttons)
     r.tag(a, "permission-options", $d.permissionOptions.len)
     r.appendChild(body, a)
@@ -651,8 +661,8 @@ proc drawItemPageBody*(r: GpuiRenderer; p: AhPalette; page: InboxItemVM;
       r.appendChild(body, r.notice(p, unresolvable, "unresolvable"))
     else:
       let target = page
-      r.appendChild(body, r.errorBlock(p, ItemErrorTitle, page.error.val,
-                                       proc() = target.load()))
+      r.appendChild(body, r.routedErrorBlock(p, ItemErrorTitle, page.error.val,
+                                             InboxRetryOperation, proc() = target.load()))
   of asReady:
     let d = page.detail
     let inner = widthPx - 2 * InsetPx
@@ -687,13 +697,19 @@ proc pageBox(r: GpuiRenderer): GpuiElement =
                                          ("min-width", "0px"), ("overflow", "hidden")])
   r.tag(result, "item-page", "true")
 
-proc drawInboxItemPage*(r: GpuiRenderer; host: GpuiElement; page: InboxItemVM; p: AhPalette;
-                        widthPx: int; ctx = AgentHarborInboxItemContext();
-                        heightPx = 0; scroll: P3Scroll = nil) =
-  ## An item's page standing alone (the session tab's page), `widthPx` wide.
-  ## Given its `heightPx`, a ready page taller than that scrolls as a region
-  ## (`PageRegionKey`, its first pixel kept by `scroll`); without, it is
-  ## clipped at the panel's foot.
+proc inboxPresses*(vm: InboxVM; page: InboxItemVM; keymap = UserKeymap()): PanelPress =
+  ## The route for a press on the Inbox over `vm` (nil for an item's page
+  ## standing alone) and `page` (the page on screen; nil: the Inbox's):
+  ## resolved in the `inbox` scope under `keymap`'s rows over the base
+  ## keymap's; a user's row that names one of the Inbox's key operations runs
+  ## it (`runInboxOperation`).
+  panelPresses(InboxPanelScope, keymap, proc(operation: string): bool =
+    let shown = if page.isNil and not vm.isNil: vm.page else: page
+    runInboxOperation(vm, shown, operation))
+
+proc drawInboxItemPageParts(r: GpuiRenderer; host: GpuiElement; page: InboxItemVM;
+                            p: AhPalette; widthPx: int; ctx: AgentHarborInboxItemContext;
+                            heightPx: int; scroll: P3Scroll) =
   scroll.beginDraw()
   r.clearChildren(host)
   r.styles(host, [("display", "flex"), ("flex-direction", "column"),
@@ -716,16 +732,30 @@ proc drawInboxItemPage*(r: GpuiRenderer; host: GpuiElement; page: InboxItemVM; p
     r.setStyle(body, "flex-grow", "1")
     r.appendChild(host, body)
 
+proc drawInboxItemPage*(r: GpuiRenderer; host: GpuiElement; page: InboxItemVM; p: AhPalette;
+                        widthPx: int; ctx = AgentHarborInboxItemContext();
+                        heightPx = 0; scroll: P3Scroll = nil; press: PanelPress = nil) =
+  ## An item's page standing alone (the session tab's page), `widthPx` wide.
+  ## Given its `heightPx`, a ready page taller than that scrolls as a region
+  ## (`PageRegionKey`, its first pixel kept by `scroll`); without, it is
+  ## clipped at the panel's foot. Its presses go through `press` (the base
+  ## keymap's `inboxPresses` when nil).
+  drawingWith(if press.isNil: inboxPresses(nil, page) else: press):
+    drawInboxItemPageParts(r, host, page, p, widthPx, ctx, heightPx, scroll)
+
 proc mountInboxItemPage*(r: GpuiRenderer; host: GpuiElement; page: InboxItemVM; p: AhPalette;
                          widthPx: int; ctx = AgentHarborInboxItemContext();
-                         heightPx = 0; scroll: P3Scroll = nil; redraw: Signal[int] = nil) =
+                         heightPx = 0; scroll: P3Scroll = nil; redraw: Signal[int] = nil;
+                         press: PanelPress = nil) =
   ## Draws the page, redraws it whenever what it reads changes (or the host
   ## moves `redraw`, after a scroll), and marks it visible while mounted
-  ## (its viewing heartbeat runs), as the web mount does.
+  ## (its viewing heartbeat runs), as the web mount does. Its presses go
+  ## through `press` (the base keymap's `inboxPresses` when nil).
+  let route = if press.isNil: inboxPresses(nil, page) else: press
   createRenderEffect proc() =
     discard page.revision.val
     if redraw != nil: discard redraw.val
-    drawInboxItemPage(r, host, page, p, widthPx, ctx, heightPx, scroll)
+    drawInboxItemPage(r, host, page, p, widthPx, ctx, heightPx, scroll, route)
   page.setVisible(true)
 
 # ---------------------------------------------------------------------------
@@ -733,7 +763,7 @@ proc mountInboxItemPage*(r: GpuiRenderer; host: GpuiElement; page: InboxItemVM; 
 # ---------------------------------------------------------------------------
 
 proc drawStep(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; arrow, title: string;
-              enabled: bool; onClick: proc()): GpuiElement =
+              enabled: bool; operation: string; onClick: proc()): GpuiElement =
   ## Previous or Next (`.ah-step`): 24px, at least as wide, 6px in, a 1px
   ## border in the control border role on the secondary surface, the arrow
   ## in the body colour; disabled, the arrow in the disabled colour inside
@@ -752,7 +782,7 @@ proc drawStep(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; arrow, title
   r.tag(result, "enabled", $enabled)
   r.tag(result, "ink", colour)
   r.tag(result, "tooltip", title)
-  if enabled and onClick != nil: r.addEventListener(result, "click", onClick)
+  if enabled: r.pressable(result, operation, onClick)
 
 proc drawStepper(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: InboxVM;
                  widthPx: int): GpuiElement =
@@ -770,13 +800,13 @@ proc drawStepper(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: Inbox
   r.tag(result, "stepper-position", position)
   let target = vm
   r.appendChild(result, r.drawStep(p, ink, PreviousArrow, stepperTitle(false), vm.canPrev,
-                                   proc() = discard target.prev()))
+                                   InboxPreviousOperation, proc() = discard target.prev()))
   if not compact:
     let pos = r.text(position, LabelPx, p.textLabel, shrink = false)
     r.tag(pos, "position", position)
     r.appendChild(result, pos)
   r.appendChild(result, r.drawStep(p, ink, NextArrow, stepperTitle(true), vm.canNext,
-                                   proc() = discard target.next()))
+                                   InboxNextOperation, proc() = discard target.next()))
   let words = autoSwitchText(on, compact)
   let auto = r.box(pairs = [("height", $ControlPx & "px"), ("items", "center"),
                             ("padding-left", "8px"), ("padding-right", "8px"),
@@ -786,7 +816,7 @@ proc drawStepper(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: Inbox
   r.tag(label, "auto-switch-text", words)
   r.appendChild(auto, label)
   r.tag(auto, "inbox-auto-switch", if on: "on" else: "off")
-  r.addEventListener(auto, "click", proc() = target.setAutoSwitch(not on))
+  r.pressable(auto, InboxToggleAutoSwitchOperation, proc() = target.setAutoSwitch(not on))
   r.appendChild(result, auto)
 
 proc drawRow(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: InboxVM;
@@ -860,7 +890,7 @@ proc drawRow(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: InboxVM;
     heights2.add ChipPx
   if item.kind == ikUnknown:
     let target = vm
-    line2.add FlowItem(el: r.actionButton(p, ink, OpenLabel, false,
+    line2.add FlowItem(el: r.actionButton(p, ink, OpenLabel, false, InboxOpenItemOperation,
                                           proc() = target.open(itemRef)),
                        widthPx: actionButtonPx(OpenLabel), alignEnd: true)
     heights2.add ControlPx
@@ -871,7 +901,7 @@ proc drawRow(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: InboxVM;
     r.appendChild(main, e)
   r.appendChild(row, main)
   let target = vm
-  r.addEventListener(row, "click", proc() = target.open(itemRef))
+  r.pressable(row, InboxOpenItemOperation, proc() = target.open(itemRef))
   # Its height, from the same lines it was drawn with: the label line, the
   # kind's line and the explanation, 2px apart, beside the mark's 14px, 6px
   # above and below.
@@ -949,9 +979,9 @@ proc sectionHeaderPx(source, counts: string; widthPx: int): int =
   let lines = flowLineCount(items, max(1, widthPx - 2 * InsetPx), 8)
   8 + lines * 24 + (lines - 1) * 2 + 1
 
-proc drawInboxPanel*(r: GpuiRenderer; host: GpuiElement; vm: InboxVM; p: AhPalette;
-                     widthPx: int; ctx = AgentHarborInboxContext(); heightPx = 0;
-                     scroll: P3Scroll = nil) =
+proc drawInboxPanelParts(r: GpuiRenderer; host: GpuiElement; vm: InboxVM; p: AhPalette;
+                         widthPx: int; ctx: AgentHarborInboxContext; heightPx: int;
+                         scroll: P3Scroll) =
   ## The Inbox panel over `vm`, `widthPx` wide; with the viewmodel's pages
   ## on, the item on screen's page under (or beside) the rows, or, while
   ## items wait and none is on screen, the hint in the page's place.
@@ -982,8 +1012,8 @@ proc drawInboxPanel*(r: GpuiRenderer; host: GpuiElement; vm: InboxVM; p: AhPalet
     return
   of asError:
     let target = vm
-    r.appendChild(host, r.errorBlock(p, InboxErrorTitle, vm.error.val,
-                                     proc() = target.restart()))
+    r.appendChild(host, r.routedErrorBlock(p, InboxErrorTitle, vm.error.val,
+                                           InboxRetryOperation, proc() = target.restart()))
     return
   of asReady: discard
   r.appendChild(host, r.drawStepper(p, ink, vm, widthPx))
@@ -1092,14 +1122,25 @@ proc drawInboxPanel*(r: GpuiRenderer; host: GpuiElement; vm: InboxVM; p: AhPalet
       r.appendChild(main, pageHost)
   r.appendChild(host, main)
 
+proc drawInboxPanel*(r: GpuiRenderer; host: GpuiElement; vm: InboxVM; p: AhPalette;
+                     widthPx: int; ctx = AgentHarborInboxContext(); heightPx = 0;
+                     scroll: P3Scroll = nil; press: PanelPress = nil) =
+  ## `drawInboxPanelParts`, its presses through `press` (the base keymap's
+  ## `inboxPresses` when nil).
+  drawingWith(if press.isNil: inboxPresses(vm, nil) else: press):
+    drawInboxPanelParts(r, host, vm, p, widthPx, ctx, heightPx, scroll)
+
 proc mountInboxPanel*(r: GpuiRenderer; host: GpuiElement; vm: InboxVM; p: AhPalette;
                       widthPx: int; ctx = AgentHarborInboxContext(); heightPx = 0;
-                      scroll: P3Scroll = nil; redraw: Signal[int] = nil) =
+                      scroll: P3Scroll = nil; redraw: Signal[int] = nil;
+                      press: PanelPress = nil) =
   ## Draws the panel, redraws it whenever what it reads changes (or the host
   ## moves `redraw`, after a scroll), and (with the viewmodel's pages on)
-  ## marks its pages visible while it is mounted, as the web mount does.
+  ## marks its pages visible while it is mounted, as the web mount does. Its
+  ## presses go through `press` (the base keymap's `inboxPresses` when nil).
+  let route = if press.isNil: inboxPresses(vm, nil) else: press
   createRenderEffect proc() =
     discard vm.revision.val
     if redraw != nil: discard redraw.val
-    drawInboxPanel(r, host, vm, p, widthPx, ctx, heightPx, scroll)
+    drawInboxPanel(r, host, vm, p, widthPx, ctx, heightPx, scroll, route)
   if vm.showPages: vm.setPagesVisible(true)

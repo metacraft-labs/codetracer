@@ -420,6 +420,46 @@ const
     ## The operations a host runs on its own drawing (`runChangesOperation`
     ## and `runInboxOperation` leave them to it).
 
+# ---------------------------------------------------------------------------
+# Presses (Input-Routing-And-Keymaps.md §5.1)
+# ---------------------------------------------------------------------------
+#
+# The operation each pressable element of the panels carries. A press is
+# resolved by the host's router over the pointer keymap (a user's row for the
+# press first, else the operation the element carries) and runs the procedure
+# the view bound to that element (`element_operations.bindOperation` on the
+# web, `ah_changes_inbox_parts.pressable` in GPUI). The views hold no press
+# handler of their own.
+
+const
+  ChangesRetryOperation* = "changes.retry"
+    ## Retry after the panel's read failed.
+  ChangesSelectTabOperation* = "changes.select-tab"
+    ## A tab: show it.
+  ChangesToggleCardOperation* = "changes.toggle-card"
+    ## A spec card's head: open or close that card.
+  ChangesCardActionOperation* = "changes.card-action"
+    ## A card's buttons (Approve, Revert, Request Changes, …), the revert
+    ## question's and the Request Changes input's.
+  ChangesShowSideOperation* = "changes.show-side"
+    ## The Summary ⇄ Diff toggle's sides: show that side.
+  ChangesOpenFileOperation* = "changes.open-file"
+    ## A file link or Open in Editor: ask the host to open the file.
+  ChangesSelectFileOperation* = "changes.select-file"
+    ## A changed file's row in the Code tab: select it.
+  ChangesStepFileOperation* = "changes.step-file"
+    ## The file navigation's previous and next.
+  ChangesLoadDiffOperation* = "changes.load-diff"
+    ## Load a file's diff.
+  InboxRetryOperation* = "inbox.retry"
+    ## Retry after the Inbox's or an item's read failed.
+  InboxItemActionOperation* = "inbox.item-action"
+    ## An item page's form buttons (Send, Submit, Approve, Deny, …).
+  InboxToggleAutoSwitchOperation* = "inbox.toggle-auto-switch"
+    ## Auto-switch: turn it on or off.
+  InboxOpenItemOperation* = "inbox.open-item"
+    ## An Inbox row, or its Open: put that item's page on screen.
+
 proc runChangesOperation*(vm: ChangesVM; operation: string): bool =
   ## Runs one of the Changes panel's key operations on `vm`: true when it
   ## changed something. False for a scroll (the host's) and for an

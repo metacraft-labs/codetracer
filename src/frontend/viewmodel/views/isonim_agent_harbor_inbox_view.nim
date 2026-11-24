@@ -100,24 +100,36 @@ proc renderOverlay[R](r: R; message, kind: string): auto =
     tdiv(class = "empty-overlay ah-inbox-notice", `data-ah-notice` = kind):
       text message
 
-proc renderError[R](r: R; title, message: string; retry: proc()): auto =
-  ui(r):
+proc presses[R, N](r: R; node: N; operation: string; run: proc()) =
+  ## `node` carries `operation` and `run` performs it there: the page's one
+  ## pointer listener resolves a press through the pointer keymap and runs
+  ## it (`element_operations.bindOperation`, Input-Routing-And-Keymaps.md
+  ## §5.1). The view holds no press handler.
+  if run != nil:
+    r.bindOperation(node, operation, proc(press: PressInfo) = run())
+
+proc renderError[R, N](r: R; title, message: string; retry: proc()): N =
+  var retryButton: N
+  result = ui(r):
     tdiv(class = "ah-fleet-error", `data-ah-notice` = "error"):
       tdiv(class = "ah-fleet-error-title"):
         text title
       tdiv(class = "ah-fleet-error-message"):
         text message
-      button(class = "ah-fleet-retry", onclick = retry):
+      button(ref = retryButton, class = "ah-fleet-retry"):
         text RetryLabel
+  r.presses(retryButton, InboxRetryOperation, retry)
 
 proc renderButton[R](r: R; label: string; primary, disabled: bool;
                      action: proc()): auto =
-  ## A form's button: the filled primary or outlined.
+  ## A form's button: the filled primary or outlined. It carries
+  ## `inbox.item-action`, performed by `action` (`presses`).
   let node = ui(r):
     button(class = (if primary: "ct-button-sm-primary" else: "ct-button-sm-secondary") &
-                   " ah-item-action", `data-ah-action` = label, onclick = action):
+                   " ah-item-action", `data-ah-action` = label):
       text label
   r.setFlag(node, "disabled", disabled)
+  r.presses(node, InboxItemActionOperation, action)
   node
 
 # ---------------------------------------------------------------------------
@@ -373,6 +385,12 @@ proc renderApproval[R, N](r: R; page: InboxItemVM; a: ApprovalRequest): N =
   r.appendRendered(actions, renderButton(r, DenyLabel, false, false,
     proc() = discard page.decideApproval(requestId, adDeny)))
 
+proc permissionPress(page: InboxItemVM; id: string): proc() =
+  ## A permission option's button: a proc of its own so each closure owns
+  ## its id (a closure made in a Nim loop body shares the body's variables
+  ## with every other iteration's: every option chose the last one).
+  result = proc() = discard page.choosePermission(id)
+
 proc renderPermission[R, N](r: R; page: InboxItemVM; d: InboxItemDetail; host: N) =
   if d.prompt.len > 0:
     let q = ui(r):
@@ -384,9 +402,8 @@ proc renderPermission[R, N](r: R; page: InboxItemVM; d: InboxItemDetail; host: N
     let a = ui(r):
       tdiv(ref = actions, class = "ah-item-actions ah-permission-options")
     for i, o in d.permissionOptions:
-      let id = o.id
       r.appendRendered(actions, renderButton(r, o.label, i == 0, false,
-                                             proc() = discard page.choosePermission(id)))
+                                             permissionPress(page, o.id)))
     r.appendRendered(host, a)
   for approval in d.approvals:
     r.appendRendered(host, renderApproval[R, N](r, page, approval))
@@ -509,7 +526,7 @@ proc renderItemPageBody[R, N](r: R; page: InboxItemVM; ctx: AgentHarborInboxItem
     if unresolvable.len > 0:
       r.appendRendered(body, renderOverlay(r, unresolvable, "unresolvable"))
     else:
-      r.appendRendered(body, renderError(r, ItemErrorTitle, page.error.val,
+      r.appendRendered(body, renderError[R, N](r, ItemErrorTitle, page.error.val,
                                          proc() = target.load()))
   of asReady:
     let d = page.detail
@@ -566,26 +583,27 @@ proc renderStepper[R, N](r: R; vm: InboxVM): N =
   let canNext = vm.canNext
   let position = vm.positionText
   let on = vm.autoSwitch.val
-  var prev, next: N
+  var prev, next, autoButton: N
   result = ui(r):
     tdiv(class = "ah-inbox-stepper", role = "group", `data-ah-position` = position):
-      button(ref = prev, class = "ah-step ah-step-prev", title = stepperTitle(false),
-             onclick = proc() = discard vm.prev()):
+      button(ref = prev, class = "ah-step ah-step-prev", title = stepperTitle(false)):
         text PreviousArrow
       span(class = "ah-step-position"):
         text position
-      button(ref = next, class = "ah-step ah-step-next", title = stepperTitle(true),
-             onclick = proc() = discard vm.next()):
+      button(ref = next, class = "ah-step ah-step-next", title = stepperTitle(true)):
         text NextArrow
-      button(class = "ah-auto-switch" & (if on: " ah-auto-switch-on" else: ""),
-             title = AutoSwitchTitle, `data-ah-auto-switch` = (if on: "on" else: "off"),
-             onclick = proc() = vm.setAutoSwitch(not on)):
+      button(ref = autoButton, class = "ah-auto-switch" & (if on: " ah-auto-switch-on" else: ""),
+             title = AutoSwitchTitle, `data-ah-auto-switch` = (if on: "on" else: "off")):
         span(class = "ah-auto-full"):
           text autoSwitchText(on, compact = false)
         span(class = "ah-auto-compact"):
           text autoSwitchText(on, compact = true)
   r.setFlag(prev, "disabled", not canPrev)
   r.setFlag(next, "disabled", not canNext)
+  # Previous and Next carry the operations their keys run (`[` and `]`).
+  r.presses(prev, InboxPreviousOperation, proc() = discard vm.prev())
+  r.presses(next, InboxNextOperation, proc() = discard vm.next())
+  r.presses(autoButton, InboxToggleAutoSwitchOperation, proc() = vm.setAutoSwitch(not on))
 
 proc renderRow[R, N](r: R; vm: InboxVM; ctx: AgentHarborInboxContext;
                      item: InboxItem; onScreen: bool): N =
@@ -600,8 +618,7 @@ proc renderRow[R, N](r: R; vm: InboxVM; ctx: AgentHarborInboxContext;
     tdiv(class = "ah-inbox-row" & (if onScreen: " ah-inbox-row-current" else: ""),
          role = "button", tabindex = "0", title = label,
          `data-ah-item` = item.id, `data-ah-kind` = item.kindText,
-         `data-ah-position` = $item.position,
-         onclick = proc() = vm.open(itemRef)):
+         `data-ah-position` = $item.position):
       span(class = "ah-item-mark " & roleClass(kindRole(item.kind))):
         discard
       tdiv(class = "ah-inbox-row-main"):
@@ -632,9 +649,11 @@ proc renderRow[R, N](r: R; vm: InboxVM; ctx: AgentHarborInboxContext;
     r.appendRendered(line2, renderChip(r, pendingText, "info", "pending"))
   if item.kind == ikUnknown:
     let open = ui(r):
-      button(class = "ct-button-sm-secondary ah-inbox-open", onclick = proc() = vm.open(itemRef)):
+      button(class = "ct-button-sm-secondary ah-inbox-open"):
         text OpenLabel
+    r.presses(open, InboxOpenItemOperation, proc() = vm.open(itemRef))
     r.appendRendered(line2, open)
+  r.presses(result, InboxOpenItemOperation, proc() = vm.open(itemRef))
 
 proc renderRows[R, N](r: R; vm: InboxVM; ctx: AgentHarborInboxContext; list: N) =
   ## The rows in the server's order. A run of rows from another server is
@@ -703,7 +722,7 @@ proc renderAgentHarborInboxPanel*[R, N](r: R; vm: InboxVM;
       r.appendRendered(body, renderOverlay(r, vm.notice(), "loading"))
       return
     of asError:
-      r.appendRendered(body, renderError(r, InboxErrorTitle, vm.error.val,
+      r.appendRendered(body, renderError[R, N](r, InboxErrorTitle, vm.error.val,
                                          proc() = target.restart()))
       return
     of asReady: discard

@@ -27,7 +27,10 @@
 ##     keyboard's file scrolled out of its region's window; and
 ##   * mounts the keyboard stories in the GPUI story host at the brief's
 ##     sizes and shows their first frames scrolled to what the keyboard is
-##     on, and the page keys scrolling a long list.
+##     on, and the page keys scrolling a long list; and
+##   * presses the panels' parts in the story host: each carries its
+##     operation and a press runs the procedure bound to it through the
+##     panel's route, and a user's row for the press takes it over.
 ##
 ## No mocks: the viewmodels read the synthetic fixture sets of
 ## nim-agents-isonim-viewmodels through the production data-source seam,
@@ -45,6 +48,7 @@ from isonim_gpui/bindings import gpui_reset_tree
 import ../agent_harbor/ah_changes_inbox_stories
 import ./ctf_p3_gpui_cover
 import ../agent_harbor/ah_stories
+from ../../viewmodel/input/element_press import OperationAttribute
 
 const
   Widths = [("laptop", 1432), ("panel", 752), ("sidebar", 352)]
@@ -390,6 +394,92 @@ suite "CTF-P3: Send draft is a compact button, as Submit is":
       page.dispose()
       discard size
 
+proc collectCarrying(node: GpuiElement; operation: string; into: var seq[GpuiElement]) =
+  if node.isNil: return
+  if getAttribute(node, OperationAttribute) == operation: into.add node
+  for i in 0 ..< childCount(node): collectCarrying(nthChild(node, i), operation, into)
+
+proc carrying(root: GpuiElement; operation: string): seq[GpuiElement] =
+  ## The parts under `root` that carry `operation` (`data-ct-operation`), in
+  ## document order.
+  collectCarrying(root, operation, result)
+
+proc openCards(vm: ChangesVM): seq[string] =
+  for card in vm.specCards:
+    if card.open: result.add card.key
+
+suite "CTF-P3: the presses (the panels' changes.* and inbox.* press operations) in GPUI":
+  # The GPUI story host's own mount: a part carries its operation, and a
+  # press (GPUI delivers it to the part under the pointer) is resolved by
+  # the panel's route in the panel's scope and runs the part's procedure.
+  test "a card's head, a tab, and Previous and Next do what they carry":
+    gpui_reset_tree()
+    let c = r.mountAgentHarborStoryGpui("agent-harbor-changes", "populated", 1440, 900)
+    defer: c.dispose()
+    let vm = c.changesInbox.changes
+    let opened = vm.openCards
+    let heads = c.view.carrying(ChangesToggleCardOperation)
+    ck heads.len > 0
+    if heads.len > 0: fireEvent(heads[0], "mousedown")
+    ck vm.openCards != opened
+    let again = c.view.carrying(ChangesToggleCardOperation)
+    if again.len > 0: fireEvent(again[0], "mousedown")
+    ck vm.openCards == opened
+    let shown = vm.activeTab.val
+    var other: GpuiElement
+    for t in c.view.carrying(ChangesSelectTabOperation):
+      if t.fact("changes-tab") != $shown: other = t
+    ck other != nil
+    if other != nil: fireEvent(other, "mousedown")
+    ck vm.activeTab.val != shown
+    gpui_reset_tree()
+    let i = r.mountAgentHarborStoryGpui("agent-harbor-inbox", "prev-next", 1440, 900)
+    defer: i.dispose()
+    let before = i.changesInbox.inbox.positionText
+    let next = i.view.carrying(InboxNextOperation)
+    ck next.len == 1
+    if next.len > 0: fireEvent(next[0], "mousedown")
+    ck i.changesInbox.inbox.positionText != before
+    let prev = i.view.carrying(InboxPreviousOperation)
+    ck prev.len == 1
+    if prev.len > 0: fireEvent(prev[0], "mousedown")
+    ck i.changesInbox.inbox.positionText == before
+
+  test "the file navigation's Previous steps back":
+    # Each step button owns its step: drawn in a loop, they once shared the
+    # loop's one closure environment and Previous stepped forward too.
+    gpui_reset_tree()
+    let c = r.mountAgentHarborStoryGpui("agent-harbor-changes", "code-file-open", 1440, 900)
+    defer: c.dispose()
+    let vm = c.changesInbox.changes
+    let first = vm.files[0].file.path
+    var previous: GpuiElement
+    for b in c.view.carrying(ChangesStepFileOperation):
+      if b.fact("file-step") == PreviousFileLabel: previous = b
+    ck previous != nil
+    if previous != nil: fireEvent(previous, "mousedown")
+    ck vm.selectedFile.val == first
+
+  test "CONTROL: a user's row for the press takes it over":
+    # A row naming another operation for a press on any of the panel's
+    # parts: a card's head then steps the tab, and the card stays as it was.
+    gpui_reset_tree()
+    let keymap = parseUserKeymap(
+      """[ { "key": "click", "command": "changes.next-tab",
+             "when": "paneKind == changes && elementKind == button" } ]""")
+    ck keymap.errors.len == 0
+    let c = r.mountAgentHarborStoryGpui("agent-harbor-changes", "populated", 1440, 900,
+                                        keymap = keymap)
+    defer: c.dispose()
+    let vm = c.changesInbox.changes
+    let opened = vm.openCards
+    let shown = vm.activeTab.val
+    let heads = c.view.carrying(ChangesToggleCardOperation)
+    ck heads.len > 0
+    if heads.len > 0: fireEvent(heads[0], "mousedown")
+    ck vm.openCards == opened
+    ck vm.activeTab.val != shown
+
 suite "CTF-P3: assertion count":
   test "every assertion ran":
-    check countedAssertions == 39 + 12 + 9 + 5 + 4 + 6 + 6 + 2 + 3 * 3
+    check countedAssertions == 39 + 12 + 9 + 5 + 4 + 6 + 6 + 2 + 3 * 3 + 9 + 2 + 4

@@ -14,6 +14,7 @@
 import isonim/core/signals
 import ../../stories/agent_harbor_playback
 import ../../stories/agent_harbor_changes_inbox_stories
+import ../../viewmodel/keymap/user_keymap
 import ./ah_changes_panel
 import ./ah_inbox_panel
 
@@ -39,13 +40,16 @@ type
 
 proc mountChangesInboxStory*(r: GpuiRenderer; host: GpuiElement; surface, fixture: string;
                              playback: AhPlayback; p: AhPalette;
-                             widthPx: int; heightPx = 0): ChangesInboxMount =
+                             widthPx: int; heightPx = 0;
+                             keymap = UserKeymap()): ChangesInboxMount =
   ## Builds the story's viewmodel with its constructor and mounts its view in
   ## `host`, `widthPx` × `heightPx` (the panel's body; 0 for a view that
   ## does not scroll, clipped at its foot). Call inside a reactive root; the
   ## caller disposes the viewmodel it returns. Raises `ValueError` for a
   ## surface this module does not mount, and (from the constructors) for a
-  ## fixture the surface does not name.
+  ## fixture the surface does not name. A press on the panel is routed under
+  ## `keymap`'s rows over the base keymap's (`changesPresses`,
+  ## `inboxPresses`).
   result.requests = StoryHostRequests()
   result.scroll = P3Scroll()
   result.redraw = createSignal(0)
@@ -53,17 +57,19 @@ proc mountChangesInboxStory*(r: GpuiRenderer; host: GpuiElement; surface, fixtur
   of "agent-harbor-changes":
     result.changes = createChangesStoryVM(fixture)
     r.mountChangesPanel(host, result.changes, p, widthPx, changesStoryContext(fixture),
-                        heightPx, result.scroll, result.redraw)
+                        heightPx, result.scroll, result.redraw,
+                        changesPresses(result.changes, keymap))
   of "agent-harbor-inbox":
     result.inbox = createInboxStoryVM(fixture, playback)
     r.mountInboxPanel(host, result.inbox, p, widthPx,
                       inboxStoryContext(fixture, result.requests), heightPx, result.scroll,
-                      result.redraw)
+                      result.redraw, inboxPresses(result.inbox, nil, keymap))
   of "agent-harbor-inbox-item":
     result.inboxItem = createInboxItemStoryVM(fixture)
     r.mountInboxItemPage(host, result.inboxItem, p, widthPx,
                          inboxItemStoryContext(fixture, result.requests), heightPx,
-                         result.scroll, result.redraw)
+                         result.scroll, result.redraw,
+                         inboxPresses(nil, result.inboxItem, keymap))
   else:
     raise newException(ValueError, "no GPUI rendering of the Changes or Inbox surface " &
                        surface & " (story fixture " & fixture & ")")

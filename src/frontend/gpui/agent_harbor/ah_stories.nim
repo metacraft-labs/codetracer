@@ -605,7 +605,10 @@ proc mountAgentHarborStoryGpui*(r: GpuiRenderer; surface, fixture: string;
       # above the body) or less the playback bar, so its regions scroll at
       # their drawn heights.
       let bodyH = if frameTitle.len > 0: heightPx - FrameTitlePx - 8 else: heightPx
-      m.changesInbox = r.mountChangesInboxStory(host, surface, fixture, pb, p, bodyW, bodyH)
+      # A press on either panel is routed under `keymap`'s rows over the
+      # base's, in the panel's scope (`changesPresses`, `inboxPresses`).
+      m.changesInbox = r.mountChangesInboxStory(host, surface, fixture, pb, p, bodyW, bodyH,
+                                                keymap)
     of PieStorySurface:
       # Static data, no viewmodel (`agent_harbor_pie_stories`).
       r.drawPieStory(host, fixture, p, bodyW, heightPx)
