@@ -328,7 +328,10 @@ const
     ## parse, requested and reconciled off the render path). Their threads are
     ## `host/`'s, so nothing else under `app/` moved.
 
-  ExpectedStyleLiterals = 400
+  ExpectedStyleLiterals = 403
+    ## 2026-11-24: 400 → 403, measured — the docked plugin panes' two
+    ## (`a1589993144`) and the plugin source markers' one (`14cff691a07`),
+    ## which landed without re-counting.
     ## 2026-11-18: 394 → 400, measured — the six in the new
     ## `views/macro_expansion_pane.nim` (`ac499b2cead`).
     ## 2026-11-09: 384 → 394, measured — nine in the new
