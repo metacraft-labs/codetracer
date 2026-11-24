@@ -767,7 +767,7 @@ proc checkResults(view: GpuiElement; vm: ResultCommandsVM): seq[string] =
   prefix("groups", view.values("group"), groups)
   prefix("group states", view.values("state"), states)
   prefix("rows", view.values("row"), rows)
-  prefix("selected rows", view.values("selected"), selected)
+  prefix("selected rows", view.values("result-selected"), selected)
   prefix("more", view.values("more"), more)
 
 proc checkSuggestion(view: GpuiElement; vm: SuggestedActionsVM): seq[string] =

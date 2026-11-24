@@ -55,7 +55,8 @@ proc bandOf(p: AhPalette): string =
 
 proc drawSectionHeader*(r: GpuiRenderer; p: AhPalette; title, source,
                         summary: string; widthPx: int; caveat = "";
-                        narrow = false; sourceBasisPx = -1): GpuiElement =
+                        narrow = false; sourceBasisPx = -1;
+                        linePx = HeadLinePx): GpuiElement =
   ## The VCS panel's section header (`.ah-fleet-section-header`): an
   ## uppercase label, a quieter source taking the free width, the summary
   ## pushed to the right, a caveat after it, over a hairline, 4px by 8px in
@@ -63,7 +64,9 @@ proc drawSectionHeader*(r: GpuiRenderer; p: AhPalette; title, source,
   ## one line (24px lines, 2px apart). `narrow` is the fleet's own narrow
   ## header (`@container ah-fleet (max-width: 40rem)`): the title and the
   ## summary on the first line, the source and the caveat each on one of
-  ## their own, 16px lines.
+  ## their own, 16px lines. `linePx`: the header's line where the host's
+  ## inherited line-height is not the panels' 24px (the control center's
+  ## 21px: `.ah-control-center` is set at the body size, 1.5 lines).
   result = r.box(column = true, pairs = [("padding-top", "4px"), ("padding-bottom", "4px"),
                                          ("padding-left", $InsetPx & "px"),
                                          ("padding-right", $InsetPx & "px"),
@@ -104,7 +107,7 @@ proc drawSectionHeader*(r: GpuiRenderer; p: AhPalette; title, source,
       items.add FlowItem(el: withDot,
                          widthPx: textPx("\xC2\xB7", CaptionPx) + 8 + textPx(caveat, CaptionPx))
   r.appendChild(result, r.flowLines(items, max(1, widthPx - 2 * InsetPx), 8,
-                                    if narrow: 16 else: 24, if narrow: 0 else: 2))
+                                    if narrow: 16 else: linePx, if narrow: 0 else: 2))
 
 proc drawMilestoneBar*(r: GpuiRenderer; p: AhPalette;
                        counts: array[MilestoneStatusClass, int];
@@ -121,7 +124,6 @@ proc drawMilestoneBar*(r: GpuiRenderer; p: AhPalette;
   r.tag(result, "milestone-bar", statusCountsText(counts))
   let bar = r.box(pairs = [("height", $BarPx & "px"), ("flex-grow", "1"),
                            ("rounded", BarRadius), ("overflow", "hidden"), ("gap", "1px")])
-  if not labelled: r.setStyle(bar, "max-width", "580px")
   let legend = r.box(pairs = [("gap", $LegendGapPx & "px"), ("items", "center"),
                               ("height", $LegendPx & "px"), ("flex-shrink", "0")])
   # Beside the bar, the legend is at least 9rem wide with its counts at its
@@ -224,7 +226,10 @@ proc drawSessionLine*(r: GpuiRenderer; p: AhPalette; item: SessionItem;
 # ---------------------------------------------------------------------------
 
 proc drawInitiativeRow(r: GpuiRenderer; p: AhPalette; vm: InitiativesVM;
-                       row: InitiativeRow; index: int; widthPx: int): GpuiElement =
+                       row: InitiativeRow; index: int; widthPx: int;
+                       headLinePx = HeadLinePx): GpuiElement =
+  ## One initiative. `headLinePx`: the line its head and its "no session"
+  ## tail inherit (the panel's 24px; 21px inside the control center).
   let id = row.id
   let selected = row.selected
   # The selected initiative is drawn on the selected-row ground every list
@@ -256,7 +261,7 @@ proc drawInitiativeRow(r: GpuiRenderer; p: AhPalette; vm: InitiativesVM;
   # `.ah-initiative-head`: a 24px line -- the fold control (12px wide) and
   # the counts in the label role, the title semibold on a 16px line.
   let head = r.box(pairs = [("gap", "8px"), ("items", "center"),
-                            ("height", $HeadLinePx & "px")])
+                            ("height", $headLinePx & "px")])
   let fold = r.text(if row.folded: "\xE2\x96\xB8" else: "\xE2\x96\xBE", CaptionPx, p.textLabel,
                     shrink = false, pairs = [("cursor", cursorOf(hkControl)), ("width", "12px")])
   r.tag(fold, "fold", id)
@@ -330,7 +335,7 @@ proc drawInitiativeRow(r: GpuiRenderer; p: AhPalette; vm: InitiativesVM;
       # `.ah-initiative-more`: upright caption text on the 24px line it
       # inherits, 16px further in than the session lines.
       let tail = r.text(label, CaptionPx, quiet,
-                        pairs = [("line-height", $HeadLinePx & "px"), ("margin-left", "16px")])
+                        pairs = [("line-height", $headLinePx & "px"), ("margin-left", "16px")])
       r.tag(tail, "more", label)
       r.appendChild(sessions, tail)
     if wide:
@@ -341,7 +346,10 @@ proc drawInitiativeRow(r: GpuiRenderer; p: AhPalette; vm: InitiativesVM;
     r.appendChild(result, sessions)
 
 proc drawInitiativesPanel*(r: GpuiRenderer; host: GpuiElement; vm: InitiativesVM;
-                           p: AhPalette; widthPx: int) =
+                           p: AhPalette; widthPx: int; linePx = HeadLinePx) =
+  ## The Initiatives panel in `host`. `linePx`: the line its parts inherit,
+  ## the panel's own 24px, or its host's (the control center's 21px, where
+  ## the panel inherits the tab's body-size line-height).
   r.clearChildren(host)
   r.styles(host, [("display", "flex"), ("flex-direction", "column"),
                   ("width", $widthPx & "px"), ("height", "100%"),
@@ -349,7 +357,7 @@ proc drawInitiativesPanel*(r: GpuiRenderer; host: GpuiElement; vm: InitiativesVM
   r.tag(host, "surface", "agent-harbor-initiatives")
   r.tag(host, "state", stateName(vm.state.val))
   let head = r.drawSectionHeader(p, "Initiatives", vm.sourceLabel,
-    if vm.state.val == asReady: vm.summaryText else: "", widthPx)
+    if vm.state.val == asReady: vm.summaryText else: "", widthPx, linePx = linePx)
   r.tag(head, "head", "section header")
   r.appendChild(host, head)
   case vm.state.val
@@ -364,9 +372,14 @@ proc drawInitiativesPanel*(r: GpuiRenderer; host: GpuiElement; vm: InitiativesVM
     if rows.len == 0:
       r.appendChild(host, r.notice(p, InitiativesEmptyText, "empty"))
     else:
-      let list = r.box(column = true, pairs = [("flex-grow", "1"), ("overflow", "hidden")])
+      # The list fills the panel and ends at its edge (`.ah-fleet-list`'s box
+      # is the panel's rest, its rows clipped there), never as tall as its
+      # rows: a flex item's least height is otherwise its content's.
+      let list = r.box(column = true, pairs = [("flex-grow", "1"), ("flex-shrink", "1"),
+                                               ("min-height", "0px"), ("overflow", "hidden")])
       r.tag(list, "rows", "list")
-      for i, row in rows: r.appendChild(list, r.drawInitiativeRow(p, vm, row, i, widthPx))
+      for i, row in rows:
+        r.appendChild(list, r.drawInitiativeRow(p, vm, row, i, widthPx, headLinePx = linePx))
       r.appendChild(host, list)
 
 proc mountInitiativesPanel*(r: GpuiRenderer; host: GpuiElement; vm: InitiativesVM;

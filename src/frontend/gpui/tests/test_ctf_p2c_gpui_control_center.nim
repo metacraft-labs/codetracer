@@ -14,11 +14,17 @@
 ##   the waiting rows.
 ## * **The gaze mark**: off draws nothing; tracking and paused draw the eye
 ##   and the words in the caption role; the pause key and a press pause it.
+##   It is as wide and as tall as the web lays it out (the committed layout
+##   record `agent-harbor-web-regions.json`, `gaze-mark`, within the layout
+##   judge's `PxTolerance`): a 12px eye, the gap and the words at the status
+##   bar's 14px. It was drawn with a 14px eye and 12px words, 92px wide where
+##   the web's is 102.4px (issue
+##   2026-11-24-gpui-omnibox-control-center-and-gaze-captures-fail-the-ctf-p1b-layout-gate).
 ##
 ## No mocks: the stories' own viewmodels over the scripted router and action
 ## source, drawn by the real views through the real isonim-gpui shim.
 
-import std/[sequtils, strutils, unittest]
+import std/[json, math, os, sequtils, strutils, unittest]
 
 import isonim_gpui/renderer
 from isonim_gpui/bindings import gpui_reset_tree
@@ -26,6 +32,7 @@ from isonim_gpui/bindings import gpui_reset_tree
 import ../agent_harbor/ah_stories
 import ../../stories/agent_harbor_control_center_stories
 from ../../viewmodel/input/element_press import OperationAttribute
+import ../../../tests/visual/agent_harbor/ctf_layout_judge
 
 let r = GpuiRenderer()
 
@@ -158,3 +165,51 @@ suite "CTF-P2c: the GPUI gaze mark":
     fireEvent(m.view.tagged("gaze-mark")[0], "mousedown")
     check m.view.tagged("gaze-mark")[0].fact("gaze-mark") == "tracking"
     m.dispose()
+
+proc planNodeWith(n: JsonNode; attribute: string): JsonNode =
+  ## The first node of a render plan carrying `attribute`.
+  let attributes = n{"attributes"}
+  if attributes != nil and attributes.kind == JObject and attributes.hasKey(attribute):
+    return n
+  for c in n{"children"}.getElems:
+    let found = planNodeWith(c, attribute)
+    if found != nil: return found
+
+proc pxOf(style: string): float =
+  ## A `<n>px` style's pixels; NaN (never within a tolerance) for anything else.
+  if not style.endsWith("px"):
+    checkpoint "not a px style: '" & style & "'"
+    return NaN
+  parseFloat(style[0 ..< ^2])
+
+suite "CTF-P2c: the GPUI gaze mark has the web's size":
+  test "tracking and paused are as wide and as tall as the web record, both sizes and themes":
+    let record = loadWebRecord(repoRoot / "src" / "tests" / "visual" /
+                               "agent-harbor-web-regions.json")
+    var compared = 0
+    var problems: seq[string]
+    for fixture in ["tracking", "paused"]:
+      for (size, w, h) in Sizes:
+        for (mode, theme) in [(dmDark, "dark"), (dmLight, "light")]:
+          let id = "agent-harbor-status-gaze-" & fixture & "-" & size & "-" & theme
+          let web = record{id}{"regions"}{"gaze-mark"}
+          if web.isNil:
+            problems.add id & ": the web record has no gaze-mark"
+            continue
+          gpui_reset_tree()
+          let m = r.mountAgentHarborStoryGpui("agent-harbor-status-gaze", fixture, w, h, mode)
+          let mark = parseJson(renderPlanJson(r, m.root)).planNodeWith("data-ah-gaze-mark")
+          m.dispose()
+          if mark.isNil:
+            problems.add id & ": no gaze mark drawn"
+            continue
+          inc compared
+          # The render plan's own names for the box's width and height.
+          for (edge, style) in [("w", "w"), ("h", "h")]:
+            let got = pxOf(mark{"styles"}{style}.getStr)
+            if not (abs(got - web[edge].getFloat) <= PxTolerance):
+              problems.add id & ": " & style & " " & $got & "px, the web's " &
+                           $web[edge].getFloat & "px"
+    for p in problems: checkpoint p
+    check compared == 8
+    check problems.len == 0

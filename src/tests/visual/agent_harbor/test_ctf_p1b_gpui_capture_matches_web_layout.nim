@@ -34,7 +34,11 @@
 ##     is a single colour (a region the layout reports but the window did not
 ##     draw);
 ##   * its regions file is missing, or was measured in another viewport;
-##   * the web record has no capture of the same id;
+##   * the web record has no capture of the same id (or, for a story GPUI
+##     draws as the web draws another, of that story's: the rich result
+##     rows, which GPUI always draws as their text form, are judged against
+##     the web's `result-text-fallback`; `ctf_layout_judge.GpuiDrawsAs`,
+##     P2c study D45);
 ##   * a region is drawn on one side and not the other, or any edge of a
 ##     region (x, y, width, height, in hundredths of the viewport) is more
 ##     than PLAT-35's `PaneRectangleTolerancePp` from the web's. The
@@ -122,7 +126,7 @@ suite "CTF-P1b: the GPUI captures lay the stories out as the web does":
     let expected = expectedCaptures(section)
     var judgements: seq[CaptureJudgement]
     for e in expected:
-      judgements.add judgeCapture(e.id, gpuiDir, web{e.id}, e.width, e.height)
+      judgements.add judgeCapture(e.id, gpuiDir, web{e.webId}, e.width, e.height)
     writeReport(judgements)
     var failing: seq[string]
     for j in judgements:

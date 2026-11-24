@@ -486,6 +486,20 @@ proc judgeCapture*(id: string; dir: string; webCapture: JsonNode;
 type Expected* = object
   id*: string
   width*, height*: int
+  webId*: string
+    ## The web capture it is judged against: its own id, but for a story
+    ## GPUI draws as another web story draws it (`GpuiDrawsAs`).
+
+const
+  GpuiDrawsAs* = [("result-rich-rows", "result-text-fallback")]
+    ## Stories GPUI draws as the web draws another story, by view name (the
+    ## capture id's story part). GPUI never draws a rich result row's HTML
+    ## box: it switches rich rows to their text form when it mounts the
+    ## results (`setHtmlEnabled(false)`), as the web does only with rich rows
+    ## off (`result-text-fallback`), and its header says so (P2c study D45,
+    ## OMNI-AREQ4). Its capture of the rich rows is the web's text form,
+    ## line for line, so that is the web capture it is judged against; the
+    ## web's boxes have no GPUI drawing to compare.
 
 proc agentHarborSection*(): CodeTracerStorySection =
   for s in codeTracerStorySections():
@@ -501,10 +515,15 @@ proc expectedCaptures*(section: CodeTracerStorySection): seq[Expected] =
   for story in section.stories:
     let sid = storybookId(section, story)
     doAssert sid.startsWith(StoryIdPrefix), sid
-    let view = ViewPrefix & sid[StoryIdPrefix.len .. ^1]
+    let name = sid[StoryIdPrefix.len .. ^1]
+    var webName = name
+    for (gpui, web) in GpuiDrawsAs:
+      if name == gpui: webName = web
     for (size, w, h) in sizesOf(story):
       for theme in Themes:
-        result.add Expected(id: view & "-" & size & "-" & theme, width: w, height: h)
+        let suffix = "-" & size & "-" & theme
+        result.add Expected(id: ViewPrefix & name & suffix, width: w, height: h,
+                            webId: ViewPrefix & webName & suffix)
 
 proc loadWebRecord*(webRecordPath: string): JsonNode =
   ## The `captures` of a web record (`ci/test/ctf-p1b-web-capture.sh`); an
