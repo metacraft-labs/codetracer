@@ -764,7 +764,6 @@ src/frontend/tui/tests/plat57-find-in-files-mutation-control.sha256	src/frontend
 src/frontend/tui/tests/plat58-requests-mutation-control.sha256	src/frontend/tui/main.nim	634de7f0b7b8a822b4bc8b07b3c1106143ffeedf6dde1f2d77e2e24d7607d507	dc07c46cddae122d6e2d4b327728d4b45b11219fb59c29d77caf904f45e6168e
 src/frontend/tui/tests/plat61-shell-mutation-control.sha256	src/frontend/tui/main.nim	634de7f0b7b8a822b4bc8b07b3c1106143ffeedf6dde1f2d77e2e24d7607d507	dc07c46cddae122d6e2d4b327728d4b45b11219fb59c29d77caf904f45e6168e
 src/frontend/tui/tests/plat65-nim-tracing-mutation-control.sha256	src/frontend/tui/main.nim	634de7f0b7b8a822b4bc8b07b3c1106143ffeedf6dde1f2d77e2e24d7607d507	dc07c46cddae122d6e2d4b327728d4b45b11219fb59c29d77caf904f45e6168e
-src/frontend/tui/tests/plat72-screen-reader-mutation-control.sha256	src/frontend/tui/main.nim	634de7f0b7b8a822b4bc8b07b3c1106143ffeedf6dde1f2d77e2e24d7607d507	dc07c46cddae122d6e2d4b327728d4b45b11219fb59c29d77caf904f45e6168e
 
 # 2026-11-21, plugin key bindings in canonical key names: key_names gains
 # bindingKeyName (the modifiers' spelling folded, a bare letter's case kept), read by
@@ -783,7 +782,6 @@ src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/common/k
 src/frontend/tui/tests/plat70a-hscroll-mutation-control.sha256	src/frontend/tui/app/runtime.nim	7f58388446ab2135d8e46b5e2b43760bb553d63e4b64674516a8278c4be8b794	44d968e50c635c06040e3b6c4198fe2c748584d80ac55290aeee3283a918fd96
 src/frontend/tui/tests/plat70a-hscroll-mutation-control.sha256	src/frontend/gpui/main.nim	93e0d62046619caab3c26eb7d894941ff23c8d044e139302cc93481b87bc8f5b	5463ced11b13732d03f6de28107a5cd307c606402247398f0ed8e317ea3fa6ed
 src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	src/common/key_names.nim	1acf4821d23f7cf4529431a99b64ccde8d30f63f9df9547869f22af730c837c9	f1a70bdb7cbc96c678dee9f08374a322033a7d0ca8d9ab7422d6cd1030c1b741
-src/frontend/tui/tests/plat72-screen-reader-mutation-control.sha256	src/frontend/tui/app/runtime.nim	7f58388446ab2135d8e46b5e2b43760bb553d63e4b64674516a8278c4be8b794	44d968e50c635c06040e3b6c4198fe2c748584d80ac55290aeee3283a918fd96
 src/frontend/tui/tests/plat83-ct-lens-mutation-control.sha256	src/frontend/tui/app/runtime.nim	7f58388446ab2135d8e46b5e2b43760bb553d63e4b64674516a8278c4be8b794	44d968e50c635c06040e3b6c4198fe2c748584d80ac55290aeee3283a918fd96
 src/frontend/viewmodel/tests/unit/plat31-keymap-mutation-control.sha256	src/common/key_names.nim	1acf4821d23f7cf4529431a99b64ccde8d30f63f9df9547869f22af730c837c9	f1a70bdb7cbc96c678dee9f08374a322033a7d0ca8d9ab7422d6cd1030c1b741
 src/frontend/viewmodel/tests/unit/plat36-vim-import-mutation-control.sha256	src/frontend/tui/app/runtime.nim	7f58388446ab2135d8e46b5e2b43760bb553d63e4b64674516a8278c4be8b794	44d968e50c635c06040e3b6c4198fe2c748584d80ac55290aeee3283a918fd96
