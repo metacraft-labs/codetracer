@@ -182,6 +182,13 @@ C_MEMO_BUDGET = "the body inside a plugin MEMO is budgeted like any other"
 C_REENTRANT = "a checkpoint still fires in an OUTER run after a nested one returns"
 C_RECORDED = "pluginComputed, pluginRenderEffect and pluginOnMount are recorded"
 C_ENTERED = "every wrapped body enters through the budget wrapper"
+# RETIRED 2026-11-24: arm N5b (the N5 mutation, `discard owner.owned[^1]`, named against the
+# batch case). isonim 0cbf25e made `cleanNode(node, dispose = true)` set `csClean` and clear the
+# computation's body itself, so the `csClean` sweep in `host.deactivate` is now redundant defence
+# in depth for an already-queued effect: removing the sweep alone, and dropping the record that
+# feeds it alone, both leave "deactivation inside a batch also stops an already-queued effect"
+# green (measured by hand, 23 of 23 cases pass). No single-line mutation can reach that case any
+# more, and the same mutation stays graded by N5, which the record cases kill.
 C_BATCH = "deactivation inside a batch also stops an already-queued effect"
 C_RELEASE = "a deactivated plugin's effects no longer run, and its edges are gone"
 
@@ -351,20 +358,6 @@ MUTATIONS: list[Mutation] = [
         C_RECORDED, NIM_LIFECYCLE,
         "the record is dropped entirely — this is what the pre-fix `if` did "
         "SILENTLY whenever its condition was false",
-        control_name="the recorded computation is hoisted into a named binding",
-        control_find="  ctx.state.effects.add owner.owned[^1]\n",
-        control_replace="  let created = owner.owned[^1]\n  ctx.state.effects.add created\n",
-    ),
-    Mutation(
-        "N5b", API,
-        "  ctx.state.effects.add owner.owned[^1]\n",
-        "  discard owner.owned[^1]\n",
-        C_BATCH, NIM_LIFECYCLE,
-        "THE SAME MUTATION, NAMING THE OTHER CASE. A dropped record cannot "
-        "break the release — that is cleanNode(scope) — but it drops the "
-        "csClean sweep, so an already-queued effect survives its plugin's "
-        "deactivation. That is what the silent skip cost, and it is why the "
-        "else is now a raise.",
         control_name="the recorded computation is hoisted into a named binding",
         control_find="  ctx.state.effects.add owner.owned[^1]\n",
         control_replace="  let created = owner.owned[^1]\n  ctx.state.effects.add created\n",

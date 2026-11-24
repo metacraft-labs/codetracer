@@ -24,8 +24,9 @@
 ##   design-system Switch (in view and in the next run), its label, its
 ##   recordability mark, the backend that serves its run (a quiet chip) and
 ##   what its run or its catalog says (`queued on reprobuild`, `running on
-##   ah-executors (pytest)`, `5 passed · 1 failed`, `Discovering tests on
-##   macOS arm64…`); its diagnostics under it. The legend (every mark, chip
+##   ah-executors (pytest)`, `5 passed · 1 failed`, `not in this run` for a
+##   platform switched on that the shown run does not include, `Discovering
+##   tests on macOS arm64…`); its diagnostics under it. The legend (every mark, chip
 ##   and backend, with its meaning) opens from the strip's end;
 ## - the search (`Search tests…`) and the status filter (the design system's
 ##   Dropdown);
@@ -34,10 +35,12 @@
 ##   each test a row with the pane's mark of its roll-up, its name, the
 ##   milestones whose Verification entries name it, one cell per platform
 ##   (the pane's mark and the status word; a reused pass's `reused` chip; a
-##   kept trace's open control) and its own Run and Record. An opened row
+##   kept trace's open control) and its own Run and Record (icons, each named
+##   by what it does: `Run <test> on the platforms switched on`). An opened row
 ##   shows one sub-row per platform: the backend chip, the runner, the
 ##   status and duration, `Run`, `Record` and the open control in its three
-##   modes, then the failure (its message and where), the last output lines
+##   modes (a Record waiting behind a Run being sent says so beside it, or
+##   once above the sub-rows when every platform's waits), then the failure (its message and where), the last output lines
 ##   with their stream, and the platform's diagnostics. The plan's
 ##   Verification entries no catalog test matches close the list, under
 ##   their milestone, `not in the catalog`.
@@ -147,12 +150,15 @@ proc renderButton[R, N](r: R; label, title, cls, operation: string; enabled: boo
   r.setAttribute(result, "aria-disabled", if enabled: "false" else: "true")
   if enabled: r.press(result, operation, run)
 
-proc renderIconButton[R, N](r: R; kind, title, operation: string; enabled: bool;
+proc renderIconButton[R, N](r: R; kind, name, title, operation: string; enabled: bool;
                             run: proc()): N =
   ## A row's Run (`play`) or Record (`record`), drawn as the pane's marks.
+  ## The icon has no text, so `name` (what it does, enabled or not) is its
+  ## accessible name, and `title` (that, and why not when it cannot) its
+  ## tooltip.
   result = ui(r):
     button(class = "ah-tests-icon-btn ah-tests-icon-" & kind, title = title,
-           `aria-label` = title, `data-ah-control` = kind):
+           `aria-label` = name, `data-ah-control` = kind):
       discard
   r.setFlag(result, "disabled", not enabled)
   r.setAttribute(result, "aria-disabled", if enabled: "false" else: "true")
@@ -340,11 +346,14 @@ proc renderPlatformHead[R, N](r: R; vm: TestRunsVM; head: PlatformHeadView): N =
   if head.catalogWord.len > 0:
     let role = if head.catalogWord.startsWith(DiscoveringPrefix): "quiet" else: "error"
     r.appendRendered(words, renderLine(r, head.catalogWord, role, "catalog"))
-  if head.runWord.len > 0:
+  let runWord = vm.platformRunWord(head)
+  if runWord.len > 0:
     # A run's word is quiet: its failures are the cells' marks. Running is
-    # the one state said in its role.
-    let role = if head.runWord.startsWith("running"): "info" else: "quiet"
-    r.appendRendered(words, renderLine(r, head.runWord, role, "run"))
+    # the one state said in its role. A platform switched on that the shown
+    # run does not include says `not in this run`: never on and silent.
+    let role = if runWord.startsWith("running"): "info" else: "quiet"
+    r.appendRendered(words, renderLine(r, runWord, role,
+      (if runWord == NotInThisRunText: "not-in-run" else: "run")))
   for d in head.diagnostics:
     r.appendRendered(words, renderLine(r, d.text, diagnosticRole(d.level), "diagnostic"))
 
@@ -508,9 +517,10 @@ proc renderSubRow[R, N](r: R; vm: TestRunsVM; row: TestRowView; cell: TestCellVi
     TestsRecordOperation, cell.recordAbsence.len == 0,
     proc() = discard target.record(RunScope(kind: scCell, testId: testId, platform: platform)))
   r.appendRendered(actions, recordButton)
-  if cell.recordWaiting:
+  if cellSaysRecordWaiting(row, cell):
     # Record waits behind the Run on this platform that is being sent
-    # (study D31): said beside the control, never a silently inert button.
+    # (study D31): said beside the control, never a silently inert button;
+    # said once for the row instead when every platform waits.
     let waiting = ui(r):
       span(class = "ah-tests-waiting-word ah-role-quiet", `data-ah-waiting` = "record"):
         text cell.recordAbsence
@@ -600,17 +610,25 @@ proc renderRow[R, N](r: R; vm: TestRunsVM; row: TestRowView): N =
   for cell in row.cells:
     r.appendRendered(cells, renderCell[R, N](r, vm, row, cell))
   let target = vm
-  r.appendRendered(actions, renderIconButton[R, N](r, "play", vm.rowRunTitle(row),
-    TestsRunOperation, row.rowCanRun,
+  r.appendRendered(actions, renderIconButton[R, N](r, "play", rowRunName(row),
+    vm.rowRunTitle(row), TestsRunOperation, row.rowCanRun,
     proc() = discard target.run(RunScope(kind: scTest, testId: id))))
-  r.appendRendered(actions, renderIconButton[R, N](r, "record", vm.rowRecordTitle(row),
-    TestsRecordOperation, row.rowCanRecord,
+  r.appendRendered(actions, renderIconButton[R, N](r, "record", rowRecordName(row),
+    vm.rowRecordTitle(row), TestsRecordOperation, row.rowCanRecord,
     proc() = discard target.record(RunScope(kind: scTest, testId: id))))
   r.press(line, TestsToggleOperation, proc() = target.toggleRow(id))
   if row.open:
     var subs: N
     let s = ui(r):
       tdiv(ref = subs, class = "ah-tests-subs")
+    let waiting = rowRecordWaitingText(row)
+    if waiting.len > 0:
+      # Every platform's Record waits behind its Run (D31): said once for
+      # the row, above its sub-rows, which then do not repeat it.
+      let w = ui(r):
+        tdiv(class = "ah-tests-subs-say ah-role-quiet", `data-ah-waiting` = "record-row"):
+          text waiting
+      r.appendRendered(subs, w)
     for cell in row.cells:
       r.appendRendered(subs, renderSubRow[R, N](r, vm, row, cell))
     r.appendRendered(result, s)

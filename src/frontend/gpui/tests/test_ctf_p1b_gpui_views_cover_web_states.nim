@@ -158,7 +158,49 @@ proc severityOf(failed, waiting: bool): string =
   ## here: a failure over a wait over nothing.
   if failed: "failed" elif waiting: "needs-input" else: "none"
 
-proc checkSessionTabs(view: GpuiElement; vm: SessionTabStripVM): seq[string] =
+proc saysShare(words: string): bool =
+  ## Whether `words` print a count or a share the pie now shows: a `%`, or
+  ## a number, `/` and a number (`3/19`).
+  if '%' in words: return true
+  for i in 1 ..< words.high:
+    if words[i] == '/' and words[i - 1] in Digits and words[i + 1] in Digits: return true
+
+proc pieProblems(e: GpuiElement; pie: ProgressPie; ground: string; p: AhPalette;
+                 at: string; plate = false): seq[string] =
+  ## One site's drawn pie against the viewmodel's `pie` (CTF-P1d): the
+  ## same role, the same share (or unknown), the same words as its
+  ## accessible name, its shape, the inks the palette resolves for `ground`
+  ## -- so a view that recomputes a pie, or draws another item's, differs --
+  ## and, with `plate`, the disc of `ground` it sits on.
+  let pies = e.all("pie")
+  if pies.len != 1:
+    return @[at & " draws " & $pies.len & " pies, not one"]
+  let d = pies[0]
+  result.expect("pie role at " & at, d.attr("pie"), $pie.role)
+  result.expect("pie share at " & at, d.attr("pie-fraction"),
+                if pie.known: pie.pieStopPercent else: "unknown")
+  result.expect("pie words at " & at, d.attr("pie-label"), pie.label)
+  result.expect("pie name at " & at, getAttribute(d, "aria-label"), pie.label)
+  result.expect("pie shape at " & at, d.attr("pie-shape"), $pie.pieShapeOf)
+  let inks = p.pieInks(pie.role, ground)
+  result.expect("pie inks at " & at, (d.attr("pie-wedge"), d.attr("pie-ground")),
+                (inks.wedge, ground))
+  result.expect("pie plate at " & at, d.values("pie-plate"),
+                if plate: @[ground] else: @[])
+
+proc tabPieProblems(e: GpuiElement; pie: ProgressPie; active: bool; p: AhPalette;
+                    at: string): seq[string] =
+  ## A tab's pie (its state and share, on the tab's own ground), and no
+  ## count or share printed on the tab: an initiative's `n/m` is in its
+  ## tooltip now.
+  result = pieProblems(e, pie, p.pieGroundColour(tabPieGround(active)), p, at)
+  if e.all("progress").len > 0:
+    result.add at & " still prints its progress"
+  let label = e.first("label")
+  if not label.isNil and saysShare(label.attr("label")):
+    result.add at & "'s label says a share: " & label.attr("label")
+
+proc checkSessionTabs(view: GpuiElement; vm: SessionTabStripVM; mode = dmDark): seq[string] =
   result.expect("state", view.attr("state"), stateName(vm.state.val))
   commonState(view, vm.state.val, vm.error.val, result)
   if vm.state.val != asReady: return
@@ -191,6 +233,12 @@ proc checkSessionTabs(view: GpuiElement; vm: SessionTabStripVM): seq[string] =
   result.expect("tab labels", labels, wantedLabels)
   result.expect("tab attention", attention, wantedAttention)
   result.expect("active tab", active, vm.activeId.val)
+  # Each drawn tab's pie, read from its session.
+  let p = ahPalette(mode)
+  for e in drawn:
+    for t in tabs:
+      if t.id == e.attr("tab"):
+        result.add tabPieProblems(e, t.pie, t.active, p, "tab " & t.shortId)
   result.expect("+N chip", view.values("overflow"),
                 if overflow.len > 0: @[$overflow.len] else: @[])
   var failed, waiting = false
@@ -241,7 +289,7 @@ proc checkSessionList(view: GpuiElement; vm: SessionTabStripVM): seq[string] =
     if e.attr("active") == "true":
       result.expect("active row", e.attr("row"), vm.activeId.val)
 
-proc checkInitiativeTabs(view: GpuiElement; vm: InitiativeTabStripVM): seq[string] =
+proc checkInitiativeTabs(view: GpuiElement; vm: InitiativeTabStripVM; mode = dmDark): seq[string] =
   let tabs = vm.tabs
   let ready = vm.state.val == asReady
   result.expect("state", view.attr("state"),
@@ -258,6 +306,17 @@ proc checkInitiativeTabs(view: GpuiElement; vm: InitiativeTabStripVM): seq[strin
   for e in view.all("tab"):
     if e.attr("active") == "true": active = e.attr("tab")
   result.expect("active tab", active, vm.activeTab.val)
+  # Each drawn tab's pie, read from its initiative or session; the active
+  # one's is the layout check's `bar-active-tab-pie`.
+  let p = ahPalette(mode)
+  for e in view.all("bar-tab"):
+    for t in tabs:
+      let key = if t.kind == stkInitiative: initiativeKey(t.id) else: sessionKey(t.id)
+      if key == e.attr("bar-tab"):
+        result.add tabPieProblems(e, t.pie, t.active, p, "bar tab " & t.title)
+        let pies = e.all("bar-tab-pie")
+        result.expect("bar-tab-pie of " & t.title, pies.mapIt(it.attr("bar-tab-pie")),
+                      @[$t.active])
   result.expect("+N chip", view.values("overflow"),
                 if layout.overflow.len > 0: @[$layout.overflow.len] else: @[])
   var barFailed, barWaiting = false
@@ -395,36 +454,6 @@ proc fleetInkProblems(view: GpuiElement; vm: FleetSnapshotVM; p: AhPalette): seq
     if count.isNil or count.attr("ink") != wanted:
       result.add "the count of filter " & e.attr("filter") & " is drawn in " &
                  (if count.isNil: "nothing" else: count.attr("ink")) & ", not " & wanted
-
-proc saysShare(words: string): bool =
-  ## Whether `words` print a count or a share the pie now shows: a `%`, or
-  ## a number, `/` and a number (`3/19`).
-  if '%' in words: return true
-  for i in 1 ..< words.high:
-    if words[i] == '/' and words[i - 1] in Digits and words[i + 1] in Digits: return true
-
-proc pieProblems(e: GpuiElement; pie: ProgressPie; ground: string; p: AhPalette;
-                 at: string; plate = false): seq[string] =
-  ## One site's drawn pie against the viewmodel's `pie` (CTF-P1d): the
-  ## same role, the same share (or unknown), the same words as its
-  ## accessible name, its shape, the inks the palette resolves for `ground`
-  ## -- so a view that recomputes a pie, or draws another item's, differs --
-  ## and, with `plate`, the disc of `ground` it sits on.
-  let pies = e.all("pie")
-  if pies.len != 1:
-    return @[at & " draws " & $pies.len & " pies, not one"]
-  let d = pies[0]
-  result.expect("pie role at " & at, d.attr("pie"), $pie.role)
-  result.expect("pie share at " & at, d.attr("pie-fraction"),
-                if pie.known: pie.pieStopPercent else: "unknown")
-  result.expect("pie words at " & at, d.attr("pie-label"), pie.label)
-  result.expect("pie name at " & at, getAttribute(d, "aria-label"), pie.label)
-  result.expect("pie shape at " & at, d.attr("pie-shape"), $pie.pieShapeOf)
-  let inks = p.pieInks(pie.role, ground)
-  result.expect("pie inks at " & at, (d.attr("pie-wedge"), d.attr("pie-ground")),
-                (inks.wedge, ground))
-  result.expect("pie plate at " & at, d.values("pie-plate"),
-                if plate: @[ground] else: @[])
 
 proc checkFleet(view: GpuiElement; vm: FleetSnapshotVM; mode = dmDark): seq[string] =
   result.expect("state", view.attr("state"), stateName(vm.state.val))
@@ -883,9 +912,9 @@ proc checkStory(m: AhStoryMount; mode = dmDark): seq[string] =
   if view.attr("surface") != m.surface:
     return @["the view's root says surface '" & view.attr("surface") & "'"]
   case m.surface
-  of "agent-harbor-session-tabs": checkSessionTabs(view, m.sessions)
+  of "agent-harbor-session-tabs": checkSessionTabs(view, m.sessions, mode)
   of "agent-harbor-session-list": checkSessionList(view, m.sessions)
-  of "agent-harbor-initiative-tabs": checkInitiativeTabs(view, m.initiativeTabs)
+  of "agent-harbor-initiative-tabs": checkInitiativeTabs(view, m.initiativeTabs, mode)
   of "agent-harbor-initiatives": checkInitiatives(view, m.initiatives)
   of "agent-harbor-initiative-progress": checkProgress(view, m.progress)
   of "agent-harbor-fleet": checkFleet(view, m.fleet, mode)
@@ -1087,10 +1116,11 @@ suite "CTF-P1b: the comparison can fail":
       gpui_reset_tree()
       let m = r.mountAgentHarborStoryGpui(story.surface, story.fixture, 1440, 900, mode)
       let tab = m.view.first("tab")
-      let att = m.sessions.tabs[0].attention
-      let want = ahPalette(mode).markOf(att)
-      ck tab.first("mark").attr("mark") ==
-        (if want.ring: "ring:" & want.colour else: want.colour)
+      # The first tab's pie, in the mode's ink for the tab's ground.
+      let item = m.sessions.tabs[0]
+      let p = ahPalette(mode)
+      ck tab.first("pie").attr("pie-wedge") ==
+        p.pieInks(item.pie.role, p.pieGroundColour(tabPieGround(item.active))).wedge
       m.dispose()
     ck ahPalette(dmDark).panel != ahPalette(dmLight).panel
 

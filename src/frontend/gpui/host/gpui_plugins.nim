@@ -42,6 +42,7 @@ import ../../viewmodel/session_vm
 import ../../viewmodel/viewmodels/omnibar_vm
 import ../../../common/view_vocabulary/mappings   # `feGpui`
 import ../../../common/view_vocabulary/vocabulary   # `ViewNode`
+import ../../../common/key_names   # `bindingKeyName`
 import std/tables
 
 export plugin_processes
@@ -75,24 +76,61 @@ proc openWindowPlugins*(session: SessionViewModel; noExtensionsFlag: bool;
                               surfaces = feGpui)
   result.attach(session, id)
 
+const
+  GpuiPluginJumpPrefix* = "jump:"
+    ## A queued call-trace jump: `jump:<plugin>\t<line index>`.
+  GpuiPluginWatchPrefix* = "watch:"
+    ## A queued watch: `watch:<plugin>\t<expression>`.
+
 proc routeMovesToControls*(p: SessionPlugins; queue: ref seq[string]) =
-  ## Take the plugins' debugger moves into `queue` (transport control ids),
-  ## for the window's loop to run as its own.
+  ## Take the plugins' relayed moves into `queue` for the window's loop to run
+  ## as its own: a debugger move as its transport control id, a call-trace
+  ## jump as `jump:` and an added watch as `watch:`. Each then takes the
+  ## window's own path (the toolbar press, the call trace row's jump, the
+  ## Watches edit) and the window redraws what it moved; applied on the
+  ## session behind the window's loop, a jump or a watch was not drawn until
+  ## the next step.
   if p.isNil: return
-  p.sup.actionHook = proc(msg: JsonNode): bool =
-    if msg{"vm"}.getStr("") != "debugControls": return false
+  p.sup.actionHook = proc(msg: JsonNode; refusal: var string): bool =
+    let vm = msg{"vm"}.getStr("")
     let action = msg{"action"}.getStr("")
-    for (name, control) in GpuiPluginMoves:
-      if name == action:
-        queue[].add control
-        return true
-    false
+    let plugin = msg{"plugin"}.getStr("")
+    let args = msg{"args"}
+    case vm
+    of "debugControls":
+      for (name, control) in GpuiPluginMoves:
+        if name == action:
+          queue[].add control
+          return true
+      false
+    of "calltrace":
+      if action != "doubleClickEntry": return false
+      if args.isNil or args{"lineIndex"}.isNil:
+        refusal = "a call-trace jump names no call"
+        return false
+      queue[].add GpuiPluginJumpPrefix & plugin & "\t" & $args{"lineIndex"}.getBiggestInt
+      true
+    of "state":
+      if action != "addWatch": return false
+      let expression = if args.isNil: "" else: args{"expression"}.getStr("")
+      if expression.strip.len == 0:
+        refusal = "a watch names no expression"
+        return false
+      queue[].add GpuiPluginWatchPrefix & plugin & "\t" & expression
+      true
+    else:
+      false
+
+proc refuseRelayed*(p: SessionPlugins; plugin, why: string) =
+  ## A relayed jump or watch the window could not carry out, refused like any
+  ## other push: the status line and the notes name the plugin.
+  if not p.isNil: p.sup.refuseRelayed(plugin, why)
 
 func pluginKeyName*(canonical: string): string =
-  ## A window key's canonical name (`gpui_keys.canonicalKeyOfGpui`) in the
-  ## plugin manifests' grammar: lower case, and `escape` for `Esc`.
-  let k = canonical.toLowerAscii
-  if k == "esc": "escape" else: k
+  ## A window key's canonical name (`gpui_keys.canonicalKeyOfGpui`) as the
+  ## supervisor compares a plugin binding (`key_names.bindingKeyName`): the
+  ## modifiers' spelling folded, the key's own case kept — `J` is not `j`.
+  bindingKeyName(canonical)
 
 proc observeWindowEscape*(p: SessionPlugins; canonical: string): bool =
   ## §11.7.6, called for EVERY key before anything resolves it: an `Escape`
@@ -100,7 +138,7 @@ proc observeWindowEscape*(p: SessionPlugins; canonical: string): bool =
   ## usual. True on the third within a second, which popped every plugin
   ## layer: the window then shows the recovery dialog.
   if p.isNil or not p.sup.extensionsEnabled: return false
-  if pluginKeyName(canonical) != "escape": return false
+  if pluginKeyName(canonical) != "Esc": return false
   p.sup.observeEscape()
 
 proc routePluginKey*(p: SessionPlugins; canonical: string;

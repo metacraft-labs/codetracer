@@ -58,6 +58,7 @@ from backend/stdio_backend import sendDapRequestNoResponse, drainEvents,
 # reader meets as a compile error several modules away from either declaration.
 import ../../viewmodel/store/types as store_types
 import ../../viewmodel/viewmodels/inline_value_timeline
+from ../../../common/value_visualisers import MaxComputedSummaries
 
 import viewmodels/filesystem_vm   # the replay file tree the Files pane lists
 import viewmodels/generated_code_presenter   # Generated-Code-Listing §13.4
@@ -200,6 +201,11 @@ type
     pluginVisualisers*: proc(): seq[Visualiser] {.closure.}
       ## The running plugins' per-type visualisers (PLAT-12's plugin tier),
       ## installed by the host loop when it starts the session's plugins.
+    askPluginVisualisers*: proc(values: seq[PValue]) {.closure.}
+      ## Hand the values on screen to the running plugins' COMPUTED
+      ## visualisers (`supervisor.requestVisualisations`). Never waits: the
+      ## answers arrive later, and the host loop renders the values again
+      ## when they do (`renderValuesAgain`).
     shell*: NativeShell
       ## PLAT-61: the Shell pane's process side (`wireShell`): the session's
       ## `ShellVM` with its shell on a pty, nil until wired.
@@ -694,12 +700,21 @@ proc scratchpadModelOf*(vm: ScratchpadVM): ScratchpadPaneModel =
 
 proc onScreenValues(s: TuiSession): seq[PValue] =
   ## The values a surface is about to show: the stop's locals and their first
-  ## level of members, and the scratchpad's pinned values — what a project's
-  ## executable visualiser is run over (`project_definitions_host`).
+  ## level of members, the scratchpad's pinned values, and the values the
+  ## flow recorded beside the lines of the shown file (the editor's inline
+  ## values) — what a project's executable visualiser is run over
+  ## (`project_definitions_host`), and what a plugin's computed visualiser
+  ## is asked about.
   if not s.state.isNil:
     result = valuesOnScreen(s.state.currentVariables.val)
   for samples in s.pinned.values:
     if samples.len > 0: result.add samples[^1]
+  let flow = s.session.session.flowVM
+  if not flow.isNil:
+    for st in flow.steps.val:
+      if result.len >= MaxComputedSummaries: break
+      if not st.beforeRecorded.isNil: result.add st.beforeRecorded
+      if not st.afterRecorded.isNil: result.add st.afterRecorded
 
 proc visualisersOnScreen(s: TuiSession): seq[Visualiser] =
   ## The checkout's visualiser tier for the values on screen now, and the
@@ -1828,6 +1843,60 @@ proc runTracepointSweep(s: TuiSession; rt: TuiRuntime;
   s.refresh(rt)
   hits.len
 
+proc buildSourceModel(s: TuiSession; rt: TuiRuntime; tick: uint64) =
+  ## The source pane's model at the stop: its lines, the flow's dimming, and
+  ## the values beside the lines — rendered through the running plugins'
+  ## visualisers (their summaries and computed answers), so a value a plugin
+  ## renders reads alike here and in the Variables pane. The checkout's tier
+  ## is NOT applied beside the lines: GPUI's editor does not apply it either,
+  ## and the two native editors must draw the same values at a stop
+  ## (`test_plat42_inline_values_terminal`).
+  let vis = if s.pluginVisualisers.isNil: newSeq[Visualiser]()
+            else: s.pluginVisualisers()
+  let editorVM = s.session.session.editorVM
+  let flowVM = s.session.session.flowVM
+  # PLAT-29: the locals were requested at a stop, and are drawn beside the
+  # source only while the debugger is still at it — reconciled against the
+  # store's stop timeline on the way to the pane. `loadStopPanes` above is
+  # synchronous, so on this host the answer is always current by now; the
+  # withheld arm is observed by `test_plat29_inline_values.nim`.
+  let values = s.valueGate.installable(
+    s.session.session.store,
+    inlineValuesOf(s.state, tuiRowBudget(max(1, rt.width), false), vis))
+  let notTaken =
+    if editorVM.isNil or flowVM.isNil or not editorVM.showFlowOverlay.val: @[]
+    else: notTakenLinesOf(flowVM.styledLines.val)
+  # THE FLOW'S VALUES ON EVERY LINE IT REACHED — the one rule GPUI's editor
+  # draws too (`editor_surface.flowValuesByLine`), with the overlay.
+  let flowValues = flowValuesByLine(
+    flowVM, s.source.path.val, int(tick),
+    not editorVM.isNil and editorVM.showFlowOverlay.val, vis)
+  rt.app.source = sourcePaneModelFor(
+    s.source, s.session.session.store.degraded.sourceAvailability.val,
+    points = s.points,
+    notTakenLines = notTaken,
+    inlineValues = values,
+    lineValues = flowValues)
+
+proc askPlugins(s: TuiSession) =
+  ## The values on screen, to the plugins' computed visualisers.
+  if not s.askPluginVisualisers.isNil:
+    s.askPluginVisualisers(s.onScreenValues())
+
+proc renderValuesAgain*(s: TuiSession; rt: TuiRuntime) =
+  ## A plugin's visualisers changed (new rows, or a computed visualiser's
+  ## answers for the values on screen arrived): every surface that renders
+  ## values through them is rendered again — the Variables pane, the
+  ## scratchpad and the editor's values — without asking the replay for
+  ## anything. A file opened from the Files pane keeps the editor.
+  if s.isNil or s.ended or s.pluginVisualisers.isNil:
+    return
+  rt.app.variables.visualisers = s.visualisersOnScreen()
+  s.refreshScratchpad(rt)
+  if rt.app.viewedFile.len == 0:
+    s.buildSourceModel(rt, s.session.getCurrentRRTicks())
+  s.askPlugins()
+
 proc refresh*(s: TuiSession; rt: TuiRuntime) =
   ## Rebuild every pane's model from the CURRENT stop, and re-point the
   ## dispatcher and the command context at it.
@@ -1877,31 +1946,10 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
   # `EditorVM.showFlowOverlay` toggle. The inline values come from the SAME
   # producer GPUI's editor uses — `editor_surface.inlineValuesOf` over
   # `StateVM`, presented at this medium's row budget — so the two native
-  # editors cannot show two different sets of values for one stop.
-  let editorVM = s.session.session.editorVM
-  let flowVM = s.session.session.flowVM
-  # PLAT-29: the locals were requested at a stop, and are drawn beside the
-  # source only while the debugger is still at it — reconciled against the
-  # store's stop timeline on the way to the pane. `loadStopPanes` above is
-  # synchronous, so on this host the answer is always current by now; the
-  # withheld arm is observed by `test_plat29_inline_values.nim`.
-  let values = s.valueGate.installable(
-    s.session.session.store,
-    inlineValuesOf(s.state, tuiRowBudget(max(1, rt.width), false)))
-  let notTaken =
-    if editorVM.isNil or flowVM.isNil or not editorVM.showFlowOverlay.val: @[]
-    else: notTakenLinesOf(flowVM.styledLines.val)
-  # THE FLOW'S VALUES ON EVERY LINE IT REACHED — the one rule GPUI's editor
-  # draws too (`editor_surface.flowValuesByLine`), with the overlay.
-  let flowValues = flowValuesByLine(
-    flowVM, s.source.path.val, int(tick),
-    not editorVM.isNil and editorVM.showFlowOverlay.val)
-  rt.app.source = sourcePaneModelFor(
-    s.source, s.session.session.store.degraded.sourceAvailability.val,
-    points = s.points,
-    notTakenLines = notTaken,
-    inlineValues = values,
-    lineValues = flowValues)
+  # editors cannot show two different sets of values for one stop. A running
+  # plugin's visualisers apply to them as they apply to the Variables pane.
+  s.buildSourceModel(rt, tick)
+  let vis = s.visualisersOnScreen()
   # PLAT-50: A FILE OPENED FROM THE FILES PANE stays in the editor until the
   # debugger moves (`applyOutcome` clears `viewedFile` on every move).
   if rt.app.viewedFile.len > 0:
@@ -1944,7 +1992,10 @@ proc refresh*(s: TuiSession; rt: TuiRuntime) =
                                        tickLabel = "tick " & $tick,
                                        scrollTop = rt.app.variables.scrollTop)
   # THE CHECKOUT'S VISUALISERS, on the pane every recorded value reaches.
-  rt.app.variables.visualisers = s.visualisersOnScreen()
+  rt.app.variables.visualisers = vis
+  # And the stop's values, to the plugins' computed visualisers: their
+  # answers arrive later and the values are rendered again then.
+  s.askPlugins()
   if not s.state.isNil:
     rt.app.variables.selectedHop =
       if rt.app.variables.selected.len > 0: s.state.selectedHop.val else: -1

@@ -543,15 +543,16 @@ ARMS = [
         id="G1",
         path=LANE_FILES,
         # The last two entries of the wasm lane's list, not the last one
-        # alone: `test_plugin_process_host` is rejected from `vm-unit-js`
-        # too, so the one-line spelling has two targets (§16). Re-aimed
-        # 2026-11-21, when Extensibility-Model.md §11 appended it; before that
-        # the pair ended at `test_native_file_tree_operations` (2026-10-26),
-        # and before K19 at `test_project_action_runner`.
-        find=("\t\t\t\t'/test_native_file_tree_operations\\.nim$' \\\n"
-              "\t\t\t\t'/test_plugin_process_host\\.nim$'\n"),
-        replace=("\t\t\t\t'/test_native_file_tree_operations\\.nim$' \\\n"
-                 "\t\t\t\t'/test_plugin_process_host\\.nim$' \\\n"
+        # alone: `test_ct_lens_plugins` is rejected from `vm-unit-js` too, so
+        # the one-line spelling has two targets (§16). Re-aimed 2026-11-23,
+        # when the `ct-lens` plugin package appended its suite; before that
+        # the pair ended at `test_plugin_process_host` (2026-11-21), then at
+        # `test_native_file_tree_operations` (2026-10-26), and before K19 at
+        # `test_project_action_runner`.
+        find=("\t\t\t\t'/test_plugin_process_host\\.nim$' \\\n"
+              "\t\t\t\t'/test_ct_lens_plugins\\.nim$'\n"),
+        replace=("\t\t\t\t'/test_plugin_process_host\\.nim$' \\\n"
+                 "\t\t\t\t'/test_ct_lens_plugins\\.nim$' \\\n"
                  "\t\t\t\t'/test_sync\\.nim$'\n"),
         grader=G_PARITY_ONE,
         killer="(contract 1 — the documented exclusion set)",

@@ -205,7 +205,9 @@ proc drawTab(c: var AhCanvas; parent: AhNode; vm: SessionTabStripVM;
                   ("active", $tab.active), ("tooltip", tab.tooltip)])
   if tab.active: c.fill(row, col, width, 1, c.p.activeTab)
   c.target(row, col, width, 1, proc() = discard vm.activate(id))
-  discard c.mark(n, row, col + 1, c.p.markOf(tab.attention))
+  # The tab's progress pie, read from the viewmodel (`SessionItem.pie`), on
+  # the tab's own ground.
+  discard c.pie(n, row, col + 1, tab.pie, c.bgAt(row, col + 1))
   var right = col + width - 1
   var nextAt = -1   # where the origin or the close starts: a cut label keeps its gap
   # On the active tab the origin and the close take the active row's quiet

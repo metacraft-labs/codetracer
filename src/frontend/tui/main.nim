@@ -1028,10 +1028,18 @@ proc interactive(command: TuiCommand): int =
   defer: plugins.close()
   plugins.attach(session.session.session, "tui-" & $getCurrentProcessId())
   rt.plugins = plugins.service()
-  var pluginMoves = new(seq[string])
-  plugins.routeMoves(pluginMoves)
+  var pluginMoves = new(seq[PluginMove])
+  plugins.routeMoves(pluginMoves, rt)
   session.pluginVisualisers = proc(): seq[Visualiser] =
     plugins.sup.pluginVisualisers()
+  # A plugin's COMPUTED visualiser is asked about the values on screen, never
+  # waited for: the loop renders them again when its answers arrive.
+  session.askPluginVisualisers = proc(values: seq[PValue]) =
+    var asked: seq[VisualiseValue]
+    for v in values:
+      if not v.isNil: asked.add (input: executableInputOf(v), typeName: v.typeName)
+    plugins.sup.requestVisualisations(asked)
+  var shownVisualiserRevision = plugins.sup.visualiserRevision
   app.pluginEntries = plugins.paletteEntries()
   app.refreshOmnibarIndex()
   app.recordings = recordingsBeside(folder)
@@ -1678,14 +1686,36 @@ proc interactive(command: TuiCommand): int =
       # Extensibility-Model.md §11: the plugin processes — what they pushed,
       # their liveness, their deadlines and breakers. Never blocks.
       var pluginsChanged = plugins.pump()
-      # A plugin's step or continue, run as the terminal's own command so the
-      # loop pumps it to its stop as it does a key's.
+      # EVERY ACTION A PLUGIN RELAYED, run on the terminal's own route
+      # (`plugin_service.pluginMoveOf`): a step as its command line, a jump
+      # as the pane's own jump, a watch as `:watch` — so the loop pumps a move
+      # to its stop and shows it as it does a key's, and a pane's change is
+      # drawn now rather than at the next stop. Rebuilding the panes after
+      # actions that are not moves is owed once per turn, however many came.
+      var owedRefresh = false
       while pluginMoves[].len > 0:
-        let line = pluginMoves[][0]
+        let move = pluginMoves[][0]
         pluginMoves[].delete(0)
         var moved = RuntimeOutcome()
-        rt.runMenuAction(CommandLineTargetPrefix & line, moved)
+        let why = move.carryOut(rt, session.session.session, moved)
+        pluginsChanged = true
+        if why.len > 0:
+          plugins.sup.refuseRelayed(move.plugin, why)
+          continue
+        if moved.refreshesSession and moved.paneClick.kind == pcNone and
+           not moved.awaitsMove and not moved.jumpsToCall:
+          owedRefresh = true
+          continue
         session.applyOutcome(rt, moved)
+        owedRefresh = false
+      if owedRefresh:
+        session.applyOutcome(rt, RuntimeOutcome(refreshesSession: true,
+                                                repaint: true))
+      # A plugin's visualisers changed — new rows, or a computed visualiser's
+      # answers for the values on screen: they are rendered again.
+      if plugins.sup.visualiserRevision != shownVisualiserRevision:
+        shownVisualiserRevision = plugins.sup.visualiserRevision
+        session.renderValuesAgain(rt)
         pluginsChanged = true
       block:
         let pluginNote = rt.plugins.takeNote()

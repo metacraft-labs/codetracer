@@ -279,7 +279,8 @@ func editorPointsOf*(rows: openArray[PointListEntry]): seq[EditorPoint] =
       result.add EditorPoint(path: r.path, line: r.line, kind: epkTracepoint,
                              enabled: r.enabled)
 
-proc inlineValuesOf*(vm: StateVM; budget: Budget): seq[EditorValue] =
+proc inlineValuesOf*(vm: StateVM; budget: Budget;
+                     visualisers: seq[Visualiser] = @[]): seq[EditorValue] =
   ## The values in scope at THIS tick, rendered through PLAT-2's pipeline.
   ##
   ## **THE BUDGET IS THE CALLER'S AND THE RENDERING IS THE PRESENTER'S**, which
@@ -295,6 +296,11 @@ proc inlineValuesOf*(vm: StateVM; budget: Budget): seq[EditorValue] =
   ## what it means: it means the formatter had nothing to print, and silence is
   ## the honest rendering of that.
   ##
+  ## `visualisers` is the per-type tier the surface renders every value with
+  ## (the checkout's and the running plugins', `presenter.withVisualisers`),
+  ## so a value reads beside its line as it reads in the Variables pane. The
+  ## default, none, is the built-in table alone.
+  ##
   ## NOTHING IS CACHED, ANYWHERE, and that is the contract rather than an
   ## omission. A stale inline value is worse than none because it is
   ## indistinguishable from a correct one — `x: 42` beside a line where `x` is
@@ -308,6 +314,9 @@ proc inlineValuesOf*(vm: StateVM; budget: Budget): seq[EditorValue] =
       continue
     let rendered =
       if v.presented.isNil: v.value.strip()
+      elif visualisers.len > 0:
+        present(v.presented, budget,
+                presenters = withVisualisers(visualisers)).root.text.strip()
       else: presentText(v.presented, budget).strip()
     if rendered.len == 0:
       continue
@@ -356,7 +365,8 @@ func notTakenLinesOf*(facts: openArray[FlowStyledLine]): seq[int] =
       result.add f.position
 
 proc flowValuesByLine*(flow: FlowVM; path: string; tick: int;
-                       visible: bool): Table[int, seq[EditorValue]] =
+                       visible: bool; visualisers: seq[Visualiser] = @[]):
+                       Table[int, seq[EditorValue]] =
   ## **THE DESKTOP'S INLINE VALUES ARE THE FLOW'S** (`ui/flow.nim`'s parallel
   ## values), per line of `path`: every line of the current function the run
   ## reached carries the values its step recorded — before the step, as
@@ -381,7 +391,10 @@ proc flowValuesByLine*(flow: FlowVM; path: string; tick: int;
   ## `continueForward`). A loop's header carries its control, not values.
   ##
   ## The values arrive pre-rendered (`flowValueText`); each medium fits them
-  ## to its own row as it fits every inline value.
+  ## to its own row as it fits every inline value. With `visualisers` (the
+  ## surface's per-type tier, as `inlineValuesOf` takes it) a step's RECORDED
+  ## value is rendered again through them, at the same flow budget, so a
+  ## call's `return` beside its line reads as the Variables pane reads it.
   result = initTable[int, seq[EditorValue]]()
   if flow.isNil or not visible:
     return
@@ -427,9 +440,15 @@ proc flowValuesByLine*(flow: FlowVM; path: string; tick: int;
     else:
       for e in eventsOf.getOrDefault(st.step):
         result.mgetOrPut(line, @[]).add e
-    let value = if st.beforeValue.len > 0: st.beforeValue else: st.afterValue
+    var value = if st.beforeValue.len > 0: st.beforeValue else: st.afterValue
     if value.len == 0:
       continue
+    if visualisers.len > 0:
+      let recorded = if st.beforeValue.len > 0: st.beforeRecorded
+                     else: st.afterRecorded
+      if not recorded.isNil:
+        value = present(recorded, FlowBudget,
+                        presenters = withVisualisers(visualisers)).root.text
     result.mgetOrPut(line, @[]).add EditorValue(name: st.expression,
                                                 value: value)
 

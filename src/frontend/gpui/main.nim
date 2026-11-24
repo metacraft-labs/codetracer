@@ -7395,7 +7395,42 @@ proc pumpPluginsWindow(r: GpuiRenderer): bool =
     let control = gPluginMoves[][0]
     gPluginMoves[].delete(0)
     traceGesture("plugin move " & control)
-    performControl(r, control)
+    if control.startsWith(GpuiPluginJumpPrefix) or
+       control.startsWith(GpuiPluginWatchPrefix):
+      let isJump = control.startsWith(GpuiPluginJumpPrefix)
+      let body = control[(if isJump: GpuiPluginJumpPrefix.len
+                          else: GpuiPluginWatchPrefix.len) .. ^1]
+      let tab = body.find('\t')
+      let plugin = if tab < 0: "" else: body[0 ..< tab]
+      let arg = if tab < 0: body else: body[tab + 1 .. ^1]
+      if gSession.isNil:
+        gPlugins.refuseRelayed(plugin, "the window has no session to move")
+      elif isJump:
+        # The call trace row's jump (`calltrace.go-to-call`): selected, moved
+        # to, and the window redrawn at the stop it lands on.
+        var index = -1'i64
+        try: index = parseBiggestInt(arg)
+        except ValueError: discard
+        if not gSession.session.calltraceVM.isNil and index >= 0:
+          gSession.session.calltraceVM.selectEntry(some(index))
+        let why = if index < 0: "a call-trace jump names no call"
+                  else: gSession.jumpToCall(index)
+        if why.len > 0:
+          gPlugins.refuseRelayed(plugin, why)
+        else:
+          traceGesture("plugin jump #" & $index)
+          refreshReplayWindow(r)
+      else:
+        # The Watches edit (`:watch EXPRESSION`): added and shown at once.
+        if gSession.session.stateVM.isNil:
+          gPlugins.refuseRelayed(plugin, "the window has no Watches")
+        else:
+          gSession.session.stateVM.addWatch(arg)
+          traceGesture("watches " &
+                       gSession.session.stateVM.watchExpressions.val.join("|"))
+          refreshReplayWindow(r)
+    else:
+      performControl(r, control)
     changed = true
   let note = gPlugins.takeNote(" (Plugins: Show status for more)")
   if note.len > 0:
@@ -13947,7 +13982,7 @@ proc routeWindowKey(r: GpuiRenderer; key: string; mods: seq[string]) =
   if not gPlugins.isNil and not gPluginRecoveryKey:
     var userBound = false
     for b in gRouter.user.bindings:
-      if b.chords.len == 1 and b.chords[0].toLowerAscii == name.toLowerAscii:
+      if b.chords.len == 1 and b.chords[0] == name:
         userBound = true
     if gPlugins.routePluginKey(name, userBound):
       traceGesture("plugin key " & name)

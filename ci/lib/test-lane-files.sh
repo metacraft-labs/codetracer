@@ -211,6 +211,8 @@ _tlf_js_only_suites() {
 #
 #   agent-harbor views (fleet, pie, link ink, session tabs, results): the GPUI and TUI
 #       front-ends draw them; no `nim js` bundle imports them.
+#   the Agent Harbor Tests and trace-link web views: only StoryBook draws
+#       them so far, and it is none of the bundles above.
 #   `codetracer_ui_components` (the editor gutter lanes) and the TUI
 #       vocabulary generator: native front-ends only.
 _TLF_VM_UNIT_JS_NOT_SHIPPED=(
@@ -218,6 +220,7 @@ _TLF_VM_UNIT_JS_NOT_SHIPPED=(
 	'/test_agent_harbor_link_ink\.nim$'
 	'/test_agent_harbor_pie\.nim$'
 	'/test_agent_harbor_session_list_view\.nim$'
+	'/test_agent_harbor_tests_view_followups\.nim$'
 	'/test_ctf_p2c_results_followups\.nim$'
 	'/test_editor_gutter_lanes\.nim$'
 	'/test_editor_vocabulary_laws\.nim$'

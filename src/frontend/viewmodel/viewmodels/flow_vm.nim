@@ -94,6 +94,13 @@ type
     expression*: string
     beforeValue*: string
     afterValue*: string
+    beforeRecorded*: PValue
+    afterRecorded*: PValue
+      ## The recorded values behind `beforeValue` / `afterValue` (nil when
+      ## none was recorded): what a surface renders again through a
+      ## presenter set of its own — the editor's inline values through the
+      ## running plugins' visualisers — and what it asks a computed
+      ## visualiser about.
     loop*: int
       ## The loop the step ran in (the backend's `FlowStep.loop`; 0: none).
     iteration*: int
@@ -553,12 +560,18 @@ proc flowStepEntriesOf*(view: JsonNode): seq[FlowStepEntry] =
       order.sort()
     for expr in order:
       if expr.len == 0: continue
+      let b = if before.isNil: nil else: before{expr}
+      let a = if after.isNil: nil else: after{expr}
       result.add FlowStepEntry(
         step: count,
         location: base & ":" & $line,
         expression: expr,
-        beforeValue: flowValueText(if before.isNil: nil else: before{expr}),
-        afterValue: flowValueText(if after.isNil: nil else: after{expr}),
+        beforeValue: flowValueText(b),
+        afterValue: flowValueText(a),
+        beforeRecorded: (if b.isNil or b.kind == JNull: nil
+                         else: json_adapter.toPValue(b)),
+        afterRecorded: (if a.isNil or a.kind == JNull: nil
+                        else: json_adapter.toPValue(a)),
         loop: jsonInt(st{"loop"}, 0),
         iteration: jsonInt(st{"iteration"}, 0))
 

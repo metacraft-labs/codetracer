@@ -672,7 +672,7 @@ jobs:
           # 521b3d71a); ci/test/launcher-recorder-e2e-workflow-test.sh derives
           # that set from this file and fails when one is missing, so a new
           # step cannot quietly reintroduce the skew.
-          for script in scripts/build-siblings.sh ci/test/launcher-recorder-decode-test.sh; do
+          for script in scripts/build-siblings.sh ci/build/bounded-build-once.sh ci/test/launcher-recorder-decode-test.sh; do
             if [ ! -f "${CT_DIR}/${script}" ]; then
               echo "  MISSING ${CT_DIR}/${script}"
               echo "::error::the codetracer revision under test ($(git -C "${CT_DIR}" rev-parse HEAD 2>/dev/null || echo unknown)) predates ${script}, which a later step of this workflow runs. This workflow is taken from codetracer@dev, the checkout it drives is taken from the lock, and the lock published for the commit under test pins a codetracer that is too old for it. Test against a codetracer revision that carries ${script}: move the codetracer pin in the caller's repro.lock (or the codetracer-revision input) forward."
@@ -998,7 +998,14 @@ jobs:
         run: |
           set -euo pipefail
           cd "${CT_DIR}"
-          nix develop '.?submodules=1#ci' --command just build-once
+          # The way codetracer's own ct-build job builds (ct-build.yml): bounded,
+          # and without the repro daemon (FIRST_MINUTES=0). With the daemon,
+          # build-once handed its actions to whatever repro daemon the host
+          # already ran, and they failed with `clang: not found` and compiled
+          # print_trace.nim against a store copy of codetracer-trace-format-nim
+          # that lacks forEachMarkerEvent (native-recorder run 45315757263).
+          nix develop '.?submodules=1#ci' --command \
+            bash ci/build/bounded-build-once.sh "${RUNNER_TEMP}/build-once-diagnostics" 0 90
           CT_BIN="src/build-debug-repro/bin/ct"
           if [ ! -x "${CT_BIN}" ]; then
             echo "::error::the desktop core was not built: no executable at ${CT_BIN}. The launcher<->recorder gate cannot run without hop 2; this is deliberately a hard failure and never a skip."
@@ -1016,6 +1023,14 @@ jobs:
           ls -l "${CT_BIN}" "${RS_BIN}"
           nix develop '.?submodules=1#ci' --command "./${CT_BIN}" --version
           echo "desktop core artifact check: OK"
+
+      - name: Upload the build-once stall diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: launcher-recorder-e2e-build-once-diagnostics
+          path: ${{ runner.temp }}/build-once-diagnostics
+          if-no-files-found: ignore
 
       - name: Build ct-print (the trace-validation oracle)
         # INHERITED LRC-3 DELIVERABLE (runner prerequisites).

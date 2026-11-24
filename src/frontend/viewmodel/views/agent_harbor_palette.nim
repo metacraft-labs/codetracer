@@ -365,6 +365,12 @@ proc pieGroundColour*(p: AhPalette; ground: PieGround): string =
   of pgSelectedRow: p.activeRow
   of pgMenu: p.menu
 
+proc tabPieGround*(active: bool): PieGround =
+  ## The ground a tab's pie sits on in every host: the active tab's fill,
+  ## or the window (the caption bar the strips sit in) under an inactive
+  ## tab.
+  if active: pgActiveTab else: pgWindow
+
 proc pieGroundShown*(p: AhPalette; ground: PieGround): bool =
   ## Whether `ground` has a colour no earlier ground (in `PieGround`'s
   ## order) has in `p`'s mode: the pie story shows each distinct ground once.

@@ -19,7 +19,8 @@
 ##   (`stories/agent_harbor_pie_stories`).
 ##
 ## The panels, tabs and lines that draw a pie take it from here: the
-## fleet's rows (`isonim_agent_harbor_fleet_view`) first.
+## fleet's rows (`isonim_agent_harbor_fleet_view`) and the tabs of both
+## strips (`tabPie`).
 
 import std/strutils
 when defined(js):
@@ -76,6 +77,11 @@ proc pieIndicator*[R, N](r: R; pie: ProgressPie; ground: PieGround;
     let dot = r.createElement("span")
     r.setAttribute(dot, "class", "ah-pie-dot")
     r.appendChild(result, dot)
+
+proc tabPie*[R](r: R; pie: ProgressPie; active: bool): auto =
+  ## A tab's pie: `PieTabPx` across, on its tab's ground (`tabPieGround`).
+  mixin createElement
+  pieIndicator[R, typeof(r.createElement("span"))](r, pie, tabPieGround(active), PieTabPx)
 
 proc renderAgentHarborPieStory*[R, N](r: R; fixture: string): N =
   ## The story: a head naming the columns, then one band per ground, each a

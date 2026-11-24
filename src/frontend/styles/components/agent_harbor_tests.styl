@@ -657,6 +657,13 @@ AH_TESTS_ACTIONS = 3rem          // a row's Run and Record
 .ah-tests-waiting-word
   font-size: ah-rem(type-ui-size-caption-md)
 
+// D31, said once for an opened row whose every platform's Record waits: a
+// caption line above the sub-rows, starting where their platform names do.
+.ah-tests-subs-say
+  padding: 0.125rem PANEL_INSET
+  font-size: ah-rem(type-ui-size-caption-md)
+  white-space: normal
+
 // D31's waiting Record says so beside it, and wraps rather than pushing the
 // sub-row's controls out of a narrow panel.
 .ah-tests-waiting-word
@@ -862,20 +869,9 @@ AH_TESTS_ACTIONS = 3rem          // a row's Run and Record
   font-size: ah-rem(type-ui-size-caption-md)
   white-space: normal
 
-// Download: quiet, a word rather than a second button.
-.ah-trace-download
-  height: CONTROL_HEIGHT_XS
-  padding: 0 0.25rem
-  border: 0
-  background: transparent
-  font-family: inherit
-  font-size: ah-rem(type-ui-size-caption-md)
-  color: colors-ui-text-primary-caption
-  cursor: pointer
-
-  &:hover
-    color: colors-ui-text-primary-label
-    text-decoration: underline
+// Download is the design system's small secondary button, as `Load trace`
+// and `Retry` beside it are (`.ah-trace-button`): one look for the trace's
+// actions, as the Tests panel's sub-rows draw their Run and Record.
 
 // A link-like text that is not a link, and a file with nothing to open:
 // plain text with a tooltip, and a dotted underline that says it has one.

@@ -9,10 +9,25 @@
 ## `metrics` is the well-behaved one. Its pane shows the debugger's current
 ## line from its MIRRORED session, stamped with the epoch it was computed at;
 ## its command steps the primary forward through the action relay; it pushes a
-## status item, enablement and a context key, and answers `values` queries
-## for a visualiser. It also DECORATES the current line of the source the
-## debugger is in (`decorations`, a marker reading `metrics: line N`),
-## re-pushed at every stop, so the decoration follows a step; and it MARKS
+## status item, enablement and a context key, and answers `values` queries.
+## Its `visualisers` are declarative rows (a summary, a hidden field, and one
+## row the host must refuse) and, with its `computeVisualiser` setting on, a
+## COMPUTED row: it answers the host's `visualise` query for the values on
+## screen with `acme=<value>`.
+##
+## `ctrl+alt+k` (what a terminal sends as `ESC 0x0b`) steps like
+## `metrics.step`, and `J` counts (`metrics.count`, read back by
+## `metrics.tally`): the bindings a terminal must deliver as written.
+##
+## Three more commands relay actions the terminal must carry out on its own
+## routes: `metrics.jump` goes to the `mul` call of the loaded call trace
+## (`calltrace.doubleClickEntry`), `metrics.watch` adds the watch `left*9`
+## (`state.addWatch`) and `metrics.stepout` steps out
+## (`debugControls.stepOut`).
+##
+## It also DECORATES the current line of the source the debugger is in
+## (`decorations`, a marker reading `metrics: line N`), re-pushed at every
+## stop, so the decoration follows a step; and it MARKS
 ## the same line through its declared `hotspot` marker surface (a `★` in the
 ## gutter's mark column).
 ##
@@ -144,12 +159,24 @@ proc setupMetrics(sdk: PluginSdk) =
     p.pushHotspot()
     p.pushStatus("metrics.status", viewText("metrics.status", "metrics ok"))
     p.pushEnablement("metrics.step", true)
+    # Every command a key or `:plugins run` reaches is enabled by a pushed
+    # value (§11.7.2): one never pushed reads "plugin starting" for ever.
+    for op in ["metrics.jump", "metrics.watch", "metrics.stepout",
+               "metrics.count", "metrics.tally"]:
+      p.pushEnablement(op, true)
     p.pushContext("ready", %true)
     # A per-type visualiser for the value panes (PLAT-12's plugin tier): data,
     # not code — the host presents the value with it.
-    p.publish("visualisers", %*[
+    var rows = %*[
       {"id": "matrix", "typeMatch": "Matrix", "matchKind": "typeName",
-       "summary": "matrix (acme-tools)", "rank": 1}])
+       "summary": "matrix (acme-tools)", "rank": 1},
+      {"id": "secret", "typeMatch": "Account", "matchKind": "typeName",
+       "hide": ["password"]},
+      # Refused by the host: a hidden field must be a field's label.
+      {"id": "broken", "typeMatch": "Broken", "hide": ["a/b"]}]
+    if p.settings{"computeVisualiser"}.getBool(false):
+      rows.add %*{"id": "readings", "computed": true}
+    p.publish("visualisers", rows)
   m.onSignals = proc(p: Plugin) =
     p.pushView("overview", metricsView(p))
     p.pushLineDecoration(decorated)
@@ -158,6 +185,39 @@ proc setupMetrics(sdk: PluginSdk) =
     p.pushView("overview", metricsView(p))
   m.onInvoke("metrics.step", proc(p: Plugin; args: JsonNode; req: Request) =
     p.relay("debugControls", "stepForward")
+    p.done(req))
+  m.onInvoke("metrics.jump", proc(p: Plugin; args: JsonNode; req: Request) =
+    # The `mul` call, as the call trace the mirror holds names it.
+    let s = p.session
+    if s.isNil or s.store.isNil:
+      p.fail(req, "no session")
+      return
+    let lines = s.store.calltrace.lines.val
+    let start = s.store.calltrace.startLineIndex.val
+    for i, l in lines:
+      let name = if l.displayName.len > 0: l.displayName else: l.name
+      if name == "mul" or name.endsWith(".mul"):
+        p.relay("calltrace", "doubleClickEntry",
+                %*{"lineIndex": start + i.int64})
+        p.done(req)
+        return
+    p.fail(req, "the call trace holds no mul call"))
+  m.onInvoke("metrics.watch", proc(p: Plugin; args: JsonNode; req: Request) =
+    p.relay("state", "addWatch", %*{"expression": "left*9"})
+    p.done(req))
+  m.onInvoke("metrics.stepout", proc(p: Plugin; args: JsonNode; req: Request) =
+    p.relay("debugControls", "stepOut")
+    p.done(req))
+  # `J` (Shift+j) is bound to `metrics.count`; `metrics.tally` reports the
+  # count on the status line. Both go through the one pipe in order, so a
+  # tally run after the keys says how many of them reached the plugin.
+  var count = 0
+  m.onInvoke("metrics.count", proc(p: Plugin; args: JsonNode; req: Request) =
+    inc count
+    p.done(req))
+  m.onInvoke("metrics.tally", proc(p: Plugin; args: JsonNode; req: Request) =
+    p.pushStatus("metrics.status", viewText("metrics.status",
+                                            "metrics tally " & $count))
     p.done(req))
   m.onInvoke("metrics.echo", proc(p: Plugin; args: JsonNode; req: Request) =
     p.answer(req, %*{"key": args{"key"}, "line": p.currentLine}))
@@ -182,15 +242,16 @@ proc setupMetrics(sdk: PluginSdk) =
       p.pushView("overview", viewTreeNode("big", "big", kids, expanded = true))
     p.done(req))
   m.onQuery("visualise", proc(p: Plugin; input: JsonNode; req: Request) =
-    # A value visualiser's producer: the value it was given, as a table.
-    let v = input{"value"}
-    var rows: seq[seq[string]]
-    if not v.isNil and v.kind == JArray:
-      for i, x in v.getElems:
-        rows.add @[$i, $x]
-    else:
-      rows.add @["value", $v]
-    p.answer(req, viewTable("metrics.visual", @["index", "value"], rows).toJson))
+    # The COMPUTED visualiser: an answer for each value the host has on
+    # screen, keyed by the input the host sent.
+    var answers = newJArray()
+    let values = input{"values"}
+    if not values.isNil and values.kind == JArray:
+      for v in values:
+        let text = v{"input"}.getStr("")
+        if text.len > 0:
+          answers.add %*{"input": text, "text": "acme=" & text}
+    p.answer(req, %*{"visualiser": input{"visualiser"}, "answers": answers}))
 
 proc spin(p: Plugin) =
   var x = 0

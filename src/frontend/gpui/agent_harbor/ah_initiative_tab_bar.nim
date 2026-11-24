@@ -3,7 +3,7 @@
 ## `InitiativeTabStripVM` (nim-agents-isonim-viewmodels).
 ##
 ## The web prototype is `viewmodel/views/isonim_agent_harbor_initiative_tabs_view.nim`.
-## Left to right, as there: one tab per initiative (state mark, name, `n/m`;
+## Left to right, as there: one tab per initiative (progress pie and name;
 ## the active one with the recording switcher's numbered buttons), a tab per
 ## open session of no initiative, the `+N` chip and "+"; then, at the bar's
 ## end, the sessions started elsewhere (a count badge and its label, the
@@ -26,6 +26,7 @@ from ../../viewmodel/views/agent_harbor_words import stateSuffix, HiddenSeverity
   hiddenRecordings, hiddenBarTabs, chipTitle
 
 import ./ah_theme
+import ./ah_pie
 import ./ah_session_views
 import ./ah_initiative_panels
 
@@ -97,7 +98,7 @@ proc recordingsMarginPx(vm: InitiativeTabStripVM): int =
   if vm.compact: CompactRecordingsMarginPx else: 0
 
 proc recordingsWidth(vm: InitiativeTabStripVM; buttons: RecordingButtons): float =
-  ## The switcher beside `n/m`: the tab's 6px gap (and a compact bar's
+  ## The switcher after the name: the tab's 6px gap (and a compact bar's
   ## margin), the buttons 2px apart (`.ah-rec-switch`: a gap BETWEEN items,
   ## so one fewer than the buttons unless `+N` follows them), and `+N`.
   if buttons.buttons.len == 0: return 0.0
@@ -118,27 +119,25 @@ proc initiativeTabContent(vm: InitiativeTabStripVM; tab: StripTab): float =
   ## browser and GPUI set them: the unkerned, rounded `textPx` made every
   ## tab one to three pixels wider than the web's, and a bar of four tabs
   ## put "+" 5px right of the web's.
-  result = float(2 * TabPadPx + MarkPx + TabInnerGapPx) + textWidth(tab.title, TabTitlePx)
+  result = float(2 * TabPadPx + PieTabPx + TabInnerGapPx) + textWidth(tab.title, TabTitlePx)
   if tab.kind == stkInitiative:
-    result += float(TabInnerGapPx) + textWidth(tab.progressText, CaptionPx, tabular = true)
     if tab.active: result += recordingsWidth(vm, vm.recordingButtonsOf(tab.id))
   elif tab.session.originShort.len > 0:
     result += float(TabInnerGapPx) + textWidth(tab.session.originShort, CaptionPx)
 
 proc tabSetOverhead(vm: InitiativeTabStripVM; tab: StripTab): float =
   ## How much wider than the browser's GPUI sets a tab's runs of text: each
-  ## run's whole-pixel box (`setPx`) less its exact width, over the title,
-  ## `n/m` or the origin, and the active tab's recording buttons and `+N`.
+  ## run's whole-pixel box (`setPx`) less its exact width, over the title
+  ## or the origin, and the active tab's recording buttons and `+N`.
   ## `drawBarTab` takes it out of the tab's right padding, so the tab keeps
   ## the web's width (and every place after it the web's place) while its
   ## title keeps the room GPUI sets its words in. Without it the title lost
   ## the difference and GPUI cut it ("Telemetry upload retri…": 188px for
-  ## words that take 188.3, the `n/m` beside it set in 20px for 19.3) where
+  ## words that take 188.3) where
   ## the browser drew it whole.
   proc over(words: float): float = setPx(words) - words
   result = over(textWidth(tab.title, TabTitlePx))
   if tab.kind == stkInitiative:
-    result += over(textWidth(tab.progressText, CaptionPx, tabular = true))
     if tab.active:
       let buttons = vm.recordingButtonsOf(tab.id)
       for rb in buttons.buttons:
@@ -153,23 +152,34 @@ proc pxOf(v: float): string =
   ## A length in CSS pixels, to a hundredth.
   formatFloat(v, ffDecimal, 2) & "px"
 
+proc tabMinPx(vm: InitiativeTabStripVM; tab: StripTab): float =
+  ## The least width a tab is held to: `min-width: 8rem`, except a stacked
+  ## bar's active initiative tab, which gives way first (`.ah-bar-stacked
+  ## .session-tab.ah-initiative-tab.active`: `min-width: 0`; an active
+  ## session tab has no `ah-initiative-tab` class and keeps 8rem). With its
+  ## `n/m` gone, a short active initiative tab's content can be narrower
+  ## than 8rem, and the browser then lays it out at its content.
+  if vm.stacked and tab.active and tab.kind == stkInitiative: 0.0
+  else: float(TabMinPx)
+
 proc initiativeTabWidth*(vm: InitiativeTabStripVM; tab: StripTab; barPx = 0): float =
-  ## Its content, from 8rem to 16rem (the active one to 24rem).
+  ## Its content, from 8rem to 16rem (the active one to 24rem; a stacked
+  ## bar's active one from nothing, `tabMinPx`).
   let w = initiativeTabContent(vm, tab)
   # A stacked bar's active tab leaves its line room for the chip and "+"
   # (`max-width: calc(100% - 88px)`).
   let activeMax = if vm.stacked and barPx > 0: min(InitiativeTabMaxPx, barPx - 88)
                   else: InitiativeTabMaxPx
-  clamp(w, float(TabMinPx),
-        float(if tab.active: max(TabMinPx, activeMax) else: InactiveTabMaxPx))
+  let lo = tabMinPx(vm, tab)
+  clamp(w, lo, if tab.active: max(lo, float(activeMax)) else: float(InactiveTabMaxPx))
 
 proc initiativeTabMinWidth(vm: InitiativeTabStripVM; tab: StripTab): float =
   ## The narrowest a tab shrinks to when the bar is full: its name at its
   ## minimum (`titleMinPx`) beside everything else it holds, and never under
-  ## `min-width: 8rem`.
-  result = float(2 * TabPadPx + MarkPx + TabInnerGapPx + titleMinPx(vm))
+  ## its `min-width` (`tabMinPx`).
+  if vm.stacked and tab.active and tab.kind == stkInitiative: return tabMinPx(vm, tab)
+  result = float(2 * TabPadPx + PieTabPx + TabInnerGapPx + titleMinPx(vm))
   if tab.kind == stkInitiative:
-    result += float(TabInnerGapPx) + textWidth(tab.progressText, CaptionPx, tabular = true)
     if tab.active: result += recordingsWidth(vm, vm.recordingButtonsOf(tab.id))
   result = max(result, float(TabMinPx))
 
@@ -320,16 +330,21 @@ proc drawBarTab(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM;
   r.tag(result, "tooltip", tab.tooltip)
   let target = vm
   r.addEventListener(result, "click", proc() = discard target.activate(key))
+  # The tab's progress pie, read from the viewmodel (`StripTab.pie`), on the
+  # tab's own ground; an initiative's `n/m` is in its tooltip. The active
+  # tab's pie is the layout check's `bar-active-tab-pie`.
+  let pie = r.drawPie(p, tab.pie, p.pieGroundColour(tabPieGround(tab.active)), PieTabPx)
+  r.tag(pie, "bar-tab-pie", $tab.active)
   if tab.kind == stkInitiative:
     r.tag(result, "state", $tab.state)
-    r.appendChild(result, r.mark(p.markOf(tab.state)))
+    r.appendChild(result, pie)
     # Hovering shows the progress popup, as `mouseenter` does on the web.
     r.addEventListener(result, "mouseenter", proc() = target.popupId.val = id)
     r.addEventListener(result, "mouseleave", proc() =
       if target.popupId.val == id: target.popupId.val = "")
   else:
     r.tag(result, "attention", $tab.session.attention)
-    r.appendChild(result, r.mark(p.markOf(tab.session.attention)))
+    r.appendChild(result, pie)
   let title = r.text(tab.title, TabTitlePx,
                      if tab.active: p.activeTabText else: p.textCaption,
                      pairs = [("flex-grow", "1"), ("min-width", $titleMinPx(vm) & "px")])
@@ -343,14 +358,6 @@ proc drawBarTab(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM;
   r.tag(title, "bar-tab-label", $tab.active)
   r.appendChild(result, title)
   if tab.kind == stkInitiative:
-    # The active tab's figures, readable on Light's raised fill:
-    # `by-mode(caption, label)`; tabular (`.ah-tab-progress`).
-    let progress = r.text(tab.progressText, CaptionPx,
-                          if tab.active: p.activeRowQuiet else: p.textCaption,
-                          shrink = false, tabular = true)
-    r.tag(progress, "progress", tab.progressText)
-    r.tag(progress, "bar-tab-progress", $tab.active)
-    r.appendChild(result, progress)
     if tab.active:
       let buttons = vm.recordingButtonsOf(id)
       if buttons.buttons.len > 0:
