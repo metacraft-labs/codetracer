@@ -162,11 +162,14 @@ function Invoke-Test {
 }
 
 $helper = Join-Path $PSScriptRoot "..\ensure-origin-dap-windows-toolchain.ps1"
-$toolchainFile = Join-Path $PSScriptRoot `
-  "..\..\non-nix-build\windows\toolchain-versions.env"
-# Functions only: see the entry-point guard at the end of the helper.
-$CodeTracerOriginDapToolchainLibraryOnly = $true
 . $helper
+# After the dot-source, and not named $toolchainFile: dot-sourcing runs the
+# helper's param block in this scope, and its $ToolchainFile (variable names
+# are case-insensitive) would overwrite ours with its default. Under Windows
+# PowerShell 5.1 that default resolves against THIS script's $PSScriptRoot,
+# ci\test\..\non-nix-build, which does not exist (run 45471393785).
+$pinFile = Join-Path $PSScriptRoot `
+  "..\..\non-nix-build\windows\toolchain-versions.env"
 
 $script:TestRoot = Join-Path ([IO.Path]::GetTempPath()) `
   "codetracer-origin-toolchain-$([Guid]::NewGuid().ToString('N'))"
@@ -174,7 +177,7 @@ New-Item -ItemType Directory -Path $script:TestRoot | Out-Null
 $script:Passed = 0
 $script:AssetBytes = @{}
 $script:ProductionSpecifications = @(
-  Get-CodeTracerOriginToolSpecifications -Path $toolchainFile
+  Get-CodeTracerOriginToolSpecifications -Path $pinFile
 )
 $savedPath = $env:PATH
 
