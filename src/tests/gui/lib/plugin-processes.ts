@@ -18,8 +18,12 @@ import type { Page } from "@playwright/test";
 const repoRoot = path.resolve(path.resolve(), "..", "..", "..");
 const installer = path.join(repoRoot, "src", "frontend", "viewmodel", "tests",
                             "unit", "install_acme_tools.nim");
+const lensInstaller = path.join(repoRoot, "src", "frontend", "viewmodel", "tests",
+                                "unit", "install_ct_lens.nim");
 
 export const PluginExecutablePattern = "acme-tools@1.0.0/bin/acme-tools-plugins";
+/** The `ct-lens` package's executable (`src/plugins/ct-lens/`). */
+export const LensExecutablePattern = "ct-lens@0.1.0/bin/ct-lens-plugins";
 
 export interface PluginHome {
   /** `CODETRACER_COMPONENTS_ROOT`: where the package is installed. */
@@ -53,6 +57,27 @@ export function installAcmeTools(settings?: object, capturesWindowInput = false)
   return home;
 }
 
+/**
+ * A fresh components root holding the `ct-lens` package as it ships
+ * (`src/plugins/ct-lens/`, built by `install_ct_lens.nim` with the plugin
+ * SDK), and an empty user root.
+ */
+export function installCtLens(): PluginHome {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "ct-gui-ct-lens-"));
+  const home: PluginHome = {
+    components: path.join(base, "components"),
+    userRoot: path.join(base, "user-root"),
+  };
+  fs.mkdirSync(home.components, { recursive: true });
+  fs.mkdirSync(home.userRoot, { recursive: true });
+  const nimcache = path.join(os.tmpdir(), "ct-gui-ct-lens-installer-cache");
+  childProcess.execFileSync("nim", ["c", "-r", "--hints:off", "--warnings:off",
+    `--nimcache:${nimcache}`, `-o:${path.join(nimcache, "install_ct_lens")}`,
+    lensInstaller, home.components],
+    { cwd: repoRoot, stdio: "pipe", timeout: 600_000 });
+  return home;
+}
+
 export function pluginEnv(home: PluginHome, extra: Record<string, string> = {}): Record<string, string> {
   return {
     CODETRACER_COMPONENTS_ROOT: home.components,
@@ -68,7 +93,8 @@ export function pluginEnv(home: PluginHome, extra: Record<string, string> = {}):
  * itself (a shell, or a command relay that carries pgrep's argv), which shows
  * up as a pid that is gone a moment later.
  */
-export function pluginPids(home?: PluginHome): number[] {
+export function pluginPids(home?: PluginHome,
+                           executable: string = PluginExecutablePattern): number[] {
   const pids: number[] = [];
   for (const entry of fs.readdirSync("/proc")) {
     if (!/^[0-9]+$/.test(entry)) continue;
@@ -78,8 +104,8 @@ export function pluginPids(home?: PluginHome): number[] {
     } catch {
       continue;
     }
-    const ok = home ? argv0.includes(path.join(home.components, PluginExecutablePattern))
-                    : argv0.endsWith(PluginExecutablePattern);
+    const ok = home ? argv0.includes(path.join(home.components, executable))
+                    : argv0.endsWith(executable);
     if (ok) pids.push(Number(entry));
   }
   return pids;
