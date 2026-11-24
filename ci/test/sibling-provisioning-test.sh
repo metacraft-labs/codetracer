@@ -3405,6 +3405,27 @@ while IFS= read -r line || [ -n "$line" ]; do
 		;;
 	esac
 done <"$CONTRACT_LANE_WORKFLOW"
+# ---------------------------------------------------------------------------
+# 1f. The launcher <-> recorder E2E gate provisions from codetracer's locks.
+#
+# The gate runs in other repositories too (recorders, the launcher), with
+# codetracer checked out beside them at the codetracer revision under test.
+# Its siblings come from THAT commit's repro.lock, test lock and private homes:
+# provision-repro-lock-siblings (codetracer-dir, exclude) clones the build
+# inputs, ci/launcher-recorder-e2e-resolve-siblings.sh gives each private
+# corner its one-home revision and fails a planned sibling no lock pins, and
+# the workflow restates no revision. The focused suite holds the details and
+# its negative controls; this file, the repository's sibling-provisioning
+# gate, requires that it passes.
+# ---------------------------------------------------------------------------
+lrc_out="$(bash "$REPO_ROOT/ci/test/launcher-recorder-e2e-provisioning-test.sh" 2>&1)"
+if [ "$?" -eq 0 ]; then
+	ok "the launcher-recorder E2E gate provisions every sibling from codetracer's locks and homes ($(tail -n 1 <<<"$lrc_out"))"
+else
+	fail "the launcher-recorder E2E gate provisions every sibling from codetracer's locks and homes" \
+		"$(grep -E 'FAIL|^ {7}' <<<"$lrc_out" | head -20)"
+fi
+
 # The lane as the last job of the file: its last step ends at end of file.
 if [ "$in_lane" -eq 1 ] && [ "$lane_closed" -eq 0 ]; then
 	flush_lane_step
@@ -3482,7 +3503,9 @@ echo
 # 52 -> 53 (2026-11-20): no workflow names such a sibling bare (run 44612896066).
 # 53 -> 54 (2026-11-22): every copy of a private sibling's revision equals its
 # one home, flake.lock or ci/toolchain.pin (1e).
-readonly EXPECTED_ASSERTIONS=54
+# 54 -> 55 (2026-11-24): the launcher-recorder E2E gate provisions from
+# codetracer's locks and private homes (1f).
+readonly EXPECTED_ASSERTIONS=55
 if [ "$assertions" -ne "$EXPECTED_ASSERTIONS" ]; then
 	printf 'FAIL: ran %d assertions, expected %d\n' "$assertions" "$EXPECTED_ASSERTIONS"
 	failures=$((failures + 1))
