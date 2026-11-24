@@ -43,6 +43,7 @@ import ../app/leaves
 import ../../view_vocabulary/[editor_surface, pane_views]
 import ../../../common/view_vocabulary/editor_rows   # `emBreakpoint`
 import ../../viewmodel/viewmodels/omnibar_vm
+import ../../viewmodel/store/types as store_types   # `CallLine`, `Location`
 import ../host/gpui_plugins
 import ../window_clicks   # the window's press wiring, `GPaneClick`
 import ../../viewmodel/tests/unit/plugin_process_fixture
@@ -222,6 +223,41 @@ suite "GPUI: the window's plugins (host/gpui_plugins)":
     discard p.control(@["run", "acme-tools.metrics", "metrics.step"])
     ck p.waitFor("the move", proc(): bool = queue[].len > 0)
     ck queue[] == @["next"]
+    p.close()
+
+  test "a plugin's relayed call-trace jump and watch are the window's own, not the session's":
+    # The window draws a move only when it makes it: applied on the session
+    # behind the window's loop, a jump or a watch a plugin relayed was not
+    # drawn until the next step. Both must reach the window's queue, which
+    # the loop runs through its own call-trace jump and Watches edit
+    # (`pumpPluginsWindow`), and never the session's `applyAction`.
+    let home = newHome()
+    let session = newSession()
+    var lines: seq[CallLine]
+    for i, n in ["main", "evaluate", "apply_op", "mul"]:
+      lines.add CallLine(index: i.int64, name: n, depth: i + 1,
+                         rrTicks: uint64(10 + i),
+                         location: Location(file: "/src/main.nim", line: 10 * (i + 1)),
+                         callKey: "call-" & $i)
+    session.store.calltrace.startLineIndex.val = 0
+    session.store.calltrace.lines.val = lines
+    let watchesBefore = session.stateVM.watchExpressions.val
+    let p = openWindowPlugins(session, false, home)
+    p.widen()
+    let queue = new(seq[string])
+    p.routeMovesToControls(queue)
+    p.grantBoth()
+    ck p.waitFor("metrics' jump enabled", proc(): bool =
+      p.running("acme-tools.metrics") and
+        p.sup.enablementOf("acme-tools.metrics", "metrics.jump").enabled)
+    discard p.control(@["run", "acme-tools.metrics", "metrics.jump"])
+    ck p.waitFor("the jump queued", proc(): bool = queue[].len > 0)
+    ck queue[] == @[GpuiPluginJumpPrefix & "acme-tools.metrics\t3"]
+    discard p.control(@["run", "acme-tools.metrics", "metrics.watch"])
+    ck p.waitFor("the watch queued", proc(): bool = queue[].len > 1)
+    ck queue[1] == GpuiPluginWatchPrefix & "acme-tools.metrics\tleft*9"
+    # Neither ran on the session behind the window: no watch was added there.
+    ck session.stateVM.watchExpressions.val == watchesBefore
     p.close()
 
   test "a contributed leaf draws its plugin's view through the GPUI binding":
@@ -531,5 +567,5 @@ suite "GPUI: the window's plugins (host/gpui_plugins)":
     ck markers.len == 1 and elementText(markers[0]) == "★"
 
   test "assertion count":
-    ck CHECKS == 153
+    ck CHECKS == 159
     echo "CHECKS: ", CHECKS
