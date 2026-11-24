@@ -376,7 +376,7 @@ proc checkInitiativeTabs(view: GpuiElement; vm: InitiativeTabStripVM; mode = dmD
   result.expect("inbox", view.values("inbox"), @[position])
   result.expect("auto-switch", view.values("auto-switch"), @[$vm.autoSwitch.val])
 
-proc checkInitiatives(view: GpuiElement; vm: InitiativesVM): seq[string] =
+proc checkInitiatives(view: GpuiElement; vm: InitiativesVM; mode = dmDark): seq[string] =
   result.expect("state", view.attr("state"), stateName(vm.state.val))
   commonState(view, vm.state.val, vm.error.val, result)
   if vm.state.val != asReady: return
@@ -403,6 +403,14 @@ proc checkInitiatives(view: GpuiElement; vm: InitiativesVM): seq[string] =
           for i in 0 ..< shown: wantedSessions.add row.sessions[i].id
         result.expect("sessions of " & row.id, e.values("session"), wantedSessions)
         result.expect("progress of " & row.id, e.values("progress"), @[row.progressText])
+        # The selected initiative on the selected-row ground every list
+        # shares, and no other row on it.
+        let ground = e.attr("ground")
+        if row.selected:
+          result.expect("ground of the selected initiative " & row.id, ground,
+                        ahPalette(mode).activeRow)
+        elif ground == ahPalette(mode).activeRow:
+          result.add "initiative " & row.id & " is not selected but is on the selected-row ground"
 
 proc checkProgress(view: GpuiElement; vm: InitiativeProgressVM): seq[string] =
   let found = vm.state.val == asReady and vm.found
@@ -782,7 +790,8 @@ proc checkSuggestion(view: GpuiElement; vm: SuggestedActionsVM): seq[string] =
   result.expect("disabled", b.values("action-disabled"), vm.rows.mapIt($it.disabled))
   result.expect("buttons", b.values("suggested-button"), @["approve", "dismiss"])
 
-proc checkControlCenter(view: GpuiElement; panels: seq[GpuiElement]; vm: ControlCenterVM): seq[string] =
+proc checkControlCenter(view: GpuiElement; panels: seq[GpuiElement]; vm: ControlCenterVM;
+                        mode = dmDark): seq[string] =
   ## The control center against its viewmodel (CTF-P2c step 4): its state,
   ## mode and the initiative a launch is for; the Initiatives panel it draws
   ## (the panel's own comparison, `checkInitiatives`, over the control
@@ -800,7 +809,7 @@ proc checkControlCenter(view: GpuiElement; panels: seq[GpuiElement]; vm: Control
     if panels.len != 1:
       result.add "the Initiatives panel is drawn " & $panels.len & " times"
     else:
-      result.add checkInitiatives(panels[0], vm.initiatives)
+      result.add checkInitiatives(panels[0], vm.initiatives, mode)
   if vm.state != asReady:
     result.expect("waiting", view.values("waiting-session").len, 0)
     return
@@ -913,7 +922,7 @@ proc checkStory(m: AhStoryMount; mode = dmDark): seq[string] =
   of "agent-harbor-session-tabs": checkSessionTabs(view, m.sessions, mode)
   of "agent-harbor-session-list": checkSessionList(view, m.sessions)
   of "agent-harbor-initiative-tabs": checkInitiativeTabs(view, m.initiativeTabs, mode)
-  of "agent-harbor-initiatives": checkInitiatives(view, m.initiatives)
+  of "agent-harbor-initiatives": checkInitiatives(view, m.initiatives, mode)
   of "agent-harbor-initiative-progress": checkProgress(view, m.progress)
   of "agent-harbor-fleet": checkFleet(view, m.fleet, mode)
   of "agent-harbor-composer": checkComposer(view, m.composer)
@@ -922,7 +931,7 @@ proc checkStory(m: AhStoryMount; mode = dmDark): seq[string] =
     checkTimeline(view, m.timeline, m.suggestion) & checkSuggestion(view, m.suggestion)
   of "agent-harbor-control-center":
     checkControlCenter(view, view.all("surface").filterIt(
-      it.attr("surface") == "agent-harbor-initiatives"), m.center)
+      it.attr("surface") == "agent-harbor-initiatives"), m.center, mode)
   of "agent-harbor-status-gaze": checkGazeMark(view, m.gaze)
   of ProcessSwitcherSurface: checkProcessSwitcher(view, m.processes)
   of PieStorySurface: checkPieStory(view, m.fixture, mode)

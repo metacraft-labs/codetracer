@@ -286,7 +286,8 @@ proc dropGround*(p: AhPalette; covered: openArray[string]): string =
   candidates[^1]
 
 proc selectedGround*(p: AhPalette): string =
-  ## The selected initiative's ground: the palette's tint over the panel.
+  ## The palette's selection tint over the panel (the changes inbox's active
+  ## tab and current item).
   blendOver(p.selectedTint, p.panel)
 
 # ---------------------------------------------------------------------------

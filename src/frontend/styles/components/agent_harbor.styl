@@ -1076,33 +1076,6 @@ AH_MARK = 0.5rem
     outline: 0.0625rem solid colors-ui-border-focus
     outline-offset: -0.0625rem
 
-// Selected as a commit row is selected (vcs.styl), with the body text of
-// the selected commit in Light.
-.ah-initiative-row-selected
-  background: colors-ui-surface-action-primary
-
-  &:hover
-    background: colors-ui-surface-action-primary-hover
-
-  .ah-initiative-title,
-  .ah-initiative-progress-text,
-  .ah-initiative-label,
-  .ah-initiative-current-text,
-  .ah-initiative-meta-text,
-  .ah-initiative-counts,
-  .ah-initiative-session-title,
-  .ah-initiative-session-status,
-  .ah-initiative-more
-    color: by-mode(colors-ui-text-on-action-primary, colors-ui-text-primary-body)
-
-  .ah-initiative-bar
-    background: by-mode(colors-ui-surface-action-primary-hover, colors-ui-surface-primary-tertiary)
-
-// Status words on the selection take its text colour, as every text of a
-// selected commit row does (the status mark keeps the status).
-.agent-harbor-initiatives .ah-initiative-row-selected .ah-initiative-session-status
-  color: by-mode(colors-ui-text-on-action-primary, colors-ui-text-primary-body)
-
 .ah-initiative-head
   display: flex
   align-items: center
@@ -1964,13 +1937,6 @@ AH_MARK = 0.5rem
   margin-right: 0.25rem
   margin-left: 0.25rem
 
-// The selection outranks the band.
-.ah-initiative-row.ah-initiative-row-selected
-  background: colors-ui-surface-action-primary
-
-  &:hover
-    background: colors-ui-surface-action-primary-hover
-
 // The controls beside the tabs are outlined, not
 // filled, so only the active tab (and "+") carry a fill, as in the plain
 // strip; the active recording takes the selection's colours.
@@ -2045,12 +2011,7 @@ AH_MARK = 0.5rem
 .ah-popup-state-blocked
   color: colors-ui-text-error-primary
 
-// The bar keeps a visible track on the selection, and
-// the legend a fixed width so the bars of all rows end together.
-.ah-initiative-row-selected .ah-ms-bar
-  background: by-mode(colors-ui-surface-action-primary-hover, colors-ui-surface-primary-tertiary)
-  padding: 0.0625rem
-
+// The legend keeps a fixed width so the bars of all rows end together.
 .ah-ms-legend
   min-width: 9rem
   justify-content: flex-end
@@ -2163,12 +2124,15 @@ AH_MARK = 0.5rem
 .ah-rec-button.ah-rec-failed
   border-color: by-mode(colors-ui-border-error, colors-ui-text-error-primary)
 
-// The selected initiative is raised as the active
-// session row is, with the focus bar at its left, so its status words and
-// bar segments keep their colours (on the action surface they lost contrast).
+// The selected initiative is drawn on the selected-row ground every list
+// shares (`.ah-session-row-active`, `.ah-fleet-row-selected`; the palette's
+// `activeRow`), with a 3px focus bar in the action border role at its left
+// edge. Only the ground and the bar mark it: its title keeps its weight, and
+// its status words, marks and bar segments keep their colours (on the
+// action surface they lost contrast).
 .agent-harbor-initiatives .ah-initiative-row.ah-initiative-row-selected
   background: by-mode(#3c3c3c, colors-ui-surface-primary-secondary-hover)
-  box-shadow: inset 0.125rem 0 0 colors-ui-border-action
+  box-shadow: inset 0.1875rem 0 0 colors-ui-border-action
 
   &:hover
     background: by-mode(#3c3c3c, colors-ui-surface-primary-secondary-hover)
@@ -2189,15 +2153,6 @@ AH_MARK = 0.5rem
   .ah-ms-bar
     background: transparent
     padding: 0
-
-.agent-harbor-initiatives .ah-initiative-row-selected .ah-att-needs-input .ah-initiative-session-status
-  color: colors-ui-text-warning-primary
-
-.agent-harbor-initiatives .ah-initiative-row-selected .ah-att-running .ah-initiative-session-status
-  color: colors-ui-text-success-primary
-
-.agent-harbor-initiatives .ah-initiative-row-selected .ah-att-failed .ah-initiative-session-status
-  color: colors-ui-text-error-primary
 
 .agent-harbor-initiatives .ah-initiative-row-selected .ah-ms-legend
   color: colors-ui-text-primary-label
@@ -2285,14 +2240,6 @@ AH_MARK = 0.5rem
 .ah-tab-strip .ah-tab-notice.ah-tab-error
   border-color: colors-ui-text-error-primary
 
-// The selected initiative stands above the bands in Dark too: the tertiary
-// hover surface, a step above the band's secondary hover.
-.agent-harbor-initiatives .ah-initiative-row.ah-initiative-row-selected
-  background: by-mode(colors-ui-surface-primary-tertiary-hover, colors-ui-surface-primary-secondary-hover)
-
-  &:hover
-    background: by-mode(colors-ui-surface-primary-tertiary-hover, colors-ui-surface-primary-secondary-hover)
-
 // `+N more`: its label centred in the chip, the chip clear of the band's
 // edge.
 .ah-initiative-more-toggle
@@ -2312,16 +2259,6 @@ AH_MARK = 0.5rem
 .ah-ms-planned .ah-ms-mark,
 .ah-ms-seg.ah-ms-planned
   background: by-mode(colors-ui-icon-primary-subtle, colors-ui-border-primary)
-
-// The selected initiative in Dark: an action-colour tint over the panel,
-// distinct from every band, light enough that the status colours on it keep
-// their contrast; the focus bar a little wider.
-.agent-harbor-initiatives .ah-initiative-row.ah-initiative-row-selected
-  background: by-mode(rgba(colors-ui-surface-action-primary, 0.28), colors-ui-surface-primary-secondary-hover)
-  box-shadow: inset 0.1875rem 0 0 colors-ui-border-action
-
-  &:hover
-    background: by-mode(rgba(colors-ui-surface-action-primary, 0.28), colors-ui-surface-primary-secondary-hover)
 
 // The session strip's active tab is exactly the width the viewmodel counts
 // for it, at every window width; the `+N` chip keeps a tab's visual gap

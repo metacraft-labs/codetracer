@@ -227,10 +227,10 @@ proc drawInitiativeRow(r: GpuiRenderer; p: AhPalette; vm: InitiativesVM;
                        row: InitiativeRow; index: int; widthPx: int): GpuiElement =
   let id = row.id
   let selected = row.selected
-  # The selected initiative keeps its words' colours -- status words
-  # included -- over a tint, with a 3px bar in the action role down its
-  # left edge (`.ah-initiative-row-selected`: Dark a 28% action tint, Light
-  # the secondary-hover surface).
+  # The selected initiative is drawn on the selected-row ground every list
+  # shares (the palette's `activeRow`, `.ah-initiative-row-selected`), with a
+  # 3px bar in the action role down its left edge; it keeps its words'
+  # colours, status words included.
   let fg = p.textBody
   let quiet = p.textCaption
   result = r.box(column = true, pairs = [("gap", "6px"), ("padding-top", "10px"),
@@ -238,10 +238,16 @@ proc drawInitiativeRow(r: GpuiRenderer; p: AhPalette; vm: InitiativesVM;
                                          ("padding-left", $InsetPx & "px"),
                                          ("padding-right", $InsetPx & "px"),
                                          ("cursor", cursorOf(hkControl)), ("flex-shrink", "0")])
+  # The row's own ground, tagged for a reader of the tree: the selection's,
+  # the band's on every other row, else the panel's.
+  let ground = if selected: p.activeRow
+               elif index mod 2 == 1: p.bandOf
+               else: p.panel
   if selected:
-    r.styles(result, [("background", p.selectedTint), ("position", "relative")])
+    r.styles(result, [("background", ground), ("position", "relative")])
     r.appendChild(result, r.insetBar(p.borderAction, 3))
-  elif index mod 2 == 1: r.setStyle(result, "background", p.bandOf)
+  elif index mod 2 == 1: r.setStyle(result, "background", ground)
+  r.tag(result, "ground", ground)
   r.tag(result, "initiative", id)
   r.tag(result, "state", $row.state)
   r.tag(result, "selected", $selected)

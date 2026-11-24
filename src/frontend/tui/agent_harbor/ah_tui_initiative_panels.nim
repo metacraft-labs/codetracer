@@ -259,7 +259,10 @@ proc drawInitiativeRow(c: var AhCanvas; parent: AhNode; vm: InitiativesVM;
     sessionRows = shown + (if more: 1 else: 0) + (if row.sessions.len == 0: 1 else: 0)
   let height = if wide: max(infoRows, sessionRows) else: infoRows + sessionRows
   let selected = row.selected
-  let ground = if selected: c.p.selectedGround
+  # The selected initiative on the selected-row ground every list shares
+  # (the palette's `activeRow`, the web's `.ah-initiative-row-selected`), with
+  # the action bar down its left edge.
+  let ground = if selected: c.p.activeRow
                elif index mod 2 == 1: c.tone.band else: c.tone.body
   if ground == c.tone.body:
     c.fill(top, col, width, height, ground)

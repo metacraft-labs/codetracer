@@ -1493,7 +1493,7 @@ proc styleProblems(m: AhTuiMount; look: LookOf): seq[string] =
     for i, row in vm.rows:
       for e in view.all("initiative"):
         if e.attr("initiative") != row.id or e.row >= rows: continue
-        let wanted = if row.selected: p.selectedGround
+        let wanted = if row.selected: p.activeRow
                      elif i mod 2 == 1: t.band else: t.body
         # The row's first cells after its left edge (the bar is drawn there).
         let probe = AhNode(row: e.row, col: e.col + 1, width: 1, height: 1)

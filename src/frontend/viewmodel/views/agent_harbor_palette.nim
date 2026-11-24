@@ -112,8 +112,10 @@ type
       ## sits near 3:1 under a title.
     addText*: string         ## "+": `by-mode(#b0b0b0, text-primary-label)`
     selectedTint*: string
-      ## The selected initiative: `by-mode(rgba(surface-action-primary, 0.28),
-      ## surface-primary-secondary-hover)`, as `#rrggbbaa`.
+      ## A selection tint: `by-mode(rgba(surface-action-primary, 0.28),
+      ## surface-primary-secondary-hover)`, as `#rrggbbaa` (the changes
+      ## inbox's selection and the composer's cited line; a list's selected
+      ## row uses `activeRow`).
 
   MarkStyle* = object
     ## A status mark: a filled dot, or a hollow ring (idle, planned).

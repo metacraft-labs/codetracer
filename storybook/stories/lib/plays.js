@@ -1721,6 +1721,18 @@ export const plays = {
     await waitFor(el, ".ah-initiative-row-selected");
     expect(el.querySelectorAll(".ah-initiative-row-selected").length).toBe(1);
     expect(el.querySelector(".ah-initiative-row-selected .ah-initiative-session")).toBeTruthy();
+    // The selected initiative is drawn on the selected-row ground every list
+    // shares, as the palette's generated pie stylesheet paints it for its
+    // selected-row band (`.ah-pie-band-selected-row`).
+    const sel = el.querySelector(".ah-initiative-row-selected");
+    const ground = document.createElement("div");
+    ground.className = "ah-pie-band-selected-row";
+    el.appendChild(ground);
+    try {
+      expect(getComputedStyle(sel).backgroundColor).toBe(getComputedStyle(ground).backgroundColor);
+    } finally {
+      ground.remove();
+    }
   }),
   "agent-harbor-initiatives-empty": initiativesCheck(async (el) => {
     expect(el.querySelector(".ah-fleet-overlay")?.textContent).toContain("No initiative");
