@@ -30,7 +30,6 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${here}/../.." && pwd)"
-styles_dir="${repo_root}/src/frontend/styles"
 
 if ! command -v stylus >/dev/null 2>&1; then
 	echo "css-token-resolution: stylus is not on PATH." >&2
@@ -41,21 +40,11 @@ fi
 out_dir="$(mktemp -d "${TMPDIR:-/tmp}/ct-css-token.XXXXXX")"
 trap 'rm -rf "${out_dir}"' EXIT
 
-# The entry points the build ships (`StylusCssEntryPoints` in repro.nim), asked
-# of the checker so the two cannot disagree. The list is materialised into a
-# file first, so a change to the recipe's list shape shows up as an EMPTY list
-# -- which the checker reports as a failure -- rather than as a loop that
-# silently does nothing.
-ship_list="${out_dir}/.shipped"
-python3 "${here}/css-token-resolution-guard.py" --repo-root "${repo_root}" \
-	--css-dir "${out_dir}" --print-shipped >"${ship_list}"
-
-echo "css-token-resolution: compiling $(wc -l <"${ship_list}" | tr -d ' ') shipped stylesheet(s) with stylus $(stylus --version)"
-while read -r src dst; do
-	[[ -n ${src} ]] || continue
-	(cd "${styles_dir}" && stylus -p "${src}") >"${out_dir}/${dst}"
-	printf '  %-40s -> %8s bytes\n' "${src}" "$(wc -c <"${out_dir}/${dst}" | tr -d ' ')"
-done <"${ship_list}"
+# The entry points the build ships (`StylusCssEntryPoints` in repro.nim),
+# compiled by the helper the other compiled-CSS guards share; it asks the
+# checker below for the list, so the two cannot disagree.
+printf 'css-token-resolution: '
+bash "${repo_root}/ci/lib/compile-shipped-stylesheets.sh" "${out_dir}"
 
 args=()
 if [[ -n ${CT_CSS_TOKEN_JSON:-} ]]; then

@@ -229,6 +229,30 @@ proc setEvents*(vm: TerminalOutputVM; events: seq[TerminalOutputEvent];
   vm.pickView(vm.screen.offered)
   vm.screenVersion.val = vm.screenVersion.val + 1
 
+proc loadWrites*(vm: TerminalOutputVM) =
+  ## Ask the engine for the recording's writes (`ct/load-terminal`) and hand
+  ## them to `setEvents`, once per recording. For a host that does not feed
+  ## them: the desktop's shell asks for them itself and calls `setEvents`
+  ## (`ui/terminal_output`), but the WebAssembly panes' core
+  ## (`web_core/web_core.nim`) has no shell of its own. Nothing is asked
+  ## where the engine serves the line view by window — the ViewModel loads
+  ## those lines itself — or while an earlier ask is in flight.
+  if vm.isNil or vm.store.isNil or vm.windowed or vm.writesAsked:
+    return
+  vm.writesAsked = true
+  let fut = vm.store.backend.send("ct/load-terminal", newJObject())
+  onComplete(fut,
+    proc(response: JsonNode) =
+      if responseSucceeded(response) and not vm.windowed:
+        # A JSON ARRAY of writes, which `responseBody` does not pass through.
+        let body = if isResponseEnvelope(response): response.getOrDefault("body")
+                   else: response
+        vm.setEvents(terminalEventsFromJson(body))
+      else:
+        vm.writesAsked = false,
+    proc(message: string) =
+      vm.writesAsked = false)
+
 proc clearLines*(vm: TerminalOutputVM) =
   ## Reset to the pre-load state (a new trace).
   vm.initialLoad.val = true

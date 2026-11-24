@@ -3426,6 +3426,7 @@ async function launchElectron(ctx: Ctx, launch: any): Promise<void> {
     app.process()?.stdout?.on("data", (c: Buffer) => put("main", c.toString().trimEnd()));
     app.process()?.stderr?.on("data", (c: Buffer) => put("main!", c.toString().trimEnd()));
     page.on("console", (m: any) => put(`console.${m.type()}`, m.text()));
+    page.on("pageerror", (e: any) => put("pageerror", String(e && e.stack || e)));
   }
   ctx.context = app.context();
 }

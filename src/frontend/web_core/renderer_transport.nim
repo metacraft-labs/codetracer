@@ -78,7 +78,7 @@ proc newWasmPaneTransport*(dap: DapApi): JsObject =
           elif outcome.message.len > 0: outcome.message
           else: cstring"the engine refused the request"
       resp["body"] = if outcome.body.isUndef: JsObject{} else: outcome.body
-      deliver(jsonStringify(resp)))
+      deliver(jsonStringify(resp)), private = true)
   transport["onMessage"] = proc(cb: proc(text: cstring)) =
     listeners.add cb
   transport

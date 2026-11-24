@@ -15,7 +15,8 @@
 when not defined(js):
   {.error: "viewmodel/input/dom_pane_presses is a DOM front-end's (JS).".}
 
-import std/[jsffi, strutils]
+import std/[jsffi, json, strutils]
+from kdom import nil
 
 import ./dom_pointer
 import ./pane_presses
@@ -26,8 +27,7 @@ from ../store/types import CallLine
 import isonim/core/signals
 from ../views/context_menu_bridge import showContextMenu
 from ../../context_menu_item import ContextMenuItem
-from ../views/isonim_calltrace_view import calltraceRowContextItems,
-  callArgContextItems
+import ../views/isonim_calltrace_view
 from ../views/isonim_state_view import variableRowMenuItems
 from ../views/isonim_filesystem_view import fileTreeMenuItems
 from ../views/isonim_low_level_code_view import nil
@@ -47,6 +47,36 @@ when defined(ctWasmPanes):
     ## own core (`web_core/web_core_panels.js`).
   proc wasmPanePress(operation: cstring; element: JsObject): bool {.importjs:
     "globalThis.ctwPanels.press(#, #)".}
+  proc wasmPaneMenu(pane: cstring; element: JsObject): JsObject {.importjs:
+    "globalThis.ctwPanels.menu(#, #)".}
+    ## The core's menu of `element`: `[{label, hint, enabled, choose()}]`.
+
+  proc wasmMenuItem(entry: JsObject): ContextMenuItem =
+    ## One entry of the core's menu, choosing it in the core; what the core
+    ## leaves to the page (a value for the Scratchpad, which the shell
+    ## draws) is done here.
+    ContextMenuItem(
+      name: entry["label"].to(cstring),
+      hint: entry["hint"].to(cstring),
+      handler: proc(ev: kdom.Event) =
+        let rest = $entry.choose().to(cstring)
+        if rest.len > 0:
+          let j = try: parseJson(rest) except CatchableError: newJObject()
+          if j.hasKey("scratchpad") and
+              not isonim_calltrace_view.addToScratchpadHook.isNil:
+            isonim_calltrace_view.addToScratchpadHook(
+              j["scratchpad"]{"name"}.getStr, j["scratchpad"]{"text"}.getStr))
+
+  proc wasmMenuItems(pane: string; element: JsObject): seq[ContextMenuItem] =
+    ## The right-click menu of an element of a pane the WebAssembly core
+    ## draws: its entries and their actions are the core's, on the core's
+    ## ViewModels.
+    let entries = wasmPaneMenu(cstring(pane), element)
+    if entries.isNil or entries.isUndefined: return
+    for i in 0 ..< entries["length"].to(int):
+      let entry = entries[i]
+      if entry["enabled"].to(bool):
+        result.add wasmMenuItem(entry)
 
 proc readerOf*(element: JsObject): AttributeReader =
   ## `name` on `element`, or on its nearest ancestor that carries it (a call's
@@ -131,6 +161,9 @@ proc installPanePresses*(vms: proc(): PaneVMs) =
       let paneKind = pane
       registerPaneOperation("context-menu.open", paneKind,
         proc(p: ElementPress): bool =
+          when defined(ctWasmPanes):
+            if wasmPaneHosts(p.element):
+              return p.showMenuAt(wasmMenuItems(paneKind, p.element))
           p.showMenuAt(paneMenuItems(vms(), paneKind, readerOf(p.element))))
 
 proc installSessionPanePresses*(session: proc(): SessionViewModel) =

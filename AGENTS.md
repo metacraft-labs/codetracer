@@ -310,6 +310,22 @@ dev shell sets `CODETRACER_BUILD_DIR` to the platform's build output), falling b
 code, run `just build-once` first to rebuild the frontend before running `just test-e2e`;
 `just test-gui` runs it for you as a prerequisite.
 
+### Sharing the machine while tests run
+
+The heavy commands of `just test-rust` (its `cargo test`, `cargo build` and
+`cargo nextest` runs) and the Playwright command behind `just test-e2e`,
+`just test-gui` and `just dev-tools-test-e2e` run under a
+[RunQuota](https://github.com/metacraft-labs/reprobuild) lease when `runquota`
+is installed. Several checkouts or sessions on one machine then draw from one
+CPU budget and run at the width they are granted, instead of each assuming every
+core is theirs. Without RunQuota, or when no daemon answers, the commands run as
+before. The prefixes are the `rq`, `rq1` and `rqj` variables at the top of the
+`justfile`, which go through `scripts/runquota-bridge.sh`. Set `RQ=` to run a
+recipe without the bridge, or `RQ="runquota run --width 2 --"` to pin a width.
+Playwright stays at `--workers=1`; its lease only records the slot. After
+adding a cargo or Playwright command to one of these recipes, give it the same
+prefix: `just test-runquota-bridge` fails when a line has lost it.
+
 ## Running the cross-language ct_test provider tests
 
 ```

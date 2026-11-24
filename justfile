@@ -1,3 +1,27 @@
+# Heavy cargo and Playwright commands take a lease from the host's shared
+# RunQuota budget, and run at the width they are granted instead of assuming
+# every core is theirs. The prefixes are plain strings that name
+# scripts/runquota-bridge.sh, which probes for RunQuota when it runs, so
+# loading this file costs nothing.
+#
+#   rq    `runquota run --`        tools that take a width flag
+#                                  (cargo nextest -j, playwright --workers)
+#   rq1   the same, at width 1     a command that is pinned to one worker
+#   rqj   `runquota jobserver --`  tools that follow a make jobserver
+#                                  (plain cargo test / cargo build)
+#
+# Where RunQuota is not installed (or lacks the verb), or no daemon answers,
+# the command runs exactly as it did without a prefix. The person running a
+# recipe controls it through RQ: unset is automatic, `RQ=` turns the bridge
+# off, and any other value replaces the prefix, for example
+# `RQ="runquota run --width 2 --" just test-rust`. Put the prefix after any
+# VAR=value words and in front of the program. Its exit status and standard
+# output are the command's own. `just test-runquota-bridge` checks that the
+# recipes below still carry it.
+rq := '"' + justfile_directory() + '/scripts/runquota-bridge.sh" run --'
+rq1 := '"' + justfile_directory() + '/scripts/runquota-bridge.sh" run --width 1 --'
+rqj := '"' + justfile_directory() + '/scripts/runquota-bridge.sh" jobserver --'
+
 build:
   bash scripts/build.sh
 
@@ -8,6 +32,15 @@ build-once:
 [positional-arguments]
 capture-dev-env output *nix_args:
   bash scripts/capture-dev-env.sh "$@"
+
+# The cargo and Playwright commands of `test-rust`, `test-e2e` and
+# `dev-tools-test-e2e` run under a RunQuota lease. Runs the real recipes with
+# stand-in cargo/npx tools against a private `runquotad` and checks the peak
+# concurrency stays within its budget; `--mutate` deletes the prefixes and
+# expects the check to fail. Needs `runquota` and `runquotad` on PATH.
+[positional-arguments]
+test-runquota-bridge *args:
+  bash ci/test/runquota-bridge-test.sh "$@"
 
 # Real Nix installer, linked worktrees, local checker and publication gate.
 test-nix-git-hooks:
@@ -1023,6 +1056,19 @@ storybook-check-render *args: storybook-build
   node storybook/scripts/check-story-render.mjs --self-test
   node storybook/scripts/check-story-render.mjs "$@"
 
+# Count the whole-document restyles the Changes panel's path cuts cost
+# (`ChangesCodeLongKeyboard` at 360px, 300 cuts) from Chromium's
+# `UpdateLayoutTree` element counts, and fail when the cuts, an inline-style
+# write or an inserted element restyle the whole document; also checks that
+# the caption bar's welcome-screen switch still switches. Counts, not time, so
+# a loaded host cannot flip the verdict. The self-test plants the old
+# `:root:has([style...])` caption rule, a `:root:has()` naming a class, a
+# forced caption height and an uncut 1440px mount, and fails unless each is
+# caught. See storybook/scripts/check-style-invalidation.mjs; its static
+# sibling is `just test-css-has-invalidation`.
+storybook-check-style-invalidation *args: storybook-build
+  node storybook/scripts/check-style-invalidation.mjs --self-test {{args}}
+
 # Check directories of captures written by tools/visual-review/capture-storybook.mjs
 # (which shoots only stories the render check's judge passes, and records each
 # image's verdict in the directory's capture-verdicts.json): every PNG must be
@@ -1164,12 +1210,12 @@ test-rust:
   ct_export_scratch_codetracer_home rust-tests
   trap '_ct_rc=$?; report_skips; ct_remove_scratch_codetracer_home rust-tests; ct_user_state_guard_exit rust-tests "$_ct_rc"' EXIT
   # The resolver itself (both sides of the CODETRACER_HOME contract).
-  ( cd libs/ct-home && cargo test )
+  ( cd libs/ct-home && {{rqj}} cargo test )
   # `libs/ct-dap-client` is a plain path dev-dependency of src/db-backend, so
   # db-backend's run never builds its test targets. Its own tests cover the
   # DAP runners' ct-native-replay finder, which must resolve the worker the
   # db-backend harness recorded with.
-  ( cd libs/ct-dap-client && cargo test )
+  ( cd libs/ct-dap-client && {{rqj}} cargo test )
   # `libs/ct-data-breakpoints` holds the admission rules for DAP data
   # breakpoints (watchpoints) and is a plain path dependency of BOTH
   # src/db-backend and src/backend-manager -- neither of which builds a
@@ -1177,21 +1223,21 @@ test-rust:
   # its `conformance_cases()` table is exactly what the mock/real parity
   # tests in those two crates are anchored to. A dark anchor is not an
   # anchor. (ci/test/rust-test-crate-coverage.sh is the gate that says so.)
-  ( cd libs/ct-data-breakpoints && cargo nextest run --release )
+  ( cd libs/ct-data-breakpoints && {{rq}} cargo nextest run --release )
   # `libs/ct-open-beneath` is the one rule both read sides (backend-manager's
   # MCP `read_source_file`, db-backend's reads of a recording's source copies)
   # open recorded paths through, without following a symlink below the base.
   # It is a path dependency of both, so for the reason above its tests --
   # the checks on that confinement -- run only here.
-  ( cd libs/ct-open-beneath && cargo test )
+  ( cd libs/ct-open-beneath && {{rqj}} cargo test )
   # `libs/ct-flow-wire` elides and restores the default fields of a flow
   # update's step values (`valueEncoding: "elided-defaults-1"`), a path
   # dependency of src/db-backend, libs/ct-dap-client and
   # src/backend-manager; its round-trip tests run only here.
-  ( cd libs/ct-flow-wire && cargo test )
+  ( cd libs/ct-flow-wire && {{rqj}} cargo test )
   pushd src/db-backend
   # Unit tests (inside the binary)
-  cargo nextest run --release --bin replay-server
+  {{rq}} cargo nextest run --release --bin replay-server
   # Run ignored unit tests separately.  When the binary happens to
   # have no #[ignore]'d tests at all, nextest exits with code 4
   # ("no tests to run") which we don't want to surface as a failure
@@ -1202,7 +1248,7 @@ test-rust:
   # input nothing in the suite produces (e.g. `just test-valid-trace <dir>`);
   # they are ignored so they never count as passed, and fail if run without
   # their input, so they are left out of this sweep by name.
-  cargo nextest run --release --bin replay-server --run-ignored ignored-only -E 'not test(/::manual_/)' || \
+  {{rq}} cargo nextest run --release --bin replay-server --run-ignored ignored-only -E 'not test(/::manual_/)' || \
     if [ "$?" = "4" ]; then \
       echo "  (no ignored tests in replay-server; treating as no-op)"; \
     else \
@@ -1216,7 +1262,7 @@ test-rust:
   # not necessarily under src/backend-manager/target where the script looks,
   # so the path cargo reports is handed to the script explicitly.
   pushd ../backend-manager
-  session_manager="$(cargo build --release --bin session-manager --message-format=json-render-diagnostics \
+  session_manager="$({{rqj}} cargo build --release --bin session-manager --message-format=json-render-diagnostics \
     | jq -r 'select(.reason == "compiler-artifact" and .executable != null) | .executable' | tail -n 1)"
   popd
   if [ ! -x "$session_manager" ]; then
@@ -1252,10 +1298,10 @@ test-rust:
     not_provided="$(cd ../.. && realpath "$CODETRACER_TEST_LANE_NOT_PROVIDED")"
     filter="$filter and ($(bash ../../ci/lib/not-provided-filter.sh "$not_provided" "$PWD/tests"))"
   fi
-  cargo nextest run --release --test '*' -E "$filter"
+  {{rq}} cargo nextest run --release --test '*' -E "$filter"
   # The replay-server path, reported by cargo for the same reason as the
   # session-manager's above: libs/jsbound's e2e test drives it.
-  replay_server="$(cargo build --release --bin replay-server --message-format=json-render-diagnostics \
+  replay_server="$({{rqj}} cargo build --release --bin replay-server --message-format=json-render-diagnostics \
     | jq -r 'select(.reason == "compiler-artifact" and .executable != null) | .executable' | tail -n 1)"
   popd
   if [ ! -x "$replay_server" ]; then
@@ -1268,7 +1314,7 @@ test-rust:
   # recording with `ct trace info`, i.e. the session-manager and
   # replay-server built above; it fails rather than skips without them.
   ( cd libs/jsbound && JSBOUND_E2E_SESSION_MANAGER="$session_manager" \
-      CODETRACER_REPLAY_SERVER_CMD="$replay_server" cargo nextest run --release )
+      CODETRACER_REPLAY_SERVER_CMD="$replay_server" {{rq}} cargo nextest run --release )
   pushd src/backend-manager
   # The same list, for backend-manager's tests: real_recording_integration's
   # rr tests and the tests that record with ct-mcr fail without tools the
@@ -1281,7 +1327,7 @@ test-rust:
   if [ -n "$not_provided" ]; then
     bm_filter="$(bash ../../ci/lib/not-provided-filter.sh "$not_provided" "$PWD/tests")"
   fi
-  cargo nextest run --release -E "$bm_filter"
+  {{rq}} cargo nextest run --release -E "$bm_filter"
   # mcp_dive_in_fetch_gateway_test needs a running codetracer-ci as its
   # gateway; it is excluded here, by name, and runs through
   # `just t_mcp_dive_in_fetch_sends_token_only_to_gateway` in the sibling
@@ -1302,7 +1348,7 @@ test-rust:
     echo "  t_mcp_daemon_answers_no_peer_of_another_user (needs \`sudo -n -u nobody\`; runs in"
     echo "  codetracer.yml test-non-gui, Linux leg, where ci/test/non-gui.sh declares it)"
   fi
-  cargo nextest run --release --run-ignored ignored-only -E "not binary(mcp_dive_in_fetch_gateway_test) and ($peer_filter) and ($bm_filter)" || \
+  {{rq}} cargo nextest run --release --run-ignored ignored-only -E "not binary(mcp_dive_in_fetch_gateway_test) and ($peer_filter) and ($bm_filter)" || \
     if [ "$?" = "4" ]; then \
       echo "  (no ignored tests in backend-manager; treating as no-op)"; \
     else \
@@ -2363,11 +2409,11 @@ test-e2e *args:
   # this recipe, so the whole suite is type-checked once per run, whatever
   # subset of it the arguments select.
   npx tsc --noEmit
-  env CODETRACER_DEV_TOOLS=0 npx playwright test --workers=1 "$@"
+  CODETRACER_DEV_TOOLS=0 {{rq1}} npx playwright test --workers=1 "$@"
 
 dev-tools-test-e2e *args:
   cd ${CODETRACER_REPO_ROOT_PATH}/src/tests/gui && \
-    env CODETRACER_DEV_TOOLS=1 npx playwright test --workers=1 \
+    CODETRACER_DEV_TOOLS=1 {{rq1}} npx playwright test --workers=1 \
       {{args}}
 
 # Show accumulated test timing statistics.
@@ -4241,6 +4287,17 @@ test-css-token-resolution:
   mkdir -p test-logs
   exec > >(tee test-logs/test-css-token-resolution.log) 2>&1
   bash ci/test/css-token-resolution.sh
+
+# A `:has()` that names the `style` attribute is re-evaluated on every
+# inline-style write, and one anchored at `:root`/`html` on every inserted
+# element; Chromium restyles the whole document each time. The caption bar's
+# switch had both shapes and made the Changes panel's 300-file Code tab take
+# 45-100 s to mount at 360px. Runs the guard's planted fixtures, compiles the
+# shipped stylesheets and reads the OUTPUT (Stylus nesting decides what a
+# `&:has()` is anchored at). Needs `stylus`, so it runs in the dev shell.
+# See ci/test/css-has-invalidation-guard.py.
+test-css-has-invalidation:
+  bash ci/test/css-has-invalidation.sh
 
 # The guard above, shown failing. Ten arms: four defects it must report (an
 # unresolved token, a theme redefining a token, and a legacy palette leak —

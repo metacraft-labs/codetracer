@@ -1157,13 +1157,38 @@ package codeTracer:
       # the fs-snoop shim.
       let inputStyl = "src/frontend/styles/" & name & ".styl"
       let outputCss = buildDebugPath("frontend/styles/" & name & ".css")
-      node(
-        args = @["node_modules/stylus/bin/stylus",
-                 "-o", outputCss,
-                 inputStyl],
-        actionId = "stylus-" & name,
-        extraInputs = @[inputStyl],
-        extraOutputs = @[outputCss])
+      #
+      # CACHEABLE ONLY THIS WAY. Through the typed `node(...)` call every
+      # stylus edge re-ran on every build: repro refused to publish its record
+      # for two reasons ("cache-publish-skipped: reasons=unblessed-entropy,
+      # monitor-loss"), measured with `repro internal io monitor run` on node
+      # 20.20.2:
+      #   * monitor-loss: V8's JIT maps writable executable pages, and the
+      #     monitor cannot scan code written into them for inline syscalls, so
+      #     it reports an unknown-scope loss. `--jitless` runs the interpreter
+      #     only; the loss is gone and the CSS is byte-identical.
+      #   * entropy: node draws `getentropy` at start-up on every run (even
+      #     `node -e 1`; `--random-seed` / `--hash-seed` do not remove it).
+      #     Stylus compiles a .styl file to CSS deterministically and never
+      #     puts a random value into its output, so the draw is blessed for
+      #     these edges only. The typed `node` wrapper cannot carry a per-edge
+      #     blessing by design, hence `buildAction` with the call written out.
+      buildAction(
+        id = "stylus-" & name,
+        call = inlineExecCall(@["node", "--jitless",
+          "node_modules/stylus/bin/stylus",
+          "-o", outputCss,
+          inputStyl]),
+        inputs = @[inputStyl],
+        outputs = @[outputCss],
+        nonDeterminism = ndpEntropyBlessed,
+        nonDeterminismJustification =
+          "node draws getentropy at start-up on every run (V8 and OpenSSL " &
+          "seeding); stylus compiles one .styl file to CSS and writes no " &
+          "random value into it, so the CSS depends only on the monitored " &
+          "inputs. Measured: --jitless output is byte-identical to the JIT " &
+          "build's, and two builds produce the same bytes.",
+        toolIdentityRefs = @["node"])
 
     template ctShell(actionIdValue, commandValue: string;
                      extraInputsValue: openArray[string] = [];
