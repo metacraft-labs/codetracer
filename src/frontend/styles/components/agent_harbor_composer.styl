@@ -110,12 +110,16 @@ AH_COMPOSER_PAD = 0.75rem
 .ah-composer-sheet
   dropdown-surface-chrome()
   position: absolute
-  top: calc(100% + DROPDOWN_TRIGGER_GAP)
+  // Stylus does not substitute a variable inside a literal `calc()`; the
+  // `%` form puts the gap's value in (auto_hide.styl does the same).
+  top: "calc(100% + %s)" % DROPDOWN_TRIGGER_GAP
   left: 50%
   transform: translateX(-50%)
   // min(40rem, the window less 0.5rem each side): the viewmodel's rule.
   width: unquote("min(40rem, calc(100vw - 1rem))")
-  max-height: unquote("calc(100vh - var(--caption-bar-height, 2.125rem) - 1rem)")
+  // Its foot 1rem above the window's, the trigger gap taken off too (the
+  // gap moved the sheet down; without it the clearance fell to 11px).
+  max-height: "calc(100vh - var(--caption-bar-height, 2.125rem) - 1rem - %s)" % DROPDOWN_TRIGGER_GAP
   // A body that scrolls and a footer that stays: the send line is always in
   // view, however long the form above it.
   display: flex

@@ -322,9 +322,9 @@ proc drawResults*(r: GpuiRenderer; host: GpuiElement; vm: ResultCommandsVM;
   let blocks = r.bodyBlocks(p, vm, innerW, narrow, press)
   var total = 0
   for b in blocks: total += b.heightPx
-  # Up to the window less the caption bar and its inset (the composer's
-  # `max-height`).
-  let maxH = heightPx - CaptionBarPx - SheetInsetPx
+  # Up to the window less the caption bar, its inset and the trigger gap
+  # (the composer's `max-height`).
+  let maxH = heightPx - CaptionBarPx - SheetInsetPx - DropdownTriggerGapPx
   let bodyRoom = max(16, maxH - topPx - 4)
   var last = blocks.high
   var moreBelow = false

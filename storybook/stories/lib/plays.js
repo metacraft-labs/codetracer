@@ -179,7 +179,24 @@ function terminalCheck(assert) {
 // the sheet draws: its phase and routing state, the header, each
 // destination row's mark, delivery and actions, the chips and the form.
 
-const composerCheck = (assert) => hostCheck(".ah-composer-sheet", assert);
+// Where every composer story's sheet hangs (note 237, the coordinator's
+// follow-up): DROPDOWN_TRIGGER_GAP (6px) below the field, and its tallest
+// form still 1rem (16px) above the window's foot, so the gap does not eat
+// into that clearance.
+function expectSheetPlaced(el) {
+  const sheet = el.querySelector(".ah-composer-sheet");
+  if (!sheet || !sheet.offsetParent) return;
+  const s = sheet.getBoundingClientRect();
+  if (s.height === 0) return;
+  // The block the sheet hangs from (`top: calc(100% + gap)`): the field's row.
+  const f = sheet.offsetParent.getBoundingClientRect();
+  expect(Math.round(s.top - f.bottom)).toBe(6);
+  expect(s.bottom).toBeLessThanOrEqual(window.innerHeight - 16 + 0.5);
+}
+const composerCheck = (assert) => hostCheck(".ah-composer-sheet", async (el) => {
+  await assert(el);
+  expectSheetPlaced(el);
+});
 const sheetOf = (el) => el.querySelector(".ah-composer-body");
 const headerOf = (el) => el.querySelector(".ah-composer-header")?.textContent ?? "";
 const rowOf = (el, target) => el.querySelector(`.ah-composer-row[data-ah-target="${target}"]`);

@@ -66,12 +66,15 @@ export omnibox_composer_vm, agent_harbor_composer_words, ah_theme
 const
   CaptionBarPx* = 34      ## `--caption-bar-height` (2.125rem)
   FieldHeightPx* = 28     ## COMMAND_INPUT_HEIGHT
-  SheetTopPx* = 33
+  DropdownTriggerGapPx* = 6
+    ## `DROPDOWN_TRIGGER_GAP` (0.375rem): a menu's gap under its trigger.
+  SheetTopPx* = 33 + DropdownTriggerGapPx
     ## Where the sheet's top edge is: on the web it hangs
-    ## `DROPDOWN_TRIGGER_GAP` under the omnibox's box, which puts it at 33px
-    ## in every capture of the layout record (`composer-sheet`), against the
-    ## field's lower edge.
-  SheetInsetPx* = 16      ## `max-height: 100vh − caption bar − 1rem`
+    ## `DROPDOWN_TRIGGER_GAP` under the omnibox's box, whose lower edge is at
+    ## 33px, so at 39px in every capture of the layout record
+    ## (`composer-sheet`). (The web's `calc()` had dropped the gap, note 237,
+    ## and the record and this constant had read 33.)
+  SheetInsetPx* = 16      ## `max-height: 100vh − caption bar − 1rem − gap`
   SheetRadiusPx* = 6      ## DROPDOWN_RADIUS
   PadPx* = 12             ## AH_COMPOSER_PAD
   TitleColPx* = 116       ## a row's title column (7.25rem)
@@ -92,7 +95,7 @@ const
   FieldTopPx* = 5
     ## The omnibox field's top in the caption bar: where the web lays out
     ## `.ah-composer-input-row` (5px in every capture of the layout record),
-    ## its lower edge meeting the sheet's top border (`SheetTopPx`).
+    ## its lower edge `DropdownTriggerGapPx` above the sheet's (`SheetTopPx`).
   AddPx = 21
     ## The `+` control's width as the web lays it out (`.ah-composer-add`,
     ## measured 21px in the browser), narrower than a square control.
@@ -870,8 +873,9 @@ proc drawComposer*(r: GpuiRenderer; host: GpuiElement; vm: OmniboxComposerVM;
     total += b.heightPx
   total += EndPadPx
   # The sheet is as tall as what it holds, up to the window less the caption
-  # bar and its inset (`max-height`), its two hairlines included.
-  let maxH = heightPx - CaptionBarPx - SheetInsetPx
+  # bar, its inset and the trigger gap (`max-height`), its two hairlines
+  # included.
+  let maxH = heightPx - CaptionBarPx - SheetInsetPx - DropdownTriggerGapPx
   let bodyRoom = max(MoreLinePx + 1, maxH - 2 - topPx - footerPx)
   var bodyPx = total
   var scroll = 0
