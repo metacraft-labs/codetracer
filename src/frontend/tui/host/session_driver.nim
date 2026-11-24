@@ -139,10 +139,17 @@ proc performPointMenuOp*(s: HeadlessDebugSession; op: PointMenuOp;
         said(false, "there are no enabled tracepoints to run")
       else:
         nextTracepointId += specs.len
-        let hits = s.runTracepoints(specs)
-        PointMenuOutcome(performed: true, swept: hits, sweptSpecs: specs.len,
-                         message: "ran " & $specs.len & " tracepoint(s): " &
-                                  $hits.len & " hit(s)")
+        try:
+          let hits = s.runTracepoints(specs)
+          PointMenuOutcome(performed: true, swept: hits,
+                           sweptSpecs: specs.len,
+                           message: "ran " & $specs.len & " tracepoint(s): " &
+                                    $hits.len & " hit(s)")
+        except DapRequestRefusedError as e:
+          # The engine refused the sweep (codetracer#880): its sentence, in
+          # the wording every front-end uses for that, not the generic
+          # "could not <op>" below.
+          said(false, tracepointRefusalText(e.msg))
   except CatchableError as e:
     said(false, "could not " & $op & ": " & e.msg)
 

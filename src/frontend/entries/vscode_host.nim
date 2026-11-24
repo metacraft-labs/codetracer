@@ -42,8 +42,10 @@ import ../viewmodel/viewmodels/[calltrace_vm, debug_controls_vm,
 import ../viewmodel/viewmodels/[origin_chain_vm, origin_chain_bridges]
 import ../../common/lang as common_lang
 
-const TracepointRunRefused* = "the replay refused to run the tracepoint"
-  ## A tracepoint row's detail when `ct/run-tracepoints` was refused.
+# A tracepoint row's detail when `ct/run-tracepoints` was refused — the one
+# wording the terminal and GPUI also use (`tracepointRefusalText`), defined
+# beside the request it answers.
+export replay_data_store.TracepointRunRefused
 
 type
   HostedDebugSession = ref object
@@ -331,7 +333,7 @@ proc runTracepoint*(host: VsCodeHost; path: string; line: int;
     proc(message: string) =
       debugger.store.applyTracepointResults(@[spec], @[TracepointSweepHit(
         tracepointId: spec.tracepointId, path: path, line: line,
-        errorMessage: TracepointRunRefused & ": " & message)],
+        errorMessage: tracepointRefusalText(message))],
         replaceHits = false))
 
 proc onFlowLines*(host: VsCodeHost;

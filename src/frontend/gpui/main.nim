@@ -7831,6 +7831,13 @@ proc runGpuiTracepoint(r: GpuiRenderer; path: string; line: int;
     hits = gSession.runTracepoints(@[TracepointSweepSpec(
       tracepointId: gTracepointsRun - 1, path: path, line: line,
       expression: expression)])
+  except DapRequestRefusedError as e:
+    # The engine refused the sweep (codetracer#880): its sentence on the
+    # window's status line, where the user reads it; the session goes on.
+    sayStatus(tracepointRefusalText(e.msg))
+    refreshReplayWindow(r)
+    drawTopBar(r)
+    return
   except CatchableError as e:
     traceGesture("tracepoint failed: " & e.msg)
     return
@@ -7864,6 +7871,11 @@ proc runGpuiPointMenuOp(r: GpuiRenderer; op: PointMenuOp) =
   gTracepointsRun = nextId
   traceGesture("menu " & PointMenuActions[op] & ": " & done.message)
   refreshReplayWindow(r)
+  if op == pmoRunAllTracepoints and not done.performed:
+    # A sweep that did not run — the engine refused it (codetracer#880), or
+    # there was nothing to run — says why on the status line.
+    sayStatus(done.message)
+    drawTopBar(r)
   if op == pmoRunAllTracepoints and done.performed:
     showTracepointHits(r, done.swept,
       "tracepoints: " & $done.sweptSpecs & " run — " & $done.swept.len &
