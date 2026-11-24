@@ -1,5 +1,8 @@
 {
   "J1": "the exit is SIGSEGV",
+  "J10": "what it echoed is in the plugin log",
+  "J11": "the hang is flame's (the watchdog's `busy`)",
+  "J12": "both active",
   "J2": "send refuses once the child is 16777216 bytes behind (accepted 12)",
   "J3": "a process stuck in a handler is stopped",
   "J4": "SIGTERM, a stuck plugin, without setpriv (the exit guard): and its plugin process ended with it",
@@ -7,6 +10,7 @@
   "J6": "shutdown waits for the exit and forgets the group",
   "J7": "exit status 127 (Node's spawn error): the process exited with status 0",
   "J8": "every fault is flame's: the crash record on stderr was read before the exit",
+  "J9": "a setpriv whose probe fails is not used",
   "K1": "the snapshot's suspect layer is transparent, and names who was passed",
   "K2": "the relayed step reached the primary's backend",
   "K3": "the pane shows the RENDERER's session, through the mirror",
