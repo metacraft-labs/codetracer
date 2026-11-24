@@ -141,6 +141,31 @@ when defined(js):
     ## surface that swallows the click (Monaco's view zones and widgets).
     bindElementOperation(element, operation, run, carried = true, onDown = true)
 
+  # A `MockRenderer` suite compiled with `nim js` draws `MockNode`s, not DOM
+  # elements: their bindings are kept here, by node identity, and read by the
+  # `MockNode` overload of `runBoundOperation` (a `MockNode` has no
+  # `setAttribute` to carry them on).
+  var mockNodes: seq[MockNode]
+  var mockRuns: seq[Table[string, ElementRun]]
+
+  proc mockBind(node: MockNode; operation: string; run: ElementRun) =
+    for i, n in mockNodes:
+      if n == node:
+        mockRuns[i][operation] = run
+        return
+    mockNodes.add node
+    mockRuns.add {operation: run}.toTable
+
+  proc runBoundOperation*(node: MockNode; operation: string;
+                          press: PressInfo): bool =
+    ## Runs the procedure bound to the mock `node` for `operation`; false
+    ## when it has none.
+    for i, n in mockNodes:
+      if n == node and mockRuns[i].hasKey(operation):
+        mockRuns[i][operation](press)
+        return true
+    false
+
 else:
   var nativeRuns = initTable[pointer, Table[string, ElementRun]]()
     ## A `MockRenderer` suite's bindings, keyed by the node.
@@ -161,10 +186,10 @@ const PressDownValue* = "down"
 proc setNodeAttribute[R, N](r: R; node: N; name, value: string) =
   ## On the DOM the element's own `setAttribute` (whichever renderer drew
   ## it); under `MockRenderer` the node's attribute table.
-  when defined(js):
-    jsSetAttribute(cast[JsObject](node), cstring(name), cstring(value))
-  elif N is MockNode:
+  when N is MockNode:
     node.attributes[name] = value
+  elif defined(js):
+    jsSetAttribute(cast[JsObject](node), cstring(name), cstring(value))
   else:
     mixin setAttribute
     r.setAttribute(node, name, value)
@@ -178,7 +203,9 @@ proc bindOperation*[R, N](r: R; node: N; operation: string; run: ElementRun;
     setNodeAttribute(r, node, OperationAttribute, operation)
   if onDown:
     setNodeAttribute(r, node, "data-ct-press", PressDownValue)
-  when defined(js):
+  when defined(js) and N is MockNode:
+    mockBind(node, operation, run)
+  elif defined(js):
     bindElementOperation(cast[JsObject](node), operation, run, carried = false)
   else:
     nativeRuns.mgetOrPut(cast[pointer](node),
