@@ -79,7 +79,7 @@ from ../viewmodel/viewmodels/flow_layout import
   FlowSourceToken, tokenizeSourceExpressions,
   stepIndexForTicks, orderIterationSteps, firstBodyStepIn,
   closestIterationStepCount, FlowLayoutLoop, FlowLayoutStep, FlowLayoutWindow,
-  FlowLayoutEvent, FlowValueText
+  FlowLayoutEvent, FlowValueText, groupStepsByLine
 from isonim/web/dom_api import nil
 
 type
@@ -2871,7 +2871,11 @@ proc recalculateMaxFlowLineWidth*(self: FlowComponent) =
   self.maxFlowLineWidth = 0
   let monaco = self.editorUI.monacoEditor
 
-  for position, stepCounts in self.flow.positionStepCounts:
+  # The lines `createFlowLines` draws (`groupStepsByLine`): a step that names
+  # no source line, such as Ruby's `<top-level>` entry at line 0, has no width
+  # to measure, and Monaco throws for it (#908).
+  for group in groupStepsByLine(self.flow[]):
+    let position = group.line
     let positionMaxColumn = monaco.getModel().getLineMaxColumn(position)
     var sourceLength = monaco.getOffsetForColumn(position, positionMaxColumn)
 
@@ -3923,7 +3927,17 @@ proc createFlowLines(self: FlowComponent) =
   let editorContentLeft =
     self.editorUI.monacoEditor.config.layoutInfo.contentLeft.float
 
-  for line, stepCounts in self.flow.positionStepCounts:
+  # The lines come from `flow_layout.groupStepsByLine`, the shared contract,
+  # not from the raw `positionStepCounts`: it leaves out a step that names no
+  # source line. Ruby records its `<top-level>` frame's entry at line 0, and a
+  # flow line for it made every later Monaco query about the line
+  # (`getLineMaxColumn(0)` in `flowLeftStyle`) throw "Illegal value for
+  # lineNumber". The throw ended the render of that editor's labels, and on a
+  # zoom it ended `updateEditors` before the editors after it were redrawn,
+  # which left their labels at the old size over the code (#908).
+  for group in groupStepsByLine(self.flow[]):
+    let line = group.line
+    let stepCounts = group.stepCounts
     if line < self.tab.sourceLines.len:
       for stepCount in stepCounts:
         let step = self.flow.steps[stepCount]

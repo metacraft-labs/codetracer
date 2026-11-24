@@ -5,9 +5,10 @@
 # `wayland-run-test.sh`, the window lanes' compositor) over the real `calc`
 # recording and `replay-server`, with the `acme-tools` test package installed as
 # a component (`plugin_process_fixture.installPackage`). The driver,
-# `ci/test/gpui_plugins_window.py`, types real keys through the compositor and
+# `ci/test/gpui_plugins_window.py`, types real keys through the compositor (and
+# presses a real pointer, isonim-gpui's `virtual-pointer`) and
 # reads the window's own gesture trace, the process table and `grim` frames;
-# its header lists the four windows and what each shows.
+# its header lists the windows and what each shows.
 #
 #   bash ci/test/gpui-plugins-window.sh            # capture
 #   bash ci/test/gpui-plugins-window.sh --record   # -> src/tests/visual/gpui-plugins-window.json
@@ -16,6 +17,7 @@
 # `ci/test/gpui-window-captures.sh plugins` re-takes it.
 #
 # PREREQUISITES are refused by name: sway, swaymsg, wayland-info, wtype, grim,
+# isonim-gpui's `build/virtual-pointer`,
 # tesseract, pgrep, python3, nim, `REPLAY_SERVER_BIN`, the `calc` recording and
 # a `codetracer-gpui` built against the WINDOWED shim
 # (`CODETRACER_GPUI_PLUGINS_BIN`, default build/bin/codetracer-gpui-window).
@@ -58,6 +60,12 @@ nim c --hints:off --warnings:off --nimcache:"${OUT}/nimcache-install" \
 	src/frontend/gpui/tests/gpui_plugins_install.nim >"${OUT}/install-build.log" 2>&1 ||
 	fail "building the installer failed (${OUT}/install-build.log)"
 export CODETRACER_GPUI_PLUGINS_INSTALLER="${OUT}/gpui_plugins_install"
+# A real pointer for the pane-click window: isonim-gpui's virtual-pointer
+# (`scripts/build-virtual-pointer.sh`, which `gpui-window-captures.sh` runs in
+# isonim-gpui's dev shell; `CODETRACER_VIRTUAL_POINTER` names another build).
+VP="${CODETRACER_VIRTUAL_POINTER:-${ISONIM_GPUI}/build/virtual-pointer}"
+[ -x "${VP}" ] || fail "${VP} is not built (isonim-gpui's scripts/build-virtual-pointer.sh)"
+export CODETRACER_VIRTUAL_POINTER="${VP}"
 export CODETRACER_GPUI_PLUGINS_BIN="${BIN}"
 
 bash "${ISONIM_GPUI}/scripts/wayland-run-test.sh" -- \

@@ -1261,6 +1261,27 @@ function centerCheck(assert) {
   };
 }
 
+// A multi-process recording's session tab with its process switcher
+// (CTF-P2c step 5, study §2.6 and D25): the recording's tab, active, holds
+// the recording switcher's buttons for its processes. A narrow window
+// (below 720px) draws the first process and the active one before +N.
+const processTab = (el) => el.querySelector(".ah-ps-bar .ah-ps-tab");
+function processCheck(assert) {
+  return async ({ canvasElement }) => {
+    await waitFor(canvasElement, ".ah-ps-bar .ah-ps-tab .ah-rec-button");
+    const tab = processTab(canvasElement);
+    expect(tab.classList.contains("active")).toBe(true);
+    expect(tab.querySelector(".session-tab-label").textContent).toBe("envelope-flow");
+    expect(tab.querySelector(".ah-ps-processes").getAttribute("data-ct-pane")).toBe("processSwitcher");
+    expect(tab.getAttribute("title")).toContain("Ctrl+Alt+PageDown / Ctrl+Alt+PageUp to move between them");
+    const tabs = canvasElement.querySelectorAll(".ah-ps-bar .session-tab");
+    expect(tabs.length).toBe(2);
+    expect(tabs[1].textContent).toBe("sudoku");
+    await assert(tab, window.innerWidth < 720);
+  };
+}
+const processButtons = (tab) => [...tab.querySelectorAll(".ah-rec-button")];
+
 const gazeHost = (el) => el.querySelector(".ah-gaze-host");
 function gazeCheck(assert) {
   return async ({ canvasElement }) => {
@@ -1354,6 +1375,52 @@ const centerChecks = {
     expect(mark.classList.contains("ah-gaze-paused")).toBe(true);
     expect(mark.getAttribute("title")).toContain("Ctrl+Alt+Y resumes it.");
     expect(mark.querySelectorAll("svg path").length).toBe(2);   // struck through
+  }),
+  "agent-harbor-process-switcher-three": processCheck(async (tab, narrow) => {
+    const buttons = processButtons(tab);
+    expect(buttons.map((b) => b.textContent)).toEqual(narrow ? ["1", "2"] : ["1", "2", "3"]);
+    expect(buttons[0].classList.contains("ah-rec-active")).toBe(true);
+    expect(buttons[1].getAttribute("title")).toBe("backend \u00b7 pid 4182 \u00b7 /srv/envelope/bin/backend");
+    expect(tab.getAttribute("data-ah-process-ringed")).toBe("0");
+    // The next-process key moves to process 2 and the previous-process key
+    // back: the story ends as it began.
+    const keyOf = (key) => new KeyboardEvent("keydown", { key, code: key, ctrlKey: true, altKey: true });
+    window.dispatchEvent(keyOf("PageDown"));
+    await waitUntil(() => processTab(document).getAttribute("data-ah-process-active") === "2", "moved by the key");
+    window.dispatchEvent(keyOf("PageUp"));
+    await waitUntil(() => processTab(document).getAttribute("data-ah-process-active") === "1", "moved back");
+  }),
+  "agent-harbor-process-switcher-correlation": processCheck(async (tab) => {
+    // Process 2 is ringed until the reader goes there: the switcher's own
+    // ring (study D81), the tab's fact and its button's tooltip.
+    expect(tab.getAttribute("data-ah-process-ringed")).toBe("2");
+    const ringed = processButtons(tab).filter((b) => b.classList.contains("ah-rec-ringed"));
+    expect(ringed.map((b) => b.textContent)).toEqual(["2"]);
+    // The ring and its halo: two box shadows outside the button (D81).
+    expect(getComputedStyle(ringed[0]).boxShadow.split("px,").length).toBe(2);
+    expect(tab.getAttribute("data-ah-process-active")).toBe("1");
+    expect(processButtons(tab)[1].getAttribute("title"))
+      .toContain("a correlation marker (envelope-flow, step 1 204) leads here");
+  }),
+  "agent-harbor-process-switcher-many": processCheck(async (tab, narrow) => {
+    expect(tab.getAttribute("data-ah-processes")).toBe("8");
+    expect(processButtons(tab).length).toBe(narrow ? 2 : 5);
+    const more = tab.querySelector(".ah-rec-more");
+    expect(more.textContent).toBe(narrow ? "+6" : "+3");
+    // The failed worker is behind +N: the chip takes its error severity.
+    expect(more.classList.contains("ah-att-failed")).toBe(true);
+  }),
+  "agent-harbor-process-switcher-loading-and-missing": processCheck(async (tab, narrow) => {
+    const buttons = processButtons(tab);
+    expect(buttons[1].classList.contains("ah-rec-loading")).toBe(true);
+    expect(buttons[1].getAttribute("title")).toContain("(loading)");
+    if (!narrow) {
+      expect(buttons[2].classList.contains("ah-rec-missing")).toBe(true);
+      expect(buttons[2].getAttribute("title")).toContain("(missing: not in the recording's bundle)");
+    } else {
+      // The missing worker is behind +1: the chip takes the warning severity.
+      expect(tab.querySelector(".ah-rec-more").classList.contains("ah-att-needs-input")).toBe(true);
+    }
   }),
   // L7: the control center itself, under the caption tabs.
   "layout-l7-control-center": async ({ canvasElement }) => {

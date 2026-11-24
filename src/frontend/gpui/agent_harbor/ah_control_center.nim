@@ -63,6 +63,16 @@ const
   RowPadPx = 6            ## a waiting row's padding
   RecentPadPx = 4         ## a recent launch's padding
 
+proc renameFact(r: GpuiRenderer; e: GpuiElement; name, to: string) =
+  ## Every `data-ah-<name>` in `e`'s tree moved to `data-ah-<to>` (the old
+  ## one emptied: an empty fact reads as none).
+  if e.isNil: return
+  let v = getAttribute(e, "data-ah-" & name)
+  if v.len > 0:
+    r.setAttribute(e, "data-ah-" & name, "")
+    r.tag(e, to, v)
+  for i in 0 ..< childCount(e): r.renameFact(nthChild(e, i), name, to)
+
 proc acts(r: GpuiRenderer; el: GpuiElement; operation, target: string;
           press: ControlCenterPress) =
   r.setAttribute(el, OperationAttribute, operation)
@@ -297,6 +307,9 @@ proc overviewColumn(r: GpuiRenderer; p: AhPalette; vm: ControlCenterVM;
     let rows = vm.waiting
     let head = r.drawSectionHeader(p, WaitingHeading, "", waitingCountText(rows.len), widthPx)
     r.tag(head, "head", "waiting")
+    # The count sits where a panel has its summary, but the tab's summary is
+    # the Initiatives panel's own: a reader of the tab finds that one.
+    r.renameFact(head, "summary", "waiting-count")
     r.appendChild(waiting, head)
     let list = r.box(column = true, pairs = [("padding-left", $PadXPx & "px"),
                                              ("padding-right", $PadXPx & "px"),

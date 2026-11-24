@@ -35,6 +35,7 @@
 
 import std/[json, os, strutils]
 
+import ../key_names
 import ./diagnostics
 import ./manifest
 
@@ -220,7 +221,9 @@ proc parsePluginPackage*(text, source, component: string): PluginPackage =
     if not kb.isNil and kb.kind == JArray:
       let commands = m.commandIds
       for b in kb:
-        let key = b{"key"}.getStr("").toLowerAscii
+        # The modifiers' spelling folded, the key's own case kept: `J` is
+        # not `j` (`key_names.bindingKeyName`).
+        let key = bindingKeyName(b{"key"}.getStr(""))
         let op = b{"command"}.getStr(b{"op"}.getStr(""))
         if key.len == 0 or op.len == 0:
           pp.parsed.errors.add pluginError(pid, pecMissingField,

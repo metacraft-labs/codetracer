@@ -506,6 +506,10 @@ type
       ## §11.7.3: the plugin layers' answer, top first.
     routeStaticKey*: proc(key: string): PluginRoute {.closure.}
       ## §11.7.2: the plugin pass, between the user's bindings and the base.
+    claimsKey*: proc(key: string): bool {.closure.}
+      ## Whether a plugin layer or binding would take `key` (its canonical
+      ## name), asked without routing it: an Alt chord the terminal does not
+      ## bind is read as the bare key unless a plugin binds the chord.
     layerLabel*: proc(): string {.closure.}
       ## §11.7.3: `FLAME MODE (acme-tools.flame)` while a plugin layer is the
       ## top layer, so a user can always see who holds the keyboard.
@@ -10315,10 +10319,14 @@ proc handleTokenUnwatched(rt: TuiRuntime; token: string;
   # something here (the desktop's `Alt+T`, Emacs's `M-f`, CUA's `Alt+Up`, a
   # user's row) is taken as the chord; any other is the key alone, which is
   # what the framer delivered before it framed Alt.
+  # A PLUGIN'S Alt chord (`Ctrl+Alt+k`, the `ESC 0x0b` a terminal sends for
+  # it) is a chord the terminal binds too, through the plugin pass.
   if token.len == 2 and token[0] == '\x1b' and token[1] != '\x1b' and
      not rt.app.menu.isOpen and not rt.app.content.open and
      not rt.terminalInfo.open and
-     rt.probeKey(rt.lastKey).kind == erNothing:
+     rt.probeKey(rt.lastKey).kind == erNothing and
+     (rt.plugins.isNil or rt.plugins.claimsKey.isNil or
+      not rt.plugins.claimsKey(rt.lastKey)):
     return rt.handleTokenUnwatched(token[1 .. 1], nowMs)
   # PLAT-71: `:terminal-info` takes every token while it is open.
   if rt.terminalInfo.open:
@@ -10477,14 +10485,17 @@ proc handleTokenUnwatched(rt: TuiRuntime; token: string;
       recovery = rt.plugins.observeEscape()
     if not recovery and not rt.prompt.open and not rt.app.omnibar.isOpen and
        not rt.app.content.open:
-      var route = rt.plugins.routeLayerKey(lower)
+      # THE CANONICAL NAME, NOT ITS LOWER CASE: `J` and `j` are two keys
+      # here (`G` is a command, `g` is not), and a plugin's binding names one
+      # of them (`key_names.bindingKeyName`).
+      var route = rt.plugins.routeLayerKey(name)
       if not route.consumed:
         var userBound = false
         for b in rt.router.user.bindings:
-          if b.chords.len == 1 and b.chords[0].toLowerAscii == lower:
+          if b.chords.len == 1 and b.chords[0] == name:
             userBound = true
         if not userBound:
-          route = rt.plugins.routeStaticKey(lower)
+          route = rt.plugins.routeStaticKey(name)
       if route.consumed:
         if route.note.len > 0: rt.note(route.note)
         result.repaint = true

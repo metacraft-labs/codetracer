@@ -100,7 +100,7 @@ import ../../agent_harbor/ah_tui_pie
 from ../../app/views/glyph_table import GlyphProfile
 import ../../agent_harbor/ah_tui_session_activity
 import ../../agent_harbor/ah_tui_suggested_actions
-import ../../agent_harbor/[ah_tui_control_center, ah_tui_gaze_mark]
+import ../../agent_harbor/[ah_tui_control_center, ah_tui_gaze_mark, ah_tui_process_switcher]
 import ../ctf_p3_tui_cover
 import ../../../viewmodel/agent_harbor_activity_cards
 import nim_agents/agent_harbor/fleet_records
@@ -151,7 +151,7 @@ proc themeOf(mode: DesignMode): string = (if mode == dmDark: "dark" else: "light
 const DrawnTextFacts = [
   "label", "title", "summary", "headline", "status", "meta", "progress", "source",
   "counts", "detail", "age", "activity", "origin", "inbox-position", "elsewhere-label",
-  "frame-title", "caveat", "failure", "error", "error-title"]
+  "frame-title", "caveat", "failure", "error", "error-title", "waiting-count"]
   ## The facts that name a text the node draws on its one row.
 
 proc elidedMatch*(drawn, value: string): bool =
@@ -1102,6 +1102,32 @@ proc checkPieStory(m: AhTuiMount): seq[string] =
             if g in byKind[b]:
               result.add "tier " & name & " draws " & $a & " and " & $b & " alike: " & g
 
+proc checkProcessSwitcher(view: AhNode; vm: ProcessSwitcherVM): seq[string] =
+  ## The multi-process recording's tab against its viewmodel (CTF-P2c step
+  ## 5): one active tab with the recording's name, its facts, and the
+  ## recording switcher's buttons for the processes at the tab's slots --
+  ## their numbers, tooltips and rings -- and `+N`.
+  let tabs = view.all("tab").filterIt(it.attr("active") == "true")
+  if tabs.len != 1:
+    result.add "the recording's tab is drawn " & $tabs.len & " times"
+    return
+  let t = tabs[0]
+  result.expect("title", t.attr("tab"), vm.title)
+  result.expect("processes", t.attr("processes"), $vm.entries.val.len)
+  result.expect("active", t.attr("process-active"), $vm.activeNumber)
+  result.expect("ringed", t.attr("process-ringed"), $vm.ringedNumber)
+  var slots = 0
+  try: slots = parseInt(t.attr("process-slots"))
+  except ValueError: result.add "no process-slots fact"
+  let b = vm.buttons(slots)
+  let drawn = t.all("recording")
+  result.expect("buttons", drawn.mapIt(it.attr("recording")), b.buttons.mapIt($it.number))
+  result.expect("tooltips", drawn.mapIt(it.attr("tooltip")), b.buttons.mapIt(it.tooltip))
+  result.expect("rings", drawn.mapIt(it.attr("recording-ringed") == "true"),
+                b.buttons.mapIt(it.ringed))
+  result.expect("hidden", t.all("recordings-hidden").mapIt(it.attr("recordings-hidden")),
+                (if b.hidden > 0: @[$b.hidden] else: newSeq[string]()))
+
 proc checkStory(m: AhTuiMount): seq[string] =
   let view = m.view
   if view.isNil: return @["no node says which surface was drawn"]
@@ -1124,6 +1150,7 @@ proc checkStory(m: AhTuiMount): seq[string] =
     checkControlCenter(view, m.canvas.root.all("surface").filterIt(
       it.attr("surface") == "agent-harbor-initiatives"), m.center)
   of "agent-harbor-status-gaze": checkGazeMark(view, m.gaze)
+  of ProcessSwitcherSurface: checkProcessSwitcher(view, m.processes)
   of PieStorySurface: checkPieStory(m)
   of "agent-harbor-session-activity":
     var problems = checkTimeline(view, m.timeline)

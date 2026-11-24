@@ -40,6 +40,7 @@ import isonim/web/dom_api
 import ../../common/view_vocabulary
 import ../view_vocabulary/web_binding as wbind
 import ../viewmodel/plugin_host/[protocol, key_snapshot]
+import ../../common/key_names
 import ../viewmodel/session_vm
 import ../viewmodel/sync/[transport, sync_host]
 import ./plugin_hooks
@@ -426,9 +427,10 @@ proc onState(payload: JsonNode) =
 # ---------------------------------------------------------------------------
 
 proc pluginKeyName(name: string): string =
-  ## The desktop's canonical key, in the plugin bindings' spelling: the
-  ## terminal's (`runtime`: the canonical name, lower case).
-  name.toLowerAscii
+  ## The desktop's canonical key, in the plugin bindings' spelling
+  ## (`key_names.bindingKeyName`): the modifiers' spelling folded, the key's
+  ## own case kept, so a binding of `J` does not take `j`.
+  bindingKeyName(name)
 
 proc focusedSurface(): string =
   ## The contributed pane holding the focus, or "".

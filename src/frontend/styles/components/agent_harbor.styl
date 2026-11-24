@@ -1506,6 +1506,27 @@ AH_MARK = 0.5rem
   font-size: ah-rem(type-ui-size-caption-md)
   color: colors-ui-text-primary-label
 
+// A recording a correlation marker leads to (a multi-process recording's
+// process; P2c study D25, D81): a quiet ring, 1px, 2px outside the button's
+// own outline, until the reader follows it; on `+N` when it hides that
+// recording. The ring is 1px over a 1px halo of the window's ground, both
+// just outside the button's own outline. It is the only mark of the state,
+// so it holds 3:1 (WCAG 2.2 SC 1.4.11) against the active tab's fill it sits
+// on as well as against its halo: in Dark the brand's 400 step (3.7:1 on the
+// fill, 5.8:1 on the halo; the action border, brand/500, is 2.5:1 on the
+// fill), in Light its 700 step (3.6:1 on the fill, 4.95:1 on the halo; the
+// action border is 2.8:1 on the halo). 2px out in all, it stays clear of a
+// 26px tab's edges; the buttons sit 2px apart, so a ringed one keeps 2px
+// either side, clear of its neighbours' outlines.
+.ah-rec-button.ah-rec-ringed
+  box-shadow: 0 0 0 0.0625rem colors-ui-surface-base-canvas, 0 0 0 0.125rem by-mode(colors-brand-400, colors-brand-700)
+  margin: 0 0.125rem
+
+// `+N` keeps its own inset outline under the ring.
+.ah-rec-more.ah-rec-ringed
+  box-shadow: inset 0 0 0 0.0625rem by-mode(colors-ui-border-primary, colors-ui-text-primary-caption), 0 0 0 0.0625rem colors-ui-surface-base-canvas, 0 0 0 0.125rem by-mode(colors-brand-400, colors-brand-700) !important
+  margin: 0 0.125rem
+
 // Previous / Next session and auto-switch, at the strip's start.
 .ah-inbox
   display: inline-flex

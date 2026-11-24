@@ -108,9 +108,12 @@ What the SDK gives each plugin:
   a click in a front-end does. `ct-lens.watch` calls
   `p.relay("state", "addWatch", %*{"expression": path})`. The actions a
   plugin can relay are the ones `src/frontend/viewmodel/sync/action_relay.nim`
-  lists. In the terminal, the six step and continue moves run as the
-  terminal's own commands; other actions reach the session but are shown at
-  the next stop (a relayed watch's row, a relayed calltrace jump).
+  lists. In the terminal every relayed action takes the terminal's own route
+  and is shown at once: a step as its command, a calltrace jump as the call
+  trace pane's jump, a watch as `:watch`, a seek as the timeline's. An action
+  the terminal cannot show (a live restore on a finished recording, a
+  search result the session does not hold, "continue tracing" under an
+  origin chain) is refused, and the status line names your plugin and why.
 - **`pushView`, `pushStatus`, `pushEnablement`, `pushContext`, `publish`,
   `pushLayer`/`popLayer`**: everything a plugin shows or binds is pushed.
   CodeTracer never waits for a plugin to decide what a key does or what a pane
@@ -145,11 +148,13 @@ A binding's `when` clause can read your context keys as
 ```
 
 Choose keys the terminal can deliver and the user's keymap leaves free.
-`:keys check` shows how a key arrives and what it is bound to. Two traps, as
-of this writing: a terminal sends Ctrl+Alt+letter as Escape plus a control
-byte, which arrives as Ctrl+letter, so such a binding never fires; and key
-names are compared without case, so a binding of `J` also takes `j`.
-Function keys avoid both.
+`:keys check` shows how a key arrives and what it is bound to. The spelling
+of the modifiers does not matter (`ctrl+alt+k`, `Ctrl+Alt+K`), but a bare
+letter's case does: `J` is Shift+j and does not take `j`. A terminal
+sends Ctrl+Alt+letter as Escape plus a control byte, and that reaches your
+binding, except for the letters whose control byte is another key: a
+terminal sends Ctrl+h, Ctrl+i, Ctrl+j and Ctrl+m as Backspace, Tab and Enter,
+so Ctrl+Alt+h, i, j and m arrive as Alt plus those keys.
 
 ### Modal layers
 
@@ -268,9 +273,31 @@ p.publish("visualisers", %*[
    "language": "python", "summary": "function (ct-lens)", "rank": 1}])
 ```
 
-`summary` is a template over the value's field names (`"{rows}x{cols}"`). The
-plugin must declare `{"viewModel": [{"id": "visualisers", "version": "1.0.0"}]}`
+`summary` is a template over the value's field names (`"{rows}x{cols}"`);
+`hide` lists fields to leave out (`"hide": ["password"]`). A row is checked as
+a project's visualiser rows are, and a row that fails the check is dropped.
+The plugin must declare `{"viewModel": [{"id": "visualisers", "version": "1.0.0"}]}`
 in its contributions, or the rows are ignored.
+
+A row with `"computed": true` is answered by your plugin. For the values on
+screen (the Variables pane, the scratchpad, the values beside the editor's
+lines) CodeTracer sends a `visualise` query and keeps drawing while it waits:
+
+```nim
+p.publish("visualisers", %*[{"id": "units", "computed": true,
+                             "typeMatch": "int"}])
+p.onQuery("visualise", proc(p: Plugin; input: JsonNode; req: Request) =
+  var answers = newJArray()
+  for v in input{"values"}:        # {"input": "42", "type": "int"}
+    answers.add %*{"input": v{"input"}, "text": v{"input"}.getStr & " ms"}
+  p.answer(req, %*{"answers": answers}))
+```
+
+`typeMatch` (with `matchKind` and `language`) narrows which values are sent.
+Each answer's `input` names the value it is for. When the answers arrive the
+values are drawn again with them. An answer for a stop the debugger has left is
+dropped. Empty answers, and answers longer than a summary may be, are
+ignored.
 
 ## Building
 

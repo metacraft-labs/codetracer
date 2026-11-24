@@ -32781,6 +32781,834 @@
         }
       }
     },
+    "agent-harbor-process-switcher-correlation-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "active-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 200.421875,
+          "h": 26,
+          "fill": "#3c3c3c"
+        },
+        "ps-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 200.421875,
+          "h": 26
+        },
+        "ps-processes": {
+          "x": 136.421875,
+          "y": 10,
+          "w": 62,
+          "h": 18
+        },
+        "ps-ringed": {
+          "x": 158.421875,
+          "y": 10,
+          "w": 18,
+          "h": 18
+        }
+      }
+    },
+    "agent-harbor-process-switcher-correlation-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "active-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 200.421875,
+          "h": 26,
+          "fill": "#b5ae9f"
+        },
+        "ps-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 200.421875,
+          "h": 26
+        },
+        "ps-processes": {
+          "x": 136.421875,
+          "y": 10,
+          "w": 62,
+          "h": 18
+        },
+        "ps-ringed": {
+          "x": 158.421875,
+          "y": 10,
+          "w": 18,
+          "h": 18
+        }
+      }
+    },
+    "agent-harbor-process-switcher-correlation-panel-dark": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 760,
+          "h": 640
+        },
+        "active-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 200.421875,
+          "h": 26,
+          "fill": "#3c3c3c"
+        },
+        "ps-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 200.421875,
+          "h": 26
+        },
+        "ps-processes": {
+          "x": 136.421875,
+          "y": 10,
+          "w": 62,
+          "h": 18
+        },
+        "ps-ringed": {
+          "x": 158.421875,
+          "y": 10,
+          "w": 18,
+          "h": 18
+        }
+      }
+    },
+    "agent-harbor-process-switcher-correlation-panel-light": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 760,
+          "h": 640
+        },
+        "active-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 200.421875,
+          "h": 26,
+          "fill": "#b5ae9f"
+        },
+        "ps-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 200.421875,
+          "h": 26
+        },
+        "ps-processes": {
+          "x": 136.421875,
+          "y": 10,
+          "w": 62,
+          "h": 18
+        },
+        "ps-ringed": {
+          "x": 158.421875,
+          "y": 10,
+          "w": 18,
+          "h": 18
+        }
+      }
+    },
+    "agent-harbor-process-switcher-correlation-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "active-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 202.859375,
+          "h": 26,
+          "fill": "#3c3c3c"
+        },
+        "ps-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 202.859375,
+          "h": 26
+        },
+        "ps-processes": {
+          "x": 136.421875,
+          "y": 10,
+          "w": 64.4375,
+          "h": 18
+        },
+        "ps-ringed": {
+          "x": 158.421875,
+          "y": 10,
+          "w": 18,
+          "h": 18
+        }
+      }
+    },
+    "agent-harbor-process-switcher-correlation-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "active-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 202.859375,
+          "h": 26,
+          "fill": "#b5ae9f"
+        },
+        "ps-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 202.859375,
+          "h": 26
+        },
+        "ps-processes": {
+          "x": 136.421875,
+          "y": 10,
+          "w": 64.4375,
+          "h": 18
+        },
+        "ps-ringed": {
+          "x": 158.421875,
+          "y": 10,
+          "w": 18,
+          "h": 18
+        }
+      }
+    },
+    "agent-harbor-process-switcher-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "active-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 196.421875,
+          "h": 26,
+          "fill": "#3c3c3c"
+        },
+        "ps-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 196.421875,
+          "h": 26
+        },
+        "ps-processes": {
+          "x": 136.421875,
+          "y": 10,
+          "w": 58,
+          "h": 18
+        }
+      }
+    },
+    "agent-harbor-process-switcher-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "active-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 196.421875,
+          "h": 26,
+          "fill": "#b5ae9f"
+        },
+        "ps-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 196.421875,
+          "h": 26
+        },
+        "ps-processes": {
+          "x": 136.421875,
+          "y": 10,
+          "w": 58,
+          "h": 18
+        }
+      }
+    },
+    "agent-harbor-process-switcher-loading-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "active-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 216.109375,
+          "h": 26,
+          "fill": "#3c3c3c"
+        },
+        "ps-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 216.109375,
+          "h": 26
+        },
+        "ps-processes": {
+          "x": 136.421875,
+          "y": 10,
+          "w": 77.6875,
+          "h": 18
+        }
+      }
+    },
+    "agent-harbor-process-switcher-loading-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "active-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 216.109375,
+          "h": 26,
+          "fill": "#b5ae9f"
+        },
+        "ps-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 216.109375,
+          "h": 26
+        },
+        "ps-processes": {
+          "x": 136.421875,
+          "y": 10,
+          "w": 77.6875,
+          "h": 18
+        }
+      }
+    },
+    "agent-harbor-process-switcher-loading-panel-dark": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 760,
+          "h": 640
+        },
+        "active-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 216.109375,
+          "h": 26,
+          "fill": "#3c3c3c"
+        },
+        "ps-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 216.109375,
+          "h": 26
+        },
+        "ps-processes": {
+          "x": 136.421875,
+          "y": 10,
+          "w": 77.6875,
+          "h": 18
+        }
+      }
+    },
+    "agent-harbor-process-switcher-loading-panel-light": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 760,
+          "h": 640
+        },
+        "active-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 216.109375,
+          "h": 26,
+          "fill": "#b5ae9f"
+        },
+        "ps-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 216.109375,
+          "h": 26
+        },
+        "ps-processes": {
+          "x": 136.421875,
+          "y": 10,
+          "w": 77.6875,
+          "h": 18
+        }
+      }
+    },
+    "agent-harbor-process-switcher-loading-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "active-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 221.0625,
+          "h": 26,
+          "fill": "#3c3c3c"
+        },
+        "ps-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 221.0625,
+          "h": 26
+        },
+        "ps-processes": {
+          "x": 136.421875,
+          "y": 10,
+          "w": 82.640625,
+          "h": 18
+        }
+      }
+    },
+    "agent-harbor-process-switcher-loading-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "active-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 221.0625,
+          "h": 26,
+          "fill": "#b5ae9f"
+        },
+        "ps-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 221.0625,
+          "h": 26
+        },
+        "ps-processes": {
+          "x": 136.421875,
+          "y": 10,
+          "w": 82.640625,
+          "h": 18
+        }
+      }
+    },
+    "agent-harbor-process-switcher-many-laptop-dark": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "active-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 273.125,
+          "h": 26,
+          "fill": "#3c3c3c"
+        },
+        "ps-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 273.125,
+          "h": 26
+        },
+        "ps-processes": {
+          "x": 136.421875,
+          "y": 10,
+          "w": 134.703125,
+          "h": 18
+        }
+      }
+    },
+    "agent-harbor-process-switcher-many-laptop-light": {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 1440,
+          "h": 900
+        },
+        "active-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 273.125,
+          "h": 26,
+          "fill": "#b5ae9f"
+        },
+        "ps-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 273.125,
+          "h": 26
+        },
+        "ps-processes": {
+          "x": 136.421875,
+          "y": 10,
+          "w": 134.703125,
+          "h": 18
+        }
+      }
+    },
+    "agent-harbor-process-switcher-many-panel-dark": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 760,
+          "h": 640
+        },
+        "active-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 273.125,
+          "h": 26,
+          "fill": "#3c3c3c"
+        },
+        "ps-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 273.125,
+          "h": 26
+        },
+        "ps-processes": {
+          "x": 136.421875,
+          "y": 10,
+          "w": 134.703125,
+          "h": 18
+        }
+      }
+    },
+    "agent-harbor-process-switcher-many-panel-light": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 760,
+          "h": 640
+        },
+        "active-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 273.125,
+          "h": 26,
+          "fill": "#b5ae9f"
+        },
+        "ps-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 273.125,
+          "h": 26
+        },
+        "ps-processes": {
+          "x": 136.421875,
+          "y": 10,
+          "w": 134.703125,
+          "h": 18
+        }
+      }
+    },
+    "agent-harbor-process-switcher-many-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "active-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 213.21875,
+          "h": 26,
+          "fill": "#3c3c3c"
+        },
+        "ps-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 213.21875,
+          "h": 26
+        },
+        "ps-processes": {
+          "x": 136.421875,
+          "y": 10,
+          "w": 74.796875,
+          "h": 18
+        }
+      }
+    },
+    "agent-harbor-process-switcher-many-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "active-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 213.21875,
+          "h": 26,
+          "fill": "#b5ae9f"
+        },
+        "ps-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 213.21875,
+          "h": 26
+        },
+        "ps-processes": {
+          "x": 136.421875,
+          "y": 10,
+          "w": 74.796875,
+          "h": 18
+        }
+      }
+    },
+    "agent-harbor-process-switcher-panel-dark": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 760,
+          "h": 640
+        },
+        "active-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 196.421875,
+          "h": 26,
+          "fill": "#3c3c3c"
+        },
+        "ps-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 196.421875,
+          "h": 26
+        },
+        "ps-processes": {
+          "x": 136.421875,
+          "y": 10,
+          "w": 58,
+          "h": 18
+        }
+      }
+    },
+    "agent-harbor-process-switcher-panel-light": {
+      "viewport": {
+        "width": 760,
+        "height": 640
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 760,
+          "h": 640
+        },
+        "active-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 196.421875,
+          "h": 26,
+          "fill": "#b5ae9f"
+        },
+        "ps-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 196.421875,
+          "h": 26
+        },
+        "ps-processes": {
+          "x": 136.421875,
+          "y": 10,
+          "w": 58,
+          "h": 18
+        }
+      }
+    },
+    "agent-harbor-process-switcher-sidebar-dark": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "active-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 198.859375,
+          "h": 26,
+          "fill": "#3c3c3c"
+        },
+        "ps-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 198.859375,
+          "h": 26
+        },
+        "ps-processes": {
+          "x": 136.421875,
+          "y": 10,
+          "w": 60.4375,
+          "h": 18
+        }
+      }
+    },
+    "agent-harbor-process-switcher-sidebar-light": {
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "regions": {
+        "surface": {
+          "x": 0,
+          "y": 0,
+          "w": 360,
+          "h": 900
+        },
+        "active-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 198.859375,
+          "h": 26,
+          "fill": "#b5ae9f"
+        },
+        "ps-tab": {
+          "x": 8,
+          "y": 6,
+          "w": 198.859375,
+          "h": 26
+        },
+        "ps-processes": {
+          "x": 136.421875,
+          "y": 10,
+          "w": 60.4375,
+          "h": 18
+        }
+      }
+    },
     "agent-harbor-result-opened-outside-laptop-dark": {
       "viewport": {
         "width": 1440,

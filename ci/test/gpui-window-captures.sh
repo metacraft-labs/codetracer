@@ -279,8 +279,10 @@ for w in "${which[@]}"; do
 		# Installed plugins in the window (Extensibility-Model §11): the
 		# `acme-tools` test package installed as a component, consent, one
 		# process for both plugins, a docked pane, a command, a restart,
-		# `--no-extensions`, and the input defences; the record is the
-		# window's own trace, the process table and OCR of its frames.
+		# `--no-extensions`, the input defences, a plugin pane's keys and
+		# click and its decorations, and the `ct-lens` package's three
+		# plugins; the record is the window's own trace, the process table
+		# and OCR of its frames.
 		in_compositor_shell "CODETRACER_PLUGINS_ISONIM_GPUI='${ISONIM_GPUI}' bash ci/test/gpui-plugins-window.sh" &&
 			bash ci/test/gpui-plugins-window.sh --record &&
 			suite gpui-shell src/frontend/gpui/tests/test_gpui_plugins_window.nim ||

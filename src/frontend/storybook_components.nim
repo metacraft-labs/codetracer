@@ -128,6 +128,8 @@ import stories/[dom_control_center_presses, agent_harbor_control_center_stories,
                 dom_gaze_presses, agent_harbor_gaze_stories]
 import viewmodel/views/[isonim_agent_harbor_control_center_view,
                         isonim_agent_harbor_gaze_mark_view]
+import stories/[dom_process_switcher_presses, agent_harbor_process_switcher_stories]
+import viewmodel/views/isonim_agent_harbor_process_switcher_view
 import viewmodel/views/isonim_agent_harbor_results_view
 import viewmodel/views/isonim_agent_harbor_pie_view
 import viewmodel/views/isonim_agent_harbor_session_activity_view
@@ -2325,6 +2327,40 @@ proc mountAgentHarborStatusGaze(container: isonim_dom.Element;
     dispose()
     container.innerHTML = ""
 
+var shownProcesses: ProcessSwitcherVM
+  ## The process switcher on the page: its presses and keys act on it.
+
+proc windowInnerWidth(): int {.importjs: "(window.innerWidth | 0)".}
+
+proc mountAgentHarborProcessSwitcherStory(container: isonim_dom.Element;
+                                          fixture: string): DisposeProc =
+  ## A multi-process recording's session tab with its process switcher, in
+  ## the caption bar (`#menu`, where the application draws its session tabs,
+  ## as the `session-tabs` story places them), beside a plain tab, over an
+  ## empty working area. A narrow window (below 720px, the sidebar size)
+  ## draws the first process and the active one before `+N`
+  ## (`slotsFor`). The tab's tooltip names the keys the base keymap binds
+  ## (`processChord`).
+  let story = createHost(container, "div", "ah-ps-story")
+  isonim_dom.setAttribute(story, cstring"class", cstring"ah-ps-story")
+  let captionHost = createHost(story, "div", "menu")
+  let work = createHost(story, "div", "ah-ps-window")
+  isonim_dom.setAttribute(work, cstring"class", cstring"ah-ps-window")
+  routeProcessSwitcherPresses(proc(): ProcessSwitcherVM = shownProcesses)
+  let slots = slotsFor(windowInnerWidth() < 720)
+  let dispose = mountAgentHarborVM(captionHost,
+    proc(): ProcessSwitcherVM =
+      shownProcesses = createProcessSwitcherStoryVM(fixture)
+      shownProcesses,
+    proc(h: isonim_dom.Element; vm: ProcessSwitcherVM) =
+      mountAgentHarborProcessSwitcher(h, vm, OtherTabTitle, slots,
+        processChord(ProcessNextOperation), processChord(ProcessPreviousOperation),
+        processSwitcherPress()))
+  return proc() =
+    shownProcesses = nil
+    dispose()
+    container.innerHTML = ""
+
 proc storyMenuShellModel(active: bool): MenuShellModel =
   ## The caption bar's menu: "Open File" and a Debug menu, open (`active`)
   ## or closed, with the window controls.
@@ -3062,6 +3098,7 @@ proc mountCodeTracerStory*(container: isonim_dom.Element;
     of "agent-harbor-results": mountAgentHarborResultsStory(container, f)
     of "agent-harbor-control-center": mountAgentHarborControlCenterStory(container, f, o)
     of "agent-harbor-status-gaze": mountAgentHarborStatusGaze(container, f)
+    of "agent-harbor-process-switcher": mountAgentHarborProcessSwitcherStory(container, f)
     of "agent-harbor-pie": mountAgentHarborPie(container, f)
     of "debug-shell": mountDebugShell(container, f)
     of "debug-controls": mountDebugControls(container, f)

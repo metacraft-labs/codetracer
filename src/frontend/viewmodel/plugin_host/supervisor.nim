@@ -84,9 +84,12 @@ else:
 import isonim/core/[computation, owner, signals]
 
 import ../../../common/plugin_model
+import ../../../common/key_names
 import ../../../common/view_vocabulary/vocabulary as view_vocabulary
 import ../../../common/value_presentation/presenter as value_presenter
 import ../../../common/value_presentation/vocabulary as value_vocabulary
+import ../../../common/value_visualisers
+import ../../../common/project_definitions
 import ../session_vm
 import ../store/replay_data_store
 import ../store/stop_timeline
@@ -162,6 +165,12 @@ type
     cancelled: bool
     finished: bool
     expired: bool
+
+  VisualiseValue* = tuple[input, typeName: string]
+    ## A value a surface is about to show, as a computed visualiser is asked
+    ## about it: `input` is `presenter.executableInputOf(value)` (the key its
+    ## answer is looked up by, the bytes a project's executable visualiser is
+    ## handed), `typeName` the recorded type's name.
 
   Answer* = object
     id*: string
@@ -239,6 +248,15 @@ type
     reactivateAtMs: int64
       ## When a WASM plugin whose instance faulted is activated again.
     actionsApplied*: int
+    computedAnswers*: Table[string, tuple[epoch: Epoch,
+                                         answers: seq[ComputedSummary]]]
+      ## A computed visualiser's answers (`requestVisualisations`), by its
+      ## row id, with the epoch they were computed at. Shown only while that
+      ## is the current position.
+    visualiseAsked: Table[string, tuple[id, signature: string]]
+      ## The `visualise` query in flight (or last answered) for each computed
+      ## row, and what it asked: the same values at the same position are not
+      ## asked twice.
 
   InstanceState* = enum
     isStopped = "stopped"
@@ -313,6 +331,22 @@ type
     pending: OrderedTable[string, Pending]
     nextId: int
     answers*: seq[Answer]
+    visualiseRequests: Table[string, tuple[plugin, row: string]]
+      ## The `visualise` queries the host sent for computed visualisers, by
+      ## request id: their answers are kept by the host, not queued in
+      ## `answers`.
+    visualiserRevision*: int
+      ## Bumped whenever a computed visualiser's answers change: a front-end
+      ## that rendered values with `pluginVisualisers` renders them again.
+    visualiseWanted: seq[VisualiseValue]
+    visualiseLanguage: string
+    visualiseOwed: bool
+      ## The values a front-end has on screen (`requestVisualisations`),
+      ## asked of the computed visualisers at the next `poll`, AFTER the
+      ## turn's state batches are cut: a plugin answers with the epoch of the
+      ## last batch it applied, so a query that overtook the batch of the stop
+      ## it is about would be answered with the previous stop's epoch and
+      ## dropped as stale.
     staleDropped*: int
     faults*: seq[Fault]
     notifications*: seq[Notification]
@@ -330,12 +364,19 @@ type
       ## Persist `plugins.<id>.enabled` (the user's *Disable*).
     onChange*: proc()
       ## Something a front-end shows changed.
-    actionHook*: proc(msg: JsonNode): bool
+    actionHook*: proc(msg: JsonNode; refusal: var string): bool
       ## A front-end's own route for a relayed action, tried before the
       ## session's `applyAction`; true when it took the action. A front-end
       ## whose loop drives the debugger's moves itself (the terminal pumps each
-      ## move to its stop) takes the debugger's moves here, so a plugin's step
-      ## is a step like a key's.
+      ## move to its stop and rebuilds its panes) takes the relayed actions
+      ## here — steps, a call trace jump, a seek, the watch edits — so a
+      ## plugin's step is a step like a key's, shown where it lands. `false`
+      ## with `refusal` set: the action must not run at all (it would send a
+      ## request no stop answers, such as a live restore on a finished
+      ## recording, or the front-end cannot show it); it is refused like any
+      ## other push (`refuse`: the status line and a note) and never reaches
+      ## `applyAction`. `false` with `refusal` empty: not the front-end's, and
+      ## `applyAction` takes it.
     rng: Rand
     # thresholds (§11.4.7, §11.6.2, §11.7.4, §11.7.5, §11.8)
     helloDeadlineMs*: int
@@ -574,6 +615,8 @@ proc removePushed(sup: Supervisor; s: PluginSlot; reason: string;
       s.instance.sendTo(%*{"type": "layer-popped", "plugin": s.id,
                            "token": l.token, "reason": reason})
   s.layers = @[]
+  s.computedAnswers.clear()
+  s.visualiseAsked.clear()
   s.enablement.clear()
   s.context.clear()
   s.decorations.clear()
@@ -968,6 +1011,39 @@ proc refuse(sup: Supervisor; s: PluginSlot; what: string) =
   sup.statusLine = "plugin '" & s.id & "': " & what
   sup.note("refused " & s.id & ": " & what)
 
+const PluginVisualisersViewModel* = "visualisers"
+  ## The published ViewModel a plugin contributes per-type visualisers
+  ## through (PLAT-12's `ptPlugin` tier): a batch of rows, never code.
+  ##
+  ## * A DECLARATIVE row is `{id, typeMatch, matchKind, language, summary,
+  ##   hide, rank}` — the shape a project definition's `[[visualiser]]` row
+  ##   has, admitted by the same door (`value_visualisers.admit`).
+  ## * A COMPUTED row is `{id, computed: true}`, optionally narrowed by
+  ##   `typeMatch` / `matchKind` / `language`: the plugin answers for the
+  ##   values on screen. The host asks it (`requestVisualisations`, a
+  ##   `visualise` query `{visualiser, values: [{input, type}], language}`),
+  ##   never waiting; the plugin answers `{answers: [{input, text}]}` and the
+  ##   answers render the values whose `executableInputOf` they name, as a
+  ##   project's executable visualiser's do, while the position they were
+  ##   computed at is current.
+
+const PluginVisualiseQuery* = "visualise"
+  ## The query kind a computed visualiser answers.
+
+const PluginVisualiseDeadlineMs* = 2_000
+  ## How long the host keeps caring about one `visualise` query. Missing it is
+  ## not a fault (§11.4.6): the values render without the answers.
+
+proc refuseRelayed*(sup: Supervisor; plugin, what: string) =
+  ## A front-end could not carry out an action `plugin` relayed, found only
+  ## when it came to run it (`actionHook` took it): refused like any other
+  ## push, on the status line and in the notes, naming the plugin.
+  let s = sup.slot(plugin)
+  if s.isNil:
+    sup.statusLine = what
+    return
+  sup.refuse(s, what)
+
 proc declaresSurface(s: PluginSlot; surface: string): bool =
   for c in s.spec.parsed.manifest.contributions:
     if c.kind in {ckPane, ckMarker, ckStatusItem} and
@@ -979,8 +1055,13 @@ proc localSurface(s: PluginSlot; surface: string): string =
   if surface.startsWith(s.id & "/"): surface[s.id.len + 1 .. ^1] else: surface
 
 proc isReservedKey*(sup: Supervisor; key: string): bool =
-  let k = key.toLowerAscii.strip
-  k in sup.reservedKeys or k in RecoveryChordSpellings
+  ## Compared in canonical names (`key_names.bindingKeyName`), so no
+  ## spelling of the palette key or the recovery chord slips past.
+  let k = bindingKeyName(key)
+  var reserved: seq[string]
+  for r in sup.reservedKeys: reserved.add bindingKeyName(r)
+  for r in RecoveryChordSpellings: reserved.add bindingKeyName(r)
+  k in reserved
 
 proc takeToken(sup: Supervisor; s: PluginSlot): bool =
   let t = sup.now()
@@ -1006,6 +1087,31 @@ proc takeToken(sup: Supervisor; s: PluginSlot): bool =
       "Messages past the limit were dropped.")
   false
 
+proc takeVisualiseAnswer(sup: Supervisor; s: PluginSlot; id, t: string;
+                         msg: JsonNode; e: Epoch) =
+  ## A computed visualiser's answer to the host's `visualise` query: kept
+  ## against its row, bounded as a project's executable visualiser's are
+  ## (`value_visualisers.executableVisualiser`: at most
+  ## `MaxComputedSummaries`, none empty, none past `MaxSummaryBytes`).
+  let row = sup.visualiseRequests[id].row
+  sup.visualiseRequests.del(id)
+  if t != "answer":
+    return
+  var kept: seq[ComputedSummary] = @[]
+  let answers = msg{"value"}{"answers"}
+  if not answers.isNil and answers.kind == JArray:
+    for a in answers:
+      if kept.len >= MaxComputedSummaries: break
+      if a.kind != JObject: continue
+      let c = ComputedSummary(input: a{"input"}.getStr(""),
+                              text: a{"text"}.getStr(""))
+      if c.input.len == 0 or c.text.len == 0 or
+         c.text.len > MaxSummaryBytes: continue
+      kept.add c
+  s.computedAnswers[row] = (epoch: e, answers: kept)
+  inc sup.visualiserRevision
+  sup.changed()
+
 proc onReply(sup: Supervisor; s: PluginSlot; msg: JsonNode; t: string) =
   let id = msg{"id"}.getStr("")
   if id.len == 0:
@@ -1022,6 +1128,10 @@ proc onReply(sup: Supervisor; s: PluginSlot; msg: JsonNode; t: string) =
   let e = epochFrom(msg{"epoch"})
   if p.kind == pkQuery and not samePosition(e, sup.epoch):
     inc sup.staleDropped      # §11.4.5: a stale answer is never shown
+    return
+  if sup.visualiseRequests.hasKey(id):
+    p.finished = true
+    sup.takeVisualiseAnswer(s, id, t, msg, e)
     return
   sup.answers.add Answer(id: id, plugin: s.id, kind: t,
                          payload: msg, epoch: e)
@@ -1191,13 +1301,26 @@ proc handleMessage(sup: Supervisor; inst: Instance; msg: JsonNode) =
     if vm in ["collab", "viewport"]:
       sup.refuse(s, "a plugin cannot relay '" & vm & "' actions")
       return
-    if not sup.actionHook.isNil and sup.actionHook(msg):
-      inc s.actionsApplied
-    elif not sup.session.isNil and sup.session.applyAction(msg):
+    if not sup.actionHook.isNil:
+      var refusal = ""
+      if sup.actionHook(msg, refusal):
+        inc s.actionsApplied
+        return
+      if refusal.len > 0:
+        sup.refuse(s, refusal)
+        return
+    if not sup.session.isNil and sup.session.applyAction(msg):
       inc s.actionsApplied
   of "publish-batch":
-    s.published[msg{"viewModel"}.getStr("")] =
+    let viewModel = msg{"viewModel"}.getStr("")
+    s.published[viewModel] =
       (batch: msg{"batch"}, epoch: epochFrom(msg{"epoch"}))
+    if viewModel == PluginVisualisersViewModel:
+      # New rows render the values on screen again, and a computed row is
+      # asked about them now rather than at the next stop.
+      inc sup.visualiserRevision
+      s.visualiseAsked.clear()
+      sup.visualiseOwed = true
     sup.changed()
   of "view":
     let surface = msg{"surface"}.getStr("")
@@ -1534,6 +1657,8 @@ proc pollBreakers(sup: Supervisor) =
     of bsClosed:
       discard
 
+proc sendVisualiseQueries(sup: Supervisor)
+
 proc poll*(sup: Supervisor) =
   ## One turn: cut pending batches, read every process, run every timer.
   ## Never blocks. A front-end calls it from its event loop.
@@ -1541,6 +1666,9 @@ proc poll*(sup: Supervisor) =
     let d = sup.deferred
     sup.deferred = @[]
     for cb in d: cb()
+  if sup.visualiseOwed:
+    sup.visualiseOwed = false
+    sup.sendVisualiseQueries()
   let t = sup.now()
   for pkg in sup.packages.values:
     # A copy: a fault handled below may add an instance (quarantine).
@@ -1659,40 +1787,118 @@ proc enablementOf*(sup: Supervisor; plugin, op: string):
   let e = s.enablement[op]
   (e.enabled, e.reason)
 
-const PluginVisualisersViewModel* = "visualisers"
-  ## The published ViewModel a plugin contributes per-type visualisers
-  ## through (PLAT-12's `ptPlugin` tier): a batch of declarations, each
-  ## `{id, typeMatch, matchKind, language, summary, rank}` — data, the same
-  ## shape a project definition's `[[visualiser]]` row has, never code.
+proc declaresVisualisers(s: PluginSlot): bool =
+  for c in s.spec.parsed.manifest.contributions:
+    if c.kind == ckViewModel and c.id == PluginVisualisersViewModel:
+      return true
+  false
+
+proc visualiserRows(s: PluginSlot): seq[JsonNode] =
+  ## The rows of a running plugin's published `visualisers`, bounded per
+  ## plugin by a project's whole tier (`MaxVisualiserRules`).
+  if not s.active or s.breaker == bsOpen or not s.declaresVisualisers or
+     not s.published.hasKey(PluginVisualisersViewModel):
+    return
+  let batch = s.published[PluginVisualisersViewModel].batch
+  if batch.isNil or batch.kind != JArray: return
+  for v in batch:
+    if result.len >= MaxVisualiserRules: break
+    if v.kind == JObject: result.add v
+
+proc rowId(s: PluginSlot; v: JsonNode; at: int): string =
+  v{"id"}.getStr($at)
+
+proc matchKindOf(v: JsonNode): ValueMatchKind =
+  case v{"matchKind"}.getStr("typeName")
+  of "typePrefix": mkTypePrefix
+  of "typeSuffix": mkTypeSuffix
+  else: mkTypeName
+
+proc isComputed(v: JsonNode): bool = v{"computed"}.getBool(false)
 
 proc pluginVisualisers*(sup: Supervisor): seq[Visualiser] =
   ## Every running plugin's visualisers, as `ptPlugin`-tier `Visualiser`s.
   ## A plugin must declare the `visualisers` ViewModel it publishes; a batch
   ## from one that did not is ignored. Ids are namespaced by the plugin.
+  ##
+  ## A declarative row is admitted through `value_visualisers.admit`, the
+  ## door a project's rows go through, and dropped when refused. A computed
+  ## row contributes only the answers computed at the CURRENT position
+  ## (§11.4.5: a stale visualiser answer is dropped, never shown).
   for s in sup.slots.values:
-    if not s.active or s.breaker == bsOpen: continue
-    var declared = false
-    for c in s.spec.parsed.manifest.contributions:
-      if c.kind == ckViewModel and c.id == PluginVisualisersViewModel:
-        declared = true
-    if not declared or not s.published.hasKey(PluginVisualisersViewModel):
-      continue
-    let batch = s.published[PluginVisualisersViewModel].batch
-    if batch.isNil or batch.kind != JArray: continue
-    for v in batch:
-      var mk = mkTypeName
-      case v{"matchKind"}.getStr("typeName")
-      of "typePrefix": mk = mkTypePrefix
-      of "typeSuffix": mk = mkTypeSuffix
-      else: mk = mkTypeName
-      let typeMatch = v{"typeMatch"}.getStr("")
-      if typeMatch.len == 0: continue
-      result.add Visualiser(id: "plugin:" & s.id & "#" & v{"id"}.getStr($result.len),
-                            tier: ptPlugin, tierDeclared: true,
-                            typeMatch: typeMatch, matchKind: mk,
-                            language: v{"language"}.getStr(""),
-                            summary: v{"summary"}.getStr(""),
-                            rank: v{"rank"}.getInt(0))
+    let rows = s.visualiserRows
+    for at, v in rows:
+      let id = "plugin:" & s.id & "#" & s.rowId(v, at)
+      if v.isComputed:
+        let row = s.rowId(v, at)
+        if not s.computedAnswers.hasKey(row): continue
+        let held = s.computedAnswers[row]
+        if not samePosition(held.epoch, sup.epoch) or held.answers.len == 0:
+          continue
+        result.add Visualiser(id: id, tier: ptPlugin, tierDeclared: true,
+                              computed: held.answers, computedDeclared: true,
+                              rank: v{"rank"}.getInt(0))
+        continue
+      var rule = VisualiserRule(match: v{"typeMatch"}.getStr(""),
+                                matchKind: v.matchKindOf,
+                                language: v{"language"}.getStr(""),
+                                summary: v{"summary"}.getStr(""))
+      let hide = v{"hide"}
+      if not hide.isNil and hide.kind == JArray:
+        for h in hide: rule.hide.add h.getStr("")
+      if not admit(rule): continue
+      var vis = visualiserFor(rule, doProject, v{"rank"}.getInt(0))
+      vis.id = id
+      vis.tier = ptPlugin
+      vis.tierDeclared = true
+      result.add vis
+
+proc requestVisualisations*(sup: Supervisor; values: seq[VisualiseValue];
+                            language = "") =
+  ## The values a front-end is about to show, for the running plugins'
+  ## computed visualisers. NEVER WAITS: the queries go out at the next
+  ## `poll`, the answers arrive through it (`visualiserRevision` moves), and
+  ## until they do the values render without them. Asking again with the
+  ## same values at the same position sends nothing.
+  sup.visualiseWanted = values
+  sup.visualiseLanguage = language
+  sup.visualiseOwed = true
+
+proc sendVisualiseQueries(sup: Supervisor) =
+  for s in sup.slots.values:
+    if s.suspect: continue
+    for at, v in s.visualiserRows:
+      if not v.isComputed: continue
+      let row = s.rowId(v, at)
+      let match = v{"typeMatch"}.getStr("")
+      let mk = v.matchKindOf
+      let language = v{"language"}.getStr("")
+      var values = newJArray()
+      var seen: seq[string]
+      for (input, typeName) in sup.visualiseWanted:
+        if values.len >= MaxComputedSummaries: break
+        if input.len == 0 or input in seen: continue
+        if match.len > 0 and not typeMatches(mk, match, language, typeName,
+                                             sup.visualiseLanguage):
+          continue
+        seen.add input
+        values.add %*{"input": input, "type": typeName}
+      let signature = $sup.position & "\x1f" & seen.join("\x1f")
+      let asked = s.visualiseAsked.getOrDefault(row)
+      if asked.signature == signature: continue
+      if asked.id.len > 0 and sup.visualiseRequests.hasKey(asked.id):
+        sup.visualiseRequests.del(asked.id)
+        sup.cancel(asked.id)
+      if values.len == 0:
+        s.visualiseAsked[row] = (id: "", signature: signature)
+        continue
+      let id = sup.query(s.id, PluginVisualiseQuery,
+        %*{"visualiser": row, "values": values,
+           "language": sup.visualiseLanguage},
+        PluginVisualiseDeadlineMs)
+      if id.len == 0: continue
+      sup.visualiseRequests[id] = (plugin: s.id, row: row)
+      s.visualiseAsked[row] = (id: id, signature: signature)
 
 proc contextKeys*(sup: Supervisor): Table[string, bool] =
   ## Every plugin context key, as `plugin.<id>.<key>`, truthy or not.
@@ -1743,7 +1949,7 @@ proc resolveLayerKey*(sup: Supervisor; key, focusedSurface: string;
   ## (host modal layers rank above every plugin layer).
   if not sup.hostModalOpen.isNil and sup.hostModalOpen():
     return
-  let k = key.toLowerAscii
+  let k = bindingKeyName(key)
   var ctx = hostContext
   for kk, v in sup.contextKeys: ctx[kk] = v
   var order: seq[PluginSlot]
@@ -1780,7 +1986,7 @@ proc resolveStaticKey*(sup: Supervisor; key, focusedSurface: string;
   ## The plugin PASS, between the user pass and the base pass (§11.7.2).
   if not sup.hostModalOpen.isNil and sup.hostModalOpen():
     return
-  let k = key.toLowerAscii
+  let k = bindingKeyName(key)
   var ctx = hostContext
   for kk, v in sup.contextKeys: ctx[kk] = v
   for s in sup.slots.values:
@@ -1792,6 +1998,27 @@ proc resolveStaticKey*(sup: Supervisor; key, focusedSurface: string;
       if not evalWhen(b.whenClause, ctx): continue
       if not sup.enablementOf(s.id, b.op).enabled: continue
       return KeyRoute(found: true, plugin: s.id, op: b.op)
+
+proc claimsKey*(sup: Supervisor; key, focusedSurface: string;
+                hostContext: Table[string, bool] =
+                  initTable[string, bool]()): bool =
+  ## Whether a plugin would take `key` now — a layer that binds it, or the
+  ## plugin pass — asked without routing it and without the strike a
+  ## suspect plugin's layer takes for a key routed through it. A front-end
+  ## that reads an unbound chord as something else (the terminal reads an
+  ## Alt chord it does not bind as the bare key) asks this first.
+  if not sup.hostModalOpen.isNil and sup.hostModalOpen():
+    return false
+  let k = bindingKeyName(key)
+  var ctx = hostContext
+  for kk, v in sup.contextKeys: ctx[kk] = v
+  for s in sup.slots.values:
+    if s.breaker == bsOpen or not s.active or s.suspect: continue
+    for l in s.layers:
+      if not l.window and l.owner != focusedSurface: continue
+      for b in l.bindings:
+        if b.key == k and evalWhen(b.whenClause, ctx): return true
+  sup.resolveStaticKey(key, focusedSurface, hostContext).found
 
 proc routeKey*(sup: Supervisor; route: KeyRoute; key: string): string =
   ## Consume `key` for the plugin `route` names: an `invoke` with the input

@@ -36,6 +36,8 @@ import ./ah_control_center
 import ../../stories/agent_harbor_control_center_stories
 import ./ah_gaze_mark
 import ../../stories/agent_harbor_gaze_stories
+import ./ah_process_switcher
+import ../../stories/agent_harbor_process_switcher_stories
 import ../agent_activity_leaf
 import ../window_geometry
 import ../../viewmodel/agent_harbor_activity_cards
@@ -49,7 +51,7 @@ import ../../viewmodel/keymap/[base_keymaps, context_keys, editing_keymap,
 import ../../../common/key_names
 
 export agent_harbor_stories, ah_theme, ah_playback_bar, user_keymap, ah_composer,
-  ah_control_center, ah_gaze_mark,
+  ah_control_center, ah_gaze_mark, ah_process_switcher,
   ah_results, ah_changes_inbox_stories, ah_pie
 
 const
@@ -70,6 +72,7 @@ const
     "agent-harbor-inbox",
     "agent-harbor-inbox-item",
     "agent-harbor-pie",
+    "agent-harbor-process-switcher",
   ]
     ## Every surface of the Agent Harbor section this module draws (the
     ## Changes panel's and the Inbox's through `ah_changes_inbox_stories`,
@@ -100,6 +103,8 @@ type
       ## The control center (its stories only).
     gaze*: GazeStatusVM
       ## The status line's gaze mark (its stories only).
+    processes*: ProcessSwitcherVM
+      ## A multi-process recording's process switcher (its stories only).
     cards*: ActivityAgainstCards
       ## The comparison story's cards (`agent_harbor_activity_cards`): its
       ## store, the events both halves were fed, and today's Agent Activity
@@ -226,6 +231,31 @@ proc gazeKey*(m: AhStoryMount; name: string; keymap = UserKeymap()): string =
   var router = gpuiRouter(keymap)
   let res = router.route(SessionFacts(), WindowScopePath, nmNormal, name, 0)
   if res.kind != erOperation or not m.gaze.runGazeOperation(res.operation): return ""
+  res.operation
+
+let ProcessSwitcherScopePath = @[element(ekWindow, "window"), pane(ProcessSwitcherScope)]
+  ## Where the process switcher's number keys and presses resolve; its next
+  ## and previous keys are window rows, found from here too.
+
+proc processSwitcherPresses*(keymap: UserKeymap; vm: ProcessSwitcherVM): ProcessPress =
+  ## The route for a press on a process's button: resolved in the
+  ## `processSwitcher` scope, a user's row first, and run on the switcher.
+  let resolve = routerResolver(gpuiRouter(keymap), SessionFacts())
+  result = proc(operation, target: string) =
+    let outcome = resolveElementPress(resolve, ProcessSwitcherScopePath, ButtonElementKind,
+                                      operation, {}, "Click")
+    discard vm.runProcessSwitcherPress(outcome.operation, target)
+
+proc processSwitcherKey*(m: AhStoryMount; name: string; keymap = UserKeymap()): string =
+  ## A key while the process switcher story is shown, ROUTED in its scope
+  ## (the digits; `Ctrl+Alt+PageDown` / `PageUp`). Runs the operation it
+  ## resolves to and returns it ("" for none).
+  if m.processes.isNil: return ""
+  var router = gpuiRouter(keymap)
+  let res = router.route(SessionFacts(), ProcessSwitcherScopePath, nmNormal, name, 0)
+  if res.kind != erOperation or
+     not m.processes.runProcessSwitcherOperation(res.operation, res.argument):
+    return ""
   res.operation
 
 let ResultsScopePath = @[element(ekWindow, "window"), pane(ResultsScope)]
@@ -563,6 +593,13 @@ proc mountAgentHarborStoryGpui*(r: GpuiRenderer; surface, fixture: string;
       m.gaze = createGazeStoryVM(fixture, gazePauseChord())
       r.mountGazeStory(host, m.gaze, p, bodyW, heightPx,
                        GazeStoryStatusItems, gazePresses(keymap, m.gaze))
+    of ProcessSwitcherSurface:
+      m.processes = createProcessSwitcherStoryVM(fixture)
+      r.mountProcessSwitcherStory(host, m.processes, p, bodyW, heightPx, OtherTabTitle,
+                                  processChord(ProcessNextOperation),
+                                  processChord(ProcessPreviousOperation),
+                                  RecordingSwitcherSlot,
+                                  processSwitcherPresses(keymap, m.processes))
     of "agent-harbor-changes", "agent-harbor-inbox", "agent-harbor-inbox-item":
       # The panel's body: the window less its frame (the header and the 8px
       # above the body) or less the playback bar, so its regions scroll at
@@ -594,6 +631,7 @@ proc mountAgentHarborStoryGpui*(r: GpuiRenderer; surface, fixture: string;
   let suggestion = m.suggestion
   let center = m.center
   let gaze = m.gaze
+  let processes = m.processes
   let cards = m.cards
   let changesInbox = m.changesInbox
   let playback = m.playback
@@ -609,6 +647,7 @@ proc mountAgentHarborStoryGpui*(r: GpuiRenderer; surface, fixture: string;
     if suggestion != nil: suggestion.dispose()
     if center != nil: center.dispose()
     if gaze != nil: gaze.dispose()
+    if processes != nil: processes.dispose()
     if timeline != nil: timeline.dispose()
     if cards.cards != nil:
       cards.cards.dispose()

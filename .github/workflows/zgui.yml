@@ -9,10 +9,9 @@ name: zgui front-end
 #
 # The Linux job records `calc` with `ct` (`just build-once` of its target) and
 # hands the recording to the macOS job, which replays it with a replay-server
-# built for macOS. `build-once` does not run on macOS while
-# locks/arm64-macosx.lock trails repro.lock (codetracer-pm issues 2026-11-04
-# and 2026-11-08): it refuses the drift, and with the drift allowed it
-# refuses the lock's cargo pin.
+# built for macOS with cargo. The macOS job does not use `build-once`, so it
+# does not depend on locks/arm64-macosx.lock keeping up with repro.lock
+# (darwin-lock-resolve.yml re-solves that file on a macOS runner).
 #
 # isonim-zgui is private, so the public repro.lock can neither declare nor pin
 # it (ci/test/sibling-provisioning-test.sh UNLOCKED_SIBLINGS); its revision is
@@ -61,11 +60,21 @@ jobs:
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
 
+      # The token minted at the start can be over an hour old by here: the
+      # checkout alone took 64 minutes on a macOS runner (run 44906061572), and
+      # the sibling clone below then failed on the expired token.
+      - name: Mint a token for the sibling setup
+        id: setup_token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
       - name: Setup db-backend siblings
         uses: ./.github/actions/setup-db-backend-siblings
         with:
           env-flavor: nix
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.setup_token.outputs.token }}
           # The same cache settings as `Install Nix` above. This action
           # installs and configures Nix again, and without them the
           # configuration it writes names no Attic cache: on an ephemeral
@@ -171,7 +180,10 @@ jobs:
     name: zgui lane (aarch64-darwin)
     needs: linux
     runs-on: aarch64-darwin
-    timeout-minutes: 150
+    # The setup alone has taken 75 minutes here (a 42-minute checkout in run
+    # 44935860183), the post-checkout cleanup up to 25 more, and a cold
+    # replay-server build up to the 150 its step allows.
+    timeout-minutes: 300
     steps:
       - name: Mint installation token for cross-repo sibling access
         id: ci_token
@@ -196,11 +208,21 @@ jobs:
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
 
+      # The token minted at the start can be over an hour old by here: the
+      # checkout alone took 64 minutes on a macOS runner (run 44906061572), and
+      # the sibling clone below then failed on the expired token.
+      - name: Mint a token for the sibling setup
+        id: setup_token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
       - name: Setup db-backend siblings
         uses: ./.github/actions/setup-db-backend-siblings
         with:
           env-flavor: nix
-          gh-token: ${{ steps.ci_token.outputs.token }}
+          gh-token: ${{ steps.setup_token.outputs.token }}
           # The same cache settings as `Install Nix` above. This action
           # installs and configures Nix again, and without them the
           # configuration it writes names no Attic cache: on an ephemeral
@@ -260,7 +282,49 @@ jobs:
           # runner's ~/.nimble hides its absence; an ephemeral one has none
           # (run 44827340359: "cannot open file: results").
           CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
-        run: nix develop . --command bash -c 'cd src/db-backend && cargo build --bin replay-server'
+          # The paths above hold the trace writer's Nim packages, so its build
+          # script need not reach the network for them.
+          CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL: "1"
+        # Run 44884214467 (attempt 2) spent 107 minutes here until the job's
+        # budget cancelled it, and a cancelled job keeps no log. A step bound
+        # fails the step instead. Run 44935860183 (attempt 3) then reached
+        # that bound too, and the post-checkout cleanup ran the job past its
+        # budget, so it lost its log all the same. The build therefore writes
+        # its own log, with a process listing every five minutes that shows
+        # whether cargo is compiling or waiting, and the upload below keeps it.
+        #
+        # A cold build is the cost: on m3, beside the other runners there,
+        # half of the crates took 90 minutes. The checkout cleans the
+        # workspace, so target/ under it is cold in every job; the target
+        # directory therefore lives in the runner's home, where the next job
+        # on this runner finds it warm, and the lane takes the binary from
+        # there through REPLAY_SERVER_BIN.
+        timeout-minutes: 150
+        run: |
+          set -euo pipefail
+          target="$HOME/.cache/codetracer-zgui/db-backend-target"
+          mkdir -p "$target"
+          echo "REPLAY_SERVER_BIN=$target/debug/replay-server" >>"$GITHUB_ENV"
+          export CARGO_TARGET_DIR="$target"
+          mkdir -p test-logs
+          # Inside the dev shell as a whole: the darwin runner has no grep,
+          # cut or head before it (ci/test/sibling-provisioning-test.sh).
+          nix develop . --command bash -c '
+            set -euo pipefail
+            log="$PWD/test-logs/replay-server-build.log"
+            : >"$log"
+            (
+              while sleep 300; do
+                echo "== $(date -u +%H:%M:%S) processes"
+                # shellcheck disable=SC2009 # one listing filtered by several names
+                ps -axo pid,etime,pcpu,rss,command | grep -E "[c]argo|[r]ustc|[n]ix|[n]im |[c]c |[c]lang|[l]d " | cut -c1-220 | head -25 || true
+              done
+            ) >>"$log" 2>&1 &
+            heartbeat=$!
+            trap "kill $heartbeat 2>/dev/null || true" EXIT
+            cd src/db-backend
+            cargo build --bin replay-server 2>&1 | tee -a "$log"
+          '
 
       - name: The zgui lane
         env:
@@ -268,12 +332,25 @@ jobs:
           # The runner's own nimcache: a shared /tmp/ct-nim-cache can belong to
           # another runner account on the same host.
           CT_NIM_CACHE_ROOT: ${{ runner.temp }}/ct-nim-cache
-        run: nix develop . --command just test-zgui
+          # No recorder here. `calc` comes from the Linux job of this run, at
+          # this commit and the recorder repro.lock pins, but the fixture
+          # provider identifies a recorder by the content of its installed
+          # package, native extension included, so the macOS build of the same
+          # recorder never matches the Linux stamp, and the provider refused
+          # the recording because it could not re-record it (run 45151089269).
+          # This job records nothing and builds no `ct`; an interpreter that
+          # cannot run the identity probe says so, and the provider keeps the
+          # recording it was handed. It is set inside the shell: the dev
+          # shell's hook points CODETRACER_PYTHON_INTERPRETER at its recorder
+          # venv, over any value the step gives it (run 45196362876).
+        run: nix develop . --command bash -c 'CODETRACER_PYTHON_INTERPRETER=/usr/bin/false exec just test-zgui'
 
       - name: Upload the lane's log
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: zgui-lane-aarch64-darwin
-          path: test-logs/test-zgui.log
+          path: |
+            test-logs/test-zgui.log
+            test-logs/replay-server-build.log
           retention-days: 30
