@@ -35,7 +35,10 @@ n=$(($(cat "$FAKE_DIR/calls" 2>/dev/null || echo 0) + 1))
 echo "$n" >"$FAKE_DIR/calls"
 echo "call $n REPRO_DAEMON=${REPRO_DAEMON:-unset}" >>"$FAKE_DIR/log"
 behaviour="$(sed -n "${n}p" "$FAKE_DIR/plan")"
-[ "$behaviour" = hang ] && exec sleep 600
+# The hang records its own pid ($$ survives the exec into sleep), so the
+# "gone after the attempt" check asks about THIS process, not about any
+# `sleep 600` the user happens to run elsewhere on a shared host.
+[ "$behaviour" = hang ] && { echo "$$" >"$FAKE_DIR/hang.pid"; exec sleep 600; }
 exit "${behaviour:-0}"
 EOF
 cat >"$work/bin/repro" <<'EOF'
@@ -77,8 +80,9 @@ done
 check "the dump was taken while the stalled build was alive (its process is in build-tree.txt)" \
 	"build-tree.txt: $(cat "$diag/daemon-stall/build-tree.txt" 2>/dev/null)" \
 	grep -q "sleep 600" "$diag/daemon-stall/build-tree.txt"
-check "the stalled build is gone after the attempt" "a 'sleep 600' from the fake build is still running" \
-	bash -c "! pgrep -f '^sleep 600\$' -u \"\$(id -u)\" >/dev/null"
+check "the stalled build is gone after the attempt" \
+	"the fake build's 'sleep 600' (pid $(cat "$work/hang.pid" 2>/dev/null)) is still running" \
+	bash -c '[ -s "$1" ] && ! kill -0 "$(cat "$1")" 2>/dev/null' _ "$work/hang.pid"
 check "the dump holds the daemon's status and sessions" "repro-daemon.txt: $(cat "$diag/daemon-stall/repro-daemon.txt" 2>/dev/null)" \
 	grep -q "fake repro daemon sessions" "$diag/daemon-stall/repro-daemon.txt"
 check "each attempt's duration is printed" "no per-attempt lines: $out" \

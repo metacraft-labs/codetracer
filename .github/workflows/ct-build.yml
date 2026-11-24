@@ -14,7 +14,14 @@ permissions:
 
 jobs:
   ct-build:
-    runs-on: [self-hosted, linux, x64]
+    # `ephemeral`: a GARM runner, never a persistent one. On the persistent
+    # runners of a shared host the build is starved: high-mem-server-mcl-003 sits
+    # in builds.slice (CPU weight 200) beside interactive sessions (user.slice,
+    # 1000) and the VMs (machine.slice, 700), at CPU pressure ~75% and load ~220
+    # on 32 cores, and codetracer run 45236060796's build-once stalled there at
+    # "loading project interface" until the 90-minute bound, while the same step
+    # passes on GARM runners, which get dedicated vCPUs.
+    runs-on: [self-hosted, linux, x64, ephemeral]
     # First sized at 120 from run 43935388749's slowest cold garm shard:
     # provisioning 1768 s, build-once 2557 s, the windowed shim and front-end
     # 830 s (86 min), plus packing and the upload. Run 44048043714 then spent
