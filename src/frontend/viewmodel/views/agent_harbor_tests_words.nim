@@ -320,6 +320,23 @@ proc showsOpenInCell*(cell: TestCellView): bool =
   c.status in {tsFailed, tsErrored} and cell.open.kind == omRecordAndOpen and
     cell.open.absence.len == 0
 
+proc openControlName*(cell: TestCellView): string =
+  ## The accessible name of the panel's open control, in a row's cell and
+  ## in an opened row's sub-row alike. In its `⏺⏵` mode the control is
+  ## drawn as one button carrying both marks (the Test Results pane's
+  ## record-and-open glyph), named `Record and open on <platform>`, so it
+  ## reads as one action rather than as the row's separate Run and Record
+  ## in reverse. Its other modes keep the viewmodel's title, which says what
+  ## they do.
+  if cell.open.kind == omRecordAndOpen: "Record and open on " & cell.label
+  else: cell.openTitle
+
+proc openControlTitle*(cell: TestCellView): string =
+  ## That control's tooltip: its name, then the viewmodel's title (why it
+  ## cannot, or where the trace opens) on the next line.
+  let name = openControlName(cell)
+  if name == cell.openTitle: name else: name & "\n" & cell.openTitle
+
 proc locationText*(cell: TestCell; test: TestRowView): string =
   ## Where a failure is: its own location, else the test's.
   if cell.location.file.len > 0:
@@ -433,6 +450,12 @@ const
   RecordingNotKeptMark* = "\xE2\x80\x94"
     ## — where a test's recording was not kept: no open control.
   FileMenuTitle* = "Several files match; choose one"
+  LabelSpace* = "\xC2\xA0"
+    ## U+00A0 NO-BREAK SPACE, inside a trace link's label: the label wraps
+    ## only where a reader can take its halves apart (`trace 3f9b2c1e` |
+    ## `on harbor.example.invalid`), never between `trace` and its id, `on`
+    ## and its host, or `recording` and its name
+    ## (https://www.unicode.org/reports/tr14/#GL).
 
 proc isUuid(id: string): bool =
   ## Whether `id` is a UUID as RFC 9562 §4 writes one: 8-4-4-4-12 hex
@@ -473,18 +496,21 @@ proc traceLinkLabel*(link: LinkPart): string =
   ## holds, `trace 8d7e6f5a on harbor.example.invalid` for its https form,
   ## `recording test_queue_bound_holds` for a recording on this machine. The
   ## two kinds keep labels of their own, as their buttons do (`Load trace`,
-  ## `Open recording`). A label only: the line's `text` and `copyText` are
-  ## the message's, URL and all, and the URL is the link's tooltip
-  ## (`traceLinkTitle`). "" for a part that is not a trace link.
+  ## `Open recording`). Each word is held to what it names by a
+  ## `LabelSpace`, so a narrow line breaks the label only before `on`. A
+  ## label only: the line's `text` and `copyText` are the message's, URL and
+  ## all, the URL is the link's tooltip (`traceLinkTitle`), and its
+  ## accessible name is the timeline's `linkName`. "" for a part that is not
+  ## a trace link.
   if link.kind != lpTrace: return ""
   let reference = link.reference
   case reference.kind
   of trkAgentHarbor:
-    result = "trace " & shortTraceId(reference.id)
+    result = "trace" & LabelSpace & shortTraceId(reference.id)
     let host = hostOf(link.text)
-    if host.len > 0: result.add " on " & host
+    if host.len > 0: result.add " on" & LabelSpace & host
   of trkLocalRecording:
-    result = "recording " & reference.id
+    result = "recording" & LabelSpace & reference.id
 
 proc traceLinkTitle*(link: LinkPart): string =
   ## A trace or recording link's tooltip: the URL as the message writes it,

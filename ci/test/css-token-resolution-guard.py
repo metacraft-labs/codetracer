@@ -82,6 +82,12 @@ ceilings file is gone and there is nothing left to tolerate.  When a palette
 loses a variable ``codetracer.styl`` reads, define it in BOTH palettes; do not
 bring the ceilings back.
 
+The same arm catches a variable written inside ``calc(…)``: Stylus does not
+substitute there, so ``calc(PANEL_INSET + 2.375rem)`` reaches the output as
+``calc((PANEL_INSET + 2.375rem))`` although ``PANEL_INSET`` is defined, and
+the browser drops the declaration.  The repair is to format the value with
+``%`` (``"calc(%s + %s)" % (A B)``), which Stylus does substitute.
+
 INSTRUMENT CHECKS
 -----------------
 A guard that scans an empty file passes.  ``default_white_theme.styl`` is a
@@ -393,7 +399,10 @@ def main() -> int:
             f"{len(distinct)} distinct identifier(s). A palette is missing a "
             "variable codetracer.styl reads: define it in BOTH "
             "default_dark_theme.styl and default_white_theme.styl, or delete "
-            "the rule if no view emits its selector.\n"
+            "the rule if no view emits its selector. A variable that IS "
+            "defined still leaks when it is written inside calc(…), which "
+            "Stylus does not substitute: format that value with % instead, "
+            "'\"calc(%s + %s)\" % (A B)', as auto_hide.styl does.\n"
             + "\n".join(lines)
             + "\n  distinct: "
             + ", ".join(distinct)

@@ -169,14 +169,19 @@ proc renderOpenControl[R, N](r: R; vm: TestRunsVM; testId: string;
   ## The Test Results pane's open control in its mode (`⏵`, `⟳⏵`, `⏺⏵`):
   ## its glyph stays its text, drawn as the pane's marks; disabled with the
   ## reason in its tooltip, which otherwise ends with where the trace opens.
+  ## In a row's cell and in an opened row's sub-row alike it is one small
+  ## secondary button carrying both marks (the cell's at the cell's compact
+  ## size), named for the one action it takes (`openControlName`): `⏺⏵`
+  ## must nowhere read as a row's `Run` and `Record` icons in reverse order.
   let mode = cell.open
   let enabled = mode.absence.len == 0
   result = ui(r):
-    span(class = "test-results-open-btn ah-tests-open" &
+    span(class = "test-results-open-btn ah-tests-open ct-button-sm-secondary" &
+                 " ah-tests-button ah-tests-open-grouped" &
                  (if enabled: "" else: " disabled") &
                  (if mode.kind == omRefreshAndOpen: " shift-armed" else: ""),
-         role = "button", tabindex = "-1", title = cell.openTitle,
-         `aria-label` = cell.openTitle, `data-ct-open-mode` = $mode.kind,
+         role = "button", tabindex = "-1", title = openControlTitle(cell),
+         `aria-label` = openControlName(cell), `data-ct-open-mode` = $mode.kind,
          `data-ah-open` = $mode.kind):
       text openGlyph(mode.kind)
   if enabled:

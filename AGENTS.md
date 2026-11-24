@@ -13,6 +13,13 @@ After any change or merge touching the frontend, run
 Do not edit the guard. Git can drop a decision in a merge with no conflict, so
 check after every merge.
 
+After any change under `src/frontend/styles/`, also run
+`just test-css-token-resolution` in the dev shell. Stylus copies an undefined
+variable, or any variable written inside `calc(…)`, into the CSS unchanged; the
+browser drops that rule and nothing else reports it. Write such a `calc()` as
+`"calc(%s + %s)" % (A B)`. CI runs this check on pull requests and on `dev`;
+nothing runs it on `agents`, so run it yourself there.
+
 ## Where a checkout — or a worktree — has to live
 
 **A checkout of this repo must sit DIRECTLY under the workspace root, beside its

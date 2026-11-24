@@ -4,6 +4,8 @@
 ## * **A trace link draws a short label** (`traceLinkLabel`): `trace
 ##   3f9b2c1e`, `trace 8d7e6f5a on harbor.example.invalid`, `recording
 ##   test_queue_bound_holds`, never the raw URL, which wraps across lines.
+##   A no-break space (`LabelSpace`) holds `trace` to its id, `on` to its
+##   host and `recording` to its name, so a label breaks only before `on`.
 ##   The URL as written is the link's tooltip and its `data-ah-url`; the
 ##   timeline line's `text` (from which its `copyText` is made) still holds
 ##   it, and the link's
@@ -20,13 +22,17 @@
 ## * **A row's icons are named**: the trailing Run and Record icons carry an
 ##   accessible name saying what they do (`Run <test> on the platforms
 ##   switched on`), enabled or not, and a tooltip that starts with it.
+## * **Run comes before Record everywhere**: a row's icons and a sub-row's
+##   buttons alike; the `⏺⏵` open control, in a sub-row after both and in a
+##   row's cell after its word, is one grouped button named `Record and open
+##   on <platform>`.
 ##
 ## No mocks beyond IsoNim's mock renderer (the views' DOM): the viewmodels
 ## are the stories' own (`createTestsStoryVM`, `createTraceLinksStory`),
 ## over the viewmodels' scripted synthetic sources, so each check reads the
 ## state a story shows.
 
-import std/[strutils, tables, unittest]
+import std/[sequtils, strutils, tables, unittest]
 import isonim/core/owner
 import isonim/testing/mock_dom
 import nim_agents/agent_harbor/[test_runs, trace_links]
@@ -82,13 +88,15 @@ suite "a trace link draws a short label (review finding 1)":
   test "the label of each kind":
     let one = linkSpans("see " & OneTraceUrl, TestRunsServer, [])
     check one.len == 2
-    check traceLinkLabel(one[1]) == "trace 3f9b2c1e"
+    check traceLinkLabel(one[1]) == "trace\xC2\xA03f9b2c1e"
     let https = linkSpans(SecondTraceHttps, TestRunsServer, [])
     check https.len == 1
-    check traceLinkLabel(https[0]) == "trace 8d7e6f5a on harbor.example.invalid"
+    check traceLinkLabel(https[0]) ==
+      "trace\xC2\xA08d7e6f5a on\xC2\xA0harbor.example.invalid"
     let rec = linkSpans(RecordingUrl, TestRunsServer, [])
     check rec.len == 1
-    check traceLinkLabel(rec[0]) == "recording test_queue_bound_holds"
+    check traceLinkLabel(rec[0]) == "recording\xC2\xA0test_queue_bound_holds"
+    check LabelSpace == "\xC2\xA0"
     check traceLinkTitle(https[0]).splitLines[0] == SecondTraceHttps
     check traceLinkLabel(LinkPart(kind: lpText, text: "plain")) == ""
 
@@ -98,22 +106,23 @@ suite "a trace link draws a short label (review finding 1)":
       check parts.len == 1
       if parts.len == 1: traceLinkLabel(parts[0]) else: ""
     # Only a UUID is cut to its first group.
-    check label(OneTraceId) == "trace 3f9b2c1e"
-    check label("3F9B2C1E-7A4D-4E8B-9C2F-1A2B3C4D5E6F") == "trace 3F9B2C1E"
+    check label(OneTraceId) == "trace" & LabelSpace & "3f9b2c1e"
+    check label("3F9B2C1E-7A4D-4E8B-9C2F-1A2B3C4D5E6F") == "trace" & LabelSpace & "3F9B2C1E"
     # Not UUIDs: neighbours sharing a prefix keep their ends.
     check label("nightly-run-42") != label("nightly-run-43")
-    check label("nightly-run-42") == "trace nightly-\xE2\x80\xA6n-42"
+    check label("nightly-run-42") == "trace" & LabelSpace & "nightly-\xE2\x80\xA6n-42"
     check label("relay-depth-metric-0041") != label("relay-depth-metric-0042")
     # A short id, and one of exactly 12 characters, are shown whole.
-    check label("a") == "trace a"
-    check label("abc-def") == "trace abc-def"
-    check label("abcdef-12345") == "trace abcdef-12345"
+    check label("a") == "trace" & LabelSpace & "a"
+    check label("abc-def") == "trace" & LabelSpace & "abc-def"
+    check label("abcdef-12345") == "trace" & LabelSpace & "abcdef-12345"
     # An https form's host is shown as written, with its port.
     let ported = linkSpans("https://Harbor.example.invalid:8443/trace/" & OneTraceId,
                            "https://harbor.example.invalid:8443", [])
     check ported.len == 1
     if ported.len == 1:
-      check traceLinkLabel(ported[0]) == "trace 3f9b2c1e on Harbor.example.invalid:8443"
+      check traceLinkLabel(ported[0]) ==
+        "trace" & LabelSpace & "3f9b2c1e on" & LabelSpace & "Harbor.example.invalid:8443"
 
   for fixture in ["one-link", "many-links", "local-recording"]:
     test "the drawn links of " & fixture & " name no raw URL":
@@ -126,10 +135,17 @@ suite "a trace link draws a short label (review finding 1)":
           urls.add url
           let shown = textOf(l)
           check "://" notin shown
-          check shown.startsWith("trace ") or shown.startsWith("recording ")
+          check shown.startsWith("trace" & LabelSpace) or
+                shown.startsWith("recording" & LabelSpace)
+          # Breakable only before `on`: no other plain space in a label.
+          check shown.count(' ') == shown.count(" on" & LabelSpace)
           check l.attr("title").splitLines[0] == url
           check l.attr("aria-label").startsWith("Trace ") or
                 l.attr("aria-label").startsWith("Recording ")
+          # The no-break space is the label's alone: the accessible name and
+          # the tooltip read as before.
+          check LabelSpace notin l.attr("aria-label")
+          check LabelSpace notin l.attr("title")
         # The timeline's lines still hold every URL: the label is drawn
         # only, so a line's text and what its Copy copies (derived from it
         # by the viewmodel) are the message's.
@@ -143,7 +159,7 @@ suite "a trace link draws a short label (review finding 1)":
     withLinks("local-recording", proc(story: TraceLinksStory; root: MockNode) =
       var kinds: seq[string]
       for l in root.all("data-ah-url"):
-        kinds.add l.attr("data-ah-link") & ":" & textOf(l).split(' ')[0]
+        kinds.add l.attr("data-ah-link") & ":" & textOf(l).split(LabelSpace)[0]
       check "agent-harbor:trace" in kinds
       check "local-recording:recording" in kinds)
 
@@ -243,3 +259,101 @@ suite "a row's icons are named (review finding 5)":
           inc disabled
           check icon.attr("aria-label").startsWith("Record ")
       check disabled > 0)
+
+suite "Run comes before Record everywhere":
+  proc controls(n: MockNode): seq[string] =
+    ## The `data-ah-control` values under `n`, in document order.
+    for c in n.all("data-ah-control"): result.add c.attr("data-ah-control")
+
+  test "a row's icons, then each sub-row's buttons, are Run then Record":
+    withTests("row-open", proc(vm: TestRunsVM; root: MockNode) =
+      var rows, subs = 0
+      for row in root.all("class"):
+        if row.hasClass("ah-tests-row-actions"):
+          inc rows
+          check controls(row) == @["play", "record"]
+        if row.hasClass("ah-tests-sub-actions"):
+          inc subs
+          let c = controls(row)
+          check c.len >= 2
+          if c.len >= 2: check c[0 .. 1] == @[RunLabel, RecordLabel]
+      check rows > 0
+      check subs >= 2)
+
+  test "a sub-row's record-and-open is one grouped button, after Record":
+    withTests("row-open", proc(vm: TestRunsVM; root: MockNode) =
+      var grouped = 0
+      for sub in root.all("data-ah-platform"):
+        if not sub.hasClass("ah-tests-sub"): continue
+        for actions in sub.all("class"):
+          if not actions.hasClass("ah-tests-sub-actions"): continue
+          let opens = actions.all("data-ah-open", "record-and-open")
+          if opens.len == 0: continue
+          check opens.len == 1
+          let o = opens[0]
+          inc grouped
+          check o.hasClass("ah-tests-open-grouped")
+          check o.hasClass("ct-button-sm-secondary")
+          # One control: the pane's glyph stays its text, in the pane's order.
+          check textOf(o) == "\xE2\x8F\xBA\xE2\x8F\xB5"
+          let label = sub.all("class").filterIt(it.hasClass("ah-tests-sub-platform"))
+          check label.len == 1
+          if label.len == 1:
+            let name = "Record and open on " & textOf(label[0])
+            check o.attr("aria-label") == name
+            check o.attr("title").startsWith(name)
+          # After the Run and Record buttons.
+          var order: seq[string]
+          for n in actions.all("class"):
+            if n.hasClass("ah-tests-open"): order.add "open"
+            elif n.attributes.hasKey("data-ah-control"): order.add n.attr("data-ah-control")
+          check order.find("open") > order.find(RecordLabel)
+          check order.find(RecordLabel) > order.find(RunLabel)
+      check grouped > 0)
+
+  test "a row's cell draws the same grouped record-and-open, after its word":
+    withTests("row-open", proc(vm: TestRunsVM; root: MockNode) =
+      # Each platform's name, from the opened row's sub-rows.
+      var names: Table[string, string]
+      for sub in root.all("data-ah-platform"):
+        if not sub.hasClass("ah-tests-sub"): continue
+        let label = sub.all("class").filterIt(it.hasClass("ah-tests-sub-platform"))
+        if label.len == 1: names[sub.attr("data-ah-platform")] = textOf(label[0])
+      var grouped = 0
+      for cell in root.all("data-ah-platform"):
+        if not cell.hasClass("ah-tests-cell"): continue
+        let opens = cell.all("class").filterIt(it.hasClass("ah-tests-open"))
+        if opens.len == 0: continue
+        check opens.len == 1
+        let o = opens[0]
+        # The sub-row's control, not a fork of it.
+        check o.hasClass("ah-tests-open-grouped")
+        check o.hasClass("ct-button-sm-secondary")
+        check o.attr("data-ah-open") == "record-and-open"
+        check textOf(o) == "\xE2\x8F\xBA\xE2\x8F\xB5"
+        let key = cell.attr("data-ah-platform")
+        check key in names
+        if key in names:
+          inc grouped
+          let name = "Record and open on " & names[key]
+          check o.attr("aria-label") == name
+          check o.attr("title").startsWith(name)
+        # The cell's mark and word come first; the control is its last part.
+        check cell.children.len > 0
+        if cell.children.len > 0: check cell.children[^1] == o
+      check grouped > 0)
+
+  test "a kept trace's cell control is grouped too, and keeps its title":
+    withTests("recorded", proc(vm: TestRunsVM; root: MockNode) =
+      var existing = 0
+      for cell in root.all("data-ah-platform"):
+        if not cell.hasClass("ah-tests-cell"): continue
+        for o in cell.all("class").filterIt(it.hasClass("ah-tests-open")):
+          check o.hasClass("ah-tests-open-grouped")
+          if o.attr("data-ah-open") != "open-existing": continue
+          inc existing
+          check textOf(o) == "\xE2\x8F\xB5"
+          check o.attr("aria-label").len > 0
+          check not o.attr("aria-label").startsWith("Record and open on ")
+          check o.attr("title") == o.attr("aria-label")
+      check existing > 0)
