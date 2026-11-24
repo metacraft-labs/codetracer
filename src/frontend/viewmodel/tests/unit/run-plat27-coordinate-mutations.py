@@ -310,8 +310,8 @@ ARMS = [
     ),
     Arm(
         "M6", WRAP,
-        "  let firstLine = lineOfOffset(oldDoc, loA)\n",
-        "  let firstLine = lineOfOffset(oldDoc, loA) + 1\n",
+        "  let firstLine = max(0, c.lineStart.upperBound(loA) - 1)\n",
+        "  let firstLine = max(0, c.lineStart.upperBound(loA) - 1) + 1\n",
         C6_TABS,
         "INVALIDATION SKIPS THE REGION ABOVE THE EDIT. The recomputed span now "
         "starts at the edit's LAST line rather than its first, so an edit "

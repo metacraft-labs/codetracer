@@ -211,6 +211,16 @@ type
     contextsValid: int
       ## contexts[0 .. contextsValid] are the tokenizer states at the start of
       ## those lines.
+    tokenDeadline: float
+      ## When the current frame stops tokenizing ahead (`contextAt`): one
+      ## budget per frame, not per line.
+    tokensBehind: bool
+      ## A line of the frame was drawn from a state the tokenizer had not
+      ## reached; `tokenizeInBackground` catches up and redraws.
+    tokenTimerQueued: bool
+    linesRetokenized*: int
+      ## How many lines the last document change re-tokenized
+      ## (`retokenizeChange`) — what the huge-file case holds a keystroke to.
     # input
     pointer*: EditorPointerState
     focused*: bool
@@ -271,6 +281,9 @@ var
   onSharedEditorFocus*: proc(ed: SharedEditor) = nil
 
 proc sameString(s: string): string {.importjs: "#".}
+proc installIndex(ed: SharedEditor; ix: LineIndex) {.importjs: "#.index = #".}
+  ## `ed.index = ix` without the copy the JS backend makes of an assigned
+  ## object (`ix` is a value built for this editor and held by nothing else).
   ## `s` itself, not a copy: on the JS backend a string is an array and
   ## binding it to a `let` copies it, which for a large document is the
   ## largest cost of a keystroke. The core never mutates a document string in
@@ -338,17 +351,22 @@ proc invalidateTokensFrom(ed: SharedEditor; line0: int) =
   if ed.lineRuns.len > ed.contextsValid:
     ed.lineRuns.setLen(ed.contextsValid)
 
-proc contextAt(ed: SharedEditor; line0: int; budgetMs = 30.0): tuple[ctx: string; exact: bool] =
+const TokenBudgetMs = 10.0
+  ## How long one frame tokenizes ahead of the tokenizer's cache.
+
+proc contextAt(ed: SharedEditor; line0: int): tuple[ctx: string; exact: bool] =
   ## The tokenizer state at the start of `line0`, tokenizing forward from the
-  ## last known state for at most `budgetMs` (Monaco tokenizes in the
-  ## background the same way; a line beyond the budget is drawn from the
-  ## nearest state and redrawn when the tokenizer gets there).
+  ## last known state until the frame's deadline (`tokenDeadline`; Monaco
+  ## tokenizes in the background the same way): a line beyond it is drawn
+  ## from the nearest state and redrawn when the tokenizer gets there
+  ## (`tokenizeInBackground`).
   if ed.lexer == lxNone: return ("", true)
   if ed.contexts.len == 0:
     ed.contexts = @[""]
     ed.contextsValid = 0
-  let started = nowMs()
   while ed.contextsValid < line0:
+    if nowMs() > ed.tokenDeadline:
+      return (ed.contexts[ed.contextsValid], false)
     var ctx = ed.contexts[ed.contextsValid]
     let runs = tokenRuns(ed.lexer, ed.index.lineText(ed.doc.state.doc,
                                                      ed.contextsValid), ctx)
@@ -357,9 +375,80 @@ proc contextAt(ed: SharedEditor; line0: int; budgetMs = 30.0): tuple[ctx: string
     if ed.contexts.len <= ed.contextsValid + 1: ed.contexts.add ctx
     else: ed.contexts[ed.contextsValid + 1] = ctx
     inc ed.contextsValid
-    if nowMs() - started > budgetMs and ed.contextsValid < line0:
-      return (ed.contexts[ed.contextsValid], false)
   (ed.contexts[line0], true)
+
+proc spliceSeq[T](a: seq[T]; start, deleteCount: int; items: seq[T]) {.importjs: """
+  ((a, st, dc, it) => {
+    a.splice(st, dc);
+    for (let i = 0; i < it.length; i += 8192) a.splice(st + i, 0, ...it.slice(i, i + 8192));
+  })(#, #, #, #)""".}
+  ## `a`'s elements `start ..< start + deleteCount` replaced by `items`, in
+  ## place: the engine's `splice` moves the tail once, where a Nim `insert`
+  ## or `delete` would shift it an element at a time. In chunks, because a
+  ## spread argument list is bounded by the stack.
+
+proc retokenizeChange(ed: SharedEditor; first0, oldLast0, lineDelta: int) =
+  ## The tokenizer's cache moved by a change that replaced the old lines
+  ## `first0 .. oldLast0` with the new lines `first0 .. oldLast0 + lineDelta`:
+  ## the lines above are kept, the replaced ones re-tokenized, and the lines
+  ## below kept — shifted by `lineDelta` — when the last new line ends in the
+  ## state the old next line started in (Monaco's rule: a change that leaves
+  ## the state it found re-tokenizes only its own lines). Otherwise the cache
+  ## ends after the change and the tokenizer resumes from there. Costs the
+  ## changed lines, not the document.
+  ed.linesRetokenized = 0
+  if ed.lexer == lxNone or first0 >= ed.contextsValid:
+    ed.invalidateTokensFrom(first0)
+    return
+  let newLast0 = oldLast0 + lineDelta
+  let deadline = nowMs() + TokenBudgetMs
+  var ctx = ed.contexts[first0]
+  var runs: seq[seq[TokenRun]] = @[]
+  var states: seq[string] = @[]
+  var l0 = first0
+  while l0 <= newLast0:
+    runs.add tokenRuns(ed.lexer, ed.index.lineText(ed.doc.state.doc, l0), ctx)
+    states.add ctx
+    inc l0
+    if nowMs() > deadline and l0 <= newLast0: break
+  ed.linesRetokenized = runs.len
+  let done = l0 > newLast0
+  let oldValid = ed.contextsValid
+  if done and oldLast0 + 1 <= oldValid and ctx == ed.contexts[oldLast0 + 1]:
+    # The lines below start where they started: kept, shifted.
+    spliceSeq(ed.lineRuns, first0, oldLast0 - first0 + 1, runs)
+    spliceSeq(ed.contexts, first0 + 1, oldLast0 - first0 + 1, states)
+    ed.contextsValid = oldValid + lineDelta
+  else:
+    ed.contextsValid = first0
+    ed.contexts.setLen(first0 + 1)
+    ed.lineRuns.setLen(first0)
+    for i in 0 ..< runs.len:
+      ed.lineRuns.add runs[i]
+      ed.contexts.add states[i]
+    ed.contextsValid = first0 + runs.len
+
+func tokenizedLines*(ed: SharedEditor): int =
+  ## How many lines from the top the tokenizer's cache holds the state of:
+  ## an edit keeps the cache below it (`retokenizeChange`), so this moves by
+  ## the lines the edit added, not back to the edit.
+  ed.contextsValid
+
+proc requestRender*(ed: SharedEditor)
+
+proc tokenizeInBackground(ed: SharedEditor) =
+  ## A frame drew lines past the tokenizer's cache: tokenize on in slices of
+  ## the frame budget between frames, and redraw once the drawn lines are
+  ## exact.
+  if ed.tokenTimerQueued or ed.disposed: return
+  ed.tokenTimerQueued = true
+  discard setTimeoutJs(proc() =
+    ed.tokenTimerQueued = false
+    if ed.disposed or ed.visible.len == 0: return
+    ed.tokenDeadline = nowMs() + TokenBudgetMs
+    let (_, exact) = ed.contextAt(ed.visible[^1])
+    if exact: ed.requestRender()
+    else: ed.tokenizeInBackground(), 0)
 
 proc lineTokenRuns*(ed: SharedEditor; line0: int; lt: string): seq[TokenRun] =
   ## Line `line0`'s tokens (its text `lt`).
@@ -371,6 +460,7 @@ proc lineTokenRuns*(ed: SharedEditor; line0: int; lt: string): seq[TokenRun] =
     if exact and line0 < ed.lineRuns.len:
       result = ed.lineRuns[line0]
     else:
+      ed.tokensBehind = true
       var (ctx, _) = ed.contextAt(line0)
       discard ctx0
       result = tokenRuns(ed.lexer, lt, ctx)
@@ -689,6 +779,8 @@ proc render*(ed: SharedEditor) =
   ## measurement.
   if ed.disposed or ed.root.isNil: return
   inc ed.renders
+  ed.tokenDeadline = nowMs() + TokenBudgetMs
+  ed.tokensBehind = false
   ed.ensureIndex()
   ed.decos.followDocument(ed.doc)
   let lay = ed.layoutNow
@@ -965,7 +1057,6 @@ proc render*(ed: SharedEditor) =
     z.domNode.setStyle("position", "absolute")
     z.domNode.setStyle("top", cstring($zt & "px"))
     z.domNode.setStyle("height", cstring($z.heightPx & "px"))
-    z.domNode.setStyle("width", "100%")
     if not z.marginNode.isNil:
       z.marginNode.setStyle("position", "absolute")
       z.marginNode.setStyle("top", cstring($zt & "px"))
@@ -1001,6 +1092,7 @@ proc render*(ed: SharedEditor) =
     ev["contentWidth"] = ed.contentWidthPx
     queueRender(proc() =
       if not ed.disposed: ed.fire("contentSize", ev))
+  if ed.tokensBehind: ed.tokenizeInBackground()
   ed.fire("render", jsNew())
 
 # ---------------------------------------------------------------------------
@@ -1080,26 +1172,16 @@ proc afterDocumentChange*(ed: SharedEditor; before: DocumentVersion;
     ch["text"] = cstring(newText)
     changes.jsPush(ch)
   # The line index moves by the change rather than being rebuilt.
-  ed.index = if known: updatedLineIndex(oldIx, cs, ed.doc.state.doc, now)
-             else: buildLineIndex(ed.doc.state.doc, now)
+  # Installed, not assigned: assigning a line index copies its line starts,
+  # one entry per line of the document.
+  if known: installIndex(ed, updatedLineIndex(oldIx, cs, ed.doc.state.doc, now))
+  else: installIndex(ed, buildLineIndex(ed.doc.state.doc, now))
   if firstLine0 != high(int):
-    # Monaco's rule: a change that leaves its line ending in the tokenizer
-    # state the next line already started in re-tokenizes that line alone.
-    let sameLines = ed.index.lineCount == oldIx.lineCount
     var lastLine0 = firstLine0
     for r in cs.changedRangeSeq(individual = true):
       lastLine0 = max(lastLine0, oldIx.lineOfOffset(r.toA))
-    if sameLines and lastLine0 == firstLine0 and ed.lexer != lxNone and
-       firstLine0 + 1 < ed.contextsValid and firstLine0 < ed.lineRuns.len:
-      var ctx = ed.contexts[firstLine0]
-      let runs = tokenRuns(ed.lexer, ed.index.lineText(ed.doc.state.doc,
-                                                       firstLine0), ctx)
-      if ctx == ed.contexts[firstLine0 + 1]:
-        ed.lineRuns[firstLine0] = runs
-      else:
-        ed.invalidateTokensFrom(firstLine0)
-    else:
-      ed.invalidateTokensFrom(firstLine0)
+    ed.retokenizeChange(firstLine0, lastLine0,
+                        ed.index.lineCount - oldIx.lineCount)
   ed.decos.followDocument(ed.doc)
   let ev = jsNew()
   ev["changes"] = changes
@@ -1210,23 +1292,89 @@ proc setScroll*(ed: SharedEditor; top, left: int) =
     ed.render()
     ed.fireScroll(ed.scrollTop != t0, ed.scrollLeft != l0)
 
-proc lineFullyVisible*(ed: SharedEditor; line1: int): bool =
-  ## Monaco's test for the `…IfOutsideViewport` reveals: the line's whole
-  ## box inside the view (a line cut by an edge is outside).
-  let top = ed.topForLine(line1)
-  top >= ed.scrollTop and top + ed.lineHeight <= ed.scrollTop + ed.textViewportHeight
+type
+  RevealKind* = enum
+    ## Monaco's `VerticalRevealType`s that the editor API reaches.
+    rkSimple,                   ## `revealLine`, `revealPosition`, `revealRange`
+    rkCenter,                   ## `…InCenter`
+    rkCenterIfOutsideViewport,  ## `…InCenterIfOutsideViewport`
+    rkNearTop                   ## `revealLineNearTop`
+
+proc surroundingLines(ed: SharedEditor): int =
+  ## How many lines an API reveal keeps around its box: Monaco's
+  ## `max(cursorSurroundingLines, stickyScroll.enabled ? maxLineCount : 0)`.
+  ## Sticky scroll is on by default (maxLineCount 5), and the desktop's
+  ## editors do not turn it off, so a reveal from the API keeps five lines
+  ## above the line it reveals.
+  var around = 0
+  var sticky = true
+  var stickyLines = 5
+  if not ed.options.isNil:
+    let csl = ed.options["cursorSurroundingLines"]
+    if not isNilOrUndef(csl): around = int(jsNum(csl))
+    let ss = ed.options["stickyScroll"]
+    if not isNilOrUndef(ss):
+      if not isNilOrUndef(ss["enabled"]): sticky = ss["enabled"].to(bool)
+      if not isNilOrUndef(ss["maxLineCount"]): stickyLines = int(jsNum(ss["maxLineCount"]))
+  max(around, if sticky: stickyLines else: 0)
+
+proc revealScrollTop*(ed: SharedEditor; firstLine1, lastLine1: int;
+                      kind: RevealKind): int =
+  ## The scroll top Monaco's `ViewLines._computeScrollTopToRevealRange` picks
+  ## for a reveal from the API (source `api`, not a minimal reveal) of lines
+  ## `firstLine1 .. lastLine1`: the box is the lines plus `context` lines of
+  ## padding above and `context - 1` below, `context` being
+  ## `min(viewport lines / 2, surroundingLines)`. A centred reveal puts the
+  ## padded box's middle at the view's middle, so with any padding the
+  ## revealed line's TOP sits at the middle (not the line's middle), and an
+  ## `…IfOutsideViewport` reveal moves the view unless the whole padded box
+  ## is inside it. The scroll position is truncated to whole pixels as
+  ## Monaco's scroll state does (`| 0`).
+  let lh = ed.lineHeight
+  let vh = ed.textViewportHeight
+  let viewStart = float(ed.scrollTop)
+  let viewEnd = viewStart + float(vh)
+  var boxStart = float(ed.topForLine(firstLine1))
+  var boxEnd = float(ed.topForLine(lastLine1) + lh)
+  let context = min(float(vh) / float(max(1, lh)) / 2.0, float(ed.surroundingLines))
+  var padBottom = max(0.0, context - 1.0) * float(lh)
+  if kind == rkSimple: padBottom += float(lh)
+  boxStart -= context * float(lh)
+  boxEnd += padBottom
+  var st: float
+  if boxEnd - boxStart > float(vh):
+    st = boxStart
+  else:
+    case kind
+    of rkNearTop:
+      let gap = max(5.0 * float(lh), float(vh) * 0.2)
+      st = max(boxEnd - float(vh), boxStart - gap)
+    of rkCenter, rkCenterIfOutsideViewport:
+      if kind == rkCenterIfOutsideViewport and viewStart <= boxStart and
+         boxEnd <= viewEnd:
+        st = viewStart
+      else:
+        st = max(0.0, (boxStart + boxEnd) / 2.0 - float(vh) / 2.0)
+    of rkSimple:
+      # `_computeMinimumScrolling`, on whole pixels.
+      let vs = int(viewStart)
+      let ve = int(viewEnd)
+      let bs = int(boxStart)
+      let be = int(boxEnd)
+      if be - bs < ve - vs:
+        if bs < vs: st = float(bs)
+        elif be > ve: st = float(max(0, be - (ve - vs)))
+        else: st = viewStart
+      else:
+        st = float(bs)
+  int(st)
+
+proc revealLines*(ed: SharedEditor; firstLine1, lastLine1: int; kind: RevealKind) =
+  ## A reveal from the editor API, as Monaco makes it (`revealScrollTop`).
+  ed.setScroll(ed.revealScrollTop(firstLine1, lastLine1, kind), ed.scrollLeft)
 
 proc revealLine*(ed: SharedEditor; line1: int; center = false) =
-  let top = ed.topForLine(line1)
-  let vh = ed.textViewportHeight
-  var st = ed.scrollTop
-  if center:
-    st = top - (vh - ed.lineHeight) div 2
-  elif top < st:
-    st = top
-  elif top + ed.lineHeight > st + vh:
-    st = top + ed.lineHeight - vh
-  ed.setScroll(st, ed.scrollLeft)
+  ed.revealLines(line1, line1, if center: rkCenter else: rkSimple)
 
 proc revealOffset*(ed: SharedEditor; offset: int; center = false) =
   ed.ensureIndex()
@@ -1537,7 +1685,8 @@ proc refreshFindWidget(ed: SharedEditor) =
 
 proc afterFindMove(ed: SharedEditor; r: FindReveal) =
   if r.line > 0:
-    if not ed.lineFullyVisible(r.line): ed.revealLine(r.line, center = true)
+    # Monaco's find widget: `revealRangeInCenterIfOutsideViewport`.
+    ed.revealLines(r.line, r.line, rkCenterIfOutsideViewport)
   ed.refreshFindWidget()
   ed.fireCursor("find")
   ed.render()
@@ -2200,6 +2349,9 @@ proc addZone*(ed: SharedEditor; spec: JsObject): int =
   let node = spec["domNode"]
   if not isNilOrUndef(node):
     node.setAttr("data-ct-target", "zone")
+    # Monaco's `ViewZones._addZone`: 100% wide once, when added. A width the
+    # zone's owner sets afterwards (the tracepoint editor's) is kept.
+    node.setStyle("width", "100%")
     ed.zonesLayer.appendChild(node)
   var mnode: JsObject = nil
   if not isNilOrUndef(spec["marginDomNode"]):

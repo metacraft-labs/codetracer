@@ -43,6 +43,8 @@ from ../../common/key_names import kpNative
 import ../tui/app/syntax/token_class
 import ../tui/app/theme/editor_theme
 import ../styles/generated/design_tokens
+from ../viewmodel/editor/wrap import linesRewrapped
+from ../viewmodel/editor/operations import derivationSpanBytes
 
 proc ctPress(selector, key: cstring): Future[void] {.importjs:
   "window.ctPress(#, #)".}
@@ -138,8 +140,12 @@ proc endCase(name: string) =
 
 const
   Source = "def main():\n    x = 1\n    if x:\n        y = 2\n\n    return x\nprint(main())\n"
-  ExpectedChecks = 151
+  ExpectedChecks = 165
     ## Written from a run. See the end of `main`.
+  HugeKeyRatio = 25.0
+    ## `caseHugeFile`'s bound: a keystroke at 200,000 lines against one at
+    ## 1,000. Measured 2-6 at host load ~140 (see the case); a bound with
+    ## room for the noise of a loaded host, which slows both sides.
 
 proc fresh(text = Source; readOnly = false; model = bkCua;
            dark = true): SharedEditor =
@@ -405,6 +411,13 @@ proc caseDecorationsAndZones() {.async.} =
   ck pxOf(viewLine(2)) == float(ed.lineHeight + 40),
     "line 2 top " & $pxOf(viewLine(2))
   ck pxOf(zone) == float(ed.lineHeight), "the zone's top " & $pxOf(zone)
+  # Monaco makes a zone's node 100% wide when it is ADDED, and never again:
+  # a width its owner gives it afterwards (the tracepoint editor sizes its
+  # zone to the text area) survives every later frame.
+  zone.style.width = cstring"120px"
+  ed.render()
+  await settle()
+  ck $zone.style.width.to(cstring) == "120px", "a zone keeps the width its owner gave it"
   # Injected text (a value chip) sits at the end of its line.
   discard f.deltaDecorations(newJsArray(), toJs([js{
     range: js{startLineNumber: 4, startColumn: 10, endLineNumber: 4, endColumn: 10},
@@ -994,7 +1007,9 @@ proc caseScrollRangeAndViewState() {.async.} =
   await settle()
   let vh = ed.height
   let lh = ed.lineHeight
-  ck ed.scrollTop == ed.topForLine(55) - (vh - lh) div 2,
+  # Monaco centres the box sticky scroll's five lines pad on either side
+  # (see `caseRevealsAsMonaco`), so the line's TOP is at the view's middle.
+  ck ed.scrollTop == int(float(ed.topForLine(55)) - float(vh) / 2.0),
     "line 55 centred past the last screenful (" & $ed.scrollTop & ")"
   ck num(f.getScrollHeight()) == float(60 * lh - lh + vh), "Monaco's scroll height"
   ed.options[cstring"scrollBeyondLastLine"] = false
@@ -1015,14 +1030,121 @@ proc caseScrollRangeAndViewState() {.async.} =
      str(f.getModel().getValueInRange(sels[1])) == "ro", "with their text"
   endCase("Monaco's scroll range, and the view state carries every selection")
 
+proc caseRevealsAsMonaco() {.async.} =
+  beginCase()
+  # The editor API's reveals put the view where Monaco 0.54's
+  # `ViewLines._computeScrollTopToRevealRange` puts it, for a reveal from the
+  # API (source `api`): the revealed lines are a box padded by `context`
+  # lines above and `context - 1` below (`Simple` one more below), where
+  # `context = min(viewport lines / 2, max(cursorSurroundingLines,
+  # stickyScroll.enabled ? stickyScroll.maxLineCount : 0))` — five, with
+  # Monaco's defaults, which the desktop's editors keep. A centred reveal
+  # puts the padded box's middle at the view's middle; an
+  # `…IfOutsideViewport` one moves the view unless the whole padded box is in
+  # it; the scroll top is truncated to whole pixels. The expectations below
+  # are that rule, worked by hand for each reveal.
+  var lines: seq[string] = @[]
+  for i in 1 .. 100: lines.add "row_" & $i
+  let ed = fresh(lines.join("\n"))
+  let f = facadeOf(ed)
+  let vh = ed.height
+  let lh = ed.lineHeight
+  echo "    reveals: view " & $vh & " px, line height " & $lh & " px"
+  ck vh div lh >= 12, "the view holds more than the padded box"
+  # The last fully drawn line: inside the view, but its padded box is not,
+  # so Monaco centres it — the stop the differential's
+  # `dimming-marks-only-untaken-branches` makes.
+  let edge = vh div lh
+  discard f.setScrollTop(0)
+  discard f.revealLineInCenterIfOutsideViewport(edge)
+  await settle()
+  echo "    reveals: line " & $edge & " centred at scroll top " & $ed.scrollTop
+  ck ed.scrollTop == int(float((edge - 1) * lh) - float(vh) / 2.0),
+    "the last fully drawn line, inside the last five lines, is centred"
+  # A line whose padded box is inside the view stays where it is.
+  discard f.setScrollTop(0)
+  discard f.revealLineInCenterIfOutsideViewport(7)
+  await settle()
+  ck ed.scrollTop == 0, "line 7 is far enough inside: no scroll"
+  # Centred: the line's top at the middle of the view.
+  discard f.revealLineInCenter(50)
+  await settle()
+  ck ed.scrollTop == int(float(49 * lh) - float(vh) / 2.0),
+    "line 50's top at the view's middle"
+  # Simple, from the top: the box's bottom (the line, four lines of padding
+  # and one more) at the view's bottom.
+  discard f.setScrollTop(0)
+  discard f.revealLine(60)
+  await settle()
+  ck ed.scrollTop == 60 * lh + 5 * lh - vh,
+    "line 60 revealed with five lines below it"
+  # Near the top: a gap of max(5 lines, 20% of the view) above the box.
+  discard f.setScrollTop(0)
+  discard f.revealLineNearTop(70)
+  await settle()
+  let gap = max(5.0 * float(lh), float(vh) * 0.2)
+  ck ed.scrollTop == int(float(69 * lh - 5 * lh) - gap),
+    "line 70 near the top"
+  # Without sticky scroll (and no surrounding lines) there is no padding:
+  # the line's MIDDLE is centred.
+  ed.options[cstring"stickyScroll"] = js{enabled: false}
+  discard f.revealLineInCenter(50)
+  await settle()
+  ck ed.scrollTop == int(float(49 * lh) + float(lh) / 2.0 - float(vh) / 2.0),
+    "without sticky scroll, line 50's middle at the view's middle"
+  endCase("the API's reveals scroll as Monaco's do")
+
 proc caseHugeFile() {.async.} =
   beginCase()
   # 200,000 lines (PLAT-24's corpus size): the editor opens it, draws only
-  # the viewport, and the line-splitting keystroke costs about the same at
-  # the first line as at the last (Editor-ViewModel.md §4.1's gate, < 4x).
-  var lines = newSeqOfCap[string](200_000)
-  for i in 1 .. 200_000: lines.add "    let value_" & $i & " = compute(" & $i & ", other)"
-  let text = lines.join("\n")
+  # the viewport, and a keystroke costs what the edit touches, not what the
+  # document holds.
+  #
+  # STRUCTURE FIRST. A keystroke re-tokenizes the lines it changed and keeps
+  # the tokenizer's cache below them (`tokenizedLines` moves by the line it
+  # added rather than back to the edit), re-wraps the lines it touched
+  # (`wrap.linesRewrapped`) and re-derives the bytes of the edit, not the
+  # document (`operations.derivationSpanBytes`). These are counts, so they
+  # hold at any host load.
+  #
+  # THEN TIME, AS A RATIO. A keystroke at 200,000 lines is held to at most
+  # `HugeKeyRatio` times one at 1,000 lines, both the best of several takes
+  # in the same run, so a loaded host slows both: what remains of the
+  # document's size in a keystroke is one copy of its bytes (the new
+  # document, `ChangeSet.apply`) and a few passes over its LINE arrays,
+  # measured on 2026-11-23 at host load ~140 as ~80-90 ms against ~13 ms
+  # at 1,000 lines in the lane's debug build (ratio ~6), and ~90-200 ms
+  # against ~45 ms in a release build. Before the change, a keystroke
+  # re-derived the whole document and re-tokenized from the edit down, and
+  # cost 8-16 s at 200,000 lines on the same host. Monaco
+  # edits a piece tree and pays milliseconds; the shared editor's document
+  # is one string, and the copy is the difference the parity table states.
+  # Editor-ViewModel.md §4.1's gate (`Enter` at line 1 ÷ at the last line,
+  # < 4) is kept.
+  proc enterAt(ed: SharedEditor; line: int): float =
+    # The line split is left in place: one more line changes nothing these
+    # compare, and an undo would double the keystrokes this case costs on a
+    # loaded lane.
+    discard facadeOf(ed).setPosition(js{lineNumber: line, column: 5})
+    let s = perfNow()
+    discard ed.applyKeyName("Enter")
+    ed.render()
+    result = perfNow() - s
+  proc best(xs: seq[float]): float = min(xs)
+  proc corpus(n: int): string =
+    var lines = newSeqOfCap[string](n)
+    for i in 1 .. n: lines.add "    let value_" & $i & " = compute(" & $i & ", other)"
+    lines.join("\n")
+  # The small document first: its best keystroke is the unit.
+  let small = fresh(corpus(1_000))
+  small.focusEditor()
+  discard enterAt(small, 500)
+  var smallTakes: seq[float]
+  for k in 0 ..< 5:
+    smallTakes.add enterAt(small, 1)
+    smallTakes.add enterAt(small, small.lineCount)
+  echo "    huge file: 1,000 lines, best Enter " & $best(smallTakes) & " ms"
+  let text = corpus(200_000)
   echo "    huge file: text built"
   let t0 = perfNow()
   let ed = fresh(text)
@@ -1031,33 +1153,54 @@ proc caseHugeFile() {.async.} =
   ck ed.lineCount == 200_000
   ck num(qsa(ed.root, ".view-line").length) < 60, "only the viewport is drawn"
   ed.focusEditor()
-  proc enterAt(line: int): float =
-    # The line split is left in place: one more line changes nothing the
-    # gate compares, and an undo would double the keystrokes this case
-    # costs on a loaded lane.
-    discard facadeOf(ed).setPosition(js{lineNumber: line, column: 5})
-    let s = perfNow()
-    discard ed.applyKeyName("Enter")
-    ed.render()
-    result = perfNow() - s
-  # The first keystroke pays the engine's warm-up; it is not a take.
-  discard enterAt(100_000)
+  # The first keystroke in a document derives it whole (the memo held the
+  # previous document): not the keystroke being counted.
+  discard enterAt(ed, 100_000)
+  # The tokenizer's cache well past the view: line 3,000 shown, and the
+  # background tokenizer waited for (on its state, not on time) until the
+  # cache reaches it. Then back to the top.
+  discard facadeOf(ed).revealLineInCenter(3_000)
+  await settle()
+  var waits = 0
+  while ed.tokenizedLines < 3_000 and waits < 20_000:
+    await settle()
+    inc waits
+  discard facadeOf(ed).revealLineInCenter(1)
+  await settle()
+  # The structure of one keystroke at the top of the document.
+  let cached = ed.tokenizedLines
+  discard enterAt(ed, 1)
+  ck cached >= 3_000, "the tokenizer reached line 3,000"
+  echo "    huge file: Enter re-tokenized " & $ed.linesRetokenized &
+    " lines, re-wrapped " & $linesRewrapped & ", re-derived " &
+    $derivationSpanBytes & " bytes"
+  ck ed.linesRetokenized <= 2, "Enter re-tokenized only the lines it changed"
+  echo "    huge file: the tokenizer's cache " & $cached & " -> " &
+    $ed.tokenizedLines & " lines"
+  ck ed.tokenizedLines > cached, "the tokenizer's cache kept the lines below the edit"
+  ck linesRewrapped <= 2, "Enter re-wrapped only the lines it touched"
+  ck derivationSpanBytes <= 64, "Enter re-derived only the bytes of the edit"
+  # The first keystroke at the far end pays the engine's warm-up there; it
+  # is not a take.
+  discard enterAt(ed, ed.lineCount)
   var first, last: seq[float]
-  for k in 0 ..< 2:
-    first.add enterAt(1)
-    last.add enterAt(ed.lineCount)
+  for k in 0 ..< 3:
+    first.add enterAt(ed, 1)
+    last.add enterAt(ed, ed.lineCount)
     echo "    huge file: take " & $k & ": " & $first[^1] & " / " & $last[^1] & " ms"
-  # The best take of each: on a loaded machine the slower take measures
-  # the machine.
-  proc best(xs: seq[float]): float = min(xs)
-  let ratio = best(first) / max(0.001, best(last))
+  let gate = best(first) / max(0.001, best(last))
+  let unit = max(1.0, best(smallTakes))
+  let ratio = min(best(first), best(last)) / unit
   echo "    huge file: opened in " & $opened.int & " ms; Enter at line 1 " &
-    $best(first) & " ms, at the last line " & $best(last) & " ms, ratio " & $ratio
-  ck ratio < 4.0, "Enter at line 1 / at the last line = " & $ratio
+    $best(first) & " ms, at the last line " & $best(last) & " ms; at 1,000 lines " &
+    $best(smallTakes) & " ms; ratio " & $ratio
+  ck gate < 4.0, "Enter at line 1 / at the last line = " & $gate
+  ck ratio <= HugeKeyRatio,
+    "a keystroke at 200,000 lines is " & $ratio & " times one at 1,000 lines"
   discard facadeOf(ed).revealLineInCenter(150_000)
   await settle()
   ck not isNull(viewLine(150_000)), "line 150,000 is drawn after a reveal"
-  endCase("a 200,000-line file opens, scrolls and edits with the keystroke gate held")
+  endCase("a 200,000-line file opens, scrolls and edits at the cost of the edit")
 
 proc guarded(c: proc(): Future[void]; name: string) {.async.} =
   ## A case that raises fails, by name, with the exception's message and the
@@ -1093,6 +1236,7 @@ proc main() {.async.} =
   await guarded(caseEditorSurfaces, "caseEditorSurfaces")
   await guarded(caseBracketsAndWheel, "caseBracketsAndWheel")
   await guarded(caseScrollRangeAndViewState, "caseScrollRangeAndViewState")
+  await guarded(caseRevealsAsMonaco, "caseRevealsAsMonaco")
   await guarded(caseHugeFile, "caseHugeFile")
   beginCase()
   inc checks

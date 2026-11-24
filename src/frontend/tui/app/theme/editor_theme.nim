@@ -133,8 +133,10 @@ func themeRuleOf*(tokenType: string): string =
   ## the same rule.
   var s = tokenType
   while s.len > 0:
-    for r in EditorThemeRules:
-      if r.scope == s:
+    # By index: on the JS backend `for r in` a constant table copies each
+    # row, and this runs for every token drawn.
+    for i in 0 ..< EditorThemeRules.len:
+      if EditorThemeRules[i].scope == s:
         return s
     var cut = -1
     for i in countdown(s.high, 0):

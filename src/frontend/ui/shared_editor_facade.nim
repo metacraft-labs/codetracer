@@ -587,25 +587,32 @@ proc facadeOf*(ed: SharedEditor): JsObject =
       let last = ed.visible[^1]
       result.jsPush(rangeObj(ed.visible[0], 1, last,
         monacoColumnOf(ed.lineText(last), ed.lineText(last).len)))
-  f["revealLine"] = proc(line: int) = ed.revealLine(line)
-  f["revealLineInCenter"] = proc(line: int) = ed.revealLine(line, center = true)
+  # Every reveal is Monaco's `_computeScrollTopToRevealRange` for its
+  # `VerticalRevealType` (`SharedEditor.revealScrollTop`).
+  proc lineOf(p: JsObject): int = int(jsNum(p["lineNumber"]))
+  proc firstOf(r: JsObject): int = int(jsNum(r["startLineNumber"]))
+  proc lastOf(r: JsObject): int = int(jsNum(r["endLineNumber"]))
+  f["revealLine"] = proc(line: int) = ed.revealLines(line, line, rkSimple)
+  f["revealLineInCenter"] = proc(line: int) = ed.revealLines(line, line, rkCenter)
   f["revealLineInCenterIfOutsideViewport"] = proc(line: int) =
-    if not ed.lineFullyVisible(line): ed.revealLine(line, center = true)
-  f["revealLineNearTop"] = proc(line: int) = ed.revealLine(line, center = true)
-  f["revealLines"] = proc(a, b: int) = ed.revealLine(a)
-  f["revealLinesInCenter"] = proc(a, b: int) = ed.revealLine(a, center = true)
-  f["revealPosition"] = proc(p: JsObject) = ed.revealLine(int(jsNum(p["lineNumber"])))
+    ed.revealLines(line, line, rkCenterIfOutsideViewport)
+  f["revealLineNearTop"] = proc(line: int) = ed.revealLines(line, line, rkNearTop)
+  f["revealLines"] = proc(a, b: int) = ed.revealLines(a, b, rkSimple)
+  f["revealLinesInCenter"] = proc(a, b: int) = ed.revealLines(a, b, rkCenter)
+  f["revealLinesInCenterIfOutsideViewport"] = proc(a, b: int) =
+    ed.revealLines(a, b, rkCenterIfOutsideViewport)
+  f["revealPosition"] = proc(p: JsObject) =
+    ed.revealLines(lineOf(p), lineOf(p), rkSimple)
   f["revealPositionInCenter"] = proc(p: JsObject) =
-    ed.revealLine(int(jsNum(p["lineNumber"])), center = true)
+    ed.revealLines(lineOf(p), lineOf(p), rkCenter)
   f["revealPositionInCenterIfOutsideViewport"] = proc(p: JsObject) =
-    let line = int(jsNum(p["lineNumber"]))
-    if not ed.lineFullyVisible(line): ed.revealLine(line, center = true)
-  f["revealRange"] = proc(r: JsObject) = ed.revealLine(int(jsNum(r["startLineNumber"])))
+    ed.revealLines(lineOf(p), lineOf(p), rkCenterIfOutsideViewport)
+  f["revealRange"] = proc(r: JsObject) =
+    ed.revealLines(firstOf(r), lastOf(r), rkSimple)
   f["revealRangeInCenter"] = proc(r: JsObject) =
-    ed.revealLine(int(jsNum(r["startLineNumber"])), center = true)
+    ed.revealLines(firstOf(r), lastOf(r), rkCenter)
   f["revealRangeInCenterIfOutsideViewport"] = proc(r: JsObject) =
-    let line = int(jsNum(r["startLineNumber"]))
-    if not ed.lineFullyVisible(line): ed.revealLine(line, center = true)
+    ed.revealLines(firstOf(r), lastOf(r), rkCenterIfOutsideViewport)
   f["saveViewState"] = proc(): JsObject =
     ## Monaco's view state carries every cursor's selection (`cursorState`),
     ## so a re-mounted pane (a mode switch) gives the selection back.

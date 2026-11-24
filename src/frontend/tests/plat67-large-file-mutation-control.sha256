@@ -1,0 +1,8 @@
+# Control digests for run-plat67-large-file-mutations.py — the
+# subjects AND the suites the arms are graded by.
+# Refreshed with --record-control-hashes, gated by the
+# needle scan.
+612e69b073d1963a8510bf8fe63f7769b85a79c95616c47c39104aaf9ce88c62  src/frontend/ui/shared_editor.nim
+6ba96746bc6aea47ebb5a05f9e589ed4658b406604d2b48b5338193c01c46053  src/frontend/viewmodel/editor/operations.nim
+01eecfaf12b2524e611ce59860739e42babf164e9dd5fcf8078ef10145b76f46  src/frontend/viewmodel/editor/wrap.nim
+ef0ac8389103e53a88e8c49575a5be1e969d49d41a4d65b483961ef3844d7b5b  src/frontend/tests/shared_editor_chromium_test.nim

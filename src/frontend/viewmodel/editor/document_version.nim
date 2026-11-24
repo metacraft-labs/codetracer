@@ -164,6 +164,12 @@ func knows*(vd: VersionedDocument; v: DocumentVersion): bool =
   ## it is the difference between a countable outcome and an exception.
   vd.oldest <= v and v <= vd.cur
 
+proc mint(vd: var VersionedDocument): DocumentVersion =
+  ## The next version, after a change set went into the log — both
+  ## `applyChanges` call it, so there is one place a version is minted.
+  vd.cur = DocumentVersion(int(vd.cur) + 1)
+  vd.cur
+
 proc applyChanges*(vd: var VersionedDocument; cs: ChangeSet): DocumentVersion =
   ## **THE ONLY WAY A VERSION IS MINTED.** Synchronous, unconditionally: there
   ## is no branch in this procedure that waits, polls, schedules or yields,
@@ -176,8 +182,34 @@ proc applyChanges*(vd: var VersionedDocument; cs: ChangeSet): DocumentVersion =
       " bytes does not meet a document of " & $vd.docText.len)
   vd.docText = cs.apply(vd.docText)
   vd.log.add cs
-  vd.cur = DocumentVersion(int(vd.cur) + 1)
-  vd.cur
+  vd.mint()
+
+when defined(js):
+  proc installText(vd: var VersionedDocument; text: string) {.importjs:
+    "#.docText = #".}
+else:
+  proc installText(vd: var VersionedDocument; text: string) =
+    vd.docText = text
+
+proc applyChanges*(vd: var VersionedDocument; cs: ChangeSet;
+                   after: string): DocumentVersion =
+  ## `applyChanges(vd, cs)` for a caller that already holds the document
+  ## `cs` produces (the editing model, which built it): the timeline takes
+  ## `after` rather than building the same bytes a second time. `after` must
+  ## be `cs.apply(text)`; its length is checked, and the caller's own
+  ## invariant (`editing_core.drainJournal`: the timeline's text is the
+  ## model's `doc`) is what makes the bytes the same.
+  if cs.length != vd.docText.len:
+    raise newException(ChangeSetError,
+      "applyChanges: a change set over " & $cs.length &
+      " bytes does not meet a document of " & $vd.docText.len)
+  if cs.newLength != after.len:
+    raise newException(ChangeSetError,
+      "applyChanges: a change set producing " & $cs.newLength &
+      " bytes was handed a document of " & $after.len)
+  vd.installText(after)
+  vd.log.add cs
+  vd.mint()
 
 proc apply*(vd: var VersionedDocument; t: Transaction): DocumentVersion =
   ## §6: *"a transaction is the only way state changes"*, meeting §11's *"the

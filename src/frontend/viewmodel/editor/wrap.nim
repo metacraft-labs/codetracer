@@ -250,7 +250,6 @@ type
     doc*: string
     store*: TextStore
     cache*: WrapCache
-    boundaries*: seq[int]   ## document-wide cluster boundaries, PLAT-26's
     settings*: WrapSettings
 
   WrapError* = object of ValueError
@@ -380,20 +379,31 @@ proc documentLines*(doc: string): seq[string] =
       start = i + 1
   result.add doc[start .. ^1]
 
+when defined(js):
+  proc installBases(c: var WrapCache; rowBase, lineStart: seq[int]) {.importjs:
+    "((c, r, l) => { c.rowBase = r; c.lineStart = l; })(#, #, #)".}
+    ## Installed, not assigned: the JS backend copies an assigned `seq`, an
+    ## element at a time, and these have one entry per line.
+else:
+  proc installBases(c: var WrapCache; rowBase, lineStart: sink seq[int]) =
+    c.rowBase = rowBase
+    c.lineStart = lineStart
+
 proc rebuildBase(c: var WrapCache) =
   ## The two prefix sums, derived from the per-line data rather than carried
   ## alongside it. Derived, because a counter maintained beside a splice is the
   ## bookkeeping §36a's second rule is about.
-  c.rowBase = newSeq[int](c.rows.len + 1)
-  c.lineStart = newSeq[int](c.rows.len)
+  var rowBase = newSeq[int](c.rows.len + 1)
+  var lineStart = newSeq[int](c.rows.len)
   var acc = 0
   var off = 0
   for i in 0 ..< c.rows.len:
-    c.rowBase[i] = acc
+    rowBase[i] = acc
     acc += c.rows[i].len
-    c.lineStart[i] = off
+    lineStart[i] = off
     off += c.metrics[i].byteLen + 1   # the terminating '\n'
-  c.rowBase[^1] = acc
+  rowBase[^1] = acc
+  installBases(c, rowBase, lineStart)
 
 func lineStartOffsetsOf*(doc: string): seq[int] =
   ## The DOCUMENT offset each logical line begins at, derived from
@@ -466,6 +476,11 @@ proc wrapCacheOfMetrics*(doc: string; settings: WrapSettings;
   result.lineCount = result.metrics.len
   result.rebuildBase()
 
+var linesRewrapped* = 0
+  ## How many logical lines the last wrap cache built or moved recomputed:
+  ## every line for `initWrapCache`, the lines the change touched for
+  ## `updateWrapCache`.
+
 proc initWrapCache*(doc: string; settings: WrapSettings): WrapCache =
   ## The full computation, with no decorations. `LAW-C6`'s oracle is this
   ## function; the incremental path below is the thing under test.
@@ -477,6 +492,7 @@ proc initWrapCache*(doc: string; settings: WrapSettings): WrapCache =
   var ms: seq[LineMetrics] = @[]
   for line in documentLines(doc):
     ms.add lineMetrics(line, settings.policy)
+  linesRewrapped = ms.len
   wrapCacheOfMetrics(doc, settings, ms)
 
 proc rewrap*(c: WrapCache; wrapColumn: int): WrapCache =
@@ -531,7 +547,10 @@ func rowAt*(c: WrapCache; row: int): DisplayRow =
       "wrap cache: display row " & $row & " outside a document of " &
       $c.rowBase[^1] & " row(s)")
   let line = c.rowBase.upperBound(row) - 1
-  c.rows[line][row - c.rowBase[line]]
+  result = c.rows[line][row - c.rowBase[line]]
+  # The line is the one the row is stored under: `updateWrapCache` carries
+  # the rows of the lines below an edit without re-stamping them.
+  result.line = line
 
 func lineOfRow*(c: WrapCache; row: int): int =
   if row < 0 or row >= c.rowBase[^1]:
@@ -585,6 +604,25 @@ when defined(js):
     ## them is the value semantics the copy was paying for.
 else:
   template shared[T](x: T): T = x
+
+when defined(js):
+  proc sliceSeq[T](s: seq[T]; a, b: int): seq[T] {.importjs: "#.slice(#, #)".}
+  proc joinSeqs[T](a, b, c: seq[T]): seq[T] {.importjs: "#.concat(#, #)".}
+    ## The engine's array copies: the elements are shared, as `shared` shares
+    ## them — the carried lines' values are never written after the cache
+    ## that holds them is built.
+  proc setCarried(c: WrapCache; metrics: seq[LineMetrics];
+                  rows: seq[seq[DisplayRow]]) {.importjs:
+    "((c, m, r) => { c.metrics = m; c.rows = r; })(#, #, #)".}
+    ## The cache under construction takes the joined arrays as they are: an
+    ## assignment would deep-copy every line's metrics again.
+else:
+  proc sliceSeq[T](s: seq[T]; a, b: int): seq[T] = s[a ..< b]
+  proc joinSeqs[T](a, b, c: seq[T]): seq[T] = a & b & c
+  proc setCarried(c: var WrapCache; metrics: sink seq[LineMetrics];
+                  rows: sink seq[seq[DisplayRow]]) =
+    c.metrics = metrics
+    c.rows = rows
 
 proc updateWrapCache*(c: WrapCache; oldDoc: string; cs: ChangeSet;
                       newDoc: string): WrapCache =
@@ -641,43 +679,60 @@ proc updateWrapCache*(c: WrapCache; oldDoc: string; cs: ChangeSet;
     result.docLen = newDoc.len
     return
 
-  let newLines = documentLines(newDoc)
-  let firstLine = lineOfOffset(oldDoc, loA)
-  let lastOldLine = lineOfOffset(oldDoc, hiA)
-  let lastNewLine = lineOfOffset(newDoc, hiB)
+  # The touched lines, found through the cache's own line starts rather than
+  # by splitting the document: the line holding `loA` starts at the same
+  # offset in both documents, and the new document's lines from there run
+  # to the line holding `hiB`.
+  let firstLine = max(0, c.lineStart.upperBound(loA) - 1)
+  let lastOldLine = max(0, c.lineStart.upperBound(hiA) - 1)
+  let firstStart = c.lineStart[firstLine]
+  var touched: seq[string] = @[]
+  var lineBegin = firstStart
+  var i = firstStart
+  while true:
+    if i == newDoc.len or newDoc[i] == '\n':
+      touched.add newDoc[lineBegin ..< i]
+      if i >= hiB or i == newDoc.len: break
+      lineBegin = i + 1
+    inc i
+  let lastNewLine = firstLine + touched.len - 1
+  # The line after the touched ones is the old line after `lastOldLine`,
+  # moved by the length change; a splice that disagreed would leave the cache
+  # describing other lines than the document's, so it RAISES rather than
+  # carrying on (the same rule as the line count below).
+  let delta = newDoc.len - oldDoc.len
+  if lastOldLine + 1 < c.lineStart.len and
+     c.lineStart[lastOldLine + 1] + delta != i + 1:
+    raise newException(WrapError,
+      "wrap cache: the line after the edit starts at " & $(i + 1) &
+      " and the carried line at " & $(c.lineStart[lastOldLine + 1] + delta))
 
   result.settings = c.settings
   result.docLen = newDoc.len
-  result.metrics = @[]
-  result.rows = @[]
-  # Above the edit: carried over byte for byte.
-  for i in 0 ..< firstLine:
-    result.metrics.add shared(c.metrics[i])
-    result.rows.add shared(c.rows[i])
-  # The touched span: recomputed.
-  for i in firstLine .. lastNewLine:
-    let m = lineMetrics(newLines[i], c.settings.policy)
-    result.metrics.add m
-    result.rows.add wrapLine(m, i, c.settings.wrapColumn)
-  # Below the edit: carried over, with only the line index re-stamped.
-  for i in (lastOldLine + 1) ..< c.metrics.len:
-    let target = i + (lastNewLine - lastOldLine)
-    result.metrics.add shared(c.metrics[i])
-    if target == i:
-      # The edit kept the line count: the rows are this line's, unchanged.
-      result.rows.add shared(c.rows[i])
-    else:
-      var rs = c.rows[i]
-      for k in 0 ..< rs.len: rs[k].line = target
-      result.rows.add rs
+  # Above and below the edit: carried over, the rows unchanged — a row's
+  # line is the index it is stored at (`rowAt` stamps it), so lines that
+  # move need no re-stamping. On the JS backend the engine's `slice` and
+  # `concat` move the carried runs in one copy each.
+  var mid: seq[LineMetrics] = @[]
+  var midRows: seq[seq[DisplayRow]] = @[]
+  for k in 0 ..< touched.len:
+    let m = lineMetrics(touched[k], c.settings.policy)
+    mid.add m
+    midRows.add wrapLine(m, firstLine + k, c.settings.wrapColumn)
+  linesRewrapped = touched.len
+  setCarried(result,
+    joinSeqs(sliceSeq(c.metrics, 0, firstLine), mid,
+             sliceSeq(c.metrics, lastOldLine + 1, c.metrics.len)),
+    joinSeqs(sliceSeq(c.rows, 0, firstLine), midRows,
+             sliceSeq(c.rows, lastOldLine + 1, c.rows.len)))
   result.lineCount = result.metrics.len
-  if result.lineCount != newLines.len:
+  if lastOldLine + 1 >= c.lineStart.len and i != newDoc.len:
     # Unreachable by construction, and it RAISES rather than truncating: a
     # cache that quietly held a different number of lines from its document
     # would answer every question plausibly and every one of them wrongly.
     raise newException(WrapError,
       "wrap cache: the splice produced " & $result.lineCount &
-      " lines and the document has " & $newLines.len)
+      " lines and ended at byte " & $i & " of a document of " & $newDoc.len)
   result.rebuildBase()
 
 # ===========================================================================
@@ -892,8 +947,14 @@ func displayGoalOf(ctx: DisplayCtx; r: SelectionRange; at: DisplayPos): int =
 
 proc initDisplayCtx*(doc: string; settings: WrapSettings): DisplayCtx =
   DisplayCtx(doc: doc, store: toTextStore(doc),
-             cache: initWrapCache(doc, settings),
-             boundaries: clusterBoundariesOf(doc), settings: settings)
+             cache: initWrapCache(doc, settings), settings: settings)
+
+proc boundaries*(ctx: DisplayCtx): seq[int] =
+  ## Every cluster boundary of the document (PLAT-26's), built on each call:
+  ## for a law that quantifies over the table. A display motion asks
+  ## `selection_ops.boundaryAtOrBeforeIn`, which answers from the bytes
+  ## around one position.
+  clusterBoundariesOf(ctx.doc)
 
 proc offsetOfDisplay(ctx: DisplayCtx; d: DisplayPos): int =
   ## A display position as a document byte offset, snapped to a document
@@ -907,8 +968,7 @@ proc offsetOfDisplay(ctx: DisplayCtx; d: DisplayPos): int =
   ## document" one claim.
   let p = ctx.cache.toLogical(d)
   let raw = ctx.store.offsetOf(p)
-  let i = ctx.boundaries.upperBound(raw)
-  if i <= 0: 0 else: ctx.boundaries[i - 1]
+  boundaryAtOrBeforeIn(ctx.doc, raw)
 
 proc displayPosOfOffset(ctx: DisplayCtx; offset: int): DisplayPos =
   ctx.cache.toDisplay(ctx.store.posOf(offset))
