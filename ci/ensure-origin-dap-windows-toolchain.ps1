@@ -602,7 +602,15 @@ function Ensure-CodeTracerOriginDapWindowsToolchain {
   return $toolchain
 }
 
-if ($MyInvocation.InvocationName -ne '.') {
+# The tests dot-source this file for its functions. Windows PowerShell 5.1
+# does not reliably tell a dot-sourced script that it was dot-sourced: in the
+# origin-DAP job (run 45292632494) the entry point below ran during the
+# test's `. $helper`, with the param defaults resolved against the caller's
+# $PSScriptRoot, and failed on a pin file at ci\test\..\non-nix-build. A
+# caller that only wants the functions says so explicitly.
+$libraryOnly = Get-Variable -Name CodeTracerOriginDapToolchainLibraryOnly `
+  -ValueOnly -ErrorAction SilentlyContinue
+if ($MyInvocation.InvocationName -ne '.' -and -not $libraryOnly) {
   $specifications = Get-CodeTracerOriginToolSpecifications -Path $ToolchainFile
   Ensure-CodeTracerOriginDapWindowsToolchain `
     -Destination $InstallRoot `
