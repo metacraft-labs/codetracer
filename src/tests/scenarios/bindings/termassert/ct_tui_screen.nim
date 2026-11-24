@@ -42,6 +42,13 @@ type
     bottom*: int           ## rows (strip, bottom) are its content
     labels*: seq[tuple[label: string, col: int, active: bool]]
 
+var
+  findMatchGrounds*: seq[string]
+    ## The grounds (`colorKey` spellings) the editor paints a find match on,
+    ## set by the binding from the design system's tokens; and the current
+    ## match's. A line's `find-matches` are its runs of cells on these.
+  findCurrentGrounds*: seq[string]
+
 const
   BoxEdge = "▏"
 
@@ -299,6 +306,7 @@ proc readEditor(g: ScreenGrid; b: Box; t: var Tree; root: SurfaceNode) =
     if rs.len < 4: continue
     var i = 1
     while i < rs.len and $rs[i] == " ": inc i
+    let digitStart = i
     var digits = ""
     while i < rs.len and ($rs[i])[0] in Digits:
       digits.add $rs[i]
@@ -311,6 +319,12 @@ proc readEditor(g: ScreenGrid; b: Box; t: var Tree; root: SurfaceNode) =
     var text = if textCol <= rs.len: $rs[min(textCol, rs.len) ..< rs.len] else: ""
     text = text.strip(leading = false)
     let bpGlyph = $rs[0]
+    # A plugin's declared marker: a glyph drawn in the gutter before the line
+    # number that is not one of the breakpoint lane's own.
+    var pluginMark = ""
+    for k in 0 ..< min(digitStart, rs.len):
+      let ch = $rs[k]
+      if ch != " " and ch notin ["●", "◉", "○", "◆", "◇"]: pluginMark.add ch
     let isCurrent = marker == "▸"
     let isCaret = focused and caretRow == r
     if isCurrent: current = n
@@ -318,10 +332,36 @@ proc readEditor(g: ScreenGrid; b: Box; t: var Tree; root: SurfaceNode) =
     if first == 0: first = n
     last = n
     texts.add text
+    # The find's painted matches: runs of the text's cells on a find ground,
+    # as `<column>:<text>` (the column counted from the text's first cell),
+    # and the current match's text.
+    var matches: seq[string]
+    var currentText = ""
+    if findMatchGrounds.len > 0 and textCol < rs.len:
+      var x = textCol
+      while x < rs.len:
+        let c = b.left + x
+        if c >= b.right: break
+        let ground = g.rows[r][c].bg
+        if ground in findMatchGrounds or ground in findCurrentGrounds:
+          let start = x
+          let isCurrentRun = ground in findCurrentGrounds
+          var run = ""
+          while x < rs.len and b.left + x < b.right and
+              (g.rows[r][b.left + x].bg in findMatchGrounds or
+               g.rows[r][b.left + x].bg in findCurrentGrounds):
+            run.add $rs[x]
+            inc x
+          matches.add $(start - textCol) & ":" & run
+          if isCurrentRun: currentText = run
+        else:
+          inc x
     let ln = node("line", fl(b.left), fl(r), fl(b.right - b.left), 1,
                   %*{"number": n, "text": text, "current": isCurrent, "caret": isCaret,
                      "breakpoint": bpGlyph in ["●", "◉", "○", "◆"],
-                     "tracepoint": bpGlyph in ["◆", "◇"]},
+                     "tracepoint": bpGlyph in ["◆", "◇"],
+                     "find-matches": matches.join(" "), "find-current": currentText,
+                     "plugin-mark": pluginMark},
                   @[("number", $n)])
     if not focused:
       ln.unreadable["caret"] = "the editor does not hold the focus, so no caret is drawn"
@@ -758,11 +798,32 @@ proc readFiles(g: ScreenGrid; t: var Tree; root: SurfaceNode) =
 proc readDockLabels(g: ScreenGrid; t: var Tree; root: SurfaceNode) =
   ## The footer's auto-hide labels (the status row).
   let r = g.height - 1
+  var lastEnd = -1
   for label in FooterLabels:
     let c = g.findCol(r, " " & label & " ")
     if c >= 0:
+      lastEnd = max(lastEnd, c + 1 + label.toRunes.len)
       t.add(root, node("dock-label", fl(c + 1), fl(r), fl(label.len), 1,
                        %*{"label": paneName(label)}, @[("label", paneName(label))]))
+  # A pane docked to the footer that is not one of the built-in panels (a
+  # plugin's): its title, as drawn, after the built-in labels and before the
+  # keymap indicator, two blanks apart.
+  if lastEnd < 0: return
+  var c = lastEnd
+  while c < g.width:
+    while c < g.width and g.rows[r][c].text == " ": inc c
+    if c >= g.width: break
+    let start = c
+    var word = ""
+    while c < g.width and not (g.rows[r][c].text == " " and
+        (c + 1 >= g.width or g.rows[r][c + 1].text == " ")):
+      word.add g.rows[r][c].text
+      inc c
+    if word in ["CUA", "VIM", "EMACS", "HELIX", "KAKOUNE"] or word.startsWith("[") or
+        word.toUpperAscii == word:
+      break
+    t.add(root, node("dock-label", fl(start), fl(r), fl(c - start), 1,
+                     %*{"label": word}, @[("label", word)]))
 
 proc readChrome*(g: ScreenGrid; t: var Tree; root: SurfaceNode) =
   ## The program menu's root button and the transport controls (row 0).

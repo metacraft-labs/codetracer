@@ -1,0 +1,39 @@
+scenario: 1
+name: terminal/find-in-selection-alt-l
+pack: codetracer
+summary: >-
+  In Edit mode under CUA, with lines 2 and 3 selected, the in-document find
+  opened over the selection and Alt+L confines it to them (`[in selection]`):
+  `a1` finds the two matches on line 3 and paints only those; Alt+L again
+  searches the whole file, painting `a1` on lines 1, 3 and 4.
+stage:
+  - use: write-project
+    with:
+      files:
+        find.txt: "let a1 = 10\nlet b22 = 200\n# a1 and a12\ntotal = a1 + b22\n"
+  - use: select-keymap
+    with: { preset: cua }
+  - use: open-project
+    with: { folder: $project, file: find.txt, width: 160, height: 40 }
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - wait: { until: { at: 'editor[file="find.txt"]/line[number="2"]', present: true }, timeout: 30s }
+  - click: { at: 'editor[file="find.txt"]/line[number="2"]', anchor: text-start }
+  - chord: Shift+Down
+  - chord: Shift+Down
+  # the keys are read in the order they are sent, so the field opens over
+  # the selection and Alt+L takes it (the status line's `[in selection]`)
+  - chord: Ctrl+F
+  - chord: Alt+l
+  - wait: { until: { at: status-line, assert: 'says("[in selection]")' }, timeout: 30s }
+  - type: "a1"
+  - wait: { until: { at: status-line, assert: 'says("1 of 2")' }, timeout: 30s }
+  - wait: { until: { at: 'editor[file="find.txt"]/line[number="3"]', find-matches: "2:a1 9:a1" }, timeout: 30s }
+  - expect: { at: 'editor[file="find.txt"]/line[number="3"]', find-current: "a1" }
+  - expect: { at: 'editor[file="find.txt"]/line[number="1"]', find-matches: "" }
+  - expect: { at: 'editor[file="find.txt"]/line[number="4"]', find-matches: "" }
+  # the whole file again
+  - chord: Alt+l
+  - wait: { until: { at: status-line, assert: ['lacks("in selection")', 'says(" of 4")'] }, timeout: 30s }
+  - wait: { until: { at: 'editor[file="find.txt"]/line[number="1"]', find-matches: "4:a1" }, timeout: 30s }
+  - expect: { at: 'editor[file="find.txt"]/line[number="4"]', find-matches: "8:a1" }

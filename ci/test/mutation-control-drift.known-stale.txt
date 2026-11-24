@@ -622,7 +622,7 @@ src/frontend/tui/tests/plat70d-grep-mutation-control.sha256	src/frontend/viewmod
 
 # 2026-11-21, the terminal binding's Variables reader reads the column layout
 # (a fold glyph, then name, type and value), for the project-definitions port.
-src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/termassert/ct_tui_screen.nim	255a2526134d381474f695d7fd979d939f84bcbce60d0cffb1893725869e1816	6de7b081797168b30f90b8958bcfd5d6f155ef87a3b492941050638f6440d690
+src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/termassert/ct_tui_screen.nim	255a2526134d381474f695d7fd979d939f84bcbce60d0cffb1893725869e1816	467e0b911964693dfb4b3599fbc601a4b32a76b334ce1ae9d801c4322bf8383b
 
 # CTF-P3 step 5 (the terminal Changes panel and Inbox) moved overlay_rows.nim and
 # scope_path.nim again (the `changes` and `inbox` scopes and their key rows; the
@@ -823,3 +823,4 @@ src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	src/f
 # (every arm as required, every control green) and their digests re-recorded there.
 # tui/app/runtime.nim, gpui/main.nim and ci/lib/test-lane-files.sh moved after that
 # grade, so their lines above still owe a re-grade of the arms whose needles sit in them.
+src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/termassert/ct_term_binding.nim	4e8868c3a9d9b320145a538499112672abbc040935a896a2b73b7f2d98bb8fdc	fa14ec891c866d43b04bbf586595928c0c66da716f9b9b142144ad5521230951

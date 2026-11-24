@@ -1,0 +1,24 @@
+scenario: 1
+name: terminal/find-in-selection-needs-a-selection
+pack: codetracer
+summary: >-
+  In Edit mode under CUA, with nothing selected, Alt+L in the in-document
+  find says it needs a selection and does not confine the search.
+stage:
+  - use: write-project
+    with:
+      files:
+        find.txt: "let a1 = 10\nlet b22 = 200\n# a1 and a12\ntotal = a1 + b22\n"
+  - use: select-keymap
+    with: { preset: cua }
+  - use: open-project
+    with: { folder: $project, file: find.txt, width: 160, height: 40 }
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - wait: { until: { at: 'editor[file="find.txt"]/line[number="1"]', present: true }, timeout: 30s }
+  - click: { at: 'editor[file="find.txt"]/line[number="1"]', anchor: text-start }
+  - chord: Ctrl+F
+  - wait: { until: { at: status-line, assert: 'says("let")' }, timeout: 30s }
+  - chord: Alt+l
+  - wait: { until: { at: status-line, assert: 'says("find in selection: select the text to search first")' }, timeout: 30s }
+  - expect: { at: status-line, assert: 'lacks("[in selection]")' }

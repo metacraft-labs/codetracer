@@ -231,7 +231,8 @@ roles:
     # pw8: `panel-button`: the "Run test" control beside a test, named by
     # its title ("Run test_passes").
     children: { line: many, flow-value: many, panel-button: many, loop-control: optional, macro-expansion: many }
-    affordances: [click, context-click, wheel, focusable, text-entry]
+    # `drop-target`: a pane tab dragged onto the code area docks beside it.
+    affordances: [click, context-click, wheel, focusable, text-entry, drop-target]
     assertions:
       stopped-at(n): "current-line == n"
       stopped-within(first, last): "current-line >= first and current-line <= last"
@@ -260,6 +261,14 @@ roles:
       caret: bool
       breakpoint: bool
       tracepoint: bool
+      # The in-document find's painted matches on this line, as space-separated
+      # `<column>:<text>` (the column counted from the line's first character,
+      # in order), and the current match's text when it is on this line.
+      find-matches: text
+      find-current: text
+      # A plugin's declared marker drawn in the line's gutter, before its
+      # number (its glyph, as drawn); empty when no plugin marks the line.
+      plugin-mark: text
       # --- pw2 ---
       # The marks in the line's glyph cell, space-separated, sorted:
       # `breakpoint`, `breakpoint-disabled`, `breakpoint-tracepoint`, `hint`.
@@ -2201,8 +2210,47 @@ stages:
       screen.
     params: { program: text, backend: text, recording: text }
 
+  plugin-package:
+    summary: >-
+      A plugin package built with the plugin SDK: `package` is `acme-tools`
+      (the default; the test package, its `metrics` and `flame` plugins) or
+      `ct-lens` (the shipped package: `history`, `watch` and `jump`),
+      installed as a component under this run's
+      components root, the way `ct install` lays one out. Installed is not
+      granted: the user consents in the front-end. `captures-window-input`
+      names a plugin whose manifest asks to capture the window's input;
+      `settings` is the user's plugin settings document.
+    params: { package: text, captures-window-input: text, settings: record }
+
 # Changes outside the application during a run (an `act:` step).
 actions:
+  relaunch-front-end:
+    summary: >-
+      The user quits the front-end and starts it again with the same state,
+      configuration and installed components: a later session.
+    params: {}
+  remove-plugin-package:
+    summary: >-
+      The `plugin-package` the stage installed is removed from the components
+      root (`package`: the stage's `acme-tools` or `ct-lens`; no other package
+      is accepted).
+    params: { package: text }
+  signal-plugin:
+    summary: >-
+      TEST-ONLY. A plugin process of the stage's `acme-tools` or `ct-lens`
+      package (found by its executable under this run's components root, never
+      by name) is sent `signal` (KILL, STOP or CONT), as a crash, a debugger or
+      a swapping machine would leave it. With `plugin`, the process is the one
+      `note-plugin-process` noted for that plugin, and it must still be one of
+      the package's; without it the package must run exactly one. Anything
+      else is refused.
+    params: { package: text, signal: text, plugin: text }
+  note-plugin-process:
+    summary: >-
+      TEST-ONLY. The process the open `:plugins` overlay says runs `plugin`
+      (`<package>[<plugin>] running pid N`) is noted for a later
+      `signal-plugin`; it must be a process of the stage's `package`.
+    params: { package: text, plugin: text }
   write-file:
     summary: >-
       Another program (a second editor, a formatter, a `git checkout`) writes a

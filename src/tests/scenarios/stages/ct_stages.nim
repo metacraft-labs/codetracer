@@ -29,6 +29,8 @@ import ../../../frontend/viewmodel/tests/unit/build_fixtures/plat56_c_build
 import results
 from ../../../ct/trace/ctfs_sources import readCtfsMetaDat
 from ../../../common/project_wasm_fixtures import echoLengthModule
+from ../../../frontend/viewmodel/tests/unit/plugin_process_fixture import installPackage, packageManifest
+from ../../../frontend/viewmodel/tests/unit/ct_lens_fixture import installLens, lensManifest
 import ../../../tools/demo_request_session
 import ../../../frontend/tui/tests/fixtures/visual_fixture
 import ../../../ct/review_session
@@ -425,6 +427,42 @@ proc plantConfig*(s: StageState; file, content: string) =
   writeFile(path, content)
 
 # --- terminal ---------------------------------------------------------------
+
+proc pluginPackage*(s: StageState; package, capturesInputPlugin: string; settings: JsonNode) =
+  ## A plugin package built with the plugin SDK: `acme-tools` (the test
+  ## package, `viewmodel/tests/unit/plugin_packages/acme-tools`) or `ct-lens`
+  ## (the shipped `src/plugins/ct-lens`), installed as a
+  ## component the way `ct install` lays one out, under this run's own
+  ## components root; installed is not granted: consent is the user's, in the
+  ## scenario. `captures-window-input` names a plugin of the package whose
+  ## manifest asks to capture the window's input; `settings` is the user's
+  ## plugin settings document (`plugin-settings.json`).
+  let package = if package.len == 0: "acme-tools" else: package
+  if package notin ["acme-tools", "ct-lens"]:
+    raise newException(ValueError, "plugin-package: acme-tools or ct-lens, not '" & package & "'")
+  let components = s.root / "components"
+  createDir(components)
+  var manifest = ""
+  if capturesInputPlugin.len > 0:
+    var doc = if package == "ct-lens": lensManifest() else: packageManifest()
+    var found = false
+    for p in doc["plugins"]:
+      if p{"id"}.getStr == capturesInputPlugin or
+          p{"id"}.getStr.endsWith("." & capturesInputPlugin):
+        p["capturesWindowInput"] = %*{"reason": "a modal layer"}
+        found = true
+    if not found:
+      raise newException(ValueError, "plugin-package: " & package & " has no plugin '" &
+                         capturesInputPlugin & "'")
+    manifest = $doc
+  if package == "ct-lens": discard installLens(components, manifest)
+  else: discard installPackage(components, manifest)
+  let userRoot = s.root / "user-root"
+  createDir(userRoot)
+  if settings != nil and settings.kind == JObject:
+    writeFile(userRoot / "plugin-settings.json", $settings)
+  s.launch.env["CODETRACER_COMPONENTS_ROOT"] = components
+  s.launch.env["CODETRACER_USER_ROOT"] = userRoot
 
 proc projectFixtureBytes(name: string): string =
   ## The generated project files `write-project` can write by name.
@@ -1438,6 +1476,9 @@ proc runStage*(s: StageState; use: string; args: JsonNode) =
     s.plantConfig(argStr(args, "file"), argStr(args, "content"))
   of "write-project":
     s.writeProject(if args.isNil: nil else: args{"files"})
+  of "plugin-package":
+    s.pluginPackage(argStr(args, "package"), argStr(args, "captures-window-input"),
+                    if args.isNil: nil else: args{"settings"})
   of "plant-state":
     s.plantState(argStr(args, "file"), argStr(args, "content"))
   of "visual-recording":
