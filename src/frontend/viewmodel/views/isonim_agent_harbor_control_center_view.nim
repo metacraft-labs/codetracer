@@ -299,7 +299,7 @@ proc renderAgentHarborControlCenter*[R, N](r: R; vm: ControlCenterVM;
             text WaitingHeading
           span(class = "ah-fleet-source"):
             text HeadBandStrut
-          span(class = "ah-fleet-summary ah-cc-waiting-count"):
+          span(class = "ah-cc-waiting-count"):
             text waitingCountText(rows.len)
     let body = ui(r):
       tdiv(ref = list, class = "ah-cc-waiting-rows")

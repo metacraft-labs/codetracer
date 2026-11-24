@@ -46,7 +46,8 @@ const playbackFixtures* = [
 const surfacesWithoutPlayback* = ["agent-harbor-composer", "agent-harbor-results",
                                   "agent-harbor-suggested-actions",
                                   "agent-harbor-status-gaze", "agent-harbor-pie",
-                                  "agent-harbor-changes", "agent-harbor-inbox-item"]
+                                  "agent-harbor-changes", "agent-harbor-inbox-item",
+                                  "agent-harbor-process-switcher"]
   ## The surfaces the story hosts draw that have no playback story, each
   ## with its reason. A playback replays what a server feeds a surface over
   ## time; the omnibox composer changes only with what the operator types
@@ -57,7 +58,11 @@ const surfacesWithoutPlayback* = ["agent-harbor-composer", "agent-harbor-results
   ## (`agent_harbor_suggested_actions_stories.nim`), whose states after the
   ## one the agent's request opens are each the operator's press; so does the
   ## status line's gaze mark (`agent_harbor_gaze_stories.nim`), whose state
-  ## is the operator's (the pause key) or the gaze provider's. The
+  ## is the operator's (the pause key) or the gaze provider's; so does a
+  ## multi-process recording's process switcher
+  ## (`agent_harbor_process_switcher_stories.nim`): a recording's processes
+  ## do not change on a clock, and the marker that rings one is the reader's
+  ## position, not a server's event. The
   ## progress pie's story is a fixed table of every state and share
   ## (`agent_harbor_pie_stories.nim`) with no viewmodel at all; the pie
   ## changes over time only where a panel, tab or line draws it. The

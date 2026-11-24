@@ -108,8 +108,9 @@ import ../replay_ops
 # RE-COUNTED 2026-11-22: 1038 → 1047, by the same route -- `010bf78b2`
 # ("perf(gpui): a step writes only the elements it moved") added one non-test
 # file under `src/frontend/gpui/` (`element_reuse.nim`) and did not move this
-# pin, 1 x 9 assertions in the registry scan.
-const ExpectedAssertions = 1047
+# pin, 1 x 9 assertions in the registry scan. 1047 → 1056 for CTF-P2c step 5's
+# process switcher (`agent_harbor/ah_process_switcher.nim`), 1 x 9.
+const ExpectedAssertions = 1056
   ## 2026-11-21 (the merge of CTF-P2c step 4 and the progress pie): 1002 ->
   ## 1029. Step 4 added two scanned source files (1020) and the pie one
   ## (1011); the merged tree scans all three, at 1 + 8 = 9 per file.
