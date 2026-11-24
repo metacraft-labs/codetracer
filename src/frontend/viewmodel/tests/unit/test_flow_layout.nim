@@ -483,6 +483,23 @@ suite "Omniscience — per-line grouping and the composed layout":
     check groups[0].line == 3
     check groups[0].stepCounts == @[0, 1]
 
+  test "a step with no source line gets no line of its own":
+    # Ruby records its `<top-level>` frame's entry at line 0, which names no
+    # line of the file (Monaco's lines start at 1). The desktop drew a flow
+    # line for it, asked Monaco for line 0's width and threw, and the throw
+    # ended the zoom's redraw of every editor after it (#908). Grouping is the
+    # contract `ui/flow.nim:createFlowLines` draws from, so it is pinned here.
+    var window = columnWindow()
+    window.steps.insert(
+      FlowLayoutStep(stepCount: 0, line: 0, loopIndex: 0, iteration: 0,
+                     rrTicks: 1), 0)
+    for i, step in window.steps.mpairs:
+      step.stepCount = i
+    let groups = groupStepsByLine(window)
+    check groups.len == 1
+    check groups[0].line == 3
+    check groups[0].stepCounts == @[1, 2]
+
   test "a line inside a loop shows the selected pass only":
     # The desktop's inline behaviour and the spec's: "only one iteration shown
     # at a time". Showing both passes' labels on one line is the "stale value

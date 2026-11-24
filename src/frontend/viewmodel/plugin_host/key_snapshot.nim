@@ -25,6 +25,7 @@
 import std/[json, strutils, tables]
 
 import ./protocol
+import ../../../common/key_names
 
 type
   SnapshotRoute* = object
@@ -51,18 +52,18 @@ proc contextOf(snap: JsonNode; host: Table[string, bool]): Table[string, bool] =
       result[k] = v.getBool(false)
 
 proc isRecoveryChordKey*(key: string): bool =
-  ## Whether `key` (a front-end's canonical name, any case) is the recovery
-  ## chord's key, `Escape` (§11.7.6). The host owns the chord, so a
-  ## front-end asks here instead of spelling the key itself.
-  key.toLowerAscii in ["esc", "escape"]
+  ## Whether `key` is the recovery chord's key (§11.7.6), in any spelling a
+  ## front-end names it: the canonical `Esc` (`key_names.bindingKeyName`
+  ## folds `esc` and `escape` to it).
+  bindingKeyName(key) == "Esc"
 
 proc isReserved*(snap: JsonNode; key: string): bool =
   ## The palette key and the recovery chord's key are no plugin's.
-  let k = key.toLowerAscii
+  let k = bindingKeyName(key)
   let r = snap{SnapshotReserved}
   if not r.isNil and r.kind == JArray:
     for x in r:
-      if x.getStr("") == k: return true
+      if bindingKeyName(x.getStr("")) == k: return true
   false
 
 proc resolveLayer*(snap: JsonNode; key, focusedSurface: string;
@@ -71,7 +72,9 @@ proc resolveLayer*(snap: JsonNode; key, focusedSurface: string;
   ## consults this only when no host modal is open (host modal layers rank
   ## above every plugin layer).
   if snap.isNil or snap.isReserved(key): return
-  let k = key.toLowerAscii
+  # Canonical names (`key_names.bindingKeyName`), the spelling the bindings
+  # are stored in: `J` is not `j`, and `ctrl+alt+m` is `Ctrl+Alt+m`.
+  let k = bindingKeyName(key)
   let ctx = snap.contextOf(host)
   let layers = snap{SnapshotLayers}
   if layers.isNil or layers.kind != JArray: return
@@ -97,7 +100,9 @@ proc resolveStatic*(snap: JsonNode; key, focusedSurface: string;
                     host = initTable[string, bool]()): SnapshotRoute =
   ## The plugin PASS, between the user pass and the base pass (§11.7.2).
   if snap.isNil or snap.isReserved(key): return
-  let k = key.toLowerAscii
+  # Canonical names (`key_names.bindingKeyName`), the spelling the bindings
+  # are stored in: `J` is not `j`, and `ctrl+alt+m` is `Ctrl+Alt+m`.
+  let k = bindingKeyName(key)
   let ctx = snap.contextOf(host)
   for b in snap{SnapshotStatics}.getElems():
     if b{"key"}.getStr("") != k: continue

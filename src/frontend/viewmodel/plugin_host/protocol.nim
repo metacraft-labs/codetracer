@@ -29,6 +29,7 @@
 import std/[json, strutils, tables]
 
 import ../../../common/view_vocabulary/vocabulary as view_vocabulary
+import ../../../common/key_names
 
 export view_vocabulary.ViewNode
 
@@ -507,7 +508,7 @@ proc bindingsFrom*(j: JsonNode): seq[PluginBinding] =
   if j.isNil or j.kind != JArray:
     return
   for b in j:
-    result.add PluginBinding(key: b{"key"}.getStr("").toLowerAscii,
+    result.add PluginBinding(key: bindingKeyName(b{"key"}.getStr("")),
                              op: b{"op"}.getStr(b{"command"}.getStr("")),
                              scope: b{"scope"}.getStr("window"),
                              whenClause: b{"when"}.getStr(""))

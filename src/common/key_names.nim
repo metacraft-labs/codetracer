@@ -222,6 +222,34 @@ func normalizeChord*(text: string): string =
       discard
   ""
 
+func bindingKeyName*(text: string): string =
+  ## A key as a PLUGIN'S binding writes it (Extensibility-Model.md §11.7.2),
+  ## in its canonical name — what `keyName` produces for the key pressed, so
+  ## the two compare by equality.
+  ##
+  ## THE MODIFIERS' SPELLING IS FOLDED, THE KEY'S CASE IS NOT. `ctrl+alt+m`,
+  ## `Ctrl+Alt+M` and `control+option+m` are one chord (`Ctrl+Alt+m`: with a
+  ## command modifier held a letter is its key, `normalizeChord`'s reading),
+  ## and `escape` is `Esc`. But a bare letter is the character it names: `J`
+  ## is Shift+j, which a terminal sends as `J`, and is NOT `j` — folding it
+  ## made a plugin binding `J` take `j` (`editor.scroll-line-down`) as well.
+  ## `shift+j` is the same `J`.
+  ##
+  ## A sequence (`escape escape escape`) is each of its chords, so `Esc Esc
+  ## Esc`. A spelling that names no key is returned as written, so it
+  ## matches nothing rather than something else.
+  let t = text.strip()
+  if ' ' in t:
+    var parts: seq[string] = @[]
+    for c in t.splitWhitespace(): parts.add bindingKeyName(c)
+    return parts.join(" ")
+  if t.len == 1:
+    let c = t[0]
+    if c >= '!' and c <= '~':
+      return $c
+  let n = normalizeChord(t)
+  if n.len > 0: n else: t
+
 func normalizeChordSequence*(text: string): string =
   ## A space-separated chord sequence (`Ctrl+K Ctrl+C`), each chord through
   ## `normalizeChord`; "" when any chord names no key.

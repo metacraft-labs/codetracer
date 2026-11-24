@@ -35,6 +35,8 @@ import isonim/core/[computation, owner, signals]
 
 import codetracer_embed
 import ../../../../common/value_presentation/[presenter, vocabulary as value_vocabulary]
+import ../../../../common/value_presentation/json_adapter
+from ../../../../common/value_presentation/surfaces import StatePanelBudget
 import backend/mock_backend
 import ../../../../common/plugin_model
 import plugin_host/[host, process_link, protocol, supervisor, surface_host]
@@ -220,16 +222,65 @@ suite "PLAT-12's plugin tier: a plugin that publishes visualisers":
     var r = newRig()
     r.both()
     check r.sup.waitUntil("published", proc(): bool =
-      r.sup.pluginVisualisers().len == 1)
-    let v = r.sup.pluginVisualisers()[0]
+      r.sup.pluginVisualisers().len == 2)
+    let vs = r.sup.pluginVisualisers()
+    let v = vs[0]
     check v.tier == ptPlugin
     check v.tierDeclared
     check v.typeMatch == "Matrix"
     check v.summary == "matrix (acme-tools)"
     check v.id == "plugin:acme-tools.metrics#matrix"
+    # A row that only hides a field is read with what it hides.
+    let secret = vs.filterIt(it.typeMatch == "Account")
+    check secret.len == 1
+    check secret.len == 1 and secret[0].hide == @["password"]
+    check secret.len == 1 and secret[0].tier == ptPlugin
+    # A row the presenter's door refuses (a hidden "field" that is a path) is
+    # dropped; the plugin's other rows still render.
+    check not vs.anyIt(it.typeMatch == "Broken")
     # Its breaker open, the plugin contributes nothing.
     r.sup.setEnabled("acme-tools.metrics", false, persist = false)
     check r.sup.pluginVisualisers().len == 0
+    r.sup.shutdown()
+
+  test "a plugin computes answers for the values on screen; an answer for another stop is never shown":
+    var r = newRig()
+    r.sup.configure("acme-tools.metrics", true, %*{"computeVisualiser": true})
+    r.both()
+    check r.sup.waitUntil("rows published", proc(): bool =
+      r.sup.pluginVisualisers().len == 2)
+    # A computed row with no answers yet claims nothing.
+    check not r.sup.pluginVisualisers().anyIt(it.computedDeclared)
+    let fortyTwo = toPValue(%42)
+    let seven = toPValue(%7)
+    let asked = @[(input: executableInputOf(fortyTwo), typeName: "int"),
+                  (input: executableInputOf(seven), typeName: "int")]
+    let before = r.sup.visualiserRevision
+    r.sup.requestVisualisations(asked)
+    check r.sup.waitUntil("answered", proc(): bool =
+      r.sup.pluginVisualisers().anyIt(it.computedDeclared))
+    check r.sup.visualiserRevision > before
+    let computed = r.sup.pluginVisualisers().filterIt(it.computedDeclared)
+    check computed.len == 1
+    check computed.len == 1 and computed[0].id == "plugin:acme-tools.metrics#readings"
+    check computed.len == 1 and computed[0].tier == ptPlugin
+    # The presenter renders the value with the plugin's answer.
+    let vis = r.sup.pluginVisualisers()
+    check present(fortyTwo, StatePanelBudget,
+                  presenters = withVisualisers(vis)).root.text == "acme=" & executableInputOf(fortyTwo)
+    check present(seven, StatePanelBudget,
+                  presenters = withVisualisers(vis)).root.text == "acme=" & executableInputOf(seven)
+    # The debugger moves: the answers were computed at the old stop and are
+    # not shown at the new one.
+    r.moveTo(11)
+    check not r.sup.pluginVisualisers().anyIt(it.computedDeclared)
+    # Asked at the new stop (before the turn that cuts its batch: the query
+    # waits for it), answered there.
+    r.sup.requestVisualisations(asked[0 .. 0])
+    check r.sup.waitUntil("answered again", proc(): bool =
+      r.sup.pluginVisualisers().anyIt(it.computedDeclared))
+    let again = r.sup.pluginVisualisers().filterIt(it.computedDeclared)
+    check again.len == 1 and again[0].computed.len == 1
     r.sup.shutdown()
 
 suite "§11.4: mirrored state, epochs and the action relay":
@@ -276,6 +327,38 @@ suite "§11.4: mirrored state, epochs and the action relay":
     check r.sup.waitUntil("action applied", proc(): bool =
       r.sup.slot("acme-tools.metrics").actionsApplied == 1)
     check r.mock.receivedCommands.len > 0
+    r.sup.shutdown()
+
+  test "a front-end's own route takes a relayed action, and its refusal is the plugin's, by name":
+    var r = newRig()
+    var taken: seq[string]
+    r.sup.actionHook = proc(msg: JsonNode; refusal: var string): bool =
+      let name = msg{"vm"}.getStr("") & "." & msg{"action"}.getStr("")
+      if name == "state.addWatch":
+        refusal = "the front-end cannot show a watch here"
+        return false
+      taken.add name
+      true
+    r.both()
+    check r.sup.waitUntil("active", proc(): bool = r.active("acme-tools.metrics"))
+    r.mock.clearReceivedCommands()
+    # Taken by the front-end: counted as applied, never sent behind it.
+    discard r.sup.invoke("acme-tools.metrics", "metrics.step")
+    check r.sup.waitUntil("taken", proc(): bool =
+      r.sup.slot("acme-tools.metrics").actionsApplied == 1)
+    check taken == @["debugControls.stepForward"]
+    check r.mock.receivedCommands.len == 0
+    # Refused: on the status line and in the plugin's refusals, and never
+    # applied to the session.
+    let watches = r.session.stateVM.watchExpressions.val.len
+    discard r.sup.invoke("acme-tools.metrics", "metrics.watch")
+    check r.sup.waitUntil("refused", proc(): bool =
+      r.sup.slot("acme-tools.metrics").refusals.anyIt(
+        it.contains("cannot show a watch")))
+    check r.sup.statusLine.contains("acme-tools.metrics")
+    check r.sup.statusLine.contains("cannot show a watch")
+    check r.session.stateVM.watchExpressions.val.len == watches
+    check r.sup.slot("acme-tools.metrics").actionsApplied == 1
     r.sup.shutdown()
 
 suite "§11.6, §11.8: faults are attributed, and siblings survive":
@@ -744,6 +827,11 @@ suite "§11.7.2: the plugin pass and pushed state":
     check route.found
     check route.plugin == "acme-tools.metrics"
     check route.op == "metrics.step"
+    # The modifiers' spelling is folded: the terminal's canonical name for
+    # the chord (what `CSI 109 ; 7 u` decodes to) is the same binding.
+    check r.sup.resolveStaticKey("Ctrl+Alt+m", "").found
+    check r.sup.claimsKey("Ctrl+Alt+m", "")
+    check not r.sup.claimsKey("Ctrl+m", "")
     # Before activation, an operation is disabled with "plugin starting".
     var cold = newRig()
     check cold.sup.enablementOf("acme-tools.metrics", "metrics.step").reason ==

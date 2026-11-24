@@ -522,8 +522,9 @@ proc reviewValueBandGeometry*(editor: MonacoEditor; fontSize: int;
   ## The three measurements the band's placement is decided from.
   ##
   ## `maxOffsetPx` runs over the ANNOTATED lines only, which is
-  ## `recalculateMaxFlowLineWidth`'s rule (`for position, _ in
-  ## flow.positionStepCounts`) rather than "the widest line in the file" — a
+  ## `recalculateMaxFlowLineWidth`'s rule (the lines
+  ## `flow_layout.groupStepsByLine` groups) rather than "the widest line in
+  ## the file" — a
   ## whole-file diff tab holds plenty of long lines that carry no values, and
   ## letting one of them push the band would move every value off screen for a
   ## reason a reader cannot see.

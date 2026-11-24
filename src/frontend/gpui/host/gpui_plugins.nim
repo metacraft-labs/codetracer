@@ -42,6 +42,7 @@ import ../../viewmodel/session_vm
 import ../../viewmodel/viewmodels/omnibar_vm
 import ../../../common/view_vocabulary/mappings   # `feGpui`
 import ../../../common/view_vocabulary/vocabulary   # `ViewNode`
+import ../../../common/key_names   # `bindingKeyName`
 import std/tables
 
 export plugin_processes
@@ -79,7 +80,7 @@ proc routeMovesToControls*(p: SessionPlugins; queue: ref seq[string]) =
   ## Take the plugins' debugger moves into `queue` (transport control ids),
   ## for the window's loop to run as its own.
   if p.isNil: return
-  p.sup.actionHook = proc(msg: JsonNode): bool =
+  p.sup.actionHook = proc(msg: JsonNode; refusal: var string): bool =
     if msg{"vm"}.getStr("") != "debugControls": return false
     let action = msg{"action"}.getStr("")
     for (name, control) in GpuiPluginMoves:
@@ -89,10 +90,10 @@ proc routeMovesToControls*(p: SessionPlugins; queue: ref seq[string]) =
     false
 
 func pluginKeyName*(canonical: string): string =
-  ## A window key's canonical name (`gpui_keys.canonicalKeyOfGpui`) in the
-  ## plugin manifests' grammar: lower case, and `escape` for `Esc`.
-  let k = canonical.toLowerAscii
-  if k == "esc": "escape" else: k
+  ## A window key's canonical name (`gpui_keys.canonicalKeyOfGpui`) as the
+  ## supervisor compares a plugin binding (`key_names.bindingKeyName`): the
+  ## modifiers' spelling folded, the key's own case kept — `J` is not `j`.
+  bindingKeyName(canonical)
 
 proc observeWindowEscape*(p: SessionPlugins; canonical: string): bool =
   ## §11.7.6, called for EVERY key before anything resolves it: an `Escape`
@@ -100,7 +101,7 @@ proc observeWindowEscape*(p: SessionPlugins; canonical: string): bool =
   ## usual. True on the third within a second, which popped every plugin
   ## layer: the window then shows the recovery dialog.
   if p.isNil or not p.sup.extensionsEnabled: return false
-  if pluginKeyName(canonical) != "escape": return false
+  if pluginKeyName(canonical) != "Esc": return false
   p.sup.observeEscape()
 
 proc routePluginKey*(p: SessionPlugins; canonical: string;
