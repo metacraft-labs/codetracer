@@ -23,7 +23,7 @@ type
   JsEv {.importc: "Event".} = ref object
 
 const
-  PointerBindings: array[281, PointerBinding] = [
+  PointerBindings: array[299, PointerBinding] = [
     (cstring".ct-origin-inline-chain-hop", hkRow, false),
     (cstring".ct-origin-inline-chain-terminator", hkNone, false),
     (cstring".ct-origin-hop", hkRow, false),
@@ -310,6 +310,29 @@ const
     (cstring".welcome-screen-wrapper .welcome-screen .recent-folders-list .recent-folder", hkControl, false),
     (cstring".online-functionality-buttons .recent-trace-buttons", hkControl, false),
     (cstring".action-transaction-button", hkControl, false),
+    # The Agent Harbor Tests panel and the Changes view's dropdown (their
+    # stylesheets said `cursor` themselves, which PA-1 leaves to pointer.styl
+    # alone). Last, so the static and not-clickable rows win over the rows
+    # they refine; `help` on an unresolved link is not one of the eight shapes,
+    # so that link rests at the default.
+    (cstring".ah-dropdown-trigger", hkControl, false),
+    (cstring".ah-tests-check", hkControl, false),
+    (cstring".ah-tests-switch", hkControl, false),
+    (cstring".ah-tests-legend-toggle", hkControl, false),
+    (cstring".ah-tests-group-head", hkExpander, false),
+    (cstring".ah-tests-group-head-static", hkNone, false),
+    (cstring".ah-tests-line.test-results-row", hkRow, false),
+    (cstring".ah-tests-line-static", hkNone, false),
+    (cstring".ah-tests-sub.test-results-row", hkNone, false),
+    (cstring".ah-tests-open.test-results-open-btn", hkControl, false),
+    (cstring".ah-tests-open.test-results-open-btn.disabled", hkControl, true),
+    (cstring".ah-tests-icon-btn", hkControl, false),
+    (cstring".ah-tests-where", hkControl, false),
+    (cstring".ah-link", hkControl, false),
+    (cstring".ah-link-none", hkNone, false),
+    (cstring".ah-tr-item", hkNone, false),
+    (cstring".ah-tr-head", hkExpander, false),
+    (cstring".ah-tr-test-head", hkExpander, false),
     ]
   SkippedSubtree = cstring".monaco-editor"
   DragProxy = cstring".lm_dragProxy"
