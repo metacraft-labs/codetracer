@@ -465,7 +465,16 @@ func cloneCondition(e: WhenExpr): WhenExpr =
     result.left = cloneCondition(e.left)
     result.right = cloneCondition(e.right)
 
+var keymapTableCopies*: int
+  ## How many times a whole table of rows has been copied (`bindings`, and a
+  ## snapshot being loaded). A copy costs the table's size, so a caller that
+  ## copies per key, per operation or per drawn item pays the table's size
+  ## that many times; `test_keymap_rows_in_place` counts it to hold the hot
+  ## paths to reading the rows in place (`rows`).
+
 func copyBindings(rows: seq[EditingBinding]): seq[EditingBinding] =
+  {.cast(noSideEffect).}:
+    inc keymapTableCopies
   result = rows
   for row in result.mitems:
     row.scope.cond = cloneCondition(row.scope.cond)
@@ -476,7 +485,16 @@ func newEditingKeymap*(bindings: seq[EditingBinding] = @[]): EditingKeymap =
 
 func bindings*(km: EditingKeymap): seq[EditingBinding] =
   ## A detached value for inspection; resolution reads private storage directly.
+  ## It copies the whole table: a caller that only reads the rows, and above
+  ## all one on a per-key or per-item path, iterates `rows` instead.
   if not km.snapshot.isNil: result = copyBindings(km.snapshot.rows)
+
+iterator rows*(km: EditingKeymap): lent EditingBinding =
+  ## The table's rows in order, read in place: no copy, and nothing the
+  ## caller can change.
+  if not km.snapshot.isNil:
+    for i in 0 ..< km.snapshot.rows.len:
+      yield km.snapshot.rows[i]
 
 func bindingsFor*(km: EditingKeymap; operation: string;
                   argument = ""): seq[EditingBinding] =
@@ -501,6 +519,11 @@ proc `bindings=`*(km: var EditingKeymap; rows: seq[EditingBinding]) =
 
 func nodes*(t: EditingTrie): seq[TrieNode] = t.nodeData
 func bindings*(t: EditingTrie): seq[EditingBinding] = copyBindings(t.bindingData)
+
+iterator rows*(t: EditingTrie): lent EditingBinding =
+  ## The trie's rows in order, read in place (`rows` of a keymap).
+  for i in 0 ..< t.bindingData.len:
+    yield t.bindingData[i]
 func duplicates*(t: EditingTrie): seq[string] = t.duplicateData
 func prefixed*(t: EditingTrie): seq[string] = t.prefixData
 func nodeCount*(t: EditingTrie): int = t.nodeData.len

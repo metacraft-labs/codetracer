@@ -14047,7 +14047,7 @@ proc routeWindowKey(r: GpuiRenderer; key: string; mods: seq[string]) =
   # and the status bar says so (`pumpPluginsWindow`).
   if not gPlugins.isNil and not gPluginRecoveryKey:
     var userBound = false
-    for b in gRouter.user.bindings:
+    for b in gRouter.user.rows:
       if b.chords.len == 1 and b.chords[0] == name:
         userBound = true
     if gPlugins.routePluginKey(name, userBound):

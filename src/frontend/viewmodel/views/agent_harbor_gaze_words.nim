@@ -45,7 +45,7 @@ const
 proc gazePauseChord*(base = bkCua): string =
   ## The key the base keymap binds to the pause (`Ctrl+Alt+Y`), as it spells
   ## it; "" when the base binds none.
-  for b in keymapOf(base).keymap.bindings:
+  for b in keymapOf(base).keymap.rows:
     if b.operation == GazeTogglePauseOperation:
       return b.spelling
   ""

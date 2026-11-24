@@ -47,7 +47,7 @@ proc processChord*(operation: string; base = bkCua): string =
   ## The key the base keymap binds to `operation`, as it spells it; "" when
   ## the base binds none. The words name the bound key through this, so they
   ## can never name a key that does something else (as `gazePauseChord`).
-  for b in keymapOf(base).keymap.bindings:
+  for b in keymapOf(base).keymap.rows:
     if b.operation == operation and b.argument.len == 0:
       return b.spelling
   ""
