@@ -307,18 +307,24 @@ jobs:
           echo "REPLAY_SERVER_BIN=$target/debug/replay-server" >>"$GITHUB_ENV"
           export CARGO_TARGET_DIR="$target"
           mkdir -p test-logs
-          log="$PWD/test-logs/replay-server-build.log"
-          : >"$log"
-          (
-            while sleep 300; do
-              echo "== $(date -u +%H:%M:%S) processes"
-              # shellcheck disable=SC2009 # one listing filtered by several names
-              ps -axo pid,etime,pcpu,rss,command | grep -E '[c]argo|[r]ustc|[n]ix|[n]im |[c]c |[c]lang|[l]d ' | cut -c1-220 | head -25 || true
-            done
-          ) >>"$log" 2>&1 &
-          heartbeat=$!
-          trap 'kill "$heartbeat" 2>/dev/null || true' EXIT
-          nix develop . --command bash -c 'cd src/db-backend && cargo build --bin replay-server' 2>&1 | tee -a "$log"
+          # Inside the dev shell as a whole: the darwin runner has no grep,
+          # cut or head before it (ci/test/sibling-provisioning-test.sh).
+          nix develop . --command bash -c '
+            set -euo pipefail
+            log="$PWD/test-logs/replay-server-build.log"
+            : >"$log"
+            (
+              while sleep 300; do
+                echo "== $(date -u +%H:%M:%S) processes"
+                # shellcheck disable=SC2009 # one listing filtered by several names
+                ps -axo pid,etime,pcpu,rss,command | grep -E "[c]argo|[r]ustc|[n]ix|[n]im |[c]c |[c]lang|[l]d " | cut -c1-220 | head -25 || true
+              done
+            ) >>"$log" 2>&1 &
+            heartbeat=$!
+            trap "kill $heartbeat 2>/dev/null || true" EXIT
+            cd src/db-backend
+            cargo build --bin replay-server 2>&1 | tee -a "$log"
+          '
 
       - name: The zgui lane
         env:
