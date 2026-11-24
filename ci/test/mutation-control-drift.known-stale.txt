@@ -931,3 +931,8 @@ src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	src/f
 src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	src/frontend/tui/app/runtime.nim	44d968e50c635c06040e3b6c4198fe2c748584d80ac55290aeee3283a918fd96	a8f6c18817375c1435f4e1aabef5026a12730813e635a3ee159f497cd5a30c5d
 src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/frontend/viewmodel/keymap/editing_keymap.nim	0951fb885eb3f1f2f2d7ce24aadaeeed92982ce8d77a9502d444075035084bd5	438c7068c4ee324fe1154e7b16227d8d07d2feec3c22982fa73b9e65f3e45f01
 src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/frontend/viewmodel/keymap/keymap_router.nim	35992a226bb769b76dd6d3725f4af231cf54e97ee3c76be7b493c95c11858ae2	5aa56d7fc405efc67a11f057aa79cfdbfb817022055c34f6f5712254138ff772
+
+# 2026-11-25, the GPUI shell-split suite admits the renderer-free agent-harbor ViewModel
+# package by name and checks the admission; the suite changed, so the harness grading it owes
+# a re-grade.
+src/frontend/gpui/tests/plat20-mutation-control.sha256	src/frontend/gpui/tests/test_gpui_shell_split.nim	3d8325b36f086841e52b6032017041f6e015bba121482c5765a8b5140e05e1ee	e31ea3dce4e758df5744984ae12c76d3ab3c8b02d6a5ff199006e21bb9b604b4

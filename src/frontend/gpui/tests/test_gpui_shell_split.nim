@@ -155,17 +155,51 @@ suite "PLAT-20: the shell is renderer-free":
     # which is Verification-Harness-Traps §4d pointed the other way: matching
     # vocabulary rather than syntax, and refusing prose instead of passing
     # over it.
+    #
+    # ONE PACKAGE IS ADMITTED BY NAME, and the reason is that its name is not
+    # its content. `nim_agents_isonim_viewmodels` is the agent-harbor
+    # ViewModels (`session_tabs` draws the agent tab's progress pie from
+    # `agent_harbor/progress_pie`): it is named for the isonim front-ends
+    # that consume it, and the modules this directory imports from it reach
+    # no isonim module at all — `progress_pie` imports only `nim_agents`
+    # (measured 2026-11-24: its closure is five `nim_agents/agent_harbor`
+    # modules). The admission is checked rather than trusted: each admitted
+    # module's own import lines must name no isonim, GPUI or terminal module.
+    const AdmittedPackages = ["nim_agents_isonim_viewmodels/"]
     let dir = repoSrcFrontend() / "headless_app"
     var scanned = 0
     var importers = 0
+    var admitted: seq[string] = @[]
     for kind, path in walkDir(dir):
       if kind != pcFile or not path.endsWith(".nim"):
         continue
       inc scanned
       for line in importLinesOf(path):
-        if "gpui" in line.toLowerAscii or "isonim" in line.toLowerAscii or
-           "tui" in line.toLowerAscii:
+        var rest = line
+        for pkg in AdmittedPackages:
+          let at = rest.find(pkg)
+          if at >= 0:
+            var stop = at + pkg.len
+            while stop < rest.len and rest[stop] notin {' ', ',', ']', '#'}:
+              inc stop
+            admitted.add rest[at ..< stop]
+            rest = rest[0 ..< at] & rest[stop .. ^1]
+        if "gpui" in rest.toLowerAscii or "isonim" in rest.toLowerAscii or
+           "tui" in rest.toLowerAscii:
           inc importers
+    var admittedLeaks: seq[string] = @[]
+    for module in admitted:
+      let file = repoSrcFrontend().parentDir.parentDir.parentDir /
+                 "nim-agents-isonim-viewmodels" / "src" / (module & ".nim")
+      if not fileExists(file):
+        admittedLeaks.add module & " (not found at " & file & ")"
+        continue
+      for line in importLinesOf(file):
+        let l = line.toLowerAscii
+        if "isonim" in l or "gpui" in l or "tui" in l:
+          admittedLeaks.add module & ": " & line
+    checkpoint("admitted: " & $admitted & "; leaks: " & $admittedLeaks)
+    ck admittedLeaks.len == 0
     ck scanned == 20  # headless_app, layout_model, layout_interaction,
                       # window_set, extent_distribution — PLAT-45's
                       # desktop_panes, arrangement_relation and
@@ -188,7 +222,7 @@ suite "PLAT-20: the shell is renderer-free":
       if kind == pcFile and path.endsWith(".nim"):
         totalImports += importLinesOf(path).len
     ck totalImports >= 8
-    expectCount(3)
+    expectCount(4)
 
   test "the dock placeholder is a VALUE, so it cannot rot silently":
     resetCount()
@@ -382,7 +416,7 @@ suite "PLAT-20: the leaves are GPUI, through the real shim":
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 73
+const ExpectedAssertions = 74
 
 suite "PLAT-20: the assertion count":
   test "every case in this file ran":
