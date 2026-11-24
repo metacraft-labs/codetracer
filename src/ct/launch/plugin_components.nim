@@ -53,7 +53,6 @@ when defined(js):
   # Node: `std/os`'s file procedures are not this backend's (common/node_os).
   import ../../common/node_os
   proc readFile(path: string): string = readFileBytes(path)
-  proc writeFile(path, content: string) = writeFileBytes(path, content)
 else:
   import std/os
 
@@ -436,4 +435,3 @@ proc loadPluginPackages*(d: PluginDiscovery): PackageLoad =
       result.problems.add pkg.allErrors
       continue
     result.packages.add LoadedPackage(installed: p, package: pkg)
-

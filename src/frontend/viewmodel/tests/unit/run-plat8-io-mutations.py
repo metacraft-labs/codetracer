@@ -658,23 +658,23 @@ MUTATIONS: list[Mutation] = [
     ),
     Mutation(
         "P19", IO,
-        "      var envTable = newStringTable(modeCaseSensitive)\n"
-        "      for (k, v) in env:\n"
-        "        envTable[k] = v",
-        "      var envTable: StringTableRef = nil\n"
-        "      for (k, v) in env:\n"
-        "        discard v",
+        # Re-aimed 2026-11-24: 242e5c914 replaced `startProcess` with
+        # `spawnGrouped`, which builds the child's envp as `envs` (seq of
+        # "k=v") from the plugin's pairs. "Inherit the host's environment" is
+        # now `envPairs()` (the host's own) in place of the plugin's `env`.
+        "      var envs: seq[string]\n"
+        "      for (k, v) in env: envs.add k & \"=\" & v",
+        "      var envs: seq[string]\n"
+        "      for (k, v) in envPairs(): envs.add k & \"=\" & v",
         I_ENV, NIM_IO,
         "the child inherits the HOST's environment instead of the plugin's. "
         "`startProcess` inherits when `env` is nil, and the host's environment "
         "is where a token would be.",
         control_name="the environment pairs are copied through a named local",
-        control_find="      var envTable = newStringTable(modeCaseSensitive)\n"
-                     "      for (k, v) in env:\n"
-                     "        envTable[k] = v",
-        control_replace="      var envTable = newStringTable(modeCaseSensitive)\n"
-                        "      for pair in env:\n"
-                        "        envTable[pair[0]] = pair[1]",
+        control_find="      var envs: seq[string]\n"
+                     "      for (k, v) in env: envs.add k & \"=\" & v",
+        control_replace="      var envs: seq[string]\n"
+                        "      for pair in env: envs.add pair[0] & \"=\" & pair[1]",
     ),
     Mutation(
         "P20", IO,
@@ -779,14 +779,14 @@ MUTATIONS: list[Mutation] = [
         "    while true:\n"
         "      var code = -1\n"
         "      try:\n"
-        "        code = p.proc0.peekExitCode()\n"
+        "        code = (when defined(posix): peekCode(p.pid) else: p.proc0.peekExitCode())\n"
         "      except CatchableError, Defect:",
         "    p.reaped = true\n"
         "    if p.reaped: return\n"
         "    while true:\n"
         "      var code = -1\n"
         "      try:\n"
-        "        code = p.proc0.peekExitCode()\n"
+        "        code = (when defined(posix): peekCode(p.pid) else: p.proc0.peekExitCode())\n"
         "      except CatchableError, Defect:",
         I_TEARDOWN, NIM_IO,
         "the killed child is never REAPED, so it becomes a zombie — a process "
@@ -796,7 +796,9 @@ MUTATIONS: list[Mutation] = [
         "2026-11-10, when the reap loop's iteration bound became a wall-clock "
         "deadline: the old needle quoted `while spins < 20000`, the bound that "
         "gave up on a loaded host and left exactly this zombie on unmutated "
-        "code.",
+        "code. Re-aimed "
+        "2026-11-24: 242e5c914 made the POSIX reap read `peekCode(p.pid)` "
+        "(waitpid WNOHANG) instead of `p.proc0.peekExitCode()`.",
         control_name="the reap deadline's window is hoisted into a named binding",
         control_find="    let deadline = getMonoTime() + "
                      "initDuration(milliseconds = KillReapDeadlineMs)",
@@ -1094,8 +1096,12 @@ MUTATIONS: list[Mutation] = [
     ),
     Mutation(
         "V5b", IO,
-        "env = envTable, options = {poDaemon})",
-        "env = envTable, options = {})",
+        # Re-aimed 2026-11-24: 242e5c914 replaced `startProcess(..., {poDaemon})`
+        # with a direct posix_spawn; `poDaemon` is now spelled
+        # `POSIX_SPAWN_SETPGROUP` in `spawnGrouped`'s setflags call, and the
+        # arm drops that flag (the child no longer leads its own group).
+        "        POSIX_SPAWN_SETPGROUP or POSIX_SPAWN_SETSIGMASK))",
+        "        POSIX_SPAWN_SETSIGMASK))",
         I_F5_GRANDCHILD, NIM_IO,
         "F5's OTHER HALF. `killpg` is only worth anything if the child is its "
         "own process-group leader, and `poDaemon` is what makes it one — "
@@ -1106,9 +1112,8 @@ MUTATIONS: list[Mutation] = [
         "grandchild survives. Two arms because either half alone restores the "
         "defect, and a repair with two halves needs two arms.",
         control_name="the spawn options are built as a named set",
-        control_find="                         env = envTable, options = {poDaemon})",
-        control_replace="                         env = envTable,\n"
-                        "                         options = {poDaemon} + {})",
+        control_find="        POSIX_SPAWN_SETPGROUP or POSIX_SPAWN_SETSIGMASK))",
+        control_replace="        POSIX_SPAWN_SETSIGMASK or POSIX_SPAWN_SETPGROUP))",
     ),
     Mutation(
         "V6", IO,
