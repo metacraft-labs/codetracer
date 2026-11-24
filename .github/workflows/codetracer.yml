@@ -726,8 +726,97 @@ jobs:
   # other languages, or MCP/CLI. This workflow currently has only push and PR
   # triggers, so the guarded job remains inactive until a scheduled or manual
   # trigger is added deliberately.
+  # The nightly Windows origin-DAP job restores its env.ps1 toolchain from
+  # actions/cache instead of bootstrapping it on every run: on an ephemeral
+  # runner the full bootstrap alone took 55 min (run 45292632494), so the job
+  # could never finish inside its 75-minute bound. This job is the one that
+  # WRITES that cache. It looks the key up first and stops in a minute or two
+  # when the cache is there; only a cold key (a changed toolchain pin) runs
+  # the bootstrap, which is why this job, and only this job, gets a longer
+  # budget than the 75-minute one the test job keeps.
+  #
+  # The root is a path every Windows runner has, under RUNNER_TEMP
+  # (C:\actions-runner\_work\_temp), so the cached paths are identical on the
+  # ephemeral runners and on win-ci-bare-001; env.ps1's default root differs
+  # between them (D:\metacraft-dev-deps vs the account's LOCALAPPDATA), which
+  # would make each runner class miss the other's cache.
+  origin-dap-windows-toolchain:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, windows, x64]
+    name: origin-DAP Windows toolchain cache
+    # A cold bootstrap of the components below: GCC 244 s, NIM 283 s, RUST
+    # 137 s, TTD 425 s, ZLIB 106 s on an ephemeral runner (run 45134129306),
+    # plus NODE, UV, CAPNP and JUST, and the cache upload. 120 min leaves
+    # margin for a slow download; a warm key exits after the lookup.
+    timeout-minutes: 120
+    steps:
+      - name: Ensure Git and Git Bash are on PATH
+        shell: powershell
+        env:
+          CODETRACER_GIT_BOOTSTRAP_REVISION: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $revision = $env:CODETRACER_GIT_BOOTSTRAP_REVISION
+          if ($revision -cnotmatch '^[0-9a-f]{40}$') {
+            throw "The workflow did not supply an immutable bootstrap revision."
+          }
+          $bootstrapUrl =
+            "https://raw.githubusercontent.com/metacraft-labs/codetracer/" +
+            "$revision/ci/ensure-git-for-checkout.ps1"
+          $bootstrapScript = Join-Path $env:RUNNER_TEMP `
+            "codetracer-ensure-git-$revision-$([Guid]::NewGuid().ToString('N')).ps1"
+          [Net.ServicePointManager]::SecurityProtocol =
+            [Net.ServicePointManager]::SecurityProtocol -bor
+            [Net.SecurityProtocolType]::Tls12
+          try {
+            Invoke-WebRequest `
+              -Uri $bootstrapUrl `
+              -OutFile $bootstrapScript `
+              -UseBasicParsing
+            & $bootstrapScript
+          }
+          finally {
+            Remove-Item -LiteralPath $bootstrapScript -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: false
+
+      - name: Look up the toolchain cache
+        id: lookup
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}\ct-diy
+          key: windows-diy-origin-dap-v1-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}
+          lookup-only: true
+
+      - name: Bootstrap the toolchain through env.ps1
+        if: steps.lookup.outputs.cache-hit != 'true'
+        shell: pwsh
+        env:
+          WINDOWS_DIY_INSTALL_ROOT: ${{ runner.temp }}\ct-diy
+          # The components the nightly origin-DAP job uses (see its setup
+          # step); keep the two lists identical.
+          WINDOWS_DIY_ONLY: "GCC,ZSTD,ZLIB,RUST,NIM,CAPNP,UV,NODE,JUST,TTD"
+          WINDOWS_DIY_ENSURE_TTD: "true"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $started = Get-Date
+          . ./env.ps1
+          Write-Host "env.ps1 bootstrap of $env:WINDOWS_DIY_ONLY into $env:WINDOWS_DIY_INSTALL_ROOT took $([int]((Get-Date) - $started).TotalMinutes) min"
+
+      - name: Save the toolchain cache
+        if: steps.lookup.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}\ct-diy
+          key: windows-diy-origin-dap-v1-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}
+
   origin-dap-windows-nightly:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: origin-dap-windows-toolchain
     runs-on: [self-hosted, windows, x64]  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
     name: origin-DAP (nightly routed materialized matrix, Windows)
     # See the timeout-minutes rationale on windows-rust-components. This job is
@@ -778,11 +867,39 @@ jobs:
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
+      # Not `submodules: recursive`: on an ephemeral runner that cloned and
+      # checked out all 37 submodules one after another, 13 of the Checkout
+      # step's 20 minutes (run 45134129306), and this job uses a handful.
+      # db-backend's Cargo.toml names every tree-sitter grammar as a path
+      # dependency (cargo reads optional ones' manifests too), and the Nim
+      # side needs nim-stew and nim-result (CT_EMULATOR_EXTRA_NIM_PATHS).
+      # All of them are public repositories.
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          submodules: recursive
+          submodules: false
           token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Fetch the submodules this job uses
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $paths = @(
+            "libs/nim-stew", "libs/nim-result",
+            "libs/tree-sitter-nim", "libs/tree-sitter-cairo", "libs/tree-sitter-aiken",
+            "libs/tree-sitter-move-on-aptos", "libs/tree-sitter-sway", "libs/tree-sitter-circom",
+            "libs/tree-sitter-leo", "libs/tree-sitter-tolk", "libs/tree-sitter-masm",
+            "libs/tree-sitter-cadence")
+          git -c protocol.version=2 submodule update --init --recursive --depth=1 --jobs 8 -- @paths
+          if ($LASTEXITCODE -ne 0) { throw "git submodule update exited $LASTEXITCODE" }
+
+      - name: Restore the toolchain cache
+        # Written by origin-dap-windows-toolchain, above.
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}\ct-diy
+          key: windows-diy-origin-dap-v1-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}
+          fail-on-cache-miss: true
 
       - name: Setup db-backend siblings
         # `windows-diy`, for the reason spelled out in the per-PR job above:
@@ -793,8 +910,11 @@ jobs:
         # Ruby and JS in the nightly matrix), and env.ps1's from-source nargo
         # build alone took both jobs past their 75-minute bound in run
         # 44940608244.
+        # Only the components this job uses, at the cached root restored
+        # above; env.ps1 finds them installed and skips them. NARGO stays out.
         env:
-          WINDOWS_DIY_SKIP_NARGO: "1"
+          WINDOWS_DIY_INSTALL_ROOT: ${{ runner.temp }}\ct-diy
+          WINDOWS_DIY_ONLY: "GCC,ZSTD,ZLIB,RUST,NIM,CAPNP,UV,NODE,JUST,TTD"
         uses: ./.github/actions/setup-db-backend-siblings
         with:
           env-flavor: windows-diy
@@ -873,13 +993,18 @@ jobs:
             -Revision $env:RECORDER_REVISION `
             -Destination $destination
 
-      - name: Install Nim toolchain
+      - name: Use the pinned Nim from env.ps1
+        # Not `choco install nim`: win-ci-bare-001 has no Chocolatey, and choco
+        # installs whatever Nim is current. env.ps1 provisions the pinned one.
         shell: pwsh
         run: |
-          choco install nim -y
-          $nimBin = (Get-ChildItem -Path "C:\tools\Nim\nim-*\bin" -Directory | Select-Object -First 1).FullName
-          if ($nimBin) { Add-Content -Path $env:GITHUB_PATH -Value $nimBin }
+          $ErrorActionPreference = "Stop"
+          if (-not $env:NIM_DIR) { throw "env.ps1 set no NIM_DIR" }
+          $nimBin = Join-Path $env:NIM_DIR "bin"
+          if (-not (Test-Path -LiteralPath (Join-Path $nimBin "nim.exe") -PathType Leaf)) { throw "no nim.exe under $nimBin" }
+          Add-Content -Path $env:GITHUB_PATH -Value $nimBin
           Add-Content -Path $env:GITHUB_PATH -Value "$env:USERPROFILE\.nimble\bin"
+          & (Join-Path $nimBin "nim.exe") --version
 
       - name: Install and verify locked Rust-backed Python recorder
         shell: pwsh
@@ -913,11 +1038,15 @@ jobs:
           cd libs/tree-sitter-nim
           tree-sitter generate
 
-      - name: Install just
+      - name: Use the pinned just from env.ps1
+        # Not `choco install just`, for the same reason as Nim above.
         shell: pwsh
         run: |
-          choco install just -y
-          just --version
+          $ErrorActionPreference = "Stop"
+          $just = Join-Path $env:CARGO_HOME "bin\just.exe"
+          if (-not (Test-Path -LiteralPath $just -PathType Leaf)) { throw "env.ps1 put no just.exe at $just" }
+          Add-Content -Path $env:GITHUB_PATH -Value (Split-Path -Parent $just)
+          & $just --version
 
       - name: Run routed materialized origin-DAP matrix
         shell: bash
