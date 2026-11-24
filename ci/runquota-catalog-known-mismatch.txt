@@ -6,7 +6,6 @@
 # At most the current pair. The check fails on an entry naming any other pair,
 # or on a listed pair whose catalogs agree: delete the line then.
 #
-# runquota aad94ad is on catalog 56ffd673 (repro.lock's); reprobuild 33be1e9964's
-# runquota-src 6ff97313 is on 15ceea67. No reprobuild revision yet pins a
-# runquota on 56ffd673.
-aad94ad19f8cdb7aadc88e88b830d47caaabed92 6ff973131e7f715f0237cb0f08b8dd16cbeba0dc reprobuild-pm:issues/2026-11-18-the-runquota-reprobuild-pins-as-runquota-src-carries-catalog-15ceea67-while-reprobuilds-own-lock-pins-29b7bb9b-or-56ffd67.md
+# runquota b63c6c17 is on catalog 92100803; reprobuild's runquota-src 6ff97313
+# is on 15ceea67. No reprobuild revision yet pins a runquota on 92100803.
+b63c6c17ffd9f046baa70a62cbeb067c3a0a2745 6ff973131e7f715f0237cb0f08b8dd16cbeba0dc reprobuild-pm:issues/2026-11-18-the-runquota-reprobuild-pins-as-runquota-src-carries-catalog-15ceea67-while-reprobuilds-own-lock-pins-29b7bb9b-or-56ffd67.md
