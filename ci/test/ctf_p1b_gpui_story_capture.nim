@@ -28,7 +28,19 @@
 ##   declaration), CTF_P1B_OUT; optional CTF_P1B_ONLY (comma-separated
 ##   substrings of the story ids to keep), CTF_P1B_SIZES (default `laptop,sidebar`,
 ##   and `panel` too for the session activity timeline's stories),
-##   CTF_P1B_THEMES (default `dark,light`), CTF_P1B_MOMENTS.
+##   CTF_P1B_THEMES (default `dark,light`), CTF_P1B_MOMENTS, CTF_P1B_SHARD.
+##
+## With `CTF_P1B_SHARD=<i>/<n>` it takes only its share of the captures:
+## every capture it would take, in the order it would take them, is dealt
+## round robin over n shards, and this run takes the i-th one's. The whole
+## set is about 1,400 windows at about 8 s each, three hours on one runner,
+## which no CI job's bound holds (codetracer-specs issues/2026-11-24-gpui-
+## window-captures-shard-1-runs-out-of-its-150-minute-bound-in-the-ctf-p1b-
+## step.md), so CI spreads it over the GPUI shards and judges the union of
+## their frames in one job (`.github/workflows/gpui-window-captures.yml`).
+## The deal is by position in one listing that every shard computes from the
+## same build, so the n shares are disjoint and cover the set exactly
+## (`ci/test/ctf-p1b-gpui-capture-shards-test.sh`).
 ##
 ## With `CTF_P1B_MOMENTS=1` (CTF-P1c, `just ctf-p1c-gpui-captures`) it
 ## captures each PLAYBACK story at each named moment of its scenario instead
@@ -87,6 +99,23 @@ proc sizesFor(id: string): seq[string] =
 let themes = listOf("CTF_P1B_THEMES", "dark,light")
 let atMoments = getEnv("CTF_P1B_MOMENTS") == "1"
 
+proc shardOf(spec: string): (int, int) =
+  ## `i/n` with 1 <= i <= n; `1/1` (all of it) when unset. Anything else
+  ## stops the run: a malformed share must not quietly capture nothing.
+  if spec.len == 0: return (1, 1)
+  let parts = spec.split('/')
+  var i, n: int
+  try:
+    if parts.len != 2: raise newException(ValueError, "not i/n")
+    i = parseInt(parts[0])
+    n = parseInt(parts[1])
+  except ValueError:
+    quit("ctf_p1b_gpui_story_capture: CTF_P1B_SHARD is '" & spec & "', not <i>/<n>", 2)
+  if n < 1 or i < 1 or i > n:
+    quit("ctf_p1b_gpui_story_capture: CTF_P1B_SHARD " & spec & " is out of range", 2)
+  (i, n)
+let (shard, shards) = shardOf(getEnv("CTF_P1B_SHARD"))
+
 proc momentsOf(story: string): seq[string] =
   ## The named moments the host lists for `story` (none for a story that is
   ## not a playback story). A host that cannot list them fails the run.
@@ -137,6 +166,9 @@ let t = newSwayTarget(2560, 1440, floatingAppIds = @[AppId])
 t.start()
 var failed: seq[string]
 var captured = 0
+var dealt = 0
+  ## The position of the next capture in the whole listing; this run takes
+  ## the ones at `shard - 1` modulo `shards`.
 try:
   for (id, moment) in shots:
     let view = ViewPrefix & id[StoryIdPrefix.len .. ^1] &
@@ -145,6 +177,8 @@ try:
       if sizeName notin sizesFor(id): continue
       for theme in themes:
         let captureId = view & "-" & sizeName & "-" & theme
+        inc dealt
+        if (dealt - 1) mod shards != shard - 1: continue
         let regionsOut = outDir / (captureId & ".regions.json")
         removeFile(regionsOut)
         removeFile(outDir / (captureId & ".ppm"))
@@ -193,6 +227,7 @@ try:
 finally:
   t.stop()
 echo "ctf_p1b_gpui_story_capture: ", captured, " captures of ", stories.len, " stories",
-  (if atMoments: " at " & $shots.len & " (story, moment) pairs" else: "")
+  (if atMoments: " at " & $shots.len & " (story, moment) pairs" else: ""),
+  (if shards > 1: ", shard " & $shard & "/" & $shards & " of " & $dealt & " captures" else: "")
 if failed.len > 0:
   quit("ctf_p1b_gpui_story_capture: no frame or no regions for " & failed.join(", "), 1)

@@ -6197,6 +6197,14 @@ ctf-p1b-gpui-captures:
   CTF_P1B_MOMENTS=1 bash ci/test/ctf-p1b-gpui-story-capture.sh
   bash ci/lib/run-nim-test-lane.sh agent-harbor-gpui-captures
 
+# The captures of `ctf-p1b-gpui-captures`, both halves, for one round-robin
+# share `<i>/<n>` of them and without the lane: the whole set is about three
+# hours of windows, so CI takes it over the GPUI shards and runs the lane once
+# over the union of their frames (`gpui-window-captures.yml`).
+ctf-p1b-gpui-captures-shard shard:
+  CTF_P1B_SHARD={{shard}} bash ci/test/ctf-p1b-gpui-story-capture.sh
+  CTF_P1B_SHARD={{shard}} CTF_P1B_MOMENTS=1 bash ci/test/ctf-p1b-gpui-story-capture.sh
+
 # CTF-P1b: every Agent Harbor story on a REAL TERMINAL — the terminal story
 # host (`src/frontend/tui/agent_harbor/ah_tui_story_host.nim`) in a pty per
 # story, theme and size (laptop 180x56 and sidebar 45x56 cells: 1440x900 and

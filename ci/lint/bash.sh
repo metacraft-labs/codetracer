@@ -438,6 +438,12 @@ lint_step "the CI's background helpers end with their job" \
 lint_step "a GPUI shard provisions what a bare host lacks" \
 	bash ci/test/gpui-host-provisioning-test.sh
 
+# CTF-P1b's GPUI story captures are ~1,400 windows; shard 1 alone ran out of
+# its job's bound inside them. The shards take round-robin shares, each
+# within its step's bound, and one job judges the union.
+lint_step "CTF-P1b's GPUI captures are shared over the shards and judged whole" \
+	bash ci/test/ctf-p1b-gpui-capture-shards-test.sh
+
 # A step that runs past an earlier failure and needs ct waits on the ct build,
 # or the earlier failure resurfaces as a second, misleading `ct ENOENT`.
 # The VCS fixture builds a git repository; run under a caller's GIT_DIR it

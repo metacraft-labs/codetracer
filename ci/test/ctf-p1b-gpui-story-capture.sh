@@ -25,6 +25,10 @@
 # playback story at each named moment of its scenario instead, into
 # `build/ctf-p1c/gpui/` (`CTF_P1C_GPUI_OUT` overrides), read by
 # `test_ctf_p1c_gpui_capture_matches_web_layout_at_moments.nim`.
+#
+# With `CTF_P1B_SHARD=<i>/<n>`: only the i-th of n round-robin shares of the
+# captures (`ctf_p1b_gpui_story_capture.nim`), which is how CI spreads the
+# set over the GPUI shards (`just ctf-p1b-gpui-captures-shard`).
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WS="$(cd "${root}/.." && pwd)"
@@ -49,9 +53,17 @@ mkdir -p "${OUT}"
 if [ -z "${1:-}" ]; then
 	rm -f "${OUT}"/*.ppm "${OUT}"/*.png "${OUT}"/*.regions.json
 fi
+# CT_GPUI_SHIM_PREBUILT=1: CI's shards restore the windowed shim from the
+# ct-build job (the .so alone, without cargo's fingerprints, so a `cargo
+# build` here would rebuild it whole); only its shell's library path is read.
+if [ "${CT_GPUI_SHIM_PREBUILT:-0}" = 1 ]; then
+	[ -e "${shim}" ] || fail "CT_GPUI_SHIM_PREBUILT=1, but there is no ${shim}"
+	build_shim=true
+else
+	build_shim="cd rust && CARGO_TARGET_DIR='${target}' cargo build -q --features gpui-backend"
+fi
 (cd "${ISONIM_GPUI}" && nix develop --command bash -c \
-	"cd rust && CARGO_TARGET_DIR='${target}' cargo build -q --features gpui-backend &&
-	 printf '%s' \"\$LD_LIBRARY_PATH\" > '${OUT}/gpui.ld-path'") ||
+	"${build_shim} && printf '%s' \"\$LD_LIBRARY_PATH\" > '${OUT}/gpui.ld-path'") ||
 	fail "could not build isonim-gpui's windowed shim"
 cd "${root}"
 # The synthetic fixture set, always: the web record this capture is compared
@@ -69,6 +81,7 @@ AGENT_HARBOR_FIXTURES=synthetic nim c --hints:off --warnings:off --mm:orc -d:rel
 		CTF_P1B_GPUI_LD_LIBRARY_PATH="$(cat "${OUT}/gpui.ld-path")" \
 		CTF_P1B_REGIONS="${root}/src/tests/visual/agent-harbor-regions.json" \
 		CTF_P1B_OUT="${OUT}" CTF_P1B_ONLY="${1:-}" CTF_P1B_MOMENTS="${CTF_P1B_MOMENTS:-}" \
+		CTF_P1B_SHARD="${CTF_P1B_SHARD:-}" \
 		nix develop --command nim c -r --hints:off --warnings:off --path:src \
 		--nimcache:"${root}/build/nimcache/ctf_p1b_gpui_story_capture" \
 		-o:"${root}/build/ctf_p1b_gpui_story_capture" \

@@ -314,7 +314,13 @@ done
 # 54 -> 55: codetracer.yml's `viewmodel-tests-wasm-parity`, PLAT-17's parity
 # gate split off `viewmodel-tests-wasm`, which it ran out of time in. It
 # installs Nix with the same step as the job it came from.
-readonly EXPECTED_NIX_JOBS=55
+#
+# 55 -> 56: gpui-window-captures.yml's `ctf-p1b-gpui-layout`, which judges
+# the GPUI shards' shares of CTF-P1b's story captures together (codetracer-
+# specs issues/2026-11-24-gpui-window-captures-shard-1-runs-out-of-its-150-
+# minute-bound-in-the-ctf-p1b-step.md). It provisions Nix through
+# setup-db-backend-siblings, env-flavor nix, as screen-oracle does.
+readonly EXPECTED_NIX_JOBS=56
 
 if [ "${#nix_jobs[@]}" -eq "$EXPECTED_NIX_JOBS" ]; then
 	ok "the scanner still classifies the nix-using jobs (${#nix_jobs[@]})"

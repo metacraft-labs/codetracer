@@ -27,6 +27,12 @@ jobs:
     # covers that. The bound is one literal for the whole matrix
     # (ci/verdict/job-timeouts.py), so the other shards, which finish in
     # 22-88m, carry it too. Tighten it from shard 1's first green run.
+    # Shard 1 also carried CTF-P1b's story captures and the terminal
+    # emulators' lane after those, and was cancelled at 150 inside the
+    # captures in runs 45118976975 and 45292632494 (~110m of window lanes
+    # before them, then 40 minutes of captures, ~300 of ~1,400). The captures
+    # are now dealt over shards 3-20 and judged by `ctf-p1b-gpui-layout`; the
+    # emulators run on shard 2.
     timeout-minutes: 150
     # The GPUI scenario lane does not fit one 90-minute job (70 runs at about
     # 6 minutes each, run 43806398582), so it runs as 20 shards: 10 left each
@@ -386,18 +392,46 @@ jobs:
           build-dir: build
           name: scenario-runs-gpui-${{ matrix.shard }}
 
-      - name: CTF-P1b's Agent Harbor stories as real windows, against the web layout
+      - name: CTF-P1b's Agent Harbor stories as real windows, this shard's share
         # One `codetracer-gpui-story` window per story, theme and size on
         # GuiAssert's headless sway (the same windowed shim and GuiAssert
-        # checkout as above), then the `agent-harbor-gpui-captures` lane:
-        # each capture's laid-out regions against the committed web record
-        # (`src/tests/visual/agent-harbor-web-regions.json`) within PLAT-35's
-        # pane-rectangle tolerance; a missing or blank capture fails by name.
-        # CTF-P1c: the same for each playback story at each named moment of
-        # its scenario (`build/ctf-p1c/gpui/`), against the committed
-        # `src/tests/visual/agent-harbor-web-regions-at-moments.json`.
-        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.shard == 1 }}
-        run: nix develop .#devShells.x86_64-linux.default --command just ctf-p1b-gpui-captures
+        # checkout as above), into `build/ctf-p1b/gpui/`, and CTF-P1c's: each
+        # playback story at each named moment of its scenario, into
+        # `build/ctf-p1c/gpui/`. The whole set is about 1,400 windows at about
+        # 8 s each (run 45292632494: ~300 in 40 minutes), three hours that
+        # shard 1 never finished inside the job's bound on top of its window
+        # lanes (cancelled at 150m in runs 45118976975 and 45292632494). So
+        # every shard from 3 on takes a round-robin share of it, ~76 windows
+        # or ~10 minutes, after its scenario slice
+        # (ci/test/ctf-p1b-gpui-capture-share.sh), and the
+        # `ctf-p1b-gpui-layout` job below judges the union of the shares
+        # against the web layout. Bounded here so a slow share fails by name:
+        # ~10 minutes of windows plus the story host's and the capture
+        # driver's builds; the shards' other steps finish within 88m, which
+        # leaves 62 of the job's 150
+        # (ci/test/ctf-p1b-gpui-capture-shards-test.sh holds both).
+        id: ctf_p1b
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.shard >= 3 }}
+        timeout-minutes: 45
+        env:
+          CT_GPUI_SHIM_PREBUILT: "1"
+        run: |
+          share="$(bash ci/test/ctf-p1b-gpui-capture-share.sh "${{ matrix.shard }}/20")"
+          echo "CTF-P1b captures: share ${share}"
+          nix develop .#devShells.x86_64-linux.default --command just ctf-p1b-gpui-captures-shard "${share}"
+
+      - name: Upload this shard's CTF-P1b captures for the layout judge
+        # Frames and regions, whatever the step above managed: one it did
+        # not take is missing from the union, and the judge fails it by name.
+        if: ${{ !cancelled() && steps.ctf_p1b.outcome != 'skipped' && matrix.shard >= 3 }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctf-p1b-gpui-captures-${{ matrix.shard }}
+          path: |
+            build/ctf-p1b/gpui/
+            build/ctf-p1c/gpui/
+          if-no-files-found: ignore
+          retention-days: 2
 
       - name: The terminal front-end in real terminal emulators
         # Terminal-Adaptation §13.4's `tui-real-emulators` lane, here because
@@ -410,8 +444,11 @@ jobs:
         # OCR and pixels, OSC 52 accepted or refused against the profile. An
         # emulator this runner cannot provide or start is a counted
         # MISSING-PREREQ skip, never a failure; `!cancelled()` so a red GPUI
-        # capture does not hide it.
-        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.shard == 1 }}
+        # capture does not hide it. On shard 2, not shard 1: shard 1's window
+        # lanes leave it no room inside the job's bound (it never ran there,
+        # runs 45118976975 and 45292632494).
+        id: real_emulators
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.shard == 2 }}
         run: nix develop .#devShells.x86_64-linux.default --command just test-tui-real-emulators
 
       - name: Upload the frames
@@ -425,12 +462,18 @@ jobs:
             build/plat48-gpui/
             build/plat69/
             build/plat35/gpui-window/
-            build/ctf-p1b/
-            build/ctf-p1c/
-            build/real-emulators/out/
             src/tests/visual/plat45-gpui-arrangement.json
             src/tests/visual/plat47-gpui-window.json
             src/tests/visual/plat48-gpui-window.json
+          retention-days: 7
+
+      - name: Upload the terminal emulators' captures
+        if: ${{ failure() && steps.real_emulators.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: tui-real-emulators
+          path: build/real-emulators/out/
+          if-no-files-found: ignore
           retention-days: 7
 
       - name: Upload the memory samples
@@ -441,5 +484,75 @@ jobs:
         with:
           name: memory-samples-gpui-${{ matrix.shard }}
           path: ${{ runner.temp }}/memory-samples.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+  ctf-p1b-gpui-layout:
+    # CTF-P1b and CTF-P1c: the GPUI story captures, taken in shares by
+    # shards 3-20 above (`ctf-p1b-gpui-captures-<shard>`), judged together
+    # against the committed web layout records by the
+    # `agent-harbor-gpui-captures` lane (`just ctf-p1b-gpui-captures`' lane,
+    # without its captures). A shard's share is not a lane of its own: the
+    # layout tests hold the WHOLE set to the stories' declaration, so a
+    # capture a share failed to take, or a share that never uploaded, fails
+    # here by name. Runs when a shard failed, so the others' captures are
+    # still judged. Needs no window, no ct and no compositor.
+    needs: [gpui-window-captures]
+    if: ${{ !cancelled() }}
+    runs-on: [self-hosted, linux, x64]
+    # Unmeasured until its first green run: provisioning as screen-oracle's
+    # (up to ~55m on a cold garm VM), then the lane's compile and run, a few
+    # minutes over its two test files. Tighten from the first green run.
+    timeout-minutes: 90
+    name: CTF-P1b's GPUI story captures against the web layout
+    steps:
+      - name: Generate CI token
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Setup db-backend siblings
+        uses: ./.github/actions/setup-db-backend-siblings
+        with:
+          env-flavor: nix
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          attic-cache: ${{ vars.ATTIC_CACHE }}
+
+      - name: Provision dependency siblings from repro.lock
+        uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      - name: Restore every shard's CTF-P1b captures
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ctf-p1b-gpui-captures-*
+          merge-multiple: true
+          path: build
+
+      - name: The captures lay the stories out as the web does
+        run: nix develop .#devShells.x86_64-linux.default --command bash ci/lib/run-nim-test-lane.sh agent-harbor-gpui-captures
+
+      - name: Upload the frames and the parity reports
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctf-p1b-gpui-layout
+          path: |
+            build/ctf-p1b/
+            build/ctf-p1c/
           if-no-files-found: ignore
           retention-days: 7
