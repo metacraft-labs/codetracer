@@ -335,9 +335,10 @@ jobs:
           # the recording because it could not re-record it (run 45151089269).
           # This job records nothing and builds no `ct`; an interpreter that
           # cannot run the identity probe says so, and the provider keeps the
-          # recording it was handed.
-          CODETRACER_PYTHON_INTERPRETER: /usr/bin/false
-        run: nix develop . --command just test-zgui
+          # recording it was handed. It is set inside the shell: the dev
+          # shell's hook points CODETRACER_PYTHON_INTERPRETER at its recorder
+          # venv, over any value the step gives it (run 45196362876).
+        run: nix develop . --command bash -c 'CODETRACER_PYTHON_INTERPRETER=/usr/bin/false exec just test-zgui'
 
       - name: Upload the lane's log
         if: always()
