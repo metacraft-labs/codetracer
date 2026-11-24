@@ -15,11 +15,10 @@
 ah-rem(px)
   unit(px / 16, 'rem')
 
-// A pie on a line or a row (the palette's `PieLinePx`, CTF-P1d), and the
-// plate it keeps on a surface it was not resolved for (`PiePlatePx`).
+// A pie on a line or a row (the palette's `PieLinePx`, CTF-P1d), and on a
+// tab (`PieTabPx`).
 AH_PIE_LINE = 0.75rem
 AH_PIE_TAB = 0.625rem
-AH_PIE_PLATE = 0.125rem
 
 // ---------------------------------------------------------------------------
 // Cut text (CTF-P1c D6)
@@ -255,34 +254,21 @@ AH_PIE_PLATE = 0.125rem
     outline-offset: -0.0625rem
 
 .ah-fleet-row-selected
-  background: colors-ui-surface-action-primary
+  background: by-mode(#3c3c3c, colors-ui-surface-primary-secondary-hover)
 
   &:hover
-    background: colors-ui-surface-action-primary-hover
+    background: by-mode(#3c3c3c, colors-ui-surface-primary-secondary-hover)
 
-  // Every text of a selected row, status words and notes included, takes the
-  // selected commit row's text colour (vcs.styl `.vcs-commit-header-selected`):
-  // on-action in Dark, body text in Light, where the action surface is a pale
-  // indigo on which white is 2:1.
-  .ah-fleet-row-title,
-  .ah-fleet-row-age,
-  .ah-fleet-meta-text,
-  .ah-fleet-status-label,
-  .ah-fleet-row-failure,
-  .ah-fleet-activity-line,
-  .ah-fleet-activity-more,
-  .ah-fleet-col
-    color: by-mode(colors-ui-text-on-action-primary, colors-ui-text-primary-body)
+  // The selected row is drawn as a selected row of every other list here
+  // (`.ah-session-row-active`): its title in the active row's title colour,
+  // its meta in the quiet role that ground needs (Light's caption is too
+  // faint on it). Its status word, failure and activity lines keep their
+  // own inks, and its pie the inks resolved for this ground.
+  .ah-fleet-row-title
+    color: by-mode(#ffffff, colors-ui-text-primary-body)
 
-  // The pie keeps the panel's ground as a plate around it: the action
-  // surface is no ground its inks were resolved for (`PiePlatePx`).
-  .ah-fleet-pie
-    border-radius: 50%
-    background: colors-ui-surface-base-panel
-    box-shadow: 0 0 0 AH_PIE_PLATE colors-ui-surface-base-panel
-
-.agent-harbor-fleet .ah-fleet-row-selected .ah-fleet-status-label
-  color: by-mode(colors-ui-text-on-action-primary, colors-ui-text-primary-body)
+  .ah-fleet-meta-text
+    color: by-mode(colors-ui-text-primary-caption, colors-ui-text-primary-label)
 
 // The progress pie sits on the title's first line (a 20px line: centred).
 .ah-fleet-pie
@@ -1831,10 +1817,12 @@ AH_MARK = 0.5rem
 .ah-fleet-col-empty
   color: colors-ui-text-primary-disabled
 
-// The +N chip on a selected row takes the selection's text, no fill.
+// The +N chip on a selected row: the chip's tertiary fill is no step off
+// the selected-row ground in Dark (#333333 on #3c3c3c), so there it is
+// outlined in the row's quiet text colour instead, with no fill.
 .ah-fleet-row-selected .ah-fleet-activity-more
   background: transparent
-  border-color: by-mode(colors-ui-text-on-action-primary, colors-ui-text-primary-body)
+  border-color: by-mode(colors-ui-text-primary-caption, colors-ui-text-primary-label)
 
 // A narrow progress panel: the initiative's name and its count on one line
 // under the label; ids in a narrower column.
@@ -2121,9 +2109,8 @@ AH_MARK = 0.5rem
 // An error-level activity line is red only on a row with no failure line
 // (the view sets the class from `agent_harbor_words.activityLineIsError`):
 // a failure line already says the fault in red, and two red lines read as
-// one fault twice. After the rule above, which it must override; a selected
-// row's own text colour (`.ah-fleet-row-selected ...`, more specific) still
-// wins over it.
+// one fault twice. After the rule above, which it must override; it holds
+// on a selected row too.
 .ah-fleet-activity-error
   color: colors-ui-text-error-primary
 

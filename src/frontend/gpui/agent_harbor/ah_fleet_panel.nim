@@ -98,16 +98,15 @@ proc drawFilter(r: GpuiRenderer; p: AhPalette; vm: FleetSnapshotVM; filter: Flee
   r.addEventListener(result, "click", proc() = vm.setFilter(chosen))
 
 proc cell(r: GpuiRenderer; p: AhPalette; s: string; widthPx: int; name: string;
-          right = false; colour = ""; tabular = false): GpuiElement =
+          right = false; tabular = false): GpuiElement =
   ## A column cell, on a 16px line (`.ah-fleet-col`: caption size,
-  ## `type-ui-lineheight-body-sm`). An empty one shows the shared placeholder
-  ## in the disabled role, whatever the row's own text colour
+  ## `type-ui-lineheight-body-sm`), in the label role on every row. An empty
+  ## one shows the shared placeholder in the disabled role
   ## (`.ah-fleet-col-empty`). `tabular`: figures one width
   ## (`.ah-fleet-col-duration`).
   let empty = s.len == 0
   let words = r.text(if empty: AgentHarborFleetEmptyCellText else: s, CaptionPx,
-                     if empty: p.textDisabled
-                     elif colour.len > 0: colour else: p.textLabel,
+                     if empty: p.textDisabled else: p.textLabel,
                      tabular = tabular, pairs = [("line-height", "16px")])
   if right:
     # Right-aligned (the stylesheet's `text-align: right`): the words at the
@@ -131,23 +130,24 @@ proc drawRow(r: GpuiRenderer; p: AhPalette; vm: FleetSnapshotVM; row: FleetRow;
                           ("padding-right", $InsetPx & "px"), ("flex-shrink", "0"),
                           ("cursor", cursorOf(hkControl))])
   r.rule(result, p.borderSecondary)
-  # The selected row: the action surface, and every text of it -- status
-  # words and notes included -- in the selected commit row's text colour
-  # (`.ah-fleet-row-selected`, after vcs.styl).
+  # The selected row: the selected-row ground every list here shares, its
+  # title in the active row's title colour and its meta in the quiet role
+  # that ground needs (`.ah-fleet-row-selected`, as `.ah-session-row-active`).
+  # Its status word, failure and activity lines keep their own inks.
   let sel = row.selected
-  let selText = p.selectedText
-  if sel: r.setStyle(result, "background", p.action)
+  let ground = if sel: p.activeRow else: p.panel
+  if sel: r.setStyle(result, "background", ground)
+  r.tag(result, "ground", ground)
   r.tag(result, "row", id)
   r.tag(result, "category", $row.category)
   r.tag(result, "selected", $row.selected)
   r.tag(result, "expanded", $row.expanded)
   r.addEventListener(result, "click", proc() = vm.select(id))
   # The row's progress pie (CTF-P1d), read from the viewmodel
-  # (`FleetRow.pie`), on the panel's ground; on the selected row's action
-  # surface it keeps that ground as a plate (`.ah-fleet-row-selected
-  # .ah-fleet-pie`).
+  # (`FleetRow.pie`), in the inks resolved for the row's ground: the
+  # panel's, or the selected row's.
   let markHolder = r.box(pairs = [("height", "20px"), ("items", "center")])
-  r.appendChild(markHolder, r.drawPie(p, row.pie, p.panel, PieLinePx, plate = sel))
+  r.appendChild(markHolder, r.drawPie(p, row.pie, ground, PieLinePx))
   r.appendChild(result, markHolder)
   # Every line of the row is 16px (`.ah-fleet-row-title`, `-meta`,
   # `-failure`, `.ah-fleet-activity-line`), 2px apart, so a row is as tall as
@@ -159,18 +159,18 @@ proc drawRow(r: GpuiRenderer; p: AhPalette; vm: FleetSnapshotVM; row: FleetRow;
   if columns: r.styles(main, [("width", $grid.session & "px"), ("flex-grow", "0"),
                               ("min-width", "0px")])
   let title = r.text(row.title, BodyPx,
-                     if sel: selText
+                     if sel: p.activeTabText
                      elif row.titleIsPlaceholder: p.textCaption else: p.textBody,
                      pairs = [lh])
   r.tag(title, "title", row.title)
   let meta = r.box(pairs = [("gap", "6px"), ("items", "center"), ("min-width", "0px")])
   let status = r.text(row.statusLabel, CaptionPx,
-                      if sel: selText else: p.statusColour(row.category), shrink = false,
+                      p.statusColour(row.category), shrink = false,
                       pairs = [lh])
   r.tag(status, "status", row.statusLabel)
   r.appendChild(meta, status)
   let metaWords = (if columns: row.metaPartsShort else: row.metaParts).join(Middot)
-  let metaText = r.text(metaWords, CaptionPx, if sel: selText else: p.textCaption,
+  let metaText = r.text(metaWords, CaptionPx, if sel: p.activeRowQuiet else: p.textCaption,
                         pairs = [lh])
   r.tag(metaText, "meta", metaWords)
   r.appendChild(meta, metaText)
@@ -187,7 +187,7 @@ proc drawRow(r: GpuiRenderer; p: AhPalette; vm: FleetSnapshotVM; row: FleetRow;
     r.appendChild(main, title)
     r.appendChild(main, meta)
   if row.failureText.len > 0:
-    let failure = r.text(row.failureText, CaptionPx, if sel: selText else: p.textError,
+    let failure = r.text(row.failureText, CaptionPx, p.textError,
                          pairs = [lh])
     r.tag(failure, "failure", row.failureText)
     r.appendChild(main, failure)
@@ -201,8 +201,7 @@ proc drawRow(r: GpuiRenderer; p: AhPalette; vm: FleetSnapshotVM; row: FleetRow;
     # `.ah-fleet-activity-row`: the line and the chip 8px apart.
     let line = r.box(pairs = [("gap", "8px"), ("items", "center"), ("min-width", "0px")])
     if hasChip: r.setStyle(line, "height", $ChipLinePx & "px")
-    let ink = if sel: selText
-              elif activityLineIsError(row, i): p.textError else: p.rowDetail
+    let ink = if activityLineIsError(row, i): p.textError else: p.rowDetail
     let t = r.text(row.activity[i], CaptionPx, ink, pairs = [lh])
     r.tag(t, "activity", row.activity[i])
     r.tag(t, "ink", ink)
@@ -212,20 +211,21 @@ proc drawRow(r: GpuiRenderer; p: AhPalette; vm: FleetSnapshotVM; row: FleetRow;
       let label = if row.expanded: "less" else: "+" & $hidden
       # `.ah-fleet-activity-more`: a chip 4px further on, 6px in, the control
       # radius, a 1px border round a 16px caption line. At rest it sits on
-      # the tertiary surface with a transparent border; on a selected row it
-      # is OUTLINED in the selection's text colour, with no fill
+      # the tertiary surface with a transparent border; on a selected row,
+      # where the tertiary is no step off the ground in Dark, it is OUTLINED
+      # in the row's quiet text colour, with no fill
       # (`.ah-fleet-row-selected .ah-fleet-activity-more`).
       let more = r.box(pairs = [("height", $ChipLinePx & "px"), ("items", "center"),
                                 ("margin-left", "4px"),
                                 ("padding-left", "6px"), ("padding-right", "6px"),
                                 ("rounded", $ControlRadiusPx & "px"), ("flex-shrink", "0"),
                                 ("border-width", "1px"),
-                                ("border-color", if sel: selText else: p.tertiary),
+                                ("border-color", if sel: p.activeRowQuiet else: p.tertiary),
                                 ("cursor", cursorOf(hkControl))])
       if not sel: r.setStyle(more, "background", p.tertiary)
       r.tag(more, "activity-more", label)
       r.tag(more, "outlined", $sel)
-      r.appendChild(more, r.text(label, CaptionPx, if sel: selText else: p.textLabel,
+      r.appendChild(more, r.text(label, CaptionPx, if sel: p.activeRowQuiet else: p.textLabel,
                                  shrink = false, pairs = [lh]))
       r.addEventListener(more, "click", proc() = vm.toggleExpanded(id))
       r.appendChild(line, more)
@@ -233,18 +233,16 @@ proc drawRow(r: GpuiRenderer; p: AhPalette; vm: FleetSnapshotVM; row: FleetRow;
   if shown > 0: r.appendChild(main, activity)
   r.appendChild(result, main)
   if columns:
-    let c = if sel: selText else: ""
-    r.appendChild(result, r.cell(p, row.agentText, grid.share, "agent", colour = c))
-    r.appendChild(result, r.cell(p, row.host, grid.share, "host", colour = c))
+    r.appendChild(result, r.cell(p, row.agentText, grid.share, "agent"))
+    r.appendChild(result, r.cell(p, row.host, grid.share, "host"))
     if anyInitiative:
-      r.appendChild(result, r.cell(p, row.initiative, grid.share, "initiative",
-                                   colour = c))
+      r.appendChild(result, r.cell(p, row.initiative, grid.share, "initiative"))
     r.appendChild(result, r.cell(p, row.durationLabel, DurationColumnPx, "duration", true,
-                                 colour = c, tabular = true))
+                                 tabular = true))
   # The age: the "Active" column (4rem) at a laptop's width; in a narrow
   # panel the row's last grid column, sized to its text (`auto`).
   # `.ah-fleet-row-age`: tabular figures.
-  let age = r.text(row.ageLabel, CaptionPx, if sel: selText else: p.textBodySubtle, shrink = false,
+  let age = r.text(row.ageLabel, CaptionPx, p.textBodySubtle, shrink = false,
                    tabular = true, pairs = [("flex-shrink", "0"), lh])
   r.tag(age, "age", row.ageLabel)
   if columns:

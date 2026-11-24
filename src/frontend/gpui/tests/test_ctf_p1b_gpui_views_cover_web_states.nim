@@ -166,12 +166,11 @@ proc saysShare(words: string): bool =
     if words[i] == '/' and words[i - 1] in Digits and words[i + 1] in Digits: return true
 
 proc pieProblems(e: GpuiElement; pie: ProgressPie; ground: string; p: AhPalette;
-                 at: string; plate = false): seq[string] =
+                 at: string): seq[string] =
   ## One site's drawn pie against the viewmodel's `pie` (CTF-P1d): the
   ## same role, the same share (or unknown), the same words as its
   ## accessible name, its shape, the inks the palette resolves for `ground`
-  ## -- so a view that recomputes a pie, or draws another item's, differs --
-  ## and, with `plate`, the disc of `ground` it sits on.
+  ## -- so a view that recomputes a pie, or draws another item's, differs.
   let pies = e.all("pie")
   if pies.len != 1:
     return @[at & " draws " & $pies.len & " pies, not one"]
@@ -185,8 +184,6 @@ proc pieProblems(e: GpuiElement; pie: ProgressPie; ground: string; p: AhPalette;
   let inks = p.pieInks(pie.role, ground)
   result.expect("pie inks at " & at, (d.attr("pie-wedge"), d.attr("pie-ground")),
                 (inks.wedge, ground))
-  result.expect("pie plate at " & at, d.values("pie-plate"),
-                if plate: @[ground] else: @[])
 
 proc tabPieProblems(e: GpuiElement; pie: ProgressPie; active: bool; p: AhPalette;
                     at: string): seq[string] =
@@ -433,15 +430,14 @@ proc checkProgress(view: GpuiElement; vm: InitiativeProgressVM): seq[string] =
 proc fleetInkProblems(view: GpuiElement; vm: FleetSnapshotVM; p: AhPalette): seq[string] =
   ## The inks the shared rules decide (the views tag each as `ink`, the
   ## colour they hand the text): an activity line red only on a row with no
-  ## failure line (`activityLineIsError`), else the caption role, the
-  ## selection's text on the selected row; the active filter's count in the
-  ## body role even at 0, another 0 in the disabled role.
+  ## failure line (`activityLineIsError`), else the caption role, on the
+  ## selected row as on any other; the active filter's count in the body
+  ## role even at 0, another 0 in the disabled role.
   for row in vm.rows:
     for e in view.all("row"):
       if e.attr("row") != row.id: continue
       for i, a in e.all("activity"):
-        let wanted = if row.selected: p.selectedText
-                     elif activityLineIsError(row, i): p.textError else: p.rowDetail
+        let wanted = if activityLineIsError(row, i): p.textError else: p.rowDetail
         if a.attr("ink") != wanted:
           result.add "activity line " & $i & " of " & row.shortId &
                      (if row.failureText.len > 0: " (under a failure line)" else: "") &
@@ -487,11 +483,13 @@ proc checkFleet(view: GpuiElement; vm: FleetSnapshotVM; mode = dmDark): seq[stri
         let shown = if row.expanded: row.activity.len else: min(1, row.activity.len)
         result.expect("activity of " & row.shortId, e.values("activity"), row.activity[0 ..< shown])
         result.expect("title of " & row.shortId, e.first("title").attr("title"), row.title)
-        # The fleet's rows: the row's pie, on the panel, on a plate when selected;
-        # its status word stays and says no count or share.
+        # The fleet's rows: the row's pie, on the panel, or on the
+        # selected-row ground the selected row is drawn on; its status word
+        # stays and says no count or share.
         let p = ahPalette(mode)
-        result.add pieProblems(e, row.pie, p.panel, p, "row " & row.shortId,
-                               plate = row.selected)
+        let ground = if row.selected: p.activeRow else: p.panel
+        result.add pieProblems(e, row.pie, ground, p, "row " & row.shortId)
+        result.expect("ground of row " & row.shortId, e.attr("ground"), ground)
         let status = e.first("status").attr("status")
         if saysShare(status):
           result.add "the status of " & row.shortId & " says a share: " & status

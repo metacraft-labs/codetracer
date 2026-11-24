@@ -56,15 +56,16 @@ proc agentText(row: FleetRow): string =
   if row.agentCount > 1: row.agentLabel & " \xC3\x97" & $row.agentCount else: row.agentLabel
 
 proc cell(c: var AhCanvas; parent: AhNode; row, col, width: int; s, name: string;
-          right = false; colour = ""; before = -1) =
-  ## One grid cell; an empty one says "—" in the disabled role. `before`:
+          right = false; before = -1) =
+  ## One grid cell, in the label role on every row; an empty one says "—"
+  ## in the disabled role. `before`:
   ## where the next cell's text starts (`text`'s `before`).
   let empty = s.len == 0
   let shown = if empty: AgentHarborFleetEmptyCellText else: s
   let n = c.node(parent, row, col, width, 1, [("col", name)])
   if empty: n.tag("empty", "true")
   discard c.text(n, row, col, width, shown,
-                 if empty: c.p.textDisabled elif colour.len > 0: colour else: c.p.textLabel,
+                 if empty: c.p.textDisabled else: c.p.textLabel,
                  alignRight = right, before = before)
 
 proc titleLineFits(row: FleetRow; grid: FleetGrid): bool =
@@ -89,7 +90,6 @@ proc drawRow(c: var AhCanvas; parent: AhNode; vm: FleetSnapshotVM; row: FleetRow
              grid: FleetGrid; oneLineAll: bool): int =
   let id = row.id
   let sel = row.selected
-  let selText = c.p.selectedText
   let shown = if row.expanded: row.activity.len else: min(1, row.activity.len)
   let mainW = if columns: grid.session else: width - 3 - widthOf(row.ageLabel) - 2
   let metaWords = (if columns: row.metaPartsShort else: row.metaParts).join(Middot)
@@ -97,7 +97,12 @@ proc drawRow(c: var AhCanvas; parent: AhNode; vm: FleetSnapshotVM; row: FleetRow
   # (`titleLinesFit`).
   let oneLine = columns and oneLineAll
   let height = (if oneLine: 1 else: 2) + (if row.failureText.len > 0: 1 else: 0) + shown
-  let ground = if sel: c.p.action elif index mod 2 == 1: c.tone.band else: c.tone.body
+  # The selected row: the selected-row ground every list here shares, its
+  # title in the active row's title colour and its meta in the quiet role
+  # that ground needs (the web's `.ah-fleet-row-selected`, as the session
+  # list's active row). Its status word, failure and activity lines keep
+  # their own inks.
+  let ground = if sel: c.p.activeRow elif index mod 2 == 1: c.tone.band else: c.tone.body
   if ground == c.tone.body:
     # A row on the panel's ground is an item of the list: the stripes and
     # the selection are the areas set off from it.
@@ -109,21 +114,14 @@ proc drawRow(c: var AhCanvas; parent: AhNode; vm: FleetSnapshotVM; row: FleetRow
                   ("expanded", $row.expanded)])
   c.target(top, col, width, height, proc() = vm.select(id))
   # The row's progress pie (CTF-P1d), read from the viewmodel
-  # (`FleetRow.pie`), in the inks resolved for the row's own ground. The
-  # selected row's action surface is no ground its inks hold their floors
-  # on, so there the pie's cell keeps the panel's ground as a plate (the
-  # web's and GPUI's `PiePlatePx`).
-  if sel:
-    c.fill(top, col + 1, 1, 1, c.tone.body)
-    discard c.pie(n, top, col + 1, row.pie, c.tone.body)
-  else:
-    discard c.pie(n, top, col + 1, row.pie, ground)
+  # (`FleetRow.pie`), in the inks resolved for the row's own ground.
+  discard c.pie(n, top, col + 1, row.pie, ground)
   let mc = col + 3
   # What follows the main column on the first line: the agent's column when
   # wide, the age at sidebar width. A text cut before it keeps its gap.
   let nextAt = mc + mainW + 1
   discard c.text(n, top, mc, if oneLine: widthOf(row.title) else: mainW, row.title,
-                 if sel: selText elif row.titleIsPlaceholder: c.p.textCaption else: c.p.textBody,
+                 if sel: c.p.activeTabText elif row.titleIsPlaceholder: c.p.textCaption else: c.p.textBody,
                  fact = "title", before = nextAt)
   var r = top + 1
   var metaRow = top + 1
@@ -135,16 +133,16 @@ proc drawRow(c: var AhCanvas; parent: AhNode; vm: FleetSnapshotVM; row: FleetRow
   else:
     r = top + 2
   let sw = c.text(n, metaRow, metaCol, mainW - (metaCol - mc), row.statusLabel,
-                  if sel: selText else: c.p.statusColour(row.category), fact = "status")
+                  c.p.statusColour(row.category), fact = "status")
   let room = mainW - (metaCol - mc) - sw - 1
   if room > 0:
     discard c.text(n, metaRow, metaCol + sw + 1, room, metaWords,
-                   if sel: selText else: c.p.textCaption, fact = "meta",
+                   if sel: c.p.activeRowQuiet else: c.p.textCaption, fact = "meta",
                    before = if metaRow == top: nextAt else: -1)
   else:
     discard c.node(n, metaRow, metaCol + sw, 0, 1, [("meta-hidden", metaWords)])
   if row.failureText.len > 0:
-    discard c.text(n, r, mc, mainW, row.failureText, if sel: selText else: c.p.textError,
+    discard c.text(n, r, mc, mainW, row.failureText, c.p.textError,
                    fact = "failure")
     inc r
   for i in 0 ..< shown:
@@ -159,45 +157,43 @@ proc drawRow(c: var AhCanvas; parent: AhNode; vm: FleetSnapshotVM; row: FleetRow
     let errorInk = activityLineIsError(row, i)
     let tw = c.text(n, r, mc, mainW - (if hasChip: widthOf(label) + 1 else: 0),
                     row.activity[i],
-                    if sel: selText elif errorInk: c.p.textError else: c.p.rowDetail,
+                    if errorInk: c.p.textError else: c.p.rowDetail,
                     fact = "activity")
     if hasChip:
       let at = mc + tw + 1
       # A chip on its own ground on every row: on the selected row the
-      # action surface's hover step (`tone.chipOnAction`, where the web
-      # outlines it in the selection's text colour), so it still reads as a
-      # control on the selection; elsewhere the chip's ground.
-      discard c.put(r, at, label, if sel: selText else: c.p.textLabel,
-                    bg = if sel: c.tone.chipOnAction else: c.tone.chip)
+      # panel's (`tone.chipOnSelected`, where the web outlines it in the
+      # row's quiet text colour), so it still reads as a control on the
+      # selection; elsewhere the chip's ground.
+      discard c.put(r, at, label, if sel: c.p.activeRowQuiet else: c.p.textLabel,
+                    bg = if sel: c.tone.chipOnSelected else: c.tone.chip)
       discard c.node(n, r, at + 1, widthOf(label) - 2, 1,
                      [("activity-more", label.strip), ("outlined", $sel)])
       c.target(r, at, widthOf(label), 1, proc() = vm.toggleExpanded(id))
     inc r
   if columns:
-    let colour = if sel: selText else: ""
     var at = mc + grid.session + 1
     # The duration is right-aligned in its column: where its text starts.
     let durationAt = mc + grid.session + 1 + (grid.share + 1) * (if anyInitiative: 3 else: 2) +
                      DurationCells - widthOf(if row.durationLabel.len > 0: row.durationLabel
                                              else: AgentHarborFleetEmptyCellText)
-    c.cell(n, top, at, grid.share, row.agentText, "agent", colour = colour,
+    c.cell(n, top, at, grid.share, row.agentText, "agent",
            before = at + grid.share + 1)
     at += grid.share + 1
-    c.cell(n, top, at, grid.share, row.host, "host", colour = colour,
+    c.cell(n, top, at, grid.share, row.host, "host",
            before = if anyInitiative: at + grid.share + 1 else: durationAt)
     at += grid.share + 1
     if anyInitiative:
-      c.cell(n, top, at, grid.share, row.initiative, "initiative", colour = colour,
+      c.cell(n, top, at, grid.share, row.initiative, "initiative",
              before = durationAt)
       at += grid.share + 1
-    c.cell(n, top, at, DurationCells, row.durationLabel, "duration", right = true,
-           colour = colour)
+    c.cell(n, top, at, DurationCells, row.durationLabel, "duration", right = true)
     discard c.text(n, top, col + width - 1 - AgeCells, AgeCells, row.ageLabel,
-                   if sel: selText else: c.p.textBodySubtle, fact = "age", alignRight = true)
+                   c.p.textBodySubtle, fact = "age", alignRight = true)
   else:
     let aw = widthOf(row.ageLabel)
     discard c.text(n, top, col + width - 1 - aw, aw, row.ageLabel,
-                   if sel: selText else: c.p.textBodySubtle, fact = "age")
+                   c.p.textBodySubtle, fact = "age")
   height
 
 proc drawFleetPanel*(c: var AhCanvas; vm: FleetSnapshotVM; row, col, width, height: int) =

@@ -1499,6 +1499,24 @@ export const plays = {
   "agent-harbor-fleet-selected": fleetCheck(async (el) => {
     await waitFor(el, ".ah-fleet-row-selected");
     expect(el.querySelectorAll(".ah-fleet-row-selected").length).toBe(1);
+    // The selected row is drawn on the selected-row ground every list
+    // shares, and its pie in the inks resolved for that ground, with
+    // nothing drawn between the pie and the row.
+    const sel = el.querySelector(".ah-fleet-row-selected");
+    // The ground, as the palette's generated pie stylesheet paints it for
+    // its selected-row band (`.ah-pie-band-selected-row`).
+    const ground = document.createElement("div");
+    ground.className = "ah-pie-band-selected-row";
+    el.appendChild(ground);
+    try {
+      expect(getComputedStyle(sel).backgroundColor).toBe(getComputedStyle(ground).backgroundColor);
+    } finally {
+      ground.remove();
+    }
+    expect(sel.querySelector(".ah-fleet-pie .ah-pie-on-selected-row")).toBeTruthy();
+    const holder = getComputedStyle(sel.querySelector(".ah-fleet-pie"));
+    expect(holder.boxShadow).toBe("none");
+    expect(holder.backgroundColor).toBe("rgba(0, 0, 0, 0)");
   }),
   "agent-harbor-fleet-loading": fleetCheck(async (el) => {
     expect(el.querySelector(".ah-fleet-loading")?.textContent).toContain("Loading sessions");

@@ -14,7 +14,8 @@
 ##   * the site's own words print no count or share (`3/19`, `16%`): the pie
 ##     says it now.
 ##
-## The sites so far: the fleet's rows, and the tabs of the session strip
+## The sites so far: the fleet's rows (on the panel, the selected one on
+## the selected-row ground every list shares), and the tabs of the session strip
 ## and of the initiative bar (each tab's pie on its own ground; an
 ## initiative's `n/m` only in its tooltip). The GPUI and terminal
 ## hosts hold the same rules in their cover tests
@@ -107,7 +108,11 @@ proc fleetProblems(fixture: string): (seq[string], int) =
       problems.add fixture & ": " & $drawn.len & " rows drawn, " & $want.len & " in the viewmodel"
     for i in 0 ..< min(drawn.len, want.len):
       let at = fixture & " row " & want[i].shortId
-      problems.add pieProblems(drawn[i], want[i].pie, pgPanel, at)
+      let ground = if want[i].selected: pgSelectedRow else: pgPanel
+      problems.add pieProblems(drawn[i], want[i].pie, ground, at)
+      if drawn[i].hasClass("ah-fleet-row-selected") != want[i].selected:
+        problems.add at & ": drawn " & (if want[i].selected: "unselected" else: "selected") &
+                     ", the viewmodel's row is " & (if want[i].selected: "selected" else: "not")
       if drawn[i].byClass("ah-fleet-dot").len > 0:
         problems.add at & ": still draws the status dot"
       for s in drawn[i].byClass("ah-fleet-status-label"):
