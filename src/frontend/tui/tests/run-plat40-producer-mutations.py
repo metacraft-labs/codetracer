@@ -91,7 +91,16 @@ ARMS = [
      "  elif region.pane == panePointList and model.points.loaded:",
      "  elif false:", [PRODUCERS],
      "the terminal paints the Points pane as a bare title again"),
-    ("T2", TUI, "  rt.app.points = pointListPaneModelFor(s.points)", "  discard",
+    # Re-aimed 2026-11-24: 2e3067083 renamed the feed to
+    # `pointListPaneModelOf(<store rows>)` (a two-line statement) and
+    # `pumpDefinitions` gained a second identical feed, so the needle takes
+    # the refresh occurrence via its PLAT-40 comment line and drops the
+    # comment plus both statement lines (same mutation: the feed is gone).
+    ("T2", TUI,
+     "  rt.app.points = pointListPaneModelOf(\n"
+     "    s.session.session.store.pointList.rows.val)\n"
+     "  # PLAT-57: Find in Files, this session's.",
+     "  # PLAT-57: Find in Files, this session's.",
      [PRODUCERS], "the terminal's Points pane is never fed"),
     # --- the producer partition --------------------------------------------
     ("W1", POINTVM,
