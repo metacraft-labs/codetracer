@@ -27,6 +27,14 @@
 ##   row's cell after its word, is one grouped button named `Record and open
 ##   on <platform>`.
 ##
+## And one the step 3b stories could not keep (codetracer-pm issue
+## 2026-11-23, the Tests viewmodel's rows):
+##
+## * **The keyboard reaches the foot of a long catalog by its keys**: the
+##   `long-keyboard` story presses `Down` from the top to the last of its 320
+##   tests, which builds the viewmodel's rows once rather than once per
+##   press, and draws the keyboard on that test's first cell.
+##
 ## No mocks beyond IsoNim's mock renderer (the views' DOM): the viewmodels
 ## are the stories' own (`createTestsStoryVM`, `createTraceLinksStory`),
 ## over the viewmodels' scripted synthetic sources, so each check reads the
@@ -357,3 +365,29 @@ suite "Run comes before Record everywhere":
           check not o.attr("aria-label").startsWith("Record and open on ")
           check o.attr("title") == o.attr("aria-label")
       check existing > 0)
+
+suite "the keyboard reaches the foot of a long catalog by its keys":
+  test "long-keyboard presses Down to the last test and draws it there":
+    withTests("long-keyboard", proc(vm: TestRunsVM; root: MockNode) =
+      let rows = vm.focusables
+      check rows.len == 320
+      check vm.focusRow.val == rows[^1]
+      check vm.selected.val == ""
+      check vm.focusedCell == vm.enabledPlatforms[0]
+      # 320 presses and a drawing: the rows were built once, not per press.
+      check vm.rowBuilds == 1
+      # Exactly one cell is drawn under the keyboard, in the last test's row.
+      var keyboardRows: seq[MockNode]
+      proc cells(n: MockNode): int =
+        if n.hasClass("ah-tests-cell-keyboard"): inc result
+        for ch in n.children: result += cells(ch)
+      proc walk(n: MockNode) =
+        if n.hasClass("ah-tests-row"):
+          for _ in 0 ..< cells(n): keyboardRows.add n
+        else:
+          for ch in n.children: walk(ch)
+      walk(root)
+      check cells(root) == 1
+      check keyboardRows.len == 1
+      if keyboardRows.len == 1:
+        check vm.feed.testOf(rows[^1]).name in textOf(keyboardRows[0]))
