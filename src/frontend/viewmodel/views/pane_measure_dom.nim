@@ -267,14 +267,24 @@ proc startMeasuringPane*(host: dom_api.Element; pane: MeasuredPane;
 proc watchRows(el: dom_api.Element; onChange: proc()): StopMeasuring {.importjs:
   """((el, cb) => {
     var frame = 0;
-    var mo = new MutationObserver(() => {
-      if (frame) return;
+    // A cut cell's detail (`table_overflow_dom`, `.ct-table-detail`) is not
+    // a row: it is drawn under one after every refresh, and measuring it
+    // would re-render the pane, refresh the detail and measure it again.
+    var isDetail = (n) => n.nodeType === 1 && n.classList &&
+      (n.classList.contains('ct-table-detail') || !!n.closest('.ct-table-detail'));
+    var rowsChanged = (records) => records.some((r) =>
+      !(Array.from(r.addedNodes).every(isDetail) &&
+        Array.from(r.removedNodes).every(isDetail) &&
+        (r.addedNodes.length + r.removedNodes.length) > 0));
+    var mo = new MutationObserver((records) => {
+      if (frame || !rowsChanged(records)) return;
       frame = requestAnimationFrame(() => { frame = 0; cb(); });
     });
     mo.observe(el, {childList: true, subtree: true});
     return () => { if (frame) { cancelAnimationFrame(frame); frame = 0; } mo.disconnect(); };
   })(#, #)""".}
-  ## Call `onChange` once in the frame after the rows under `el` change.
+  ## Call `onChange` once in the frame after the rows under `el` change (a
+  ## cut cell's detail drawn or taken away is not a change of rows).
 
 proc whenPresent(host: dom_api.Element; selector: cstring;
                  found: proc(el: dom_api.Element)): StopMeasuring {.importjs:

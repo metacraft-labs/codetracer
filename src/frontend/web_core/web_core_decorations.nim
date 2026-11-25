@@ -194,4 +194,15 @@ proc ctwDecoratePanes(mount: JsObject; core: JsObject) {.exportc.} =
   if not terminal.isNull and not terminal.hasMark:
     decorateTerminalOutput(terminal, core)
 
+proc ctwTableShowDetail(pane, selected: cstring): bool {.exportc.} =
+  ## `list.show-detail` on a table pane this bundle decorates (the core's
+  ## Variables, Call Trace and Event Log): the page's key router reaches it
+  ## here, as this bundle's copy of `table_overflow_dom` holds those panes.
+  showDetailOf($pane, selected)
+
+proc ctwTableCopyRow(pane, selected: cstring): bool {.exportc.} =
+  ## `list.copy` on such a pane.
+  copyRowOf($pane, selected)
+
 {.emit: "globalThis.ctwDecoratePanes = ctwDecoratePanes;".}
+{.emit: "globalThis.ctwTableShowDetail = ctwTableShowDetail; globalThis.ctwTableCopyRow = ctwTableCopyRow;".}

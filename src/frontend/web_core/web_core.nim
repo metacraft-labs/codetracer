@@ -40,7 +40,7 @@
 ## (Uniform-WASM-Core.md §9.2). The host calls in after `main`, so on wasm32
 ## `main` ends in `emscripten_exit_with_live_runtime()`.
 
-import std/[json, options, strutils]
+import std/[json, options, strutils, tables]
 
 import isonim/core/[signals, owner, computation, async_compat]
 import isonim/web/frame_renderer
@@ -99,6 +99,9 @@ proc ctwBoot() {.exportc.} =
   session = newDebuggerSession(worker.toBackendService())
   mounted = false
 
+var lastMeasured = initTable[string, string]()
+  ## The last measurement `ctwMeasured` applied to each pane.
+
 var pendingMirror: seq[JsonNode] = @[]
   ## What the page mirrored into the event log before the panes were up.
 var mirroring = false
@@ -152,6 +155,7 @@ proc mountPanes() =
   if mounted or not session.isReady:
     return
   mounted = true
+  lastMeasured.clear()
   let s = session.session
   # THE FLOW IS THE PAGE'S. No pane this core draws shows it (the editor and
   # its inline flow are the shell's), and the flow's window arrives as
@@ -328,6 +332,12 @@ proc ctwMeasured(pane: cstring; rows, cols, firstRow: cint; rowPx: cdouble) {.ex
   ## it to its own.
   if not mounted:
     return
+  # The same measurement again changes nothing: reporting it would only
+  # re-run the pane's effects and redraw it.
+  let key = $pane & ":" & $rows & ":" & $cols & ":" & $firstRow & ":" & $rowPx
+  if lastMeasured.getOrDefault($pane) == key:
+    return
+  lastMeasured[$pane] = key
   let v = Viewport(rows: int(rows), cols: int(cols), firstRow: int(firstRow))
   let s = session.session
   case $pane
