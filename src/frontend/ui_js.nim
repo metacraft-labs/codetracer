@@ -4460,6 +4460,7 @@ proc onSavedAs(sender: js, response: jsobject(name=cstring, path=cstring)) =
     cerror "saved-as: could not update editor tab for " &
       $newPath & ": " & getCurrentExceptionMsg()
   checkPendingReRecord(data)
+  build.checkPendingDesktopBuild()
 
 proc onSavedFile(sender: js, response: jsobject(name=cstring)) =
   if data.services.editor.open.hasKey(response.name):
@@ -4544,6 +4545,7 @@ proc onSaveFileError(sender: js, response: jsobject(name=cstring, error=cstring)
   data.viewsApi.errorMessage(
     cstring("Could not save " & $response.name & ": " & $response.error))
   data.noteReRecordSaveOutcome(failed = true)
+  build.clearPendingDesktopBuild()
   data.redraw()
 
 proc saveAllFiles*(data: Data): Future[void] =

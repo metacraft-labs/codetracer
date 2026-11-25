@@ -44,7 +44,7 @@ from ../platform_host import ctPlatform
 import ../viewmodel/viewmodels/edit_mode_toolbar
 import ../viewmodel/platform/wasm_registry
 from debug_toolbar import setEditModeToolbar, projectRunRoute
-from ./build import startDesktopBuild
+from ./build import startDesktopBuild, queueDesktopBuildAfterSave
 
 
 
@@ -137,12 +137,20 @@ proc desktopEditToolbarInvoke(id: string) =
   let button = shownToolbar.build
   if not button.enabled or button.commandLine.len == 0:
     return
+  var untitledSaveCount = 0
+  for t in data.saveTargets():
+    if t.untitled and t.editorReady:
+      inc untitledSaveCount
   data.saveFiles()
   let folder = if data.startOptions.folder.isNil: ""
                else: $data.startOptions.folder
-  let why = startDesktopBuild(button.commandLine, folder, "", "")
-  if why.len > 0:
-    cwarn "toolbar: " & why
+  if untitledSaveCount > 0:
+    # Defer the build until all save-untitled dialogs complete (issue #837).
+    queueDesktopBuildAfterSave(button.commandLine, folder, untitledSaveCount)
+  else:
+    let why = startDesktopBuild(button.commandLine, folder, "", "")
+    if why.len > 0:
+      cwarn "toolbar: " & why
 
 proc installDesktopEditModeToolbar*() =
   ## Compose the edit-mode topbar from what this session is NOW — its mode
