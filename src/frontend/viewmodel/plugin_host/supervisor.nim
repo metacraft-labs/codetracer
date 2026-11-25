@@ -2065,7 +2065,7 @@ proc bindingConflicts*(sup: Supervisor): seq[PluginError] =
 # Escape, recovery and the user's actions (§11.7.6)
 # ---------------------------------------------------------------------------
 
-proc observeEscape*(sup: Supervisor): bool {.discardable.} =
+proc observeEscape*(sup: Supervisor; arrivedMs: int64 = -1): bool {.discardable.} =
   ## Called by a front-end's router for EVERY `Escape`, before any layer is
   ## resolved. The third within a second pops every plugin layer, marks the
   ## plugins that held one suspect, and opens the recovery dialog. True when
@@ -2080,11 +2080,19 @@ proc observeEscape*(sup: Supervisor): bool {.discardable.} =
   ## recover: a suspect plugin receives no key and no command, so the `ack`
   ## that clears a missed deadline never comes. A plugin already suspect from
   ## a missed input deadline stays so, and still needs an `ack`.
-  let t = sup.now()
-  sup.escapeTimes.add t
+  ##
+  ## The chord is timed on when each `Escape` ARRIVED (`arrivedMs`, on the
+  ## caller's own clock, the same for every call), not on when it was
+  ## handled: on a loaded machine the user's three quick Escapes are handled
+  ## seconds apart, which is when recovery is needed most, and a chord timed
+  ## by handling would never fire. Without `arrivedMs` the key is taken as
+  ## arriving now. A key that arrived before one already counted (the
+  ## caller's clock started again: a reloaded page) starts the count over.
+  let t = if arrivedMs >= 0: arrivedMs else: sup.now()
   var kept: seq[int64]
   for x in sup.escapeTimes:
-    if t - x <= RecoveryChordWindowMs: kept.add x
+    if x <= t and t - x <= RecoveryChordWindowMs: kept.add x
+  kept.add t
   sup.escapeTimes = kept
   if kept.len < RecoveryChordCount:
     return false

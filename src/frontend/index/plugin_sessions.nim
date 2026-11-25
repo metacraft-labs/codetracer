@@ -369,9 +369,11 @@ proc keyPassedSuspect*(ps: PluginSession; key, focusedSurface: string) =
   discard ps.plugins.sup.resolveLayerKey(key, focusedSurface)
   ps.send(force = true)
 
-proc escape*(ps: PluginSession) =
-  ## Every `Escape` the renderer's router saw (§11.7.6).
-  if ps.plugins.sup.observeEscape():
+proc escape*(ps: PluginSession; arrivedMs = -1'i64) =
+  ## Every `Escape` the renderer's router saw (§11.7.6), with when it
+  ## arrived on the renderer's clock: the chord is timed on that, not on when
+  ## this process got to it.
+  if ps.plugins.sup.observeEscape(arrivedMs):
     infoPrint "plugins: recovery chord in ", ps.key
   ps.send(force = true)
 
@@ -403,7 +405,7 @@ proc handle*(ps: PluginSession; kind: string; msg: JsonNode) =
   of "key-passed":
     ps.keyPassedSuspect(msg{"key"}.getStr(""), msg{"focused"}.getStr(""))
   of "escape":
-    ps.escape()
+    ps.escape(int64(msg{"at"}.getFloat(-1.0)))
   of "view-event":
     ps.viewEvent(msg{"surface"}.getStr(""), msg{"event"})
   of "close-recovery":
