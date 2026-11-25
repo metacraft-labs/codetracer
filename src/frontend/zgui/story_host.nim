@@ -179,6 +179,7 @@ proc appCss(opts: HostOptions): string =
 var gOpts: HostOptions
 var gDispose: StoryDispose
 var gSurface: ZguiNode
+var gLayout: DefaultDebugFrame[ZguiNode]
 
 proc dumpBoxes(path: string) =
   ## Every element under the surface, in document order, with its border box
@@ -210,12 +211,37 @@ proc buildDocument(root: ZguiNode) =
   r.appendChild(html, body)
   let surface = createSurface(r, body, gOpts.kind, gOpts.surface)
   gSurface = surface
+  if gOpts.kind == "layout" and gOpts.surface == "default-debug":
+    # `surfaces.js` `renderDefaultDebugLayout`: the reference shell, its
+    # GoldenLayout geometry (`syncDefaultLayoutGeometry`, once `#ROOT` has
+    # been laid out: see `main`), then a panel story in every tab.
+    gLayout = buildDefaultDebugFrame(r, surface, body, gOpts.fixture)
+    return
   let frame = createAppShell(r, surface, gOpts.kind, gOpts.surface, gOpts.title)
   case gOpts.kind
   of "panel":
     gDispose = mountPanelStory(r, frame, gOpts.surface, gOpts.fixture)
   else:
     raise newException(ValueError, "no native mount for " & gOpts.kind & " stories yet")
+
+proc finishDefaultDebugLayout() =
+  ## The default layout's geometry from `#ROOT`'s laid-out size, then its
+  ## panels. A tab whose panel has no native mount yet (the editor) stays
+  ## empty, and says so on stderr.
+  let r = ZguiRenderer()
+  let box = borderBox(gLayout.root)
+  syncDefaultLayoutGeometry(r, gLayout, float(box.w) / gOpts.scale,
+                            float(box.h) / gOpts.scale)
+  var disposers: seq[StoryDispose]
+  for m in gLayout.mounts:
+    if m.name in nativePanelSurfaces:
+      disposers.add mountPanelStory(r, m.mount, m.name,
+        if m.fixture.len > 0: m.fixture else: "populated")
+    else:
+      stderr.writeLine "codetracer-zgui-story: no native mount for the `", m.name,
+        "` panel of the default layout"
+  gDispose = proc() =
+    for d in disposers: d()
 
 proc parseOptions(): HostOptions =
   result = HostOptions(width: 1600, height: 1000, scale: 1.0, theme: "dark",
@@ -252,6 +278,9 @@ proc main() =
   openHeadless(float32(gOpts.width), float32(gOpts.height), css, zrOffscreen, buildDocument)
   try:
     for _ in 0 ..< 8: discard settle(512)
+    if not gLayout.root.isNil:
+      finishDefaultDebugLayout()
+      for _ in 0 ..< 8: discard settle(512)
     if gOpts.scale != 1.0:
       setHeadlessScale(gOpts.scale, float32(gOpts.width), float32(gOpts.height))
       for _ in 0 ..< 8: discard settle(512)
