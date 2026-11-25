@@ -179,9 +179,7 @@ type
       ## it (`column(2).visible(false)`), and Event-Log-Pane.md's column table
       ## lists the path column "Default Visible: No".
     elcKind = "kind"
-      ## What kind of event it is. The desktop's column has no title and
-      ## draws only a row expander there; the terminal and GPUI draw the
-      ## event's category.
+      ## What kind of event it is: the event's category, shown on all front-ends.
     elcOutput = "output"
       ## The event's text.
 

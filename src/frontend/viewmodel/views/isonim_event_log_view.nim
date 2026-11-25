@@ -229,7 +229,7 @@ proc columnHeaderText*(vm: EventLogVM; col: EventLogColumn): string =
   ## A header's label, with the order's arrow on the ordering column once the
   ## order is not the recorded one (tick, ascending).
   let order = vm.order()
-  let title = if col == elcKind: "" else: eventLogColumnTitle(col)
+  let title = eventLogColumnTitle(col)
   if order != RecordedEventOrder and order.column == col and title.len > 0:
     title & (if order.ascending: " ▲" else: " ▼")
   else:
