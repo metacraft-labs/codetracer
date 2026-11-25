@@ -10979,7 +10979,10 @@ proc refreshVcsPane() =
   ## with. ONE BODY FOR BOTH TRIGGERS (`vcsTick`, `vcsWindowActivated`), so
   ## the interval and the return to the window cannot come to disagree about
   ## what a re-read is or when it earns a frame. The trace line is the one
-  ## `ci/test/plat47_gpui_window.py` counts, whichever trigger ran.
+  ## `ci/test/plat47_gpui_window.py` counts, whichever trigger ran; it names
+  ## the working tree's row count, so a capture can tell the read that saw
+  ## another program's file from one that was already in flight when the
+  ## file was written.
   if gVcsDirectory.len == 0:
     return
   for leaf in gLeafSet.leaves:
@@ -10990,7 +10993,13 @@ proc refreshVcsPane() =
         let pane = gPanes.getOrDefault($paneVcs)
         redrawWindowLeaf(r, pane, leaf)
         applyTextFaces(r, pane)
-        traceGesture("vcs refreshed")
+        traceGesture("vcs refreshed working=" &
+                     $VCSVM(leaf.vm).workingTreeFiles.val.len)
+        # A refresh with no input behind it is a state change too: the
+        # geometry report's `changedAt` must move, or a capture waiting for
+        # a frame drawn after it is answered by the frame BEFORE it.
+        if geometryOut.len > 0:
+          writeGeometry()
       break
   # the read it asked for comes back on the worker: poll for it
   armHoverTick()
@@ -11008,7 +11017,13 @@ proc pollVcsPane() =
         let pane = gPanes.getOrDefault($paneVcs)
         redrawWindowLeaf(r, pane, leaf)
         applyTextFaces(r, pane)
-        traceGesture("vcs refreshed")
+        traceGesture("vcs refreshed working=" &
+                     $VCSVM(leaf.vm).workingTreeFiles.val.len)
+        # A refresh with no input behind it is a state change too: the
+        # geometry report's `changedAt` must move, or a capture waiting for
+        # a frame drawn after it is answered by the frame BEFORE it.
+        if geometryOut.len > 0:
+          writeGeometry()
       break
 
 proc vcsPollTick() {.cdecl.} =

@@ -17,7 +17,7 @@
 ## reads or writes the user's CodeTracer state (codetracer `AGENTS.md`,
 ## "Tests never touch your real CodeTracer state").
 
-import std/[json, os, osproc, streams, strtabs, strutils, times, tables]
+import std/[algorithm, hashes, json, os, osproc, streams, strtabs, strutils, times, tables]
 
 import ../../../frontend/tui/tests/fixtures/fixture_provider
 import ../../../frontend/tui/tests/fixtures/plat65_nim_project
@@ -199,6 +199,71 @@ proc isWholeCachedRecording*(dest: string): bool =
     not staleRecordedProgram(recordedProgramOf(dest)) and
     not staleRecordedPaths(dest)
 
+proc recordingProvenanceFile*(dest: string): string =
+  ## Beside a cached recording: what it was recorded WITH (`recordingProvenance`).
+  ## An entry whose provenance is missing or differs is absent, and is recorded
+  ## again: a cache keyed by the program's name alone replayed a recording a
+  ## recorder since replaced had made (the Solana scenario, 2026-11-24).
+  dest & ".provenance"
+
+proc contentKey(path: string): string =
+  ## A file's bytes as a key: its length and a 64-bit hash of its contents.
+  try:
+    let data = readFile(path)
+    $data.len & ":" & $hash(data)
+  except CatchableError:
+    "unreadable"
+
+proc sourcesKey(program: string): string =
+  ## The program's sources as a key: every file of its folder (or the file),
+  ## by relative path and contents, leaving out what a build writes
+  ## (`target/`, `build/`, `node_modules/`, VCS folders).
+  if fileExists(program): return contentKey(program)
+  if not dirExists(program): return "absent"
+  var entries: seq[string] = @[]
+  for path in walkDirRec(program, relative = true):
+    let top = path.split(DirSep)[0]
+    if top in ["target", "build", "node_modules", ".git", "nimcache"]: continue
+    entries.add path & "=" & contentKey(program / path)
+  entries.sort()
+  $hash(entries.join("\n"))
+
+proc recorderBinaries(): seq[string] =
+  ## Every recorder `ct record` may pick: the ones the environment names
+  ## (`CODETRACER_*_RECORDER_PATH`) and every `codetracer-*-recorder` on
+  ## `PATH`, by path.
+  for key, value in envPairs():
+    if key.startsWith("CODETRACER_") and key.endsWith("_RECORDER_PATH") and
+       value.len > 0:
+      result.add key & "=" & value
+  for dir in getEnv("PATH").split(PathSep):
+    if dir.len == 0 or not dirExists(dir): continue
+    for kind, path in walkDir(dir):
+      let name = path.extractFilename
+      if kind in {pcFile, pcLinkToFile} and name.startsWith("codetracer-") and
+         name.endsWith("-recorder"):
+        result.add name & "=" & path
+  result.sort()
+
+proc recordingProvenance*(program, backend, lang: string; recorders: seq[string];
+                          ct: string): string =
+  ## What a recording of `program` depends on besides the program's name:
+  ## its sources, `ct` (which picks and drives the recorder) and every
+  ## recorder it may pick, each by path AND contents, and the backend and
+  ## language asked for. A change to any of them is a different recording.
+  var parts = @["program " & sourcesKey(program),
+                "backend " & backend, "lang " & lang,
+                "ct " & ct & " " & contentKey(ct)]
+  for r in recorders:
+    let path = r.split('=', 1)[^1]
+    parts.add "recorder " & r & " " & contentKey(path)
+  parts.join("\n") & "\n"
+
+proc cachedProvenanceMatches*(dest, provenance: string): bool =
+  ## Whether the entry in `dest` was recorded with `provenance`.
+  let f = recordingProvenanceFile(dest)
+  fileExists(f) and readFile(f) == provenance
+
 proc ctRecord(s: StageState; program, backend, lang, dest: string; workDir = "";
               stylusTrace = ""; nimExe = ""): string =
   ## `ct record` of `program` into `dest` — the binary, subcommand and
@@ -359,18 +424,25 @@ proc recordProgram*(s: StageState; program, backend: string; lang = "";
         # Not a Noir project: there is no probe for this recorder, so record
         # directly and let `ct record` name what is missing.
         let dest = fixtureCacheRoot(repo()) / (name & "-scenario")
-        if isWholeCachedRecording(dest):
+        let provenance = recordingProvenance(full, backend, lang & nimExe,
+                                             recorderBinaries(), findCtBinary())
+        if isWholeCachedRecording(dest) and cachedProvenanceMatches(dest, provenance):
           return recordedTraceIn(dest)
+        removeFile(recordingProvenanceFile(dest))
         # A Solana crate is compiled to SBF, and a PolkaVM guest crate to its
         # RISC-V ELF, first: `ct record` records the compiled program.
-        if stylusTrace.len > 0:
-          return s.ctRecord(buildStylusWasm(full), backend, lang, dest,
-                            stylusTrace = full / stylusTrace)
-        let target =
-          if lang == "solana" and fileExists(full / "Cargo.toml"): buildSbf(full)
-          elif lang == "polkavm" and fileExists(full / "Cargo.toml"): buildPolkavmGuest(full)
-          else: full
-        return s.ctRecord(target, backend, lang, dest, nimExe = nimExe)
+        let recorded =
+          if stylusTrace.len > 0:
+            s.ctRecord(buildStylusWasm(full), backend, lang, dest,
+                       stylusTrace = full / stylusTrace)
+          else:
+            let target =
+              if lang == "solana" and fileExists(full / "Cargo.toml"): buildSbf(full)
+              elif lang == "polkavm" and fileExists(full / "Cargo.toml"): buildPolkavmGuest(full)
+              else: full
+            s.ctRecord(target, backend, lang, dest, nimExe = nimExe)
+        writeFile(recordingProvenanceFile(dest), provenance)
+        return recorded
   let resolved = resolveFixture(spec)
   if resolved.outcome != foRecorded:
     raise newException(IOError, "record-program: " &

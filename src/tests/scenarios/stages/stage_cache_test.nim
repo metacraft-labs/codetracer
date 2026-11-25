@@ -4,6 +4,8 @@
 ## place) or at a path that is gone, is absent, and the next run records again.
 ## So is an rr entry whose `trace_db_metadata.json` names its output folder
 ## under `.partial` or gone.
+## An entry recorded with another recorder, another `ct` or other program
+## sources than the run's is absent too (`recordingProvenance`).
 ## Run by `ci/test/scenarios.sh stage-test`.
 import std/[json, os, unittest]
 import ./ct_stages
@@ -62,3 +64,47 @@ suite "the fixture cache's whole entries":
     # and a program that is gone does
     removeFile(root / "prog")
     check not isWholeCachedRecording(dest)
+
+  test "an entry recorded with another recorder, ct or program sources is absent":
+    # The key the cache is read by besides the program's name
+    # (`recordingProvenance`): what `ct record` recorded WITH. A recording the
+    # old Solana recorder made was replayed after the recorder changed.
+    let prog = root / "prog"
+    createDir(prog / "src")
+    writeFile(prog / "src" / "main.rs", "fn main() {}\n")
+    createDir(prog / "target")                 # what a build writes: not a source
+    writeFile(prog / "target" / "out.elf", "v1")
+    let rec = root / "codetracer-solana-recorder"
+    writeFile(rec, "recorder v1")
+    let ct = root / "ct"
+    writeFile(ct, "ct v1")
+    let recorders = @["CODETRACER_SOLANA_RECORDER_PATH=" & rec]
+    let dest = root / "prog_solana-scenario"
+    let first = recordingProvenance(prog, "", "solana", recorders, ct)
+    writeFile(recordingProvenanceFile(dest), first)
+    check cachedProvenanceMatches(dest, first)
+    # a rebuild changes nothing a recording depends on
+    writeFile(prog / "target" / "out.elf", "v2")
+    check cachedProvenanceMatches(dest,
+      recordingProvenance(prog, "", "solana", recorders, ct))
+    # a new recorder binary at the same path is a different recording
+    writeFile(rec, "recorder v2")
+    check not cachedProvenanceMatches(dest,
+      recordingProvenance(prog, "", "solana", recorders, ct))
+    writeFile(rec, "recorder v1")
+    # so is a recorder at another path, a new ct, an edited source, another --lang
+    check not cachedProvenanceMatches(dest, recordingProvenance(prog, "", "solana",
+      @["CODETRACER_SOLANA_RECORDER_PATH=" & root / "other"], ct))
+    writeFile(ct, "ct v2")
+    check not cachedProvenanceMatches(dest,
+      recordingProvenance(prog, "", "solana", recorders, ct))
+    writeFile(ct, "ct v1")
+    writeFile(prog / "src" / "main.rs", "fn main() { let _ = 1; }\n")
+    check not cachedProvenanceMatches(dest,
+      recordingProvenance(prog, "", "solana", recorders, ct))
+    writeFile(prog / "src" / "main.rs", "fn main() {}\n")
+    check not cachedProvenanceMatches(dest,
+      recordingProvenance(prog, "", "polkavm", recorders, ct))
+    # an entry with no provenance at all (recorded before the key) is absent
+    removeFile(recordingProvenanceFile(dest))
+    check not cachedProvenanceMatches(dest, first)
