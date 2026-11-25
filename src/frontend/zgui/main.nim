@@ -36,13 +36,13 @@
 ## step and a one-row change can be compared with the GPUI binary's report
 ## at the same codetracer commit.
 
-import std/[json, monotimes, os, strutils, tables, times]
+import std/[json, monotimes, options, os, strutils, tables, times]
 
 import isonim_zgui/[bindings, renderer, png, testing]
 
 import isonim/core/signals
 import headless_session
-import viewmodels/[source_vm, debug_controls_vm]
+import viewmodels/[source_vm, debug_controls_vm, calltrace_vm]
 import viewport
 import backend/stdio_backend
 import headless_app/[headless_app, layout_model, window_set]
@@ -79,7 +79,8 @@ Usage: codetracer-zgui [options] <recording-folder>
                        reader would
   --clicks=<c1,c2,...> headless: click, as a pointer does, a top-bar menu
                        (menu:Debug), an item of the open menu by its action
-                       (action:forwardNext) or a control (control:next)
+                       (action:forwardNext), a control (control:next) or a
+                       pane's row (row:calltrace:<call>, row:eventLog:<row>)
   --width=<px> --height=<px>
                        the window's size (default 1600x1000)
   --frame-report=<path>
@@ -282,6 +283,46 @@ proc runControl(id: string; label = "") =
   if not moved:
     stderr.writeLine("codetracer-zgui: '" & id & "' did not move the debugger")
 
+proc pressRow(paneId: string; press: RowPress) =
+  ## A pointer press on a pane's row, as the desktop's press does: a call
+  ## trace row goes to the call (`calltrace.go-to-call`), an event log row to
+  ## the event (`event-log.jump`); then the window brought up to date. A press
+  ## on another pane's row is that pane's view's business, not a move.
+  var op = Operation(name: "press:" & paneId & ":" & press.key,
+                     framesBefore: int(zg_frame_count()))
+  gLeaves.resetCounters()
+  let t0 = nowNs()
+  var moved = false
+  if paneId == $paneCalltrace and press.kind == rpOption:
+    var index = -1'i64
+    try: index = parseBiggestInt(press.key)
+    except ValueError: discard
+    if index >= 0:
+      gSession.session.calltraceVM.selectEntry(some(index))
+      let why = gSession.jumpToCall(index)
+      if why.len > 0: stderr.writeLine("codetracer-zgui: " & why)
+      else: moved = true
+  elif paneId == $paneEventLog and press.kind == rpRow:
+    let rows = gSession.session.eventLogVM.eventRows.val
+    var row = -1
+    try: row = parseInt(press.key)
+    except ValueError: discard
+    if row >= 0 and row < rows.len:
+      try:
+        gSession.eventJump(toEventLogEntry(rows[row]))
+        moved = true
+      except CatchableError as e:
+        stderr.writeLine("codetracer-zgui: could not go to the event: " & e.msg)
+  if not moved: return
+  gSession.afterMove()
+  let t1 = nowNs()
+  refreshWindow()
+  op.engineNs = t1 - t0
+  op.updateNs = nowNs() - t1
+  op.rowsWritten = gLeaves.rowsWritten
+  (op.paneReplaced, op.paneWritten) = gLeaves.paneWork()
+  gOps.add op
+
 # ---------------------------------------------------------------------------
 # Keys
 # ---------------------------------------------------------------------------
@@ -414,6 +455,7 @@ proc buildWindow(root: ZguiNode) =
                        updateNs: binding.lastKeyUpdateNs,
                        paneReplaced: binding.replaced,
                        paneWritten: binding.written)
+  gLeaves.onRowPress = pressRow
   gLeaves.onTab = proc(paneId: string) =
     for k in PaneKind:
       if $k == paneId: focusPane(k)
@@ -489,6 +531,8 @@ proc writeFacts(path: string) =
                   "values": getAttribute(el, EditorValuesAttribute),
                   "text": textContent(el)}
   var doc = %*{"panes": panes, "editorRows": rows}
+  if not gLeaves.editorTab.isNil:
+    doc["editorTab"] = %textContent(gLeaves.editorTab)
   if not gTopBar.popup.isNil:
     doc["openMenu"] = %getAttribute(gTopBar.popup, "data-ct-menu")
     doc["openMenuText"] = %textContent(gTopBar.popup)
@@ -569,16 +613,26 @@ proc findTagged(node: ZguiNode; attr, value: string): ZguiNode =
   noNode
 
 proc clickOn(spec: string) =
-  ## Headless: a pointer press and release at the centre of a top-bar part.
-  let (attr, value) =
-    if spec.startsWith("menu:"): ("data-ct-menu-button", spec[5 .. ^1])
-    elif spec.startsWith("action:"): ("data-ct-action", spec[7 .. ^1])
-    elif spec.startsWith("control:"): ("data-ct-control", spec[8 .. ^1])
-    else: raise newException(ValueError, "--clicks: '" & spec & "' is not " &
-                             "menu:<name>, action:<action> or control:<id>")
-  var target = findTagged(gTopBar.el, attr, value)
-  if target.isNil and not gTopBar.popup.isNil:
-    target = findTagged(gTopBar.popup, attr, value)
+  ## Headless: a pointer press and release at the centre of a top-bar part,
+  ## or of a pane's row (`row:<pane>:<option id or row index>`).
+  var target = noNode
+  if spec.startsWith("row:"):
+    let parts = spec.split(':', 2)
+    let host = if parts.len == 3: gLeaves.panes.getOrDefault(parts[1]) else: nil
+    if not host.isNil:
+      target = findTagged(host.body, "data-option-id", parts[2])
+      if target.isNil: target = findTagged(host.body, "data-row-index", parts[2])
+  else:
+    let (attr, value) =
+      if spec.startsWith("menu:"): ("data-ct-menu-button", spec[5 .. ^1])
+      elif spec.startsWith("action:"): ("data-ct-action", spec[7 .. ^1])
+      elif spec.startsWith("control:"): ("data-ct-control", spec[8 .. ^1])
+      else: raise newException(ValueError, "--clicks: '" & spec & "' is not " &
+                               "menu:<name>, action:<action>, control:<id> " &
+                               "or row:<pane>:<row>")
+    target = findTagged(gTopBar.el, attr, value)
+    if target.isNil and not gTopBar.popup.isNil:
+      target = findTagged(gTopBar.popup, attr, value)
   if target.isNil:
     raise newException(ValueError, "--clicks: nothing to click for '" & spec & "'")
   let before = gOps.len

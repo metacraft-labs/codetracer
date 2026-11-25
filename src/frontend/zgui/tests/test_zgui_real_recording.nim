@@ -45,7 +45,7 @@ import ../app/zgui_leaves
 import headless_app/layout_model
 
 var countedAssertions = 0
-const ExpectedAssertions = 57
+const ExpectedAssertions = 63
 
 template ck(condition: untyped) =
   inc countedAssertions
@@ -85,6 +85,18 @@ let clickFacts = work / "clicks-facts.json"
 let ran = execCmdEx(quoteShellCommand([zguiBinary(), "--headless",
   "--clicks=menu:Debug,action:forwardStep,control:next",
   "--facts-out=" & clickFacts, "--frame-report=" & clickFrames, trace]))
+
+# Two more: a press on an event log row (the third line of output, `6 * 7 =
+# 42`) and on a call trace row (`add #5`, the first call of `add`), each
+# going where the desktop's press goes.
+let eventFacts = work / "event-press.json"
+let eventFrames = work / "event-press-frames.json"
+let pressedEvent = execCmdEx(quoteShellCommand([zguiBinary(), "--headless",
+  "--clicks=row:eventLog:2", "--facts-out=" & eventFacts,
+  "--frame-report=" & eventFrames, trace]))
+let callFacts = work / "call-press.json"
+let pressedCall = execCmdEx(quoteShellCommand([zguiBinary(), "--headless",
+  "--clicks=row:calltrace:5", "--facts-out=" & callFacts, trace]))
 
 # The same stop, through the host's own producers.
 let session = openGpuiTrace(trace)
@@ -272,6 +284,29 @@ suite "the top bar and its menus":
       if row["pointer"].getStr == $eptExecution: exec = parseInt(row["line"].getStr)
     # A step in and a step over from the first stop: the pointer moved.
     ck exec > 0 and exec != 1
+
+proc executionLine(doc: JsonNode): int =
+  for row in doc["editorRows"].getElems:
+    if row["pointer"].getStr == $eptExecution: result = parseInt(row["line"].getStr)
+
+suite "codetracer-zgui: a press on a pane's row":
+  test "a press on an event log row goes to the event":
+    checkpoint(pressedEvent.output)
+    ck pressedEvent.exitCode == 0
+    var names: seq[string]
+    for op in parseFile(eventFrames)["operations"].getElems:
+      names.add op["name"].getStr
+    ck "click:row:eventLog:2 -> press:eventLog:2" in names
+    # `print("%s = %d" % ...)`, where the third line was written
+    ck executionLine(parseFile(eventFacts)) == 111
+
+  test "a press on a call trace row goes to the call, and the editor's tab names the file":
+    checkpoint(pressedCall.output)
+    ck pressedCall.exitCode == 0
+    let doc = parseFile(callFacts)
+    let line = executionLine(doc)
+    ck line >= 29 and line <= 31          # inside `add`
+    ck doc{"editorTab"}.getStr == "main.py"
 
 suite "cleanup":
   test "the session is closed and the scratch removed":

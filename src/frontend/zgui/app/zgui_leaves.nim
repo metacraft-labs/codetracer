@@ -25,7 +25,7 @@
 ## the cells of the panes that changed. The counters (`ZguiLeaves.rowsWritten`,
 ## the bindings' `replaced` / `written`) let a test hold that to account.
 
-import std/[json, strutils, tables]
+import std/[json, options, strutils, tables]
 
 import isonim_zgui/renderer
 
@@ -145,6 +145,23 @@ type
     onViewKey*: proc(paneId: string; binding: ZguiBinding) {.closure.}
       ## A key a pane's view consumed (a list's highlight, a table's row),
       ## after the view wrote its new state, for the host's timing record.
+    editorTab*: ZguiNode
+      ## The editor's tab: it names the file the editor shows, as the
+      ## desktop's and the GPUI window's editor tabs do.
+    editorFile*: string
+      ## The base name of the file the editor shows; "" before it has one.
+    onRowPress*: proc(paneId: string; row: RowPress) {.closure.}
+      ## A pointer press on a row of a pane's list or table, for the host to
+      ## do what the press means there (the call trace's row goes to the
+      ## call, the event log's to the event).
+
+  RowPressKind* = enum
+    rpOption  ## a list's option, by its `data-option-id`
+    rpRow     ## a table's row, by its `data-row-index`
+
+  RowPress* = object
+    kind*: RowPressKind
+    key*: string
 
 # ---------------------------------------------------------------------------
 # The editor
@@ -254,6 +271,10 @@ proc updateEditor*(z: ZguiLeaves; surface: EditorSurface) =
     e.rowEls = @[]
     e.rows = @[]
     e.path = surface.path
+    let file = surface.path.rsplit({'/', '\\'}, maxsplit = 1)[^1]
+    if file.len > 0 and file != z.editorFile:
+      z.editorFile = file
+      if not z.editorTab.isNil: r.setTextContent(z.editorTab, file)
   for i, row in surface.rows:
     if i < e.rows.len and sameRow(e.rows[i], row):
       continue
@@ -299,6 +320,20 @@ proc paneModel(leaf: GpuiLeaf): (ViewNode, string) =
   let pv = paneView(leaf.builtin, leaf.vm, GpuiPanelBudget, ZguiMedium)
   (pv.root, pv.report)
 
+proc rowPressAt*(r: ZguiRenderer; target, stop: ZguiNode): Option[RowPress] =
+  ## The list option or table row an element pressed at `target` belongs to,
+  ## looking no higher than `stop`.
+  var n = target
+  var guard = 0
+  while not n.isNil and n.handle != stop.handle and guard < 32:
+    let option = getAttribute(n, "data-option-id")
+    if option.len > 0: return some(RowPress(kind: rpOption, key: option))
+    let row = getAttribute(n, "data-row-index")
+    if row.len > 0: return some(RowPress(kind: rpRow, key: row))
+    n = r.parentNode(n)
+    inc guard
+  none(RowPress)
+
 proc renderPane(z: ZguiLeaves; leaf: GpuiLeaf): PaneHost =
   let r = z.renderer
   result = PaneHost(leaf: leaf)
@@ -327,6 +362,16 @@ proc renderPane(z: ZguiLeaves; leaf: GpuiLeaf): PaneHost =
   binding.onKeyHandled = proc(id: string) =
     if not z.onViewKey.isNil: z.onViewKey(paneId, binding)
   r.appendChild(result.body, result.binding.root)
+  # A press on a row: the body's listener, since the binding rewrites the
+  # rows inside it in place. The row is the nearest element above the
+  # pressed one that names an option or a table row.
+  let body = result.body
+  addListener(body, "click", proc(ev: ZguiEvent): uint32 =
+    if z.onRowPress.isNil: return 0
+    let press = rowPressAt(r, ev.target, body)
+    if press.isNone: return 0
+    z.onRowPress(paneId, press.get)
+    3)
 
 proc refreshPane*(z: ZguiLeaves; paneId: string) =
   ## Bring one pane up to date with its ViewModel, in place.
@@ -395,9 +440,14 @@ proc renderTabs(z: ZguiLeaves; panel: JsonNode): ZguiNode =
   for i, k in kids:
     let id = paneIdOf(k)
     let (ok, leaf) = z.leafFor(id)
+    let title =
+      if id == $paneEditor and z.editorFile.len > 0: z.editorFile
+      elif ok: titleOf(leaf)
+      else: id
     let tab = span(r, if i == active: "ct-tab ct-tab-active" else: "ct-tab",
-                   if ok: titleOf(leaf) else: id)
+                   title)
     r.setAttribute(tab, "data-ct-tab", id)
+    if id == $paneEditor: z.editorTab = tab
     addListener(tab, "click", z.onTabClick(id))
     r.appendChild(strip, tab)
   r.appendChild(result, strip)
