@@ -69,13 +69,19 @@ import ../viewmodel/platform/endpoint_protocol
 import ../viewmodel/platform/endpoint_codec
 
 const
-  SlowGitSeconds = 0.8
-    ## How long every git run the SERVER makes takes, at least.
+  SlowGitSeconds = 2.0
+    ## How long every git run the SERVER makes takes, at least. Two seconds
+    ## rather than 0.8 (2026-11-25): at host load ~100 B's file read alone
+    ## took 577 ms, over the 500 ms half of a 0.8 s run, while B still came
+    ## back well before A. A longer slow run widens the margin the latency
+    ## claim needs without weakening it: B must still answer within half of
+    ## one slow git run.
   BSendDelayMs = 100
     ## How long after A's call B asks: a socket round trip later, so A's verb
     ## has certainly started, and well inside one slow git run.
-  PromptMs = 400
-    ## B must be answered within this of asking — half of one slow git run.
+  PromptMs = 900
+    ## B must be answered within `BSendDelayMs + PromptMs` of A's call — half
+    ## of one slow git run.
     ## B's own verb is a file read; the margin is for a loaded CI host.
 
 var checks = 0
