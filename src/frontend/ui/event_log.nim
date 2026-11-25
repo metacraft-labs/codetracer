@@ -32,7 +32,7 @@ from ../viewmodel/viewmodels/event_log_vm import EventLogVM,
   setSelectedKinds, selectRow, doubleClickRow, reload, resetLog, eventLogText,
   EventLogColumn, setColumnWidth, resizeColumn, columnWidthEntries,
   withColumnWidths, EventLogTableName, columnResizeTarget, parseEventLogColumn,
-  placeColumn, placeColumnLower
+  placeColumn
 from ../viewmodel/viewmodels/omnibar_sources import parseColumnWidthLine
 from ../viewmodel/session_vm import SessionViewModel
 from isonim/core/signals import val, `val=`
@@ -41,7 +41,7 @@ from isonim/core/signals import val, `val=`
 import ../viewmodel/views/table_overflow_dom
 from ../viewmodel/views/isonim_event_log_view import columnClass,
   EventLogColumnGripAttribute, EventLogColumnOptionClass,
-  EventLogColumnHandleClass, EventLogColumnDraggingClass,
+  EventLogColumnDraggingClass,
   EventLogColumnDropBeforeClass, EventLogColumnDropAfterClass
 from isonim/web/dom_api import nil
 from ../viewmodel/views/isonim_event_log_filter_dropdown_view import
@@ -494,13 +494,10 @@ when defined(ctWasmPanes):
     "((e, c) => (e && e.closest && e.closest('.' + c)) || null)(#, #)".}
   proc columnOptionOfTarget(ev: Event): Element =
     columnOptionOf(cast[JsObject](ev).target, cstring EventLogColumnOptionClass)
-  proc handleOfTarget(ev: Event): Element =
-    columnOptionOf(cast[JsObject](ev).target, cstring EventLogColumnHandleClass)
   proc startMoveDrag(ev: Event; payload: cstring) {.importjs:
     "(function(e, p){ if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', p); } })(#, #)".}
   proc showMoveCursor(ev: Event) {.importjs:
     "(function(e){ if (e.dataTransfer) { e.dataTransfer.dropEffect = 'move'; } })(#)".}
-  proc clickDetail(ev: Event): int {.importjs: "#.detail".}
   proc insideWasmPane(el: Element): bool {.importjs:
     "((e) => !!(e && e.closest && e.closest('.ct-web-core-pane')))(#)".}
 
@@ -557,17 +554,6 @@ when defined(ctWasmPanes):
       let row = ev.columnOptionOfTarget
       if not row.isNil: row.clearMarks()
       dragged = none(EventLogColumn))
-    # Enter or Space on a row's handle moves the row one lower: a `click()`
-    # whose `detail` is 0 (`wireColumnHandleKey`).
-    host.addEventListener(cstring"click", proc(ev: Event) =
-      let handle = ev.handleOfTarget
-      if handle.isNil or not handle.insideWasmPane or ev.clickDetail != 0: return
-      ev.stopPropagation()
-      let col = columnOf(ev.columnOptionOfTarget)
-      let model = vm()
-      if col.isSome and not model.isNil:
-        discard model.placeColumnLower(col.get)
-        handle.focus())
 
 proc decorateEventLog(host: dom_api.Element; session: SessionViewModel) =
   let vm = session.eventLogVM
