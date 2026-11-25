@@ -84,6 +84,41 @@ proc tabMinCellsOf(vm: InitiativeTabStripVM; tab: StripTab): int =
     if tab.active: result += recordingsCells(vm.recordingButtonsOf(tab.id))
   result = max(result, TabMinCells)
 
+proc buttonStateInk*(p: AhPalette; state: RecordingState): string =
+  ## A recording button's number (and `+N`'s, and its mark) in its state's
+  ## role, on the buttons' ground (the panel's). Dark keeps the roles
+  ## themselves (7:1 or more there). Light's roles fall under the text floor
+  ## on its warm panel (#e6e2db; terminal review of the process switcher,
+  ## 2026-11-25: the warning role 2.76:1, the error role 3.74:1, the caption
+  ## role 3.55:1), so Light takes readable steps, each 4.5:1 or more: a
+  ## failed one the error role's 700 step (its hover step, red/700, 5.0:1); a
+  ## missing one the warning role's 700 step taken a quarter toward the body
+  ## text (#9b3a12, about orange/800: the design system's alias
+  ## `colors-warning-800` is #9a3412, but it is a Stylus primitive with no
+  ## semantic token, so `DesignTokenHex` does not carry it; 5.4:1;
+  ## orange/700 alone is 4.0:1); a loading one the label role,
+  ## as the web's `.ah-rec-loading` (9.7:1), its `…` saying it loads.
+  case state
+  of rsReady: p.textLabel
+  of rsLoading: (if p.mode == dmDark: p.textCaption else: p.textLabel)
+  of rsFailed:
+    if p.mode == dmDark: p.textError
+    else: tokenHexOf(dtColorsUiTextErrorPrimaryHover, p.mode)
+  of rsMissing:
+    if p.mode == dmDark: p.textWarning
+    else: mixInk(tokenHexOf(dtColorsUiTextWarningPrimaryHover, p.mode), p.textBody, 25)
+
+proc ringUnderlineInk*(p: AhPalette): string =
+  ## The correlation ring's underline: the action colour's ring step
+  ## (brand/400 in Dark, brand/700 in Light), the web's `.ah-rec-ringed`
+  ## outline and GPUI's `ringInk` (P2c study D81). The action border
+  ## (brand/500) it replaced was 3.3:1 and 3.5:1 on the buttons' ground, under
+  ## the ring step's 4.9:1 and 6.1:1 (terminal review, 2026-11-25). The
+  ## palette has neither step; each is the other mode's
+  ## `surface/action/primary-hover`.
+  let other = if p.mode == dmDark: dmLight else: dmDark
+  tokenHexOf(dtColorsUiSurfaceActionPrimaryHover, other)
+
 proc drawRecordingButton*(c: var AhCanvas; parent: AhNode; vm: InitiativeTabStripVM;
                           initiativeId: string; rb: RecordingButton; row, col: int;
                           onSelect: proc(id: string) = nil): int =
@@ -96,20 +131,15 @@ proc drawRecordingButton*(c: var AhCanvas; parent: AhNode; vm: InitiativeTabStri
   let id = rb.id
   let label = buttonLabel(rb)
   let w = widthOf(label)
-  var fg = c.p.textLabel
+  var fg = buttonStateInk(c.p, rb.state)
   var bg = c.p.panel
-  case rb.state
-  of rsReady: discard
-  of rsLoading: fg = c.p.textCaption
-  of rsFailed: fg = c.p.textError
-  of rsMissing: fg = c.p.textWarning
   if rb.active:
     bg = if c.p.mode == dmDark: c.p.action else: c.p.borderAction
     fg = c.p.onAction
   discard c.put(row, col, label, fg, bg = bg)
   if rb.ringed:
     c.grid.paint(row, col + 1, $rb.number, CellStyle(fg: fg, bg: bg, underline: true,
-                                                    underlineColor: c.p.borderAction))
+                                                    underlineColor: ringUnderlineInk(c.p)))
   discard c.node(parent, row, col, w, 1,
                  [("recording", $rb.number), ("recording-state", $rb.state),
                   ("recording-active", $rb.active), ("recording-label", label),
@@ -142,14 +172,21 @@ proc drawRecordingsMore*(c: var AhCanvas; parent: AhNode; buttons: RecordingButt
                          ("recordings-hidden-ringed", $buttons.hiddenRinged),
                          ("tooltip", chipTitle(h, noun, nouns))])
   if h.severity != hsNone:
+    # The mark in its state's readable ink (`buttonStateInk`): in Light the
+    # status marks' own inks are under 3:1 (warning) or near it on the
+    # buttons' ground.
+    let state = if h.severity == hsFailed: rsFailed else: rsMissing
+    let m = c.p.markOf(if h.severity == hsFailed: saFailed else: saNeedsInput)
     discard c.mark(moreNode, row, at + 1,
-                   c.p.markOf(if h.severity == hsFailed: saFailed else: saNeedsInput))
-  let ink = if h.severity == hsFailed: c.p.textError else: c.p.textLabel
+                   MarkStyle(colour: (if c.p.mode == dmDark: m.colour
+                                      else: buttonStateInk(c.p, state)),
+                             ring: m.ring))
+  let ink = if h.severity == hsFailed: buttonStateInk(c.p, rsFailed) else: c.p.textLabel
   discard c.put(row, at + markCells, more, ink, bg = c.p.panel)
   if buttons.hiddenRinged:
     c.grid.paint(row, at + markCells + 1, "+" & $buttons.hidden,
                  CellStyle(fg: ink, bg: c.p.panel, underline: true,
-                           underlineColor: c.p.borderAction))
+                           underlineColor: ringUnderlineInk(c.p)))
   w
 
 proc drawBarTab(c: var AhCanvas; parent: AhNode; vm: InitiativeTabStripVM;
