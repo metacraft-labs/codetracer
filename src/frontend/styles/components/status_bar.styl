@@ -239,13 +239,14 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     padding: 0 0.375rem
     height: CONTROL_HEIGHT_SM
     line-height: CONTROL_HEIGHT_SM
-    border-radius: 0.1875rem
+    border-radius: 0.0625rem
     user-select: none
     white-space: nowrap
 
     &:hover
       color: colors-ui-text-primary-body
-      background-color: rgba(255, 255, 255, 0.1)
+      // D-40: the list hover in the light theme; white at 10% vanished there.
+      background-color: by-mode(rgba(255, 255, 255, 0.1), colors-ui-surface-primary-secondary-hover)
 
     &.active
       color: colors-ui-text-success-primary
@@ -269,7 +270,7 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
       white-space: nowrap
 
       &:hover
-        background-color: rgba(255, 255, 255, 0.1)
+        background-color: by-mode(rgba(255, 255, 255, 0.1), colors-ui-surface-primary-secondary-hover)
 
       &.active
         color: colors-ui-text-success-primary
@@ -599,7 +600,8 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     // NOTE the guard reads the COMPILED theme, so it only sees an edit to this
     // file after `just build-once`.
     bottom: 0
-    background-color: colors-ui-surface-primary-default
+    // D-46: the status bar is part of the frame, `surface/base/canvas` in light.
+    background-color: by-mode(colors-ui-surface-primary-default, colors-ui-surface-base-canvas)
     // THE BAR DECLARES A TEXT COLOUR, because it declares a background.
     //
     // Reported from noirstudio.dev as *"the colors in the status bar are
@@ -710,7 +712,7 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
       padding-right: 1.25rem
       height: 1.3125rem
       line-height: 1.3125rem
-      border-radius: 0.3125rem
+      border-radius: 0.1875rem
       margin-top: 0.125rem
       margin-bottom: 0.125rem
       user-select: none
@@ -725,7 +727,7 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     // `UNREACHABLE_SELECTORS` rather than repainted.
     .status-button-clicked
       background-color: colors-ui-surface-primary-secondary-hover
-      color: colors-ui-border-primary
+      color: by-mode(colors-ui-border-primary, colors-ui-text-primary-label-subtle)
       float: left
       width: max-content
       margin-left: 1.25rem
@@ -734,7 +736,7 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
       padding-right: 1.25rem
       height: 1.3125rem
       line-height: 1.3125rem
-      border-radius: 0.3125rem
+      border-radius: 0.1875rem
       margin-top: 0.125rem
       margin-bottom: 0.125rem
 
@@ -745,7 +747,7 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
       padding-left: 0.375rem;
       padding-right: 0.375rem;
       background-color: red;
-      border-radius: 0.65625rem;
+      border-radius: 0.53125rem;
       color: white;
       font-weight: bold;
 
@@ -779,7 +781,7 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
       padding: 0 0.5rem
       margin-right: 0.75rem
       border: 0.0625rem solid colors-ui-text-warning-primary
-      border-radius: 0.375rem
+      border-radius: 0.25rem
       color: colors-ui-text-warning-primary
       font-weight: 600
 
@@ -989,7 +991,7 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
       margin-bottom: 0.375rem
       text-align: left
       white-space: normal
-      border-radius: 0.3125rem
+      border-radius: 0.1875rem
       background-color: colors-ui-surface-base-panel
       color: colors-ui-text-primary-label
       box-shadow: 0 0.125rem 0.5rem rgba(0, 0, 0, 0.45)
@@ -1034,7 +1036,7 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
         color: by-mode(white, colors-ui-text-primary-body)
         text-align: left
         background-color: colors-ui-surface-base-panel
-        border-radius: 0.3125rem
+        border-radius: 0.1875rem
         padding: 0.625rem
         display: none
 
@@ -1044,12 +1046,12 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
           color: by-mode(white, colors-ui-text-primary-body)
           text-align: left
           background-color: colors-ui-surface-base-panel
-          border-radius: 0.3125rem
+          border-radius: 0.1875rem
           padding: 0.625rem
           display: block
 
       .status-flow-type
-        border-radius: 0.3125rem
+        border-radius: 0.1875rem
         padding-left: 0.3125rem
         padding-right: 0.3125rem
 
@@ -1060,7 +1062,7 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
   #notifications-container
     width: 100%
     max-height: 50vh
-    overflow-y: scroll
+    overflow-y: auto
     background-color: colors-ui-surface-base-panel
     // THE HISTORY LIST STACKS THE SAME NOTIFICATIONS AS THE LIVE TOAST STACK,
     // AND OWED THEM THE SAME GAP.
@@ -1083,8 +1085,8 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
     border-top: 0.3125rem solid colors-ui-surface-primary-tertiary
     border-left: 0.3125rem solid colors-ui-surface-primary-tertiary
     border-right: 0.3125rem solid colors-ui-surface-primary-tertiary
-    border-top-left-radius: 0.3125rem
-    border-top-right-radius: 0.3125rem
+    border-top-left-radius: 0.1875rem
+    border-top-right-radius: 0.1875rem
     color: colors-ui-text-primary-body
     position: absolute
     z-index: 100
@@ -1107,13 +1109,13 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
   #bug-report-container
     width: 50%
     max-height: 50vh
-    overflow-y: scroll
+    overflow-y: auto
     background-color: colors-ui-surface-base-panel
     border-top: 0.3125rem solid colors-ui-surface-primary-tertiary
     border-left: 0.3125rem solid colors-ui-surface-primary-tertiary
     border-right: 0.3125rem solid colors-ui-surface-primary-tertiary
-    border-top-left-radius: 0.3125rem
-    border-top-right-radius: 0.3125rem
+    border-top-left-radius: 0.1875rem
+    border-top-right-radius: 0.1875rem
     color: colors-ui-text-primary-body
     position: absolute
     z-index: 100
@@ -1135,6 +1137,9 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
 
     #bug-report-title
       margin-left: 10% !important
+      // The shared panel field (D-41) fills its row; match the description box.
+      width: 80%
+      max-width: 80%
 
     textarea
       color: colors-ui-text-primary-body
@@ -1147,7 +1152,7 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
       width: 80%
       margin-left: 10% !important
       margin-bottom: 0.3125rem !important
-      border-radius: 0.9375rem
+      border-radius: 0.8125rem
       padding-left: 0.9375rem
       overflow-wrap: break-word
 
@@ -1174,6 +1179,7 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
   background-repeat: no-repeat
   background-position: center
   background-image: url("../../public/resources/menu/copy_file_path_dark.svg")
+  light-icon(url("../../public/resources/menu/copy_file_path_dark.svg"), auto) // D-42
 
   &:hover
     opacity: 0.5
@@ -1319,11 +1325,13 @@ NOTIFICATION_STACK_BOTTOM = STATUS_BAR_OUTER_HEIGHT + NOTIFICATION_STACK_GAP
 
   &::before
     content: ""
-    width: 0.9375rem
-    height: 0.875rem
+    // D-38: icons-lg=copy.  The variable it used existed only in the dark
+    // theme, so in the light theme the mask was dropped and nothing showed.
+    width: 1rem
+    height: 1rem
     background-color: currentColor
-    -webkit-mask-image: ct-images-copy-path
-    mask-image: ct-images-copy-path
+    -webkit-mask-image: ICON_COPY
+    mask-image: ICON_COPY
     -webkit-mask-repeat: no-repeat
     mask-repeat: no-repeat
     -webkit-mask-position: center

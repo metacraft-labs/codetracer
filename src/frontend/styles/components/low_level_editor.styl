@@ -10,7 +10,7 @@
   flex-direction: column
   background-color: colors-ui-surface-base-panel
   color: colors-ui-text-primary-body
-  overflow: scroll
+  overflow: auto
   flex-basis: 25%
   height: 100vh
   white-space: pre
@@ -108,7 +108,7 @@
     // height: 40%
     width: 100%
     background-color: colors-ui-surface-input-default
-    border-radius: 0.375rem
+    border-radius: 0.25rem
     // border-right: 3px solid #5a595c
 
     // .line-numbers
@@ -139,7 +139,7 @@
     width: calc(100% - 3.5625rem)
     height: 0.5rem
     background-color: colors-ui-surface-input-default
-    border-radius: 0.375rem
+    border-radius: 0.25rem
 
   .editor-traces
     margin-top: 0.24em
@@ -150,7 +150,7 @@
     position: relative
     display: flex
     flex-direction: column
-    border-radius: 0.325em
+    border-radius: calc(max(0rem, 0.325em - 0.125rem))
     min-height: 0
 
     .dt-scroll-body::-webkit-scrollbar-thumb
@@ -305,7 +305,7 @@
   padding: 0.1em 0.55em
   margin-right: 0.6em
   border: 0.0625rem solid colors-ui-border-secondary
-  border-radius: 0.1875rem
+  border-radius: 0.0625rem
 
   &.sync-on
     opacity: 0.9

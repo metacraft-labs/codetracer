@@ -72,14 +72,12 @@ if IS_EXTENSION
       padding-bottom: 0.5rem
       border-bottom: 0.0625rem solid var(--vscode-editorWidget-border)
 
-input::-webkit-input-placeholder
-  color: colors-ui-text-primary-label;
-
-input:-moz-placeholder
-  color: colors-ui-text-primary-label
-
-input::-moz-placeholder
-  color: colors-ui-text-primary-label
+// No placeholder colour here.  A vendor block (`::-webkit-input-placeholder`,
+// `colors-ui-text-primary-label`) used to sit here; Chromium treats it as the
+// same pseudo-element as `::placeholder`, and this file loads after input.styl,
+// so it overrode input.styl's `label-subtle` and every resting placeholder
+// painted in the typed-text colour (#C8C8C8 on #C8C8C8 text).  The one
+// placeholder rule is in input.styl (D-39).
 
 TRACE_LOG_EDITOR_Z_INDEX = 50
 
@@ -137,7 +135,7 @@ DROPDOWN_TRIGGER_OFFSET = "calc(100% + %s)" % DROPDOWN_TRIGGER_GAP
 // to open from.  rem for the same reason as the gap — these menus sit in
 // containers from 12px to 16px, and an em radius drew a different curve in
 // each.
-DROPDOWN_RADIUS = 0.375rem
+DROPDOWN_RADIUS = 0.25rem
 
 // Scrollbars inside a menu.
 //
@@ -184,7 +182,7 @@ segmented-tab()
   border: none
   // `!important` only to beat the app-wide `button` radius (0.5em, itself
   // `!important`); the tabs are 5px.
-  border-radius: 0.3125rem !important
+  border-radius: 0.1875rem !important
   background-color: transparent
   font-family: "SpaceGrotesk"
   font-weight: 400
@@ -205,7 +203,11 @@ segmented-tabs()
   // The outline wraps the tabs instead of running the panel's width.
   width: fit-content
   padding: 0.125rem
-  background-color: colors-ui-surface-base-raised
+  // The track is recessed: in dark `surface/base/raised` sits below the panel;
+  // in light raised is the lightest surface (menus, D-44), the same as the
+  // selected tab's `surface/base/card`, so the track takes `surface/primary/
+  // tertiary`, one step darker than the panel, and the selected tab shows.
+  background-color: by-mode(colors-ui-surface-base-raised, colors-ui-surface-primary-tertiary)
   // The shared control outline (button.styl) — this is where it started.
   border: CONTROL_BORDER_WIDTH solid CONTROL_BORDER_COLOR
   border-radius: CONTROL_RADIUS
@@ -393,13 +395,14 @@ body
   font-family: "SpaceGrotesk", sans-serif !important
   -webkit-font-smoothing: antialiased
   -moz-osx-font-smoothing: grayscale
-  background-color: colors-ui-surface-primary-default !important
+  // D-46: the frame is `surface/base/canvas` in light.
+  background-color: by-mode(colors-ui-surface-primary-default, colors-ui-surface-base-canvas) !important
 
 [data-tippy-root]
   max-width: calc(100vw - 0.625em)
 
 .tippy-box
-  border-radius: 0.25em
+  border-radius: calc(max(0rem, 0.25em - 0.125rem))
   font-size: inherit
 
   &[data-placement^="top"] > .tippy-arrow::before
@@ -555,7 +558,7 @@ CAPTION_BAR_HEIGHT = unquote("var(--caption-bar-height)")
   // The auto-hide row and GoldenLayout both rely on #ROOT staying flexible.
   // A fixed viewport width here collapses the height chain and only tab
   // headers remain visible after layout restore.
-  background-color: colors-ui-surface-primary-default !important
+  background-color: by-mode(colors-ui-surface-primary-default, colors-ui-surface-base-canvas) !important  // D-46
   color: colors-ui-text-primary-body
   height: 100%
   flex: 1
@@ -666,7 +669,7 @@ CAPTION_BAR_HEIGHT = unquote("var(--caption-bar-height)")
 
 .indeterminate-checkmark
   border: 0.0625rem solid colors-ui-border-secondary
-  border-radius: 0.15625rem
+  border-radius: 0.03125rem
   display: flex
   position: absolute
   top: 0.3125rem
@@ -722,13 +725,13 @@ input:checked ~ .checkmark:after
   transition: opacity 0.3s ease-in-out
   white-space: normal
   pointer-events: none
-  border-radius: 0.375rem
+  border-radius: 0.25rem
 
   .active-line
     .excerpt-code
       color: colors-ui-text-primary-body !important
     background: colors-ui-surface-base-canvas
-    border-radius: 0.25rem
+    border-radius: 0.125rem
     width: fit-content
     padding-right: 0.25rem
 
@@ -737,7 +740,7 @@ input:checked ~ .checkmark:after
 
 .checkmark
   border: 0.03125rem solid colors-ui-border-primary
-  border-radius: 0.15625rem
+  border-radius: 0.03125rem
   display:block
   position: absolute
   top: 0.375rem
@@ -756,7 +759,7 @@ input:checked ~ .checkmark:after
     height: 0.5rem;
     border: solid colors-ui-text-success-primary;
     border-width: 0 0.125rem 0.125rem 0;
-    border-radius: 0.125rem
+    border-radius: 0
     -webkit-transform: rotate(45deg);
     -ms-transform: rotate(45deg);
     transform: rotate(45deg);
@@ -889,7 +892,7 @@ input:checked ~ .checkmark:after
   padding: 0 0.625em
   gap: 0.375em
   user-select: none
-  border-radius: 0.5em
+  border-radius: calc(max(0rem, 0.5em - 0.125rem))
   // The button look (button.styl) — these pickers are where it was taken from,
   // and every other button now follows them.
   control-button()
@@ -916,6 +919,17 @@ input:checked ~ .checkmark:after
   text-overflow: ellipsis
   white-space: nowrap
 
+// The most a picker's list grows before it scrolls: five and a half 36px rows,
+// plus the list's 3px padding top and bottom and its border.  205px, in rem.
+//
+// It was 12.5em, and the list's text is 12px, so 150px — exactly four rows plus
+// the padding.  The border counts inside that cap, so a list of four rows (the
+// Requests panel's Status filter) came out 1px too tall and showed a scrollbar
+// with nothing to scroll (Nikolay, 2026-11-21).  At five and a half rows a list
+// that fits never touches the cap, and one that does not shows half a row at
+// the bottom, which says "there is more".
+DROPDOWN_LIST_MAX_HEIGHT = 12.8125rem
+
 .ct-picker-dropdown
   // The look this defines is now shared — see `dropdown-surface()` above, which
   // every menu that opens over the UI calls.
@@ -926,7 +940,7 @@ input:checked ~ .checkmark:after
   right: 0
   z-index: 100
   padding: 0.25em
-  max-height: 12.5em
+  max-height: DROPDOWN_LIST_MAX_HEIGHT
   overflow-y: auto
 
 // .ct-picker--chevron-left: chevron DOM node is first → naturally appears on

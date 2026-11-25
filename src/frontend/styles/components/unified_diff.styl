@@ -240,7 +240,8 @@
 .ct-diff-line-hunk-header,
 .monaco-diff-editor .modified-in-monaco-diff-editor .margin-view-overlays div.ct-diff-line-hunk-header
   background-color colors-ui-divider-primary
-  box-shadow inset 0 0.0625rem 0 rgba(255, 255, 255, 0.14), inset 0 -0.0625rem 0 rgba(255, 255, 255, 0.14)
+  // D-40: white hairlines vanish on the light band; `border/secondary` there.
+  box-shadow inset 0 0.0625rem 0 by-mode(rgba(255, 255, 255, 0.14), colors-ui-border-secondary), inset 0 -0.0625rem 0 by-mode(rgba(255, 255, 255, 0.14), colors-ui-border-secondary)
 
 // A selected hunk (VCS-Panel.md, "Hunk Selection") keeps its kind colouring
 // and gains a marked left edge, the way the DOM renderer's `.hunk-selected`
@@ -284,7 +285,7 @@
   // off-palette chrome — "the file header bar is #2C3339 … blue-tinted against
   // the #282828 editor / #1b1b1b panel / #3a3a3a border palette". A file
   // header is a surface, not an accent.
-  background-color rgba(255, 255, 255, 0.045)
+  background-color by-mode(rgba(255, 255, 255, 0.045), colors-ui-surface-base-card) // D-40
   // A white hairline, invisible on the light ground. White at 10% over the
   // dark panel is about `border/secondary`'s Dark value, so the light theme
   // takes that token (`by-mode`, defaults.styl).
@@ -615,8 +616,8 @@
     // A fill, for the same reason. An outline-only pill on a band that already
     // has two rules is one more line among lines; a filled one is an object on
     // top of them.
-    background-color rgba(255, 255, 255, 0.10)
-    border-radius 0.125rem
+    background-color by-mode(rgba(255, 255, 255, 0.10), colors-ui-surface-primary-secondary-hover) // D-40
+    border-radius 0
     font-size 0.625rem
     // Neutral, for the reason on `.ct-diff-line-hunk-header` above: this is
     // chrome on a grey band, and a blue outline made two reviewers inventory it
@@ -630,7 +631,7 @@
     color by-mode(rgba(246, 246, 246, 1), colors-ui-text-primary-body)
 
     &::after
-      background-color rgba(255, 255, 255, 0.14)
+      background-color by-mode(rgba(255, 255, 255, 0.14), colors-ui-surface-primary-tertiary) // D-40
       border-color by-mode(rgba(255, 255, 255, 0.55), colors-ui-border-primary-hover)
 
 // --- The boundary's context menu (UD-2) ----------------------------------
@@ -648,7 +649,7 @@
   z-index 10002
   min-width 15em
   padding 0.25em 0
-  border-radius 0.25rem
+  border-radius 0.125rem
   // A popup: the raised surface and the primary border in the light theme;
   // the dark theme keeps its colours (`by-mode`, defaults.styl).
   background-color by-mode(#252526, colors-ui-surface-base-raised)
@@ -696,7 +697,7 @@
 // borders the code; a rule on the original strip would draw a second line down
 // the middle of the rail, which is the defect this rule exists to remove.
 .monaco-diff-editor .modified-in-monaco-diff-editor .margin
-  box-shadow inset -0.0625rem 0 0 rgba(255, 255, 255, 0.06)
+  box-shadow inset -0.0625rem 0 0 by-mode(rgba(255, 255, 255, 0.06), colors-ui-border-tertiary) // D-40
 
 // The minimap is one of the affordances a DOM diff could not offer (DR-R4) and
 // stays, but in a pane this narrow it was reading louder than the code: "a
@@ -739,7 +740,7 @@
   color by-mode(#3fb950, colors-ui-text-success-primary) !important
 
 .ct-diff-linenum-removed
-  color #f85149 !important
+  color by-mode(#f85149, colors-ui-text-error-primary) !important
 
 // --- Whole-commit document (VCS-Panel.md, "Whole-Commit Document") --------
 //

@@ -160,11 +160,11 @@ from pathlib import Path
 # (selector, property, design-token variable, what it is).  The selector is
 # matched EXACTLY against one member of a rule's selector list.
 GROUNDS = [
-    ("body", "background-color", "colors-ui-surface-primary-default",
+    ("body", "background-color", "colors-ui-surface-base-canvas",
      "the window's ground"),
     (".lm_content", "background-color", "colors-ui-surface-base-panel",
      "every panel's ground, and the editor's (Monaco is transparent over it)"),
-    (".lm_splitter", "background", "colors-ui-surface-primary-default",
+    (".lm_splitter", "background", "colors-ui-surface-base-canvas",
      "the splitters between panels"),
     (".lm_tab", "background-color", "colors-ui-surface-base-panel",
      "a pane tab"),
@@ -226,6 +226,10 @@ MODE_INDEPENDENT = {
         "the loupe's pixel readout, over the video stage (components/video_player.styl)",
     ".agent-ha-container .agent-paste-thumb .agent-paste-remove:hover":
         "the remove chip over a pasted image's thumbnail (components/agent_activity.styl)",
+    ".custom-tooltip":
+        "the Tooltip, an inverse dark chip in both modes (D-44, tooltip-look() in components/button.styl)",
+    ".ct-tooltip":
+        "the Tooltip, an inverse dark chip in both modes (D-44, tooltip-look() in components/button.styl)",
 }
 
 # The properties that draw a FOREGROUND: text, its caret and decoration, and

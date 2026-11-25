@@ -8,7 +8,7 @@
   padding-top: 0.25rem
   padding-bottom: 0.25rem
   transform: translate(0, 50%)
-  border-radius: 0.375rem
+  border-radius: 0.25rem
   background: colors-ui-surface-input-default
 
   .history-list-item-wrapper
@@ -21,7 +21,7 @@
       padding-right: 0.5rem
       font-family: "SpaceGrotesk"
       color: colors-ui-text-primary-body
-      border-radius: 0.375rem
+      border-radius: 0.25rem
       font-size: 0.875rem
       line-height: 1.5rem
       display: flex
@@ -47,7 +47,7 @@
   overflow-y: auto
   min-height: 0
   max-height: 30vh
-  border-radius: 0.375rem
+  border-radius: 0.25rem
 
   &::-webkit-scrollbar-thumb
     border-color: colors-ui-surface-input-default
@@ -114,6 +114,7 @@
 .toggle-value-history
   background-image: HISTORY_VALUE_VIEW_TOGGLE_IMAGE
   background-size: 0.625rem 0.625rem
+  light-icon(HISTORY_VALUE_VIEW_TOGGLE_IMAGE, 0.625rem 0.625rem) // D-42
   background-position: center
   background-repeat: no-repeat
   display: inline-block
@@ -122,7 +123,7 @@
   margin-left: 0.5rem
   transform: translateY(0.1875rem)
   padding: 0.125rem
-  border-radius: 6.25rem
+  border-radius: 6.125rem
   outline: 0.0625rem solid colors-ui-border-primary-hover
 
   &.active
@@ -199,8 +200,8 @@
   min-height: fit-content
   position: relative
   display: flex
-  overflow-y: scroll
-  border-radius: 0.375rem
+  overflow-y: auto
+  border-radius: 0.25rem
   padding-left: 0.25rem
   width: -moz-available
   width: -webkit-fill-available

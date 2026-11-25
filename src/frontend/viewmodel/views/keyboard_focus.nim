@@ -74,7 +74,10 @@ when defined(js):
       //   trigger — clicked to close it, and given the focus afterwards;
       //   prev    — the trigger is the element just before the list;
       //   blur    — the button's menu follows its focus, so closing is a blur
-      //             and focus cannot go back to it without reopening it.
+      //             and focus cannot go back to it without reopening it;
+      //   close   — a menu with no trigger beside it closes itself: called with
+      //             the open list, it returns a selector for the element to
+      //             focus once the view has redrawn, if any.
       var DROPDOWNS = [
         { open: '.agent-settings-dropdown-list', box: '.agent-settings-select-wrapper', trigger: '.agent-settings-select-trigger' },
         { open: '.agent-settings-panel', box: '.agent-settings-host', trigger: '.agent-settings-done', focus: '.agent-settings-button' },
@@ -86,6 +89,24 @@ when defined(js):
         { open: '.eventLog-columns-menu', box: '.eventLog', trigger: '.eventLog-columns-button' },
         { open: '.session-tab-bar.overflow-open', box: '.session-tab-bar', trigger: '.session-tab-overflow' },
         { open: '.dropdown-list.active', prev: true },
+        // The tracepoint options (⋯): open is "not .hidden"; nothing ever adds
+        // `.active` to it, so the entry above never matched and Escape left it
+        // open (D-21).
+        { open: '.hamburger-dropdown-container > .dropdown-list:not(.hidden)', prev: true },
+        // The diff's "show more lines" menu, built on <body> per open.
+        { open: '.ct-diff-expand-menu', close: function () {
+            all(document, '.ct-diff-expand-menu').forEach(function (m) { m.remove(); });
+            return null;
+          } },
+        // The status bar's tab-list menu, lifted to <body> (ui/auto_hide.nim).
+        { open: 'body > .auto-hide-tablist-menu', close: function () {
+            // The zone is redrawn on close, so the button is found again by
+            // its label afterwards rather than kept.
+            var button = document.querySelector('.auto-hide-tablist-button[aria-expanded="true"]');
+            var label = button ? button.getAttribute('aria-label') : null;
+            if (globalThis.__ctCloseTabLists) globalThis.__ctCloseTabLists();
+            return label ? '.auto-hide-tablist-button[aria-label="' + label + '"]' : null;
+          } },
         { open: '[id="category-image"].open', blur: true }
       ];
       // tooltips.nim reads it too: an open dropdown's button shows no tooltip (D-35).
@@ -135,6 +156,14 @@ when defined(js):
           var open = all(document, d.open).filter(onScreen)[0];
           if (!open) continue;
           if (d.blur) { open.blur(); return true; }
+          if (d.close) {
+            var focusAfter = d.close(open);
+            if (focusAfter) afterRender(function () {
+              var el = document.querySelector(focusAfter);
+              if (el) el.focus();
+            });
+            return true;
+          }
           var box = d.box ? closest(open, d.box) : null;
           var trigger = d.prev ? open.previousElementSibling : box ? box.querySelector(d.trigger) : null;
           if (!trigger) continue;

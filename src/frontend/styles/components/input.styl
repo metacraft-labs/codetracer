@@ -20,6 +20,13 @@ INPUT_HEIGHT_MD = CONTROL_HEIGHT_MD
 INPUT_HEIGHT_SM = CONTROL_HEIGHT_SM
 INPUT_HEIGHT_XS = CONTROL_HEIGHT_XS
 
+// D-43: every text field's fill.  The dark theme keeps each field's own value
+// (passed in).  The light theme takes the field token the Figma light screens
+// use, `surface/input/default` (#F8F6F2), the same colour as the frame around
+// the panels (Nikolay, 2026-11-18).
+field-fill(dark)
+  by-mode(dark, colors-ui-surface-input-default)
+
 input
   font-family: "SpaceGrotesk" !important
   font-size: 0.875rem !important
@@ -46,7 +53,7 @@ input
 
   &:not(:placeholder-shown):not(:disabled)
     border-color: colors-ui-border-action
-    background: colors-ui-surface-input-secondary
+    background: field-fill(colors-ui-surface-input-secondary)
     color: colors-ui-text-primary-body !important
 
   // `colors-ui-text-primary-disabled` AND NOT `colors-ui-text-disabled-default`,
@@ -86,20 +93,35 @@ input
     color: colors-ui-text-primary-disabled !important
 
 
+// The magnifier: the Design System's `icons-lg=search` (Figma icons page,
+// node 192:11871), built here as an SVG in the theme's own token colour.  A
+// field cannot hold a `::before`, so it cannot use a mask painted in its text
+// colour like the buttons (D-38); a background built from the token is the
+// equivalent.  It used to be three fixed-colour files that the light theme
+// borrowed from the dark one, so on hover, focus and with text in the field the
+// light theme drew a near-white #F3F3F3 magnifier on its near-white field (D-39).
+SEARCH_ICON_PATH = "M7.27637 1.92871C10.2298 1.92892 12.625 4.32357 12.625 7.27734C12.6249 8.57408 12.1624 9.76261 11.3945 10.6885L13.7471 13.042L14.1006 13.3955L13.3936 14.1025L13.04 13.749L10.6875 11.3955C9.76159 12.1633 8.57302 12.6259 7.27637 12.626C4.323 12.6258 1.92897 10.231 1.92871 7.27734C1.92875 4.32354 4.32286 1.92887 7.27637 1.92871ZM7.27637 2.92871C4.87529 2.92887 2.92875 4.87568 2.92871 7.27734C2.92897 9.67882 4.87543 11.6258 7.27637 11.626C9.67726 11.6258 11.6247 9.67879 11.625 7.27734C11.625 4.87571 9.6774 2.92892 7.27637 2.92871Z"
+
+search-icon(color)
+  hex = replace('#', '%23', '' + color)
+  svg = "<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'><path d='" + SEARCH_ICON_PATH + "' fill='" + hex + "'/></svg>"
+  unquote('url("data:image/svg+xml;utf8,' + svg + '")')
+
 .ct-input-search-image
   padding-left: 1.875em !important
-  background-image: ct-images-empty-search-icon !important
+  // At rest the magnifier is the placeholder's colour; live, the text's.
+  background-image: search-icon(colors-ui-text-primary-label-subtle) !important
   background-repeat: no-repeat !important
-  background-position: 0.5em center !important
-  background-size: 1em !important
+  background-position: 0.375rem center !important
+  background-size: 1rem !important
 
   &:hover,
   &:focus-visible,
   &:not(:placeholder-shown):not(:disabled)
-    background-image: ct-images-default-search-icon !important
+    background-image: search-icon(colors-ui-text-primary-body) !important
 
   &:disabled
-    background-image: ct-images-disabled-search-icon !important
+    background-image: search-icon(colors-ui-text-primary-disabled) !important
 
 
 // Welcome-screen form fields: the extra-large input size (34px; was 36px, off
@@ -107,8 +129,8 @@ input
 .ct-input-form
   height: INPUT_HEIGHT_XL
   max-height: INPUT_HEIGHT_XL
-  border-radius: 0.375rem
-  background: colors-ui-surface-primary-secondary
+  border-radius: 0.25rem
+  background: field-fill(colors-ui-surface-primary-secondary)
   border: CONTROL_BORDER_WIDTH solid CONTROL_BORDER_COLOR
 
   // The backend dropdown: the 14px of the fields beside it (`input` above), and
@@ -129,9 +151,9 @@ input
   max-width: -moz-available
   max-width: -webkit-fill-available
   max-width: stretch
-  border-radius: 0.375rem
+  border-radius: 0.25rem
   border: CONTROL_BORDER_WIDTH solid CONTROL_BORDER_COLOR
-  background: colors-ui-surface-primary-secondary
+  background: field-fill(colors-ui-surface-primary-secondary)
 
   &:hover
     border-color: colors-ui-border-primary-hover
@@ -140,8 +162,8 @@ input
 
 .ct-input-small
 .ct-input-panel
-  border-radius: 0.375rem
-  background: colors-ui-surface-input-secondary
+  border-radius: 0.25rem
+  background: field-fill(colors-ui-surface-input-secondary)
 
   &:hover
     border: 0.0625rem solid colors-ui-surface-primary-default

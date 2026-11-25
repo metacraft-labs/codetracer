@@ -192,7 +192,7 @@ welcome-heading-type()
     background: colors-ui-surface-input-default
     display: flex
     flex-direction: column
-    border-radius: 0.75em
+    border-radius: calc(max(0rem, 0.75em - 0.125rem))
     align-items: center
     border: 0.0625em solid colors-ui-border-secondary
 
@@ -361,7 +361,7 @@ welcome-heading-type()
         padding: 0.375em
         padding-left: 0.875em
         padding-right: 0.875em
-        border-radius: 0.375em
+        border-radius: calc(max(0rem, 0.375em - 0.125rem))
 
         &.hovered
           // color: colors-ui-text-primary-active
@@ -376,7 +376,7 @@ welcome-heading-type()
       width: -webkit-fill-available
       width: stretch
       background-color: colors-ui-surface-base-panel
-      border-radius: 0.375em
+      border-radius: calc(max(0rem, 0.375em - 0.125rem))
       padding: 0.5em
       // The scrollbar sits 1px from the card's right edge (Nikolay, 2026-10-11).
       padding-right: RECENT_LIST_SCROLLBAR_EDGE
@@ -446,7 +446,7 @@ welcome-heading-type()
         display: flex
         position: relative
         text-align: left
-        border-radius: 0.25em
+        border-radius: calc(max(0rem, 0.25em - 0.125rem))
         width: -moz-available
         width: -webkit-fill-available
         width: stretch
@@ -509,7 +509,7 @@ welcome-heading-type()
           padding: 0.5em 0.75em
           font-size: 0.75em
           font-family: "SpaceGrotesk"
-          border-radius: 0.25em
+          border-radius: calc(max(0rem, 0.25em - 0.125rem))
           white-space: pre-line
           box-shadow: 0 0.25em 0.75em rgba(0, 0, 0, 0.4)
           opacity: 0
@@ -534,7 +534,7 @@ welcome-heading-type()
       width: -webkit-fill-available
       width: stretch
       background-color: colors-ui-surface-base-panel
-      border-radius: 0.375em
+      border-radius: calc(max(0rem, 0.375em - 0.125rem))
       padding: 0.5em
       // The scrollbar sits 1px from the card's right edge (Nikolay, 2026-10-11).
       padding-right: RECENT_LIST_SCROLLBAR_EDGE
@@ -554,7 +554,7 @@ welcome-heading-type()
 
     .recent-folders-list
       max-height: 10.75em
-      overflow-y: scroll
+      overflow-y: auto
       overflow-x: visible
       // 6px between the rows and the scrollbar, as in Recent traces.
       padding-right: RECENT_LIST_SCROLLBAR_GAP
@@ -593,7 +593,7 @@ welcome-heading-type()
         display: flex
         position: relative
         text-align: left
-        border-radius: 0.25em
+        border-radius: calc(max(0rem, 0.25em - 0.125rem))
         width: -moz-available
         width: -webkit-fill-available
         width: stretch
@@ -631,7 +631,7 @@ welcome-heading-type()
       width: 43.75em
       background: colors-ui-surface-input-default
       border: 0.0625em solid colors-ui-border-secondary
-      border-radius: 0.75em
+      border-radius: calc(max(0rem, 0.75em - 0.125rem))
       padding: 3em
       padding-bottom: 3.75em
 
@@ -798,7 +798,7 @@ welcome-heading-type()
       align-items: center
       justify-content: center
       margin-bottom: 1em
-      border-radius: 0.375em
+      border-radius: calc(max(0rem, 0.375em - 0.125rem))
       padding: 0.5em
 
       &.empty
@@ -839,10 +839,6 @@ welcome-heading-type()
             animation-name: loading
             animation-duration: 3s
 
-          &.failed
-            background-image: ct-images-notification-error
-          &.success
-            background-image: ct-images-notification-success
 
         .new-record-result-info
           text-align: center
@@ -863,7 +859,7 @@ welcome-heading-type()
     height: 1.75em
     width: 1.75em
     background-color: colors-ui-surface-primary-secondary-hover
-    border-radius: 0.25em
+    border-radius: calc(max(0rem, 0.25em - 0.125rem))
   upload
     &:hover
       outline: 0.0625em solid colors-ui-border-secondary
@@ -910,17 +906,22 @@ welcome-heading-type()
   #progress-bar
     position: relative
 
+  // D-42: #919191 files; the light theme repaints them in `icon/primary/subtle`.
   #trace-upload-button
     background-image: WELCOME_SCREEN_UPLOAD_BUTTON
+    light-icon(WELCOME_SCREEN_UPLOAD_BUTTON, 1em 1em, colors-ui-icon-primary-subtle)
 
   #trace-copy-button
     background-image: WELCOME_SCREEN_COPY_BUTTON
+    light-icon(WELCOME_SCREEN_COPY_BUTTON, 1em 1em, colors-ui-icon-primary-subtle)
 
   #trace-delete-button
     background-image: WELCOME_SCREEN_DELETE_BUTTON
+    light-icon(WELCOME_SCREEN_DELETE_BUTTON, 1em 1em, colors-ui-icon-primary-subtle)
 
   #trace-info-button
     background-image: WELCOME_SCREEN_INFO_BUTTON
+    light-icon(WELCOME_SCREEN_INFO_BUTTON, 1em 1em, colors-ui-icon-primary-subtle)
 
   #trace-info-button-active
     background-image: WELCOME_SCREEN_INFO_ACTIVE_BUTTON
@@ -954,7 +955,7 @@ welcome-heading-type()
   font-size: 1.125em
   font-weight: 700
   background-color: colors-ui-surface-base-panel
-  border-radius: 0.375em
+  border-radius: calc(max(0rem, 0.375em - 0.125rem))
   padding: 1em
   flex-direction: column
 
@@ -990,7 +991,7 @@ welcome-heading-type()
 
 .recent-transactions
   max-height: 22.5em
-  overflow: scroll
+  overflow: auto
 
 .recent-transaction
   display: flex
@@ -1017,7 +1018,7 @@ welcome-heading-type()
   height: 1.75em
   width: 1.75em
   background-color: colors-ui-surface-primary-secondary-hover
-  border-radius: 0.25em
+  border-radius: calc(max(0rem, 0.25em - 0.125rem))
   background-image: RECENT_TRANSACTION_ACTION_BUTTON
   background-repeat: no-repeat
   background-position: center
@@ -1046,7 +1047,7 @@ welcome-heading-type()
   height: CONTROL_HEIGHT_XL
   padding: 0 0.875em
   align-items: center
-  border-radius: 0.375rem !important
+  border-radius: 0.25rem !important
 
 // The welcome screens keep their own button look (Nikolay, 2026-10-21): the
 // shared button look (button.styl) is for the panels of an open trace only.

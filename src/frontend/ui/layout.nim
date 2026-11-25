@@ -334,7 +334,7 @@ proc setupDropdownDismissListeners() =
           open: '.ct-picker-trigger--open',
           trigger: '.ct-picker-trigger--open' },
         { container: '.hamburger-dropdown-container',
-          open: '.dropdown-list.active',
+          open: '.hamburger-dropdown-container > .dropdown-list:not(.hidden)',
           trigger: null }
       ];
 
@@ -490,7 +490,7 @@ proc setupSelectedPanelOutline() =
           var v = parseFloat(window.getComputedStyle(probe).borderTopLeftRadius);
           if (isFinite(v) && v > 0) { return v; }
         }
-        return 6;
+        return 4;
       }
 
       function clearOutlines(except) {
@@ -572,7 +572,7 @@ proc setupSelectedPanelOutline() =
           radiusOf(items, null, 'borderTopRightRadius'),
           radiusOf(items, null, 'borderBottomRightRadius'),
           radiusOf(items, null, 'borderBottomLeftRadius'),
-          radiusOf(tab, '::before', 'borderBottomRightRadius') || 10,
+          radiusOf(tab, '::before', 'borderBottomRightRadius') || 4,
           strokeWidth / 2,
           tab.parentElement !== null && tab.parentElement.firstElementChild === tab,
           tab.parentElement !== null && tab.parentElement.lastElementChild === tab));

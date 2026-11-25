@@ -115,3 +115,14 @@ by-mode(dark, light)
   if COLOR_MODE is defined and COLOR_MODE == "Light"
     return light
   dark
+
+// on-status-text(status) — the text colour on a strong status fill
+// (`colors-ui-surface-alert-<status>`: information, success, error, warning).
+// Those fills keep one saturated value in both themes, so the text on them
+// must be pale in both.  The light theme's `text-<status>-primary` and
+// `text-primary-body` are dark and read at 1.0–3.1:1 there (the Find in Files
+// badge was dark blue on dark blue, 1.5:1).  Light: the status's own
+// `on-color` text (4.5–8.5:1).  Dark: the near-white body text, which beats
+// the dark `on-color` values on every fill (4.5–9.3:1).
+on-status-text(status)
+  by-mode(colors-ui-text-primary-body, lookup('colors-ui-text-' + status + '-on-color'))

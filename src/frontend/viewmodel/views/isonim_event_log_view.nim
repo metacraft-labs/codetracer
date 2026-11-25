@@ -78,7 +78,10 @@ export signals, computation, components
 
 const
   EventLogColumnsButtonClass* = "eventLog-columns-button"
-  EventLogColumnsButtonText* = "Columns +"
+  EventLogColumnsButtonText* = "Columns"
+  ## The plus after the label is the icon collection's `icons-lg=plus-sm`,
+  ## painted by CSS (`.eventLog-columns-icon`); it was a typed "+".
+  EventLogColumnsIconClass* = "eventLog-columns-icon"
   EventLogColumnsMenuClass* = "eventLog-columns-menu"
   EventLogColumnOptionClass* = "eventLog-column-option"
   EventLogColumnCheckClass* = "eventLog-column-check"
@@ -735,6 +738,7 @@ proc renderEventLogPanel*[R, N](r: R; vm: EventLogVM;
                title = "Show, hide or move the event log's columns",
                onclick = proc() = vm.toggleColumnsMenu()):
           text EventLogColumnsButtonText
+          span(class = EventLogColumnsIconClass): discard
       tdiv(ref = columnsMenu, class = EventLogColumnsMenuClass,
            display = displayIf(vm.columnsMenuOpen.val)):
         discard

@@ -180,10 +180,10 @@ const DetailTabs* = [
 # ct-picker chevron SVGs and option data
 # ---------------------------------------------------------------------------
 
-const chevronDownSvg* = """<svg width="9" height="5" viewBox="0 0 9 5" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M0.353516 0.353577L4.35352 4.35358L8.35352 0.353576" stroke="#DDDDDD" stroke-linejoin="round"/></svg>"""
+const chevronDownSvg* = """<svg width="9" height="5" viewBox="0 0 9 5" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M0.353516 0.353577L4.35352 4.35358L8.35352 0.353576" stroke="currentColor" stroke-linejoin="round"/></svg>"""
   ## Down-pointing chevron SVG injected into ``.ct-picker-chevron`` spans.
   ## Matches the VCS branch-picker chevron shape and colour.
-const chevronUpSvg* = """<svg width="9" height="5" viewBox="0 0 9 5" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8.35352 4.35358L4.35352 0.353577L0.353516 4.35358" stroke="#DDDDDD" stroke-linejoin="round"/></svg>"""
+const chevronUpSvg* = """<svg width="9" height="5" viewBox="0 0 9 5" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M8.35352 4.35358L4.35352 0.353577L0.353516 4.35358" stroke="currentColor" stroke-linejoin="round"/></svg>"""
   ## Up-pointing chevron — shown when a picker dropdown is open.
 
 when defined(js):

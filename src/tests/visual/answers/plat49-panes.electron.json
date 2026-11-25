@@ -165,7 +165,7 @@
  },
  "eventLogMenu": {
   "button": true,
-  "buttonText": "Columns +",
+  "buttonText": "Columns",
   "headerBefore": [
    "tick",
    "#",

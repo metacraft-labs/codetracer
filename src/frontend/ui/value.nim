@@ -767,9 +767,8 @@ proc renderValueHistoryButtonDom(self: ValueComponent, expression: cstring, acti
   bindPressOperation(result.toJs, "variables.value-history",
     proc(p: PressInfo) = discard self.showHistory(expression))
 
-  let tooltip = newElement(cstring"div", cstring"custom-tooltip")
-  tooltip.appendText(cstring"Toggle history value")
-  result.appendChild(tooltip)
+  # The shared tooltip (D-31), as in the IsoNim state view.
+  result.setAttribute(cstring"title", cstring"Show or hide value history")
 
 proc renderDirectAtomValueDom(
   self: ValueComponent,

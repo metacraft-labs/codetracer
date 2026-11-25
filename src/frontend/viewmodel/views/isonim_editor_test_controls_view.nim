@@ -54,7 +54,8 @@ proc renderEditorTestControls*[R, N](r: R;
              `data-ct-test-collision-markers` = markersAttr(control.collisionMarkers)):
           for actionIndex in 0 ..< control.actions.len:
             let action = control.actions[actionIndex]
-            button(class = "ct-test-action " & $action.kind,
+            # Extra small (20px): the controls sit on a code line (D-41).
+            button(class = "ct-button-xs-secondary ct-test-action " & $action.kind,
                    `data-ct-test-action` = $action.kind,
                    `data-ct-test-command` = action.commandName,
                    `data-ct-test-enabled` = $action.enabled,

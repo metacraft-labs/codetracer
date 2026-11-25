@@ -6,7 +6,7 @@
 // 28px → 26px, the same size as the Event Log's filter button), and the app's
 // control radius, CONTROL_RADIUS (Nikolay, 2026-10-11: 8px → 6px).
 AGENT_TOOLBAR_CONTROL_SIZE = CONTROL_HEIGHT_MD
-AGENT_TOOLBAR_CONTROL_RADIUS = 0.375rem
+AGENT_TOOLBAR_CONTROL_RADIUS = 0.25rem
 // Text of the panel's text buttons, in rem so it lands on a whole pixel.
 AGENT_BUTTON_TEXT = 0.75rem
 
@@ -56,8 +56,10 @@ AGENT_BUTTON_TEXT = 0.75rem
   padding: 0.5em 0.5em
   position: relative
 
+  // D-43: the prompt box is a text field, so in light it takes the field token
+  // `surface/input/default` like every other field; dark keeps canvas.
   .agent-input-wrapper
-    background: colors-ui-surface-base-canvas
+    background: by-mode(colors-ui-surface-base-canvas, colors-ui-surface-input-default)
     border-radius: AGENT_TOOLBAR_CONTROL_RADIUS
     display: flex
     flex-direction: column
@@ -78,7 +80,7 @@ AGENT_BUTTON_TEXT = 0.75rem
     position: relative
     width: 4.5em
     height: 4.5em
-    border-radius: 0.375em
+    border-radius: calc(max(0rem, 0.375em - 0.125rem))
     overflow: hidden
     flex-shrink: 0
     background: colors-ui-surface-primary-default
@@ -132,7 +134,7 @@ AGENT_BUTTON_TEXT = 0.75rem
     align-items: center
     gap: 0.35em
     padding: 0.25em 0.5em
-    border-radius: 0.375em
+    border-radius: calc(max(0rem, 0.375em - 0.125rem))
     background: colors-ui-surface-primary-default
     // `colors-ui-border-default` is not a design token (the generator emits
     // border-primary/-secondary/-tertiary), so this edge was dropped. The
@@ -319,11 +321,10 @@ AGENT_BUTTON_TEXT = 0.75rem
     flex: 0 0 auto !important
     margin-left: auto !important
 
+  // Send is a primary button, so its arrow is a mask in
+  // `icon/on-action/primary` (D-45), not the picture with white baked in.
   .agent-start-button
-    background-image: COMMAND_PALETTE_START_MSG_IMG
-    background-repeat: no-repeat
-    background-size: 1em
-    background-position: center
+    button-icon(COMMAND_PALETTE_START_MSG_IMG, 1em)
     border-radius: 50% !important
 
   .agent-stop-button
@@ -383,7 +384,7 @@ AGENT_BUTTON_TEXT = 0.75rem
 
 .agent-msg-wrapper
   border: 0.0625em solid colors-ui-surface-primary-secondary
-  border-radius: 0.25em
+  border-radius: calc(max(0rem, 0.25em - 0.125rem))
   background: colors-ui-surface-input-default
   margin-bottom: 0.5em
 
@@ -450,7 +451,7 @@ AGENT_BUTTON_TEXT = 0.75rem
 
 .agent-turn-error
   border-left: 0.1875em solid colors-ui-border-error
-  border-radius: 0.125em
+  border-radius: calc(max(0rem, 0.125em - 0.125rem))
   padding: 0.375em 0.5em
   margin: 0.25em 0 0.25em
   color: colors-ui-text-primary-body
@@ -467,7 +468,7 @@ AGENT_BUTTON_TEXT = 0.75rem
   // violet (`by-mode`, defaults.styl).
   color: by-mode(colors-editor-action-primary, colors-editor-syntax-number)
   background: colors-ui-surface-primary-secondary
-  border-radius: 0.25em
+  border-radius: calc(max(0rem, 0.25em - 0.125rem))
   padding: 0.05em 0.25em
   font-size: 0.875em
 
@@ -488,7 +489,7 @@ AGENT_BUTTON_TEXT = 0.75rem
   display: table
   border-collapse: collapse
   border: 0.0625rem solid colors-ui-border-primary
-  border-radius: 0.375em
+  border-radius: calc(max(0rem, 0.375em - 0.125rem))
   overflow: hidden
   min-width: 100%
 
@@ -545,7 +546,7 @@ AGENT_BUTTON_TEXT = 0.75rem
   display: block
   background: colors-ui-surface-primary-secondary
   border: 0.0625rem solid colors-ui-border-primary
-  border-radius: 0.25em
+  border-radius: calc(max(0rem, 0.25em - 0.125rem))
   margin: 0.5em 0
   overflow: hidden
 
@@ -585,7 +586,7 @@ AGENT_BUTTON_TEXT = 0.75rem
   // overlook is most of the way back to the empty panel this exists to
   // prevent.
   border-left: 0.1875em solid colors-ui-border-information
-  border-radius: 0.125em
+  border-radius: calc(max(0rem, 0.125em - 0.125rem))
   background: colors-ui-surface-input-default
   color: colors-ui-text-primary-body
   padding: 0.5em 0.75em
@@ -603,7 +604,7 @@ AGENT_BUTTON_TEXT = 0.75rem
 .agent-test-run
   border: 0.0625em solid colors-ui-surface-primary-secondary
   border-left: 0.1875em solid colors-ui-border-information
-  border-radius: 0.25em
+  border-radius: calc(max(0rem, 0.25em - 0.125rem))
   background: colors-ui-surface-input-default
   margin-bottom: 0.5em
 
@@ -658,7 +659,7 @@ AGENT_BUTTON_TEXT = 0.75rem
 .agent-test-row-output
   margin: 0.25em 0 0.5em 0
   padding: 0.5em
-  border-radius: 0.125em
+  border-radius: calc(max(0rem, 0.125em - 0.125rem))
   background: colors-ui-surface-base-canvas
   color: colors-ui-text-primary-body
   white-space: pre-wrap
@@ -750,7 +751,7 @@ AGENT_BUTTON_TEXT = 0.75rem
 .agent-evidence
   border: 0.0625em solid colors-ui-surface-primary-secondary
   border-left: 0.1875em solid colors-ui-border-information
-  border-radius: 0.25em
+  border-radius: calc(max(0rem, 0.25em - 0.125rem))
   background: colors-ui-surface-input-default
   margin-bottom: 0.5em
   padding: 0.5em 0.75em
@@ -816,7 +817,7 @@ AGENT_BUTTON_TEXT = 0.75rem
 .agent-evidence-output
   margin: 0.5em 0 0 0
   padding: 0.5em
-  border-radius: 0.125em
+  border-radius: calc(max(0rem, 0.125em - 0.125rem))
   background: colors-ui-surface-base-canvas
   color: colors-ui-text-primary-body
   white-space: pre-wrap
@@ -825,7 +826,9 @@ AGENT_BUTTON_TEXT = 0.75rem
 
 .user-wrapper
   background: colors-ui-surface-primary-default !important
-  border-radius: border-border-radius-2xs !important
+  // The token is a bare number (4); without a unit the browser dropped the
+  // declaration and the bubble had square corners.  As session_tabs.styl does.
+  border-radius: unit(border-border-radius-2xs / 16, 'rem') !important
   padding-top: 0.5em !important
   padding-bottom: 0.5em !important
 
@@ -865,7 +868,7 @@ AGENT_BUTTON_TEXT = 0.75rem
 .agent-msg-thumb
   width: 5em
   height: 5em
-  border-radius: 0.375em
+  border-radius: calc(max(0rem, 0.375em - 0.125rem))
   overflow: hidden
   flex-shrink: 0
 
@@ -928,7 +931,7 @@ AGENT_BUTTON_TEXT = 0.75rem
 
 .agent-diff-section
   margin: 0.5em 0 0.25em 0
-  border-radius: 0.375em
+  border-radius: calc(max(0rem, 0.375em - 0.125rem))
   overflow: hidden
 
 .agent-diff-header
@@ -1061,7 +1064,7 @@ AGENT_BUTTON_TEXT = 0.75rem
   align-items: center
   gap: 0.625em
   padding: 0.5em 0.75em
-  border-radius: 0.375em
+  border-radius: calc(max(0rem, 0.375em - 0.125rem))
   background: colors-ui-surface-primary-tertiary
 
 .agent-tc-row-current
@@ -1127,14 +1130,14 @@ AGENT_BUTTON_TEXT = 0.75rem
 
 .component-wrapper
   background: colors-ui-surface-base-panel
-  border-radius: 0.25em
+  border-radius: calc(max(0rem, 0.25em - 0.125rem))
   margin: 0.5em
   color: colors-ui-text-primary-body
 
   .header-wrapper
     background: colors-ui-surface-base-canvas
-    border-top-right-radius: 0.375em
-    border-top-left-radius: 0.375em
+    border-top-right-radius: calc(max(0rem, 0.375em - 0.125rem))
+    border-top-left-radius: calc(max(0rem, 0.375em - 0.125rem))
     border-bottom: 0 !important
 
 .editor-wrapper
@@ -1150,7 +1153,8 @@ AGENT_BUTTON_TEXT = 0.75rem
     height: 100%
 
 .agent-interaction
-  background: colors-ui-surface-base-canvas
+  // D-43: the whole prompt tray reads as one field in light (Nikolay, 2026-11-19).
+  background: by-mode(colors-ui-surface-base-canvas, colors-ui-surface-input-default)
   border-radius: AGENT_TOOLBAR_CONTROL_RADIUS
   padding: 0.5em
   flex: 0 0 auto
@@ -1178,7 +1182,7 @@ AGENT_BUTTON_TEXT = 0.75rem
 
 .prompt-wrapper
   background: colors-ui-surface-base-canvas
-  border-radius: 0.375em
+  border-radius: calc(max(0rem, 0.375em - 0.125rem))
   display: flex
   flex-direction: column
   margin-top: 0.5em
@@ -1220,7 +1224,7 @@ AGENT_BUTTON_TEXT = 0.75rem
 .permission-prompt
   background: colors-ui-surface-primary-default
   border: 0.0625rem solid colors-ui-border-error
-  border-radius: 0.25em
+  border-radius: calc(max(0rem, 0.25em - 0.125rem))
   display: flex
   flex-direction: column
   gap: 0.5em
@@ -1316,15 +1320,31 @@ AGENT_BUTTON_TEXT = 0.75rem
 // Empty prompt — idle state (shown when the conversation has no messages yet)
 // ---------------------------------------------------------------------------
 
+// Centred in the panel, with room above and below that gives way first when
+// the panel is short.  It was `height: 100%` with a fixed 1.5em padding, so a
+// panel a couple of pixels too short pushed the suggestions 1px past the bottom
+// and `.agent-com` showed a scrollbar for it (Nikolay, 2026-11-21).  Now the
+// room above and below is two shrinking spacers, and `min-height` plus `safe`
+// centring mean that if the content truly does not fit it scrolls from its top
+// instead of being cut there.
 .agent-idle-state
   display: flex
   flex-direction: column
   align-items: center
-  justify-content: center
-  height: 100%
-  padding: 1.5em 1em
+  justify-content: safe center
+  min-height: 100%
+  padding: 0 1em
   gap: 1.25em
   text-align: center
+
+  // 1.5em each, shrinking to nothing.  The negative margin takes back the
+  // `gap` the spacer itself adds, so with room the content sits 1.5em from the
+  // edges, as before.
+  &::before,
+  &::after
+    content: ""
+    flex: 0 1 1.5em
+    margin-block: -1.25em
 
 .agent-idle-header
   display: flex
@@ -1535,12 +1555,18 @@ agent-toolbar-icon(img)
   &:hover:not(.ct-menu-item--disabled)
     background: DROPDOWN_HOVER_BG
 
+  // The icons' SVGs draw in `currentColor`: they had `#DDDDDD` baked in,
+  // near-white, so they faded out on the light theme's menu.
   .agent-add-context-menu-icon
     display: flex
     align-items: center
     justify-content: center
     width: 1em
     flex-shrink: 0
+    color: colors-ui-icon-primary-default
+
+  &.ct-menu-item--disabled .agent-add-context-menu-icon
+    color: colors-ui-icon-primary-disabled
 
   .ct-menu-item-label
     font-size: 0.875rem

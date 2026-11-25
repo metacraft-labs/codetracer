@@ -148,26 +148,26 @@
   font-weight: 700
   font-family: "SpaceGrotesk"
   padding: 0.25em 0.8333em
-  border-radius: 0.3333em
+  border-radius: calc(max(0rem, 0.3333em - 0.125rem))
   text-transform: uppercase
   letter-spacing: 0.03em
 
 .request-method-get
   background: colors-ui-surface-alert-information
-  color: colors-ui-text-information-primary
+  color: on-status-text('information')
 
 .request-method-post
   background: colors-ui-surface-alert-success
-  color: colors-ui-text-success-primary
+  color: on-status-text('success')
 
 .request-method-delete
   background: colors-ui-surface-alert-error
-  color: colors-ui-text-error-primary
+  color: on-status-text('error')
 
 .request-method-put,
 .request-method-patch
   background: colors-ui-surface-alert-warning
-  color: colors-ui-text-warning-primary
+  color: on-status-text('warning')
 
 .request-method-head,
 .request-method-options

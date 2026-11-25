@@ -120,7 +120,7 @@ proc renderContextMenu*(self: ContextMenu): dom.Node =
   return cast[dom.Node](root)
 
 
-proc loadTheme*(name: cstring)
+proc loadTheme*(name: cstring; onApplied: proc() = nil)
 
 proc loadShellTheme*(data: Data, name: cstring) =
   let shellComponent = data.shellComponent(0)
@@ -884,46 +884,119 @@ proc stopAction* {.locks: 0.}=
   discard stopReplaySession(data)
 
 
-proc swapThemeHrefImpl(link: js; newHref, newName, prevHref, prevName: cstring)
+proc swapThemeHrefImpl(link: js; newHref, newName, prevHref, prevName: cstring;
+                       onApplied: proc())
     {.importjs: """
-(function(link, newHref, newName, prevHref, prevName){
+(function(link, newHref, newName, prevHref, prevName, onApplied){
+  // A swap still loading when the user picks again is abandoned.
+  var stale = document.getElementById('theme-pending');
+  if (stale && stale.parentNode) { stale.onload = stale.onerror = null; stale.parentNode.removeChild(stale); }
+  var next = document.createElement('link');
+  next.rel = 'stylesheet';
+  next.id = 'theme-pending';
+  next.dataset.theme = newName;
   var settled = false;
-  function finish(){
-    if (settled) { return true; }
+  function fail(why){
+    if (settled) { return; }
     settled = true;
-    link.onload = null;
-    link.onerror = null;
-    return false;
-  }
-  function revert(why){
-    if (finish()) { return; }
+    next.onload = next.onerror = null;
     console.error("[THEME] '" + newName + "' did not apply (" + why +
-      "); reverting to '" + prevName + "'. This deployment does not serve " +
+      "); keeping '" + prevName + "'. This deployment does not serve " +
       newHref);
-    link.href = prevHref;
-    link.dataset.theme = prevName;
+    if (next.parentNode) { next.parentNode.removeChild(next); }
   }
-  link.onerror = function(){ revert("the stylesheet did not load"); };
-  link.onload = function(){
+  function commit(){
+    // Abandoned by a later pick while its assets were warming up.
+    if (!next.parentNode || document.getElementById('theme-pending') !== next) { return; }
+    // Colour transitions would otherwise animate every control from the old
+    // theme's fill to the new one (white blocks fading out in dark). Off for
+    // the swap, flushed, then back on.
+    var still = document.createElement('style');
+    still.textContent = '*, *::before, *::after { transition: none !important; }';
+    document.head.appendChild(still);
+    if (link.parentNode) { link.parentNode.removeChild(link); }
+    next.id = 'theme';
+    if (onApplied) { onApplied(); }
+    void getComputedStyle(document.body).color;
+    void document.body.offsetHeight;
+    requestAnimationFrame(function(){
+      requestAnimationFrame(function(){
+        if (still.parentNode) { still.parentNode.removeChild(still); }
+      });
+    });
+  }
+  // Everything the new sheet needs to draw, fetched and decoded BEFORE it
+  // takes over: its icon images, and the font faces it registered (the
+  // same files as the current theme's, but new font objects that would
+  // otherwise load lazily and show the system serif for a frame).
+  function warmUp(sheet){
+    var waits = [];
+    var seen = {};
+    var re = /url\(\s*["']?([^"')]+)["']?\s*\)/g;
+    var rules = sheet.cssRules;
+    for (var i = 0; i < rules.length; i++) {
+      var text = rules[i].cssText;
+      if (text.indexOf('url(') < 0 || rules[i] instanceof CSSFontFaceRule) { continue; }
+      var m;
+      while ((m = re.exec(text)) !== null) {
+        var u = m[1];
+        if (u.indexOf('data:') === 0 || seen[u]) { continue; }
+        seen[u] = true;
+        var img = new Image();
+        img.src = new URL(u, next.href).href;
+        waits.push(img.decode().catch(function(){}));
+      }
+    }
+    if (document.fonts) {
+      document.fonts.forEach(function(face){
+        if (face.status === 'unloaded') { waits.push(face.load().catch(function(){})); }
+      });
+    }
+    // Never hold the switch hostage to a slow or missing asset.
+    var cap = new Promise(function(done){ setTimeout(done, 1500); });
+    Promise.race([Promise.all(waits), cap]).then(function(){
+      requestAnimationFrame(commit);
+    });
+  }
+  next.onerror = function(){ fail("the stylesheet did not load"); };
+  next.onload = function(){
+    if (settled) { return; }
     var rules = null;
     try {
-      rules = link.sheet && link.sheet.cssRules;
+      rules = next.sheet && next.sheet.cssRules;
     } catch (e) {
       // A sheet the document may not read is still a sheet that loaded.
-      // Cannot happen same-origin, and guessing "broken" here would revert a
+      // Cannot happen same-origin, and guessing "broken" here would drop a
       // working theme.
-      finish();
+      settled = true;
+      commit();
       return;
     }
-    if (rules && rules.length > 0) { finish(); }
-    else { revert("the stylesheet parsed to zero rules"); }
+    if (!(rules && rules.length > 0)) { fail("the stylesheet parsed to zero rules"); return; }
+    settled = true;
+    next.onload = next.onerror = null;
+    warmUp(next.sheet);
   };
-  link.href = newHref;
-  link.dataset.theme = newName;
-})(#, #, #, #, #)
+  next.href = newHref;
+  // BEFORE the current sheet, so the current one keeps winning every rule
+  // (the page does not change at all) until `commit` removes it.
+  link.parentNode.insertBefore(next, link);
+})(#, #, #, #, #, #)
 """.}
-  ## Point `#theme` at `newHref`, and put it back if that turns out to be
-  ## nothing.
+  ## Load the theme at `newHref` BEHIND the current `#theme` sheet, warm up
+  ## its fonts and icon images, and only then remove the current one (D-48).
+  ##
+  ## ## Why not just repoint `#theme.href`
+  ##
+  ## That is what this did until 2026-11-20. Changing a stylesheet link's
+  ## `href` drops the old sheet AT ONCE, and the new one applies only after
+  ## it has been fetched and parsed — so View → theme painted at least one
+  ## frame with no theme at all: system serif text, blank buttons and the
+  ## caption bar's icons at their natural (huge) size. Swapping two links on
+  ## `load` alone still showed serif text and blank icons for a frame, because
+  ## the new sheet's fonts and images load lazily once it applies; hence the
+  ## warm-up, capped at 1.5 s. A sheet that fails (below) is
+  ## simply removed, so the old theme stays without any revert step.
   ##
   ## ## The swap used to be two unconditional assignments
   ##
@@ -955,7 +1028,9 @@ proc swapThemeHrefImpl(link: js; newHref, newName, prevHref, prevName: cstring)
   ## with a blocker recorded in `rewritePrefixes` — `/demo` on a language host
   ## is served ONLY by the SPA fallback, so a `404.html` would take it out.
 
-proc loadTheme*(name: cstring) =
+proc loadTheme*(name: cstring; onApplied: proc() = nil) =
+  ## `onApplied` runs once the theme is on screen: after the new stylesheet
+  ## has loaded, or at once when `name` is already the current theme.
   ## Swap the theme stylesheet for `name`.
   ##
   ## THE DIRECTORY COMES OFF THE LINK THAT IS ALREADY THERE, and it has to,
@@ -1005,7 +1080,10 @@ proc loadTheme*(name: cstring) =
     # what let a theme the deployment does not carry render the application
     # unstyled while reporting success; see that proc.
     let previousHref = cast[JsObject](link).href.to(cstring)
-    swapThemeHrefImpl(cast[js](link), linkValue, name, previousHref, currentTheme)
+    swapThemeHrefImpl(cast[js](link), linkValue, name, previousHref, currentTheme,
+                      onApplied)
+  elif not onApplied.isNil:
+    onApplied()
 
 
 let monacoThemeNames* = JsAssoc[cstring, cstring]{"mac classic": cstring"codetracerWhite", # TODO
@@ -1027,8 +1105,9 @@ proc loadThemeFromName*(name: cstring) =
   var programName = themeProgramNames[name]
   let monacoTheme = monacoThemeNames[name]
   if not (programName.isNil or monacoTheme.isNil):
-    loadMonacoTheme(monacoTheme)
-    loadTheme(programName)
+    # The editor follows the stylesheet IN THE SAME FRAME: switched first, it
+    # showed the new theme's editor inside the old theme's app (D-48).
+    loadTheme(programName, proc() = loadMonacoTheme(monacoTheme))
   if data.startOptions.shellUi:
     loadShellTheme(data, programName)
   data.config.theme = programName

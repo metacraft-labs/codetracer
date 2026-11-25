@@ -801,9 +801,12 @@ proc renderVariableRow*[R, N](r: R; vm: StateVM;
               discard
             button(class = "value-history-button ct-button-image-xs-secondary ct-ml-2",
                    id = "value-history",
+                   # The shared tooltip (D-31), not a `.custom-tooltip` child:
+                   # that one sat inside the panel, so the panel clipped it
+                   # and it covered the origin badge beside it.
+                   title = "Show or hide value history",
                    onclick = proc() = vm.toggleHistory(item().path)):
-              tdiv(class = "custom-tooltip"):
-                text "Toggle history value"
+              discard
             # A collection the locals budget cut short (HSF-V1): fetch the
             # next elements, appended as further child rows.
             button(class = "value-load-more ct-button-text-xs-tertiary ct-ml-2",

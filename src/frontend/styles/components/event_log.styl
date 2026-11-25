@@ -12,7 +12,7 @@
 
 .eventLog-medium-control-button
   user-select: none
-  border-radius: 0.375rem
+  border-radius: 0.25rem
   color: colors-ui-text-primary-body
   white-space: nowrap
   height: 1.75rem
@@ -65,7 +65,7 @@
   align-items: start
 
 .hamburger-dropdown
-  border-radius: 0.375rem
+  border-radius: 0.25rem
   color: colors-ui-text-primary-body
   height: 1.5rem
   background-color: colors-ui-surface-primary-tertiary
@@ -114,7 +114,9 @@
   user-select: none
   transform-origin: top left
   overflow: hidden
-  box-shadow: 0 1em 2.5em rgba(0, 0, 0, 0.32)
+  // Light: a short, faint drop in the ink colour; the dark 32% black read as a
+  // heavy grey band on a light screen (D-44).
+  box-shadow: by-mode(0 1em 2.5em rgba(0, 0, 0, 0.32), 0 0.5rem 1.5rem rgba(29, 28, 26, 0.1))
   // `top` is overwritten inline: the container is appended to `document.body`
   // and positioned from the filter button's measured rect, gap included — see
   // `setupFilterDropdown` in src/frontend/ui/event_log.nim.  This is the
@@ -129,6 +131,13 @@
   // and its own background — and therefore has to take the scrollbar, and the
   // radius above, on its own.
   dropdown-scrollbar()
+
+  // The list is a section of this menu, under the tab row, not a menu of its
+  // own: the container's radius and `overflow: hidden` round the menu's outer
+  // corners, so the list's own DROPDOWN_RADIUS (shared_widgets.styl) only drew
+  // a curve against the tab row at its top corners.
+  > .dropdown-list
+    border-radius: 0
 
 .dropdown-list
   display: flex
@@ -247,7 +256,8 @@ table.dataTable tbody tr:not(.active):hover
     grid-column: 1 / 3
     height: CONTROL_HEIGHT_MD
     box-sizing: border-box
-    background-color: colors-ui-surface-base-raised
+    // Recessed track, as `segmented-tabs()` (shared_widgets.styl, D-44).
+    background-color: by-mode(colors-ui-surface-base-raised, colors-ui-surface-primary-tertiary)
     border: CONTROL_BORDER_WIDTH solid CONTROL_BORDER_COLOR
     border-radius: CONTROL_RADIUS
 
@@ -337,12 +347,12 @@ table.dataTable tbody tr:not(.active):hover
       max-height: INPUT_HEIGHT_XS
       margin: 0em 0em !important
       padding: 0 0.75em
-      border-radius: 0.5em
+      border-radius: calc(max(0rem, 0.5em - 0.125rem))
       // Matches the 0.0625rem (1px) field border in input.styl. This rule wins
       // over `.ct-input-small` on specificity, so leaving it at the old 0.03125em
       // kept this one field a hairline while every other field went to 1px.
       border: CONTROL_BORDER_WIDTH solid CONTROL_BORDER_COLOR
-      background: colors-ui-surface-input-secondary
+      background: field-fill(colors-ui-surface-input-secondary)
       color: colors-ui-text-primary-body !important
       font-family: "SpaceGrotesk"
       font-size: 1em !important
@@ -352,12 +362,12 @@ table.dataTable tbody tr:not(.active):hover
 
       &:hover
         border-color: colors-ui-border-primary-hover
-        background: colors-ui-surface-input-secondary
+        background: field-fill(colors-ui-surface-input-secondary)
 
       // Border and ring come from the shared active state (input.styl);
       // the surface stays the field's own, as it does for every other field.
       &:focus-visible
-        background: colors-ui-surface-input-secondary
+        background: field-fill(colors-ui-surface-input-secondary)
 
   .eventLog-detailed-table
     display: none // TODO: show
@@ -435,7 +445,7 @@ table.dataTable tbody tr:not(.active):hover
     height: 2rem
     line-height: 1.25rem
     text-align: center
-    border-radius: 0.625rem
+    border-radius: 0.5rem
     border: 0
     background-color: EVENT_LOG_BUTTON_BACKGROUND_COLOR
     color: EVENT_LOG_BUTTON_UNSELECTED_COLOR
@@ -722,8 +732,16 @@ label
 .eventLog-columns-button
   margin-left: auto
   white-space: nowrap
+  display: inline-flex
+  align-items: center
+  gap: 0.125rem
   font-size: 0.75em
   padding: 0.125em 0.5em
+
+// The plus after "Columns": `icons-lg=plus-sm` (a 16px box with an 8px plus),
+// in the button's text colour.  It was a typed "+" in the label.
+.eventLog-columns-icon
+  mask-icon(ICON_PLUS_SM, 1rem)
 
 // The menu is every other dropdown (Nikolay, 2026-10-20): the shared surface
 // (`dropdown-surface()`, shared_widgets.styl — the Requests pickers' menu), its
@@ -761,7 +779,7 @@ label
       flex: 0 0 auto
       width: 1rem
       height: 1rem
-      border-radius: 0.125rem
+      border-radius: 0
       // The icon is drawn on a child box: a mask on the handle itself would
       // also cut away its keyboard focus ring.
       &::before

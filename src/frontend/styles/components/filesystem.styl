@@ -78,7 +78,7 @@
 
 .filesystem-entry-folder-icon
   border: 0.09em solid colors-ui-text-primary-body
-  border-radius: 0.12em
+  border-radius: calc(max(0rem, 0.12em - 0.125rem))
   width: 0.95em
   height: 0.7em
 
@@ -91,7 +91,7 @@
     height: 0.25em
     border: 0.09em solid colors-ui-text-primary-body
     border-bottom: 0
-    border-radius: 0.12em 0.12em 0 0
+    border-radius: calc(max(0rem, 0.12em - 0.125rem)) calc(max(0rem, 0.12em - 0.125rem)) 0 0
 
 .filesystem-entry-file-icon
   border-left: 0.12em solid colors-ui-text-primary-body
@@ -146,6 +146,33 @@
   background: colors-ui-surface-primary-secondary
 .path-even
   background: colors-ui-surface-primary-secondary-hover
+
+// The tree's own icons — the expand arrows, the folder, the plain file — are
+// Design System icons painted in the row's text colour (D-38).  The third-party
+// tree stylesheet (public/third_party/jstree_default.css, loaded after this one,
+// hence `.filesystem.jstree-default` to outrank it) gave both themes the same
+// near-white pictures, so in the light theme they all but vanished.  File-type
+// icons (`.jstree-themeicon-custom`, e.g. the red Ruby gem) keep their colour.
+.filesystem.jstree-default
+  .jstree-open > .jstree-ocl,
+  .jstree-closed > .jstree-ocl
+    background-image: none
+    background-color: currentColor
+    -webkit-mask: ICON_CHEVRON_DOWN center / 1rem no-repeat
+    mask: ICON_CHEVRON_DOWN center / 1rem no-repeat
+
+  .jstree-closed > .jstree-ocl
+    -webkit-mask-image: ICON_CHEVRON_RIGHT
+    mask-image: ICON_CHEVRON_RIGHT
+
+  .jstree-themeicon:not(.jstree-themeicon-custom)
+    background: currentColor
+    -webkit-mask: ICON_FOLDER center / 1rem no-repeat
+    mask: ICON_FOLDER center / 1rem no-repeat
+
+  .jstree-file:not(.jstree-themeicon-custom)
+    -webkit-mask-image: ICON_FILE
+    mask-image: ICON_FILE
 
 // file-icons-js gives fallback glyphs fixed pixel font sizes, widths and
 // baseline offsets. Use the tree's scalable icon slot instead, so a glyph

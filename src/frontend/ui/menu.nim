@@ -105,6 +105,11 @@ when defined(js):
   proc stopPropagation(ev: dom_api.Event) {.importcpp: "#.stopPropagation()".}
   proc focusElement(node: dom_api.Element) {.importcpp: "#.focus()".}
   proc requestSessionTabsRenderSoon() {.importjs: "if (window.__ctRequestSessionTabsRender) { window.setTimeout(window.__ctRequestSessionTabsRender, 0); }".}
+  proc requestSessionTabsRenderNow() {.importjs: "if (window.__ctRequestSessionTabsRender) { window.__ctRequestSessionTabsRender(); }".}
+    ## Fill the session strip in the same task as the shell rebuild. The
+    ## rebuilt shell's `#session-tab-bar` starts EMPTY, and the deferred
+    ## `...Soon` variant let the browser paint one frame with no session tabs —
+    ## the top row visibly jumped on every Edit/Debug switch.
 
   var documentMenuDismissWired = false
   var activeMenuComponentForDismiss: MenuComponent
@@ -780,7 +785,9 @@ when defined(js):
     let r = WebRenderer()
     renderMenuShellInto[WebRenderer, dom_api.Element](r, container, model, callbacks)
     menuShellGate.noteRendered(signature)
-    requestSessionTabsRenderSoon()
+    # NOW, not soon: the shell just rebuilt has an empty session strip, and a
+    # deferred fill shows that empty strip for one frame (D-49).
+    requestSessionTabsRenderNow()
     if not self.data.startOptions.shellUi:
       debug_toolbar.requestDebugShellRender()
       if not self.data.ui.commandPalette.isNil:

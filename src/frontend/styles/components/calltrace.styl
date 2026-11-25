@@ -129,7 +129,7 @@
     content: ""
     left: 0.1875em
     top: 0.625em
-    border-radius: 0.09375em
+    border-radius: calc(max(0rem, 0.09375em - 0.125rem))
 
 
   .call-offset-icon-2
@@ -156,7 +156,7 @@
     height: 0.625em
     position: absolute
     background-color: CALLTRACE_NEXT_CALL_POINTER_COLOR
-    border-radius: 0.125em
+    border-radius: calc(max(0rem, 0.125em - 0.125rem))
     content: ""
     left: -0.125em
     top: 0
@@ -166,7 +166,7 @@
     height: 0.3125em
     position: absolute
     background-color: CALLTRACE_NEXT_CALL_POINTER_COLOR
-    border-radius: 0.09375em
+    border-radius: calc(max(0rem, 0.09375em - 0.125rem))
     content: ""
     left: 0.1875em
     top: 0.625em
@@ -229,7 +229,7 @@
     overflow: visible
     position: relative
     background-color: colors-ui-surface-input-default
-    border-radius: 0.625em
+    border-radius: calc(max(0rem, 0.625em - 0.125rem))
     padding-left: 0.9375em
     padding-bottom: 0.15625em
     padding-right: 0.3125em
@@ -238,7 +238,7 @@
     margin-bottom: 0.1875em
 
     .view-active
-      border-radius: 0.625em
+      border-radius: calc(max(0rem, 0.625em - 0.125rem))
       padding-left: 0
       position: relative
 
@@ -291,7 +291,7 @@
     padding-top: 0.3125em
     padding-bottom: 0.3125em
     width: fit-content
-    border-radius: 0.375em
+    border-radius: calc(max(0rem, 0.375em - 0.125rem))
     background-color: colors-ui-surface-input-default
     position: fixed
     z-index: 3
@@ -391,7 +391,7 @@
 
   .hidden-calls-button
     background-color: colors-ui-surface-input-default
-    border-radius: 0.625em
+    border-radius: calc(max(0rem, 0.625em - 0.125rem))
     padding-left: 0.625em
     padding-right: 0.625em
 
@@ -426,7 +426,7 @@
     font-size: 0.875em
     line-height: 1.125em
     padding-top: 0.125em
-    border-radius: 0.25em
+    border-radius: calc(max(0rem, 0.25em - 0.125rem))
 
   .toggle-call
     // keep it a bit in left, so we can actually see the function name for same depth
@@ -478,6 +478,7 @@
 
     .end-of-program-error
       background-image: url(CALLTRACE_EOP_ERROR_IMG);
+      light-icon(url(CALLTRACE_EOP_ERROR_IMG), cover, colors-ui-icon-warning-primary) // D-42
 
   .call-space
     width: 0.125em
@@ -643,7 +644,7 @@
   width: 100%
   background-color: colors-ui-surface-base-canvas
   color: colors-ui-text-primary-body
-  overflow-y: scroll
+  overflow-y: auto
 
 .inactive-trace, .inactive-dialog
   display: none
@@ -802,7 +803,7 @@
 
 .call-search-results
   max-height: 5.5em
-  overflow: scroll
+  overflow: auto
   background-color: colors-ui-surface-input-default
   margin-left: 0
   margin-bottom: 0.25em

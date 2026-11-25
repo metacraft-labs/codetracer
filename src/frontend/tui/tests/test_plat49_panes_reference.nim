@@ -47,7 +47,7 @@
 ##   * THE DESKTOP'S CELL — a character of its editor's monospace and its
 ##     line height, which the terminal's `DesktopCellWidthPx` /
 ##     `DesktopCellHeightPx` carry its pixel measures into cells with;
-##   * the EVENT LOG'S COLUMN MENU — the desktop's "Columns +" lists the
+##   * the EVENT LOG'S COLUMN MENU — the desktop's "Columns" (+ icon) lists the
 ##     ViewModel's columns in its order, and showing location / moving
 ##     output left changes the header as `EventLogVM.showColumn` /
 ##     `moveColumn` say.

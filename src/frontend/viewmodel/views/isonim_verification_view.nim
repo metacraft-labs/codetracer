@@ -212,7 +212,7 @@ proc renderVerificationPanelTree[R, N](r: R; mdl: VerificationPanelModel;
                `aria-label` = "Run " & mdl.runLabel):
           text mdl.runLabel
       if mdl.cancellable:
-        button(class = "ct-verification-cancel",
+        button(class = "ct-button-md-secondary ct-verification-cancel",
                `data-ct-verification-action` = "cancel",
                onclick = plainHandler(hnd.onStop),
                `aria-label` = "Stop this verification run"):
@@ -239,7 +239,7 @@ proc renderVerificationPanelTree[R, N](r: R; mdl: VerificationPanelModel;
              `data-ct-verification-counterexamples` = $mdl.counterexampleOffers.len):
           for offerIndex in 0 ..< mdl.counterexampleOffers.len:
             let offer = mdl.counterexampleOffers[offerIndex]
-            button(class = "ct-verification-open-counterexample",
+            button(class = "ct-button-md-secondary ct-verification-open-counterexample",
                    `data-ct-verification-action` = "open-counterexample",
                    `data-ct-verification-finding` = offer.findingId,
                    `data-ct-verification-counterexample-steps` = $offer.stepCount,

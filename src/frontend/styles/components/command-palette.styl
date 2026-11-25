@@ -39,7 +39,7 @@ COMMAND_INPUT_BOTTOM = COMMAND_INPUT_HEIGHT
     align-items: center
     background: colors-ui-surface-primary-default
     border: CONTROL_BORDER_WIDTH solid CONTROL_BORDER_COLOR
-    border-radius: 0.75em 0.75em 0 0
+    border-radius: calc(max(0rem, 0.75em - 0.125rem)) calc(max(0rem, 0.75em - 0.125rem)) 0 0
     box-shadow: 0 0.75em 2.5em rgba(0, 0, 0, 0.35)
 
     // The same hover as every other field (components/input.styl): the border
@@ -139,7 +139,7 @@ COMMAND_INPUT_BOTTOM = COMMAND_INPUT_HEIGHT
 
   .command-surface
     position: relative
-    border-radius: 0.75em
+    border-radius: calc(max(0rem, 0.75em - 0.125rem))
 
   .command-surface-open
     overflow: visible
@@ -148,7 +148,7 @@ COMMAND_INPUT_BOTTOM = COMMAND_INPUT_HEIGHT
     max-height: 40vh
 
   .ct-input-cp-background
-    background: colors-ui-surface-primary-secondary !important
+    background: field-fill(colors-ui-surface-primary-secondary) !important // D-43
     padding-left: 0.5rem !important
 
   // The agent prompt's text and placeholder: pale cyan on the dark input,
@@ -172,7 +172,7 @@ COMMAND_INPUT_BOTTOM = COMMAND_INPUT_HEIGHT
     border: 0.0625em solid colors-ui-border-tertiary
     box-shadow: 0 0.75em 2.5em rgba(0, 0, 0, 0.4)
     margin-top: 0.25rem
-    border-radius: 0.75em
+    border-radius: calc(max(0rem, 0.75em - 0.125rem))
     overflow: hidden
 
     .command-result:last-child
@@ -226,7 +226,7 @@ COMMAND_INPUT_BOTTOM = COMMAND_INPUT_HEIGHT
   position: fixed
   bottom: 1.25rem
   max-height: 40vh
-  overflow: scroll
+  overflow: auto
 
   .search-results-location
     width: 50vw
@@ -328,7 +328,7 @@ COMMAND_INPUT_BOTTOM = COMMAND_INPUT_HEIGHT
       // down used to live here; it left the field half a pixel lower than every
       // other control on the same row.
       height: COMMAND_INPUT_HEIGHT
-      border-radius: 0.375rem
+      border-radius: 0.25rem
       // The field needs edges of its own.  Painted as the caption bar's own
       // colour it had none, so the eye took its top edge from nothing and its
       // bottom edge from the tabs below — which made two equal 4px gaps read as
@@ -339,7 +339,7 @@ COMMAND_INPUT_BOTTOM = COMMAND_INPUT_HEIGHT
       // the tab surface, so the field simply traded one neighbour for another.
       // The border is the strong signal — around 50 levels above the bar — so it
       // carries the definition, at a full pixel rather than a hairline.
-      background: colors-ui-surface-primary-default
+      background: field-fill(colors-ui-surface-primary-default) // D-43
       border: CONTROL_BORDER_WIDTH solid CONTROL_BORDER_COLOR
       box-shadow: none
 

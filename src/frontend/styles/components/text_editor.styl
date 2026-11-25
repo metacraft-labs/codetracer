@@ -117,7 +117,7 @@
   --ct-gutter-highlight-size: 0.8em
   --ct-gutter-glyph-size: 0.7em
   margin-left: 0
-  border-bottom-left-radius: 0.375em
+  border-bottom-left-radius: calc(max(0rem, 0.375em - 0.125rem))
 
 .margin-view-overlays
   height: 100%
@@ -368,14 +368,14 @@
     background-color: colors-ui-surface-primary-tertiary !important
 
 .monaco-inputbox
-  border-radius: 1.5625em
+  border-radius: calc(max(0rem, 1.5625em - 0.125rem))
 
 .code-editor
   // background-color: colors-ui-surface-base-panel
   height: 100% //100vh
-  overflow: scroll
+  overflow: auto
   flex-basis: 100%
-  border-radius: 0.375em
+  border-radius: calc(max(0rem, 0.375em - 0.125rem))
 
   &:focus
     outline: 0em
@@ -515,7 +515,7 @@
     // height: 1.0625em
     // line-height: 1.0625em
     display: flex
-    border-radius: 0.125em
+    border-radius: calc(max(0rem, 0.125em - 0.125rem))
     box-sizing: border-box
     white-space: nowrap
 
@@ -526,7 +526,7 @@
     margin-right: 0.5em
     justify-content: center
     align-items: center
-    border-radius: 0.25rem
+    border-radius: 0.125rem
     border: 0.12em solid colors-editor-surface-tertiary
     background: colors-editor-surface-primary
     white-space: nowrap
@@ -545,7 +545,7 @@
     // height: 1.0625em
     // line-height: 1.0625em
     display: flex
-    border-radius: 0.125em
+    border-radius: calc(max(0rem, 0.125em - 0.125rem))
     box-sizing: border-box
     white-space: nowrap
 
@@ -597,7 +597,7 @@
     // max-width: 6.25em // 1.9375em // it seems we need a ~12.5em max or no max? (old: all width should be ~4.375em for two int values)
     overflow: hidden
     text-align: center
-    border-radius: 0.125em
+    border-radius: calc(max(0rem, 0.125em - 0.125rem))
     text-overflow: ellipsis
     font-family: monospace
     // margin-top: 0.09375em
@@ -675,7 +675,7 @@
 
     &.shrinked
       background-color: colors-ui-surface-base-panel
-      border-radius: 0.15625em
+      border-radius: calc(max(0rem, 0.15625em - 0.125rem))
 
       &.active
         .flow-loop-shrinked-iteration
@@ -770,7 +770,7 @@
   .unknown-location-asm
     white-space: pre
     font-family: monospace
-    overflow-y: scroll
+    overflow-y: auto
     overflow-x: auto
 
     .asm-code .asm-highlight
@@ -781,7 +781,7 @@
   z-index: 10000
   width: fit-content
   background-color: colors-ui-surface-base-panel
-  border-radius: 0.3125em
+  border-radius: calc(max(0rem, 0.3125em - 0.125rem))
   display: none
 
   &:focus
@@ -793,7 +793,7 @@
 
 .context-menu-option
   // Layout overrides on top of .ct-menu-item base styles
-  border-radius: 0.3125em
+  border-radius: calc(max(0rem, 0.3125em - 0.125rem))
   font-size: 0.875em
 
 .context-menu-option-text
@@ -980,10 +980,12 @@ line-number-type()
 .gutter:hover .gutter-runtest
   opacity: 1
 
-// AND THE ARROW YIELDS, but only while the row is hovered. Outside that the
-// current line keeps its marker exactly as before, so this control changes
-// nothing about how a reader finds where execution is.
-.gutter:hover .gutter-highlight-active:before
+// AND THE ARROW YIELDS, but only while the row is hovered and only where the
+// row HAS a run-test control (a test's first line).  Outside that the current
+// line keeps its marker exactly as before, so this control changes nothing
+// about how a reader finds where execution is.  It was every hovered row, so
+// the arrow vanished on hover with nothing taking its place.
+.gutter:hover:has(.gutter-runtest) .gutter-highlight-active:before
   opacity: 0
 
 // RUNNING is visible without a hover, because at this point the slot is a
@@ -1048,7 +1050,7 @@ editor-execution-pointer()
 .ct-column-breakpoint-marker
   border-bottom: 0.125em solid colors-ui-text-error-primary
   background-color: rgba(255, 0, 0, 0.18)
-  border-radius: 0.1em
+  border-radius: calc(max(0rem, 0.1em - 0.125rem))
 
 .ct-column-breakpoint-marker.ct-breakpoint-conditional
   border-bottom-style: dashed
@@ -1101,7 +1103,7 @@ editor-execution-pointer()
 
 .limited-expanded
   font-size: 1em
-  overflow-y: scroll
+  overflow-y: auto
   height: 50vh
 
 .breakpoint-menu
@@ -1157,12 +1159,12 @@ if IS_EXTENSION
     width: 100%
 else
   #values
-    overflow-x: scroll
+    overflow-x: auto
 #right
   width: 24%
   float: left
   height: 62.5em
-  overflow-y: scroll
+  overflow-y: auto
 
 .invisible
   display: none
@@ -1177,7 +1179,7 @@ else
   z-index: 1
   width: 100% !important
   height: 12.5em
-  overflow: scroll
+  overflow: auto
   position: absolute
 
 .active-tab
@@ -1259,7 +1261,7 @@ else
   // height: 1.0625em
   // line-height: 1.0625em
   display: flex
-  border-radius: 0.125em
+  border-radius: calc(max(0rem, 0.125em - 0.125rem))
   box-sizing: border-box
   white-space: nowrap
 
@@ -1283,7 +1285,7 @@ else
   // height: 1.0625em
   // line-height: 1.0625em
   display: flex
-  border-radius: 0.125em
+  border-radius: calc(max(0rem, 0.125em - 0.125rem))
   box-sizing: border-box
   white-space: nowrap
 
@@ -1335,7 +1337,7 @@ else
 
 .line-diff-removed
   background-color: rgba(248, 81, 73, 0.18)
-  border-left: 0.1875em solid #f85149
+  border-left: 0.1875em solid by-mode(#f85149, colors-ui-border-error)
 
 // THE GLYPH COLUMN (Editor-Pane.md MC.5): Monaco's glyph margin, one lane, one
 // mark per line, centred. The hint is `gutter.breakpoint.hint`, a colour of its

@@ -97,7 +97,7 @@
     padding: 0 0.625rem
     // Preserve the dark outline; the light mode uses its border token.
     border: 0.0625rem solid by-mode(#3a3a3a, colors-ui-border-primary)
-    border-radius: 0.3125rem
+    border-radius: 0.1875rem
     background-color: transparent
     font-family: "SpaceGrotesk"
     font-size: 0.75rem
@@ -265,27 +265,22 @@
   display: flex
   align-items: center
 
-  // The expander's caret is a stencil in the theme's icon colour: its file
-  // strokes a near-white `#DDDDDD`, which as a `background-image` was
-  // invisible on the light panel (a compound value showed no caret at all).
+  // D-38: the Design System chevrons in the text colour.  The pictures they
+  // replace were near-white files both themes shared, so in the light theme
+  // the arrows all but vanished.  The 16px artwork is centred in the same
+  // 8px box; its chevron is 4x8, so nothing is cut off.
   .caret-collapse,
   .caret-expand
     display: block
-    background-color: colors-ui-icon-primary-default
-    -webkit-mask-position: center
-    mask-position: center
-    -webkit-mask-repeat: no-repeat
-    mask-repeat: no-repeat
     width: 0.5em
     height: 0.5em
-
-  .caret-collapse
-    -webkit-mask-image: SHARED_OPEN_FA_ICON
-    mask-image: SHARED_OPEN_FA_ICON
+    background-color: currentColor
+    -webkit-mask: ICON_CHEVRON_RIGHT center / 1rem no-repeat
+    mask: ICON_CHEVRON_RIGHT center / 1rem no-repeat
 
   .caret-expand
-    -webkit-mask-image: SHARED_CLOSE_FA_ICON
-    mask-image: SHARED_CLOSE_FA_ICON
+    -webkit-mask-image: ICON_CHEVRON_DOWN
+    mask-image: ICON_CHEVRON_DOWN
 
 .value-line-view-text
   display: flex
