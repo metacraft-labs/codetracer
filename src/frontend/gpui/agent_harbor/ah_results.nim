@@ -35,6 +35,7 @@ from ../../viewmodel/views/cut_text_rules import cutAroundMatch
 import ./ah_theme
 import ./ah_composer
 from ./ah_session_activity import wrappedRows
+from ./ah_changes_inbox_parts import mono, monoTextPx
 from ../../viewmodel/input/element_press import OperationAttribute
 
 export result_commands_vm, agent_harbor_results_words, ah_theme
@@ -162,23 +163,27 @@ proc rowBlock(r: GpuiRenderer; p: AhPalette; vm: ResultCommandsVM; g: ShownGroup
                             ("height", $linePx & "px"), ("flex-shrink", "0")])
   if code:
     let (ms, me) = matchedSpan(row, query)
-    let measure = proc(text: string): int = textPx(text, BodyPx)
+    # Set in the code face (Space Mono, `.ah-results-title-code`), as the
+    # editor and the Changes panel set code (brief: "a line of the program's
+    # text is set in the code face"), so it is cut by Space Mono's advances.
+    let measure = proc(text: string): int = monoTextPx(text, BodyPx)
     let shown = cutAroundMatch(row.title, ms, me, max(1, widthPx - rightPx0 - 8), measure,
                                measure(Ellipsis))
-    # The match bold where the cut drew it (D62), the rest in the body role.
     let t = r.box(pairs = [("min-width", "0px"), ("flex-grow", "1"), ("items", "baseline")])
+    r.tag(t, "face", "code")
     # Every match in view bold (D62), the rest in the body role.
     let mt = if me > ms: row.title[ms ..< me] else: ""
     var from0 = 0
     for (s0, n0) in spansIn(shown, mt):
       if s0 > from0:
-        r.appendChild(t, r.text(shown[from0 ..< s0], BodyPx, p.textBody, shrink = false))
-      let m = r.text(shown[s0 ..< s0 + n0], BodyPx, p.textBody, bold = true, shrink = false)
+        r.appendChild(t, r.mono(r.text(shown[from0 ..< s0], BodyPx, p.textBody, shrink = false)))
+      let m = r.mono(r.text(shown[s0 ..< s0 + n0], BodyPx, p.textBody, bold = true,
+                            shrink = false))
       r.tag(m, "match", shown[s0 ..< s0 + n0])
       r.appendChild(t, m)
       from0 = s0 + n0
     if from0 < shown.len:
-      r.appendChild(t, r.text(shown[from0 .. ^1], BodyPx, p.textBody, shrink = false))
+      r.appendChild(t, r.mono(r.text(shown[from0 .. ^1], BodyPx, p.textBody, shrink = false)))
     # The title as drawn (the cover suite holds it to the drawing), and
     # the same as `title-shown` for the follow-up suite.
     r.tag(t, "title", shown)

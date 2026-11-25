@@ -304,6 +304,11 @@ proc drawRecordingsMore*(r: GpuiRenderer; p: AhPalette; buttons: RecordingButton
     r.styles(result, [("margin-left", $RingMarginPx & "px"),
                       ("margin-right", $RingMarginPx & "px")])
     r.tag(result, "recordings-hidden-ringed", "true")
+    # The ringed control, as a ringed button is: the web's `.ah-rec-ringed`
+    # is on `.ah-rec-more` too, so the layout record's `ps-ringed` region
+    # (`agent-harbor-regions.json`) is the chip here. Without it the region
+    # was "drawn only on web" for `process-switcher-many-ringed`.
+    r.tag(result, "recording-ringed", "true")
     r.appendChild(result, r.recordingRing(p))
 
 proc drawBarTab(r: GpuiRenderer; p: AhPalette; vm: InitiativeTabStripVM;

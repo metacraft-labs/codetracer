@@ -34,6 +34,7 @@ import isonim_gpui/renderer
 from isonim_gpui/bindings import gpui_reset_tree
 
 import ../agent_harbor/ah_stories
+from ../chrome import MonoFontFamily
 from ../../viewmodel/input/element_press import OperationAttribute
 import ../../stories/codetracer_stories
 import ../../../../tools/stories/emit_storybook_stories
@@ -134,6 +135,35 @@ suite "CTF-P2c: manager note 132's follow-ups in GPUI (D60-D63)":
       for t in titles:
         check "remaining" in getAttribute(t, "data-ah-title-shown").toLowerAscii
         check getAttribute(t, "data-ah-title-shown").count("\xE2\x80\xA6") <= 2
+      m.dispose()
+
+  test "a matched line of the program's text is set in the code face":
+    # The brief: "a line of the program's text is set in the code face" (the
+    # web's `.ah-results-title-code`, Space Mono). Every run of a code row's
+    # title -- the matches and the text around them -- is in Space Mono, at
+    # every width; its control, a row that is not code (a file's title), is
+    # in the window's face (GPUI review of 2026-11-25: the program text was
+    # in the body face).
+    for width in [1440, 360]:
+      let m = mount("search-final", width, height = 2000)
+      let plan = parseJson(renderPlanJson(r, m.root))
+      var code, other: seq[string]
+      proc walk(n: JsonNode; inCode, inRow: bool) =
+        let attrs = n{"attributes"}
+        let isCode = inCode or (attrs.kind == JObject and attrs{"data-ah-face"}.getStr == "code")
+        let isRow = inRow or (attrs.kind == JObject and attrs{"data-ah-kind"}.getStr.len > 0)
+        let family = n{"styles"}{"font_family"}.getStr
+        # Every run of text (`ah_theme.text`) names its face.
+        if family.len > 0:
+          if isCode: code.add family
+          elif isRow: other.add family
+        for c in n{"children"}.getElems: walk(c, isCode, isRow)
+      walk(plan, false, false)
+      checkpoint "width " & $width & ": code " & $code & ", other " & $other
+      check code.len > 0
+      check code.allIt(it == MonoFontFamily)
+      check other.len > 0
+      check other.allIt(it != MonoFontFamily)
       m.dispose()
 
   test "the selected row is on the editor's selection ground":
