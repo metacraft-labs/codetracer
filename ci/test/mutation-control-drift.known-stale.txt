@@ -851,8 +851,8 @@ src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/fro
 # package by name and checks the admission; the suite changed, so the harness grading it owes
 # a re-grade.
 src/frontend/gpui/tests/plat20-mutation-control.sha256	src/frontend/gpui/tests/test_gpui_shell_split.nim	3d8325b36f086841e52b6032017041f6e015bba121482c5765a8b5140e05e1ee	e31ea3dce4e758df5744984ae12c76d3ab3c8b02d6a5ff199006e21bb9b604b4
-src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/viewmodel/plugin_host/supervisor.nim	37a911c95f7ce375ba18f590470046ad9550343fadf19166e6bf8ec65e2bd4fe	4d43574344afeb66d34e11ae1308c17bac3e9f7ef07c37a41d40cef4cf96b089
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/supervisor.nim	37a911c95f7ce375ba18f590470046ad9550343fadf19166e6bf8ec65e2bd4fe	4d43574344afeb66d34e11ae1308c17bac3e9f7ef07c37a41d40cef4cf96b089
+src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/viewmodel/plugin_host/supervisor.nim	37a911c95f7ce375ba18f590470046ad9550343fadf19166e6bf8ec65e2bd4fe	538e210863e1e1f99f853d55b69d1481dd9ce7eed49808bc7a3d15800c892ed8
+src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/supervisor.nim	37a911c95f7ce375ba18f590470046ad9550343fadf19166e6bf8ec65e2bd4fe	538e210863e1e1f99f853d55b69d1481dd9ce7eed49808bc7a3d15800c892ed8
 
 # 2026-11-25, the SDK acknowledges an autoAck plugin's invoke on its reader thread
 # (codetracer-pm 2026-11-24-a-freshly-activated-plugins-first-key-misses-its-input-
@@ -860,7 +860,7 @@ src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/fronten
 # M25, its positive control run by hand: ackEarly off fails the new case) and the SDK
 # under plat83-ct-lens (its M3 re-indented to compile; by hand, it fails "a slow git
 # does not hold the sibling plugin"). Both owe a re-grade for these bytes.
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_plugin_process_host.nim	a89551d91a97127efb3167bff332656b21a67e21ce5bdc6e9222924210b3d119	45ffd89aa41f7332bc7df3bf616301ec8cd3be01ad07f0a26fd4328f530e79cd
+src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_plugin_process_host.nim	a89551d91a97127efb3167bff332656b21a67e21ce5bdc6e9222924210b3d119	e60205a8fba6e07a3bfd8f2a176ce73450edfd6324a0145513bfe2f6e09a4c4d
 src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/plugin_sdk/codetracer_plugin_sdk.nim	2d4903eaa226c5295c0ced78d7a2666d9ecabd473c9bf9d3066d0a009d782fee	e2c939f3be8c6038dff6f10c0bb7c71b0faf5657f99ebcae999ea82b523483a1
 src/frontend/tui/tests/plat83-ct-lens-mutation-control.sha256	src/plugin_sdk/codetracer_plugin_sdk.nim	2d4903eaa226c5295c0ced78d7a2666d9ecabd473c9bf9d3066d0a009d782fee	e2c939f3be8c6038dff6f10c0bb7c71b0faf5657f99ebcae999ea82b523483a1
 # 2026-11-25: the status line's row-sharing rule moved from the GPUI window
