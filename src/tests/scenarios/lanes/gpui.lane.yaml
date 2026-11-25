@@ -17,6 +17,8 @@ settle-timeout: 30000
 stage-timeout: 300000
 applicable:
   - ../tracing/trace-macro-at-caret.yaml
+  # a whole debugging session, the one every front-end renders into a video
+  - ../tour/calc-debugging-session.yaml
   - ../gpui/keys-debug-function-keys.yaml
   - ../gpui/editor-wheel-scrolls-rows.yaml
   # --- the GPUI flavour's ports (passed fast and realistic) ---

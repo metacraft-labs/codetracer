@@ -8,7 +8,9 @@
 #     backend";
 #   - a cursor theme (Adwaita): "no cursor theme on this machine";
 #   - a D-Bus session configuration: dbus-run-session could not open
-#     /etc/dbus-1/session.conf, so sway never started.
+#     /etc/dbus-1/session.conf, so sway never started;
+#   - an EGL vendor (Mesa's): GNOME Shell "Unable to initialize the Clutter
+#     backend: no available drivers found" (run 45292632494).
 # For each, the step must exist, take it from this flake's nixpkgs, keep the
 # host's own when there is one, and come before the first step that runs the
 # window (the build of the windowed front-end).
@@ -43,6 +45,9 @@ check() { # name, nixpkgs attribute, host-has test
 	fi
 }
 check "Give Vulkan a software driver where the host has none" mesa "/run/opengl-driver/share/vulkan/icd.d"
+# GNOME Shell (PLAT-69's second compositor) needs an EGL vendor, which a
+# bare garm VM lacks too ("no available drivers found", run 45292632494).
+check "Give Vulkan a software driver where the host has none" mesa "/run/opengl-driver/share/glvnd/egl_vendor.d"
 check "Give the window a cursor theme where the host has none" adwaita-icon-theme "/run/current-system/sw/share/icons/Adwaita/cursors"
 check "Give dbus-run-session a session bus configuration where the host has none" dbus.out "/etc/dbus-1/session.conf"
 

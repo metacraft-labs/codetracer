@@ -211,6 +211,8 @@ _tlf_js_only_suites() {
 #
 #   agent-harbor views (fleet, pie, link ink, session tabs, results): the GPUI and TUI
 #       front-ends draw them; no `nim js` bundle imports them.
+#   the sessions bar's setting, fit and inbox group: the Agent Harbor frames
+#       read them, and no `nim js` bundle imports them yet.
 #   the Agent Harbor Tests and trace-link web views: only StoryBook draws
 #       them so far, and it is none of the bundles above.
 #   `codetracer_ui_components` (the editor gutter lanes) and the TUI
@@ -225,6 +227,9 @@ _TLF_VM_UNIT_JS_NOT_SHIPPED=(
 	'/test_ctf_p2c_results_followups\.nim$'
 	'/test_editor_gutter_lanes\.nim$'
 	'/test_editor_vocabulary_laws\.nim$'
+	'/test_sessions_bar_fit\.nim$'
+	'/test_sessions_bar_inbox_group\.nim$'
+	'/test_sessions_bar_setting\.nim$'
 )
 
 # _tlf_vm_unit_candidates — the ViewModel unit suites that belong to neither

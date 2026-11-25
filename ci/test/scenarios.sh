@@ -4,7 +4,7 @@
 #
 #   ci/test/scenarios.sh build [part…]      the runner and the bindings' programs
 #   ci/test/scenarios.sh lint               the scenario linter over every scenario
-#   ci/test/scenarios.sh lane <flavour>     one lane: terminal | gpui | electron
+#   ci/test/scenarios.sh lane <flavour>     one lane: terminal | gpui | zgui | electron
 #                                           (SCENARIO_LANE_SHARD=i/n: one shard of it)
 #   ci/test/scenarios.sh run <flavour> <scenario.yaml> [dvs run args…]
 #   ci/test/scenarios.sh binding-test       the bindings' own tests (bindings/*/*.test.ts)
@@ -106,7 +106,7 @@ siblings_of() {
 		echo "nim-libvterm ${ws}/nim-libvterm"
 		echo "nim-pty ${ws}/nim-pty"
 		;;
-	gpui)
+	gpui | zgui)
 		echo "DemoVideoScript $(dirname "${dvs_src}")"
 		echo "DemoVideoScript-GuiAssert $(dirname "${dga_src}")"
 		echo "GuiAssert $(dirname "${ga_src}")"
@@ -138,6 +138,7 @@ output_of() {
 	dvs) echo "${bin}/dvs" ;;
 	terminal) echo "${bin}/dvs-termassert-codetracer" ;;
 	gpui) echo "${bin}/dvs-guiassert-codetracer" ;;
+	zgui) echo "${bin}/dvs-guiassert-codetracer-zgui" ;;
 	playwright) echo "${build_dir}/scenario-arm/src/main.ts" ;;
 	esac
 }
@@ -161,6 +162,7 @@ parts_of() {
 	case "$1" in
 	terminal) echo "terminal" ;;
 	gpui) echo "gpui" ;;
+	zgui) echo "zgui" ;;
 	electron) echo "dvs playwright" ;;
 	esac
 }
@@ -218,6 +220,17 @@ build_gpui() {
 	stamp_siblings gpui
 }
 
+build_zgui() {
+	# The zgui window (`codetracer-zgui`, `just build-zgui`), read by the same
+	# GuiAssert backend as the GPUI window, with the zgui binding.
+	require "DemoVideoScript-GuiAssert" "${dga_src}/demo_video_script_guiassert.nim"
+	check_siblings zgui
+	nim c "${nim_common[@]}" --path:"${ga_src}" --path:"${dvs_src}" --path:"${dga_src}" \
+		--nimcache:"${nimcache}/scenario-guiassert-zgui" \
+		-o:"${bin}/dvs-guiassert-codetracer-zgui" "${S}/bindings/guiassert/dvs_guiassert_codetracer_zgui.nim"
+	stamp_siblings zgui
+}
+
 build_playwright() {
 	require "DemoVideoScript-Playwright" "${dpw_root}/src/main.ts"
 	check_siblings playwright
@@ -237,10 +250,10 @@ build_playwright() {
 backend_of() {
 	case "$1" in
 	terminal) echo "termassert" ;;
-	gpui) echo "guiassert" ;;
+	gpui | zgui) echo "guiassert" ;;
 	electron) echo "cmd:node ${build_dir}/scenario-arm/src/main.ts --binding ${root}/${S}/bindings/playwright/codetracer-binding.ts" ;;
 	*)
-		echo "scenarios: unknown flavour '$1' (terminal, gpui, electron)" >&2
+		echo "scenarios: unknown flavour '$1' (terminal, gpui, zgui, electron)" >&2
 		exit 64
 		;;
 	esac
@@ -250,16 +263,17 @@ runner_of() {
 	case "$1" in
 	terminal) echo "${bin}/dvs-termassert-codetracer" ;;
 	gpui) echo "${bin}/dvs-guiassert-codetracer" ;;
+	zgui) echo "${bin}/dvs-guiassert-codetracer-zgui" ;;
 	electron) echo "${bin}/dvs" ;;
 	esac
 }
 
 case "${1:-}" in
 build)
-	# `build [dvs stage terminal gpui playwright]`: all, or the named parts.
+	# `build [dvs stage terminal gpui zgui playwright]`: all, or the named parts.
 	shift
 	parts=("$@")
-	[ "${#parts[@]}" -gt 0 ] || parts=(dvs stage terminal gpui playwright)
+	[ "${#parts[@]}" -gt 0 ] || parts=(dvs stage terminal gpui zgui playwright)
 	for p in "${parts[@]}"; do "build_${p}"; done
 	;;
 lint)
@@ -323,7 +337,7 @@ lint)
 	echo "scenarios: the Playwright bindings parse; a stray '}' is rejected as it must be"
 	;;
 lane)
-	flavour="${2:?usage: scenarios.sh lane <terminal|gpui|electron>}"
+	flavour="${2:?usage: scenarios.sh lane <terminal|gpui|zgui|electron>}"
 	runner="$(runner_of "${flavour}")"
 	[ -x "${runner}" ] || "$0" build
 	ensure_built "${flavour}"

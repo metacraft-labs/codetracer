@@ -175,6 +175,28 @@ jobs:
             echo "VK_ICD_FILENAMES=${icd}" >> "${GITHUB_ENV}"
             echo "VK_DRIVER_FILES=${icd}" >> "${GITHUB_ENV}"
           fi
+          # GNOME Shell (GuiAssert's gnome target, PLAT-69's second
+          # compositor) renders through EGL and GBM, not Vulkan, and on a host
+          # with no EGL vendor it does not start: "Unable to initialize the
+          # Clutter backend: no available drivers found" (run 45292632494,
+          # shard 1). Mesa's EGL vendor, GBM backend and DRI drivers from the
+          # same nixpkgs are the fallback (measured on the workstation:
+          # gnome-shell --headless fails that way with the host's drivers
+          # hidden, and starts with these three set).
+          if ls /run/opengl-driver/share/glvnd/egl_vendor.d/*.json /usr/share/glvnd/egl_vendor.d/*.json /etc/glvnd/egl_vendor.d/*.json >/dev/null 2>&1; then
+            echo "the host has an EGL vendor; keeping it"
+          else
+            mesa="$(nix build --no-link --print-out-paths --inputs-from . nixpkgs#mesa | head -n 1)"
+            vendor="${mesa}/share/glvnd/egl_vendor.d/50_mesa.json"
+            test -f "${vendor}"
+            test -f "${mesa}/lib/gbm/dri_gbm.so"
+            echo "no EGL vendor on this host; using Mesa's (${vendor})"
+            {
+              echo "__EGL_VENDOR_LIBRARY_FILENAMES=${vendor}"
+              echo "GBM_BACKENDS_PATH=${mesa}/lib/gbm"
+              echo "LIBGL_DRIVERS_PATH=${mesa}/lib/dri"
+            } >> "${GITHUB_ENV}"
+          fi
 
       - name: Give the window a cursor theme where the host has none
         # The scenario binding names the theme the window loads its pointer
@@ -452,7 +474,10 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just test-tui-real-emulators
 
       - name: Upload the frames
-        if: ${{ failure() && matrix.shard == 1 }}
+        # Also when cancelled at the job's bound, which is when they are
+        # most needed; and every window lane's own output directory, since a
+        # lane that fails here is diagnosed from its run log and frames.
+        if: ${{ (failure() || cancelled()) && matrix.shard == 1 }}
         uses: actions/upload-artifact@v4
         with:
           name: gpui-window-captures
@@ -461,6 +486,10 @@ jobs:
             build/plat47-gpui/
             build/plat48-gpui/
             build/plat69/
+            build/plat59-gpui/
+            build/plat68/
+            build/plat70b-gpui/
+            build/gpui-plugins/
             build/plat35/gpui-window/
             src/tests/visual/plat45-gpui-arrangement.json
             src/tests/visual/plat47-gpui-window.json

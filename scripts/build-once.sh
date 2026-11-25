@@ -703,6 +703,18 @@ PY
 	# script self-guards (no-ops when codetracer-setcap is absent or
 	# passwordless sudo is unavailable), so it is safe to call on macOS
 	# too. Windows has no Linux setcap concept, so skip it there.
+	# A build of one part of the tree that is not the product (the StoryBook's
+	# stylesheets, `scripts/build-storybook-styles.sh`) builds no `ct`, so the
+	# three steps below, which set capabilities on `bin/ct`, refuse a `ct`
+	# that cannot start and stamp the Electron bundle, have nothing to act on:
+	# run after `.#frontend-styles` they failed a build that had succeeded,
+	# because the tree held no `ct` at all. The caller that builds such a part
+	# says so with CODETRACER_REPROBUILD_PARTIAL=1; nothing else sets it, so
+	# every product build still runs all three.
+	if [ "${CODETRACER_REPROBUILD_PARTIAL:-0}" = 1 ]; then
+		echo "build-once: built $ct_repro_target only (CODETRACER_REPROBUILD_PARTIAL=1); the product checks on bin/ct are not run" >&2
+		exit 0
+	fi
 	if [ "$ct_reprobuild_host" = "linux" ] || [ "$ct_reprobuild_host" = "darwin" ]; then
 		scripts/post-build-setcap.sh "$ct_repro_out_root/bin/ct"
 	fi

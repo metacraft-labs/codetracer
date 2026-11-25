@@ -14,6 +14,9 @@
 //     opening latches until Re-enable;
 //   * a press on a row of its docked pane is a view event, and the plugin
 //     answers it (§11.4.4).
+//   * three quick Escapes recover input even while the window's event loop
+//     is busy: the chord is timed on when each key arrived, not on when the
+//     window got to it (§11.7.6).
 //
 // No stand-ins: the real Electron app, a real recording of
 // `test-programs/calc/main.py` made by the real recorder, a real replay, and
@@ -27,7 +30,7 @@ import { test, expect } from "../../lib/fixtures";
 import { CommandPalette } from "../../page-objects/command-palette/command-palette";
 import {
   installAcmeTools, pluginEnv, pluginPids, pluginState, pluginOf, paneText,
-  pluginStatusItem, countBodyKeys, bodyKeys, type PluginHome,
+  pluginStatusItem, countBodyKeys, bodyKeys, pressRecoveryChord, type PluginHome,
 } from "../../lib/plugin-processes";
 
 test.setTimeout(480_000);
@@ -112,6 +115,52 @@ test.describe("desktop: a layer that never answers", () => {
     await expect.poll(async () => await bodyKeys(ctPage), { timeout: 30_000 }).toContain("m");
     // Its sibling is not touched.
     expect((await pluginState(ctPage)).plugins.find((p: any) => p.id === METRICS).state).toBe("running");
+  });
+});
+
+test.describe("desktop: three quick Escapes behind a busy event loop", () => {
+  let home: PluginHome;
+  test.beforeAll(() => {
+    home = installAcmeTools({ plugins: { [FLAME]: { settings: { mode: "swallow-input" } } } }, true);
+  });
+  test.use({
+    sourcePath: "calc/main.py",
+    launchMode: "trace",
+    launchEnv: async ({}, use) => { await use(pluginEnv(home)); },
+  });
+
+  test("still recover input: the chord is timed on when each key arrived", async ({ ctPage }) => {
+    await grantBoth(ctPage);
+    await layerHeld(ctPage);
+    await ctPage.evaluate(() => (document.activeElement as any)?.blur?.());
+    // The window's event loop is busy for 600 ms after each Escape it gets
+    // (a listener only this test adds), so the three keys, sent together,
+    // are handled about 1.2 s apart: past the chord's 1 s window if it were
+    // timed on handling, inside it on arrival. The busy loop runs on the
+    // key's `keyup`. On the keydown it did not delay anything: the three
+    // reached the host within 23 ms and the control passed, as the router
+    // consumes a keydown it routes to a plugin's layer before a listener
+    // added after it runs. So the test also counts the busy loops it ran.
+    await ctPage.evaluate(() => {
+      (window as any).__ctBusyEscapes = 0;
+      window.addEventListener("keyup", (e: KeyboardEvent) => {
+        if (e.key !== "Escape") return;
+        (window as any).__ctBusyEscapes++;
+        const until = performance.now() + 600;
+        while (performance.now() < until) { /* busy */ }
+      }, true);
+    });
+    await pressRecoveryChord(ctPage);
+    await expect.poll(async () => await ctPage.evaluate(() => (window as any).__ctBusyEscapes),
+      { timeout: 30_000, message: "the window was busy after each of the three Escapes" }).toBe(3);
+    // The dialog element outlives a closed dialog (the grants used it), so
+    // its being open is asserted, not only its title.
+    const dialog = ctPage.locator("[data-ct-plugin-dialog]");
+    await expect(dialog.locator(".plugin-dialog-title")).toHaveText("RECOVER INPUT", { timeout: 30_000 });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText(FLAME);
+    await expect.poll(async () => (await pluginState(ctPage))?.layerLabel ?? "x",
+      { timeout: 30_000 }).toBe("");
   });
 });
 

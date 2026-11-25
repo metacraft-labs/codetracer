@@ -280,24 +280,41 @@ when defined(js):
         return cell
     nil
 
+  proc outerHtmlOf(el: JsObject): cstring {.importjs: "(#.outerHTML || '')".}
+  proc newCopyToken(): cstring {.importjs: "(Math.random().toString(36).slice(2))".}
+  let detailOwner = newCopyToken()
+    ## This copy of the module's mark on the details it draws. A page can load
+    ## the module twice — the renderer's shell, and the decoration bundle of
+    ## a WebAssembly core that draws some of its panes — and a pane's root
+    ## can lie inside another copy's: each takes away only its own details,
+    ## or the two would take each other's away on every refresh.
+  proc nextSiblingOf(el: JsObject): JsObject {.importjs: "(#.nextElementSibling || null)".}
+
   proc renderDetail(t: TablePaneDom) =
     ## §5.3: the open row's full text under it, wrapped in its cell's width,
     ## capped at `DetailMaxLines` with the copy hint.
-    for old in t.root.queryAll(cstring("." & TableDetailClass)):
-      old.removeEl()
+    ##
+    ## A detail already drawn as it would be drawn again is left in place:
+    ## taking it out and putting it back is a change of the pane's DOM, which
+    ## the pane's own observer, and any other front-end's (a WebAssembly
+    ## core's pane, measured by the page), answer by refreshing — and the
+    ## refresh draws it again.
+    var box: JsObject = nil
+    var row: JsObject = nil
     if openDetail.isOpenIn(t.pane):
       let cell = t.cellOfRow(openDetail.key, openDetail.column)
       if not cell.isNil:
-        var row = cell.closest(t.rowSelector)
+        row = cell.closest(t.rowSelector)
         if row.isNil: row = cell
         let rowH = max(1.0, row.offsetHeight)
         let bodyRows = int(t.root.clientHeight / rowH)
         let view = detailView(cell.fullOf, max(1, cell.cellsOf), bodyRows,
                               chord())
         let isTr = ($row.tagName.to(cstring)).toUpperAscii == "TR"
-        let box = createEl(cstring(if isTr: "tr" else: "div"),
-                           cstring(TableDetailClass))
+        box = createEl(cstring(if isTr: "tr" else: "div"),
+                       cstring(TableDetailClass))
         box.setAttr(cstring"data-ct-detail", cstring(openDetail.key))
+        box.setAttr(cstring"data-ct-detail-owner", detailOwner)
         var host = box
         if isTr:
           host = createEl(cstring"td", cstring"")
@@ -309,7 +326,16 @@ when defined(js):
           let l = createEl(cstring"div", cstring"ct-table-detail-line")
           l.setText(cstring(line))
           host.appendTo(l)
-        row.insertAfterJs(box)
+    let olds = t.root.queryAll(cstring("." & TableDetailClass &
+                                       "[data-ct-detail-owner=\"" & $detailOwner & "\"]"))
+    if not box.isNil and olds.len == 1 and
+        row.nextSiblingOf == olds[0] and
+        olds[0].outerHtmlOf == box.outerHtmlOf:
+      return
+    for old in olds:
+      old.removeEl()
+    if not box.isNil:
+      row.insertAfterJs(box)
     if not t.observer.isNil:
       t.observer.takeRecords()
 

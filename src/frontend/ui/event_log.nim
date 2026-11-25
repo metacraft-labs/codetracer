@@ -41,7 +41,8 @@ from isonim/core/signals import val, `val=`
 import ../viewmodel/views/table_overflow_dom
 from ../viewmodel/views/isonim_event_log_view import columnClass,
   EventLogColumnGripAttribute, EventLogColumnOptionClass,
-  EventLogColumnHandleClass, EventLogColumnDraggingClass,
+  EventLogColumnMoveDownOperation,
+  EventLogColumnDraggingClass,
   EventLogColumnDropBeforeClass, EventLogColumnDropAfterClass
 from isonim/web/dom_api import nil
 from ../viewmodel/views/isonim_event_log_filter_dropdown_view import
@@ -359,6 +360,35 @@ proc rowAtPosition(vm: EventLogVM; position: int): Option[EventLogRow] =
   let rows = vm.eventRows.val
   if at >= 0 and at < rows.len: some(rows[at]) else: none(EventLogRow)
 
+# Enter or Space on a Columns menu row's focused handle moves the row one
+# lower (Nikolay, 2026-11-02): the handle carries
+# `event-log.columns.move-down`, and this is its procedure, on the pane the
+# nim js shell draws and on the one the WebAssembly core draws alike (that
+# pane's columns are the tab's EventLogVM's, which the core mirrors).
+# `isonim_activation` turns those keys into the handle's `click()`, whose
+# `detail` is 0; a mouse click's is 1 or more, and the mouse reorders by
+# dragging, so it moves nothing here. Moving the row drops the focus, so the
+# handle takes it back and can be pressed again.
+proc clickDetailOf(ev: JsObject): int {.importjs: "((e) => (e && e.detail) || 0)(#)".}
+proc columnOptionOfElement(el: JsObject): Element {.importjs:
+  "((e) => (e && e.closest && e.closest('.eventLog-column-option')) || null)(#)".}
+proc focusLater(el: JsObject) {.importjs:
+  "((e) => setTimeout(() => { if (e && e.isConnected) e.focus(); }, 0))(#)".}
+
+registerElementOperation(EventLogColumnMoveDownOperation, proc(p: ElementPress): bool =
+  let vm = paneVM()
+  if vm.isNil or clickDetailOf(p.event) != 0:
+    return false
+  let row = columnOptionOfElement(p.element)
+  if row.isNil:
+    return false
+  let (known, col) = parseEventLogColumn($row.getAttribute(cstring"data-column"))
+  if not known:
+    return false
+  discard vm.placeColumnLower(col)
+  focusLater(p.element)
+  true)
+
 # A right press on a recorded event opens its text in an editor view: the
 # pointer row `event-log.show-content` (K25), performed here on the row the
 # key router's hit test found (`input/dom_pointer`).
@@ -494,13 +524,10 @@ when defined(ctWasmPanes):
     "((e, c) => (e && e.closest && e.closest('.' + c)) || null)(#, #)".}
   proc columnOptionOfTarget(ev: Event): Element =
     columnOptionOf(cast[JsObject](ev).target, cstring EventLogColumnOptionClass)
-  proc handleOfTarget(ev: Event): Element =
-    columnOptionOf(cast[JsObject](ev).target, cstring EventLogColumnHandleClass)
   proc startMoveDrag(ev: Event; payload: cstring) {.importjs:
     "(function(e, p){ if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', p); } })(#, #)".}
   proc showMoveCursor(ev: Event) {.importjs:
     "(function(e){ if (e.dataTransfer) { e.dataTransfer.dropEffect = 'move'; } })(#)".}
-  proc clickDetail(ev: Event): int {.importjs: "#.detail".}
   proc insideWasmPane(el: Element): bool {.importjs:
     "((e) => !!(e && e.closest && e.closest('.ct-web-core-pane')))(#)".}
 
@@ -557,17 +584,6 @@ when defined(ctWasmPanes):
       let row = ev.columnOptionOfTarget
       if not row.isNil: row.clearMarks()
       dragged = none(EventLogColumn))
-    # Enter or Space on a row's handle moves the row one lower: a `click()`
-    # whose `detail` is 0 (`wireColumnHandleKey`).
-    host.addEventListener(cstring"click", proc(ev: Event) =
-      let handle = ev.handleOfTarget
-      if handle.isNil or not handle.insideWasmPane or ev.clickDetail != 0: return
-      ev.stopPropagation()
-      let col = columnOf(ev.columnOptionOfTarget)
-      let model = vm()
-      if col.isSome and not model.isNil:
-        discard model.placeColumnLower(col.get)
-        handle.focus())
 
 proc decorateEventLog(host: dom_api.Element; session: SessionViewModel) =
   let vm = session.eventLogVM

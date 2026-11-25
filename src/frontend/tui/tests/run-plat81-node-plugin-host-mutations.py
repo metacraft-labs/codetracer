@@ -121,7 +121,7 @@ ARMS = [
              "  discard")],
      [(WIRING, "keys")],
      "§11.7.4: a key that passed a suspect layer in the renderer is no strike"),
-    ("K5", [(SESS, "  if ps.plugins.sup.observeEscape():", "  if false:")],
+    ("K5", [(SESS, "  if ps.plugins.sup.observeEscape(arrivedMs):", "  if false:")],
      [(WIRING, "keys")],
      "§11.7.6: the renderer's Escapes are not observed; the chord never "
      "recovers input"),

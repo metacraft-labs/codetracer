@@ -444,8 +444,10 @@ ARMS = [
         "    (abs(col - b.pressCol) >= 0 or\n",
         S_CLICK,
         "no drag threshold: any press is past it"),
+    # Re-aimed at the rewritten site (codetracer 14cff691a: a press marks
+    # the pick through `markPick`): the same "pick up at once" defect.
     Arm("DG2", BINDING,
-        '        b.pendingPick = tab\n        return action(lasNoGesture, "pressed the " & $tab.get & " tab")\n',
+        '        b.markPick(builtinRef(tab.get))\n        return action(lasNoGesture, "pressed the " & $tab.get & " tab")\n',
         '        return b.beginDrag(tab.get)\n',
         S_CLICK,
         "a press on a tab picks it up at once (the old behaviour)"),
@@ -888,9 +890,11 @@ ARMS = [
         "    if false:\n",
         S2_LONE,
         "a lone pane's strip is in its drop body: a drop there splits"),
+    # Anchored on the line before (codetracer a15899931 added a second,
+    # identical line in another proc): the same `tabAtCell` site.
     Arm("DZ7", BINDING,
-        "  let info = nodeInfoAtPath(b.layout.tree, childPathOf(stackPath.get, at))\n",
-        "  let info = nodeInfoAtPath(b.layout.tree, childPathOf(stackPath.get,\n                                                      min(at + 1, region.tabs.high)))\n",
+        "    return none(PaneKind)\n  let info = nodeInfoAtPath(b.layout.tree, childPathOf(stackPath.get, at))\n",
+        "    return none(PaneKind)\n  let info = nodeInfoAtPath(b.layout.tree, childPathOf(stackPath.get,\n                                                      min(at + 1, region.tabs.high)))\n",
         S2_HALVES,
         "a click on a tab activates its neighbour"),
     Arm("DZ8", WINGEOM,

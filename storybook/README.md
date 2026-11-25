@@ -79,6 +79,11 @@ IsoNim views.
 Storybook loads CodeTracer styles by parsing the production
 `src/frontend/index.html`; do not copy app stylesheet lists or component visual
 CSS into stories. Keep Storybook CSS limited to harness sizing/layout.
+The stylesheets it links are the compiled ones in
+`src/build-debug-repro/frontend/styles/`; `just storybook` and
+`just storybook-build` compile them first (`just storybook-styles`, the
+`frontend-styles` build target), so a story shows the Stylus sources as they
+are in the tree. `just test-storybook-styles` checks that.
 
 Fixtures may mock ViewModel/store state, but stories must not reimplement
 component DOM in JavaScript. The DOM under test should come from the real

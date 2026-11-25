@@ -18,6 +18,8 @@ retention: { runs: 5, failure-days: 7 }
 applicable:
   - ../tracing/trace-macro-at-caret.yaml
   - ../tracing/trace-macro-rebound.yaml
+  # a whole debugging session, the one every front-end renders into a video
+  - ../tour/calc-debugging-session.yaml
   # --- terminal --- (the real-terminal suites' scenarios, passed fast and realistic)
   - ../terminal/edit-find-in-files.yaml
   - ../terminal/project-definitions-on-a-recording.yaml

@@ -73,8 +73,10 @@ suite "PLAT-68: the CUA sequence in a real GPUI window":
     let keys = rec()["keys"].getElems
     ck keys.len == ExpectedNames.len
     for k in keys[0 ..< keys.len - 1]:
-      ck k["outcome"].getStr != "ignored"
-    ck keys[^1]["outcome"].getStr == "ignored"
+      ck k["outcome"].getStr notin ["ignored", "inert"]
+    # `F12` is a replay-only key: an Edit window takes it as inert (and says
+    # so on the status bar) before the document sees it.
+    ck keys[^1]["outcome"].getStr == "inert"
     # The writes are writes: paste, undo, redo and delete-line changed the
     # buffer.
     for i in [7, 8, 9, 11]:

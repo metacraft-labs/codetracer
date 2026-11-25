@@ -102,6 +102,9 @@ type
 var ui: PluginUi
 
 proc jsNowMs(): float {.importjs: "Date.now()".}
+proc eventTimeMs(ev: JsObject): float {.importjs:
+  "((# || {}).timeStamp ?? performance.now())".}
+  ## When a key event arrived, on the page's performance clock.
 proc jsonParse(s: cstring): JsObject {.importjs: "JSON.parse(#)".}
 proc jsonStringify(o: JsObject): cstring {.importjs: "JSON.stringify(#)".}
 proc ipcSend(ipc: JsObject; channel: cstring; payload: JsObject) {.
@@ -443,11 +446,15 @@ proc decideKey(name: string; ev: JsObject; hostModalOpen: bool): bool =
   let snap = st{"keys"}
   let key = pluginKeyName(name)
   if isRecoveryChordKey(key):
-    send("escape")
-    let t = jsNowMs()
+    # The chord is timed on when each key ARRIVED (the event's own
+    # `timeStamp`), here and in the supervisor, never on when it was handled:
+    # behind a busy event loop three quick Escapes are handled seconds apart,
+    # which is when the user needs recovery most.
+    let t = eventTimeMs(ev)
+    send("escape", %*{"at": t})
     var kept: seq[float]
     for x in ui.escapes:
-      if t - x <= float(snap.chordWindowMs): kept.add x
+      if x <= t and t - x <= float(snap.chordWindowMs): kept.add x
     kept.add t
     ui.escapes = kept
     if kept.len >= snap.chordCount:

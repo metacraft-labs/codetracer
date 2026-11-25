@@ -511,6 +511,36 @@ suite "PLAT-39 LAW-R5 — ONE TYPE, TWO PRODUCERS":
       ck r.height == parseInt(declared[1])
 
 # ---------------------------------------------------------------------------
+suite "PLAT-39 — the execution row is cross-checked against its neighbours":
+  # `lineByNeighbours` (vision_producer.nim). Measured on a CI frame: the
+  # highlighted `44` OCR'd as `54` while every plain row around it read
+  # right. The rule, case by case:
+  test "a misread execution row is outvoted by the rows around it":
+    let r = lineByNeighbours((true, 54),
+      @[(-2, true, 42), (-1, true, 43), (1, true, 45), (2, true, 46)])
+    ck r.ok
+    ck r.line == 44
+
+  test "one misread neighbour does not move a correct reading":
+    let r = lineByNeighbours((true, 44),
+      @[(-2, true, 42), (-1, true, 53), (1, true, 45), (2, false, -1)])
+    ck r.line == 44
+
+  test "a single neighbour is not enough to overrule":
+    let r = lineByNeighbours((true, 54),
+      @[(-2, false, -1), (-1, true, 43), (1, false, -1)])
+    ck r.line == 54
+
+  test "an unreadable neighbourhood leaves the direct reading":
+    ck lineByNeighbours((true, 44), @[]).line == 44
+    ck lineByNeighbours((true, 44),
+      @[(-1, false, -1), (1, false, -1)]).line == 44
+
+  test "an unreadable execution row stays unreadable":
+    let r = lineByNeighbours((false, -1),
+      @[(-1, true, 43), (1, true, 45)])
+    ck not r.ok
+
 suite "PLAT-39 — the locator, and the thresholds it is built on":
 # ---------------------------------------------------------------------------
 

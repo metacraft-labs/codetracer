@@ -531,18 +531,29 @@ proc spaceFoldsSelectedCall(): bool =
       return true
   false
 
+proc coreTableShowDetail(pane, selected: cstring): bool {.importjs:
+  "(globalThis.ctwTableShowDetail ? globalThis.ctwTableShowDetail(#, #) : false)".}
+  ## The same operation on a table pane the WebAssembly core draws: its
+  ## cells are fitted and its details drawn by the core host's decoration
+  ## bundle (`web_core/web_core_decorations.nim`), whose own copy of
+  ## `table_overflow_dom` holds that pane. False where there is none.
+proc coreTableCopyRow(pane, selected: cstring): bool {.importjs:
+  "(globalThis.ctwTableCopyRow ? globalThis.ctwTableCopyRow(#, #) : false)".}
+
 proc runTableOperation(res: EditingResolution): bool =
   ## PLAT-70 Part B: `list.show-detail` and `list.copy` on the focused table
   ## pane's row (its WHOLE text), `table.resize-column` on the Event Log.
   let (pane, selected) = focusedTablePane()
   case res.operation
   of "list.show-detail":
-    if pane.len == 0 or not showDetailOf(pane, selected):
+    if pane.len == 0 or not (showDetailOf(pane, selected) or
+                             coreTableShowDetail(cstring(pane), selected)):
       cwarn "keys: Show Detail works in the Variables, Event Log and Call " &
             "Trace panes, on a row"
     true
   of "list.copy":
-    pane.len > 0 and copyRowOf(pane, selected)
+    pane.len > 0 and (copyRowOf(pane, selected) or
+                      coreTableCopyRow(cstring(pane), selected))
   of "list.toggle-expand":
     # Space on the call trace; another tree pane's key keeps its own path.
     if spaceFoldsSelectedCall() and not toggleCallTraceRowHook.isNil:

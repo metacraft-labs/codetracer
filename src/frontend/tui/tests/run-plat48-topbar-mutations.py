@@ -407,8 +407,11 @@ ARMS = [
         "a side strip's slot is one row, so the label is cut to its first "
         "character"),
     # --- pin / unpin -------------------------------------------------------------------
+    # Re-aimed at the rewritten site (codetracer 17f3ccf31: the remembered
+    # anchor is `cameFrom`, a `PaneRef`): the same "forget where it was
+    # pinned from" defect.
     Arm("PN1", LAYOUTMODEL,
-        "                       entry.beside.isSome and tree.contains(entry.beside.get)\n",
+        "                       tree.contains(cameFrom.get)\n",
         "                       false\n",
         B_VERBS,
         "unpin forgets where the pane was pinned from and appends it to the "

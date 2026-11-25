@@ -216,7 +216,7 @@ src/frontend/tui/tests/plat59-visual-replay-mutation-control.sha256	src/tests/gu
 # plat47: graded at 39e4112f69; b9396a9502  moved
 # src/frontend/tui/app/runtime.nim after the grade. Re-grade the arms whose
 # needles sit in them.
-src/tests/scenarios/plat66-pack-mutation-control.sha256	ci/test/scenarios.sh	4edebac246b9c375f8b5e181b3fb621774088543476bea5c556b0e1d642c0e77	7d98af7b45bf778493d101884934bf59e17454d427bb35aad0dd9691ee30e792
+src/tests/scenarios/plat66-pack-mutation-control.sha256	ci/test/scenarios.sh	4edebac246b9c375f8b5e181b3fb621774088543476bea5c556b0e1d642c0e77	1a81cc8f2eb296ee3be4d618715db9a038bdf0da46f68f4b61c74e99041c76ec
 
 # The shared editor on every editor surface (ui/editor_surface: the macro
 # expansions, low-level views, a recording-with-diff's removed lines, the
@@ -283,13 +283,13 @@ src/frontend/tui/tests/plat59-visual-replay-mutation-control.sha256	src/frontend
 # Re-grade the arms whose needles sit in them. The omnibox composer
 # (`feat(agent-harbor): prototype the omnibox as the agent composer`) moved
 # overlay_rows.nim and scope_path.nim again (the composer scope and its keys).
-src/frontend/tui/tests/plat59-visual-replay-mutation-control.sha256	src/frontend/viewmodel/keymap/overlay_rows.nim	092a2a5123f4201bd27d7756c774dcbc3f2e80b14ea515064b4c6e5c5d97584e	697ac82c87f47623bfafce8ff99fa696b5b575a9b96627f514eb4a4265e78b0a
+src/frontend/tui/tests/plat59-visual-replay-mutation-control.sha256	src/frontend/viewmodel/keymap/overlay_rows.nim	092a2a5123f4201bd27d7756c774dcbc3f2e80b14ea515064b4c6e5c5d97584e	853f13f268139f8ffbfa72175b107b464b82af71b6eabe07f3e5e206e75f6d4b
 src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/viewmodel/keymap/scope_path.nim	b6c5ae61a3b680c3360ebbc53a196fdcc68d5b62f76f02d10ca37d6bd383eef2	c4cb289d0388968e22c295616065863cfd317f04edc9c3ee17b862d46258d412
 ci/test/plat70c-find-mutation-control.sha256	src/frontend/gpui/tests/test_plat70c_gpui_plan.nim	f515428c73dfef1c26b6a13cdbf981173574ed2443d97f1af2f8bfc3ff08df46	439e490ce6982ba70abafbf6234d187d3a7256681f195f84a0c4dc27bbc00160
-src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/gpui/window_geometry.nim	1bb7ab477d73f464741feb6e52406b5849226f27dc727383e2263f99c41551f7	8595f1669201ae3addab9f7134adf5c0ce306855acc4726ccfe1d41fb0e79ed7
+src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/gpui/window_geometry.nim	1bb7ab477d73f464741feb6e52406b5849226f27dc727383e2263f99c41551f7	fade42f842eab416a16e489917dd21c36d0577f86ed04910d418f212d1b9f4c2
 src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/gpui/tests/test_plat47_gpui_parity.nim	9741609ad88a4b373e1727212e6708b3bedea00814789b7b190e0055ee701f86	7e9b173c50a665d5e4ff3fcaa6f2fca65d8eaddb53f6c6260625bd57f1562e03
-src/frontend/tui/tests/plat48-topbar-mutation-control.sha256	src/frontend/gpui/window_geometry.nim	143cd5f4b4c0f74409ae4ff7e5dbf9bd77921b675804eaeb0ddfee03a9721764	8595f1669201ae3addab9f7134adf5c0ce306855acc4726ccfe1d41fb0e79ed7
-src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/gpui/window_geometry.nim	143cd5f4b4c0f74409ae4ff7e5dbf9bd77921b675804eaeb0ddfee03a9721764	8595f1669201ae3addab9f7134adf5c0ce306855acc4726ccfe1d41fb0e79ed7
+src/frontend/tui/tests/plat48-topbar-mutation-control.sha256	src/frontend/gpui/window_geometry.nim	143cd5f4b4c0f74409ae4ff7e5dbf9bd77921b675804eaeb0ddfee03a9721764	fade42f842eab416a16e489917dd21c36d0577f86ed04910d418f212d1b9f4c2
+src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/gpui/window_geometry.nim	143cd5f4b4c0f74409ae4ff7e5dbf9bd77921b675804eaeb0ddfee03a9721764	fade42f842eab416a16e489917dd21c36d0577f86ed04910d418f212d1b9f4c2
 src/frontend/tui/tests/plat52-terminal-mutation-control.sha256	src/frontend/gpui/tests/test_plat52_gpui_plan.nim	494e6200aebc2550f9d07cdc398cbf832b80d1cf6be4a10134216132af5fa8b5	ee7acd4ca68aea315736c2e2c127b489eda8a285a505ba53c783e1d6555fd6e8
 src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/gpui/tests/test_plat54_gpui_agent_activity.nim	a1173ab3cd103ae0a7e3e69e609cb8849942db8d18d4ea75de68a9e991c83bc4	a8a3c083d5ce44d1e946a0dc0e864f750089e01d6b3cb029c8504d89fbfac5df
 src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/gpui/tests/test_plat60_gpui_low_level_code.nim	b4eda6b4c9da0dbd80044005844c02993cb96ec75d15cdc8b6cf5629ea8a45a2	40a089ab2c63b11d5395707d48feff2e6bcbc249c0fb4f274f910135ab78c407
@@ -321,7 +321,7 @@ src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/tui/te
 src/frontend/tui/tests/plat52-terminal-mutation-control.sha256	src/tests/gui/tests/views/isonim_views_test.nim	9eaf8754a0eade9bc628c1532aa3f4045c1d21e1021313d5bd9378c5e8816281	a61d87c74a222b2ee626aa2e190a4f71781ea8dc0b0a313ddd630666688fb40a
 src/frontend/tui/tests/plat61-shell-mutation-control.sha256	scripts/plat61-capture-electron.sh	ddf8eb29ee05d8338a6ae75d6b760fd8e97e93b9d305e91b23edec85ebc78f31	29ffb9b9c2b989f03e4c56fdcc77ede40448ee3c85ed688dcab66897d59a93c6
 src/frontend/viewmodel/tests/unit/plat29-async-mutation-control.sha256	src/frontend/tests/dap_session_routing_test.nim	23f78b7c75cf637296b0c6f87a1cfe695fb20ace8b7642f04df618a2b88cd56d	62e57ece0d63f73d0c2a18e98f4f3600ee96785701286b8250698fcaf25a06c4
-src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/playwright/codetracer-binding.ts	dac9e35953b0d93636c2284d9c9a858c2bba982b92e9311b0f41fb666e6879c0	df274e868521ea794ff014ccd254d178f0764c69861cbf9505bc9cabf520be1a
+src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/playwright/codetracer-binding.ts	dac9e35953b0d93636c2284d9c9a858c2bba982b92e9311b0f41fb666e6879c0	bc25d8e73250e58bc0e58c997a3288bc9820465bce06a16bf45dbcbec519cd02
 src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/ui/pointer_stamp.nim	a24171a98e4d55680be64a05b433b8c9596affba2307f0b3e868115059164c2f	61994fe2248bf5273ec52d5586190e22892f4ac10b52f8b9d51fed2c04206ecc
 # The Agent Harbor session timeline's story hosts (`feat(agent-harbor): the session activity timeline in every story host`)
 # moved test_plat64_reachability.nim: the timeline's four press operations count as offered.
@@ -345,7 +345,7 @@ src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/gpui/a
 # The omnibox composer moved overlay_rows.nim (the composer scope's key rows) and,
 # above, test_plat64_reachability.nim (its press-only operations); it re-counted
 # test_gpui_window_frame.nim (one more scanned GPUI source). Re-grade those arms.
-src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend/viewmodel/keymap/overlay_rows.nim	29d13621166a061d890ce4e32b6f11947812f0926f5f1929385f4b3209618834	697ac82c87f47623bfafce8ff99fa696b5b575a9b96627f514eb4a4265e78b0a
+src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend/viewmodel/keymap/overlay_rows.nim	29d13621166a061d890ce4e32b6f11947812f0926f5f1929385f4b3209618834	853f13f268139f8ffbfa72175b107b464b82af71b6eabe07f3e5e206e75f6d4b
 # test_gpui_window_frame.nim moved again: its assertion pin was re-counted 1038 -> 1047 for the
 # scanned element_reuse.nim, then 1047 -> 1056 for the process switcher. Only ExpectedAssertions
 # and its history comment changed.
@@ -510,7 +510,7 @@ src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/fro
 # 2026-11-21, the browser's two keyboard oracles: test_cross_renderer_panes.nim
 # exports the four keyboard panes for the Chromium suite, and the renderer-chromium
 # lane lists that suite. Each harness below owes a re-grade for those bytes.
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/test-lane-files.sh	b463de41f09e76644ec644ddfe51bd166d7e2c033699c98ecca5083540215051	8723f13449df6da6d5acdf55932cab0382378d8cb62d41cd89503d948c776663
+src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/test-lane-files.sh	b463de41f09e76644ec644ddfe51bd166d7e2c033699c98ecca5083540215051	a7a0360b1bf2ceb0286af1ecfb5d43f5f40d3bc5b306fd21b7b8667af77edf92
 # 2026-11-21: a docked plugin pane previews on hover (auto_hide_hover, runtime); these harnesses digest those subjects and owe a re-grade.
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/headless_app/auto_hide_hover.nim	c2395cd53d7292e511d36c714f483d8f6ac8d8bf1f35c2c78237bebd54c73c62	0b4958cca008fcb95abaa5f2a2157cb461ed0b361fe1e0b702efc004cbbcf46f
 
@@ -522,14 +522,14 @@ src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/headle
 # 2026-11-21, the WebAssembly ViewModel core: the views import IsoNim's frame
 # renderer under -d:ctWasmCore (the event log view newly), and the justfile
 # gained the frame renderer's, applier's and web core's recipes.
-src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/viewmodel/views/isonim_event_log_view.nim	db9c4c6924195d6630347f931128a1d0a9d7c22f5b784749911716d1d5ac556a	a50e8e36f0206de0df303e927595f298db1942bd67de7255073ce2382e1fe28b
-src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/viewmodel/views/isonim_event_log_view.nim	db9c4c6924195d6630347f931128a1d0a9d7c22f5b784749911716d1d5ac556a	a50e8e36f0206de0df303e927595f298db1942bd67de7255073ce2382e1fe28b
+src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/viewmodel/views/isonim_event_log_view.nim	db9c4c6924195d6630347f931128a1d0a9d7c22f5b784749911716d1d5ac556a	324d832db4385ae8c2230b23874ed2c1bf937e3aa7e17cc408c4cd5f886d3eb6
+src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/viewmodel/views/isonim_event_log_view.nim	db9c4c6924195d6630347f931128a1d0a9d7c22f5b784749911716d1d5ac556a	324d832db4385ae8c2230b23874ed2c1bf937e3aa7e17cc408c4cd5f886d3eb6
 src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/viewmodel/views/isonim_state_view.nim	2bf5cf331cabc68c9a48c2f6a055ae5e8f473d9992dced21a86f1848e346aa34	06380e7b2269a990f491704e429bcb6ce32f627c6d5f9df6327765f9ff58a5a4
-src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend/viewmodel/views/isonim_event_log_view.nim	db9c4c6924195d6630347f931128a1d0a9d7c22f5b784749911716d1d5ac556a	a50e8e36f0206de0df303e927595f298db1942bd67de7255073ce2382e1fe28b
+src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend/viewmodel/views/isonim_event_log_view.nim	db9c4c6924195d6630347f931128a1d0a9d7c22f5b784749911716d1d5ac556a	324d832db4385ae8c2230b23874ed2c1bf937e3aa7e17cc408c4cd5f886d3eb6
 # 2026-11-23, the justfile gained the RunQuota prefix variables and a recipe
 # for the bridge test; none of it touches the WebAssembly profile this control
 # grades.
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	8bda0738c9719a3f394aa9ee384bc2c920800d78e38e9b540d58ff8a018e0cc0	3f2f331be750d2cc3ec99ca96cb8a589d0f1c4ca7311631bb09a88a478cb776d
+src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	8bda0738c9719a3f394aa9ee384bc2c920800d78e38e9b540d58ff8a018e0cc0	ad7cbcff4486f41f9ea09b0a22a6adc3a5ca5c7f95193802b008d1de6ef4e48f
 # src/frontend/tui/app/runtime.nim, ci/lib/test-lane-files.sh, ci/test/vm-unit-wasm-parity.sh: moved by the ct-lens package (lane rows) and the
 # plugin status-item fix. Re-grade the harnesses named.
 
@@ -650,35 +650,7 @@ src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/gpui/w
 src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/gpui/window_pointer.nim	4a4e4dd1ec4f2f433ecf76dc1629feba85379897c8c1c63a11892bb3289073fb	05498c06d9c3296ed9014c5a3bf8041c64d81d665a4e9bdf699ecf78f4f4a859
 src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/gpui/window_clicks.nim	c8e21f13353e2ee6f5741bd3ea5e2bf1327ddd0a4971237a8a1feb6012b979a4	fa57785969e88f3e03240f840175b5d80fed03d8321770842b1ab18f8fafdd6b
 src/frontend/tui/tests/plat70g-multiclick-mutation-control.sha256	src/frontend/gpui/window_clicks.nim	348d412ad297467f77fdde0607263dc7bd3464de3e457506921a3ae2e52530cb	fa57785969e88f3e03240f840175b5d80fed03d8321770842b1ab18f8fafdd6b
-ci/test/plat70-find-decisions-mutation-control.sha256	src/frontend/gpui/main.nim	74d1b4cb7c6794d7176211fc032aec567fa8d23bc4cc2a44907913bc6f089cbc	35ee2065e843830fe3a07b221e3c9e9f7ea1cb32735cb25a2d6167f5cc4a1e09
-ci/test/plat70c-find-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	35ee2065e843830fe3a07b221e3c9e9f7ea1cb32735cb25a2d6167f5cc4a1e09
-ci/test/plat70i-fit-mutation-control.sha256	src/frontend/gpui/main.nim	220d8170c7218709d5ae77691e7cfbfce2954ae359429ba9554c046b0b637053	35ee2065e843830fe3a07b221e3c9e9f7ea1cb32735cb25a2d6167f5cc4a1e09
-src/frontend/tui/tests/build-residuals-mutation-control.sha256	src/frontend/gpui/main.nim	44be0a3c885a6c9561bd625292907fa776d669875783a6445391ec5b1bfecf55	35ee2065e843830fe3a07b221e3c9e9f7ea1cb32735cb25a2d6167f5cc4a1e09
-src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/gpui/main.nim	28f36a050600425fdbbea72ccc729250a4977ecc589c87e4d67e73d3196f228e	35ee2065e843830fe3a07b221e3c9e9f7ea1cb32735cb25a2d6167f5cc4a1e09
-src/frontend/tui/tests/plat48-topbar-mutation-control.sha256	src/frontend/gpui/main.nim	44be0a3c885a6c9561bd625292907fa776d669875783a6445391ec5b1bfecf55	35ee2065e843830fe3a07b221e3c9e9f7ea1cb32735cb25a2d6167f5cc4a1e09
-src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/gpui/main.nim	44be0a3c885a6c9561bd625292907fa776d669875783a6445391ec5b1bfecf55	35ee2065e843830fe3a07b221e3c9e9f7ea1cb32735cb25a2d6167f5cc4a1e09
-src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/gpui/main.nim	44be0a3c885a6c9561bd625292907fa776d669875783a6445391ec5b1bfecf55	35ee2065e843830fe3a07b221e3c9e9f7ea1cb32735cb25a2d6167f5cc4a1e09
 src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/gpui/tests/test_files_edit_gpui_plan.nim	8312c7ca4b113b9a9916711c18ff6538f9710cb3b249c1c6904ffa4aab1dc3be	dbd2bc814fd2e01d8de098cbe3538eeee2cc6baefe2947eb55532c4e811b6076
-src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/gpui/main.nim	7953de7932634c94ba38056c6f5e8454c74131be118557bc674f6f8c5d6ce036	35ee2065e843830fe3a07b221e3c9e9f7ea1cb32735cb25a2d6167f5cc4a1e09
-src/frontend/tui/tests/plat52-terminal-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	35ee2065e843830fe3a07b221e3c9e9f7ea1cb32735cb25a2d6167f5cc4a1e09
-src/frontend/tui/tests/plat53-test-results-mutation-control.sha256	src/frontend/gpui/main.nim	204874f7ed57e34ce5819f90c33c8d1b3301359c53218385877a3184b3686591	35ee2065e843830fe3a07b221e3c9e9f7ea1cb32735cb25a2d6167f5cc4a1e09
-src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/gpui/main.nim	28f36a050600425fdbbea72ccc729250a4977ecc589c87e4d67e73d3196f228e	35ee2065e843830fe3a07b221e3c9e9f7ea1cb32735cb25a2d6167f5cc4a1e09
-src/frontend/tui/tests/plat55-problems-mutation-control.sha256	src/frontend/gpui/main.nim	44be0a3c885a6c9561bd625292907fa776d669875783a6445391ec5b1bfecf55	35ee2065e843830fe3a07b221e3c9e9f7ea1cb32735cb25a2d6167f5cc4a1e09
-src/frontend/tui/tests/plat56-build-output-mutation-control.sha256	src/frontend/gpui/main.nim	44be0a3c885a6c9561bd625292907fa776d669875783a6445391ec5b1bfecf55	35ee2065e843830fe3a07b221e3c9e9f7ea1cb32735cb25a2d6167f5cc4a1e09
-src/frontend/tui/tests/plat57-find-in-files-mutation-control.sha256	src/frontend/gpui/main.nim	44be0a3c885a6c9561bd625292907fa776d669875783a6445391ec5b1bfecf55	35ee2065e843830fe3a07b221e3c9e9f7ea1cb32735cb25a2d6167f5cc4a1e09
-src/frontend/tui/tests/plat58-requests-mutation-control.sha256	src/frontend/gpui/main.nim	44be0a3c885a6c9561bd625292907fa776d669875783a6445391ec5b1bfecf55	35ee2065e843830fe3a07b221e3c9e9f7ea1cb32735cb25a2d6167f5cc4a1e09
-src/frontend/tui/tests/plat59-visual-replay-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	35ee2065e843830fe3a07b221e3c9e9f7ea1cb32735cb25a2d6167f5cc4a1e09
-src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	35ee2065e843830fe3a07b221e3c9e9f7ea1cb32735cb25a2d6167f5cc4a1e09
-src/frontend/tui/tests/plat61-shell-mutation-control.sha256	src/frontend/gpui/main.nim	44be0a3c885a6c9561bd625292907fa776d669875783a6445391ec5b1bfecf55	35ee2065e843830fe3a07b221e3c9e9f7ea1cb32735cb25a2d6167f5cc4a1e09
-src/frontend/tui/tests/plat62-constraints-mutation-control.sha256	src/frontend/gpui/main.nim	7953de7932634c94ba38056c6f5e8454c74131be118557bc674f6f8c5d6ce036	35ee2065e843830fe3a07b221e3c9e9f7ea1cb32735cb25a2d6167f5cc4a1e09
-src/frontend/tui/tests/plat63-verification-mutation-control.sha256	src/frontend/gpui/main.nim	7953de7932634c94ba38056c6f5e8454c74131be118557bc674f6f8c5d6ce036	35ee2065e843830fe3a07b221e3c9e9f7ea1cb32735cb25a2d6167f5cc4a1e09
-src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend/gpui/main.nim	7953de7932634c94ba38056c6f5e8454c74131be118557bc674f6f8c5d6ce036	35ee2065e843830fe3a07b221e3c9e9f7ea1cb32735cb25a2d6167f5cc4a1e09
-src/frontend/tui/tests/plat65-nim-tracing-mutation-control.sha256	src/frontend/gpui/main.nim	44be0a3c885a6c9561bd625292907fa776d669875783a6445391ec5b1bfecf55	35ee2065e843830fe3a07b221e3c9e9f7ea1cb32735cb25a2d6167f5cc4a1e09
-src/frontend/tui/tests/plat70b-table-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	35ee2065e843830fe3a07b221e3c9e9f7ea1cb32735cb25a2d6167f5cc4a1e09
-src/frontend/tui/tests/plat70d-grep-mutation-control.sha256	src/frontend/gpui/main.nim	b755aed817a6d5b691557869ab7b22ce647bee0554b5421df6f18be6f06ffa81	35ee2065e843830fe3a07b221e3c9e9f7ea1cb32735cb25a2d6167f5cc4a1e09
-src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	src/frontend/gpui/main.nim	7953de7932634c94ba38056c6f5e8454c74131be118557bc674f6f8c5d6ce036	35ee2065e843830fe3a07b221e3c9e9f7ea1cb32735cb25a2d6167f5cc4a1e09
-src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/gpui/main.nim	220d8170c7218709d5ae77691e7cfbfce2954ae359429ba9554c046b0b637053	35ee2065e843830fe3a07b221e3c9e9f7ea1cb32735cb25a2d6167f5cc4a1e09
-src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	35ee2065e843830fe3a07b221e3c9e9f7ea1cb32735cb25a2d6167f5cc4a1e09
 src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	ci/test/input-routing-gate.sh	fde7961da3a00d1c0ae944d76cdc4815a11fc8d50fe694b437d16465d8a6c57b	41704ba73b10ee75c6ecc8a43d113a290e56580921d547d1dcd07f2130cfea7c
 src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	ci/test/input-routing-gate-test.sh	0152bebba1e135527d45e2ad710d6d0266b4654266a20db7333596a70e1d2bca	326bb017ee35e043322e942ee380b9a6e61c4bf4bb9af5c7ed75780edc724244
 
@@ -712,7 +684,7 @@ src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/headle
 # above moved for the same edits. plat81-node-plugin-host was re-graded
 # (17 arms) over c62a2016372's bytes; its supervisor line is owed for
 # 8fd7eeb45fc's change only.
-ci/test/plat70i-fit-mutation-control.sha256	src/frontend/ui/key_router.nim	9994e157d0760237fb047c3f49346530ce7a9bcb02d4741f9a56ed854d91203f	56f255161e32deff5fe8f91ce132af26ee205d2ab0ed895f179ca899389ffe14
+ci/test/plat70i-fit-mutation-control.sha256	src/frontend/ui/key_router.nim	9994e157d0760237fb047c3f49346530ce7a9bcb02d4741f9a56ed854d91203f	c2a070794422793c969a43b0307d325270ef8827042e778c55a7eb743a2f0050
 # 2026-11-23, the desktop's input defences: fault notifications with Re-enable,
 # Disable and Show log buttons (status), breaker figures and test thresholds in the
 # plugins' state, pane presses through paneClickNode (plugin_sessions), the chord's
@@ -720,10 +692,10 @@ ci/test/plat70i-fit-mutation-control.sha256	src/frontend/ui/key_router.nim	9994e
 src/frontend/tui/tests/plat56-build-output-mutation-control.sha256	src/frontend/ui/status.nim	df43b16eb8c1ebbdb419f3fa3db0471c2e9c6f56853a672a76f614b0fa13f518	9ef6e34245835ce010a9301461f12e8226ae904622500fffe4ba19ac267919f6
 src/frontend/tui/tests/plat57-find-in-files-mutation-control.sha256	src/frontend/ui/command_interpreter.nim	474e6f0aa46ed3aaef8dacf0a087fff872b6cf10ea4bc7eec28feff66a7b04d6	f969fe5c195b17744265b646b0231791110852df800e7311e2467436dfc34cb4
 src/frontend/tui/tests/plat57-find-in-files-mutation-control.sha256	src/frontend/index/ipc_utils.nim	37ec4874982ea39f53a83cde32a3a8c66e1810b1bbf163accd715a28e1b1411d	bcf9f7467a4f6fb00e08db270464fc24208191e0dafe7099aa975085c6e70aa1
-src/frontend/tui/tests/plat61-shell-mutation-control.sha256	src/frontend/ui/key_router.nim	9994e157d0760237fb047c3f49346530ce7a9bcb02d4741f9a56ed854d91203f	56f255161e32deff5fe8f91ce132af26ee205d2ab0ed895f179ca899389ffe14
+src/frontend/tui/tests/plat61-shell-mutation-control.sha256	src/frontend/ui/key_router.nim	9994e157d0760237fb047c3f49346530ce7a9bcb02d4741f9a56ed854d91203f	c2a070794422793c969a43b0307d325270ef8827042e778c55a7eb743a2f0050
 src/frontend/tui/tests/plat63-verification-mutation-control.sha256	src/frontend/headless_app/desktop_panes.nim	a468757a2e6189dc46ef094308864e18340ea93f28c84f41805bbe573ddf3b76	36b8305e6ab36df9d0f6bc0d1a36e209721fda6b3f87cf8c954331b816741634
-src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend/ui/key_router.nim	9994e157d0760237fb047c3f49346530ce7a9bcb02d4741f9a56ed854d91203f	56f255161e32deff5fe8f91ce132af26ee205d2ab0ed895f179ca899389ffe14
-src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	src/frontend/ui/key_router.nim	9994e157d0760237fb047c3f49346530ce7a9bcb02d4741f9a56ed854d91203f	56f255161e32deff5fe8f91ce132af26ee205d2ab0ed895f179ca899389ffe14
+src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend/ui/key_router.nim	9994e157d0760237fb047c3f49346530ce7a9bcb02d4741f9a56ed854d91203f	c2a070794422793c969a43b0307d325270ef8827042e778c55a7eb743a2f0050
+src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	src/frontend/ui/key_router.nim	9994e157d0760237fb047c3f49346530ce7a9bcb02d4741f9a56ed854d91203f	c2a070794422793c969a43b0307d325270ef8827042e778c55a7eb743a2f0050
 
 
 
@@ -732,7 +704,7 @@ src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	src/frontend/ui/ke
 # them (plugin_sessions). plat50, plat53, plat60, plat70g and plat81-node-plugin-host
 # owe re-grades.
 src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/ui/editor.nim	3ae3540e694e8e2ec989dfa8d59ffb7c3975f9713dfd319120e95ce089609b25	93c108e5ad262bb6749f9c6430abe16ecef7ef1e977332248cb8f64c83c01db8
-src/frontend/tui/tests/plat70g-multiclick-mutation-control.sha256	src/frontend/ui/trace.nim	a98d49ef54a45b722f1ab02156a2dbb1e973ee7d59b902fe3cd3668d40d69e10	aee68a90d655abd9d84c93330961f6b1bb4d321a9f180fe624bb79b60b299a73
+src/frontend/tui/tests/plat70g-multiclick-mutation-control.sha256	src/frontend/ui/trace.nim	a98d49ef54a45b722f1ab02156a2dbb1e973ee7d59b902fe3cd3668d40d69e10	6cda94da93d6c4f09a7cb45712e513a7524a7e2dd9cfecb9c426b2798cf52fbf
 
 # 2026-11-24, ci/lib/test-lane-files.sh moved in 24bb8bb4a10 (agent-harbor web views
 # for a change's tests and trace links) without its ledger lines; recorded here so the
@@ -760,8 +732,6 @@ src/frontend/tui/tests/plat65-nim-tracing-mutation-control.sha256	src/frontend/t
 # Alt chord a plugin binds whole (claimsKey) and routes the canonical name. plat81 is
 # re-graded over the final bytes of this series; the other harnesses named here are not.
 src/frontend/gpui/tests/gpui-plugins-mutation-control.sha256	src/frontend/gpui/tests/test_gpui_plugins_host.nim	425d9555b41054c89f265e414d603e59eab892b361add30cb9e31590cd527d74	638ae967921a9981453a4aa01af4ca1e78a33d0f7c6cbde7f8f68d1a8333ce18
-src/frontend/gpui/tests/gpui-visualiser-mutation-control.sha256	src/frontend/gpui/main.nim	93e0d62046619caab3c26eb7d894941ff23c8d044e139302cc93481b87bc8f5b	35ee2065e843830fe3a07b221e3c9e9f7ea1cb32735cb25a2d6167f5cc4a1e09
-src/frontend/gpui/tests/plat85-keyed-redraw-mutation-control.sha256	src/frontend/gpui/main.nim	93e0d62046619caab3c26eb7d894941ff23c8d044e139302cc93481b87bc8f5b	35ee2065e843830fe3a07b221e3c9e9f7ea1cb32735cb25a2d6167f5cc4a1e09
 src/frontend/tui/tests/plat48-topbar-mutation-control.sha256	src/common/key_names.nim	1acf4821d23f7cf4529431a99b64ccde8d30f63f9df9547869f22af730c837c9	f1a70bdb7cbc96c678dee9f08374a322033a7d0ca8d9ab7422d6cd1030c1b741
 src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/common/key_names.nim	1acf4821d23f7cf4529431a99b64ccde8d30f63f9df9547869f22af730c837c9	f1a70bdb7cbc96c678dee9f08374a322033a7d0ca8d9ab7422d6cd1030c1b741
 src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	src/common/key_names.nim	1acf4821d23f7cf4529431a99b64ccde8d30f63f9df9547869f22af730c837c9	f1a70bdb7cbc96c678dee9f08374a322033a7d0ca8d9ab7422d6cd1030c1b741
@@ -784,10 +754,10 @@ src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bind
 src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/gpui/tests/test_plat50_gpui_plan.nim	fb9de0ba3d5680daf96ba9435c4c8ec19d4bca5d6dc78fd62662e661fc3edb21	38c7758e5cf6e3cdb05d8138c5213d51adaa7b4b6c6551d35d5cbb6c9d612426
 src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/gpui/tests/test_plat47_gpui_vcs_refresh.nim	746e016dc942cbf3e6dfd9e8554cdf1b89ad2ef14676771baf00078576e38261	f56c17b57d1c95bbf38e85c126c9a1cfea2aae558a94049aa766645affa0d592
 ci/test/plat70i-fit-mutation-control.sha256	src/frontend/viewmodel/viewmodels/event_log_vm.nim	826bdadedb493db77e782fa39cb37ff64eab510e256a7e28b1ab33d7719c5e9a	a19a17e584c8c0d3eb05e17ee76f0a3fd25bc5fa33f0ed87bfd6cd5b59b3c853
-ci/test/plat70i-fit-mutation-control.sha256	src/frontend/viewmodel/views/isonim_event_log_view.nim	356970eb9bfa553f52f5c2077cdcf54e54d4b86ee3da638e63f0c8f05a311f96	a50e8e36f0206de0df303e927595f298db1942bd67de7255073ce2382e1fe28b
-src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/viewmodel/views/pane_measure_dom.nim	e56c65daedd51c2a5a90863c831de5acc29421953202d82eaa815a96051d45bd	994c879356ae85c485b968913e6f9751cce67a6ff6738158a7d8216ce0a42d92
+ci/test/plat70i-fit-mutation-control.sha256	src/frontend/viewmodel/views/isonim_event_log_view.nim	356970eb9bfa553f52f5c2077cdcf54e54d4b86ee3da638e63f0c8f05a311f96	324d832db4385ae8c2230b23874ed2c1bf937e3aa7e17cc408c4cd5f886d3eb6
+src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/viewmodel/views/pane_measure_dom.nim	e56c65daedd51c2a5a90863c831de5acc29421953202d82eaa815a96051d45bd	8ecfafb07d0eb7b18a0afb6da9a42b04fd68978b9f5629e207ae04655c24c383
 src/frontend/tui/tests/plat52-terminal-mutation-control.sha256	src/frontend/viewmodel/viewmodels/terminal_output_vm.nim	e94568287f58d6cf7fb2817f5d5910468d22c01480004cd440148c6500e94230	095b7575f5c47155ca2ed853f8449c8f464fb24fd12507c9ea55d7901a1ef28a
-src/frontend/tui/tests/plat52-terminal-mutation-control.sha256	src/frontend/viewmodel/views/pane_measure_dom.nim	e56c65daedd51c2a5a90863c831de5acc29421953202d82eaa815a96051d45bd	994c879356ae85c485b968913e6f9751cce67a6ff6738158a7d8216ce0a42d92
+src/frontend/tui/tests/plat52-terminal-mutation-control.sha256	src/frontend/viewmodel/views/pane_measure_dom.nim	e56c65daedd51c2a5a90863c831de5acc29421953202d82eaa815a96051d45bd	8ecfafb07d0eb7b18a0afb6da9a42b04fd68978b9f5629e207ae04655c24c383
 
 # 2026-11-24, a refused tracepoint sweep ends its wait (dca5152a45a): the session
 # clock now ends on the sweep's results event or the engine's answer (tui_session,
@@ -840,7 +810,7 @@ src/frontend/tui/tests/plat62-constraints-mutation-control.sha256	src/frontend/t
 src/frontend/tui/tests/plat63-verification-mutation-control.sha256	src/frontend/tui/tests/test_plat63_verification.nim	af249a16439bc091fe296bc08c2fbddd4a6e5b4c86bbee916e509034d4f1ea8e	6f38cf8af0293a6b3856fa591df00ca66eeb81abc0e8aa6db4c1125bc5e41545
 src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend/tui/tests/test_plat48_top_bar.nim	8d176a5a5beafc3d74e57322412d846de668e9f33c223435d7f230a0e41c6aa6	0d9de228818643ec3c0ad2b6457f17c9b09a4bf59aee2b7f6282057683dfad78
 src/frontend/tui/tests/plat70d-grep-mutation-control.sha256	src/frontend/viewmodel/host/find_in_files.nim	7d78c16a901b281665310d163a9c30a4f2aba0385ae3cbf7a431f192ef93191d	574e842b0279e8132579ce2d1858cc9f3a0db260cc10fa1f54d88da4324cbb45
-src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/index/plugin_sessions.nim	b11872bdb3846299913918257d3bc9359c239ffa43078d3562efdf7ca18796f8	743933bc332ad28197d631adc6876208e1563014e4d953495c25a484473c320b
+src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/index/plugin_sessions.nim	b11872bdb3846299913918257d3bc9359c239ffa43078d3562efdf7ca18796f8	c9ddf10104bf668993d6c47f6e3f0ded89ef3ca7a0ac5b96716d2d0b9c191f58
 src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/tests/plugin_sessions_test.nim	fd4f7b3978e1f47d5713a0acb99d6396e370d838454132d8872b94513d38cd87	cfa57468f74db7da81599de6cccac0622676470279e3ff33eb7c387e4e0db282
 src/frontend/tui/tests/plat81-plugin-panes-mutation-control.sha256	src/frontend/host/plugin_panes.nim	b716e2b7781cc5abfd11c3027ef2dc760e1429f91422e4264bfc4d7d186ac28a	2cb413dd75f0431075931a5cfc72454652240084aaacd81c8b61ca5bee45e031
 src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/tui/host/plugin_service.nim	b1bf1fde41673cacebe77f0dc26c683be3fad804ef03f79529a58a8e66e7c5eb	9e0d2dac48c6557b18633570c6c14abdb71c3bc1f5a57cca772126d21e45ba1d
@@ -859,14 +829,12 @@ src/frontend/tui/tests/plat48-topbar-mutation-control.sha256	src/frontend/gpui/t
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/gpui/tests/test_plat49_panes_gpui_plan.nim	7c74ced5a389d5e1fbfa18830207879c276cfe465da70d88e5e1a2e558885654	c545b7bb7c4bec284ab04dece82d2a46fdd0e59f1de847468b783acab63f6c91
 src/frontend/tui/tests/plat81-plugin-panes-mutation-control.sha256	src/frontend/headless_app/layout_model.nim	a1083e69d55c7d701ff22aceaf6a37c6fdb6a9a2920db19103313446bde1d55d	f31a4300672ca40e00b5ddd1d07b4d534185d1a829c28385e7f0e319cf6ce5cf
 src/frontend/tui/tests/plat81-plugin-panes-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_layout_contributed_identity.nim	935141d34c4ac8b3952c20e76a1ef5b7eb5837b751e6fb1d0c92d62cab335f70	71ede0da0a31c5024416743c7598feb919f87a4921fa1ee3e60862ccfad5f020
-src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	src/frontend/gpui/main.nim	5463ced11b13732d03f6de28107a5cd307c606402247398f0ed8e317ea3fa6ed	35ee2065e843830fe3a07b221e3c9e9f7ea1cb32735cb25a2d6167f5cc4a1e09
 src/frontend/viewmodel/tests/unit/plat4-layout-mutation-control.sha256	src/frontend/headless_app/layout_model.nim	a1083e69d55c7d701ff22aceaf6a37c6fdb6a9a2920db19103313446bde1d55d	f31a4300672ca40e00b5ddd1d07b4d534185d1a829c28385e7f0e319cf6ce5cf
 src/frontend/viewmodel/tests/unit/plat4-layout-mutation-control.sha256	src/frontend/gpui/app/shell.nim	b632fc2203960410939c43373a48c225e54816129f2d61d746b77593b76222b0	f6f2612139b329e72b9c0152731dd63bc9843c6a6f952fdcbd7419d605f865c3
 src/frontend/viewmodel/tests/unit/plat4-layout-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_layout_algebra.nim	e50a904add8dfe05ebf93674ba06c0badf9cfee17ef2d19b7c0a0bae46f0c9dd	483bbb75121cc14dd5414a731bc27286848560bdb7f0425d12db7aa51a504f24
 src/frontend/viewmodel/tests/unit/plat5-interaction-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_layout_interaction.nim	599aa6f135b102c88a4586e56c5b41fe8b3d4650e4d223046ecb1f4e9f05179a	f85106d769c5c68aac5ef5c4146c2b9b3ec0466b1df12d566a2f721cf46566ac
 src/frontend/viewmodel/tests/unit/plat5-interaction-mutation-control.sha256	src/frontend/headless_app/layout_model.nim	a1083e69d55c7d701ff22aceaf6a37c6fdb6a9a2920db19103313446bde1d55d	f31a4300672ca40e00b5ddd1d07b4d534185d1a829c28385e7f0e319cf6ce5cf
 src/frontend/viewmodel/tests/unit/plat5-interaction-mutation-control.sha256	src/frontend/tui/app/layout/binding.nim	8c3fb489dcb8c3afbdf3a6e8ff802b07e6635ce6362e5f8b48f1eb66c9867599	fac0190aca626b0ad8fdfe62cf8ba469f704e5a1c08f7a04c9345156e9aec3ee
-src/frontend/viewmodel/tests/unit/plat9-surface-mutation-control.sha256	src/frontend/headless_app/layout_model.nim	a1083e69d55c7d701ff22aceaf6a37c6fdb6a9a2920db19103313446bde1d55d	f31a4300672ca40e00b5ddd1d07b4d534185d1a829c28385e7f0e319cf6ce5cf
 
 # 2026-11-24, the terminal's plugin source marker that names no glyph is drawn from the
 # glyph table's new grPluginMarker role instead of a literal in views/shell.nim, and the
@@ -876,7 +844,6 @@ src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/tui/ap
 src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/tui/app/views/glyph_table.nim	55bf6277bdf57ce65709fbfc0f0b19cf5f5f4810fbdf25323268b24a4de27a51	d3e128f8bb192ddfeb59825c747e8821d82798b1265f2fcf9042f3fb95437264
 src/frontend/tui/tests/plat53-test-results-mutation-control.sha256	src/frontend/tui/app/views/shell.nim	df5ac6b9934a2c537ba95bde700e1484fd5193a037a88c60135c5bb0982933ea	6a21298445ac4d112fa8dc906f943865ec39d4b42040fbfaf6d1b147778f2d8a
 src/frontend/tui/tests/plat70b-table-mutation-control.sha256	src/frontend/tui/app/views/glyph_table.nim	55bf6277bdf57ce65709fbfc0f0b19cf5f5f4810fbdf25323268b24a4de27a51	d3e128f8bb192ddfeb59825c747e8821d82798b1265f2fcf9042f3fb95437264
-src/frontend/tui/tests/plat71d-mux-mutation-control.sha256	src/frontend/tui/app/tests/test_plat71_terminal_profile.nim	47d1c433c9838314c782aa53510815f5fdf60c93486b1da9a63f1f9719f04c2a	5177500108a19cedd2952493e3ce955b471e69b19f93a51ca73e0449681236ee
 src/frontend/tui/tests/plat72-screen-reader-mutation-control.sha256	src/frontend/tui/app/views/glyph_table.nim	55bf6277bdf57ce65709fbfc0f0b19cf5f5f4810fbdf25323268b24a4de27a51	d3e128f8bb192ddfeb59825c747e8821d82798b1265f2fcf9042f3fb95437264
 src/frontend/tui/tests/plat72-screen-reader-mutation-control.sha256	src/frontend/tui/app/views/shell.nim	df5ac6b9934a2c537ba95bde700e1484fd5193a037a88c60135c5bb0982933ea	6a21298445ac4d112fa8dc906f943865ec39d4b42040fbfaf6d1b147778f2d8a
 src/frontend/tui/tests/plat72-screen-reader-mutation-control.sha256	src/frontend/tui/tests/test_plat72_screen_reader.nim	1bb1907c844deceee1d320d61f1fbd5e4baeb51a3a74805f87fd9c56bafc21be	5851899b55feb764532cd8d20f53c49d42388cc3e89e7be3664d35b37c3057cb
@@ -886,8 +853,6 @@ src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend
 src/frontend/tui/tests/plat72-screen-reader-mutation-control.sha256	src/frontend/tui/app/runtime.nim	44d968e50c635c06040e3b6c4198fe2c748584d80ac55290aeee3283a918fd96	a8f6c18817375c1435f4e1aabef5026a12730813e635a3ee159f497cd5a30c5d
 src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/tui/app/runtime.nim	44d968e50c635c06040e3b6c4198fe2c748584d80ac55290aeee3283a918fd96	a8f6c18817375c1435f4e1aabef5026a12730813e635a3ee159f497cd5a30c5d
 src/frontend/viewmodel/tests/unit/plat31-keymap-mutation-control.sha256	src/frontend/viewmodel/keymap/editing_keymap.nim	0951fb885eb3f1f2f2d7ce24aadaeeed92982ce8d77a9502d444075035084bd5	438c7068c4ee324fe1154e7b16227d8d07d2feec3c22982fa73b9e65f3e45f01
-src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	src/frontend/viewmodel/keymap/editing_keymap.nim	0951fb885eb3f1f2f2d7ce24aadaeeed92982ce8d77a9502d444075035084bd5	438c7068c4ee324fe1154e7b16227d8d07d2feec3c22982fa73b9e65f3e45f01
-src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	src/frontend/tui/app/runtime.nim	44d968e50c635c06040e3b6c4198fe2c748584d80ac55290aeee3283a918fd96	a8f6c18817375c1435f4e1aabef5026a12730813e635a3ee159f497cd5a30c5d
 src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/frontend/viewmodel/keymap/editing_keymap.nim	0951fb885eb3f1f2f2d7ce24aadaeeed92982ce8d77a9502d444075035084bd5	438c7068c4ee324fe1154e7b16227d8d07d2feec3c22982fa73b9e65f3e45f01
 src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/frontend/viewmodel/keymap/keymap_router.nim	35992a226bb769b76dd6d3725f4af231cf54e97ee3c76be7b493c95c11858ae2	5aa56d7fc405efc67a11f057aa79cfdbfb817022055c34f6f5712254138ff772
 
@@ -895,8 +860,8 @@ src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/fro
 # package by name and checks the admission; the suite changed, so the harness grading it owes
 # a re-grade.
 src/frontend/gpui/tests/plat20-mutation-control.sha256	src/frontend/gpui/tests/test_gpui_shell_split.nim	3d8325b36f086841e52b6032017041f6e015bba121482c5765a8b5140e05e1ee	e31ea3dce4e758df5744984ae12c76d3ab3c8b02d6a5ff199006e21bb9b604b4
-src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/viewmodel/plugin_host/supervisor.nim	37a911c95f7ce375ba18f590470046ad9550343fadf19166e6bf8ec65e2bd4fe	4c9cf5554b7e6205ac7c35384b584731477de7368962c26069704177e4b662cd
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/supervisor.nim	37a911c95f7ce375ba18f590470046ad9550343fadf19166e6bf8ec65e2bd4fe	4c9cf5554b7e6205ac7c35384b584731477de7368962c26069704177e4b662cd
+src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/viewmodel/plugin_host/supervisor.nim	37a911c95f7ce375ba18f590470046ad9550343fadf19166e6bf8ec65e2bd4fe	caf140625234e049e0ffc6c87c873fcf36b3d383296b6e3c46c387b1e80bd632
+src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/supervisor.nim	37a911c95f7ce375ba18f590470046ad9550343fadf19166e6bf8ec65e2bd4fe	caf140625234e049e0ffc6c87c873fcf36b3d383296b6e3c46c387b1e80bd632
 
 # 2026-11-25, the SDK acknowledges an autoAck plugin's invoke on its reader thread
 # (codetracer-pm 2026-11-24-a-freshly-activated-plugins-first-key-misses-its-input-
@@ -904,7 +869,51 @@ src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/fronten
 # M25, its positive control run by hand: ackEarly off fails the new case) and the SDK
 # under plat83-ct-lens (its M3 re-indented to compile; by hand, it fails "a slow git
 # does not hold the sibling plugin"). Both owe a re-grade for these bytes.
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_plugin_process_host.nim	a89551d91a97127efb3167bff332656b21a67e21ce5bdc6e9222924210b3d119	ab4b6292c735ba76aac47a0cd9988dada2e16142b855653c525fa119f72b1c6a
+src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_plugin_process_host.nim	a89551d91a97127efb3167bff332656b21a67e21ce5bdc6e9222924210b3d119	b148e640606d6b423223964f44bf55dd16243ebc83539aa66dea84af746f9fc9
 src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/plugin_sdk/codetracer_plugin_sdk.nim	2d4903eaa226c5295c0ced78d7a2666d9ecabd473c9bf9d3066d0a009d782fee	e2c939f3be8c6038dff6f10c0bb7c71b0faf5657f99ebcae999ea82b523483a1
 src/frontend/tui/tests/plat83-ct-lens-mutation-control.sha256	src/plugin_sdk/codetracer_plugin_sdk.nim	2d4903eaa226c5295c0ced78d7a2666d9ecabd473c9bf9d3066d0a009d782fee	e2c939f3be8c6038dff6f10c0bb7c71b0faf5657f99ebcae999ea82b523483a1
-src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	ci/lib/test-lane-files.sh	6bc216be8edfb75d09db3103295e233200079c6d9c4cf78af18b5c3312b6df07	8723f13449df6da6d5acdf55932cab0382378d8cb62d41cd89503d948c776663
+# 2026-11-25: the status line's row-sharing rule moved from the GPUI window
+# geometry into the viewmodel layer (window_geometry.nim re-exports it), and the
+# sessions bar's three unit suites joined the list of suites the JavaScript lane
+# does not run (test-lane-files.sh); these harnesses digest those subjects and
+# owe a re-grade.
+src/frontend/gpui/tests/plat20-mutation-control.sha256	src/frontend/gpui/window_geometry.nim	8595f1669201ae3addab9f7134adf5c0ce306855acc4726ccfe1d41fb0e79ed7	fade42f842eab416a16e489917dd21c36d0577f86ed04910d418f212d1b9f4c2
+src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	ci/lib/test-lane-files.sh	8723f13449df6da6d5acdf55932cab0382378d8cb62d41cd89503d948c776663	a7a0360b1bf2ceb0286af1ecfb5d43f5f40d3bc5b306fd21b7b8667af77edf92
+ci/test/plat70-find-decisions-mutation-control.sha256	src/frontend/gpui/main.nim	74d1b4cb7c6794d7176211fc032aec567fa8d23bc4cc2a44907913bc6f089cbc	f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00
+ci/test/plat70c-find-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00
+ci/test/plat70i-fit-mutation-control.sha256	src/frontend/gpui/main.nim	220d8170c7218709d5ae77691e7cfbfce2954ae359429ba9554c046b0b637053	f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00
+src/frontend/gpui/tests/gpui-visualiser-mutation-control.sha256	src/frontend/gpui/main.nim	93e0d62046619caab3c26eb7d894941ff23c8d044e139302cc93481b87bc8f5b	f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00
+src/frontend/gpui/tests/plat44-editing-mutation-control.sha256	src/frontend/gpui/main.nim	35ee2065e843830fe3a07b221e3c9e9f7ea1cb32735cb25a2d6167f5cc4a1e09	f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00
+src/frontend/gpui/tests/plat85-keyed-redraw-mutation-control.sha256	src/frontend/gpui/main.nim	93e0d62046619caab3c26eb7d894941ff23c8d044e139302cc93481b87bc8f5b	f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00
+src/frontend/tui/tests/build-residuals-mutation-control.sha256	src/frontend/gpui/main.nim	44be0a3c885a6c9561bd625292907fa776d669875783a6445391ec5b1bfecf55	f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00
+src/frontend/tui/tests/plat45-layout-mutation-control.sha256	src/frontend/gpui/main.nim	35ee2065e843830fe3a07b221e3c9e9f7ea1cb32735cb25a2d6167f5cc4a1e09	f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00
+src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/gpui/main.nim	28f36a050600425fdbbea72ccc729250a4977ecc589c87e4d67e73d3196f228e	f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00
+src/frontend/tui/tests/plat48-topbar-mutation-control.sha256	src/frontend/gpui/main.nim	44be0a3c885a6c9561bd625292907fa776d669875783a6445391ec5b1bfecf55	f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00
+src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/gpui/main.nim	44be0a3c885a6c9561bd625292907fa776d669875783a6445391ec5b1bfecf55	f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00
+src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/gpui/main.nim	44be0a3c885a6c9561bd625292907fa776d669875783a6445391ec5b1bfecf55	f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00
+src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/gpui/main.nim	7953de7932634c94ba38056c6f5e8454c74131be118557bc674f6f8c5d6ce036	f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00
+src/frontend/tui/tests/plat52-terminal-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00
+src/frontend/tui/tests/plat53-test-results-mutation-control.sha256	src/frontend/gpui/main.nim	204874f7ed57e34ce5819f90c33c8d1b3301359c53218385877a3184b3686591	f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00
+src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/gpui/main.nim	28f36a050600425fdbbea72ccc729250a4977ecc589c87e4d67e73d3196f228e	f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00
+src/frontend/tui/tests/plat55-problems-mutation-control.sha256	src/frontend/gpui/main.nim	44be0a3c885a6c9561bd625292907fa776d669875783a6445391ec5b1bfecf55	f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00
+src/frontend/tui/tests/plat56-build-output-mutation-control.sha256	src/frontend/gpui/main.nim	44be0a3c885a6c9561bd625292907fa776d669875783a6445391ec5b1bfecf55	f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00
+src/frontend/tui/tests/plat57-find-in-files-mutation-control.sha256	src/frontend/gpui/main.nim	44be0a3c885a6c9561bd625292907fa776d669875783a6445391ec5b1bfecf55	f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00
+src/frontend/tui/tests/plat58-requests-mutation-control.sha256	src/frontend/gpui/main.nim	44be0a3c885a6c9561bd625292907fa776d669875783a6445391ec5b1bfecf55	f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00
+src/frontend/tui/tests/plat59-visual-replay-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00
+src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00
+src/frontend/tui/tests/plat61-shell-mutation-control.sha256	src/frontend/gpui/main.nim	44be0a3c885a6c9561bd625292907fa776d669875783a6445391ec5b1bfecf55	f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00
+src/frontend/tui/tests/plat62-constraints-mutation-control.sha256	src/frontend/gpui/main.nim	7953de7932634c94ba38056c6f5e8454c74131be118557bc674f6f8c5d6ce036	f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00
+src/frontend/tui/tests/plat63-verification-mutation-control.sha256	src/frontend/gpui/main.nim	7953de7932634c94ba38056c6f5e8454c74131be118557bc674f6f8c5d6ce036	f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00
+src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend/gpui/main.nim	7953de7932634c94ba38056c6f5e8454c74131be118557bc674f6f8c5d6ce036	f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00
+src/frontend/tui/tests/plat65-nim-tracing-mutation-control.sha256	src/frontend/gpui/main.nim	44be0a3c885a6c9561bd625292907fa776d669875783a6445391ec5b1bfecf55	f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00
+src/frontend/tui/tests/plat70a-hscroll-mutation-control.sha256	src/frontend/gpui/main.nim	35ee2065e843830fe3a07b221e3c9e9f7ea1cb32735cb25a2d6167f5cc4a1e09	f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00
+src/frontend/tui/tests/plat70b-table-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00
+src/frontend/tui/tests/plat70d-grep-mutation-control.sha256	src/frontend/gpui/main.nim	b755aed817a6d5b691557869ab7b22ce647bee0554b5421df6f18be6f06ffa81	f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00
+src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	src/frontend/gpui/main.nim	7953de7932634c94ba38056c6f5e8454c74131be118557bc674f6f8c5d6ce036	f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00
+src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/gpui/main.nim	220d8170c7218709d5ae77691e7cfbfce2954ae359429ba9554c046b0b637053	f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00
+src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00
+src/frontend/tui/tests/plat70b-table-mutation-control.sha256	src/frontend/viewmodel/views/table_overflow_dom.nim	3cafcc6a3e9313fd18877db72be64ad195f0a86801bf89f119e79601d250fe83	651dc6c35d6eb035eda0eb6e83cfb7d48fc61d50618e29cbe67e098c825d64f4
+src/frontend/viewmodel/tests/unit/plat29-async-mutation-control.sha256	src/frontend/ui/state.nim	dffab8fbd926da0a6350b4bfa1ee15ae5940fb3b35e8630fe3fc07cb370f4e9f	bd66da9527b6298b1f91aaef8e60c68aa75e1b7847189f039b7d0bbd6671274e
+
+# Re-grades owed for subjects moved by a379c1fc4e6 without ledger lines;
+# the harnesses that digest them owe a re-grade of the arms that sit in them.
