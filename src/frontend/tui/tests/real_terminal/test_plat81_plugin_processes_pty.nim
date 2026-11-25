@@ -52,6 +52,26 @@ proc escapeKey(sess: var TuiTestSession) =
   sess.send("\e")
   sleep(200)
 
+proc overlayDismissed(sess: var TuiTestSession; needle: string;
+                      ceilingMs = 30_000): bool =
+  ## Close the overlay showing `needle` with an Escape, and return once it has
+  ## gone, so the next bytes cannot reach the TUI in the same read as that
+  ## Escape. Sent blind, `ESC` then 200 ms, then Ctrl+Alt+K as `ESC 0x0b`:
+  ## at load ~125 a TUI still busy read `ESC ESC 0x0b` together, took the
+  ## lone Escape's ESC as the Alt, and was left with a bare Ctrl+K, the chord
+  ## prefix, so the plugin's binding never saw its key (measured at codetracer
+  ## 8c9e7a094fd). An Escape that is not taken is sent again.
+  var waited = 0
+  while waited < ceilingMs:
+    sess.escapeKey()
+    for _ in 0 ..< 10:
+      discard sess.drainOutput(100)
+      if needle notin sess.screen: return true
+      sleep(100)
+    waited += 2_200
+  checkpoint "still on screen after Escape: " & needle & "\n" & sess.screen
+  false
+
 proc promptShows(sess: var TuiTestSession; text: string; ceilingMs: int): bool =
   ## The bottom line is the open prompt's sigil and buffer (§3.3.6).
   var waited = 0
@@ -309,7 +329,7 @@ suite "Extensibility-Model §11 on a real terminal":
     sess.command("plugins grant acme-tools.flame")
     check sess.commandShows("plugins", "acme-tools.metrics  running")
     let start = sess.settledTick()
-    sess.escapeKey()
+    check sess.overlayDismissed("acme-tools.metrics  running")
     sess.send("\x1b\x0b")
     check sess.tickMoves(start) != start
     # `j` first, then `J`, then the tally through the same pipe: the tally
