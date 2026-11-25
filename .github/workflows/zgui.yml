@@ -25,6 +25,11 @@ on:
       - 'src/frontend/view_vocabulary/**'
       - '.github/workflows/zgui.yml'
       - 'ci/toolchain.pin'
+      - 'src/frontend/stories/**'
+      - 'storybook/stories/lib/**'
+      - 'tools/story-parity/**'
+      - 'scripts/story-parity.sh'
+      - 'src/tests/visual/story-parity-floors.json'
   workflow_dispatch:
 
 concurrency:
@@ -158,6 +163,28 @@ jobs:
           # another runner account on the same host.
           CT_NIM_CACHE_ROOT: ${{ runner.temp }}/ct-nim-cache
         run: nix develop . --command just test-zgui
+
+      # The story-parity harness (scripts/story-parity.sh): every story in
+      # tools/story-parity/stories.txt drawn by the DOM arm (CodeTracer's
+      # Electron, on its own Xvfb) and by zgui, compared pixel by pixel. It
+      # reports for now; `--check` against src/tests/visual/story-parity-floors.json
+      # follows once the floors are taken from this lane's own captures.
+      - name: The story-parity harness
+        env:
+          CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
+          CT_NIM_CACHE_ROOT: ${{ runner.temp }}/ct-nim-cache
+        run: nix develop . --command just story-parity
+
+      - name: Upload the story-parity captures and report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: story-parity-x86_64-linux
+          path: |
+            build/story-parity/report.*
+            build/story-parity/*/*/*.png
+            build/story-parity/*/*/*.json
+          retention-days: 30
 
       - name: Hand the calc recording to the macOS job
         if: always()

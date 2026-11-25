@@ -1,0 +1,8 @@
+# The stories the story-parity harness draws with every arm
+# (scripts/story-parity.sh). One per line: <kind>/<surface>/<fixture>[|<tab title>],
+# as declared in src/frontend/stories/codetracer_stories.nim.
+panel/event-log/populated|Event Log
+panel/calltrace/populated|Calltrace
+# The Layouts page's default debugging window: the editor tab stays empty in zgui until
+# the shared editor draws through any renderer.
+layout/default-debug/populated

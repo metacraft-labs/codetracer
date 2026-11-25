@@ -227,7 +227,7 @@ PRIVATE_SIBLING_CODETRACER_SNAPSHOT_CODECS=3e503da83b73e805f30096d4baa45c18d138f
 # declares the package; the fixtures are dev's).
 PRIVATE_SIBLING_CODETRACER_NATIVE_TEST_PROGRAMS=0d0d64e2ebe2cb261284778fa7959bb7cf761604
 # isonim-zgui, which only the zgui lane (.github/workflows/zgui.yml) clones.
-PRIVATE_SIBLING_ISONIM_ZGUI=328155b7086fa6a2921287c1aec8ff5d305aa645
+PRIVATE_SIBLING_ISONIM_ZGUI=59568bf708d4e17baf7cdb4d1f5aa41b7e83c40c
 # The private recordings' CAS remote, from which the desktop and Firefox
 # scenario lanes' Windows portable recording resolves the Microsoft system
 # files it names by reference (ct_stages portableRecording): the commit that

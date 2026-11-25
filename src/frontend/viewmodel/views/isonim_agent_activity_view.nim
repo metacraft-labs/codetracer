@@ -1002,6 +1002,7 @@ proc renderTestRun[R](r: R; vm: AgentActivityVM; entry: AgentTestRunEntry;
   let summary = entry.summary
   let anchorId = entry.anchorId
   let expanded = vm.isTestRunExpanded(anchorId)
+  mixin createElement
   var body: typeof(r.createElement("div"))
   let card = ui(r):
     tdiv(class = testRunStateClass(summary), id = testRunId(anchorId)):
@@ -1166,6 +1167,7 @@ const AgentAddContextTraceIcon = """<svg width="13" height="13" viewBox="0 0 13 
 
 proc renderAddContextMenuItem[R](r: R; icon: string; label: string;
                                   action: proc(); disabledReason = ""): auto =
+  mixin createElement
   var iconRef: typeof(r.createElement("div"))
   let disabled = disabledReason.len > 0
   let cls = "agent-add-context-menu-item ct-menu-item" &
@@ -1187,6 +1189,7 @@ proc renderAddContextMenuItem[R](r: R; icon: string; label: string;
 
 proc renderAddFilesButton[R](r: R; vm: AgentActivityVM;
                               callbacks: AgentActivityCallbacks): auto =
+  mixin createElement
   ## + button with a dropdown (Upload, Files, Editor, Trace).
   ## Dropdown flips above the button when near the bottom of the screen via CSS.
   ## Clicking outside the wrapper closes the dropdown via a document-level handler.
@@ -1256,6 +1259,7 @@ proc renderModelOption[R](r: R; vm: AgentActivityVM; model: string): auto =
 
 proc renderModelButton[R](r: R; vm: AgentActivityVM;
                           callbacks: AgentActivityCallbacks): auto =
+  mixin createElement
   ## Model selector button with an upward-opening dropdown listing available models.
   var wrapperRef: typeof(r.createElement("div"))
   var listRef: typeof(r.createElement("div"))
@@ -1367,6 +1371,7 @@ proc renderSettingsDropdown[R](r: R; vm: AgentActivityVM; dropdownId: string;
                                currentValue: proc(): string;
                                options: proc(): seq[string];
                                onSelect: proc(v: string)): auto =
+  mixin createElement, removeChild
   ## A settings select: a trigger showing `currentValue()` and, while
   ## `vm.settingsActiveDropdown` names `dropdownId`, the list of `options()`.
   ##
@@ -1416,6 +1421,7 @@ proc renderSettingsDropdown[R](r: R; vm: AgentActivityVM; dropdownId: string;
 
 proc renderSettingsPanel[R](r: R; vm: AgentActivityVM;
                             callbacks: AgentActivityCallbacks): auto =
+  mixin createElement
   ## The settings panel, built once per opening.  Must be called untracked
   ## (it creates effects and memos, and must not subscribe its caller to
   ## anything); see the section comment above.
@@ -1559,6 +1565,7 @@ proc renderBranchOption[R](r: R; vm: AgentActivityVM;
 
 proc renderBranchButton[R](r: R; vm: AgentActivityVM;
                            callbacks: AgentActivityCallbacks): auto =
+  mixin createElement
   ## Branch context selector with a search-and-pick dropdown.
   ## Search row at top, scrollable branch list in the middle,
   ## "New branch" footer at the bottom.
@@ -1652,6 +1659,9 @@ proc renderIdleState[R](r: R; vm: AgentActivityVM;
 proc renderAgentActivityPanelImpl[R](r: R; vm: AgentActivityVM;
     componentId: int; commandInputId: string;
     callbacks: AgentActivityCallbacks): auto =
+  # Open, so the renderer the panel is instantiated for is found: with only
+  # MockRenderer's overloads in scope here, a native renderer bound to them.
+  mixin createElement, setAttribute, clearChildren, appendChild
   var conversation: typeof(r.createElement("div"))
   var input: typeof(r.createElement("textarea"))
   var highlight: typeof(r.createElement("div"))

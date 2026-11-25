@@ -545,9 +545,15 @@ jobs:
           $recorder = Join-Path $env:GITHUB_WORKSPACE `
             "..\codetracer-python-recorder\codetracer-python-recorder"
           $stewRoot = (Resolve-Path "$env:GITHUB_WORKSPACE\libs\nim-stew").Path.Replace('\', '/')
+          $resultRoot = (Resolve-Path "$env:GITHUB_WORKSPACE\libs\nim-result").Path.Replace('\', '/')
+          # libs/nim-result LAST: Nim gives the last --path precedence, and
+          # without it the trace writer's `import results` finds
+          # libs/nim-stew/stew's legacy copy ("'mapErr' can have side effects",
+          # run 45683516828), as in the Linux recorder jobs.
           $nimPathConfig = @(
             "--path:`"$stewRoot/stew`""
             "--path:`"$stewRoot`""
+            "--path:`"$resultRoot`""
           )
           foreach ($nimConfigDir in @(
             (Join-Path $env:APPDATA "nim"),
@@ -903,9 +909,15 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-          if (-not $env:NIM_DIR) { throw "env.ps1 set no NIM_DIR" }
-          $nimBin = Join-Path $env:NIM_DIR "bin"
-          if (-not (Test-Path -LiteralPath (Join-Path $nimBin "nim.exe") -PathType Leaf)) { throw "no nim.exe under $nimBin" }
+          # setup-dev-env exports env.ps1's PATH but not NIM_DIR (run
+          # 45683516828), so find nim.exe on PATH, else under the cached root.
+          $nim = Get-Command nim.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          $nimExe = if ($nim) { $nim.Source } else {
+            Get-ChildItem -Path "${{ runner.temp }}\ct-diy\nim\*\prebuilt\*\bin\nim.exe" -ErrorAction SilentlyContinue |
+              Select-Object -First 1 -ExpandProperty FullName
+          }
+          if (-not $nimExe) { throw "no nim.exe on PATH or under ${{ runner.temp }}\ct-diy\nim" }
+          $nimBin = Split-Path -Parent $nimExe
           Add-Content -Path $env:GITHUB_PATH -Value $nimBin
           Add-Content -Path $env:GITHUB_PATH -Value "$env:USERPROFILE\.nimble\bin"
           & (Join-Path $nimBin "nim.exe") --version
@@ -917,9 +929,15 @@ jobs:
           $recorder = Join-Path $env:GITHUB_WORKSPACE `
             "..\codetracer-python-recorder\codetracer-python-recorder"
           $stewRoot = (Resolve-Path "$env:GITHUB_WORKSPACE\libs\nim-stew").Path.Replace('\', '/')
+          $resultRoot = (Resolve-Path "$env:GITHUB_WORKSPACE\libs\nim-result").Path.Replace('\', '/')
+          # libs/nim-result LAST: Nim gives the last --path precedence, and
+          # without it the trace writer's `import results` finds
+          # libs/nim-stew/stew's legacy copy ("'mapErr' can have side effects",
+          # run 45683516828), as in the Linux recorder jobs.
           $nimPathConfig = @(
             "--path:`"$stewRoot/stew`""
             "--path:`"$stewRoot`""
+            "--path:`"$resultRoot`""
           )
           foreach ($nimConfigDir in @(
             (Join-Path $env:APPDATA "nim"),
