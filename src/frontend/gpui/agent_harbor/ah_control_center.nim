@@ -480,9 +480,13 @@ proc overviewColumn(r: GpuiRenderer; p: AhPalette; vm: ControlCenterVM;
       r.appendChild(list, r.drawWaitingRow(p, row, inner, row.item.id == focused, press))
     if shown < rows.len:
       let more = "+" & $(rows.len - shown) & " more"
+      # The list itself has no side padding (its rows span the column and
+      # inset their own words), so the line takes the panel's inset, as the
+      # "nothing waits" line does.
       let m = r.text(more, CaptionPx, p.textCaption, shrink = false,
                      pairs = [("height", $MoreLinePx & "px"),
-                              ("line-height", $MoreLinePx & "px")])
+                              ("line-height", $MoreLinePx & "px"),
+                              ("margin-left", $PadXPx & "px")])
       r.tag(m, "waiting-more", $(rows.len - shown))
       r.appendChild(list, m)
     r.appendChild(waiting, list)

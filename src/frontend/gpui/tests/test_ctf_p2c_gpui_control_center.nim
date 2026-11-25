@@ -56,6 +56,15 @@ proc carrying(root: GpuiElement; operation: string): seq[GpuiElement] =
 
 proc fact(e: GpuiElement; name: string): string = getAttribute(e, "data-ah-" & name)
 
+proc planNodeWith(n: JsonNode; attribute: string): JsonNode =
+  ## The first node of a render plan carrying `attribute`.
+  let attributes = n{"attributes"}
+  if attributes != nil and attributes.kind == JObject and attributes.hasKey(attribute):
+    return n
+  for c in n{"children"}.getElems:
+    let found = planNodeWith(c, attribute)
+    if found != nil: return found
+
 proc mount(fixture: string; width = 1440; height = 900; mode = dmDark): AhStoryMount =
   gpui_reset_tree()
   r.mountAgentHarborStoryGpui("agent-harbor-control-center", fixture, width, height, mode)
@@ -120,6 +129,12 @@ suite "CTF-P2c: the GPUI control center":
         let more = s.view.tagged("waiting-more")
         let counted = if more.len == 1: parseInt(more[0].fact("waiting-more")) else: 0
         check drawn + counted == total
+        # The `+N more` line keeps the panel's inset, as the rows' words do.
+        if more.len == 1:
+          let node = parseJson(renderPlanJson(r, s.root)).planNodeWith("data-ah-waiting-more")
+          check node != nil
+          if node != nil:
+            check node{"styles"}{"margin_left"}.getStr == $cc.PadXPx & "px"
         # The waiting list leaves the Initiatives panel its head band and
         # `InitiativesFloorPx` under it (study D84, GPUI review round 3).
         let overviewH = s.view.tagged("overview-px").mapIt(parseInt(it.fact("overview-px")))
@@ -344,15 +359,6 @@ suite "CTF-P2c: the GPUI gaze mark":
     fireEvent(m.view.tagged("gaze-mark")[0], "mousedown")
     check m.view.tagged("gaze-mark")[0].fact("gaze-mark") == "tracking"
     m.dispose()
-
-proc planNodeWith(n: JsonNode; attribute: string): JsonNode =
-  ## The first node of a render plan carrying `attribute`.
-  let attributes = n{"attributes"}
-  if attributes != nil and attributes.kind == JObject and attributes.hasKey(attribute):
-    return n
-  for c in n{"children"}.getElems:
-    let found = planNodeWith(c, attribute)
-    if found != nil: return found
 
 proc pxOf(style: string): float =
   ## A `<n>px` style's pixels; NaN (never within a tolerance) for anything else.
