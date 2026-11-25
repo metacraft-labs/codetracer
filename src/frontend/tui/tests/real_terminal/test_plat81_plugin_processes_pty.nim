@@ -173,6 +173,22 @@ proc tickMoves(sess: var TuiTestSession; from0: int;
   checkpoint "the screen stayed at tick " & $from0 & "\n" & sess.screen
   from0
 
+proc terminalPid(): int =
+  ## The `codetracer-tui` this process spawned (its child, by `/proc`).
+  let me = $getpid()
+  for kind, dir in walkDir("/proc"):
+    let name = dir.extractFilename
+    if name.len == 0 or name[0] notin Digits: continue
+    try:
+      let stat = readFile(dir / "stat")
+      let close = stat.rfind(')')
+      let fields = stat[close + 2 .. ^1].split(' ')
+      if fields.len > 1 and fields[1] == me and "(codetracer-tui)" in stat:
+        return parseInt(name)
+    except IOError, OSError, ValueError:
+      discard
+  -1
+
 proc pluginPids(home: string): seq[int] =
   ## The plugin processes of THIS test's install, by their executable's path
   ## under `home`: other suites on the same machine run the same package.
@@ -330,7 +346,18 @@ suite "Extensibility-Model §11 on a real terminal":
     check sess.commandShows("plugins", "acme-tools.metrics  running")
     let start = sess.settledTick()
     check sess.overlayDismissed("acme-tools.metrics  running")
+    # An `Esc`, then the chord 200 ms later, typed while the terminal is busy
+    # (stopped by SIGSTOP): both reach it in one read, `ESC ESC 0x0b`, which
+    # must still be Esc and then Ctrl+Alt+K. Unstopped, the same keys read
+    # apart; at load 120 they sometimes arrived together and read as Ctrl+K.
+    let tui = terminalPid()
+    check tui > 0
+    check kill(Pid(tui), SIGSTOP) == 0
+    sess.send("\x1b")
+    sleep(200)
     sess.send("\x1b\x0b")
+    sleep(200)
+    check kill(Pid(tui), SIGCONT) == 0
     check sess.tickMoves(start) != start
     # `j` first, then `J`, then the tally through the same pipe: the tally
     # counts the keys that reached the plugin before it, in order.

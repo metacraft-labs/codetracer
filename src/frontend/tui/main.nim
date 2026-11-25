@@ -1743,6 +1743,11 @@ proc interactive(command: TuiCommand): int =
       # V6): a taller pane reads the commits it can now show.
       discard vcs.followViewport(rt)
       paint(driver, rt)
+    of dekEscapePress:
+      # A press the framer read as the second `ESC` of a pair: not a key, but
+      # one of the recovery chord's three (`TuiRuntime.observeEscapePress`).
+      if rt.observeEscapePress().repaint:
+        paint(driver, rt)
     of dekFocus:
       driver.pointerFocusChanged(ev.focused)
       # THE VCS PANE'S SECOND TRIGGER (VCS-Panel.md's auto-refresh, the
@@ -2178,6 +2183,11 @@ proc editInteractive(command: TuiCommand): int =
       rt.resize(size.cols, size.rows)
       discard vcs.followViewport(rt)
       paint(driver, rt)
+    of dekEscapePress:
+      # A press the framer read as the second `ESC` of a pair: not a key, but
+      # one of the recovery chord's three (`TuiRuntime.observeEscapePress`).
+      if rt.observeEscapePress().repaint:
+        paint(driver, rt)
     of dekFocus:
       # The terminal window regained focus: the project's VCS pane re-reads
       # now, exactly as in the replay loop above (`VcsSource.refreshOnFocus`).
