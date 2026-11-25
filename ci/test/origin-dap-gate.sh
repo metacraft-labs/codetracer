@@ -103,8 +103,8 @@ windows_nightly="$(workflow_job origin-dap-windows-nightly)"
 if grep -Fq 'shell: pwsh' <<<"$windows_per_pr"; then
 	fail "Windows per-PR origin-DAP job must not require unavailable PowerShell Core"
 fi
-[ "$(printf '%s\n' "$windows_per_pr" | grep -c 'shell: powershell$')" -eq 8 ] ||
-	fail "Windows per-PR origin-DAP job must run all eight PowerShell steps with Windows PowerShell"
+[ "$(printf '%s\n' "$windows_per_pr" | grep -c 'shell: powershell$')" -eq 9 ] ||
+	fail "Windows per-PR origin-DAP job must run all nine PowerShell steps with Windows PowerShell"
 
 [ "$(printf '%s\n' "$windows_per_pr" | grep -c 'CT_TEST_LANGS: python$')" -eq 1 ] ||
 	fail "Windows per-PR origin-DAP job must select Python exactly once"

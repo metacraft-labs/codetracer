@@ -446,18 +446,22 @@ jobs:
         # archives and need no installer. They are marked externally managed,
         # so the recorder is pip-installed into a seeded venv, which is what
         # `python` resolves to from here on.
-        shell: pwsh
+        shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
           # uv.exe itself: env.ps1's extensionless `uv` shim is for Git Bash.
           $uv = if ($env:UV_DIR) { Join-Path $env:UV_DIR "uv.exe" } else { (Get-Command uv.exe -ErrorAction Stop).Source }
           if (-not (Test-Path -LiteralPath $uv -PathType Leaf)) { throw "no uv.exe at $uv" }
           $venv = Join-Path $env:RUNNER_TEMP "origin-dap-python"
+          $scripts = Join-Path $venv "Scripts"
+          # uv reports progress on stderr, which Windows PowerShell 5.1 can turn
+          # into a terminating error under Stop; the exit codes decide instead.
+          $ErrorActionPreference = "Continue"
           & $uv venv --seed --python 3.12 --python-preference only-managed $venv
           if ($LASTEXITCODE -ne 0) { throw "uv could not create a Python 3.12 venv (exit $LASTEXITCODE)" }
-          $scripts = Join-Path $venv "Scripts"
           & (Join-Path $scripts "python.exe") -m pip --version
           if ($LASTEXITCODE -ne 0) { throw "the Python 3.12 venv has no pip" }
+          $ErrorActionPreference = "Stop"
           Add-Content -LiteralPath $env:GITHUB_PATH -Value $scripts
 
       - name: Read locked Python recorder revision
