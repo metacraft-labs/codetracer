@@ -270,6 +270,20 @@
       excludes = [ "^storybook/package-lock\\.json$" ];
     };
 
+    # GitHub refuses a workflow file over 512,000 bytes: every run of it, pushed
+    # or dispatched, ends as a startup failure with no jobs ("This run likely
+    # failed because of a workflow file issue"). codetracer.yml crossed it at
+    # 10deaa18de6 (512,978 bytes) and no check inside the workflow can say so,
+    # because the workflow no longer starts. Long explanations go to
+    # docs/ci-server.md, with a pointer in the workflow.
+    workflow-size = {
+      enable = true;
+      name = "workflow files stay under GitHub's 512,000-byte limit";
+      entry = "bash -c 'rc=0; for f in \"$@\"; do n=$(wc -c <\"$f\"); if [ \"$n\" -ge 512000 ]; then echo \"$f: $n bytes; GitHub starts no run of a workflow over 512,000 (docs/ci-server.md)\"; rc=1; fi; done; exit $rc' --";
+      language = "system";
+      files = "^\\.github/workflows/.*\\.ya?ml$";
+    };
+
     check-merge-conflict = {
       enable = true;
       name = "check merge conflict markers";
