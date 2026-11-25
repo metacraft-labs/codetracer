@@ -283,7 +283,7 @@ src/frontend/tui/tests/plat59-visual-replay-mutation-control.sha256	src/frontend
 # Re-grade the arms whose needles sit in them. The omnibox composer
 # (`feat(agent-harbor): prototype the omnibox as the agent composer`) moved
 # overlay_rows.nim and scope_path.nim again (the composer scope and its keys).
-src/frontend/tui/tests/plat59-visual-replay-mutation-control.sha256	src/frontend/viewmodel/keymap/overlay_rows.nim	092a2a5123f4201bd27d7756c774dcbc3f2e80b14ea515064b4c6e5c5d97584e	697ac82c87f47623bfafce8ff99fa696b5b575a9b96627f514eb4a4265e78b0a
+src/frontend/tui/tests/plat59-visual-replay-mutation-control.sha256	src/frontend/viewmodel/keymap/overlay_rows.nim	092a2a5123f4201bd27d7756c774dcbc3f2e80b14ea515064b4c6e5c5d97584e	853f13f268139f8ffbfa72175b107b464b82af71b6eabe07f3e5e206e75f6d4b
 src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/viewmodel/keymap/scope_path.nim	b6c5ae61a3b680c3360ebbc53a196fdcc68d5b62f76f02d10ca37d6bd383eef2	c4cb289d0388968e22c295616065863cfd317f04edc9c3ee17b862d46258d412
 ci/test/plat70c-find-mutation-control.sha256	src/frontend/gpui/tests/test_plat70c_gpui_plan.nim	f515428c73dfef1c26b6a13cdbf981173574ed2443d97f1af2f8bfc3ff08df46	439e490ce6982ba70abafbf6234d187d3a7256681f195f84a0c4dc27bbc00160
 src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/gpui/window_geometry.nim	1bb7ab477d73f464741feb6e52406b5849226f27dc727383e2263f99c41551f7	fade42f842eab416a16e489917dd21c36d0577f86ed04910d418f212d1b9f4c2
@@ -345,7 +345,7 @@ src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/gpui/a
 # The omnibox composer moved overlay_rows.nim (the composer scope's key rows) and,
 # above, test_plat64_reachability.nim (its press-only operations); it re-counted
 # test_gpui_window_frame.nim (one more scanned GPUI source). Re-grade those arms.
-src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend/viewmodel/keymap/overlay_rows.nim	29d13621166a061d890ce4e32b6f11947812f0926f5f1929385f4b3209618834	697ac82c87f47623bfafce8ff99fa696b5b575a9b96627f514eb4a4265e78b0a
+src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend/viewmodel/keymap/overlay_rows.nim	29d13621166a061d890ce4e32b6f11947812f0926f5f1929385f4b3209618834	853f13f268139f8ffbfa72175b107b464b82af71b6eabe07f3e5e206e75f6d4b
 # test_gpui_window_frame.nim moved again: its assertion pin was re-counted 1038 -> 1047 for the
 # scanned element_reuse.nim, then 1047 -> 1056 for the process switcher. Only ExpectedAssertions
 # and its history comment changed.

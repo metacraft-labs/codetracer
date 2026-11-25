@@ -16,6 +16,12 @@
 import ./base_rows
 
 const
+  InboxChordsWhen* = "!textInputFocus || platform != mac || frontEnd == terminal"
+    ## Where `Alt+]` / `Alt+[` step the inbox: everywhere, except a text
+    ## field of a macOS window, where Option and a bracket type a character
+    ## the field must receive. A terminal on macOS delivers Alt only when its
+    ## Option key is set to send it, so there the chord is the user's.
+
   OverlayRows*: seq[BaseRow] = @[
     # --- The program menu, while it is open (CUA-Keymap.md §3.8) -----------
     BaseRow(chords: "Up", operation: "menu.focus-previous", table: MenuTable),
@@ -124,6 +130,26 @@ const
     BaseRow(chords: "7", operation: "process-switcher.select(7)", table: ProcessSwitcherTable),
     BaseRow(chords: "8", operation: "process-switcher.select(8)", table: ProcessSwitcherTable),
     BaseRow(chords: "9", operation: "process-switcher.select(9)", table: ProcessSwitcherTable),
+
+    # --- The Agent Harbor inbox from anywhere in the window: `Alt+]` the
+    # next item and `Alt+[` the previous one, the same under every base (the
+    # sessions bar's Prev and Next name them). The Inbox panel keeps its
+    # unmodified `]` / `[` below. Checked free against every base's rows: the
+    # Emacs base's paragraph keys are `Alt+}` / `Alt+{` (Shift held), Vim and
+    # Kakoune bind the plain brackets only, and the CUA base leaves VS Code's
+    # inline-suggestion pair on these chords untaken (it has no completion
+    # source; one added later would compete for them). A terminal sends them
+    # unambiguously only with the Kitty keyboard protocol (`CSI 93;3u`,
+    # `CSI 91;3u`) or xterm's modifyOtherKeys (`CSI 27;3;93~`,
+    # `CSI 27;3;91~`); in the classic encoding `Alt+[` is `ESC [`, the start
+    # of a control sequence, so the bar reports the keys unavailable there
+    # and its buttons do the work. On macOS, Option and a bracket type a
+    # character (`“`, `‘`), so in a desktop or GPUI text field the chord is
+    # left to the field.
+    BaseRow(chords: "Alt+]", operation: "inbox.next",
+            whenText: InboxChordsWhen, table: GlobalTable),
+    BaseRow(chords: "Alt+[", operation: "inbox.previous",
+            whenText: InboxChordsWhen, table: GlobalTable),
 
     # --- The omnibox's result commands: `Enter` opens the selected row,
     # `Down` / `Up` move the selection, `Tab` inserts a completion (the
