@@ -493,7 +493,10 @@ proc mountAgentHarborStoryGpui*(r: GpuiRenderer; surface, fixture: string;
       r.mountInitiativeTabBar(host, m.initiativeTabs, p, bodyW)
     of "agent-harbor-initiatives":
       m.initiatives = createInitiativesStoryVM(fixture, pb)
-      r.mountInitiativesPanel(host, m.initiatives, p, bodyW)
+      # Its height too: the window does not scroll, so the list keeps to
+      # whole rows within it and counts the rest.
+      let bodyH = if frameTitle.len > 0: heightPx - FrameTitlePx - 8 else: heightPx
+      r.mountInitiativesPanel(host, m.initiatives, p, bodyW, bodyH)
     of "agent-harbor-initiative-progress":
       m.progress = createProgressStoryVM(fixture, pb)
       r.mountProgressPanel(host, m.progress, p, bodyW)

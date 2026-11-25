@@ -42,8 +42,15 @@ const
   LegendPx = 14            ## the counts beside a bar: `.ah-ms-legend`, 14px high
   LegendMinPx = 144        ## `.ah-ms-legend` min-width: 9rem, its counts at its end
   LinePx = 16              ## `type-ui-lineheight-body-sm` / `-caption-md`
-  HeadLinePx = 24          ## an initiative's head line (its fold and counts inherit 24px)
+  HeadLinePx* = 24         ## an initiative's head line (its fold and counts inherit 24px)
   SessionLinePx = 18       ## a session line: 16px and 1px above and below
+  RowPadPx = 10            ## `.ah-initiative-row`: 10px above and below
+  RowGapPx = 6             ## an initiative's parts, 6px apart
+  MoreChipPx = 2 + 20 + 2  ## `+N more` / `Show fewer`: a 20px chip, 2px clear
+  ListMoreLinePx* = 20
+    ## The list's own `+N more` line, counting the initiatives a panel too
+    ## short for them leaves out: a 16px caption line, 2px above and below,
+    ## as the control center's waiting list counts its rows.
   MarkGapWidePx = 24       ## a wide milestone table's column gap
   MilestoneIdPx = 72       ## `.ah-milestone-id` min-width: 4.5rem
   MilestoneIdNarrowPx = 56 ## at most 30rem wide: 3.5rem
@@ -365,17 +372,70 @@ proc drawInitiativeRow(r: GpuiRenderer; p: AhPalette; vm: InitiativesVM;
                           ("overflow", "hidden")])
     r.appendChild(result, sessions)
 
+proc initiativeRowPx*(row: InitiativeRow; widthPx: int; headLinePx = HeadLinePx): int =
+  ## The height `drawInitiativeRow` gives `row` in a panel `widthPx` wide:
+  ## its lines never wrap (`ah_theme.text` is one line, elided), so the
+  ## height follows from which parts the row has. A panel that cannot
+  ## scroll keeps to whole rows by it (`drawInitiativesPanel`).
+  # The head, the milestone bar (its 14px legend beside the 6px bar), the
+  # current milestone and the meta line, 6px apart.
+  var info = headLinePx + RowGapPx + LegendPx
+  if row.currentMilestone.len > 0: info += RowGapPx + LinePx
+  if row.repository.len > 0 or row.manager.len > 0: info += RowGapPx + LinePx
+  var sessions = 0
+  if not row.folded:
+    # 2px below what is above it, its lines 1px apart.
+    let shown = if row.expanded: row.sessions.len
+                else: min(row.sessions.len, InitiativeSessionLinesShown)
+    var lines: seq[int]
+    for _ in 0 ..< shown: lines.add SessionLinePx
+    if row.sessions.len > shown or
+        row.expanded and row.sessions.len > InitiativeSessionLinesShown:
+      lines.add MoreChipPx
+    if row.sessions.len == 0: lines.add headLinePx
+    sessions = 2
+    for i, h in lines: sessions += h + (if i > 0: 1 else: 0)
+  let body = if widthPx >= WidePanelPx: max(info, sessions)
+             elif sessions > 0: info + RowGapPx + sessions
+             else: info
+  2 * RowPadPx + body
+
+proc initiativesShown*(rows: seq[InitiativeRow]; widthPx, listPx: int;
+                       headLinePx = HeadLinePx): int =
+  ## How many of `rows`, from the first, the panel draws in a list `listPx`
+  ## high: all of them where they fit, else the whole ones that fit above
+  ## the `+N more` line that counts the rest. A GPUI window does not scroll,
+  ## so a row is never cut through its words at the panel's foot; `listPx <
+  ## 0` is a list of unknown height, which draws them all.
+  if listPx < 0: return rows.len
+  var total = 0
+  for row in rows: total += initiativeRowPx(row, widthPx, headLinePx)
+  if total <= listPx: return rows.len
+  var used = ListMoreLinePx
+  for row in rows:
+    let h = initiativeRowPx(row, widthPx, headLinePx)
+    if used + h > listPx: break
+    used += h
+    inc result
+
 proc drawInitiativesPanel*(r: GpuiRenderer; host: GpuiElement; vm: InitiativesVM;
-                           p: AhPalette; widthPx: int; linePx = HeadLinePx) =
+                           p: AhPalette; widthPx: int; linePx = HeadLinePx;
+                           heightPx = -1) =
   ## The Initiatives panel in `host`. `linePx`: the line its parts inherit,
   ## the panel's own 24px, or its host's (the control center's 21px, where
-  ## the panel inherits the tab's body-size line-height).
+  ## the panel inherits the tab's body-size line-height). `heightPx`: the
+  ## height the host gives it, under which the list draws whole rows only
+  ## and counts the rest (`initiativesShown`); -1 where it is not known.
   r.clearChildren(host)
   r.styles(host, [("display", "flex"), ("flex-direction", "column"),
                   ("width", $widthPx & "px"), ("height", "100%"),
                   ("background", p.panel), ("overflow", "hidden")])
   r.tag(host, "surface", "agent-harbor-initiatives")
   r.tag(host, "state", stateName(vm.state.val))
+  if heightPx >= 0:
+    # The box the list keeps to, for a reader of the tree.
+    r.tag(host, "panel-px", $heightPx)
+    r.tag(host, "panel-width-px", $widthPx)
   let head = r.drawSectionHeader(p, "Initiatives", vm.sourceLabel,
     if vm.state.val == asReady: vm.summaryText else: "", widthPx, linePx = linePx)
   r.tag(head, "head", "section header")
@@ -393,19 +453,38 @@ proc drawInitiativesPanel*(r: GpuiRenderer; host: GpuiElement; vm: InitiativesVM
       r.appendChild(host, r.notice(p, InitiativesEmptyText, "empty"))
     else:
       # The list fills the panel and ends at its edge (`.ah-fleet-list`'s box
-      # is the panel's rest, its rows clipped there), never as tall as its
-      # rows: a flex item's least height is otherwise its content's.
+      # is the panel's rest), never as tall as its rows: a flex item's least
+      # height is otherwise its content's. The web scrolls it; a GPUI window
+      # does not, so where the panel is shorter than its rows the list draws
+      # the whole rows that fit and counts the rest on a `+N more` line, as
+      # the control center's waiting list does (study D84) and as a row
+      # counts its sessions. Clipped instead, its last row was cut through
+      # its letters at the panel's foot (issue
+      # 2026-11-24-the-gpui-initiatives-panel-cuts-its-last-row-through-its-letters).
       let list = r.box(column = true, pairs = [("flex-grow", "1"), ("flex-shrink", "1"),
                                                ("min-height", "0px"), ("overflow", "hidden")])
       r.tag(list, "rows", "list")
+      let listPx = if heightPx < 0: -1
+                   else: max(0, heightPx - initiativesHeadPx(vm, widthPx, linePx))
+      let shown = initiativesShown(rows, widthPx, listPx, headLinePx = linePx)
       for i, row in rows:
+        if i >= shown: break
         r.appendChild(list, r.drawInitiativeRow(p, vm, row, i, widthPx, headLinePx = linePx))
+      if shown < rows.len:
+        let hidden = rows.len - shown
+        let more = r.text("+" & $hidden & " more", CaptionPx, p.textCaption, shrink = false,
+                          pairs = [("height", $ListMoreLinePx & "px"),
+                                   ("line-height", $ListMoreLinePx & "px"),
+                                   ("margin-left", $InsetPx & "px"),
+                                   ("flex-shrink", "0")])
+        r.tag(more, "initiatives-more", $hidden)
+        r.appendChild(list, more)
       r.appendChild(host, list)
 
 proc mountInitiativesPanel*(r: GpuiRenderer; host: GpuiElement; vm: InitiativesVM;
-                            p: AhPalette; widthPx: int) =
+                            p: AhPalette; widthPx: int; heightPx = -1) =
   createRenderEffect proc() =
-    drawInitiativesPanel(r, host, vm, p, widthPx)
+    drawInitiativesPanel(r, host, vm, p, widthPx, heightPx = heightPx)
 
 # ---------------------------------------------------------------------------
 # Initiative Progress
