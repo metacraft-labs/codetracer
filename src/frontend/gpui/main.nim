@@ -1395,6 +1395,11 @@ proc editKey(key: string; mods: seq[string]) =
   # here AND SAYS SO on the status bar — the router's answer for this window's
   # scope path in Edit mode — instead of reaching the document as nothing.
   if editKeyInert(canonicalKeyOfGpui(key, mods)):
+    if editTrace:
+      # Traced like a key the document handled, so a window lane's record
+      # still lists every key that arrived (the sentinel `F12` is one).
+      stderr.writeLine("edit-key " & key & " -> " &
+                       canonicalKeyOfGpui(key, mods) & " inert 0.0ms")
     return
   # PLAT-47: the key the router resolves to `layout.cancel-drag` (`Esc`, or
   # the user's rebinding) cancels a layout gesture in flight, and is not typed.
