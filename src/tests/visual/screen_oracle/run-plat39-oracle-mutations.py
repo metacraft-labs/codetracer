@@ -147,6 +147,15 @@ ARMS = [
         "'all three panes are identified' cases fail.",
     ),
     (
+        "NB-a", "the execution row's neighbours",
+        f"{ORACLE}/vision_producer.nim",
+        "  if top != direct.line and count >= 2 and count > votes[direct.line]:",
+        "  if false:",
+        "the neighbours never overrule the direct reading, so a highlighted "
+        "`44` OCR'd as `54` stands (CI run 45292632494's stepped-editor frame); "
+        "'a misread execution row is outvoted by the rows around it' fails.",
+    ),
+    (
         "TITLE-a", "the title classifier",
         f"{ORACLE}/vision_producer.nim",
         "  if bestDist <= TitleMatchTolerance and bestDist < runnerUp:",

@@ -1146,6 +1146,32 @@ proc readGutterDigits*(img: GrayImage; cell: Rect; band: GutterRun;
     shown = ocrRegion(img, crop, scratch, psm = 7).mapIt(it.text).join(" ")
   (false, -1, shown, -1)
 
+proc lineByNeighbours*(direct: tuple[ok: bool, line: int];
+                       neighbours: seq[tuple[offset: int, ok: bool, line: int]]):
+    tuple[ok: bool, line: int] =
+  ## The execution row's number, CROSS-CHECKED against the rows around it.
+  ##
+  ## Measured 2026-11-24 on a CI frame of `stepped-editor` (run
+  ## 45292632494): tesseract read the highlighted `44` as `54` — the same
+  ## glyphs, one pixel to the right of the frame it had read as `44`. The
+  ## grammar accepts `54`, so nothing downstream could tell. The rows above
+  ## and below are drawn on the pane's plain ground and are numbered
+  ## consecutively, so each one that parses implies the execution row's
+  ## number (its own minus its offset). Each implication is a vote, the
+  ## direct reading is one more; a value is taken over the direct reading
+  ## only with at least two votes and strictly more than the direct reading
+  ## has. One misread neighbour therefore cannot move a correct reading, and
+  ## an unreadable neighbourhood leaves the direct reading as it was.
+  if not direct.ok: return direct
+  var votes = initCountTable[int]()
+  votes.inc direct.line
+  for n in neighbours:
+    if n.ok: votes.inc n.line - n.offset
+  let (top, count) = votes.largest
+  if top != direct.line and count >= 2 and count > votes[direct.line]:
+    return (true, top)
+  direct
+
 proc readEditor*(img: GrayImage, cell: Rect,
                  scratch: string): ScreenReading[EditorModel] =
   ## **THE HIGHLIGHTED ROW IS FOUND GEOMETRICALLY, THEN ITS GUTTER IS OCR'd.**
@@ -1197,7 +1223,21 @@ proc readEditor*(img: GrayImage, cell: Rect,
     return unreadable[EditorModel](urGrammarMismatch,
       "gutter cell read as " & parsed.text.escape & ", which is not " &
       EditorGrammar.shape)
-  model.higlitedLineNumber = parsed.line
+  # The rows one and two above and below, at the band's own pitch (both
+  # front-ends draw the execution band exactly one row tall: 22 px), inside
+  # the body only. See `lineByNeighbours` for why the direct reading is not
+  # taken alone.
+  let pitch = best.last - best.first + 1
+  var neighbours: seq[tuple[offset: int, ok: bool, line: int]] = @[]
+  for offset in [-2, -1, 1, 2]:
+    let nb = GutterRun(first: best.first + offset * pitch,
+                       last: best.last + offset * pitch)
+    if nb.first < body.y or nb.last >= min(body.y + body.h, img.height):
+      continue
+    let r = readGutterDigits(img, cell, nb, scratch)
+    neighbours.add (offset, r.ok, r.line)
+  model.higlitedLineNumber =
+    lineByNeighbours((parsed.ok, parsed.line), neighbours).line
   read(model)
 
 # ---------------------------------------------------------------------------
