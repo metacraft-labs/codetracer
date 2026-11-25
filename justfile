@@ -5917,6 +5917,15 @@ test-gpui-shell:
   exec > >(tee test-logs/test-gpui-shell.log) 2>&1
   bash ci/lib/run-nim-test-lane.sh gpui-shell
 
+# The story-parity harness: every story in tools/story-parity/stories.txt drawn
+# by each renderer arm (the DOM arm is CodeTracer's Electron) at the desktop
+# default, small, large and HiDPI sizes, compared pixel by pixel with the DOM
+# arm; `--check` holds the result to src/tests/visual/story-parity-floors.json.
+# See scripts/story-parity.sh.
+[positional-arguments]
+story-parity *args:
+  bash scripts/story-parity.sh "$@"
+
 # The zgui front-end (`codetracer-zgui`, src/frontend/zgui/): a proof of
 # concept of the debugger on zgui's retained document, through isonim-zgui.
 #

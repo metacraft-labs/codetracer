@@ -1,0 +1,5 @@
+# The stories the story-parity harness draws with every arm
+# (scripts/story-parity.sh). One per line: <kind>/<surface>/<fixture>[|<tab title>],
+# as declared in src/frontend/stories/codetracer_stories.nim.
+panel/event-log/populated|Event Log
+panel/calltrace/populated|Calltrace
