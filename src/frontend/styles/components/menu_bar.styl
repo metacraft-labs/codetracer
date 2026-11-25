@@ -190,7 +190,8 @@ CAPTION_BAR_PADDING_BOTTOM = unquote("var(--caption-bar-padding-bottom)")
   margin-right: 0
   -webkit-app-region: no-drag
   z-index: 50
-  align-items: center
+  align-items: flex-end
+  gap: 0
 
   // The three marks are stencils painted in the theme's icon colour
   // (`icon/primary/default`), as `.value-history-button` and the origin badge
@@ -210,13 +211,18 @@ CAPTION_BAR_PADDING_BOTTOM = unquote("var(--caption-bar-padding-bottom)")
     mask-position: center
     -webkit-mask-repeat: no-repeat
     mask-repeat: no-repeat
+    // Fixed 0.5em icon within the 1.5em circle: the mark is small relative to
+    // the button, giving breathing room inside each circle.
+    -webkit-mask-size: 0.5em
+    mask-size: 0.5em
 
     &.minimize
       -webkit-mask-image: url('../../public/resources/window/minimize_window_dark.svg')
       mask-image: url('../../public/resources/window/minimize_window_dark.svg')
       opacity: 1
-      -webkit-mask-position: center 65%
-      mask-position: center 65%
+      // Centre the minimize line vertically, same as the other icons.
+      -webkit-mask-position: center 50%
+      mask-position: center 50%
 
     // The restore button shows the maximize mark, so the button looks the
     // same whichever state the window is in.

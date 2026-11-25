@@ -480,6 +480,10 @@ proc configureIpcMain* =
     # document with the terminal and GPUI (`index/table_columns`).
     "table-columns-request"
     "table-columns-save"
+    # Issue #854: event log column order and visibility, persisted alongside
+    # the widths (`index/table_columns`).
+    "event-log-columns-request"
+    "event-log-columns-save"
     # Test-Results-Pane.md §9.3: the workspace's `replay-open-in`, one
     # document with the terminal and GPUI (`index/replay_open_in`).
     "replay-open-in-save"

@@ -379,7 +379,11 @@ type
     # the GUI sends `ct/set-active-source-view` on a view toggle): steps
     # then move by the formatted source's lines and the editor follows it.
     # Appended, for the same reason.
-    aToggleFormattedSourceView    # palette: View: Toggle Formatted Source View
+    aToggleFormattedSourceView,   # palette: View: Toggle Formatted Source View
+    # VIEW > VCS: open the VCS panel from the View menu (issue #907: the VCS
+    # panel was always present in layouts but had no menu entry to focus it).
+    # Appended at the end, for the reason every note above gives.
+    aVcs                          # View > VCS
 
   InputShortcutMap* = TableLike[langstring, langstring]
 

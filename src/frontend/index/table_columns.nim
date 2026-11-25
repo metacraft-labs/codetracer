@@ -22,7 +22,7 @@ import
   std / [async, jsffi, os],
   electron_vars,
   ../lib / [jslib, electron_lib],
-  ../viewmodel/viewmodels/table_overflow,
+  ../viewmodel/viewmodels/[table_overflow, event_log_vm],
   ../../common / [ct_home, ct_logging]
 
 const
@@ -67,3 +67,35 @@ proc onTableColumnsSave*(sender: js, response: js) {.async.} =
     renameSyncJs(cstring(path & ".new"), cstring(path))
   except CatchableError as e:
     warnPrint "table columns: cannot write ", path, ": ", e.msg
+
+const
+  EventLogColumnsMessage* = "CODETRACER::event-log-columns"
+
+proc eventLogColumnsPath*(): string =
+  let override = getEnv(NativeStateDirEnvVar)
+  (if override.len > 0: override else: ctStateDir()) / EventLogColumnsFileName
+
+proc onEventLogColumnsRequest*(sender: js, response: js) {.async.} =
+  ## Renderer asking for the persisted event log column layout.
+  if mainWindow.isNil:
+    return
+  let path = eventLogColumnsPath()
+  var text = ""
+  if fs.existsSync(cstring(path)):
+    try:
+      text = $fs.readFileSync(cstring(path), cstring"utf8")
+    except CatchableError:
+      discard
+  mainWindow.webContents.send(cstring(EventLogColumnsMessage), js{
+    path: cstring(path), text: cstring(text)})
+
+proc onEventLogColumnsSave*(sender: js, response: js) {.async.} =
+  ## Renderer saving the current event log column layout.
+  let text = $cast[cstring](response[cstring"text"])
+  let path = eventLogColumnsPath()
+  try:
+    fs.mkdirSync(cstring(path.parentDir), js{recursive: true})
+    fs.writeFileSync(cstring(path & ".new"), cstring(text))
+    renameSyncJs(cstring(path & ".new"), cstring(path))
+  except CatchableError as e:
+    warnPrint "event-log columns: cannot write ", path, ": ", e.msg

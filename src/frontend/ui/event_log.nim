@@ -32,7 +32,9 @@ from ../viewmodel/viewmodels/event_log_vm import EventLogVM,
   setSelectedKinds, selectRow, doubleClickRow, reload, resetLog, eventLogText,
   EventLogColumn, setColumnWidth, resizeColumn, columnWidthEntries,
   withColumnWidths, EventLogTableName, columnResizeTarget, parseEventLogColumn,
-  placeColumn, placeColumnLower
+  placeColumn, placeColumnLower,
+  encodeEventLogColumns, decodeEventLogColumns, onColumnsLayoutChanged,
+  `onColumnsLayoutChanged=`
 from ../viewmodel/viewmodels/omnibar_sources import parseColumnWidthLine
 from ../viewmodel/session_vm import SessionViewModel
 from isonim/core/signals import val, `val=`
@@ -441,6 +443,32 @@ proc requestEventLogWidths(vm: EventLogVM) =
         current.columns.val = current.columns.val.withColumnWidths(decoded.entries))
   data.ipc.send(cstring"CODETRACER::table-columns-request", js{})
 
+proc rememberEventLogLayout(vm: EventLogVM) =
+  ## Save the current column order and hidden set to the main process.
+  if vm.isNil or data.isNil or data.ipc.isNil: return
+  data.ipc.send(cstring"CODETRACER::event-log-columns-save", js{
+    text: cstring(encodeEventLogColumns(vm.columns.val))})
+
+var eventLogLayoutListening = false
+
+proc requestEventLogLayout(vm: EventLogVM) =
+  ## Ask the main process for the persisted column layout (order + hidden),
+  ## and apply it to the ViewModel when it arrives.
+  if data.isNil or data.ipc.isNil: return
+  if not eventLogLayoutListening:
+    eventLogLayoutListening = true
+    data.ipc.on(cstring"CODETRACER::event-log-columns", proc(event, payload: JsObject) =
+      let text = $payload.text.to(cstring)
+      if text.len == 0: return
+      let decoded = decodeEventLogColumns(text)
+      let current = paneVM()
+      if decoded.ok and not current.isNil:
+        var c = current.columns.val
+        c.order = decoded.c.order
+        c.hidden = decoded.c.hidden
+        current.columns.val = c)
+  data.ipc.send(cstring"CODETRACER::event-log-columns-request", js{})
+
 proc drawnColumnCells(col: EventLogColumn): int =
   ## The cells a column is drawn at: its header cell's width.
   let header = document.querySelector(cstring(".eventLog-column-header ." &
@@ -604,6 +632,8 @@ proc decorateEventLog(host: dom_api.Element; session: SessionViewModel) =
     setupFilterDropdown(element, vm)
   setupColumnGrips(element, vm)
   requestEventLogWidths(vm)
+  requestEventLogLayout(vm)
+  vm.onColumnsLayoutChanged = proc() = rememberEventLogLayout(vm)
   # The rows' cells are table cells (`table_overflow_dom`): fitted, hovered,
   # their `…` pressed; a detail opens under the row.
   discard attachTableOverflow(cast[JsObject](element), EventLogDetailPane,

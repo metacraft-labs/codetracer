@@ -4343,6 +4343,13 @@ proc onWelcomeScreen(
     discard data.makeWelcomeScreenComponent()
   data.ui.welcomeScreen.syncLegacyWelcomeScreenIntoVM()
 
+  # `onInit` and `onNoTrace` call `createUIComponents()` before `tryInitLayout`,
+  # which creates `data.ui.menu`. Without it `ensureSharedRenderers` skips the
+  # menu render (`if not data.ui.menu.isNil`), so the window control buttons
+  # never appear while the welcome screen is the only view (issue #884).
+  if data.ui.menu.isNil:
+    discard data.makeMenuComponent()
+
   data.ui.initEventReceived = true
   data.tryInitLayout()
 
@@ -4386,19 +4393,74 @@ proc onCtInstallStatus(sender: js, status: (cstring, cstring)) =
   else:
     data.viewsApi.errorMessage($(status[1]))
 
-proc onSavedAs(sender: js, files: JsAssoc[cstring, cstring]) =
-  # discard
-  # TODO
-  for untitledName, newPath in files:
+proc setMonacoModelLanguage(model: JsObject, language: cstring)
+  {.importjs: "monaco.editor.setModelLanguage(#, #)".}
+
+proc onSavedAs(sender: js, response: jsobject(name=cstring, path=cstring)) =
+  ## The renderer side of `index/files.onSaveUntitled`'s success path.
+  ##
+  ## `response.name` is the untitled placeholder (`#untitled{N}`);
+  ## `response.path` is the destination the user chose.
+  ##
+  ## Key design constraint: GoldenLayout captured `editorPathForTab = "#untitled{N}"`
+  ## in the tab's click handler at creation time (layout.nim §"container.on tab").
+  ## That closure fires `data.services.editor.active = "#untitled{N}"` on every
+  ## subsequent click and cannot be patched.  We therefore keep
+  ## `data.ui.editors["#untitled{N}"]` pointing to the SAME editor object so the
+  ## status-bar lookup by `active` still finds it.  The save path uses
+  ## `services.editor.open` (not `active`), so we move only that map to the new
+  ## key to avoid a second save of the same file (issue #836).
+  let untitledName = response.name
+  let newPath = response.path
+  if data.services.editor.open.hasKey(untitledName):
     data.services.editor.open[newPath] = data.services.editor.open[untitledName]
     data.services.editor.open[newPath].untitled = false
     data.services.editor.open[newPath].changed = false
     data.services.editor.open[newPath].name = newPath
-    # data.services.editor.open[newPath].fileInfo.path = newPath
+    data.services.editor.open[newPath].path = newPath
+    data.services.editor.open[newPath].lang = fromPath(newPath)
     discard jsDelete(data.services.editor.open[untitledName])
-    data.ui.editors[newPath] = data.ui.editors[untitledName]
-    discard jsDelete(data.ui.editors[untitledName])
-    data.ui.editors[newPath].path = newPath
+  try:
+    if data.ui.editors.hasKey(untitledName):
+      let editor = data.ui.editors[untitledName]
+      # Register under the new path WITHOUT deleting the old key: the GoldenLayout
+      # click handler still fires with the old key (see note above), so both must
+      # find the same editor object.
+      data.ui.editors[newPath] = editor
+      let newLang = fromPath(newPath)
+      editor.path = newPath
+      editor.name = newPath
+      editor.lang = newLang
+      if not editor.tabInfo.isNil:
+        editor.tabInfo.untitled = false
+        editor.tabInfo.changed = false
+        editor.tabInfo.name = newPath
+        editor.tabInfo.path = newPath
+        editor.tabInfo.lang = newLang
+      # Register the new path in the Find-in-Files index.
+      if not data.services.search.paths.hasKey(newPath):
+        data.services.search.pathsPrepared.add(fuzzysort.prepare(newPath))
+        data.services.search.paths[newPath] = true
+      # Update the GoldenLayout tab label (the same steps onSavedFile takes).
+      var tokens = rsplit($newPath, {'/'}, maxsplit=1)
+      var label = $newPath
+      if tokens.len >= 2:
+        label = tokens[1]
+      if not editor.contentItem.isNil:
+        editor.contentItem.setTitle(cstring(label))
+        editor.contentItem.config.componentState.label = newPath
+        editor.contentItem.config.componentState.fullPath = newPath
+      # Re-colour the Monaco model for the new file extension.
+      let langId = cstring(toCLang(newLang))
+      if not editor.monacoEditor.isNil:
+        let model = editor.monacoEditor.toJs.getModel()
+        if not model.isNil:
+          setMonacoModelLanguage(model, langId)
+  except:
+    cerror "saved-as: could not update editor tab for " &
+      $newPath & ": " & getCurrentExceptionMsg()
+  checkPendingReRecord(data)
+  build.checkPendingDesktopBuild()
 
 proc onSavedFile(sender: js, response: jsobject(name=cstring)) =
   if data.services.editor.open.hasKey(response.name):
@@ -4483,6 +4545,7 @@ proc onSaveFileError(sender: js, response: jsobject(name=cstring, error=cstring)
   data.viewsApi.errorMessage(
     cstring("Could not save " & $response.name & ": " & $response.error))
   data.noteReRecordSaveOutcome(failed = true)
+  build.clearPendingDesktopBuild()
   data.redraw()
 
 proc saveAllFiles*(data: Data): Future[void] =
@@ -4593,7 +4656,13 @@ proc onTraceLoadError*(sender: js, response: jsobject(error=cstring, preserveLoa
         welcome.loadingTrace = nil
       welcome.requestWelcomeScreenRender()
   cwarn "trace-load-error: " & errorMsg
-  data.viewsApi.errorMessage(errorMsg)
+  # `data.viewsApi` is nil when the tab's pipeline has not yet initialised
+  # (e.g. a native / C trace whose replay worker refused before the DAP
+  # handshake completed).  Without the guard the call throws and the handler
+  # exits silently — the user sees neither the loading overlay clear nor any
+  # message (issue #689).
+  if not data.viewsApi.isNil:
+    data.viewsApi.errorMessage(errorMsg)
 
 proc onReviewDatasetRead*(sender: js,
     response: jsobject(anchorId=cstring, datasetPath=cstring, kind=cstring,
@@ -6681,6 +6750,7 @@ var actions*: array[ClientAction, ClientActionHandler] = [
     dbg.formattedSourceView = t.on
     dbg.setActiveSourceView(cstring(t.viewPath))
     data.viewsApi.infoMessage(cstring(t.notice)),
+  aVcs: proc(actionData: JsObject) = data.openLayoutTab(Content.VCS),
 ]
 
 data.actions = actions

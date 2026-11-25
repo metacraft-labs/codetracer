@@ -9,7 +9,8 @@
 ## editor (`ui/trace`) for tracepoints: `sdk/tracepoints.declareTracepoint`
 ## holds one as a row from the moment its editor opens, run or not,
 ## `applyTracepointResults` annotates the rows with a run's answer, and
-## closing the editor removes its row (codetracer#886).
+## closing the editor removes its row only when it was never run — a run's
+## row stays so the user can see what the tracepoint found (codetracer#886).
 ##
 ## PLAT-40. Until 2026-09-23 `utils.makeComponent`'s arm for this pane was
 ## commented out and its `else` raised, so the pane could not be constructed

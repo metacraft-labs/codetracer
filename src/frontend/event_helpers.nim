@@ -31,7 +31,7 @@ proc historyJump*(api: MediatorWithSubscribers, location: types.Location) =
   api.emit(CtHistoryJump, location)
 
 proc installCt() =
-  when not defined(ctInExtension):
+  when not defined(ctInExtension) and defined(ctRenderer):
     data.ipc.send "CODETRACER::install-ct", js{}
 
 proc showNotification*(api: MediatorWithSubscribers, notification: Notification) =

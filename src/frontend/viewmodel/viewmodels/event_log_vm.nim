@@ -55,7 +55,7 @@
 ##   vm.nextPage()
 ##   echo vm.totalPages.val       # derived from store data
 
-import std/[json, options, strutils, tables, unicode]
+import std/[json, options, sequtils, strutils, tables, unicode]
 import ./action_sink
 
 import isonim/core/[signals, computation, owner, batch]
@@ -179,9 +179,7 @@ type
       ## it (`column(2).visible(false)`), and Event-Log-Pane.md's column table
       ## lists the path column "Default Visible: No".
     elcKind = "kind"
-      ## What kind of event it is. The desktop's column has no title and
-      ## draws only a row expander there; the terminal and GPUI draw the
-      ## event's category.
+      ## What kind of event it is: the event's category, shown on all front-ends.
     elcOutput = "output"
       ## The event's text.
 
@@ -242,6 +240,85 @@ func eventLogColumnTitle*(c: EventLogColumn): string =
 func defaultEventLogColumns*(): EventLogColumns =
   EventLogColumns(order: @DesktopEventLogColumnOrder,
                   hidden: DefaultHiddenEventLogColumns)
+
+const EventLogColumnsFileName* = "event-log-columns"
+  ## File name in the native state root for the persisted column layout
+  ## (order and hidden set).  Widths are kept separately in `table-columns`.
+
+func elcStorageName*(col: EventLogColumn): string =
+  ## Storage-safe name for a column. `elcIndex`'s enum value is `"#"`,
+  ## which is not safe in a plain-text format, so it maps to `"index"`.
+  case col
+  of elcIndex: "index"
+  else: $col
+
+func elcFromStorageName*(name: string): Option[EventLogColumn] =
+  ## Reverse of `elcStorageName`.
+  for col in EventLogColumn:
+    if elcStorageName(col) == name:
+      return some(col)
+  none(EventLogColumn)
+
+func encodeEventLogColumns*(c: EventLogColumns): string =
+  ## `"order:tick,index,...\nhidden:location\n"` — the layout minus widths.
+  ## An empty hidden set writes no `hidden:` line so absent == default.
+  result = "order:" & c.order.mapIt(elcStorageName(it)).join(",") & "\n"
+  if card(c.hidden) > 0:
+    var names: seq[string]
+    for col in c.order:        # iterate in order for determinism
+      if col in c.hidden:
+        names.add elcStorageName(col)
+    result &= "hidden:" & names.join(",") & "\n"
+
+func decodeEventLogColumns*(text: string):
+    tuple[ok: bool; c: EventLogColumns; message: string] =
+  ## Parse back what `encodeEventLogColumns` produced.
+  ## Refuses if any column is unknown, duplicated or missing from `order`.
+  var order: seq[EventLogColumn]
+  var hidden: set[EventLogColumn]
+  var hasOrder = false
+  for raw in text.splitLines:
+    let line = raw.strip
+    if line.len == 0 or line.startsWith("#"):
+      continue
+    let colon = line.find(':')
+    if colon < 0:
+      return (false, defaultEventLogColumns(), "not a key:value line: `" & line & "`")
+    let key = line[0 ..< colon]
+    let value = line[colon + 1 .. ^1]
+    case key
+    of "order":
+      for name in value.split(','):
+        let n = name.strip
+        if n.len == 0: continue
+        let colOpt = elcFromStorageName(n)
+        if colOpt.isNone:
+          return (false, defaultEventLogColumns(), "unknown column: `" & n & "`")
+        order.add colOpt.get
+      hasOrder = true
+    of "hidden":
+      for name in value.split(','):
+        let n = name.strip
+        if n.len == 0: continue
+        let colOpt = elcFromStorageName(n)
+        if colOpt.isNone:
+          return (false, defaultEventLogColumns(), "unknown hidden column: `" & n & "`")
+        hidden.incl colOpt.get
+    else:
+      return (false, defaultEventLogColumns(), "unknown key: `" & key & "`")
+  if not hasOrder:
+    return (false, defaultEventLogColumns(), "missing order line")
+  var seen: set[EventLogColumn]
+  for col in order:
+    if col in seen:
+      return (false, defaultEventLogColumns(),
+              "duplicate column in order: `" & elcStorageName(col) & "`")
+    seen.incl col
+  for col in EventLogColumn:
+    if col notin seen:
+      return (false, defaultEventLogColumns(),
+              "missing column in order: `" & elcStorageName(col) & "`")
+  (true, EventLogColumns(order: order, hidden: hidden), "")
 
 func visibleColumns*(c: EventLogColumns): seq[EventLogColumn] =
   ## The columns shown, in display order.
@@ -532,6 +609,11 @@ type
       ## font, and that character's width — so the desktop lays its columns
       ## out by the shared solver in the same cells as the terminal. (0, 0)
       ## until measured; the terminal and GPUI lay out without it.
+    onColumnsLayoutChanged*: proc()
+      ## Called by `toggleColumn`, `moveColumn`, `placeColumn`, and
+      ## `placeColumnLower` after the layout (order or hidden) changes.
+      ## The desktop registers a handler that persists the new state; nil
+      ## on frontends that persist differently (TUI, GPUI) or not at all.
 
     # -- Event log data — THE STORE'S OWN SIGNALS --
     #
@@ -877,22 +959,30 @@ proc hideColumn*(vm: EventLogVM; col: EventLogColumn): bool =
 proc toggleColumn*(vm: EventLogVM; col: EventLogColumn): bool =
   var c = vm.columns.val
   result = c.toggleColumn(col)
-  if result: vm.columns.val = c
+  if result:
+    vm.columns.val = c
+    if not vm.onColumnsLayoutChanged.isNil: vm.onColumnsLayoutChanged()
 
 proc moveColumn*(vm: EventLogVM; col: EventLogColumn; delta: int): bool =
   var c = vm.columns.val
   result = c.moveColumn(col, delta)
-  if result: vm.columns.val = c
+  if result:
+    vm.columns.val = c
+    if not vm.onColumnsLayoutChanged.isNil: vm.onColumnsLayoutChanged()
 
 proc placeColumn*(vm: EventLogVM; col, target: EventLogColumn): bool =
   var c = vm.columns.val
   result = c.placeColumn(col, target)
-  if result: vm.columns.val = c
+  if result:
+    vm.columns.val = c
+    if not vm.onColumnsLayoutChanged.isNil: vm.onColumnsLayoutChanged()
 
 proc placeColumnLower*(vm: EventLogVM; col: EventLogColumn): bool =
   var c = vm.columns.val
   result = c.placeColumnLower(col)
-  if result: vm.columns.val = c
+  if result:
+    vm.columns.val = c
+    if not vm.onColumnsLayoutChanged.isNil: vm.onColumnsLayoutChanged()
 
 proc setColumnWidth*(vm: EventLogVM; col: EventLogColumn;
                      cells: int): bool =

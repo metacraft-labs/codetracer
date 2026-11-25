@@ -453,7 +453,7 @@ when defined(js):
           widths.shortcut))
 
   proc nestedStyleString(self: MenuComponent; value: int; depth: int;
-                         separators: int; width: int): string =
+                         width: int): string =
     # A level not in the DOM yet (a folder opened from the keyboard in the
     # render that also draws its parent) measures 0; the next render
     # places it.
@@ -473,7 +473,13 @@ when defined(js):
       let h = cast[int](jq(cstring"#menu-elements .ct-menu-item").toJs.offsetHeight)
       if h > 0: h else: 28
 
-    fmt"top: {value * itemH + separators * itemH - 2 * itemH}px; left: calc({left}px + {2 * depth}px)"
+    # `value` is the accumulated visible-index sum across all ancestor levels,
+    # so `value * itemH` places the submenu's first row at exactly the same y as
+    # the folder that opened it.  No depth adjustment: the `-depth` term in the
+    # previous formula was overcorrecting by one item-height per nesting level.
+    # `.menu-sub-group-separator` elements are `display: none` and contribute
+    # zero height to the layout, so separator counts must not offset `top`.
+    fmt"top: {value * itemH}px; left: calc({left}px + {2 * depth}px)"
 
   proc buildMenuShellModel(self: MenuComponent): MenuShellModel =
     result.rootNodes = @[]
@@ -521,7 +527,15 @@ when defined(js):
         break
       var separators = countSeparators(current, index)
       current = currentElements[index]
-      sum += index
+      # Count only visible (rendered) items before `index` to get the visual
+      # row position: hidden platform-specific items (e.g. macOS-only entries)
+      # occupy no space on screen, so using the raw array index skews the
+      # submenu top offset by one item height per hidden predecessor.
+      var visibleIndex = 0
+      for i in 0 ..< index:
+        if currentElements[i].shouldRenderMenuNode():
+          visibleIndex += 1
+      sum += visibleIndex
       separators += 1
 
       let widths = self.calculateMaxMenuElementWidth(current)
@@ -533,7 +547,7 @@ when defined(js):
       result.nestedMenus.add(MenuNestedRecord(
         id: fmt"menu-nested-elements-{depth + 1}",
         className: fmt"menu-nested-elements menu-top-{sum} {separators}",
-        style: self.nestedStyleString(sum, depth + 1, separators, submenuWidth),
+        style: self.nestedStyleString(sum, depth + 1, submenuWidth),
         nodes: self.menuRecordsForNode(current, self.vm.path[0 .. depth])))
 
   proc handleNodeMouseOver(self: MenuComponent; path: seq[int]) =

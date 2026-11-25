@@ -752,6 +752,9 @@ type
       ## PLAT-70 Part B: the HOST's write of a table's column widths
       ## (`host/table_column_widths`, the one document every front-end reads),
       ## "" on success. Nil in a host that keeps no state.
+    saveEventLogLayout*: proc(): string {.closure.}
+      ## Issue #854: the HOST's write of the event log column layout (order +
+      ## hidden), "" on success. Nil in a host that keeps no state.
     autoHide*: AutoHideHover
       ## PLAT-49 part B (finding 9): the pointer's timing over the auto-hide
       ## labels — the desktop's hover preview and leave dismissal
@@ -1467,6 +1470,8 @@ proc runColumnVerb*(rt: TuiRuntime; verb, arg: string): string =
        else: (if not c.isVisible(col): "hidden; show it first"
               else: "already at that end"))
   rt.app.eventLog.columns = c
+  if not rt.saveEventLogLayout.isNil:
+    discard rt.saveEventLogLayout()
   describeColumns(c)
 
 proc applyLayoutSetting*(rt: TuiRuntime; which: LayoutSetting; value: string;

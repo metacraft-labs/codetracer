@@ -88,11 +88,19 @@ proc productMenuTree*(program: string; shellUi = false): MenuItem =
       sep(item("Switch File", "switchTabHistory")),
       item("Exit CodeTracer", "aExit", os = OsNonHost or OsNonMac)]),
     folder("Edit", mnemonic = 'i', children = @[
+      # macOS requires application-menu items with the standard roles for
+      # Cmd+Z/X/C/V/A to reach text fields (Electron passes them through the
+      # native menu, not via keyboard-event routing).  Without these the
+      # shortcuts silently do nothing in every input in the app on macOS.
+      macRole("undo"), sep(macRole("redo")),
+      macRole("cut"), macRole("copy"), macRole("paste"),
+      sep(macRole("selectAll")),
       item("Find in Files", "findInFiles"),
       sep(item("Find Symbol", "findSymbol")),
       item("Expand All", "aExpandAll"),
       item("Collapse All", "aCollapseAll")]),
     folder("View", mnemonic = 'w', children = @[
+      # Panels — components that open in the layout
       item("Filesystem", "aFilesystem"),
       item("Calltrace", "aFullCalltrace"),
       item("Variables", "aState"),
@@ -100,16 +108,20 @@ proc productMenuTree*(program: string; shellUi = false): MenuItem =
       item("Terminal Output", "aTerminal"),
       item("Scratchpad", "aScratchpad"),
       item("Breakpoints & Tracepoints", "aPointList"),
-      item("Agent Activity", "aAgentActivity"),
+      item("VCS", "aVcs"),
       item("Verification", "aVerification"),
       item("Constraints", "aConstraints"),
-      item("Start Agent Worktree Session", "aStartAgenticWorktreeSession"),
       item("Notifications", "aNotifications"),
+      sep(item("Agent Activity", "aAgentActivity")),
+      # Layout — reset and appearance
       item("Reset Layout", "aResetLayout"),
-      sep(item("Shell", "aShell")),
-      folder("Theme", @[
+      sep(folder("Theme", @[
         item("Default Dark Theme", "aTheme3"),
-        item("Default White Theme", "aTheme1")])]),
+        item("Default White Theme", "aTheme1")])),
+      # Tools
+      sep(item("Shell", "aShell")),
+      # Agent
+      item("Start Agent Worktree Session", "aStartAgenticWorktreeSession")]),
     folder("Build", mnemonic = 'b', children = @[
       item("Rebuild/Re-record file", "aReRecord"),
       item("Rebuild/Re-record project", "aReRecordProject"),

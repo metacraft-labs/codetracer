@@ -3992,6 +3992,8 @@ proc recalculateAndRedrawFlow*(self: FlowComponent) =
   if not self.flowIsLive:
     return
   if not self.flow.isNil:
+    self.recalculateMaxFlowLineWidth()
+    self.recalculateFlowViewWidth()
     self.createFlowLines()
     self.calculateLineHeight()
     self.renderFlowLines()

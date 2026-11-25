@@ -595,6 +595,36 @@ proc startDesktopBuild*(command, dir, task, matcher: string): string =
     js{command: cstring(command), cwd: cstring(dir)}
   ""
 
+var pendingDesktopBuildAfterSave: tuple[commandLine, folder: string]
+var pendingDesktopBuildSaves: int
+
+proc queueDesktopBuildAfterSave*(commandLine, folder: string; count: int) =
+  ## Defer a desktop build until `count` async (untitled-file) saves complete.
+  ## Called by `desktop_edit_toolbar` when the build button is pressed while
+  ## one or more untitled editors are open (issue #837).
+  pendingDesktopBuildAfterSave = (commandLine, folder)
+  pendingDesktopBuildSaves = count
+
+proc clearPendingDesktopBuild*() =
+  ## Drop any pending build — called when a save fails or is cancelled.
+  pendingDesktopBuildAfterSave = ("", "")
+  pendingDesktopBuildSaves = 0
+
+proc checkPendingDesktopBuild*() =
+  ## Called from `ui_js.onSavedAs` / `ui_js.onSaveFileError` after each
+  ## async save so the build starts once all untitled-file saves complete.
+  if pendingDesktopBuildAfterSave.commandLine.len == 0:
+    return
+  if pendingDesktopBuildSaves > 1:
+    dec pendingDesktopBuildSaves
+    return
+  let p = pendingDesktopBuildAfterSave
+  pendingDesktopBuildAfterSave = ("", "")
+  pendingDesktopBuildSaves = 0
+  let why = startDesktopBuild(p.commandLine, p.folder, "", "")
+  if why.len > 0:
+    cwarn "toolbar build (after save): " & why
+
 proc stopDesktopBuild*(): string =
   ## ■ Stop / `:build: stop`: the main process stops the build it runs.
   if not desktopBuildRunning():
