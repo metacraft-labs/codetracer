@@ -173,3 +173,22 @@ export async function countBodyKeys(page: Page): Promise<void> {
 export async function bodyKeys(page: Page): Promise<string[]> {
   return await page.evaluate(() => (globalThis as any).__ctBodyKeys ?? []);
 }
+
+/**
+ * The recovery chord (§11.7.6) as a user presses it: three Escapes that
+ * arrive together. Sent through the DevTools protocol without waiting for
+ * each to be handled: three `keyboard.press` calls wait for one another, and
+ * on a loaded machine they arrived 1.5-1.7 s apart (each key's own
+ * `timeStamp`, measured), so the window rightly saw no chord.
+ */
+export async function pressRecoveryChord(page: Page): Promise<void> {
+  const cdp = await page.context().newCDPSession(page);
+  const key = { key: "Escape", code: "Escape", windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 };
+  const sent: Promise<unknown>[] = [];
+  for (let i = 0; i < 3; i++) {
+    sent.push(cdp.send("Input.dispatchKeyEvent", { type: "rawKeyDown", ...key }));
+    sent.push(cdp.send("Input.dispatchKeyEvent", { type: "keyUp", ...key }));
+  }
+  await Promise.all(sent);
+  await cdp.detach();
+}

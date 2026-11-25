@@ -27,7 +27,7 @@ import { test, expect } from "../../lib/fixtures";
 import { CommandPalette } from "../../page-objects/command-palette/command-palette";
 import {
   installCtLens, pluginEnv, pluginPids, describePids, pluginState, pluginOf, paneText,
-  pluginStatusItem, countBodyKeys, bodyKeys, LensExecutablePattern, type PluginHome,
+  pluginStatusItem, countBodyKeys, bodyKeys, LensExecutablePattern, pressRecoveryChord, type PluginHome,
 } from "../../lib/plugin-processes";
 
 test.setTimeout(600_000);
@@ -165,7 +165,7 @@ test.describe("desktop: the ct-lens plugins", () => {
     await ctPage.keyboard.press("Shift+F7");
     await expect.poll(async () => (await pluginState(ctPage))?.layerLabel ?? "", { timeout: 60_000 })
       .toBe("JUMP MODE (ct-lens.jump)");
-    for (let i = 0; i < 3; i++) await ctPage.keyboard.press("Escape");
+    await pressRecoveryChord(ctPage);
     const dialog = ctPage.locator("[data-ct-plugin-dialog]");
     await expect(dialog).toContainText("RECOVER INPUT", { timeout: 30_000 });
     await expect(dialog).toContainText(JUMP);
