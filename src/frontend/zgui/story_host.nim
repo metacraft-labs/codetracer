@@ -29,6 +29,7 @@ import isonim_zgui/[renderer, png, testing]
 
 import ../stories/[story_frames, story_mount]
 import ./zgui_view_support
+import ../viewmodel/views/debug_control_marks
 
 const
   IndexHtml = staticRead("../index.html")
@@ -232,6 +233,12 @@ proc finishDefaultDebugLayout() =
   let box = borderBox(gLayout.root)
   syncDefaultLayoutGeometry(r, gLayout, float(box.w) / gOpts.scale,
                             float(box.h) / gOpts.scale)
+  # The transport marks, as `ctAttachDebugControlMarks` puts them on the
+  # reference shell's buttons in the browser.
+  for mark in ControlMarks:
+    for (id, button) in gLayout.debugButtons:
+      if id == mark.buttonId:
+        r.appendChild(button, renderControlMark[ZguiRenderer, ZguiNode](r, mark))
   var disposers: seq[StoryDispose]
   for m in gLayout.mounts:
     if m.name in nativePanelSurfaces:

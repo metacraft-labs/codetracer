@@ -134,6 +134,8 @@ type
       ## The command palette's overlay, for `command-palette-open`.
     debugHeader*: N
       ## `#debug`, whose buttons the transport marks fill.
+    debugButtons*: seq[tuple[id: string; el: N]]
+      ## Its buttons by id, for the marks (`debug_control_marks.ControlMarks`).
 
 const
   buildTabs: seq[LayoutTab] = @[("BUILD", "build")]
@@ -293,7 +295,8 @@ proc createKaraxReferenceShell[R, N](r: R; f: var DefaultDebugFrame[N]; containe
     if children mod 5 == 0:
       discard el(r, debug, "div", class = "separate-bar")
       inc children
-    discard el(r, debug, "button", id = id, class = "ct-button-image-md-secondary ct-button-no-border")
+    f.debugButtons.add (id, el(r, debug, "button", id = id,
+                              class = "ct-button-image-md-secondary ct-button-no-border"))
     inc children
   let commandView = el(r, debug, "div", id = "command-view", class = "command-view")
   let commandSurface = el(r, commandView, "div", class = "command-surface")
