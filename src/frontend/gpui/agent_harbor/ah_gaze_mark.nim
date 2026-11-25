@@ -15,7 +15,7 @@
 ##
 ## Facts (`data-ah-*`): `markFacts` on the host, `gaze-mark` on the mark.
 
-import std/math
+import std/[math, strutils]
 
 import isonim/core/computation
 import ../../viewmodel/views/agent_harbor_gaze_words
@@ -74,12 +74,51 @@ proc drawGazeMark*(r: GpuiRenderer; p: AhPalette; vm: GazeStatusVM;
     r.addEventListener(result, "mousedown", proc(ev: GpuiEvent) =  # ir1-gate: hit test
       press(GazeTogglePauseOperation))
 
+const
+  ItemSeparator* = " \xE2\x94\x82 "
+    ## How the stories' items name the bar between two readouts
+    ## (`GazeStoryStatusItems`, `Noir │ UTF-8`); GPUI draws the bar itself.
+  ItemsInsetPx* = 2
+    ## The readouts' `#file-info-status` margin-left (0.6em of the bar's
+    ## 16px, 9.6px), less the line's 8px padding.
+  ItemGapPx* = 10
+    ## `#file-info-status`'s gap, 0.6em of the bar's 16px (9.6px), on each
+    ## side of the bar between two readouts.
+  SeparatorPx* = 16
+    ## `.separate-bar`: 1em tall at the bar's 16px, a hairline wide.
+
+proc statusItemInk*(p: AhPalette): string =
+  ## The readouts' ink: the web status bar's own text colour
+  ## (`#status-base`'s `colors-ui-text-primary-label-subtle`, status_bar.styl,
+  ## the quietest token that clears 4.5:1 on the bar in Dark).
+  DesignTokenHex[dtColorsUiTextPrimaryLabelSubtle][p.mode]
+
+proc drawStatusItems(r: GpuiRenderer; p: AhPalette; items: string): GpuiElement =
+  ## The readouts at the status line's start, as the web's `#file-info-status`
+  ## lays them out: each at the bar's text size (`STATUS_BAR_TEXT_SIZE`,
+  ## 14px) in the bar's own text colour, a `.separate-bar` hairline in the
+  ## divider role between two, 0.6em clear on each side.
+  result = r.box(pairs = [("items", "center"), ("gap", $ItemGapPx & "px"),
+                          ("margin-left", $ItemsInsetPx & "px"), ("flex-shrink", "0")])
+  r.tag(result, "status-items", items)
+  let parts = items.split(ItemSeparator)
+  for i, part in parts:
+    if i > 0:
+      let bar = r.box(pairs = [("width", "1px"), ("height", $SeparatorPx & "px"),
+                               ("flex-shrink", "0"),
+                               ("background", DesignTokenHex[dtColorsUiDividerPrimary][p.mode])])
+      r.tag(bar, "status-separator", "true")
+      r.appendChild(result, bar)
+    let t = r.text(part, StatusTextPx, p.statusItemInk, shrink = false)
+    r.tag(t, "status-item", part)
+    r.appendChild(result, t)
+
 proc drawStatusLine(r: GpuiRenderer; line: GpuiElement; vm: GazeStatusVM;
                     p: AhPalette; items: string; press: GazePress) =
   ## The status line's parts: the items at its start, the mark at the start
   ## of its right-hand zone.
   r.clearChildren(line)
-  r.appendChild(line, r.text(items, CaptionPx, p.textCaption, shrink = false))
+  r.appendChild(line, r.drawStatusItems(p, items))
   r.appendChild(line, r.box(pairs = [("flex-grow", "1")]))
   let mark = r.drawGazeMark(p, vm, press)
   if mark != nil: r.appendChild(line, mark)

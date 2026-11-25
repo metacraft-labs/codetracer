@@ -417,6 +417,43 @@ suite "CTF-P2c: the GPUI gaze mark":
         check StatusBarPx == 32
         m.dispose()
 
+  test "the status line's readouts are the web status bar's":
+    # GPUI review of 2026-11-25: `Noir | UTF-8` was one caption-role string
+    # at 12px, about 4px around its `|`. The web's `#file-info-status`: each
+    # readout at the bar's 14px (`STATUS_BAR_TEXT_SIZE`) in the bar's own
+    # text colour (`colors-ui-text-primary-label-subtle`), a `.separate-bar`
+    # hairline in the divider role between them, 0.6em (9.6px) clear of each.
+    for mode in [dmDark, dmLight]:
+      for (w, h) in [(1440, 900), (360, 900)]:
+        gpui_reset_tree()
+        let m = r.mountAgentHarborStoryGpui("agent-harbor-status-gaze", "tracking", w, h, mode)
+        let p = ahPalette(mode)
+        let plan = parseJson(renderPlanJson(r, m.root))
+        let items = plan.planNodeWith("data-ah-status-items")
+        # `isNil`, not `!= nil`: a failed check prints its operands, and a
+        # nil JsonNode has no `$`.
+        check not items.isNil
+        if not items.isNil:
+          check items{"styles"}{"gap"}.getStr == $ItemGapPx & "px"
+          var words: seq[string]
+          var bars = 0
+          for c in items{"children"}.getElems:
+            let a = c{"attributes"}
+            if a{"data-ah-status-item"}.getStr.len > 0:
+              words.add a{"data-ah-status-item"}.getStr
+              check c{"styles"}{"text_color"}.getStr ==
+                DesignTokenHex[dtColorsUiTextPrimaryLabelSubtle][mode]
+              check c{"styles"}{"text_color"}.getStr != p.textCaption
+              check c{"styles"}{"text_size"}.getStr == $StatusTextPx & "px"
+            elif a{"data-ah-status-separator"}.getStr == "true":
+              inc bars
+              check c{"styles"}{"bg"}.getStr == DesignTokenHex[dtColorsUiDividerPrimary][mode]
+          check words == @["Noir", "UTF-8"]
+          check bars == 1
+        m.dispose()
+    check ItemGapPx >= 9 and ItemGapPx <= 10   # 0.6em of 16px, 9.6px
+    check StatusTextPx == 14
+
   test "a waiting row's question is never cut silently":
     # GPUI review (2026-11-24): at the sidebar size the text system broke a
     # pre-wrapped question onto one more line than measured, and its last

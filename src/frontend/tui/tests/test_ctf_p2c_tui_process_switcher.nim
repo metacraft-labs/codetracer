@@ -11,7 +11,8 @@
 ##   initiative bar's `drawRecordingButton` and `drawRecordingsMore`), at
 ##   the window's slots (five, two below 90 cells): the active one, a failed
 ##   worker behind `+N`, the ringed process's number underlined in the
-##   action role, the ring on `+N` when it hides that process; a click on a
+##   ring step (D81), the ring on `+N` when it hides that process; every
+##   state's text 4.5:1 or more on the buttons' ground; a click on a
 ##   button is routed and selects its process. The tab hands any slot the
 ##   viewmodel's buttons and the press route, and makes room for it before
 ##   cutting the name.
@@ -28,6 +29,7 @@
 import std/[sequtils, strutils, unittest]
 
 import ../agent_harbor/ah_tui_stories
+import ../agent_harbor/ah_tui_initiative_tab_bar
 import ../../stories/agent_harbor_process_switcher_stories
 
 proc mount(fixture: string; cols = 180; rows = 56; mode = dmDark): AhTuiMount =
@@ -82,24 +84,81 @@ suite "CTF-P2c: the terminal process switcher's tab":
         check more[0].attr("recordings-hidden-severity") == "failed"
       m.dispose()
 
-  test "the ringed process's number is underlined in the action role":
+  test "the ringed process's number is underlined in the ring step":
+    # The action colour's ring step (brand/400 Dark, brand/700 Light), the
+    # web's and GPUI's ring ink (study D81); the action border (brand/500)
+    # it replaced is the control: it is not the ring step in either theme.
     for mode in [dmDark, dmLight]:
       let m = mount("correlation", mode = mode)
       let b = m.tab.all("recording")
       check b.mapIt(it.attr("recording-ringed")) == @["false", "true", "false"]
       let st = m.canvas.grid.styleAt(b[1].row, b[1].col + 1)
-      check st.underline and st.underlineColor == m.canvas.p.borderAction
+      check st.underline and st.underlineColor == ringUnderlineInk(m.canvas.p)
+      check st.underlineColor != m.canvas.p.borderAction
+      check contrastOf(st.underlineColor, m.canvas.p.panel) >= 4.5
       check not m.canvas.grid.styleAt(b[0].row, b[0].col + 1).underline
       m.dispose()
+    check ringUnderlineInk(ahPalette(dmDark)) == "#818cf8"   # brand/400
+    check ringUnderlineInk(ahPalette(dmLight)) == "#4338ca"  # brand/700
 
   test "behind +N, the ring is on the chip":
-    let m = mount("many")
-    check m.processes.markCorrelation("envelope-worker-6", "x")
-    m.draw()
-    let more = m.tab.all("recordings-hidden")[0]
-    check more.attr("recordings-hidden-ringed") == "true"
-    check m.tab.all("recording").allIt(it.attr("recording-ringed") == "false")
-    m.dispose()
+    for mode in [dmDark, dmLight]:
+      let m = mount("many", mode = mode)
+      check m.processes.markCorrelation("envelope-worker-6", "x")
+      m.draw()
+      let more = m.tab.all("recordings-hidden")[0]
+      check more.attr("recordings-hidden-ringed") == "true"
+      check m.tab.all("recording").allIt(it.attr("recording-ringed") == "false")
+      # Its count underlined in the ring step, as a ringed button's number.
+      var underlined = 0
+      for col in more.col ..< more.col + more.width:
+        let st = m.canvas.grid.styleAt(more.row, col)
+        if st.underline:
+          inc underlined
+          check st.underlineColor == ringUnderlineInk(m.canvas.p)
+      check underlined == 2   # `+3`
+      m.dispose()
+
+  test "every state's number and mark holds 4.5:1 on the buttons' ground":
+    # Terminal review of 2026-11-25: on Light's warm panel the warning role
+    # was 2.76:1 (`3?`), the caption role 3.55:1 (`2…`), the error role
+    # 3.74:1 (`● +3`). Each state's text, and `+N`'s mark and count, are
+    # read off the canvas, in both themes, at every size.
+    for mode in [dmDark, dmLight]:
+      for cols in [180, 95, 45]:
+        for fixture in ["loading-and-missing", "many"]:
+          let m = mount(fixture, cols, mode = mode)
+          let ground = m.canvas.p.panel
+          for b in m.tab.all("recording"):
+            if b.attr("recording-active") == "true": continue
+            for col in b.col ..< b.col + b.width:
+              let ch = m.canvas.grid.runeAt(b.row, col)
+              if ch.strip.len == 0: continue
+              let st = m.canvas.grid.styleAt(b.row, col)
+              check st.bg == ground
+              if contrastOf(st.fg, ground) < 4.5:
+                checkpoint $mode & " " & $cols & " " & fixture & " button " &
+                  b.attr("recording-label") & " '" & ch & "' " & st.fg
+              check contrastOf(st.fg, ground) >= 4.5
+          for chip in m.tab.all("recordings-hidden"):
+            for col in chip.col ..< chip.col + chip.width:
+              let ch = m.canvas.grid.runeAt(chip.row, col)
+              if ch.strip.len == 0: continue
+              let st = m.canvas.grid.styleAt(chip.row, col)
+              if contrastOf(st.fg, ground) < 4.5:
+                checkpoint $mode & " " & $cols & " " & fixture & " +N '" & ch & "' " & st.fg
+              check contrastOf(st.fg, ground) >= 4.5
+          m.dispose()
+    # Dark is unchanged: its state roles themselves.
+    let d = ahPalette(dmDark)
+    check buttonStateInk(d, rsFailed) == d.textError
+    check buttonStateInk(d, rsMissing) == d.textWarning
+    check buttonStateInk(d, rsLoading) == d.textCaption
+    # The control: Light's own roles, which the drawing used, are under it.
+    let l = ahPalette(dmLight)
+    check contrastOf(l.textWarning, l.panel) < 3.0
+    check contrastOf(l.textError, l.panel) < 4.5
+    check contrastOf(l.textCaption, l.panel) < 4.5
 
   test "+N is a button on the numbered buttons' ground, not the tab's":
     # The web's `.ah-rec-more`: a button like its siblings. Its control: the

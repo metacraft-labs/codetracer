@@ -18,7 +18,7 @@
 ## No mocks: the stories' own viewmodel drawn by the real views into
 ## isonim-gpui's element tree.
 
-import std/[json, sequtils, strutils, unittest]
+import std/[json, os, sequtils, strutils, unittest]
 
 import isonim_gpui/renderer
 from isonim_gpui/bindings import gpui_reset_tree
@@ -28,6 +28,9 @@ from ../agent_harbor/ah_initiative_tab_bar import ringInk, RingMarginPx, Recordi
 from ../chrome import contrastRatio
 import ../../styles/generated/design_tokens
 import ../../stories/agent_harbor_process_switcher_stories
+import ../../stories/codetracer_stories
+import ../../../../tools/stories/emit_storybook_stories
+import ../../../tests/visual/agent_harbor/ctf_layout_judge
 
 let r = GpuiRenderer()
 
@@ -76,7 +79,21 @@ suite "CTF-P2c: the GPUI process switcher's tab":
       check t.tagged("label")[0].fact("label") == EnvelopeFlowTitle
       let others = m.view.tagged("tab").filterIt(it.fact("active") == "false")
       check others.len == 1 and others[0].fact("tab") == OtherTabTitle
+      # The plain tab's name in the caption role, quiet beside the active
+      # tab's (GPUI review of 2026-11-25: it was the caption token at full
+      # strength, nearly the active name's brightness in Dark).
+      let ink = others[0].fact("ink")
+      check ink == plainTabInk(p)
+      check m.styleOf("ink", ink, "bg") == ""   # the plain tab has no fill
+      check ink != p.activeTabText
+      check contrastRatio(ink, p.ground) >= 4.0
+      check contrastRatio(ink, p.ground) < contrastRatio(p.activeTabText, p.ground)
       m.dispose()
+    # Dark: CodeTracer's `.session-tab` colour at its 0.7 opacity over the
+    # bar (the web's #838383); the caption token alone is the control.
+    check plainTabInk(ahPalette(dmDark)) == "#838383"
+    check plainTabInk(ahPalette(dmDark)) != ahPalette(dmDark).textCaption
+    check contrastRatio(plainTabInk(ahPalette(dmDark)), ahPalette(dmDark).ground) >= 4.5
 
   test "the tab's facts are the viewmodel's":
     let m = mount("correlation")
@@ -151,6 +168,10 @@ suite "CTF-P2c: the GPUI process switcher's buttons":
     check m.processes.markCorrelation("envelope-worker-6", "x")
     let more = m.tab.tagged("recordings-hidden")[0]
     check more.fact("recordings-hidden-ringed") == "true"
+    # The ringed control for the layout record's `ps-ringed` region
+    # (`data-ah-recording-ringed`), as the web's `.ah-rec-ringed` is on its
+    # `.ah-rec-more`.
+    check more.fact("recording-ringed") == "true"
     check more.fact("tooltip").startsWith("3 more processes")   # not recordings
     check more.tagged("recording-ring").len == 1
     check m.tab.tagged("recording").allIt(it.fact("recording-ringed") == "")
@@ -174,3 +195,63 @@ suite "CTF-P2c: the GPUI process switcher's presses and keys":
     check m.tab.fact("process-active") == "3"
     check m.processSwitcherKey("9") == ""
     m.dispose()
+
+# ---------------------------------------------------------------------------
+# The regions the window capture is judged on
+# ---------------------------------------------------------------------------
+
+proc matchesFacts(el: GpuiElement; facts: JsonNode): bool =
+  ## The story window's region match (`ah_story_window.matches`): every
+  ## declared `data-ah-*` attribute present, with its value when one is given.
+  for attr, want in facts.pairs:
+    let have = getAttribute(el, attr)
+    if have.len == 0 or (want.getStr.len > 0 and have != want.getStr): return false
+  true
+
+proc anyMatching(node: GpuiElement; facts: JsonNode): bool =
+  if node.isNil: return false
+  if node.matchesFacts(facts): return true
+  for i in 0 ..< childCount(node):
+    if anyMatching(nthChild(node, i), facts): return true
+  false
+
+suite "CTF-P1b: a process switcher story draws the regions the web draws, and no others":
+  test "each region of every process switcher story is matched by its GPUI facts exactly when the web has it":
+    # `process-switcher-many-ringed` drew its ring on `+N` with no
+    # `data-ah-recording-ringed`, so the capture's `ps-ringed` region was
+    # "drawn only on web" (GPUI review of 2026-11-25).
+    let regionsDir = repoRoot / "src" / "tests" / "visual"
+    let record = loadWebRecord(regionsDir / "agent-harbor-web-regions.json")
+    var declared: seq[(string, JsonNode)]
+    for region in parseJson(readFile(regionsDir / "agent-harbor-regions.json"))["regions"]:
+      declared.add (region["name"].getStr, region["gpui"])
+    var stories, compared, ringed = 0
+    var problems: seq[string]
+    for story in agentHarborSection().stories:
+      if story.surface != ProcessSwitcherSurface: continue
+      inc stories
+      let sid = storybookId(agentHarborSection(), story)
+      for (size, w, h) in Sizes:
+        for (mode, theme) in [(dmDark, "dark"), (dmLight, "light")]:
+          let id = ViewPrefix & sid[StoryIdPrefix.len .. ^1] & "-" & size & "-" & theme
+          let web = record{id}{"regions"}
+          if web.isNil:
+            problems.add id & ": the web record has no capture"
+            continue
+          gpui_reset_tree()
+          let m = r.mountAgentHarborStoryGpui(story.surface, story.fixture, w, h, mode)
+          for (name, facts) in declared:
+            inc compared
+            let drawn = m.root.anyMatching(facts)
+            if name == "ps-ringed" and drawn: inc ringed
+            if web.hasKey(name) and not drawn:
+              problems.add id & ": region " & name & " is drawn only on web"
+            elif drawn and not web.hasKey(name):
+              problems.add id & ": region " & name & " is drawn only on gpui"
+          m.dispose()
+    for p in problems: checkpoint p
+    check stories == 5
+    check compared > 0
+    # `-correlation` and `-many-ringed`, two sizes, two themes.
+    check ringed == 8
+    check problems.len == 0

@@ -590,6 +590,15 @@ proc sendPing(inst: Instance; t: int64) =
   inst.sendTo(%*{"type": "ping", "seq": inst.pingSeq})
 
 proc broadcastState(sup: Supervisor; msg: JsonNode) =
+  ## A batch goes to every plugin that has had its snapshot: an ACTIVATING
+  ## plugin as well as an active one. `sendActivate` sends the snapshot with
+  ## `activate`, and a batch is a delta against it, so one withheld until
+  ## `activated` arrives is lost for good: a stop made in that window never
+  ## reaches the plugin, which draws the previous stop until the next one
+  ## (§11.8 "After a restart"; codetracer-pm issues/2026-11-25-a-restarted-
+  ## plugin-leaves-its-docked-pane-stale-at-the-next-stop.md). The SDK takes
+  ## its messages in order and is active once it has handled `activate`, so
+  ## it applies the batch after the snapshot.
   var m = msg
   m["epoch"] = sup.epoch.toJson
   for pkg in sup.packages.values:
@@ -597,7 +606,7 @@ proc broadcastState(sup: Supervisor; msg: JsonNode) =
       if inst.state == isRunning:
         var any = false
         for s in inst.slotsOf(sup):
-          if s.active: any = true
+          if s.active or s.activating: any = true
         if any: inst.sendTo(m)
 
 proc attachSession*(sup: Supervisor; session: SessionViewModel;

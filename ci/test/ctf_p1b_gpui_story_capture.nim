@@ -27,7 +27,9 @@
 ##   CTF_P1B_STORY_BIN, CTF_P1B_GPUI_LD_LIBRARY_PATH, CTF_P1B_REGIONS (the
 ##   declaration), CTF_P1B_OUT; optional CTF_P1B_ONLY (comma-separated
 ##   substrings of the story ids to keep), CTF_P1B_SIZES (default `laptop,sidebar`,
-##   and `panel` too for the session activity timeline's stories),
+##   and `panel` too for the session activity timeline's and the suggested
+##   UI actions' stories; the control center's `wide` is not taken: the
+##   web record holds no `wide` capture to judge it against),
 ##   CTF_P1B_THEMES (default `dark,light`), CTF_P1B_MOMENTS, CTF_P1B_SHARD.
 ##
 ## With `CTF_P1B_SHARD=<i>/<n>` it takes only its share of the captures:
@@ -88,14 +90,20 @@ let outDir = need("CTF_P1B_OUT")
 let only = listOf("CTF_P1B_ONLY", "")
 let sizes = listOf("CTF_P1B_SIZES", "laptop,sidebar")
 let sizesGiven = getEnv("CTF_P1B_SIZES").len > 0
-const PanelFamily = StoryIdPrefix & "session-activity"
-  ## The session activity timeline's stories, which are also taken at the
-  ## `panel` size (the timeline is a panel) unless CTF_P1B_SIZES names the
-  ## sizes.
+const PanelFamilies = [StoryIdPrefix & "session-activity",
+                       StoryIdPrefix & "suggested-actions"]
+  ## The stories also taken at the `panel` size unless CTF_P1B_SIZES names
+  ## the sizes: the session activity timeline's (the timeline is a panel),
+  ## and the suggested UI actions' (the P2c study's captures list them at
+  ## `panel`; the web record holds them there).
 
 proc sizesFor(id: string): seq[string] =
   result = sizes
-  if not sizesGiven and id.startsWith(PanelFamily): result.add "panel"
+  if not sizesGiven:
+    for family in PanelFamilies:
+      if id.startsWith(family):
+        result.add "panel"
+        break
 let themes = listOf("CTF_P1B_THEMES", "dark,light")
 let atMoments = getEnv("CTF_P1B_MOMENTS") == "1"
 

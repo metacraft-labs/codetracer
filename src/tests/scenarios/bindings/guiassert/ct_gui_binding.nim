@@ -39,6 +39,7 @@ import std/sequtils
 import ../../../visual/screen_oracle/pane_grammar
 import ../../../../frontend/gpui/app/pane_names
 import headless_app/layout_model
+import ./code_digits
 
 proc gpuiBinary*(): string =
   result = getEnv("CODETRACER_GPUI_WINDOW_BIN")
@@ -1242,6 +1243,127 @@ proc readEventLog(ctx: GuiContext; f: Frame; t: var Tree; b: PaneBox) =
     inc n
   pane.props["count"] = %n
 
+const
+  CodeFacePx = 16.0
+    ## The size the window sets code in (`chrome.CodeFontPx`), the Variables
+    ## pane's values included: Space Mono's 612-unit advance at it is the
+    ## 9.792 px the editor's columns are measured with.
+  CodeFaceAdvance = CodeFacePx * SpaceMonoAdvanceUnits / SpaceMonoUnitsPerEm
+
+proc glyphCoverage*(f: Frame; x0, x1, y0, y1: int; ground: (int, int, int)): Coverage =
+  ## A glyph's patch of the frame as coverage: how far each pixel's colour is
+  ## from the row's ground, as a share of the farthest (the glyph's own
+  ## colour, which its fully covered pixels are drawn in).
+  let xa = max(0, x0)
+  let ya = max(0, y0)
+  let xb = min(f.image.width, x1)
+  let yb = min(f.image.height, y1)
+  result = Coverage(w: max(0, xb - xa), h: max(0, yb - ya))
+  result.a = newSeq[float](result.w * result.h)
+  var far = 0
+  for y in ya ..< yb:
+    for x in xa ..< xb:
+      let (r, g, bb) = f.rgb(x, y)
+      let d = max(abs(r - ground[0]), max(abs(g - ground[1]), abs(bb - ground[2])))
+      result.a[(y - ya) * result.w + (x - xa)] = float(d)
+      far = max(far, d)
+  if far < 40: return Coverage(w: result.w, h: result.h, a: newSeq[float](result.w * result.h))
+  for v in result.a.mitems:
+    v = v / float(far)
+    if v < 0.06: v = 0.0        # the ground's own noise
+
+proc inkBands*(f: Frame; x0, x1, y0, y1: int): int =
+  ## How many separate bands of rows hold ink (`inkRuns`' rule) in columns
+  ## `x0` … `x1` between rows `y0` and `y1`: 2 for a colon, 1 for a point.
+  var inBand = false
+  for y in max(0, y0) ..< min(y1, f.image.height):
+    var ink = false
+    for x in max(0, x0) .. min(x1, f.image.width - 1):
+      if f.luma(x, y) > 110:
+        ink = true
+        break
+    if ink and not inBand: inc result
+    inBand = ink
+
+func isCodeNumber(s: string): bool =
+  ## A number as the Variables pane prints one: digits, a sign, a point.
+  var digits = 0
+  for i, c in s:
+    if c in Digits: inc digits
+    elif c == '-' and i == 0: discard
+    elif c == '.' and i > 0: discard
+    else: return false
+  digits > 0
+
+proc checkedNumber(f: Frame; r: TextRow; value: string): tuple[ok: bool, value, why: string] =
+  ## A numeric value the OCR engine read, read again glyph by glyph against
+  ## the code face's own digits (`code_digits`): confirmed, corrected, or not
+  ## read at all. The engine reads a lone 6 of this face as an 8 (codetracer-pm
+  ## issues/2026-11-25-the-gpui-scenario-binding-reads-a-variables-lone-digit-
+  ## 6-as-8.md), so its digits are never reported on its word alone.
+  ##
+  ## The value's glyphs are the last `value.len` runs of ink of the row's
+  ## `name:value` word, after the colon's narrow run; each is one cell of the
+  ## monospaced face. A row that does not segment that way is not read.
+  result = (false, value, "")
+  var wi = -1
+  for i, wd in r.words:
+    if ':' in wd.text:
+      wi = i
+      break
+  if wi < 0:
+    result.why = "the row has no name:value word to find the value's glyphs in"
+    return
+  # the value is the word's tail after the colon, or the next word when the
+  # engine split it off (`left:` `6`)
+  var last = r.words[wi]
+  let tail = last.text[last.text.find(':') + 1 .. ^1]
+  if tail.strip.len == 0 and wi + 1 < r.words.len: last = r.words[wi + 1]
+  let y0 = r.y0 - 3
+  let y1 = r.y1 + 3
+  let runs = inkRuns(f, y0, y1, r.words[wi].x - 2, last.x + last.w + 3)
+  let n = value.len
+  let adv = CodeFaceAdvance
+  # the run before the value must be the colon: narrow, and two dots one
+  # above the other (a point, also narrow, is one dot: `1.5` the engine read
+  # as `5` must not have its point taken for the colon)
+  if runs.len < n + 1 or runs[^(n + 1)][1] - runs[^(n + 1)][0] + 1 > int(adv * 0.4) or
+      inkBands(f, runs[^(n + 1)][0], runs[^(n + 1)][1], y0, y1) != 2:
+    result.why = "its " & $n & " glyph(s) do not follow the colon as separate cells"
+    return
+  let cells = runs[^n .. ^1]
+  for j, c in cells:
+    if c[1] - c[0] + 1 > int(ceil(adv)):
+      result.why = "glyph " & $(j + 1) & " is wider than one cell of the code face"
+      return
+    if j > 0 and abs(float(c[0] - cells[j - 1][0]) - adv) > 2.5:
+      result.why = "glyph " & $(j + 1) & " is not one cell after the one before it"
+      return
+  var read = ""
+  for j, c in cells:
+    let ch = value[j]
+    let d = readDigitCached(f.glyphCoverage(c[0] - 1, c[1] + 2, y0, y1, r.ground), CodeFacePx)
+    if ch notin Digits:
+      # a sign or a point is taken on the engine's word only when its glyph
+      # is no digit of the face
+      if d.digit >= 0:
+        result.why = "glyph " & $(j + 1) & " is the digit " & $d.digit & " where the engine read '" &
+          ch & "'"
+        return
+      read.add ch
+      continue
+    if getEnv("CT_GUI_BINDING_DEBUG").len > 0:
+      stderr.writeLine "  digit @", c[0], " ocr=", ch, " outline=", d.digit,
+        " score=", d.score.formatFloat(ffDecimal, 3), " next=", d.runnerUp.formatFloat(ffDecimal, 3),
+        " contrast=", d.contrast.formatFloat(ffDecimal, 3)
+    if d.digit < 0:
+      result.why = "glyph " & $(j + 1) & " matches no digit of the code face clearly (correlation " &
+        d.score.formatFloat(ffDecimal, 2) & ", contrast to its closest rival " &
+        d.contrast.formatFloat(ffDecimal, 2) & ")"
+      return
+    read.add char(ord('0') + d.digit)
+  result = (true, read, "")
+
 proc readVariables(ctx: GuiContext; f: Frame; t: var Tree; b: PaneBox) =
   let rows = ctx.bodyRows(f, b)
   let pane = node("variables", fl(b.left), fl(b.top), fl(b.right - b.left), fl(b.bottom - b.top),
@@ -1264,9 +1386,18 @@ proc readVariables(ctx: GuiContext; f: Frame; t: var Tree; b: PaneBox) =
       if other.len > name.len and other.len - name.len <= 2 and other.endsWith(name):
         name = other
       break
+    var why = ""
+    if value.isCodeNumber:
+      let checked = f.checkedNumber(r, value)
+      if checked.ok: value = checked.value
+      else:
+        why = checked.why
+        value = ""
     let v = rowNode("variable", b, r, %*{"name": name, "value": value, "type": typ},
                     @[("name", name)])
     v.unreadable["expanded"] = "an expanded value is told by its disclosure glyph"
+    if why.len > 0:
+      v.unreadable["value"] = "the number's digits were not read reliably: " & why
     t.add(pane, v)
     inc n
   pane.props["count"] = %n

@@ -382,6 +382,35 @@ suite "§11.6, §11.8: faults are attributed, and siblings survive":
     check r.sup.faults[0].kind == fkCrash
     r.sup.shutdown()
 
+  test "a stop made while the restarted plugin is still activating reaches its pane":
+    # codetracer-pm issues/2026-11-25-a-restarted-plugin-leaves-its-docked-
+    # pane-stale-at-the-next-stop.md: under load the user's step landed
+    # between the restarted plugin's `activate` (with its snapshot) and its
+    # `activated`. The stop's batch went to active plugins only, so the
+    # plugin never saw the stop, and its pane stayed stale until the next.
+    # The window is made deterministic: wait until the host has sent
+    # `activate`, then move before the next `poll` can read `activated`
+    # (a poll cuts the pending batch before it reads any process).
+    var r = newRig()
+    r.both()
+    check r.sup.waitUntil("both active", proc(): bool =
+      r.active("acme-tools.metrics") and r.active("acme-tools.flame"))
+    let pid = r.sup.pidOf("acme-tools.metrics")
+    discard kill(Pid(pid), SIGKILL)
+    check r.sup.waitUntil("re-activating", proc(): bool =
+      r.sup.slot("acme-tools.metrics").activating and
+      r.sup.pidOf("acme-tools.metrics") notin [0, pid])
+    check not r.active("acme-tools.metrics")
+    r.moveTo(77)
+    let at = r.sup.epoch.position
+    check r.sup.waitUntil("the restarted plugin draws the new stop",
+      proc(): bool =
+        let text = r.sup.renderSurface("acme-tools.metrics/overview").allText
+        text.contains("main.nim:77") and text.contains("position " & $at),
+      ceilingMs = 30_000)
+    check not r.sup.isStale("acme-tools.metrics/overview")
+    r.sup.shutdown()
+
   test "a plugin that segfaults on activation: blamed by name, siblings restarted at most 3 times":
     var r = newRig("segfault")
     r.both()

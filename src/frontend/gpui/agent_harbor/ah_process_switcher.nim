@@ -67,6 +67,19 @@ proc switcherDraw(r: GpuiRenderer; p: AhPalette; buttons: RecordingButtons;
 let RecordingSwitcherSlot* = SwitcherSlot(draw: switcherDraw)
   ## The recording switcher's own drawing (`ah_initiative_tab_bar`).
 
+proc plainTabInk*(p: AhPalette): string =
+  ## A plain session tab's name in the caption role, quiet beside the
+  ## active tab's (brief, "The process switcher"). In Dark it is drawn as
+  ## CodeTracer's own `.session-tab` draws it (session_tabs.styl): `#b0b0b0`
+  ## (`activeTabOrigin`) dimmed by the tab's `opacity: 0.7` over the caption
+  ## bar's ground, #838383 at 4.5:1; drawn at the caption token's full
+  ## strength it was nearly as bright as the active tab's name (GPUI review
+  ## of 2026-11-25). In Light the same opacity leaves the caption token at
+  ## 2.5:1 on the bar, under the text floor, so Light keeps the caption
+  ## token itself (4.2:1), already well under the active tab's body ink.
+  if p.mode == dmDark: mixInk(p.activeTabOrigin, p.ground, 30)
+  else: p.textCaption
+
 proc slotsForPx*(widthPx: int): int =
   ## The buttons a tab draws before `+N`: two on a narrow window, else five
   ## (the web story's `slotsFor`).
@@ -116,7 +129,9 @@ proc drawProcessSwitcherStory*(r: GpuiRenderer; host: GpuiElement; vm: ProcessSw
                              ("min-width", $OtherTabPx & "px"), ("flex-shrink", "0")])
   r.tag(other, "tab", otherTab)
   r.tag(other, "active", "false")
-  r.appendChild(other, r.text(otherTab, BodyLargePx, p.textCaption, shrink = false))
+  let otherInk = plainTabInk(p)
+  r.tag(other, "ink", otherInk)
+  r.appendChild(other, r.text(otherTab, BodyLargePx, otherInk, shrink = false))
   r.appendChild(line, other)
   r.appendChild(host, line)
   r.appendChild(host, r.box(pairs = [("flex-grow", "1")]))
