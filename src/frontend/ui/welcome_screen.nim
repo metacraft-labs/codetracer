@@ -343,16 +343,18 @@ proc triggerWelcomeStartOption*(self: WelcomeScreenComponent; key: string) =
   self.syncLegacyWelcomeScreenIntoVM()
   case key
   of "new-file":
-    # ISSUE #735. Through the main process rather than straight into
-    # `renderer.openNewTab`, and the reason is that the welcome screen has NO
-    # LAYOUT: `ui/layout.initLayout` returns before GoldenLayout is constructed
-    # while `startOptions.welcomeScreen` is true and `data.trace` is nil, so a
-    # tab opened from here would have no container to go in. `CODETRACER::new-file`
-    # is answered by `index/traces.onNewFile`, which sends `CODETRACER::no-trace`
-    # with an EMPTY project — the same message "Open folder" ends up sending,
-    # so edit mode is entered by one door rather than two — and `ui_js.onNoTrace`
-    # opens the untitled buffer once the layout is on the ground.
-    self.data.ipc.send "CODETRACER::new-file"
+    # ISSUE #735. If GoldenLayout is already on the ground (a trace or edit
+    # session is open in another tab), open the buffer directly — no need to
+    # re-initialize edit mode and no Monaco context-key collision (issue #835).
+    # The IPC path below is kept for the original case: welcome screen is the
+    # FIRST tab (no layout yet), so `initLayout` hasn't run and there is no
+    # container for `openNewTab` to put the new tab in.
+    if not self.data.ui.layout.isNil:
+      self.data.openNewTab()
+    else:
+      # `CODETRACER::new-file` → `index/traces.onNewFile` → `CODETRACER::no-trace`
+      # → `ui_js.onNoTrace` initializes edit mode and opens one untitled buffer.
+      self.data.ipc.send "CODETRACER::new-file"
   of "open-folder":
     self.data.ipc.send "CODETRACER::open-folder-dialog"
   of "record-new-trace":
