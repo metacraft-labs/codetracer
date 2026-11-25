@@ -82,6 +82,22 @@ proc escapeKey(sess: var TuiTestSession) =
   sess.send("\e")
   sleep(200)
 
+proc terminalPid(): int =
+  ## The `codetracer-tui` this process spawned (its child, by `/proc`).
+  let me = $getpid()
+  for kind, dir in walkDir("/proc"):
+    let name = dir.extractFilename
+    if name.len == 0 or name[0] notin Digits: continue
+    try:
+      let stat = readFile(dir / "stat")
+      let close = stat.rfind(')')
+      let fields = stat[close + 2 .. ^1].split(' ')
+      if fields.len > 1 and fields[1] == me and "(codetracer-tui)" in stat:
+        return parseInt(name)
+    except IOError, OSError, ValueError:
+      discard
+  -1
+
 proc overlayOpen(sess: var TuiTestSession): bool =
   ## A content overlay (`:plugins`, a pane shown by `:plugins show`, the
   ## recovery dialog) is a box; no docked pane draws one.
@@ -215,6 +231,61 @@ proc watchRowShown(sess: var TuiTestSession; name: string): bool =
       return true
   false
 
+proc tickShown(screen: string): int =
+  ## The stop's tick as the screen shows it, or -1.
+  for marker in ["tick: ", "tick "]:
+    var at = screen.find(marker)
+    while at >= 0:
+      var digits = ""
+      var i = at + marker.len
+      while i < screen.len and screen[i] in Digits:
+        digits.add screen[i]
+        inc i
+      if digits.len > 0: return parseInt(digits)
+      at = screen.find(marker, at + marker.len)
+  -1
+
+proc settledTick(sess: var TuiTestSession; ceilingMs = 60_000): int =
+  ## The tick of a stop that HOLDS STILL, the same on three reads in a row:
+  ## the panes redraw in pieces after a move.
+  var last = -2
+  var same = 0
+  var waited = 0
+  while waited < ceilingMs:
+    let t = tickShown(sess.screen)
+    if t >= 0 and t == last:
+      inc same
+      if same >= 2: return t
+    else:
+      same = 0
+    last = t
+    sleep(300)
+    waited += 300
+  last
+
+proc tickMoves(sess: var TuiTestSession; from0: int; ceilingMs = 60_000): int =
+  ## The tick of the stop the screen settles on other than `from0`, or
+  ## `from0` when it never moved.
+  var waited = 0
+  while waited < ceilingMs:
+    let t = sess.settledTick(ceilingMs = 10_000)
+    if t >= 0 and t != from0: return t
+    waited += 1_000
+  checkpoint "the screen stayed at tick " & $from0 & "\n" & sess.screen
+  from0
+
+proc changedList(statusLine: string): string =
+  ## What `ct-lens.watch`'s status item names after `changed: `, or "?".
+  let at = statusLine.find("changed: ")
+  if at < 0: return "?"
+  statusLine[at + "changed: ".len .. ^1].split("  ")[0].strip
+
+proc watchRowCount(screen: string): int =
+  ## The Variables pane's watch rows (`W`), the "add" row aside.
+  for line in screen.splitLines:
+    let at = line.find("▏W ")
+    if at >= 0 and "Add watch expression" notin line: inc result
+
 proc finish(sess: var TuiTestSession; home: string) =
   sess.command("quit")
   discard sess.waitExit(initDuration(seconds = 30))
@@ -291,18 +362,26 @@ suite "ct-lens on a real terminal":
       changed = ""
       for _ in 0 ..< 60:
         sess.command("next")
-        if sess.statusHas("changed: ", ceilingMs = 8_000):
-          let line = sess.statusLine
-          let at = line.find("changed: ")
-          let list = line[at + "changed: ".len .. ^1].split("  ")[0].strip
-          if list.len > 0 and list notin ["none", "…"] and ',' notin list:
-            changed = list
-            break
+        # The item still names the previous stop's changes until the plugin
+        # has read this one: wait for the stop to hold still, then for the
+        # item to read the same twice, a second apart.
+        discard sess.settledTick(ceilingMs = 20_000)
+        var list, prev = "?"
+        for _ in 0 ..< 10:
+          prev = list
+          list = changedList(sess.statusLine)
+          if list == prev: break
+          sleep(1_000)
+        if list == prev and list.len > 0 and list notin ["?", "none", "…"] and
+           ',' notin list:
+          changed = list
+          break
       if changed.len == 0:
         checkpoint "round " & $round & ": no step named one changed value; status line:\n" &
           sess.statusLine
         continue
       # F7 on its own: nothing is open (the last `:next` closed its line).
+      let rowsBefore = watchRowCount(sess.screen)
       sleep(500)
       sess.send(F7)
       # Everything the step changed is watched now: the command says why it
@@ -318,18 +397,17 @@ suite "ct-lens on a real terminal":
         sess.command("plugins")
         checkpoint "after F7 on " & changed & ":\n" & sess.screen
         continue
-      # The watch row arrives with the locals of the next stop.
-      for _ in 0 ..< 6:
-        sess.command("next")
-        for _ in 0 ..< 25:
-          if sess.watchRowShown(changed):
-            watched = true
-            break
-          sleep(400)
-        if watched: break
+      # The watch row is drawn at once, with no step: a relayed watch takes
+      # the terminal's own `:watch` route.
+      for _ in 0 ..< 75:
+        if sess.watchRowShown(changed) or watchRowCount(sess.screen) > rowsBefore:
+          watched = true
+          break
+        sleep(400)
       if not watched:
         checkpoint "round " & $round & ": F7 on " & changed &
-          " was refused afterwards, but no watch row appeared:\n" & sess.screen
+          " was refused afterwards, but no new watch row appeared (" &
+          $rowsBefore & " before):\n" & sess.screen
       if watched: break
     check changed.len > 0
     check refused
@@ -377,11 +455,13 @@ suite "ct-lens on a real terminal":
 
 suite "ct-lens.jump on a real terminal: a mode, and the defences against it":
 
-  test "Shift+F7 names the mode and lists the calls on the status line; a digit picks one and leaves it":
+  test "Shift+F7 names the mode and lists the calls on the status line; a digit jumps there at once and leaves it":
     let home = newHome()
     var sess = spawnTui(home)
     settleOnDebugger(sess, Cols, Rows)
     sess.grant("ct-lens.jump")
+    let start = sess.settledTick()
+    check start >= 0
     check sess.openJump()
     check sess.statusHas("jump: 1 ")
     sess.send("2")
@@ -392,6 +472,8 @@ suite "ct-lens.jump on a real terminal: a mode, and the defences against it":
         break
       sleep(500)
     check left
+    # The relayed jump is drawn at its stop at once: no `:next` is sent.
+    check sess.tickMoves(start) != start
     sess.finish(home)
 
   test "Enter on a call in the docked jump pane jumps to it, without the mode":
@@ -432,6 +514,30 @@ suite "ct-lens.jump on a real terminal: a mode, and the defences against it":
     # without a re-enable, and its key opens the mode again.
     check sess.commandShows("plugins", "ct-lens.jump  running")
     check sess.openJump()
+    sess.finish(home)
+
+  test "three Escapes typed while the terminal is busy still open the recovery dialog":
+    # The chord is a user's three key presses inside a second. A user who
+    # presses them while the terminal is busy (a repaint, a step's round
+    # trip) has pressed them all the same: here the terminal is stopped
+    # (SIGSTOP) while they are typed 200 ms apart, and continued after.
+    let home = newHome()
+    var sess = spawnTui(home)
+    settleOnDebugger(sess, Cols, Rows)
+    sess.grant("ct-lens.jump")
+    check sess.openJump()
+    let tui = terminalPid()
+    check tui > 0
+    check kill(Pid(tui), SIGSTOP) == 0
+    sess.send("\e")
+    sleep(200)
+    sess.send("\e")
+    sleep(200)
+    sess.send("\e")
+    sleep(200)
+    check kill(Pid(tui), SIGCONT) == 0
+    check sess.screenHas("RECOVER INPUT", ceilingMs = 20_000)
+    check sess.screenHas("The plugins that held the keyboard: ct-lens.jump")
     sess.finish(home)
 
   test "stopped while it holds the keyboard, the plugin loses it within its deadline; its siblings keep running":
