@@ -416,6 +416,41 @@ suite "§11.6, §11.8: faults are attributed, and siblings survive":
     check r.sup.waitUntil("metrics back", proc(): bool = r.active("acme-tools.metrics"))
     r.sup.shutdown()
 
+  test "one missed ping is not a hang; misses in a row are, and the restarted plugin draws again":
+    # At load ~150 a healthy plugin was restarted for one late pong. Stopped
+    # for one and a half deadlines it misses one and answers the next ping;
+    # stopped for good it misses them in a row, and its new process pushes
+    # its state again, so its pane is drawn, not left empty or stale.
+    var r = newRig(tune = proc(s: Supervisor) = discard)
+    r.sup.pongDeadlineMs = 300
+    r.sup.pingBusyMs = 50
+    r.sup.pingIdleMs = 50
+    r.both()
+    check r.sup.waitUntil("drawn", proc(): bool =
+      r.active("acme-tools.flame") and
+        r.sup.renderSurface("acme-tools.flame/flame").allText.contains("main 60%"))
+    let pids = r.sup.processIds
+    check kill(Pid(pids[0]), SIGSTOP) == 0
+    let stoppedAt = monotonicMs()
+    discard r.sup.waitUntil("one deadline and a half", proc(): bool =
+      monotonicMs() - stoppedAt >= 450)
+    check kill(Pid(pids[0]), SIGCONT) == 0
+    let resumedAt = monotonicMs()
+    discard r.sup.waitUntil("several pings later", proc(): bool =
+      monotonicMs() - resumedAt >= 1_500)
+    check not r.sup.faults.anyIt(it.kind == fkHang)
+    check r.sup.processIds == pids
+    check kill(Pid(pids[0]), SIGSTOP) == 0
+    check r.sup.waitUntil("a process silent for good is hung", proc(): bool =
+      r.sup.faults.anyIt(it.kind == fkHang))
+    discard kill(Pid(pids[0]), SIGCONT)
+    check r.sup.faults.filterIt(it.kind == fkHang)[0].detail.contains("in a row")
+    check r.sup.waitUntil("restarted and drawn again", proc(): bool =
+      r.sup.processIds.len > 0 and r.sup.processIds != pids and
+        r.active("acme-tools.flame") and
+        r.sup.renderSurface("acme-tools.flame/flame").allText.contains("main 60%"))
+    r.sup.shutdown()
+
   test "a pong queued behind a large frame is not a hang":
     # The frame takes ~2 s to drain, under the frame lock, so the watchdog's
     # pong waits behind it; the deadline is 300 ms. Bytes arriving are the
@@ -475,6 +510,27 @@ suite "§11.6, §11.8: faults are attributed, and siblings survive":
     check r.sup.slot("acme-tools.flame").droppedMessages > 0
     check taken == @["state.addWatch after-flood"]
     check r.sup.slot("acme-tools.flame").actionsApplied == 1
+    r.sup.shutdown()
+
+  test "a flooding plugin's last state push is held, not dropped, and arrives":
+    # A plugin pushes its state when it changes, so a dropped push would leave
+    # the host showing a stale value for good. `flame.refresh` floods one
+    # status item, then sets it to `final` once: past the limit, that push is
+    # held and applied as tokens return.
+    var r = newRig("flood-final")
+    r.sup.setRateLimit(50, 100)
+    r.sup.floodStrikeAfterMs = 60_000   # the limit is the subject, not the strike
+    r.both()
+    check r.sup.waitUntil("active", proc(): bool = r.active("acme-tools.flame"))
+    let id = r.sup.invoke("acme-tools.flame", "flame.refresh")
+    check r.sup.waitUntil("answered", proc(): bool =
+      r.sup.answers.anyIt(it.id == id and it.kind == "done"))
+    let flame = r.sup.slot("acme-tools.flame")
+    check flame.droppedMessages > 0
+    check r.sup.waitUntil("the final status arrived", proc(): bool =
+      flame.status.hasKey("flame.flood") and
+        flame.status["flame.flood"].allText.strip == "final")
+    check flame.held.len == 0
     r.sup.shutdown()
 
   test "a handler error is that plugin's, and the process keeps running":

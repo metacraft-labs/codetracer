@@ -180,6 +180,10 @@ type
     payload*: JsonNode
     epoch*: Epoch
 
+  HeldPush* = tuple[key, kind: string; msg: JsonNode]
+    ## A push past the bucket's limit. `key` names the value a latest-value
+    ## push replaces; it is "" for a push whose order matters.
+
   PluginSlot* = ref object
     id*: string
     package*: string
@@ -238,6 +242,11 @@ type
     floodSinceMs: int64
     lastDropMs: int64
     droppedMessages*: int
+      ## Messages that arrived past the bucket's limit: held (`holdPush`) or,
+      ## when transient, dropped.
+    held*: seq[HeldPush]
+      ## State pushes past the limit, oldest first, applied as tokens return
+      ## (`deliverHeld`).
     refusals*: seq[string]
       ## Pushes the host refused, newest last (layers, context keys, trees).
     hostCrashes*: int
@@ -282,6 +291,8 @@ type
       ## `link.bytesRead` when the outstanding ping was sent (or when the
       ## deadline last restarted on received bytes).
     pingSeq: int
+    missedPings: int
+      ## Pong deadlines missed in a row, with nothing read meanwhile.
     pongs*: int
       ## Pongs received over this instance's life, for the report and the
       ## suites (a test that asserts something survives pongs counts them).
@@ -390,6 +401,7 @@ type
       ## makes one of its plugins suspect (§11.7.6). Short: its pong is what
       ## gives a healthy plugin its keys back.
     pongDeadlineMs*: int
+    pingMissesForHang*: int
     busyHangMs*: int
     ackBudgetMs*: int
     inputDeadlineMs*: int
@@ -447,6 +459,7 @@ proc newSupervisor*(frontEnd: string; version = "0.0.0";
     helloDeadlineMs: HelloDeadlineMs, pingIdleMs: PingIdleIntervalMs,
     pingBusyMs: PingBusyIntervalMs, chordProbeMs: ChordProbeIntervalMs,
     pongDeadlineMs: PongDeadlineMs,
+    pingMissesForHang: PingMissesForHang,
     busyHangMs: BusyHangMs, ackBudgetMs: AckBudgetMs,
     inputDeadlineMs: InputDeadlineMs, strikeWindowMs: 60_000,
     strikesToOpen: 3, breakerBackoffMs: 30_000,
@@ -618,6 +631,7 @@ proc removePushed(sup: Supervisor; s: PluginSlot; reason: string;
       s.instance.sendTo(%*{"type": "layer-popped", "plugin": s.id,
                            "token": l.token, "reason": reason})
   s.layers = @[]
+  s.held = @[]
   s.computedAnswers.clear()
   s.visualiseAsked.clear()
   s.enablement.clear()
@@ -1066,17 +1080,27 @@ proc isReservedKey*(sup: Supervisor; key: string): bool =
   for r in RecoveryChordSpellings: reserved.add bindingKeyName(r)
   k in reserved
 
-proc takeToken(sup: Supervisor; s: PluginSlot): bool =
+proc spendToken(sup: Supervisor; s: PluginSlot): bool =
+  ## Refill the bucket for the time that passed, and take a token if one is
+  ## there.
   let t = sup.now()
   let dt = float(t - s.lastRefillMs) / 1000.0
   s.lastRefillMs = t
   s.tokens = min(sup.messageBurst, s.tokens + dt * sup.messagesPerSecond)
   if s.tokens >= 1.0:
+    s.tokens -= 1.0
+    return true
+  false
+
+proc takeToken(sup: Supervisor; s: PluginSlot): bool =
+  ## A token for an arriving push; without one, the push is past the limit
+  ## and counts towards a flood strike.
+  if sup.spendToken(s):
     # A message let through does NOT end the breach: the bucket refills a
     # token between two reads, so a flood interleaves passes with drops. The
     # breach ends after `FloodQuietMs` with no drop at all.
-    s.tokens -= 1.0
     return true
+  let t = sup.now()
   inc s.droppedMessages
   if s.floodSinceMs < 0 or t - s.lastDropMs > FloodQuietMs:
     s.floodSinceMs = t
@@ -1087,8 +1111,64 @@ proc takeToken(sup: Supervisor; s: PluginSlot): bool =
     sup.recordFault(sup.packages[s.package], s.id, fkFlood,
       "more than " & $int(sup.messagesPerSecond) & " messages a second for " &
       $(sup.floodStrikeAfterMs div 1000) & " s",
-      "Messages past the limit were dropped.")
+      "Its status, views and other state were held and applied as the " &
+      "limit allowed; its log lines past the limit were dropped.")
   false
+
+const
+  TransientPushes = ["log", "progress"]
+    ## Pushes the host may drop past the limit: nothing later depends on one.
+  OrderedPushes = ["view-patch", "push-layer", "pop-layer"]
+    ## Pushes whose order matters: held in sequence, never coalesced.
+  MaxHeldOrdered* = 256
+    ## How many ordered pushes are held at most; past it one is refused.
+
+proc latestKey(t: string; msg: JsonNode): string =
+  ## The value a latest-value push sets; a newer push for the same value
+  ## replaces a held one. "" for a push that is not one.
+  case t
+  of "status": "status:" & msg{"item"}.getStr("")
+  of "enablement": "enablement:" & msg{"op"}.getStr("")
+  of "context": "context:" & msg{"key"}.getStr("")
+  of "decorations": "decorations:" & msg{"document"}.getStr("")
+  of "view": "view:" & msg{"surface"}.getStr("")
+  of "publish-batch": "publish-batch:" & msg{"viewModel"}.getStr("")
+  else: ""
+
+proc holdPush(sup: Supervisor; s: PluginSlot; t: string; msg: JsonNode) =
+  ## A push past the limit. A state push is HELD, not dropped: a plugin
+  ## pushes its state when it changes, so a dropped push would leave the
+  ## host showing a stale value until the next change, which may never come
+  ## (a command's enablement after a watch was added, say). A latest-value
+  ## push replaces the one held for the same value in its place; a whole
+  ## view replaces the patches held for its surface. Transient pushes are
+  ## dropped.
+  if t in TransientPushes:
+    return
+  let key = latestKey(t, msg)
+  if key.len > 0:
+    if t == "view":
+      let surface = msg{"surface"}.getStr("")
+      var kept: seq[HeldPush]
+      for h in s.held:
+        if not (h.kind == "view-patch" and
+                h.msg{"surface"}.getStr("") == surface):
+          kept.add h
+      s.held = kept
+    for h in s.held.mitems:
+      if h.key == key:
+        h.msg = msg
+        return
+    s.held.add (key: key, kind: t, msg: msg)
+  elif t in OrderedPushes:
+    var ordered = 0
+    for h in s.held:
+      if h.key.len == 0: inc ordered
+    if ordered >= MaxHeldOrdered:
+      sup.refuse(s, "a '" & t & "' was refused: " & $MaxHeldOrdered &
+                 " pushes already wait behind the message limit")
+      return
+    s.held.add (key: "", kind: t, msg: msg)
 
 proc takeVisualiseAnswer(sup: Supervisor; s: PluginSlot; id, t: string;
                          msg: JsonNode; e: Epoch) =
@@ -1197,6 +1277,22 @@ proc instanceFault(sup: Supervisor; inst: Instance; msg: JsonNode) =
     action.add "."
   sup.recordFault(pkg, id, fk, what & " (" & detail & ")", action)
 
+proc applyMessage(sup: Supervisor; inst: Instance; s: PluginSlot; t: string;
+                  msg: JsonNode)
+
+proc deliverHeld(sup: Supervisor; s: PluginSlot) =
+  ## Apply the pushes held past the limit, oldest first, as far as the
+  ## bucket's tokens go. A slot neither active nor activating keeps none.
+  while s.held.len > 0:
+    if not (s.active or s.activating) or s.instance.isNil:
+      s.held = @[]
+      return
+    if not sup.spendToken(s):
+      return
+    let h = s.held[0]
+    s.held.delete(0)
+    sup.applyMessage(s.instance, s, h.kind, h.msg)
+
 proc handleMessage(sup: Supervisor; inst: Instance; msg: JsonNode) =
   let t = msg{"type"}.getStr("")
   if not inst.helloSeen:
@@ -1219,6 +1315,7 @@ proc handleMessage(sup: Supervisor; inst: Instance; msg: JsonNode) =
     return
   if t == "pong":
     inc inst.pongs
+    inst.missedPings = 0
     # Only the answer to the ping that is outstanding is a probe's answer; an
     # unsolicited pong proves nothing about when the process last answered.
     let answeredPing = inst.pingOutstanding
@@ -1280,9 +1377,17 @@ proc handleMessage(sup: Supervisor; inst: Instance; msg: JsonNode) =
   # in bursts, so the reply to a key could land behind its own pushes with
   # the bucket empty.
   if t notin ["activated", "activation-failed", "ack", "answer", "rows",
-              "done", "error", "action"] and
-     not sup.takeToken(s):
-    return
+              "done", "error", "action"]:
+    # What is held goes first, so a push never overtakes an older one.
+    sup.deliverHeld(s)
+    if not sup.takeToken(s) or s.held.len > 0:
+      sup.holdPush(s, t, msg)
+      return
+  sup.applyMessage(inst, s, t, msg)
+
+proc applyMessage(sup: Supervisor; inst: Instance; s: PluginSlot; t: string;
+                  msg: JsonNode) =
+  ## One admitted message from plugin `s` (`handleMessage`, `deliverHeld`).
   case t
   of "activated":
     s.activating = false
@@ -1606,10 +1711,20 @@ proc pollInstance(sup: Supervisor; inst: Instance) =
           # them, and a process that then goes silent is still hung.
           inst.lastPingMs = t
           inst.bytesAtPing = inst.link.bytesRead
+          inst.missedPings = 0
         else:
-          sup.killForFault(inst, fkHang, "", "its watchdog did not answer a " &
-                           "ping within " & $sup.pongDeadlineMs & " ms")
-          return
+          # ONE MISSED DEADLINE IS NOT A HANG. At load ~150 a healthy ct-lens
+          # was restarted for one late pong, losing everything it had pushed.
+          # The host asks again; only `pingMissesForHang` misses in a row,
+          # with nothing read meanwhile, make a silent process hung.
+          inc inst.missedPings
+          if inst.missedPings < sup.pingMissesForHang:
+            inst.sendPing(t)
+          else:
+            sup.killForFault(inst, fkHang, "", "its watchdog did not answer " &
+                             $inst.missedPings & " pings in a row, each " &
+                             "within " & $sup.pongDeadlineMs & " ms")
+            return
     elif t - inst.lastPingMs >= interval:
       inst.sendPing(t)
   inst.link.flushWrites()
@@ -1695,6 +1810,8 @@ proc poll*(sup: Supervisor) =
         else: inst.state = isStopped
       sup.pollInstance(inst)
   for s in sup.slots.values:
+    if s.held.len > 0:
+      sup.deliverHeld(s)
     if s.reactivateAtMs > 0 and t >= s.reactivateAtMs:
       s.reactivateAtMs = 0
       if not s.active and not s.activating:
