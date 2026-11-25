@@ -306,6 +306,40 @@ suite "CTF-P2c: the terminal control center":
         check not line.strip(leading = false).endsWith("\xC2\xB7")
     s.dispose()
 
+  test "the Initiatives panel's head summary wraps with no ` · ` at a line's end":
+    # TUI §3.4's one cut rule, where the summary wraps rather than is cut:
+    # the line break separates the parts, so a separator the wrap leaves
+    # last is dropped (`11 sessions ·` reads `11 sessions`). Issue
+    # 2026-11-24-tui-initiatives-panel-head-summary-leaves-a-separator-at-a-line-end.
+    var wrapped = 0
+    for fixture in ["populated", "launched"]:
+      for (cols, rows) in [(95, 40), (45, 56)]:
+        for mode in [dmDark, dmLight]:
+          let m = mount(fixture, cols, rows, mode)
+          let panel = m.canvas.root.all("surface").filterIt(
+            it.attr("surface") == "agent-harbor-initiatives")
+          check panel.len == 1
+          if panel.len == 1:
+            let s = panel[0].first("summary")
+            check not s.isNil and s.attr("summary").len > 0
+            if not s.isNil and s.height > 1:
+              inc wrapped
+              var words = ""
+              for r in s.row ..< s.row + s.height:
+                var line = ""
+                for col in s.col ..< s.col + s.width: line.add m.canvas.grid.runeAt(r, col)
+                let shown = line.strip
+                check not shown.endsWith("\xC2\xB7")
+                check not shown.startsWith("\xC2\xB7")
+                words.add " " & shown
+              # Nothing else is lost: the words are the summary's, less the
+              # separators the breaks stood in for.
+              let want = s.attr("summary").splitWhitespace.filterIt(it != "\xC2\xB7")
+              check words.splitWhitespace.filterIt(it != "\xC2\xB7") == want
+          m.dispose()
+    # The narrow sizes do wrap the summary, so the rule is exercised.
+    check wrapped > 0
+
   test "an empty fleet, loading and error":
     let e = mount("empty")
     check e.view.first("cc-empty-line").attr("cc-empty-line") == "No initiatives yet."

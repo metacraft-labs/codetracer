@@ -54,7 +54,11 @@ proc drawSectionHeader*(c: var AhCanvas; parent: AhNode; row, col, width: int;
   ## summary when both fit, else on its own line(s). `narrow` is the fleet's
   ## narrow header (`@container ah-fleet (max-width: 40rem)`): the summary
   ## beside the title, the source and the caveat each on a line below.
-  ## Nothing is cut: a part a line cannot hold wraps. Returns the rows.
+  ## Nothing is cut: a part a line cannot hold wraps, and a separator
+  ## (` · `, ` — `) its wrap leaves at a line's end is dropped, as the line
+  ## break separates the parts (TUI §3.4's one cut rule, `para`'s
+  ## `breakSeparators`): a summary never reads `11 sessions ·`. Returns the
+  ## rows.
   let upper = title.toUpperAscii
   let inner = width - 2
   let tw = widthOf(upper)
@@ -117,7 +121,7 @@ proc drawSectionHeader*(c: var AhCanvas; parent: AhNode; row, col, width: int;
       discard c.put(row + p.line, col + p.col, p.text, c.p.textCaption)
     else:
       discard c.para(n, row + p.line, col + p.col, p.cells, p.text, c.p.textCaption,
-                     fact = p.fact, alignRight = p.right)
+                     fact = p.fact, alignRight = p.right, breakSeparators = true)
   if summary.len == 0:
     discard c.node(n, row, col + width - 1, 0, 1, [("summary", "")])
   rows
