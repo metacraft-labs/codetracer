@@ -944,3 +944,13 @@ src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/fro
 src/frontend/tui/tests/plat81-plugin-panes-mutation-control.sha256	src/frontend/tui/tests/real_terminal/test_plat81_plugin_panes_pty.nim	0822d4743a479f2dd3c1aeb07f5c3d69c5d48a72dd748c40eb1801ed8b91c5f9	b31b0d2f24d2c62d476e71ae2ceae23a84ee91dde66dfa10d92c8239268f3188
 src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/tui/tests/real_terminal/test_plat81_plugin_processes_pty.nim	c749e75d8ec3e5c6204ea252f66eb94ea466498c2e48449cf6fba9818c95522e	f03c6e32a8e5c2241c3e68315c17de19efb420443c53d8c15b1d10d1eeabb018
 src/frontend/tui/tests/plat83-ct-lens-mutation-control.sha256	src/frontend/tui/tests/real_terminal/test_ct_lens_plugins_pty.nim	d198e9b4a687984bcdcadea48dd1d99b2d9e6a9560e1b68b043c4753325bb8fc	16e0bc7f2cd3ca607a7f33c1def20a275f91f556c08d45a16ace4fc11ea1408a
+
+# 2026-11-25, the plugin wire appends frames, frame queues and pipe chunks with
+# `appendBytes` (plugin_host/byte_append.nim), because stock Nim 2.2.4's JavaScript
+# `add` throws past ~100 000 bytes (codetracer-pm 2026-11-24-under-ct-host-a-plugins-
+# mirror-never-learns-what-a-step-changed). process_link.nim and plugin_io.nim moved;
+# the harnesses that digest them owe a re-grade of the arms that sit in them.
+src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/viewmodel/plugin_host/process_link.nim	67a0095978446fcf0f5c4b2ab6e769482b685d4041d552431b9bad3e9362de98	e1bea68ce26419dac6a0b580c0585dad027d0b1be26cde03e8a9b2f083135e75
+src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/process_link.nim	67a0095978446fcf0f5c4b2ab6e769482b685d4041d552431b9bad3e9362de98	e1bea68ce26419dac6a0b580c0585dad027d0b1be26cde03e8a9b2f083135e75
+src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/plugin_io.nim	d5de198bc351a80da5aa4c73b99ed7c6fd48d90d8a9a55ad3a59df7e1e664b26	b3e909347e32bd99c041e68ab80f841755487199c62388c1ffc61ae3b73fde98
+src/frontend/viewmodel/tests/unit/plat8-io-mutation-control.sha256	src/frontend/viewmodel/plugin_host/plugin_io.nim	d5de198bc351a80da5aa4c73b99ed7c6fd48d90d8a9a55ad3a59df7e1e664b26	b3e909347e32bd99c041e68ab80f841755487199c62388c1ffc61ae3b73fde98
