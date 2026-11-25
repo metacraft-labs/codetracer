@@ -23,7 +23,7 @@
 ## Node only (`vm-unit-js`): it opens sockets. Needs `socket.io` and
 ## `socket.io-client` on Node's module path.
 
-import std/[asyncjs, importutils, json, jsffi, options]
+import std/[asyncjs, importutils, json, jsffi, options, strutils]
 
 import isonim/core/[owner, signals]
 
@@ -32,8 +32,11 @@ import ../../session_vm
 import ../../sdk/debugger_session
 import ../../store/types
 import ../../sync/[hosted_primary, mirror_session, socket_transport, sync_host,
-                   synced_signals]
+                   sync_publisher, synced_signals]
 import ../../viewmodels/state_vm
+
+const ValueChangesKey = "state.valueChanges"
+  ## The state pane's change set (`StateVM.valueChanges`) in the registry.
 
 proc pageCount(h: HostedPrimary): int =
   ## How many pages `h` serves. Read through the private field: no product
@@ -240,6 +243,73 @@ proc main() {.async.} =
   closeClient(pageA)
   closeClient(pageB)
   hostedB.close()
+
+  # ---- what mirrors the WHOLE session waits for it to attach
+  #
+  # `ct host` runs a client tab's plugins beside the server's session, and
+  # they read it through a sync publisher (`Supervisor.attachSession`). A
+  # publisher mirrors the signals the session has when it is made, and the
+  # session builds its panel ViewModels on the replay's first stop. Made
+  # before then — when the plugins were opened with the session — it carried
+  # the store alone: the plugins followed the stop and never learned what a
+  # step changed (codetracer-pm issues/
+  # 2026-11-24-under-ct-host-a-plugins-mirror-never-learns-what-a-step-changed.md).
+  # `whenAttached` is where such a reader is made (`index/host_clients`).
+  let mockW = newMockBackendService(autoRespond = true)
+  let watched = openHostedPrimary(mockW.toBackendService(), "/watched")
+  let early = createSyncPublisher(watched.debugger.session, "early",
+                                  proc(msg: JsonNode) = discard)
+  ck early.registry.find(ValueChangesKey).isNone,
+    "a publisher made before the first stop has no change set to mirror " &
+    "(why a reader waits for `whenAttached`)"
+  early.dispose()
+  var batches: seq[JsonNode]
+  var publisher: SyncPublisher
+  var opened = 0
+  watched.whenAttached proc() =
+    inc opened
+    publisher = createSyncPublisher(watched.debugger.session, "plugins",
+      proc(msg: JsonNode) = batches.add msg)
+  ck opened == 0 and not watched.isAttached, "nothing is opened before a stop"
+  mockW.emitEvent(completeMove(10, 3))
+  ck opened == 1 and watched.isAttached, "opened on the first stop"
+  ck not publisher.isNil and publisher.registry.find(ValueChangesKey).isSome,
+    "a publisher made then mirrors the state pane's change set"
+  let store = watched.debugger.session.store
+  # The locals of each stop, as the session's own `ct/load-locals` answer
+  # writes them (the stop loader's `applyLocalsResponse`).
+  store.locals.locals.val = @[Variable(name: "x", value: "1", typeName: "int"),
+                              Variable(name: "y", value: "5", typeName: "int")]
+  mockW.emitEvent(completeMove(20, 4))
+  store.locals.locals.val = @[Variable(name: "x", value: "2", typeName: "int"),
+                              Variable(name: "y", value: "5", typeName: "int")]
+  proc changeSetAt(ticks: int): JsonNode =
+    ## The last published change set that is known at `ticks`, or nil.
+    for i in countdown(batches.high, 0):
+      for entry in batches[i]{"batch"}.getElems():
+        if entry{"key"}.getStr("") == ValueChangesKey:
+          let v = entry{"value"}
+          if v{"currentKnown"}.getBool(false) and
+             v{"currentTick"}.getInt(-1) == ticks:
+            return v
+    nil
+  ck await eventually(proc(): bool = not changeSetAt(20).isNil),
+    "the step's change set reaches the session's mirrors"
+  let changed = changeSetAt(20)
+  ck not changed.isNil and ($changed).contains("\"x\"") and
+     not ($changed).contains("\"y\""),
+    "and names what the step changed: " & $changed
+  var late = 0
+  watched.whenAttached proc() = inc late
+  ck late == 1, "a reader asking after the first stop is opened at once"
+  let neverStopped = openHostedPrimary(
+    newMockBackendService(autoRespond = true).toBackendService(), "/never")
+  var ranAfterClose = 0
+  neverStopped.whenAttached proc() = inc ranAfterClose
+  neverStopped.close()
+  ck ranAfterClose == 0, "a session closed before its first stop opens nothing"
+  publisher.dispose()
+  watched.close()
 
   again.dispose()
   closeClient(reloaded)

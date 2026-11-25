@@ -16,7 +16,10 @@
 ##   through the mirror's relay (`Supervisor.actionHook`).
 ## * **`ct host`.** The server already holds each client tab's session
 ##   (`host_clients`, `HostedPrimary`); the plugins attach to it directly, and
-##   their state goes to that client alone (`runAsClient`). One client's
+##   their state goes to that client alone (`runAsClient`). They are opened
+##   when that session attaches to its replay (`HostedPrimary.whenAttached`),
+##   because a publisher mirrors only the panel ViewModels a session has when
+##   it is made, and the server's session builds them on the first stop. One client's
 ##   plugins never see another's session: each tab has its own
 ##   `SessionPlugins`, its own `Supervisor`, its own processes.
 ##
@@ -450,8 +453,9 @@ proc sessionFor(event: JsObject; tab: int): PluginSession =
 
 proc onPluginsOpen*(sender: JsObject; response: JsObject) {.async.} =
   ## The desktop renderer hosts tab `sessionId`'s session as a sync primary
-  ## and asks for its plugins. Under `ct host` the server opened them when
-  ## it opened the tab's session; this only re-sends their state.
+  ## and asks for its plugins. Under `ct host` the server opens them when
+  ## the tab's session attaches to its replay (`host_clients`); this only
+  ## re-sends their state, and before then there is nothing to send.
   let tab = jsTab(response)
   if not serverSessionFor.isNil:
     let ps = serverSessionFor(tab)
