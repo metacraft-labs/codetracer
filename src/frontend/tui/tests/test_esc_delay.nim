@@ -298,10 +298,26 @@ suite "Escape presses the keymap reads as one Esc, for the recovery chord":
     w.put("\x1b")
     ck d.events(400) == @["\x1b"]
 
-  test "a pair continued by a key or a sequence is no press":
+  test "a pair continued by a key: Esc, the key, and the dropped ESC's press":
     let (d, w) = pipeDriver()
     w.put("\x1b\x1bj")
-    ck d.events(400) == @["\x1b", "j"]
+    ck d.events(400) == @["\x1b", "j", "press"]
+
+  test "ESC ESC ESC then a key in one burst: three presses in all":
+    let (d, w) = pipeDriver()
+    w.put("\x1b\x1b\x1bj")
+    ck d.events(400) == @["\x1b", "\x1b", "j", "press"]
+
+  test "a pair held for a late reader, another ESC waiting behind it: Esc, press, Esc":
+    let (d, w) = pipeDriver()
+    w.put("\x1b\x1b")
+    ck d.nextToken(1000)[0] == "\x1b"
+    w.put("\x1b")
+    os.sleep(int(EscDelayMs) * 3)
+    ck d.events(400) == @["press", "\x1b"]
+
+  test "a pair continued by an escape sequence is no press: the ESC begins it":
+    let (d, w) = pipeDriver()
     w.put("\x1b\x1b[A")
     ck d.events(400) == @["\x1b", "\x1b[A"]
 

@@ -167,6 +167,13 @@ type
       ## passes, so `ESC ESC` is still exactly one `Esc`. Until 2026-10-27
       ## the second `ESC` was consumed as the pair's token, and the `O P` of
       ## an `F1` behind it reached the document as text.
+    droppedPresses*: int
+      ## Escape PRESSES the framing dropped as keys: a pair's second `ESC`
+      ## followed by a byte that is honoured on its own (`ESC ESC j` is `Esc`
+      ## and then `j`). Not keys, but the plugins' recovery chord counts
+      ## presses; the driver hands each to its caller as `dekEscapePress`.
+      ## `reset` keeps them: they are owed to the caller, not part of the
+      ## sequence being assembled.
 
 const
   EscDelayMs* = 50'i64
@@ -319,9 +326,10 @@ proc feed*(f: var InputFramer; b: char): (bool, string) =
           return (true, alt)
         # The pair's second `ESC`, continued by no escape sequence and a
         # printable byte: the byte on its own, as `ESC ESC <char>` has always
-        # been read (`Esc` then `j`, not Alt+J).
+        # been read (`Esc` then `j`, not Alt+J). The `ESC` was still a press.
         let broke = $b
         f.reset()
+        inc f.droppedPresses
         return (true, broke)
       # ALT + A PRINTABLE CHARACTER: `ESC <char>` in one burst is what a
       # terminal sends for Alt+<char> (Meta sends an ESC prefix), and it is
@@ -1110,6 +1118,11 @@ proc nextEvent*(d: TerminalDriver; timeoutMs: int = 100): DriverEvent =
     let token = d.buffered[0]
     d.buffered.delete(0)
     return tokenEvent(token)
+  # AN ESCAPE PRESS THE FRAMING DROPPED as a key (`InputFramer.droppedPresses`),
+  # after the tokens typed with it.
+  if d.framer.droppedPresses > 0:
+    dec d.framer.droppedPresses
+    return DriverEvent(kind: dekEscapePress)
   # A LONE `ESC` IS THE KEY ONCE `EscDelayMs` PASSES WITH NOTHING AFTER IT.
   # The read below waits no longer than the time left, so the key arrives
   # `EscDelayMs` after it was pressed rather than on the next keystroke.
@@ -1183,6 +1196,11 @@ proc nextEvent*(d: TerminalDriver; timeoutMs: int = 100): DriverEvent =
       # reading (`InputFramer.feed`).
       d.takeExtra()
       return tokenEvent(Esc & $char(next))
+    if paired and next >= 0:
+      # The pair's second `ESC`, dropped for the byte waiting behind it (a
+      # key, or another `ESC` that begins what follows): not a key, still a
+      # press.
+      inc d.framer.droppedPresses
     if next >= 0:
       # The waiting byte, framed after the `Esc` (an `ESC` begins a new
       # sequence, held from now).
