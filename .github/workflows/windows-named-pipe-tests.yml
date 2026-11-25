@@ -1,0 +1,118 @@
+name: windows-named-pipe-tests
+# Called from codetracer.yml (job `windows-named-pipe-tests`), which keeps the triggers, the
+# concurrency group, the job's `needs:` and ci-verdict's view of it. Split
+# out to keep codetracer.yml well under GitHub's 512,000-byte workflow limit
+# (ci/test/workflow-file-size-test.sh).
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  windows-named-pipe-tests:
+    runs-on: [self-hosted, windows, x64]  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
+    # See the timeout-minutes rationale on windows-rust-components. This job
+    # does not call setup-dev-env and currently fails fast (~8 min) at
+    # "Provision MSVC build environment", but it must not be able to inherit the
+    # 360-minute default if that step ever starts blocking instead of throwing.
+    timeout-minutes: 45
+    steps:
+      # See the eph-win-x64 note at the top of this file. Without this,
+      # `dtolnay/rust-toolchain@stable` dies in its own `shell: bash` step
+      # with `bash: command not found` before rustup is ever consulted.
+      - name: Ensure Git and Git Bash are on PATH
+        shell: powershell
+        env:
+          CODETRACER_GIT_BOOTSTRAP_REVISION: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $revision = $env:CODETRACER_GIT_BOOTSTRAP_REVISION
+          if ($revision -cnotmatch '^[0-9a-f]{40}$') {
+            throw "The workflow did not supply an immutable bootstrap revision."
+          }
+          $bootstrapUrl =
+            "https://raw.githubusercontent.com/metacraft-labs/codetracer/" +
+            "$revision/ci/ensure-git-for-checkout.ps1"
+          $bootstrapScript = Join-Path $env:RUNNER_TEMP `
+            "codetracer-ensure-git-$revision-$([Guid]::NewGuid().ToString('N')).ps1"
+          [Net.ServicePointManager]::SecurityProtocol =
+            [Net.ServicePointManager]::SecurityProtocol -bor
+            [Net.SecurityProtocolType]::Tls12
+          try {
+            Invoke-WebRequest `
+              -Uri $bootstrapUrl `
+              -OutFile $bootstrapScript `
+              -UseBasicParsing
+            & $bootstrapScript
+          }
+          finally {
+            Remove-Item -LiteralPath $bootstrapScript -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          # No later step in this job talks to a git remote, so the token has
+          # nothing to do after the checkout and should not outlive it: these
+          # runners reuse their work tree, and actions/checkout otherwise
+          # leaves the credential in `.git/config` for whatever runs next.
+          # (`nix develop` is unaffected either way -- Nix's fetcher does not
+          # read gitconfig; its credentials come from netrc/access-tokens.)
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Provision MSVC build environment
+        # The eph-win-x64 DIY runner does not auto-configure the MSVC / Windows
+        # SDK environment the way the GitHub-hosted windows-latest image did, so
+        # a bare `cargo test` links with rust-lld against an EMPTY `LIB` and dies
+        # with `rust-lld: error: could not open 'kernel32.lib'`. The other
+        # Windows jobs get this env because their `Setup dev env` step sources
+        # env.ps1, which in turn runs non-nix-build/windows/export-msvc-env.ps1
+        # against the runner's system Visual Studio and points cargo at link.exe.
+        # This lightweight job skips the full DIY bootstrap, so provision just
+        # the MSVC env the same way, in-workflow, via that same repo script --
+        # no ad-hoc, out-of-band runner state.
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $blob = & pwsh -NoProfile -ExecutionPolicy Bypass -File `
+            "non-nix-build/windows/export-msvc-env.ps1"
+          $captured = @{}
+          foreach ($line in $blob) {
+            if ($line -match "^(?<key>[^=]+)=(?<value>.*)$") {
+              $captured[$matches.key] = $matches.value
+            }
+          }
+          if (-not $captured.ContainsKey("LIB")) {
+            throw ("export-msvc-env.ps1 did not emit LIB: no system Visual " +
+                   "Studio with the VC tools was found on this runner. The " +
+                   "MSVC toolchain is part of the eph-win-x64 base image and " +
+                   "must be present for the named-pipe transport link step.")
+          }
+          # Persist the compiler/linker search paths for the cargo test below.
+          foreach ($key in @("LIB", "INCLUDE", "LIBPATH")) {
+            if ($captured.ContainsKey($key)) {
+              Add-Content -Path $env:GITHUB_ENV -Value "$key=$($captured[$key])"
+            }
+          }
+          # Put link.exe / the MSVC bin dir on PATH (delta only, so we never
+          # clobber the existing PATH) and use link.exe rather than rust-lld,
+          # exactly as env.ps1 does for the other Windows jobs.
+          if ($captured.ContainsKey("MSVC_PATH_ADDITIONS")) {
+            foreach ($entry in ($captured["MSVC_PATH_ADDITIONS"] -split ";")) {
+              if (-not [string]::IsNullOrWhiteSpace($entry)) {
+                Add-Content -Path $env:GITHUB_PATH -Value $entry
+              }
+            }
+          }
+          Add-Content -Path $env:GITHUB_ENV `
+            -Value "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=link.exe"
+
+      - name: Run Windows named-pipe transport tests
+        working-directory: src/tui
+        shell: pwsh
+        run: cargo test --bin simple-tui windows_named_pipe -- --nocapture

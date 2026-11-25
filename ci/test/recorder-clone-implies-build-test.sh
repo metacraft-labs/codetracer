@@ -96,7 +96,9 @@ run_guard() {
 printf 'recorder clones are followed by recorder builds\n'
 
 # --- Case 1: the live workflow passes --------------------------------------
-run_guard ".github/workflows/codetracer.yml"
+# No argument: the guard reads codetracer.yml and every workflow it calls,
+# where the recorder-cloning jobs live since the split.
+run_guard
 if [ "$rc" -eq 0 ]; then
 	ok "the live codetracer.yml builds every recorder it clones"
 else

@@ -57,6 +57,7 @@ Contract suite: ci/test/job-timeouts-test.sh
 
 import sys
 import pathlib
+import re
 
 try:
     import yaml
@@ -64,16 +65,26 @@ except ImportError:  # pragma: no cover
     print("job-timeouts: PyYAML is required", file=sys.stderr)
     sys.exit(2)
 
-# The two reusable workflows hold jobs codetracer.yml calls (it had reached
-# GitHub's file-size limit); their stubs are `uses:` jobs, skipped here, so the
-# bound is checked where the job is.
-DEFAULT_WORKFLOWS = [
-    ".github/workflows/codetracer.yml",
-    ".github/workflows/tui-tests.yml",
-    ".github/workflows/gpui-window-captures.yml",
-    ".github/workflows/ct-build.yml",
-    ".github/workflows/screen-oracle.yml",
-]
+CODETRACER_WORKFLOW = ".github/workflows/codetracer.yml"
+
+
+def called_workflows(path=CODETRACER_WORKFLOW):
+    """`path` and every local workflow it calls (`uses: ./.github/workflows/X`).
+
+    codetracer.yml keeps most of its jobs in reusable workflows of their own,
+    to stay under GitHub's 512,000-byte limit; their stubs are `uses:` jobs,
+    skipped below, so the bound is checked where the job is. Read from the
+    file rather than listed here, so a newly split-out job is not missed.
+    """
+    found = [path]
+    text = pathlib.Path(path).read_text()
+    for name in re.findall(r"^    uses: \./\.github/workflows/(\S+)$", text, re.M):
+        callee = str(pathlib.Path(path).parent / name)
+        if callee not in found:
+            found.append(callee)
+    return found
+
+
 
 # GitHub's own default. A declared bound must be strictly tighter than this,
 # or it is not a bound.
@@ -138,7 +149,7 @@ def check_workflow(path):
 
 def main(argv):
     report_only = "--report-only" in argv
-    paths = [a for a in argv if not a.startswith("--")] or DEFAULT_WORKFLOWS
+    paths = [a for a in argv if not a.startswith("--")] or called_workflows()
 
     total_examined = 0
     all_violations = []

@@ -1,0 +1,160 @@
+name: test (headless DAP, Windows)
+# Called from codetracer.yml (job `windows-headless-test`), which keeps the triggers, the
+# concurrency group, the job's `needs:` and ci-verdict's view of it. Split
+# out to keep codetracer.yml well under GitHub's 512,000-byte workflow limit
+# (ci/test/workflow-file-size-test.sh).
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  # Headless DAP test suite on Windows using MCR backend.
+  # Installs all dependencies via env.ps1, builds ct-mcr from the
+  # codetracer-native-recorder sibling, then runs the Rust DAP integration tests.
+  windows-headless-test:
+    runs-on: [self-hosted, windows, x64]  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
+    name: test (headless DAP, Windows)
+    # See the timeout-minutes rationale on windows-rust-components. This job has
+    # been `skipped` behind windows-rust-components throughout, so it has never
+    # reported -- which is precisely why it must not reach the 360-minute
+    # default the moment that dependency starts passing. It runs setup-dev-env
+    # (windows-diy) and then builds ct-mcr, so it gets a larger budget than the
+    # bootstrap-only jobs.
+    timeout-minutes: 90
+    steps:
+      # See the eph-win-x64 note at the top of this file. This job has been
+      # `skipped` behind windows-rust-components throughout the blackout, so it
+      # has never reported — but it checks out with `submodules: recursive` and
+      # runs `shell: bash` steps, so it would fail exactly as that job did the
+      # moment it is unblocked.
+      - name: Ensure Git and Git Bash are on PATH
+        shell: powershell
+        env:
+          CODETRACER_GIT_BOOTSTRAP_REVISION: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $revision = $env:CODETRACER_GIT_BOOTSTRAP_REVISION
+          if ($revision -cnotmatch '^[0-9a-f]{40}$') {
+            throw "The workflow did not supply an immutable bootstrap revision."
+          }
+          $bootstrapUrl =
+            "https://raw.githubusercontent.com/metacraft-labs/codetracer/" +
+            "$revision/ci/ensure-git-for-checkout.ps1"
+          $bootstrapScript = Join-Path $env:RUNNER_TEMP `
+            "codetracer-ensure-git-$revision-$([Guid]::NewGuid().ToString('N')).ps1"
+          [Net.ServicePointManager]::SecurityProtocol =
+            [Net.ServicePointManager]::SecurityProtocol -bor
+            [Net.SecurityProtocolType]::Tls12
+          try {
+            Invoke-WebRequest `
+              -Uri $bootstrapUrl `
+              -OutFile $bootstrapScript `
+              -UseBasicParsing
+            & $bootstrapScript
+          }
+          finally {
+            Remove-Item -LiteralPath $bootstrapScript -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Generate CI token
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Disable TTD validation for the Windows DIY bootstrap
+        # setup-dev-env (windows-diy) sources env.ps1 inside the composite;
+        # surface the same WINDOWS_DIY_ENSURE_TTD=false the former bootstrap
+        # step set so env.ps1 skips the slow TTD/WinDbg validation.
+        shell: bash
+        run: echo "WINDOWS_DIY_ENSURE_TTD=false" >> "$GITHUB_ENV"
+
+      - name: Setup dev env
+        # setup-dev-env clones the cross-repo siblings adjacent to this
+        # checkout at their pinned `dev` refs and sources
+        # env.ps1 (windows-diy flavor), persisting the resulting env to
+        # GITHUB_ENV/GITHUB_PATH for subsequent steps — replacing the former
+        # Checkout-manifests / Resolve-lock / per-sibling clone-repo steps
+        # AND the hand-rolled "Bootstrap Windows dev environment" env-export
+        # (the composite captures the full env.ps1 delta, a superset of the
+        # vars that step exported by hand).
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
+        with:
+          env-flavor: windows-diy
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          env-ps1-path: ./env.ps1
+          siblings: |
+            codetracer-native-recorder=6142cc6a30bc3057ee01c6a8c417436744e393ed
+            # codetracer-trace-format{,-nim} BY COMMIT, not `=dev`: the two halves of
+            # the FFI pair are `/agents` inputs in flake.nix, and trace-format's `dev`
+            # tip (051a298, 2026-09-30) predates the FileTable / PathTableKind API that
+            # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
+            # sibling cloned at `dev` fails to compile. Full account and the refresh
+            # rule: .github/actions/setup-db-backend-siblings/action.yml.
+            codetracer-trace-format=2f01e602e70f69a04675293f3fa0d5bad9f196a1
+            codetracer-trace-format-nim=3e50ca3f2bf6316e8f764952a84078cf59b11023
+
+      - name: Install Nim dependencies
+        shell: bash
+        run: nimble install results stew -y
+
+      - name: Build ct-mcr.exe
+        shell: bash
+        run: |
+          cd "${{ github.workspace }}/../codetracer-native-recorder/ct_cli"
+          nim c --cc:vcc \
+            --path:../ct_time_model/src --path:../ct_events/src \
+            --path:../ct_ringbuf/src --path:../ct_runtime/src \
+            --path:../ct_recorder/src --path:../ct_replayer/src \
+            --path:../ct_debugserver/src --path:../ct_trace_store/src \
+            --path:../ct_interpose/src --path:../ct_instrument/src \
+            --path:../ct_snapshot/src --path:../ct_sync/src \
+            -o:ct_mcr.exe src/ct_cli.nim
+
+      - name: Build ct_interpose.dll
+        shell: bash
+        run: |
+          cd "${{ github.workspace }}/../codetracer-native-recorder"
+          nim c --app:lib --cc:vcc --mm:orc \
+            -o:ct_interpose/ct_interpose.dll \
+            ct_interpose/src/ct_interpose/library_init_windows.nim
+
+      - name: Build db-backend
+        working-directory: src/db-backend
+        shell: bash
+        # Same CT_EMULATOR_EXTRA_NIM_PATHS rationale as the
+        # windows-rust-components job above; without it
+        # build_native_api.sh fails on a fresh runner with
+        # ``cannot open file: stew/endians2``.
+        env:
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
+        run: cargo build --release
+
+      - name: Build backend-manager
+        working-directory: src/backend-manager
+        shell: bash
+        run: cargo build --release
+
+      - name: Run headless DAP tests (MCR backend)
+        # Graceful skipping is OFF (the script sets it). The DAP tests needing
+        # tools this lane does not provide are excluded by name through
+        # ci/test/headless-not-provided.windows.txt, which names where each runs.
+        shell: bash
+        env:
+          CODETRACER_CT_MCR_CMD: ${{ github.workspace }}/../codetracer-native-recorder/ct_cli/ct_mcr.exe
+          CODETRACER_USE_GCC: "1"
+          CODETRACER_GDB_CMD: gdb
+          CODETRACER_GCC_CMD: gcc
+          CODETRACER_GPP_CMD: g++
+        run: bash ci/test/windows-headless-tests.sh

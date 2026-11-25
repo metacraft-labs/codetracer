@@ -103,7 +103,19 @@ set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 readonly REPO_ROOT
-WORKFLOW="${1:-$REPO_ROOT/.github/workflows/codetracer.yml}"
+# Without an argument: codetracer.yml with the jobs it calls inlined (most of
+# its Windows jobs live in reusable workflows of their own, to keep it under
+# GitHub's 512,000-byte limit), so the census sees them where CI runs them.
+if [ -n "${1:-}" ]; then
+	WORKFLOW="$1"
+else
+	WORKFLOW="$(mktemp "${TMPDIR:-/tmp}/codetracer-inlined.XXXXXX.yml")"
+	trap 'rm -f "$WORKFLOW"' EXIT
+	python3 "$REPO_ROOT/ci/lib/inline-codetracer-workflow.py" >"$WORKFLOW" || {
+		echo "windows-runner-bootstrap-test: could not inline codetracer.yml's called workflows" >&2
+		exit 1
+	}
+fi
 readonly WORKFLOW
 # Local composite actions a job can reach `setup-dev-env` through. Section 4
 # follows that indirection: the flavor a Windows job ends up with is not

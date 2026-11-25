@@ -14,7 +14,19 @@ readonly REPO_ROOT
 readonly GATE="$REPO_ROOT/scripts/test-origin-dap.sh"
 # The workflow these Windows-YAML assertions read. Overridden only by this
 # script's own whole-gate cases below, which feed it a mutated copy.
-readonly WORKFLOW="${ORIGIN_DAP_GATE_WORKFLOW:-$REPO_ROOT/.github/workflows/codetracer.yml}"
+# Without the override: codetracer.yml with the jobs it calls inlined (both
+# origin-DAP Windows jobs live in reusable workflows of their own).
+if [ -n "${ORIGIN_DAP_GATE_WORKFLOW:-}" ]; then
+	WORKFLOW="$ORIGIN_DAP_GATE_WORKFLOW"
+else
+	WORKFLOW="$(mktemp "${TMPDIR:-/tmp}/codetracer-inlined.XXXXXX.yml")"
+	trap 'rm -f "$WORKFLOW"' EXIT
+	python3 "$REPO_ROOT/ci/lib/inline-codetracer-workflow.py" >"$WORKFLOW" || {
+		echo "origin-DAP shell contract test failed: could not inline codetracer.yml's called workflows" >&2
+		exit 1
+	}
+fi
+readonly WORKFLOW
 
 fail() {
 	echo "origin-DAP shell contract test failed: $*" >&2

@@ -145,7 +145,7 @@ KNOWN_GAPS=(
 	# declared by no public lock (repro.lock names only siblings that can be
 	# read without credentials); the lane that needs it must provision it
 	# itself, with an explicit revision, before this gap can close.
-	"codetracer.yml|viewmodel-tests|codetracer-native-recorder"
+	"viewmodel-tests.yml|viewmodel-tests|codetracer-native-recorder"
 
 	# windows-installer-build runs `bash scripts/build-once.sh` directly with an
 	# `env-flavor: windows-diy` setup-dev-env whose siblings: block carries only
