@@ -109,6 +109,7 @@ M_CASE = "*::the modifiers' spelling is folded, the key's own case is not"
 M_ALT = "*::an Alt chord a plugin binds reaches the plugin pass whole; `J` and `j` are two keys"
 P_MOVES = "*::a plugin's relayed jump, watch and step out are shown at once, with no :next"
 P_VIS = "*::a plugin's computed visualiser answers reach the Variables pane AND the editor's values"
+EARLY_ACK = "*::a busy main thread does not hold back an autoAck plugin's ack (measured)"
 
 ARMS = [
     ("M1", [(SUP, "  if p.kind == pkQuery and not samePosition(e, sup.epoch):",
@@ -211,6 +212,11 @@ ARMS = [
               "  for p in sdk.plugins.values:\n    if true:")],
      [(HOST, T_HANG)],
      "§11.5: timers never run"),
+    ("M25", [(SDK, "          ackEarly(frame)", "          discard")],
+     [(HOST, EARLY_ACK)],
+     "§11.7: an autoAck plugin's invoke is acked by the main thread, behind "
+     "whatever it is working through, so a busy plugin misses its key "
+     "deadline"),
     ("M30", [(SUP, "      if chordSuspect: min(sup.chordProbeMs, sup.pingBusyMs)\n"
                    "      elif waiting or inst.busy.len > 0: sup.pingBusyMs",
               "      if chordSuspect: sup.pingBusyMs\n"

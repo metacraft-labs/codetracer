@@ -249,6 +249,18 @@ else:
     wakeWrite = cint(-1)
       ## The reader writes a byte here after every frame it queues, so the
       ## event loop wakes for it instead of polling.
+    ackLock: Lock
+    earlyAck: seq[string]
+      ## The active plugins whose `invoke`s are acknowledged before their
+      ## handler runs (`autoAck`). The reader thread acks those itself, the
+      ## moment it reads the frame, so an `ack` never waits for the main
+      ## thread to work through the frames before it (a fresh plugin's state
+      ## snapshot, a burst of signal batches): §11.7's deadline is for the
+      ## acknowledgement, and a busy main thread is not a plugin that ignores
+      ## its keys. Guarded by `ackLock`, like `preAcked`.
+    preAcked: seq[string]
+      ## Request ids the reader has acked; the main thread takes its id out
+      ## and does not ack again.
 
   proc setBusy(id: string) =
     let n = min(id.len, busyName.len - 1)
@@ -318,6 +330,45 @@ else:
       var b = 'w'
       discard posix.write(wakeWrite, b.addr, 1)
 
+  proc setEarlyAck(id: string; on: bool) =
+    {.cast(gcsafe).}:
+      withLock ackLock:
+        let at = earlyAck.find(id)
+        if on and at < 0: earlyAck.add id
+        elif not on and at >= 0: earlyAck.delete(at)
+
+  proc ackEarly(frame: string) =
+    ## On the reader thread: when `frame` is an `invoke` for a plugin in
+    ## `earlyAck`, send its `ack` now and remember the request.
+    if not frame.contains("\"invoke\""):
+      return
+    var msg: JsonNode
+    try: msg = parseJson(frame)
+    except CatchableError: return
+    if msg{"type"}.getStr("") != "invoke":
+      return
+    let plugin = msg{"plugin"}.getStr("")
+    let id = msg{"id"}.getStr("")
+    if id.len == 0:
+      return
+    var acked = false
+    {.cast(gcsafe).}:
+      withLock ackLock:
+        if plugin in earlyAck:
+          preAcked.add id
+          acked = true
+    if acked:
+      writeFrameBytes(encodeMessage(%*{"type": "ack", "id": id,
+                                       "plugin": plugin}))
+
+  proc takePreAcked(id: string): bool =
+    {.cast(gcsafe).}:
+      withLock ackLock:
+        let at = preAcked.find(id)
+        if at >= 0:
+          preAcked.delete(at)
+          return true
+
   proc channelLoop(c: ChannelLoop) {.thread.} =
     ## The reader (protocol input) and the watchdog (liveness input) are this
     ## loop with different settings. Answering `ping` here, off the main
@@ -360,6 +411,7 @@ else:
               writeAll(c.pongFd, pong)
             continue
         if c.toInbox:
+          ackEarly(frame)
           inbox.send(frame)
           wake()
     if c.toInbox:
@@ -928,11 +980,16 @@ proc activate(sdk: PluginSdk; p: Plugin; msg: JsonNode) =
       if not p.io.isNil: discard p.io.state.handles.closeAll()
     sendRaw(%*{"type": "activation-failed", "plugin": p.id, "reason": failed})
   else:
+    # Before `activated` goes out: the host invokes nothing until it has it.
+    when not defined(wasm32):
+      if p.autoAck: setEarlyAck(p.id, true)
     sendRaw(%*{"type": "activated", "plugin": p.id})
 
 proc deactivate(p: Plugin) =
   if not p.active:
     return
+  when not defined(wasm32):
+    setEarlyAck(p.id, false)
   p.attributed(""):
     if not p.onDeactivate.isNil:
       p.onDeactivate(p)
@@ -1014,8 +1071,12 @@ proc handle(sdk: PluginSdk; msg: JsonNode) =
     if p.isNil or not p.active:
       return
     let req = requestOf(msg)
-    if p.autoAck:
-      p.ack(req)
+    when defined(wasm32):
+      if p.autoAck: p.ack(req)
+    else:
+      # The reader thread has acked it already unless the plugin was not in
+      # `earlyAck` when the frame was read.
+      if p.autoAck and not takePreAcked(req.id): p.ack(req)
     let h = p.invokes.getOrDefault(req.op, nil)
     p.attributed(req.id):
       if h.isNil:
@@ -1138,6 +1199,7 @@ else:
     ## The protocol loop. Returns after `shutdown`, or when the host closes the
     ## channel; the process should then exit.
     initLock(writeLock)
+    initLock(ackLock)
     openChannel()
     inbox.open()
     installCrashRecord()

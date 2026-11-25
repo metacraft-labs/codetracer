@@ -168,8 +168,9 @@ first.
 
 If a key you took is not acknowledged within half a second, CodeTracer drops
 it and makes your layer transparent until you answer again. With `autoAck`
-(the default) the SDK acknowledges before your handler runs, so this happens
-only when the whole process stops answering.
+(the default) the SDK acknowledges a key the moment its reader thread reads
+it, before your handler runs and whatever your main thread is busy with, so
+this happens only when the whole process stops reading.
 
 Push only when a value changes. `onSignals` runs after every batch of session
 state, and a plugin that pushes more than 500 messages a second for five

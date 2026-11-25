@@ -1045,7 +1045,9 @@ suite "§8.1: a native plugin's process and socket primitives":
     let pidFile = r.dir.parentDir / "grandchild.pid"
     removeFile(pidFile)
     let ran = r.invokeAndWait("acme-tools.flame", "flame.run",
-      %*{"program": "sh", "timeoutMs": 500,
+      # The deadline leaves a loaded host time to start `sh` and let it write
+      # the pid (at 500 ms, load ~90 once killed `sh` before it had).
+      %*{"program": "sh", "timeoutMs": 3_000,
          "args": ["-c", "sleep 600 & echo $! > " & pidFile & "; wait"]})
     check ran{"timedOut"}.getBool
     check ran{"pid"}.getInt > 0
@@ -1179,3 +1181,92 @@ suite "§11.6.2: liveness has a channel of its own":
     except CatchableError: discard
     echo "MEASURE pong latency with the protocol pipe full, 40 pings: p50 ", p50,
          " ms, p99 ", p99, " ms (busy named in ", busyNamed, "), load ", load
+
+suite "§11.7: an invoke's ack does not wait for the main thread":
+
+  test "a busy main thread does not hold back an autoAck plugin's ack (measured)":
+    # The plugin's main thread is held in a query handler (`values` sleeps
+    # `delayMs`), as a burst of signal batches or a fresh plugin's state
+    # snapshot holds it in a loaded window. An `invoke` sent behind that
+    # query must still be acknowledged at once: the reader thread acks an
+    # autoAck plugin's invoke when it reads it. The answer comes only after
+    # the query, so the order of the frames is the proof, and the latency is
+    # the measurement.
+    let root = scratchRoot() / ("early-ack-" & $getpid())
+    removeDir(root)
+    createDir(root)
+    let dir = installPackage(root)
+    let link = spawnPluginProcess(dir / "bin" / "acme-tools-plugins")
+    defer:
+      link.signalGroup(SIGKILL)
+      while not link.pollExit(): os.sleep(2)
+      link.closeAll()
+    var seen: seq[JsonNode]   # every frame read since the round began
+    var unmatched = 0         # the first frame `pump` has not looked at
+    proc pump(cond: proc(m: JsonNode): bool): bool =
+      ## Frames read in one batch after the one that matched are kept for the
+      ## next call, not dropped.
+      let start = monotonicMs()
+      while true:
+        while unmatched < seen.len:
+          inc unmatched
+          if cond(seen[unmatched - 1]): return true
+        if monotonicMs() - start >= Ceiling: return false
+        link.flushWrites()
+        for f in link.readMessages():
+          seen.add parseJson(f)
+        os.sleep(1)
+    check link.send(hostHello("1.0.0", "tui", "linux"))
+    check pump(proc(m: JsonNode): bool = m{"type"}.getStr == "hello")
+    check link.send(%*{"type": "activate", "plugin": "acme-tools.metrics",
+      "grants": ["process"], "settings": {}, "epoch": Epoch(session: "s1").toJson})
+    check pump(proc(m: JsonNode): bool = m{"type"}.getStr == "activated")
+    var latencies: seq[int]
+    for i in 1 .. 10:
+      seen.setLen(0)
+      unmatched = 0
+      let qid = "busy-" & $i
+      let iid = "key-" & $i
+      check link.send(%*{"type": "query", "plugin": "acme-tools.metrics",
+        "id": qid, "kind": "values", "input": {"delayMs": 1500}})
+      link.flushWrites()
+      # Wait on state: the main thread is inside the query once a pong
+      # names the plugin busy.
+      var busy = false
+      var pingSeq = 0
+      let waitFrom = monotonicMs()
+      while not busy and monotonicMs() - waitFrom < Ceiling:
+        inc pingSeq
+        check link.send(%*{"type": "ping", "seq": pingSeq})
+        link.flushWrites()
+        let t0 = monotonicMs()
+        while monotonicMs() - t0 < 10_000 and not busy:
+          var answered = false
+          for f in link.readPongs():
+            let m = parseJson(f)
+            if m{"seq"}.getInt == pingSeq:
+              answered = true
+              busy = m{"busy"}.getStr == "acme-tools.metrics"
+          if answered: break
+          os.sleep(2)
+      check busy
+      let t0 = monotonicMs()
+      check link.send(%*{"type": "invoke", "plugin": "acme-tools.metrics",
+        "id": iid, "op": "metrics.echo", "args": {"key": "k"}, "fromKey": true})
+      check pump(proc(m: JsonNode): bool =
+        m{"type"}.getStr == "ack" and m{"id"}.getStr == iid)
+      latencies.add int(monotonicMs() - t0)
+      # The query was still running: its answer had not come.
+      check not seen.anyIt(it{"id"}.getStr == qid)
+      check pump(proc(m: JsonNode): bool = m{"id"}.getStr == iid and
+                                           m{"type"}.getStr == "answer")
+      # Acked once: the main thread did not ack it again.
+      check seen.countIt(it{"type"}.getStr == "ack" and
+                         it{"id"}.getStr == iid) == 1
+    let sortedL = latencies.sorted
+    var load = ""
+    try: load = readFile("/proc/loadavg").splitWhitespace()[0]
+    except CatchableError: discard
+    echo "MEASURE ack of an invoke behind a 1,500 ms handler, 10 keys: p50 ",
+         sortedL[sortedL.len div 2], " ms, max ", sortedL[^1], " ms, load ", load
+    check sortedL[^1] < 1500
