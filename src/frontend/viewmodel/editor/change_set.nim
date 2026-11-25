@@ -356,24 +356,65 @@ proc changeSetOrdered*(docLen: int; edits: openArray[Edit]): ChangeSet
 # APPLY AND INVERT
 # ===========================================================================
 
-proc apply*(cs: ChangeSet; doc: string): string =
-  ## The new document. Raises when `doc` is not the document this change set
-  ## was built over — a change set applied to the wrong document is the defect
-  ## `length` exists to make visible (`LAW-A8`).
+when defined(js):
+  proc applySectionsJs(doc: string; cs: ChangeSet; checked: bool): string {.importjs: """
+    ((doc, cs, checked) => {
+      // One pass into an array of the new length: the kept runs and the
+      // inserts copied element by element (measured against slice + concat
+      // and slice + splice on an 8 MB document: the fastest of the three,
+      // and the only one that copies each byte once).
+      const out = new Array(cs.newLen);
+      let o = 0, pos = 0;
+      for (const s of cs.sections) {
+        if (s.kind === 0) {
+          for (let end = pos + s.keep; pos < end; pos++) out[o++] = doc[pos];
+        } else {
+          const ins = s.insert;
+          for (let i = 0; i < ins.length; i++) out[o++] = ins[i];
+          pos += s.delete;
+        }
+      }
+      return out;
+    })(#, #, #)""".}
+    ## `cs`'s sections over `doc`, in one pass
+    ## (`checked` is `refuseWrongDocument`'s answer, evaluated first):
+    ## `skKeep` is the enum's first value (0) and its run is `keep` bytes; a
+    ## replace inserts `insert` and skips `delete`.
+
+proc refuseWrongDocument(cs: ChangeSet; doc: string): bool {.discardable.} =
+  ## Raises when `doc` is not the document `cs` was built over; true otherwise.
   if doc.len != cs.oldLen:
     raise newException(ChangeSetError,
       "change set over " & $cs.oldLen & " bytes applied to a document of " &
       $doc.len)
-  result = newStringOfCap(cs.newLen)
-  var pos = 0
-  for s in cs.sections:
-    case s.kind
-    of skKeep:
-      result.add doc[pos ..< pos + s.keep]
-      pos += s.keep
-    of skReplace:
-      result.add s.insert
-      pos += s.delete
+  true
+
+when defined(js):
+  # `apply` is a template on the JS backend: a Nim string is an array there,
+  # and a routine copies the array it returns into its `result` — a
+  # document's worth of copying per call, on the path every keystroke takes.
+  # The engine's `slice` and `concat` build the new document
+  # (`applySectionsJs`) and the caller binds it as built. The body is the
+  # one call and nothing else (a doc comment in it would make it a statement
+  # list, which the backend copies too).
+  template apply*(cs: ChangeSet; doc: string): string =
+    applySectionsJs(doc, cs, refuseWrongDocument(cs, doc))
+else:
+  proc apply*(cs: ChangeSet; doc: string): string =
+    ## The new document. Raises when `doc` is not the document this change set
+    ## was built over — a change set applied to the wrong document is the defect
+    ## `length` exists to make visible (`LAW-A8`).
+    refuseWrongDocument(cs, doc)
+    result = newStringOfCap(cs.newLen)
+    var pos = 0
+    for s in cs.sections:
+      case s.kind
+      of skKeep:
+        result.add doc[pos ..< pos + s.keep]
+        pos += s.keep
+      of skReplace:
+        result.add s.insert
+        pos += s.delete
 
 proc invert*(cs: ChangeSet; doc: string): ChangeSet =
   ## The change set that undoes `cs`, against the document it applied to.

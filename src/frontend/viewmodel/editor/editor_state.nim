@@ -197,9 +197,19 @@ type
     chords*: seq[string]
     startedMs*: int64
 
+  DocumentText = ref object
+    ## The document's bytes, never written after they are installed: a
+    ## state holds them by reference, so a copy of the state — and every
+    ## operation returns one — shares them rather than copying the document.
+    ## `doc=` installs new bytes in a new `DocumentText`, which is what keeps
+    ## the state a value. On the JS backend a copied string is a copied array,
+    ## a document's worth of work per copy and several copies per keystroke.
+    text: string
+
   EditorState* = object
     ## **THE VALUE EVERY OPERATION IS PURE OVER.**
-    doc*: string
+    docText: DocumentText
+      ## The document (`doc`, `doc=`).
     selection*: EditorSelection
     mode*: EditingMode
 
@@ -325,6 +335,37 @@ func defaultComments*(): LanguageComments =
   ## matches nothing would make `toggle-comment` a no-op everywhere.
   LanguageComments(lineToken: "#", blockOpen: "#[", blockClose: "]#")
 
+let emptyDocumentText = DocumentText(text: "")
+
+when defined(js):
+  func sharedText(s: string): string {.importjs: "#".}
+    ## `s` itself: a binding of a string copies it on the JS backend, and the
+    ## bytes behind `doc` are never written.
+
+  func doc*(st: EditorState): string {.importjs: "(#.docText ?? {text: []}).text".}
+    ## The document. The bytes the state holds, not a copy of them. An
+    ## import rather than a Nim body: the JS backend copies a string into a
+    ## routine's `result`, and a `let` bound to this call takes the array
+    ## itself.
+
+  proc `doc=`*(st: var EditorState; text: string) =
+    ## Install `text` as the document. It is TAKEN, not copied: the caller
+    ## hands over bytes nobody writes afterwards (every caller installs a
+    ## freshly built document).
+    st.docText = DocumentText(text: sharedText(text))
+else:
+  func textOf(st: EditorState): DocumentText {.inline.} =
+    {.cast(noSideEffect).}:
+      result = if st.docText.isNil: emptyDocumentText else: st.docText
+
+  func doc*(st: EditorState): lent string =
+    ## The document. The bytes the state holds, not a copy of them.
+    textOf(st).text
+
+  proc `doc=`*(st: var EditorState; text: sink string) =
+    ## Install `text` as the document.
+    st.docText = DocumentText(text: text)
+
 proc initEditorState*(doc: string; selection = default(EditorSelection);
                       comments = defaultComments();
                       indentUnit = DefaultIndentUnit;
@@ -339,7 +380,7 @@ proc initEditorState*(doc: string; selection = default(EditorSelection);
   if sel.rangeCount == 0:
     sel = caretSelection(0)
   EditorState(
-    doc: doc, selection: sel, mode: emNormal,
+    docText: DocumentText(text: doc), selection: sel, mode: emNormal,
     registers: initTable[string, Register](),
     activeRegister: "", count: 0, pendingOperator: "",
     pending: PendingChords(chords: @[], startedMs: 0),

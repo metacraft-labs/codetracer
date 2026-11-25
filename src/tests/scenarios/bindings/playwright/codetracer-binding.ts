@@ -28,7 +28,7 @@ import * as net from "node:net";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { _electron } from "playwright-core";
+import { _electron, firefox, webkit } from "playwright-core";
 
 type Ctx = any;
 type Node = {
@@ -3460,6 +3460,12 @@ function freePort(): Promise<number> {
   });
 }
 
+/** How long a `host-page` client may take to load: the limit the arm gives
+ *  every page it opens, duplicates or reloads itself (DemoVideoScript-Playwright's
+ *  `OPEN_WAIT`), which this binding's `openClient` replaced with Playwright's
+ *  30 s default for the pages it opens. */
+const HOST_PAGE_SETUP_MS = 600_000;
+
 async function launchHosted(ctx: Ctx, launch: any): Promise<void> {
   if (!launch.recording) throw new Error("open-recording (web): no recording");
   const env: Record<string, string> = {};
@@ -3512,8 +3518,33 @@ async function launchHosted(ctx: Ctx, launch: any): Promise<void> {
       await new Promise((r) => setTimeout(r, 500));
     }
   }
+  await openBrowser(ctx);
   await ctx.open(url, { width, height });
   ctx.state.hosted = true;
+  // `CT_SCENARIO_APP_LOG`, as for the desktop window: the host's output and
+  // the page's console, appended to a file for diagnosing a run.
+  const appLog = process.env.CT_SCENARIO_APP_LOG;
+  if (appLog) {
+    const put = (tag: string, line: string) => fs.appendFileSync(appLog, `[${tag}] ${line}\n`);
+    put("host", output.join("").trimEnd());
+    host.stdout?.on("data", (c: Buffer) => put("host", c.toString().trimEnd()));
+    host.stderr?.on("data", (c: Buffer) => put("host!", c.toString().trimEnd()));
+    ctx.page.on("console", (m: any) => put(`console.${m.type()}`, m.text()));
+    ctx.page.on("pageerror", (e: any) => put("pageerror", String(e && e.stack || e)));
+  }
+}
+
+/** The browser a web deployment is served to: Chromium unless
+ *  `CT_SCENARIO_BROWSER` names another of Playwright's engines (the
+ *  `firefox` flavour, ci/test/scenarios.sh). The arm launches Chromium only
+ *  when no browser is open yet, so one launched here is the one it opens the
+ *  page in, and the one a `separate` host page gets its context from. */
+async function openBrowser(ctx: Ctx): Promise<void> {
+  const name = process.env.CT_SCENARIO_BROWSER || "chromium";
+  if (name === "chromium" || ctx.browser) return;
+  const engine = ({ firefox, webkit } as Record<string, any>)[name];
+  if (!engine) throw new Error(`CT_SCENARIO_BROWSER=${name}: not a Playwright browser (chromium, firefox, webkit)`);
+  ctx.browser = await engine.launch();
 }
 // --- end pw2 ---
 
@@ -3708,7 +3739,12 @@ const binding = {
         });
         page = await context.newPage();
       }
-      await page.goto(url, { waitUntil: "load" });
+      // Loading the page is setup, not the behaviour under test: Playwright's
+      // 30 s default failed two-clients-step-independently at load ~150
+      // before it tested anything. The wait still returns the moment the
+      // page has loaded; the bound only decides when a loaded host is given
+      // up on.
+      await page.goto(url, { waitUntil: "load", timeout: HOST_PAGE_SETUP_MS });
       return page;
     }
     if (kind !== "app-window") throw new Error(`the desktop binding opens no client of kind '${kind}'`);

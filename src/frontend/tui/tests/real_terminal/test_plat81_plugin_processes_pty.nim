@@ -163,6 +163,7 @@ proc pluginPids(home: string): seq[int] =
 
 proc spawnTui(home: string; extra: seq[string] = @[]): TuiTestSession =
   let calc = requireFixture(fixtureSpec("calc"))
+  discard requireReplayServer()
   newTuiTest(tuiBinary(), @["--theme=dark"] & extra & @[calc])
     .width(Cols).height(Rows)
     .envRemove("TERM_PROGRAM", "NO_COLOR", "LC_ALL", "LC_CTYPE", "TMUX", "STY")

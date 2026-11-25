@@ -5,9 +5,9 @@ summary: >-
   The control for keymaps/monaco-unbound-f7-does-nothing.yaml. A user's
   keybindings.json binds F7 to "move last cursor to next match", and the
   same F7 press, with the caret on `left` in add's body in Monaco (the
-  default editor), now selects the word. F7 reaches the editor when a row
-  binds it, so what the unbound press leaves unchanged it would have
-  changed.
+  sharedEditor setting off, which this scenario sets), now selects the
+  word. F7 reaches the editor when a row binds it, so what the unbound
+  press leaves unchanged it would have changed.
 
 stage:
   - use: record-program
@@ -19,6 +19,8 @@ stage:
         [
           { "key": "f7", "command": "editor.move-last-cursor-to-next-match" }
         ]
+  - use: front-end-options
+    with: { env: { CODETRACER_SHARED_EDITOR: "0" } }
   - use: open-recording
 
 steps:

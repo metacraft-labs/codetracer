@@ -402,12 +402,13 @@ proc ruleRegex(lang: MonarchLanguage; rule: MonarchRule;
     lang.snCache[key] = compileJsRegex("^(?:" & src & ")", lang.ignoreCase)
   lang.snCache[key]
 
-proc findRules(lang: MonarchLanguage; inState: string): seq[MonarchRule] =
-  ## `findRules`: the state, else its dotted parents.
+proc ruleStateOf(lang: MonarchLanguage; inState: string): string =
+  ## Monaco's `findRules`: the state, else its dotted parents — the state
+  ## whose rules apply, by name.
   var state = inState
   while state.len > 0:
     if lang.states.hasKey(state):
-      return lang.states[state]
+      return state
     let idx = state.rfind('.')
     if idx < 0:
       break
@@ -416,7 +417,7 @@ proc findRules(lang: MonarchLanguage; inState: string): seq[MonarchRule] =
 
 proc hasRules(lang: MonarchLanguage; inState: string): bool =
   try:
-    discard lang.findRules(inState)
+    discard lang.ruleStateOf(inState)
     true
   except MonarchError:
     false
@@ -522,19 +523,26 @@ proc tokenizeLineUnsafe(lang: MonarchLanguage; line: string;
       if not forceEvaluation and pos >= line.len:
         break
       forceEvaluation = false
-      let rules = lang.findRules(state)
-      for rule in rules:
-        if pos == 0 or not rule.atStart:
-          let re = lang.ruleRegex(rule, state)
-          var caps: Captures
-          if re.matchAt(line, pos, caps):
-            matches = @[]
-            for (a, b) in caps:
-              matches.add(if a < 0: "" else: line[a ..< b])
-            matched = matches[0]
-            action = rule.action
-            haveMatch = true
-            break
+      # The state's rules read in place (`withValue`), and a rule without
+      # `$Sn` matched by its own regex: on the JS backend binding a `seq` or
+      # an object copies it, and copying the state's rules and each rule's
+      # regex for every token was most of a line's tokenizing.
+      lang.states.withValue(lang.ruleStateOf(state), rules):
+        for i in 0 ..< rules[].len:
+          template rule: untyped = rules[][i]
+          if pos == 0 or not rule.atStart:
+            var caps: Captures
+            let hit =
+              if rule.hasSn: lang.ruleRegex(rule, state).matchAt(line, pos, caps)
+              else: rule.re.matchAt(line, pos, caps)
+            if hit:
+              matches = @[]
+              for (a, b) in caps:
+                matches.add(if a < 0: "" else: line[a ..< b])
+              matched = matches[0]
+              action = rule.action
+              haveMatch = true
+              break
     if not haveMatch:
       matches = @[""]
       matched = ""

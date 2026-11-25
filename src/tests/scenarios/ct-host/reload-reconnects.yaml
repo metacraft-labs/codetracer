@@ -16,7 +16,10 @@ steps:
   - click: 'pane-tab[label="EVENT LOG"]'
   - wait: { until: event-log.loaded, timeout: 60s }
   - expect: { at: event-log, assert: 'has-output("Positive Test Case")' }
+  # Loading the page is setup: the next step waits for what it shows
+  # (DemoVideoScript b2dd47d), not the 15 s settle an input gets.
   - reload: main
+    settle: false
   - wait: { until: call-trace.loaded, timeout: 360s }
   - wait: { until: { at: 'pane-tab[label="EVENT LOG"]', present: true }, timeout: 60s }
   - click: 'pane-tab[label="EVENT LOG"]'

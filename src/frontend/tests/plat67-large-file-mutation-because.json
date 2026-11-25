@@ -1,0 +1,8 @@
+{
+  "H1": "ed.tokenizedLines > cached  -- the tokenizer's cache kept the lines below the edit",
+  "H2": "linesRewrapped <= 2  -- Enter re-wrapped only the lines it touched",
+  "H3": "linesRewrapped <= 2  -- Enter re-wrapped only the lines it touched",
+  "V1": "ed.scrollTop == int(float((edge - 1) * lh) - float(vh) / 2.0)  -- the last fully drawn line, inside the last five lines, is centred",
+  "V2": "ed.scrollTop == int(float((edge - 1) * lh) - float(vh) / 2.0)  -- the last fully drawn line, inside the last five lines, is centred",
+  "V3": "$zone.style.width.to(cstring) == \"120px\"  -- a zone keeps the width its owner gave it"
+}

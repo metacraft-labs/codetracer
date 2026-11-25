@@ -407,11 +407,19 @@ proc drainJournal*(d: var EditingDocument) =
   ##
   ## Each change set also re-measures the lines it touched (`widths`), once
   ## they have been measured at all.
-  for cs in d.state.journal:
-    let before = d.timeline.text
-    discard d.timeline.applyChanges(cs)
+  let last = d.state.journal.len - 1
+  for i, cs in d.state.journal:
     if d.widths.valid:
+      let before = d.timeline.text
+      if i == last: discard d.timeline.applyChanges(cs, d.state.doc)
+      else: discard d.timeline.applyChanges(cs)
       d.remeasure(before, d.timeline.text, cs)
+    elif i == last:
+      # The last change set's result is the model's document: the timeline
+      # shares it rather than building it again.
+      discard d.timeline.applyChanges(cs, d.state.doc)
+    else:
+      discard d.timeline.applyChanges(cs)
   d.state.journal.setLen(0)
   d.timeline.keepRecent(TimelineDepth)
   if d.widths.valid:

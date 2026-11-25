@@ -711,6 +711,7 @@ declare -A UNLOCKED_SIBLINGS=(
 	["codetracer-native-test-programs"]="private"
 	["codetracer-snapshot-codecs"]="private"
 	["isonim-zgui"]="private; the zgui lane clones it at ci/toolchain.pin's PRIVATE_SIBLING_ISONIM_ZGUI"
+	["codetracer-private-recordings"]="private; the desktop and Firefox scenario lanes clone it at ci/toolchain.pin's PRIVATE_SIBLING_CODETRACER_PRIVATE_RECORDINGS"
 	["codetracer-evm-recorder"]="public, but its tools/source_inputs.nim collides with another recorder's in the provider nimcache, so repro.nim cannot declare it"
 )
 unlocked_now_pinned=()
@@ -3434,8 +3435,7 @@ done <"$CONTRACT_LANE_WORKFLOW"
 # its negative controls; this file, the repository's sibling-provisioning
 # gate, requires that it passes.
 # ---------------------------------------------------------------------------
-lrc_out="$(bash "$REPO_ROOT/ci/test/launcher-recorder-e2e-provisioning-test.sh" 2>&1)"
-if [ "$?" -eq 0 ]; then
+if lrc_out="$(bash "$REPO_ROOT/ci/test/launcher-recorder-e2e-provisioning-test.sh" 2>&1)"; then
 	ok "the launcher-recorder E2E gate provisions every sibling from codetracer's locks and homes ($(tail -n 1 <<<"$lrc_out"))"
 else
 	fail "the launcher-recorder E2E gate provisions every sibling from codetracer's locks and homes" \

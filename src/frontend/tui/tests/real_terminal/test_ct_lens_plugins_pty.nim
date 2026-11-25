@@ -130,6 +130,7 @@ proc commandShows(sess: var TuiTestSession; line, needle: string;
 
 proc spawnTui(home: string): TuiTestSession =
   let calc = requireFixture(fixtureSpec("calc"))
+  discard requireReplayServer()
   newTuiTest(tuiBinary(), @["--theme=dark", calc])
     .width(Cols).height(Rows)
     .envRemove("TERM_PROGRAM", "NO_COLOR", "LC_ALL", "LC_CTYPE", "TMUX", "STY")

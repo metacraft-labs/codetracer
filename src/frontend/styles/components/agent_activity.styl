@@ -1576,8 +1576,10 @@ agent-toolbar-icon(img)
 
   &.ct-menu-item--disabled
     // The row's title explains why it is disabled. Keep it hit-testable for
-    // that tooltip; the view's click guard still prevents activation.
+    // that tooltip; the view's click guard still prevents activation, and the
+    // pointer says so (the welcome screen's disabled rows do the same).
     pointer-events: auto
+    cursor: not-allowed
 
   &:hover:not(.ct-menu-item--disabled)
     background: DROPDOWN_HOVER_BG

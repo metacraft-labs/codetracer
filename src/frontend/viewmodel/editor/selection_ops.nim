@@ -93,14 +93,17 @@ type
 
   OpCtx* = object
     ## Everything an operation needs that is not the range: the document, its
-    ## line index, its cluster boundaries and the column policy.
+    ## line index and the column policy.
     ##
-    ## The boundaries are computed ONCE per context rather than per range,
-    ## because a K-range operation would otherwise segment the document K
-    ## times — and `LAW-S3`'s K = 7 rows would be paying for it on every draw.
+    ## The cluster boundaries are not stored: a position's neighbouring
+    ## boundaries are answered from the bytes around it (`prevBoundary`,
+    ## `nextBoundary`, `boundaryAtOrBefore`) — at once between two ASCII
+    ## bytes, and by segmenting the one line around it otherwise. A table of
+    ## every boundary of the document cost a pass over the whole document per
+    ## keystroke to keep (millions of entries at 200,000 lines); `boundaries`
+    ## still answers the whole table, for a law that quantifies over it.
     doc*: string
     store*: TextStore
-    boundaries*: seq[int]
     policy*: ColumnPolicy
     inserted*: string     ## what `opInsertText` puts in
 
@@ -139,28 +142,77 @@ proc clusterBoundariesOf*(s: string): seq[int] =
 
 proc initOpCtx*(doc: string; policy = DefaultColumnPolicy;
                 inserted = "X"): OpCtx =
-  OpCtx(doc: doc, store: toTextStore(doc), boundaries: clusterBoundariesOf(doc),
-        policy: policy, inserted: inserted)
+  OpCtx(doc: doc, store: toTextStore(doc), policy: policy, inserted: inserted)
 
-func prevBoundary*(ctx: OpCtx; pos: int): int =
+# ---------------------------------------------------------------------------
+# Cluster boundaries, answered locally
+# ---------------------------------------------------------------------------
+#
+# UAX #29 always breaks after LF (GB4), so every line — its terminator
+# included — segments on its own, and the boundaries around a position are
+# those of the line around it. Between two ASCII bytes there is a boundary
+# unless they are CR LF (GB3): no ASCII byte is Extend, SpacingMark, Prepend,
+# ZWJ or a regional indicator (`clusterBoundariesOf`'s own fast path).
+# These three are `clusterBoundariesOf(doc)` searched, without the table;
+# `test_editor_selection_laws.nim` holds them to it at every position.
+
+func isAsciiAt(doc: string; i: int): bool {.inline.} =
+  ord(doc[i]) < 0x80
+
+proc lineAround(doc: string; pos: int): tuple[first, stop: int] =
+  ## The line holding `pos` (`0 <= pos < doc.len`): its first byte, and the
+  ## byte after its terminating `\n` (or the document's end).
+  var a = pos
+  while a > 0 and doc[a - 1] != '\n': dec a
+  var b = pos
+  while b < doc.len and doc[b] != '\n': inc b
+  (a, min(doc.len, b + 1))
+
+proc boundaryAtOrBeforeIn*(doc: string; pos: int): int =
+  ## The largest cluster boundary of `doc` not above `pos`.
+  if pos <= 0: return 0
+  if pos >= doc.len: return doc.len
+  if isAsciiAt(doc, pos - 1) and isAsciiAt(doc, pos):
+    return (if doc[pos - 1] == '\r' and doc[pos] == '\n': pos - 1 else: pos)
+  let (a, b) = lineAround(doc, pos)
+  result = a
+  for x in clusterBoundariesOf(doc[a ..< b]):
+    if a + x <= pos: result = a + x
+    else: break
+
+proc nextBoundaryIn*(doc: string; pos: int): int =
+  ## The smallest cluster boundary of `doc` above `pos`, or the document end.
+  if pos < 0: return 0
+  if pos >= doc.len: return doc.len
+  if isAsciiAt(doc, pos) and (pos + 1 == doc.len or isAsciiAt(doc, pos + 1)):
+    if doc[pos] == '\r' and pos + 1 < doc.len and doc[pos + 1] == '\n':
+      return pos + 2
+    return pos + 1
+  let (a, b) = lineAround(doc, pos)
+  for x in clusterBoundariesOf(doc[a ..< b]):
+    if a + x > pos: return a + x
+  b
+
+proc prevBoundaryIn*(doc: string; pos: int): int =
+  ## The largest cluster boundary of `doc` strictly below `pos`, or 0.
+  if pos <= 0: 0 else: boundaryAtOrBeforeIn(doc, min(pos, doc.len + 1) - 1)
+
+proc boundaries*(ctx: OpCtx): seq[int] =
+  ## Every cluster boundary of the document — the whole table, built on each
+  ## call; for a law that quantifies over it, not for an operation.
+  clusterBoundariesOf(ctx.doc)
+
+proc prevBoundary*(ctx: OpCtx; pos: int): int =
   ## The largest cluster boundary strictly below `pos`, or 0.
-  ##
-  ## `lowerBound` rather than a scan: `LAW-S3` at K = 7 over eighteen corpus
-  ## documents calls this often enough for a linear walk to show up in the JS
-  ## lane, which is the lane PLAT-25 measured at 5 m 55 s before its own
-  ## hoisting.
-  let i = ctx.boundaries.lowerBound(pos)
-  if i <= 0: 0 else: ctx.boundaries[i - 1]
+  prevBoundaryIn(ctx.doc, pos)
 
-func nextBoundary*(ctx: OpCtx; pos: int): int =
+proc nextBoundary*(ctx: OpCtx; pos: int): int =
   ## The smallest cluster boundary strictly above `pos`, or the document end.
-  let i = ctx.boundaries.upperBound(pos)
-  if i >= ctx.boundaries.len: ctx.doc.len else: ctx.boundaries[i]
+  nextBoundaryIn(ctx.doc, pos)
 
-func boundaryAtOrBefore*(ctx: OpCtx; pos: int): int =
+proc boundaryAtOrBefore*(ctx: OpCtx; pos: int): int =
   ## The largest cluster boundary not above `pos`. `pos` itself when it is one.
-  let i = ctx.boundaries.upperBound(pos)
-  if i <= 0: 0 else: ctx.boundaries[i - 1]
+  boundaryAtOrBeforeIn(ctx.doc, pos)
 
 proc lineOf(ctx: OpCtx; offset: int): int =
   ctx.store.posOf(offset).line

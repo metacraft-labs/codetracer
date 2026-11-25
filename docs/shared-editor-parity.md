@@ -1,19 +1,28 @@
 # The shared editor on the desktop — parity with Monaco
 
-The desktop's editor pane can draw the shared editing core — the editor the
-terminal draws as cells and the GPUI window as elements — instead of Monaco.
-It is a **developer setting**, off by default:
+The desktop's editor pane draws the shared editing core — the editor the
+terminal draws as cells and the GPUI window as elements. It is the **default**
+editor since 2026-11-23; Monaco stays behind the setting until it is dropped:
 
-- `sharedEditor: true` in the configuration (`~/.config/codetracer/.config.yaml`);
-- `CODETRACER_SHARED_EDITOR=1` (or `=0`) for one launch;
+- `sharedEditor: false` in the configuration (`~/.config/codetracer/.config.yaml`)
+  draws Monaco (`true`, or no entry, the shared editor);
+- `CODETRACER_SHARED_EDITOR=0` (or `=1`) for one launch;
 - the command palette's **Developer: Toggle Shared Editor** in a running
   window: every open source editor re-mounts with the other editor, keeping
   its text, caret line and scroll.
 
-Monaco stays the default until every row below is met. Whether to drop Monaco
-is a later decision taken on this table (codetracer-pm
-`spec/Architecture/Editor-ViewModel.md` §3.2a). Every editor surface of the desktop is a row,
-and with the setting on none of them is Monaco's (`ui/editor_surface`).
+A configuration file written before the change carries `sharedEditor: false`
+(the old default, copied from `default_config.yaml` at first launch) and keeps
+Monaco until that line is changed or removed.
+
+Whether to drop Monaco is a later decision taken on this table (codetracer-pm
+`spec/Architecture/Editor-ViewModel.md` §3.2a). Every editor surface of the
+desktop is a row, and with the setting on none of them is Monaco's
+(`ui/editor_surface`). The desktop scenario lane runs on both editors
+(`.github/workflows/codetracer.yml`, "Scenarios — the desktop lane" and "… with
+Monaco"). The Electron capture recipes whose committed answers were measured
+on Monaco keep it (`CODETRACER_SHARED_EDITOR=0` in the `justfile`) until they
+are re-measured (codetracer-pm `issues/2026-11-23-electron-captures-pinned-to-monaco-owe-a-re-measure-on-the-shared-editor.md`).
 
 ## How it is built
 
@@ -56,7 +65,7 @@ GUI suite run with `CODETRACER_SHARED_EDITOR=1`. Arms are
 | Accessibility: screen reader reads lines and the caret | met | **B** "a screen reader reads…": the accessibility tree (`Accessibility.getFullAXTree`) has a focused multi-line `textbox` whose value is the caret's line and whose name says line and column; read-only says so. Arm R3. |
 | Accessibility: focus order | met | **B** "the editor is in the page's focus order": Tab / Shift+Tab. Arm R4. |
 | Accessibility: high-contrast themes | met | **B** "a forced-colours theme…": `forced-colors: active` paints the selection `Highlight` and the ground `Canvas`. Arm R5. |
-| Huge files (PLAT-24's bar) | met, with a measured difference | **B** "a 200,000-line file opens, scrolls and edits…": opens in ~0.3–0.6 s, draws only the viewport, reveals line 150,000; the PLAT-24 gate — `Enter` at line 1 ÷ at the last line under 4× — holds (0.5–1.4×). The measured difference: one keystroke at 200,000 lines costs ~1.5–3 s in the renderer's debug build (Monaco: milliseconds), the core's per-operation derivation and state copies on the JS backend (`viewmodel/editor/operations.nim`, `wrap.nim`); at 1,000 lines a key costs ~20–25 ms. Arms R13, F1, F3. |
+| Huge files (PLAT-24's bar) | met, with a measured difference | **B** "a 200,000-line file opens, scrolls and edits at the cost of the edit": opens in ~0.4–1.2 s, draws only the viewport, reveals line 150,000; a keystroke re-tokenizes the lines it changed and keeps the tokenizer's cache below them, re-wraps only its lines and re-derives only its bytes (counted, so the checks hold at any load); a keystroke at 200,000 lines is at most 25× one at 1,000 lines (measured ~2–6×), and the PLAT-24 gate (`Enter` at line 1 ÷ at the last line under 4×) holds. Measured at host load ~140–190: ~75–95 ms per keystroke at 200,000 lines against ~13–18 ms at 1,000 in the lane's debug build, ~90–200 ms against ~45 ms in a release build; before, 8–16 s. The measured difference: what is left of the document's size in a keystroke is one copy of its bytes (the core's document is one string; Monaco edits a piece tree and pays milliseconds) and a few passes over per-line arrays. Arms R13, F1, F3; `run-plat67-large-file-mutations.py` H1–H3. |
 | LSP: diagnostics | met | **L** "the router's diagnostics squiggle their spans": the router's `setModelMarkers` reaches the shared model. Arm A1. |
 | LSP: hover | met | **L** against the dev shell's real `nimlangserver`. Arm L1. |
 | LSP: completion | met | **L** `Ctrl+Space`, the server's items, Enter inserts. Arm L3. |
@@ -87,7 +96,7 @@ GUI suite run with `CODETRACER_SHARED_EDITOR=1`. Arms are
 | Input through the shared router: Vim, Kakoune | met | **D** the palette's "Keymap: Vim" / "Keymap: Kakoune": modes, motions, operators, as the terminal and GPUI. A modal keymap's own chords are the editor's while it has the keys — Kakoune's `Ctrl+P` (back through the jump list) among them, as on the terminal. |
 | What the rest of the desktop reads of Monaco | met | The tracepoint view, the flow, the review, the build panel and the page objects call Monaco directly; the shared editor answers what they read: the theme service's theme name, a layout whose minimap entry has its width and left edge (the tracepoint editor and the loop slider size themselves from them), `getModelMarkers` per owner, decorations' hover messages, content widgets placed by Monaco's preference (EXACT on its line) and hidden off the view, view zones as wide as the view, a find-widget press reported as an overlay widget without a position, Escape closing an open find, and an editor in a hidden tab drawing no lines. **B** content widgets; **G** below. Arms R23, R24. |
 | Monaco's DOM where the page styles it | met | The desktop's stylesheet and its page objects address Monaco's structure, and the editor keeps it: the gutter's rows hold only the cells that exist, number last (`text_editor.styl` paints every `div` of a row with the gutter's ground); the glyph decorations in `.glyph-margin-widgets` beside a `.glyph-margin` column; the find widget's `visible` class; a contained, composited `.lines-content`, so the flow's `position: fixed` value chips are placed in the text; Monaco's font fallback; `scrollBeyondLastLine`; every cursor's line highlighted; the view state carrying every selection across a mode switch. **B** the glyph layer and the find widget's class; **X** and the scenario pack (below). Arms R19, R20, R21, A2; the gutter rows under the page's own rules are graded by the scenario pack on the desktop. |
-| The differential | met, with a measured difference | **X** one scripted scenario, both editors, the same observations (the lines drawn, the execution line, the glyph column, the active line, the caret, the selection, the value chips) at each of seven points. `ci/test/shared-editor-differential.sh` runs the scenario pack's editor and tracing scenarios of the Electron lane on both editors and compares every step's status and observation: 17 of 18 the same. The difference: in `dimming-marks-only-untaken-branches`, after the stop at `shield.nr:34`, the first line drawn is 13 with Monaco and 14 with the shared editor (the last, 54, the same; the editors' heights and line heights measured equal) — the scenario's own assertions hold on both. |
+| The differential | met | **X** one scripted scenario, both editors, the same observations (the lines drawn, the execution line, the glyph column, the active line, the caret, the selection, the value chips) at each of seven points. `ci/test/shared-editor-differential.sh` runs the scenario pack's editor and tracing scenarios of the Electron lane on both editors and compares every step's status and observation: 31 of 31 the same on one build (30 in one pass; in the 31st, `ctrl-double-click-leaves-no-selection`, Monaco's run did not settle within 5 s at host load ~220, and a re-run on the same build is the same on both editors). They are the electron lane's scenarios under `editor/`, `breakpoints/`, `tracing/` and the palette's symbol choices, among them the JavaScript, Solidity, Solana and PolkaVM column-breakpoint scenarios. The last difference (`dimming-marks-only-untaken-branches`: the first line drawn after the stop at `shield.nr:34`, 13 with Monaco and 14 with the shared editor) was the API's reveals: Monaco pads a revealed line by sticky scroll's five lines (on by default), so a centred reveal puts the line's top, not its middle, at the view's middle, and an `…IfOutsideViewport` reveal moves the view unless the padded box is visible. The shared editor's reveals follow that rule (**B** "the API's reveals scroll as Monaco's do"; `run-plat67-large-file-mutations.py` V1, V2). A view zone is 100% wide when it is added and keeps a width its owner gives it afterwards, as Monaco's, so the tracepoint editor's toolbar fits the pane (**B** the zones case; V3). |
 
 ## The unified diff with the setting on and off
 

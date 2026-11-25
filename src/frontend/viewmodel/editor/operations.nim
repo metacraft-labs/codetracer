@@ -605,6 +605,21 @@ var lastDerived: ref DerivedDocument
   ## operations still cost the same (see `initOpEnv`).
 
 
+type
+  CommitHint = ref object
+    ## The last edit `commitChange` made: the document it read, the one it
+    ## installed, and the change set between them.
+    before, after: string
+    cs: ChangeSet
+
+var lastCommit: CommitHint
+  ## What `derivedFor` reads instead of scanning for the edit: when the memo's
+  ## document IS (the same array) the one the last commit read, and the
+  ## document asked about IS the one it installed, the change set says where
+  ## the edit is. Identity, not equality, so a document that merely reads the
+  ## same never borrows another's change set; on the C backend identity is
+  ## not asked, and the scan (`editBetween`) runs.
+
 when defined(js):
   proc shared[T](x: T): T {.importjs: "#".}
     ## `x` itself, not a deep copy. On the JS backend every binding of a
@@ -617,67 +632,83 @@ when defined(js):
 else:
   template shared[T](x: T): T = x
 
+var derivationSpanBytes* = 0
+  ## The bytes the last derivation re-derived: the edited span, old and new,
+  ## for an incremental one; the whole document for a full one. What a suite
+  ## holds a keystroke's derivation to — the span of the edit, not the
+  ## length of the document.
+
 proc fullDerivation(doc: string; settings: WrapSettings): ref DerivedDocument =
-  ## Everything, from the text. The boundaries and the line index are
-  ## computed ONCE and shared by both contexts — `initOpCtx` and
-  ## `initDisplayCtx` each computed them, identically.
+  ## Everything, from the text. The line index is computed ONCE and shared by
+  ## both contexts — `initOpCtx` and `initDisplayCtx` each computed it,
+  ## identically.
+  derivationSpanBytes = doc.len
   let store = toTextStore(doc)
-  let bounds = clusterBoundariesOf(doc)
   (ref DerivedDocument)(
     doc: shared(doc), settings: settings,
-    ctx: OpCtx(doc: shared(doc), store: shared(store), boundaries: shared(bounds),
+    ctx: OpCtx(doc: shared(doc), store: shared(store),
                policy: settings.policy, inserted: "X"),
     display: DisplayCtx(doc: shared(doc), store: shared(store),
                         cache: initWrapCache(doc, settings),
-                        boundaries: shared(bounds), settings: settings))
+                        settings: settings))
+
+func isContinuationByte(c: char): bool {.inline.} =
+  (ord(c) and 0xC0) == 0x80
+
+proc onCodePoints(a, b: string; p, q: int): tuple[prefix, suffix: int] =
+  ## A common prefix `p` and suffix `q` of `a` and `b`, shortened until both
+  ## end on code point starts: `é` → `è` share their first byte, and the line
+  ## index's replace refuses an offset inside a code point.
+  var p = p
+  var q = q
+  while p > 0 and ((p < a.len and isContinuationByte(a[p])) or
+                   (p < b.len and isContinuationByte(b[p]))):
+    dec p
+  while q > 0 and (isContinuationByte(a[a.len - q]) or
+                   isContinuationByte(b[b.len - q])):
+    dec q
+  (p, q)
 
 proc editBetween(a, b: string): tuple[prefix, suffix: int] =
   ## The one contiguous edit that turns `a` into `b`: the common prefix, and
   ## the common suffix that does not overlap it. Any two strings have one; an
   ## edit an operation actually made may have been several, and this is their
-  ## covering span — which is all the splices below need.
+  ## covering span — which is all the splices below need. Both ends are moved
+  ## onto code point starts (`onCodePoints`).
   let m = min(a.len, b.len)
   var p = 0
   while p < m and a[p] == b[p]: inc p
   var q = 0
   while q < m - p and a[a.len - 1 - q] == b[b.len - 1 - q]: inc q
-  (p, q)
+  onCodePoints(a, b, p, q)
 
-proc incrementalDerivation(prev: ref DerivedDocument;
-                           doc: string): ref DerivedDocument =
+proc incrementalDerivation(prev: ref DerivedDocument; doc: string;
+                           hint: CommitHint = nil): ref DerivedDocument =
   ## `prev`'s document moved onto `doc` by the edit between them, touching
-  ## only the LINES the edit touched.
-  ##
-  ## Exact rather than approximate, and the reason is UAX #29 GB4
-  ## (https://unicode.org/reports/tr29/#GB4): there is always a cluster
-  ## boundary after LF, so each line — terminator included — segments
-  ## independently. The boundaries of the lines the edit touched are
-  ## recomputed; those above are kept; those below are kept and shifted by the
-  ## length change. The wrap cache moves by `updateWrapCache`, PLAT-27's own
-  ## incremental path (`LAW-C6` holds it to the full computation). The line
-  ## index is rebuilt: it is the cheap part (~6 ms at 40,000 lines).
+  ## only what the edit touched: the line index is the previous one with the
+  ## edit replaced (`TextStore.replaceRange`, the rope's O(log n) path, its
+  ## untouched nodes shared), and the wrap cache moves by `updateWrapCache`,
+  ## PLAT-27's own incremental path (`LAW-C6` holds it to the full
+  ## computation). Cluster boundaries are not derived at all: they are
+  ## answered from the bytes around a position (`selection_ops`). Nothing
+  ## here is proportional to the document but the scan for the edit itself.
   ## `test_op_env_memo.nim` holds the whole of this to `fullDerivation`.
   let old = shared(prev.doc)
-  let (p, q) = editBetween(old, doc)
-  let delta = doc.len - old.len
-  let lineStart = (if p == 0: 0 else: doc.rfind('\n', last = p - 1) + 1)
+  var (p, q) = (0, 0)
+  if hint.isNil:
+    (p, q) = editBetween(old, doc)
+  else:
+    p = old.len
+    var hi = 0
+    for r in hint.cs.changedRanges():
+      p = min(p, r.fromA)
+      hi = max(hi, r.toA)
+    if p > hi: (p, hi) = (old.len, old.len)
+    (p, q) = onCodePoints(old, doc, p, old.len - hi)
   let editEnd = doc.len - q
-  let nl = doc.find('\n', editEnd)
-  let newLineEnd = (if nl < 0: doc.len else: nl + 1)
-  let oldLineEnd = newLineEnd - delta
-  var bounds = newSeqOfCap[int](prev.ctx.boundaries.len + max(0, delta) + 1)
-  var i = 0
-  let olds = shared(prev.ctx.boundaries)
-  while i < olds.len and olds[i] < lineStart:
-    bounds.add olds[i]
-    inc i
-  for b in clusterBoundariesOf(doc[lineStart ..< newLineEnd]):
-    bounds.add lineStart + b
-  var j = olds.upperBound(oldLineEnd)
-  while j < olds.len:
-    bounds.add olds[j] + delta
-    inc j
-  let cs = changeSet(old.len, p, old.len - q, doc[p ..< editEnd])
+  let inserted = doc[p ..< editEnd]
+  derivationSpanBytes = (old.len - q - p) + inserted.len
+  let cs = changeSet(old.len, p, old.len - q, inserted)
   # Bound through `shared`, not assigned: on the JS backend binding the
   # try-expression's value deep-copies the whole cache.
   var refused = false
@@ -689,20 +720,34 @@ proc incrementalDerivation(prev: ref DerivedDocument;
       WrapCache())
   if refused:
     return fullDerivation(doc, prev.settings)
-  let store = toTextStore(doc)
+  var store = prev.ctx.store
+  try:
+    store.replaceRange(store.posOf(p), store.posOf(old.len - q), inserted)
+  except ValueError:
+    # The line index refuses an edge inside a code point, which only a
+    # document that is not valid UTF-8 has: index it whole.
+    store = toTextStore(doc)
   (ref DerivedDocument)(
     doc: shared(doc), settings: prev.settings,
-    ctx: OpCtx(doc: shared(doc), store: shared(store), boundaries: shared(bounds),
+    ctx: OpCtx(doc: shared(doc), store: shared(store),
                policy: prev.settings.policy, inserted: "X"),
     display: DisplayCtx(doc: shared(doc), store: shared(store),
-                        cache: shared(cache), boundaries: shared(bounds),
-                        settings: prev.settings))
+                        cache: shared(cache), settings: prev.settings))
+
+when defined(js):
+  func sameArray(a, b: string): bool {.importjs: "(# === #)".}
+else:
+  func sameArray(a, b: string): bool = false
 
 proc derivedFor(doc: string; settings: WrapSettings): ref DerivedDocument =
   if lastDerived.isNil or lastDerived.settings != settings:
     lastDerived = fullDerivation(doc, settings)
-  elif lastDerived.doc != doc:
-    lastDerived = incrementalDerivation(lastDerived, doc)
+  elif not sameArray(lastDerived.doc, doc):
+    if not lastCommit.isNil and sameArray(lastDerived.doc, lastCommit.before) and
+       sameArray(doc, lastCommit.after):
+      lastDerived = incrementalDerivation(lastDerived, doc, lastCommit)
+    elif lastDerived.doc != doc:
+      lastDerived = incrementalDerivation(lastDerived, doc)
   lastDerived
 
 proc initOpEnv*(doc: string; settings: WrapSettings; viewportRows = 20;
@@ -1210,6 +1255,7 @@ proc commitChange*(st: EditorState; cs: ChangeSet;
     return
   let newDoc = cs.apply(st.doc)
   if newDoc != st.doc:
+    lastCommit = CommitHint(before: shared(st.doc), after: shared(newDoc), cs: cs)
     let selBefore = st.selection
     let selAfter = if newSelection.isSome: newSelection.get
                    else: mapSelection(selBefore, cs)
@@ -1471,19 +1517,17 @@ proc cReplaceChar(env: OpEnv; st: EditorState; args: OpArgs): OpResult =
   ## range replaces the cluster under the caret, which is what `r` does.
   if args.ch.len == 0: return refused(st, rrMissingArgument)
   let repl = args.ch
-  let boundaries = env.ctx.boundaries
+  let doc = shared(env.ctx.doc)
   settle(st, editByRange(st, env, proc (r: SelectionRange): RangeOutcome =
     var a = r.rangeFrom
     var b = r.rangeTo
     if r.isEmpty:
-      let i = boundaries.upperBound(a)
-      b = if i >= boundaries.len: a else: boundaries[i]
+      b = if a >= doc.len: a else: nextBoundaryIn(doc, a)
     if a >= b: return noEdit(r)
     var out0 = ""
     var p = a
     while p < b:
-      let i = boundaries.upperBound(p)
-      let q = if i >= boundaries.len: b else: min(boundaries[i], b)
+      let q = min(nextBoundaryIn(doc, p), b)
       out0.add repl
       p = if q > p: q else: p + 1
     replaceWith(a, b, out0, a + out0.len)))

@@ -13,8 +13,13 @@ retention: { runs: 5, failure-days: 7 }
 settle-timeout: 15000
 # A stage that records a compiled program builds and records it on a cold
 # fixture cache: the Crystal sudoku solver took more than the default 120 s
-# at load 44-83, and the stage was stopped mid-recording.
-stage-timeout: 300000
+# at load 44-83, and the stage was stopped mid-recording. Recording is setup,
+# not the behaviour under test, so the limit only decides when a loaded host
+# is given up on: Cairo's flow_test took 7 min 25 s to record at load 138
+# (120 s of CPU, a debug recorder) and was stopped at the former 300 s. A
+# stage still returns the moment its recording is made, and a whole one is
+# cached for every later run.
+stage-timeout: 900000
 applicable:
   - ../tracing/trace-macro-at-caret.yaml
   - ../tracing/trace-macro-rebound.yaml
