@@ -1,5 +1,5 @@
 import
-  std/[unittest, os, osproc, net, monotimes, times],
+  std/[unittest, os, osproc, net, monotimes, times, strutils],
   ../../common/paths
 
 proc ensureProcessStopped(p: Process) =
@@ -41,6 +41,25 @@ proc waitForListening(port: int, timeoutMs: int): bool =
       probe.close()
   false
 
+# FREE PORTS, NOT FIXED ONES (2026-11-25). The cases used to bind 12345-12350
+# and 5000-5005. On a shared host 12345 was held by a process this suite could
+# not see, so "exits with code 0 when no connection" ran a host that could not
+# bind and failed three runs in three. Each case now asks the kernel for ports
+# that are free when the suite starts.
+proc freePort(): int =
+  let s = newSocket()
+  try:
+    s.bindAddr(Port(0), "127.0.0.1")
+    result = int(s.getLocalAddr()[1])
+  finally:
+    s.close()
+
+var HttpPort: array[6, int]
+var SockPort: array[6, int]
+for i in 0 ..< 6:
+  HttpPort[i] = freePort()
+  SockPort[i] = freePort()
+
 # The session secret a supervisor would give `ct host`. Every host and client
 # below inherits it: the host admits a socket only with it
 # (`index/host_session_guard.nim`), so without it the "connected" cases would
@@ -79,10 +98,10 @@ suite "ct host idle timeout integration":
           serverIndex,
           "-1",
           "--welcome-screen",
-          "--port", "12345",
-          "--frontend-socket-port", "5000",
+          "--port", $HttpPort[0],
+          "--frontend-socket-port", $SockPort[0],
           "--frontend-socket-parameters", "",
-          "--backend-socket-port", "5000",
+          "--backend-socket-port", $SockPort[0],
           "--caller-pid", "0",
           "--idle-timeout-ms", "1000"
         ]
@@ -91,8 +110,12 @@ suite "ct host idle timeout integration":
           workingDir = codetracerInstallDir,
           args = args,
           options = {poStdErrToStdOut})
-        # allow up to 4 seconds for timeout exit
-        let (exited, code) = waitForExitWithin(p, 4_000)
+        # A bound, not a schedule: the host must exit by itself, with code 0,
+        # and a loaded host's `node` start-up can take several seconds before
+        # the 1 s timeout even starts. Waiting for the port first is not an
+        # option here: with nothing connecting, the host may time out before
+        # a probe sees it listen (measured, load ~120).
+        let (exited, code) = waitForExitWithin(p, 20_000)
         check exited
         check code == 0
       finally:
@@ -114,10 +137,10 @@ suite "ct host idle timeout integration":
           serverIndex,
           "-1",
           "--welcome-screen",
-          "--port", "12346",
-          "--frontend-socket-port", "5001",
+          "--port", $HttpPort[1],
+          "--frontend-socket-port", $SockPort[1],
           "--frontend-socket-parameters", "",
-          "--backend-socket-port", "5001",
+          "--backend-socket-port", $SockPort[1],
           "--caller-pid", "0",
           "--idle-timeout-ms", "-1"
         ]
@@ -149,12 +172,12 @@ suite "ct host idle timeout integration":
           serverIndex,
           "-1",
           "--welcome-screen",
-          "--port", "12347",
-          "--frontend-socket-port", "5002",
+          "--port", $HttpPort[2],
+          "--frontend-socket-port", $SockPort[2],
           "--frontend-socket-parameters", "",
-          "--backend-socket-port", "5002",
+          "--backend-socket-port", $SockPort[2],
           "--caller-pid", "0",
-          "--idle-timeout-ms", "1200"
+          "--idle-timeout-ms", "25000"
         ]
         host = startProcess(
           node,
@@ -163,20 +186,24 @@ suite "ct host idle timeout integration":
           options = {poStdErrToStdOut})
 
         # allow the host to start before connecting
-        check waitForListening(5002, 10_000)
+        check waitForListening(SockPort[2], 60_000)
 
         let clientScript = """
 const io = require('socket.io-client');
-const socket = io('ws://localhost:5002', {transports: ['websocket'], forceNew: true, query: {ct_session: process.env.CODETRACER_HOST_SESSION_SECRET}});
-setTimeout(() => process.exit(0), 4000);
-"""
+const socket = io('ws://localhost:SOCKPORT', {transports: ['websocket'], forceNew: true, query: {ct_session: process.env.CODETRACER_HOST_SESSION_SECRET}});
+setTimeout(() => process.exit(0), 45000);
+""".replace("SOCKPORT", $SockPort[2])
         client = startProcess(
           node,
           args = @["-e", clientScript],
           options = {poStdErrToStdOut})
 
-        # Host should exit due to inactivity despite the connected socket.
-        let (exited, code) = waitForExitWithin(host, 4_000)
+        # Host should exit due to inactivity despite the connected socket: the
+        # client stays connected (silently) for 45 s, past the 25 s window, so
+        # the host's exit is the timeout and not the client leaving. The window
+        # was 1.2 s, under a loaded host's 4-8 s start-up, so the host could
+        # time out before it was listening at all.
+        let (exited, code) = waitForExitWithin(host, 40_000)
         check exited
         check code == 0
       finally:
@@ -200,12 +227,12 @@ setTimeout(() => process.exit(0), 4000);
           serverIndex,
           "-1",
           "--welcome-screen",
-          "--port", "12349",
-          "--frontend-socket-port", "5004",
+          "--port", $HttpPort[4],
+          "--frontend-socket-port", $SockPort[4],
           "--frontend-socket-parameters", "",
-          "--backend-socket-port", "5004",
+          "--backend-socket-port", $SockPort[4],
           "--caller-pid", "0",
-          "--idle-timeout-ms", "3000"
+          "--idle-timeout-ms", "25000"
         ]
         host = startProcess(
           node,
@@ -214,36 +241,40 @@ setTimeout(() => process.exit(0), 4000);
           options = {poStdErrToStdOut})
 
         # wait for the host to bind its socket port
-        check waitForListening(5004, 10_000)
+        check waitForListening(SockPort[4], 60_000)
 
         let clientScript = """
 const io = require('socket.io-client');
-const socket = io('ws://localhost:5004', {transports: ['websocket'], forceNew: true, query: {ct_session: process.env.CODETRACER_HOST_SESSION_SECRET}});
+const socket = io('ws://localhost:SOCKPORT', {transports: ['websocket'], forceNew: true, query: {ct_session: process.env.CODETRACER_HOST_SESSION_SECRET}});
 socket.on('connect', () => {
   let sent = 0;
   const interval = setInterval(() => {
     socket.emit('test-event', { n: ++sent });
-    if (sent >= 5) {
+    if (sent >= 70) {
       clearInterval(interval);
       setTimeout(() => process.exit(0), 300);
     }
-  }, 150);
+  }, 400);
 });
-"""
+""".replace("SOCKPORT", $SockPort[4])
         client = startProcess(
           node,
           args = @["-e", clientScript],
           options = {poStdErrToStdOut})
 
-        # The client's own script takes ~1.05 s once connected (5 x 150 ms of
-        # activity, then 300 ms); the rest of the budget is `node` start-up and
-        # the handshake, which on a loaded host exceeded the 2 s this used to
-        # allow. The host-side assertion below is unchanged.
-        let (clientExited, _) = waitForExitWithin(client, 10_000)
+        # LONGER THAN THE IDLE WINDOW, SO ONLY THE ACTIVITY KEEPS THE HOST UP
+        # (2026-11-25). The client is active for 28 s (70 x 400 ms) against a
+        # 25 s idle timeout: a host that ignored the activity would exit while
+        # the client is still sending. The windows used to be 3 s idle and
+        # 1.05 s of activity. The host's idle clock starts before it listens,
+        # and at load ~140 `node server_index.js` took 4.2-8.4 s to listen
+        # (measured), so the host timed out before the client connected. Every
+        # window that needs a client to connect first is now well above that.
+        let (clientExited, _) = waitForExitWithin(client, 120_000)
         check clientExited
 
         # Host should still be alive because activity kept resetting idle timer.
-        let (hostExited, _) = waitForExitWithin(host, 2_500)
+        let (hostExited, _) = waitForExitWithin(host, 1_500)
         check hostExited == false
       finally:
         ensureProcessStopped(client)
@@ -267,12 +298,12 @@ socket.on('connect', () => {
           serverIndex,
           "-1",
           "--welcome-screen",
-          "--port", "12348",
-          "--frontend-socket-port", "5003",
+          "--port", $HttpPort[3],
+          "--frontend-socket-port", $SockPort[3],
           "--frontend-socket-parameters", "",
-          "--backend-socket-port", "5003",
+          "--backend-socket-port", $SockPort[3],
           "--caller-pid", "0",
-          "--idle-timeout-ms", "1500"
+          "--idle-timeout-ms", "25000"
         ]
         host = startProcess(
           node,
@@ -280,17 +311,17 @@ socket.on('connect', () => {
           args = hostArgs,
           options = {poStdErrToStdOut})
 
-        check waitForListening(5003, 10_000)
+        check waitForListening(SockPort[3], 60_000)
 
         # connect first socket and send one activity ping, then exit
         let clientScript1 = """
 const io = require('socket.io-client');
-const socket = io('ws://localhost:5003', {transports: ['websocket'], forceNew: true, query: {ct_session: process.env.CODETRACER_HOST_SESSION_SECRET}});
+const socket = io('ws://localhost:SOCKPORT', {transports: ['websocket'], forceNew: true, query: {ct_session: process.env.CODETRACER_HOST_SESSION_SECRET}});
 socket.on('connect', () => {
   socket.emit('test-event', { source: 'first' });
   setTimeout(() => process.exit(0), 200);
 });
-"""
+""".replace("SOCKPORT", $SockPort[3])
         client1 = startProcess(
           node,
           args = @["-e", clientScript1],
@@ -298,17 +329,19 @@ socket.on('connect', () => {
 
         discard waitForExitWithin(client1, 2_000)
 
-        # wait near the timeout but reconnect before it fires
-        sleep(900)
+        # wait near the timeout but reconnect before it fires: 15 s of a 25 s
+        # window, which leaves a loaded host 10 s to start the second client
+        # and complete its handshake (the window was 1.5 s, with 0.6 s left).
+        sleep(15_000)
 
         let clientScript2 = """
 const io = require('socket.io-client');
-const socket = io('ws://localhost:5003', {transports: ['websocket'], forceNew: true, query: {ct_session: process.env.CODETRACER_HOST_SESSION_SECRET}});
+const socket = io('ws://localhost:SOCKPORT', {transports: ['websocket'], forceNew: true, query: {ct_session: process.env.CODETRACER_HOST_SESSION_SECRET}});
 socket.on('connect', () => {
   socket.emit('test-event', { source: 'second' });
   setTimeout(() => process.exit(0), 200);
 });
-"""
+""".replace("SOCKPORT", $SockPort[3])
         client2 = startProcess(
           node,
           args = @["-e", clientScript2],
@@ -316,8 +349,9 @@ socket.on('connect', () => {
 
         discard waitForExitWithin(client2, 2_000)
 
-        # Host should survive past the original 1.5s window because reconnect reset the timer.
-        let (hostExited, _) = waitForExitWithin(host, 1_200)
+        # Host should survive past the original 25 s window because reconnect
+        # reset the timer: 15 s + the second client + 12 s is past it.
+        let (hostExited, _) = waitForExitWithin(host, 12_000)
         check hostExited == false
       finally:
         ensureProcessStopped(client1)
@@ -341,12 +375,12 @@ socket.on('connect', () => {
           serverIndex,
           "-1",
           "--welcome-screen",
-          "--port", "12350",
-          "--frontend-socket-port", "5005",
+          "--port", $HttpPort[5],
+          "--frontend-socket-port", $SockPort[5],
           "--frontend-socket-parameters", "",
-          "--backend-socket-port", "5005",
+          "--backend-socket-port", $SockPort[5],
           "--caller-pid", "0",
-          "--idle-timeout-ms", "1500"
+          "--idle-timeout-ms", "25000"
         ]
         host = startProcess(
           node,
@@ -355,11 +389,11 @@ socket.on('connect', () => {
           options = {poStdErrToStdOut})
 
         # wait for the host to start listening
-        check waitForListening(5005, 10_000)
+        check waitForListening(SockPort[5], 60_000)
 
         let clientScript = """
 const io = require('socket.io-client');
-const socket = io('ws://localhost:5005', {transports: ['websocket'], forceNew: true, query: {ct_session: process.env.CODETRACER_HOST_SESSION_SECRET}});
+const socket = io('ws://localhost:SOCKPORT', {transports: ['websocket'], forceNew: true, query: {ct_session: process.env.CODETRACER_HOST_SESSION_SECRET}});
 socket.on('connect', () => {
   const interval = setInterval(() => socket.emit('test-event', { tick: Date.now() }), 200);
   setTimeout(() => {
@@ -368,7 +402,7 @@ socket.on('connect', () => {
     setTimeout(() => process.exit(0), 200);
   }, 2000);
 });
-"""
+""".replace("SOCKPORT", $SockPort[5])
         client = startProcess(
           node,
           args = @["-e", clientScript],
@@ -380,8 +414,9 @@ socket.on('connect', () => {
         let (exitedEarly, _) = waitForExitWithin(host, 900)
         check exitedEarly == false
 
-        # It should exit cleanly once the no-connection window elapses.
-        let (exited, code) = waitForExitWithin(host, 3_000)
+        # It should exit cleanly once the no-connection window (25 s, above a
+        # loaded host's start-up time) elapses.
+        let (exited, code) = waitForExitWithin(host, 40_000)
         check exited
         check code == 0
       finally:
