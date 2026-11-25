@@ -33,7 +33,7 @@ import ../../stories/[story_frames, story_mount]
 import ../zgui_view_support
 
 var countedAssertions = 0
-const ExpectedAssertions = 18
+const ExpectedAssertions = 22
 
 template ck(condition: untyped) =
   inc countedAssertions
@@ -95,6 +95,25 @@ suite "a panel story mounted through ZguiRenderer":
       finally:
         dispose()
         closeHeadless()
+
+  test "the Event Log's list carries the browser's scrubber, placed once laid out":
+    # The browser hides the scroll body's own bar (`.ct-scrubbed`) and draws
+    # a track over its right edge (`list_scrubber_dom`); a native renderer
+    # draws the same elements (`list_scrubber_native`, `zgui_view_support`).
+    let (host, dispose) = mountStory("event-log", "Event Log")
+    try:
+      let body = firstWithClass(host, "eventLog-scroll-body")
+      ck "ct-scrubbed" in body.getAttribute("class")
+      let track = firstWithClass(host, "ct-list-scrubber")
+      ck not track.isNil
+      refreshScrubbers(1.0)
+      discard settle()
+      ck track.getAttribute("data-ct-scrub-total") == "70"
+      let thumb = firstWithClass(track, "ct-list-scrubber-thumb")
+      ck parseInt(thumb.getAttribute("data-ct-thumb-px")) > 0
+    finally:
+      dispose()
+      closeHeadless()
 
   test "the frame's one tab is active and names the panel":
     var root: ZguiNode

@@ -12,6 +12,8 @@
 
 import isonim_zgui/renderer
 
+import ../viewmodel/views/list_scrubber_native
+
 template BadgeEvent*(r: ZguiRenderer): typedesc = ZguiDomEvent
 
 template KeyEvent*(r: ZguiRenderer): typedesc = ZguiDomEvent
@@ -27,3 +29,35 @@ proc setFieldValue*(r: ZguiRenderer; n: ZguiNode; value: string) =
   r.setAttribute(n, "value", value)
 
 proc isNil*(ev: ZguiDomEvent): bool {.inline.} = system.isNil(ev)
+
+# ---------------------------------------------------------------------------
+# The list scrubber (`views/list_scrubber_native`)
+# ---------------------------------------------------------------------------
+
+var scrubbers: seq[NativeScrubber[ZguiNode]]
+  ## Every scrubber a view attached, placed by `refreshScrubbers` once laid out.
+
+proc attachNativeListScrubber*(r: ZguiRenderer; container, host: ZguiNode;
+                               total, current: proc(): int;
+                               rowHeight: proc(): float; paneId: string) =
+  ## The Event Log's and the Call Trace's scrubber, as the browser draws it.
+  scrubbers.add attachScrubber(r, container, host, total, current, rowHeight, paneId)
+
+proc refreshScrubbers*(scale: float) =
+  ## Places every attached scrubber from the laid-out boxes (border boxes are
+  ## device pixels; the scrubber works in CSS pixels).
+  let r = ZguiRenderer()
+  proc measure(n: ZguiNode): Box =
+    let b = borderBox(n)
+    (float(b.x) / scale, float(b.y) / scale, float(b.w) / scale, float(b.h) / scale)
+  # A scrubber whose elements are gone (its pane was closed, its window
+  # shut) is forgotten.
+  var live: seq[NativeScrubber[ZguiNode]]
+  for s in scrubbers:
+    if s.container.isLive and s.track.isLive: live.add s
+  scrubbers = live
+  for s in scrubbers:
+    var content = 0.0
+    for i in 0 ..< s.container.childCount:
+      content += measure(s.container.nthChild(i)).h
+    refresh(r, s, measure, content)

@@ -851,4 +851,14 @@ proc renderEventLogPanel*[R, N](r: R; vm: EventLogVM;
     when N is isonim_dom.Element:
       decorateEventLogPanel(vm, searchInput, footerInput, scrollBody,
                             dataTable)
+  else:
+    # A native renderer whose host draws the scrubber the browser draws
+    # (`views/list_scrubber_native`, e.g. `zgui_view_support`).
+    mixin attachNativeListScrubber
+    when compiles(attachNativeListScrubber(r, scrollBody, dataTable,
+        proc(): int = 0, proc(): int = 0, proc(): float = 1.0, "")):
+      attachNativeListScrubber(r, scrollBody, dataTable,
+        proc(): int = vm.listTotal,
+        proc(): int = vm.store.eventLog.currentIndex.val,
+        proc(): float = max(1.0, vm.rowHeightPx.val), "eventLog")
   panel

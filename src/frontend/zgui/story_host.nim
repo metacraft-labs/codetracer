@@ -288,6 +288,9 @@ proc main() =
     if not gLayout.root.isNil:
       finishDefaultDebugLayout()
       for _ in 0 ..< 8: discard settle(512)
+    # The scrubbers the views attached, placed from the laid-out boxes.
+    refreshScrubbers(1.0)
+    for _ in 0 ..< 4: discard settle(512)
     if gOpts.scale != 1.0:
       setHeadlessScale(gOpts.scale, float32(gOpts.width), float32(gOpts.height))
       for _ in 0 ..< 8: discard settle(512)
