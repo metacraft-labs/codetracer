@@ -219,6 +219,36 @@ jobs:
           Add-Content -Path $env:GITHUB_PATH -Value "$env:USERPROFILE\.nimble\bin"
           & (Join-Path $nimBin "nim.exe") --version
 
+      - name: Key the locked Python recorder's wheel
+        # Building the recorder (maturin, Rust and the Nim trace writer) took
+        # 34 of the nightly job's 78 minutes on win-ci-vm-001 (run 45686408279).
+        # The wheel is cached, keyed on everything it is built from: the
+        # recorder at its lock, the trace-format pair it compiles against, the
+        # Nim libraries on its path, the Python it targets, and the toolchain.
+        id: recorder_wheel
+        shell: pwsh
+        run: |
+          $ws = $env:GITHUB_WORKSPACE
+          $inputs = @(
+            (git -C (Join-Path $ws "..\codetracer-python-recorder") rev-parse HEAD),
+            (git -C (Join-Path $ws "..\codetracer-trace-format") rev-parse HEAD),
+            (git -C (Join-Path $ws "..\codetracer-trace-format-nim") rev-parse HEAD),
+            (git -C $ws rev-parse HEAD:libs/nim-stew),
+            (git -C $ws rev-parse HEAD:libs/nim-result),
+            (& python -c "import sys; print(sys.version)")
+          )
+          if ($LASTEXITCODE -ne 0 -or @($inputs | Where-Object { -not $_ }).Count -gt 0) { throw "could not read the recorder wheel's inputs" }
+          $sha = [System.Security.Cryptography.SHA256]::Create()
+          $digest = [BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes(($inputs -join "`n")))).Replace("-", "").Substring(0, 16).ToLowerInvariant()
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "key=py-recorder-wheel-v1-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}-$digest"
+
+      - name: Restore the locked Python recorder's wheel
+        id: recorder_wheel_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}\py-recorder-wheel
+          key: ${{ steps.recorder_wheel.outputs.key }}
+
       - name: Install and verify locked Rust-backed Python recorder
         shell: pwsh
         run: |
@@ -244,11 +274,30 @@ jobs:
             $nimPathConfig | Add-Content -Path (Join-Path $nimConfigDir "nim.cfg")
           }
           $env:CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL = "1"
-          & $python -m pip install --disable-pip-version-check $recorder
+          # From the cached wheel when there is one; otherwise build it into
+          # the cache directory first.
+          $wheelDir = "${{ runner.temp }}\py-recorder-wheel"
+          $wheel = Get-ChildItem -Path $wheelDir -Filter "*.whl" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $wheel) {
+            & $python -m pip wheel --disable-pip-version-check --no-deps -w $wheelDir $recorder
+            if ($LASTEXITCODE -ne 0) { throw "failed to build the locked Python recorder" }
+            $wheel = Get-ChildItem -Path $wheelDir -Filter "*.whl" | Select-Object -First 1
+            if (-not $wheel) { throw "pip wheel left no wheel in $wheelDir" }
+          } else {
+            Write-Host "Using the cached recorder wheel $($wheel.Name)"
+          }
+          & $python -m pip install --disable-pip-version-check $wheel.FullName
           if ($LASTEXITCODE -ne 0) { throw "failed to install the locked Python recorder" }
           & $python -c "import codetracer_python_recorder"
           if ($LASTEXITCODE -ne 0) { throw "the locked Python recorder is not importable" }
           "CODETRACER_PYTHON_CMD=$python" >> $env:GITHUB_ENV
+
+      - name: Save the locked Python recorder's wheel
+        if: steps.recorder_wheel_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}\py-recorder-wheel
+          key: ${{ steps.recorder_wheel.outputs.key }}
 
       - name: Generate tree-sitter-nim parser
         shell: pwsh
