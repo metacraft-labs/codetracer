@@ -46,8 +46,7 @@ import {
 } from "./layout-reset";
 import {
   LIMIT_CACHED_RECORDING_MS,
-  LIMIT_SMALL_RECORDING_MS,
-  LIMIT_RR_RECORDING_MS,
+  LIMIT_RECORDER_TIMEOUT_MS,
   LIMIT_ELECTRON_LAUNCH_MS,
   LIMIT_FIRST_WINDOW_MS,
   LIMIT_TOTAL_SETUP_MS,
@@ -756,7 +755,7 @@ function recordTestProgram(recordArg: string, backend?: "rr" | "mcr" | "ttd"): s
       cwd: codetracerInstallDir,
       stdio: "pipe",
       encoding: "utf-8",
-      timeout: LIMIT_RR_RECORDING_MS,
+      timeout: LIMIT_RECORDER_TIMEOUT_MS,
       windowsHide: true,
     },
   );
@@ -1510,7 +1509,7 @@ function attachErrorCollectors(page: Page, bucket: string[]): void {
 
 async function launchTraceElectron(
   sourcePath: string,
-  recordingLimit = LIMIT_SMALL_RECORDING_MS,
+  recordingLimit = LIMIT_RECORDER_TIMEOUT_MS,
   visualReplayTrace = false,
   recordBackend: "" | "rr" | "mcr" = "",
 ): Promise<LaunchResult> {
@@ -1689,7 +1688,8 @@ async function launchTraceFolderElectron(traceFolderPath: string): Promise<Launc
 
   const { result: traceId, durationMs: importMs } = await timed(
     "import trace folder",
-    LIMIT_SMALL_RECORDING_MS,
+    // Importing is setup too: the same bound as a fixture's recording.
+    LIMIT_RECORDER_TIMEOUT_MS,
     async () => importTraceFolder(traceFolder),
   );
 
@@ -1747,7 +1747,7 @@ async function launchTraceFolderElectron(traceFolderPath: string): Promise<Launc
 
 async function launchTraceWeb(
   sourcePath: string,
-  recordingLimit = LIMIT_SMALL_RECORDING_MS,
+  recordingLimit = LIMIT_RECORDER_TIMEOUT_MS,
   visualReplayTrace = false,
 ): Promise<LaunchResult> {
   setupLdLibraryPath();
@@ -2361,7 +2361,8 @@ export const test = base.extend<
       }
 
       const needsRR = sourcePath ? requiresRR(sourcePath) : false;
-      const recordingLimit = needsRR ? LIMIT_RR_RECORDING_MS : LIMIT_SMALL_RECORDING_MS;
+      // Recording is setup here: grade it against the recorder's own timeout.
+      const recordingLimit = LIMIT_RECORDER_TIMEOUT_MS;
 
       if (needsRR && !process.env.CODETRACER_RR_BACKEND_PATH && !process.env.CODETRACER_RR_BACKEND_PRESENT) {
         testInfo.skip(true, "requires ct-native-replay (RR-based language)");

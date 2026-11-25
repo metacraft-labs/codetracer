@@ -42,19 +42,19 @@ export const LIMIT_TOTAL_SETUP_MS = 30_000;
 /** Cached recording lookup (already recorded, no recompilation). */
 export const LIMIT_CACHED_RECORDING_MS = 500;
 
-/** Small program recording (< 100 lines).
- * Baseline (warm cache, idle host) is well under 1s, but the first
- * recording in a worker process pays ct/recorder startup cost and
- * can collide with concurrent host activity (background builds,
- * Nix evaluations) for several seconds. 15s catches a regression
- * (small program should never take that long) while absorbing
- * cold-start + realistic noise. */
-export const LIMIT_SMALL_RECORDING_MS = 15_000;
-
 /** RR recording: compile + rr record. Ranges from 8s (C) to 60s+ (Crystal, Lean).
  * TTD (Windows) recording has much higher overhead than RR.  Compute-heavy
  * programs like sudoku solvers can take 4-10+ minutes under TTD. */
 export const LIMIT_RR_RECORDING_MS = process.platform === "win32" ? 900_000 : 90_000;
+
+/** The recorder's own timeout: `recordTestProgram` kills `ct record` past it.
+ * The fixtures record or import a trace as setup, not as the behaviour under
+ * test, so they grade it against this bound rather than a regression limit.
+ * The contention adjustment cannot rescue a loaded host here: the time is
+ * spent in a child process, not in the test runner, so a 15 s limit on a small
+ * program's recording failed specs at a high load before they tested
+ * anything. */
+export const LIMIT_RECORDER_TIMEOUT_MS = LIMIT_RR_RECORDING_MS;
 
 // ---------------------------------------------------------------------------
 // UI interactions (with loaded trace)
