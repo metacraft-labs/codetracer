@@ -127,6 +127,14 @@ export function requireFreshStorybookStatic(repoRoot) {
     join(storybookDir, "package-lock.json"),
     join(storybookDir, "dist"),
     join(repoRoot, "src/frontend/index.html"),
+    // The stylesheet sources. `just storybook-build` compiles them into the
+    // build tree below before it builds (`just storybook-styles`), so a corpus
+    // older than a `.styl` file shows CSS from before that edit. The
+    // components rule further down does not catch it: a `.styl` edit leaves
+    // `components.js` byte-identical, so `just build-storybook-components`
+    // moves only its stamp, and both rules then passed a corpus whose CSS
+    // predated the edit.
+    join(repoRoot, "src/frontend/styles"),
     join(repoRoot, `src/${buildDir}/frontend`),
     join(repoRoot, `src/${buildDir}/public`),
   ];

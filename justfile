@@ -1023,10 +1023,17 @@ build-storybook-components: storybook-stories
 storybook-deps:
   bash scripts/storybook-deps.sh
 
-storybook: build-storybook-components storybook-deps
+# Compile the stylesheets StoryBook draws (`src/build-debug-repro/frontend/styles/`,
+# mounted by storybook/.storybook/main.ts) through repro.nim's `frontend-styles`
+# target. Without it a StoryBook built after a `.styl` edit drew the CSS of the
+# last `just build-once`. See scripts/build-storybook-styles.sh.
+storybook-styles:
+  bash scripts/build-storybook-styles.sh
+
+storybook: build-storybook-components storybook-styles storybook-deps
   cd storybook && npm run storybook
 
-storybook-build: build-storybook-components storybook-deps
+storybook-build: build-storybook-components storybook-styles storybook-deps
   chmod -R u+w storybook/storybook-static 2>/dev/null || true
   rm -rf storybook/storybook-static
   cd storybook && npm run build-storybook
@@ -1036,6 +1043,13 @@ storybook-build: build-storybook-components storybook-deps
 
 storybook-check-styles: storybook-deps
   cd storybook && npm run check-styles
+
+# `just storybook-build` serves the stylesheets as they are in the tree: makes
+# the build tree's CSS stale, runs the recipe, and compares every served sheet
+# byte for byte with what stylus compiles from src/frontend/styles now. Needs
+# the dev shell. See ci/test/storybook-styles-test.sh.
+test-storybook-styles:
+  bash ci/test/storybook-styles-test.sh
 
 # Render EVERY story (both themes) from a fresh `storybook-static` and fail on
 # a placeholder ("No structure story registered", or an empty / loading /

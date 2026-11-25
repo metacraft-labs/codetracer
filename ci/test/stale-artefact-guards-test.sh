@@ -124,7 +124,7 @@ BUILD_SIBLINGS="${SUITE_ROOT}/scripts/build-siblings.sh"
 # Every contract this suite claims to check. A suite that silently runs fewer
 # assertions than it advertises is a suite that stops protecting anything, so
 # the count is asserted at the end and has to be changed deliberately.
-EXPECTED_ASSERTIONS=162
+EXPECTED_ASSERTIONS=167
 
 ASSERTIONS=0
 FAILURES=0
@@ -429,6 +429,10 @@ SB_T_REBUILD3=202001080000 # both artefacts rebuilt, fresh again
 SB_T_PROGRAM=202001090000  # a compiled test program beside its .nim
 SB_T_NIM2=202001100000     # a Nim source outruns an unchanged bundle
 SB_T_STAMP=202001110000    # the bundle recompiled unchanged: only its stamp moves
+SB_T_REBUILD4=202001120000 # corpus rebuilt, fresh again
+SB_T_STYL=202001130000     # a stylesheet source outruns the corpus
+SB_T_STAMP2=202001140000   # the bundle recompiled unchanged after that edit
+SB_T_REBUILD5=202001150000 # corpus rebuilt (styles recompiled), fresh again
 
 # `firstNewerThan` walks directories but only ever COMPARES files (it recurses
 # on `isDirectory()` and stats the leaves), so stamping the files is enough and
@@ -525,6 +529,33 @@ rm -f "${SB}/storybook/dist/components.js.compiled"
 run_expect_failure "...and without the stamp the same bundle is refused" \
 	"Stale storybook components" -- check_storybook
 touch -t "${SB_T_NIM}" "${SB}/src/frontend/ui.nim"
+
+# A stylesheet edit. `just storybook-build` compiles `src/frontend/styles/`
+# into the build tree it copies, so a corpus older than a `.styl` file shows
+# the CSS from before the edit. The components rule alone let it through: a
+# `.styl` edit leaves `components.js` byte-identical, so the remedy that rule
+# names (`just build-storybook-components`) moves only the stamp, and the
+# corpus then passed both rules with stale CSS.
+mkdir -p "${SB}/src/frontend/styles"
+printf 'x\n' >"${SB}/src/frontend/styles/loader.styl"
+touch -t "${SB_T_SOURCES}" "${SB}/src/frontend/styles/loader.styl"
+touch -t "${SB_T_REBUILD4}" "${SB}/storybook/dist/components.js" \
+	"${SB}/storybook/storybook-static/index.html"
+assert_contains "$(check_storybook)" "FRESH" \
+	"a corpus newer than the stylesheet sources passes"
+touch -t "${SB_T_STYL}" "${SB}/src/frontend/styles/loader.styl"
+touch -t "${SB_T_STAMP2}" "${SB}/storybook/dist/components.js.compiled"
+run_expect_failure "a stylesheet source newer than the corpus is refused, even after an unchanged components recompile" \
+	"Stale storybook corpus" -- check_storybook
+assert_contains "$(check_storybook)" "loader.styl" \
+	"the refusal names the stylesheet that outran the build"
+assert_contains "$(check_storybook)" "just storybook-build" \
+	"the refusal names the recipe that recompiles the stylesheets"
+touch -t "${SB_T_REBUILD5}" "${SB}/storybook/storybook-static/index.html"
+assert_contains "$(check_storybook)" "FRESH" \
+	"rebuilding the corpus makes it green again"
+rm -f "${SB}/storybook/dist/components.js.compiled"
+touch -t "${SB_T_REBUILD3}" "${SB}/storybook/dist/components.js"
 
 rm -f "${SB}/storybook/storybook-static/index.html"
 run_expect_failure "an absent corpus is still refused, with the remedy" \
@@ -1664,7 +1695,7 @@ for n in ${slot_names}; do mkdir -p "${BASE_A}/${n}"; done
 out="$(RUSTC="${STUB_RUSTC_DIR}/1.89/rustc" bash "${CARGO_LIB}" "${CK_CA}" 2>"${TEST_ROOT}/cargo-err")"
 status=$?
 if [[ ${status} -eq 0 && ${out} == "${BASE_A}" && -n ${slot_names} ]]; then
-	ok "the slot accepts every target directory repro.nim builds into ($(echo ${slot_names}))"
+	ok "the slot accepts every target directory repro.nim builds into (${slot_names//$'\n'/ })"
 else
 	bad "the slot accepts every target directory repro.nim builds into" "names: ${slot_names}" \
 		"status: ${status}" "stdout: ${out}" "stderr: $(cat "${TEST_ROOT}/cargo-err")"
