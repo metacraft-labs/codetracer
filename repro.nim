@@ -1257,12 +1257,30 @@ package codeTracer:
     #
     # Without HCR, `mangleProcNameExt` names every routine
     # `__<module>_u<itemId>`, which is unique across modules.
+    # The renderer's variables pane, Call Trace, event log and the rest of
+    # the panel host's panes are drawn by the WebAssembly ViewModel core
+    # (`-d:ctWasmPanes`, `web_core/renderer_transport.nim`), which loads
+    # from `wasm-panes/` beside `ui.js`; `frontend-wasm-panes` builds it.
     let frontendUiJs = ctNimJs(
-      definesValue = CommonNimDefines & HmrRendererDefines,
+      definesValue = CommonNimDefines & HmrRendererDefines & @["ctWasmPanes"],
       outputPath = buildDebugPath("ui.js"),
       sourcePath = "src/frontend/ui_js.nim",
       debugInfoOnValue = true)
     target("frontend-ui-js", frontendUiJs)
+
+    # The core (`core_wasm.js` and its `.wasm`) and its host files.
+    # Not cacheable: its inputs are the whole ViewModel tree and IsoNim's
+    # web renderer; the wasm object cache (`ci/lib/wasm-dev-profile.sh`
+    # keys each object on its preprocessed source) makes a rebuild with
+    # nothing changed a link.
+    let frontendWasmPanes = ctShell(
+      actionIdValue = "frontend-wasm-panes",
+      commandValue = "CT_WEB_CORE_RELEASE=1 bash ci/lib/web-core-build.sh " & buildDebugPath("wasm-panes"),
+      extraInputsValue = ["ci/lib/web-core-build.sh", "ci/lib/nim-cache-root.sh"],
+      extraOutputsValue = [buildDebugPath("wasm-panes/core_wasm.js"),
+                           buildDebugPath("wasm-panes/core_wasm.wasm")],
+      cacheableValue = false)
+    target("frontend-wasm-panes", frontendWasmPanes)
 
     let frontendPublicUiJs = fs.copyFile(
       source = buildDebugPath("ui.js"),
@@ -1406,6 +1424,7 @@ package codeTracer:
 
     var frontendActions = @[
       frontendUiJs,
+      frontendWasmPanes,
       frontendPublicUiJs,
       frontendIndexJs,
       frontendSrcIndexJs,

@@ -11,7 +11,9 @@
 #   web_core_panels.js             the renderer's pane host (-d:ctWasmPanes)
 #   core_js.js (with "js")         the same core with nim js, for comparison
 #
-# CT_WEB_CORE_RELEASE=1 builds -d:release. Used by ci/test/web-core-browser.sh
+# CT_WEB_CORE_RELEASE=1 builds -d:release. CT_WEB_CORE_NIM_FLAGS adds flags
+# to every compile, for a build whose siblings are not beside this checkout
+# (the Nix package passes its staged sources' --path flags). Used by ci/test/web-core-browser.sh
 # and by `just build-wasm-panes`. Exit 1 on a failed build, 2 on a missing tool.
 
 set -uo pipefail
@@ -46,6 +48,8 @@ cache_root="$(ct_nim_cache_root "${repo_root}")/web-core-${build_label}"
 mkdir -p "${out}"
 entry="src/frontend/web_core/web_core.nim"
 nim_common=(--hints:off --warnings:off --path:src/frontend/viewmodel -d:ctWasmCore -d:chronicles_enabled=off)
+# shellcheck disable=SC2206 # deliberately split: a list of flags
+[ -n "${CT_WEB_CORE_NIM_FLAGS:-}" ] && nim_common+=(${CT_WEB_CORE_NIM_FLAGS})
 
 iife() { {
 	echo "(function(){"

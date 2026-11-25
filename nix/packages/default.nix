@@ -853,12 +853,56 @@
               -d:nimNoLentIterators \
               -d:chronicles_enabled=off  \
               -d:ctRenderer \
+              -d:ctWasmPanes \
               --out:./ui.js js src/frontend/ui_js.nim
           '';
 
           installPhase = ''
             mkdir -p $out/bin
             cp ./ui.js $out/bin/
+          '';
+        };
+
+        # The renderer's WebAssembly panes (`ci/lib/web-core-build.sh`): the
+        # ViewModel core built for wasm32 with Emscripten, and its host files,
+        # in `wasm-panes/` — what a `-d:ctWasmPanes` `ui.js` loads from beside
+        # itself. Release: what ships.
+        wasmPanes = stdenv.mkDerivation {
+          name = "codetracer-wasm-panes";
+
+          inherit src;
+
+          nativeBuildInputs = [
+            nim-codetracer
+            pkgs.emscripten
+          ];
+
+          buildPhase = prepareIsonimSiblings + ''
+            # The build script and the library it sources are outside the
+            # package source set (which is the product's tree, not ci/);
+            # copied in rather than widening that set, whose hash every
+            # other package's build keys on.
+            mkdir -p ci/lib
+            cp ${../../ci/lib/web-core-build.sh} ci/lib/web-core-build.sh
+            cp ${../../ci/lib/nim-cache-root.sh} ci/lib/nim-cache-root.sh
+            export HOME="$TMPDIR"
+            # Emscripten writes its system-library cache beside itself
+            # unless told otherwise; the store copy is read-only.
+            export EM_CACHE="$TMPDIR/emscripten-cache"
+            cp -r ${pkgs.emscripten}/share/emscripten/cache "$EM_CACHE"
+            chmod -R u+w "$EM_CACHE"
+            export CT_NIM_CACHE_ROOT="$TMPDIR/nimcache"
+            export ISONIM_SRC="$ISONIM_STAGE/isonim/src"
+            export CT_WEB_CORE_RELEASE=1
+            export CT_WEB_CORE_NIM_FLAGS="${
+              pkgs.lib.concatMapStringsSep " " (name: "--path:$ISONIM_STAGE/${name}/src") isonimSiblings
+            }"
+            bash ci/lib/web-core-build.sh ./wasm-panes
+          '';
+
+          installPhase = ''
+            mkdir -p $out
+            cp -r ./wasm-panes $out/
           '';
         };
 
@@ -1726,6 +1770,8 @@
             cp -L ${indexJavascript}/bin/server_index.js $out/src/
             ln -sf ${node-modules-derivation.out}/bin/node_modules $out/node_modules
             cp -L ${uiJavascript}/bin/ui.js $out/
+            # The renderer's WebAssembly panes, which ui.js loads from beside itself.
+            cp -Lr ${wasmPanes}/wasm-panes $out/
 
             # COPIED, so this join does not reference `codetracer-electron`.
             # See the note beside `paths`.
@@ -1794,6 +1840,8 @@
             # to CODETRACER_PREFIX by the Electron renderer process via index.html.
             # ui.js uses require('./helpers') so helpers.js must also be at the root.
             cp -L ${uiJavascript}/bin/ui.js $out/
+            # The renderer's WebAssembly panes, which ui.js loads from beside itself.
+            cp -Lr ${wasmPanes}/wasm-panes $out/
             cp -L ${codetracer-electron}/src/helpers.js $out/helpers.js
             # index.html references frontend/styles/ but codetracer-electron
             # installs CSS to styles/ — create the expected path.
@@ -2255,6 +2303,8 @@
 
             # The UI itself
             cp -Lr ${uiJavascript}/bin/ui.js $out/
+            # The renderer's WebAssembly panes, which ui.js loads from beside itself.
+            cp -Lr ${wasmPanes}/wasm-panes $out/
 
             cp -L ${subwindowJavascript}/bin/subwindow.js $out/src/
             cp -L ${subwindowJavascript}/bin/subwindow.js $out/
