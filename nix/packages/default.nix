@@ -781,12 +781,14 @@
             ${nim-codetracer.out}/bin/nim2 \
               --warnings:off --sourcemap:on \
               ${isonimNimPaths} \
+              -d:nimNoLentIterators \
               -d:ctIndex -d:chronicles_sinks=json \
               -d:nodejs --out:./index.js js src/frontend/index.nim
 
             ${nim-codetracer.out}/bin/nim2 \
               --warnings:off --sourcemap:on \
               ${isonimNimPaths} \
+              -d:nimNoLentIterators \
               -d:ctIndex -d:server -d:chronicles_sinks=json \
               -d:nodejs --out:./server_index.js js src/frontend/index.nim
           '';
@@ -815,6 +817,7 @@
             ${nim-codetracer}/bin/nim2 \
                 --hints:off --warnings:off \
                 ${isonimNimPaths} \
+              -d:nimNoLentIterators \
                 -d:chronicles_enabled=off  \
                 -d:ctRenderer \
                 --out:./subwindow.js js src/frontend/subwindow.nim
@@ -847,6 +850,7 @@
             ${nim-codetracer.out}/bin/nim2 \
               --hints:off --warnings:off \
               ${isonimNimPaths} \
+              -d:nimNoLentIterators \
               -d:chronicles_enabled=off  \
               -d:ctRenderer \
               --out:./ui.js js src/frontend/ui_js.nim

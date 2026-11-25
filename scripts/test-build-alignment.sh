@@ -618,7 +618,10 @@ while time.time() < deadline:
 # in NONE of the Nix invocations, which is why `src/frontend/ui_js.nim` compiled
 # green under tup and red under Nix: the failure arrived as an ordinary Nim error
 # inside a store path, naming neither the lane, nor the flag, nor the fact that
-# two lanes existed. (The recipe carries it now; the Nix lane still does not.)
+# two lanes existed. (The recipe carries it, and since 2026-11-25 so do the Nix
+# lane's four JavaScript bundles: `ui.js` failed under Nix and built locally
+# on the same tree, at a closure capturing an iterator's `lent` element. The
+# Nix native binaries still lack it, below.)
 #
 # ## Why a recorded baseline and not an equality assertion
 #
@@ -752,27 +755,23 @@ db-backend-record -d:nimNoLentIterators
 ./index.js -d:chronicles_line_numbers=true
 ./index.js -d:chronicles_timestamps=UnixTime
 ./index.js -d:debug
-./index.js -d:nimNoLentIterators
 ./index.js -d:ssl
 ./index.js --mm:refc
 ./server_index.js -d:chronicles_line_numbers=true
 ./server_index.js -d:chronicles_timestamps=UnixTime
 ./server_index.js -d:debug
-./server_index.js -d:nimNoLentIterators
 ./server_index.js -d:ssl
 ./server_index.js --mm:refc
 ./subwindow.js -d:chronicles_line_numbers=true
 ./subwindow.js -d:chronicles_sinks=json
 ./subwindow.js -d:chronicles_timestamps=UnixTime
 ./subwindow.js -d:debug
-./subwindow.js -d:nimNoLentIterators
 ./subwindow.js -d:ssl
 ./subwindow.js --mm:refc
 ./ui.js -d:chronicles_line_numbers=true
 ./ui.js -d:chronicles_sinks=json
 ./ui.js -d:chronicles_timestamps=UnixTime
 ./ui.js -d:debug
-./ui.js -d:nimNoLentIterators
 ./ui.js -d:ssl
 ./ui.js --mm:refc
 RECORDED
@@ -822,12 +821,12 @@ run_nim_flag_alignment_check() {
 	# file runs under `set -o pipefail`, and `grep -q` closes the pipe as soon as
 	# it matches, so the producer dies of SIGPIPE and the PIPELINE reports 141 --
 	# a successful match reads as false, and the note silently never prints.
-	case "$actual" in
-	*'-d:nimNoLentIterators'*)
+	local lent_missing
+	lent_missing="$(printf '%s\n' "$actual" | awk '$2 == "-d:nimNoLentIterators" { printf "%s%s", sep, $1; sep = ", " }')"
+	if [ -n "$lent_missing" ]; then
 		printf '    note %s\n' \
-			"-d:nimNoLentIterators is still absent from every nix Nim invocation (blocker (2))"
-		;;
-	esac
+			"-d:nimNoLentIterators is still absent from these nix Nim invocations: $lent_missing (blocker (2))"
+	fi
 }
 
 # ---------------------------------------------------------------------------
