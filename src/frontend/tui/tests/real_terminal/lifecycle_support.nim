@@ -481,3 +481,34 @@ proc replayServerPath*(): string =
   ## (codetracer-pm
   ## `issues/2026-09-29-replay-server-discovery-misses-the-repro-build-output-root.md`).
   locateReplayServer()
+
+const ReplayServerRemedy* =
+  "no replay-server found; set REPLAY_SERVER_BIN, or build one with " &
+  "`cd src/db-backend && cargo build`"
+  ## The TUI's own words for a missing engine
+  ## (`host/native_host.replayServerRemedy`), so a suite and the binary it
+  ## starts name the same command. Spelled here because importing `host/`
+  ## pulls the entrypoint's module graph into a suite that only wants a path.
+
+proc requireReplayServer*(): string =
+  ## The `replay-server` a TUI that opens a trace needs, resolved where the TUI
+  ## resolves it (`replayServerPath`), then beside the `ct` the suite records
+  ## with (`CT_BIN`): the build that produced one produced the other. Exported
+  ## as `REPLAY_SERVER_BIN`, so every TUI this process starts uses that engine.
+  ##
+  ## With none, raises at once with the TUI's remedy, the way a missing `ct`
+  ## is already reported (`fixture_provider.requireFixture`). Without this check
+  ## a worktree with no engine failed every case only as "the binary exited
+  ## before painting the debugger, exit code 2", the TUI's own message never
+  ## shown (codetracer-pm
+  ## `issues/2026-11-25-tui-terminal-suites-hide-a-missing-replay-server-behind-exit-2.md`).
+  result = replayServerPath()
+  if result.len == 0:
+    let ct = getEnv("CT_BIN", "")
+    if ct.len > 0:
+      let beside = ct.parentDir / "replay-server".addFileExt(ExeExt)
+      if fileExists(beside):
+        result = beside
+  if result.len == 0:
+    raise newException(IOError, "prerequisite missing: " & ReplayServerRemedy)
+  putEnv("REPLAY_SERVER_BIN", result)
