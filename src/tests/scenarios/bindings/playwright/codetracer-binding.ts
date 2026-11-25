@@ -3378,8 +3378,7 @@ async function launchElectron(ctx: Ctx, launch: any): Promise<void> {
   }
   // (launch.welcome: no arguments — the welcome screen)
   env.CODETRACER_CALLER_PID = String(process.pid);
-  const width = launch.width || 1600;
-  const height = launch.height || 1000;
+  const [width, height] = windowSize(launch.width, launch.height);
   ctx.videoDir = path.join(ctx.state.root ?? process.env.TMPDIR ?? "/tmp", "video");
   fs.mkdirSync(ctx.videoDir, { recursive: true });
   const app = await _electron.launch({
@@ -3431,6 +3430,21 @@ async function launchElectron(ctx: Ctx, launch: any): Promise<void> {
   ctx.context = app.context();
 }
 
+/** The window's size for the stage's `width` × `height`. A size small enough
+ *  to be a terminal's (columns × rows: a scenario written for every
+ *  front-end says how much it shows in the terminal's unit) is that many
+ *  cells of 8 × 20 px, as the GPUI binding reads it, so the terminal's
+ *  200 × 50 is the window's default 1600 × 1000; a larger one is pixels. */
+function windowSize(w?: number, h?: number): [number, number] {
+  let width = w || 1600;
+  let height = h || 1000;
+  if (width <= 400 && height <= 400) {
+    width *= 8;
+    height *= 20;
+  }
+  return [width, height];
+}
+
 // --- pw2: the web deployment -------------------------------------------------
 // `open-recording` with `deployment: web`: the recording served by a real
 // `ct host`, and its page opened in a browser (the arm's own page, so it is
@@ -3469,8 +3483,7 @@ async function launchHosted(ctx: Ctx, launch: any): Promise<void> {
   host.stdout?.on("data", (c: Buffer) => output.push(c.toString()));
   host.stderr?.on("data", (c: Buffer) => output.push(c.toString()));
   ctx.state.hostPid = host.pid;
-  const width = launch.width || 1600;
-  const height = launch.height || 1000;
+  const [width, height] = windowSize(launch.width, launch.height);
   const url = `http://localhost:${httpPort}/?ct_session=${secret}`;
   const deadline = Date.now() + 180_000;
   let gfxCopied = !fs.existsSync(path.join(launch.recording, "gfx_stream"));
@@ -3546,7 +3559,11 @@ const binding = {
     }
     const launch = runStageCli(["run", ctx.state.file, use, JSON.stringify(clean)]);
     if (launch.env?.CT_FAKE_ACP_LOG) ctx.state.agentLog = launch.env.CT_FAKE_ACP_LOG;
-    if (use === "open-recording" && clean.deployment === "web") {
+    // `CT_SCENARIO_DEPLOYMENT=web` runs a scenario written for every
+    // front-end as the browser flavour: its recordings are opened the way
+    // `deployment: web` opens them.
+    const deployment = clean.deployment ?? process.env.CT_SCENARIO_DEPLOYMENT;
+    if (use === "open-recording" && deployment === "web") {
       await launchHosted(ctx, launch);
     } else if (use === "open-recording" || use === "open-project" || use === "open-review" || use === "open-welcome") {
       await launchElectron(ctx, launch);
