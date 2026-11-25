@@ -409,7 +409,7 @@ jobs:
 
       - name: Upload the failed scenario runs (GPUI)
         if: ${{ failure() }}
-        uses: metacraft-labs/DemoVideoScript/.github/actions/upload-failed-runs@028ea4f6704fc5377e2c6b7021a9e048c15c9f92
+        uses: metacraft-labs/DemoVideoScript/.github/actions/upload-failed-runs@b2dd47d345794d53966102b7ee151e46f7d52daf
         with:
           build-dir: build
           name: scenario-runs-gpui-${{ matrix.shard }}

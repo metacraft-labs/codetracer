@@ -1,0 +1,47 @@
+# The web deployment in Firefox: the scenarios that serve the recording
+# from `ct host` (`deployment: web`), through DemoVideoScript-Playwright's arm
+# with CodeTracer's Playwright binding, the page opened in Playwright's
+# Firefox instead of Chromium. The electron lane runs the same scenarios in
+# Chromium. Run from the repository root (the backend's paths are relative
+# to it): `ci/test/scenarios.sh lane firefox`, which sets
+# CT_SCENARIO_BROWSER=firefox for the binding.
+lane: 1
+name: firefox
+pack: ../pack/codetracer.pack.yaml
+backend: "cmd:node build/scenario-arm/src/main.ts --binding src/tests/scenarios/bindings/playwright/codetracer-binding.ts"
+# Fast mode only: realistic mode differs in pacing, which is the arm's and
+# the same in every browser; the electron lane runs both modes.
+modes: [fast]
+retention: { runs: 5, failure-days: 7 }
+# The electron lane's limits, for the same reasons: a loaded host settles
+# slowly, and a stage records its program on a cold fixture cache.
+settle-timeout: 15000
+stage-timeout: 900000
+applicable:
+  - ../browser/materialized-replay.yaml
+  - ../browser/mcr-replay.yaml
+  - ../ct-host/breakpoint-stops-continue-and-a-cleared-one-does-not.yaml
+  - ../ct-host/duplicated-tab-gets-its-own-session.yaml
+  - ../ct-host/files-pane-survives-session-sync.yaml
+  - ../ct-host/flow-jump-to-value-on-a-host-page.yaml
+  - ../ct-host/reload-reconnects.yaml
+  - ../ct-host/two-clients-step-independently.yaml
+  - ../ct-host/value-history-loads-on-a-host-page.yaml
+  - ../replay/portable-android-recording-replays.yaml
+  - ../replay/portable-ios-recording-replays.yaml
+  - ../replay/portable-linux-interpose-recording-is-refused.yaml
+  - ../replay/portable-macos-recording-replays.yaml
+  - ../replay/portable-windows-recording-replays.yaml
+  - ../video-player/keys-drive-the-player.yaml
+  - ../visual-replay/additive-tabs.yaml
+  - ../visual-replay/capture-frames-draws-and-history.yaml
+  - ../visual-replay/keyboard-focus-scope.yaml
+  - ../visual-replay/keyboard-shortcuts.yaml
+  - ../visual-replay/keymap-rows.yaml
+  - ../visual-replay/pixel-history-entries.yaml
+  - ../visual-replay/player-failure-shows-error.yaml
+  - ../visual-replay/real-recording.yaml
+  - ../visual-replay/shader-debug-source-and-values.yaml
+  - ../visual-replay/step-updates-video-player.yaml
+  - ../visual-replay/video-player-in-production-layout.yaml
+  - ../watch/typed-watches-in-the-browser.yaml

@@ -31,7 +31,10 @@ steps:
         settle: false
       - wait: { until: { at: 'editor[file="main.nr"]', current-line: 17 }, timeout: 60s }
 
+  # Loading the page is setup: the next step waits for what it shows
+  # (DemoVideoScript b2dd47d), not the 15 s settle an input gets.
   - duplicate: { client: original, name: copy }
+    settle: false
   - beat: the-copy-has-its-own-replay
     as: copy
     steps:
@@ -60,11 +63,13 @@ steps:
     as: copy
 
   - reload: copy
+    settle: false
   - wait: { until: call-trace.loaded, timeout: 360s }
     as: copy
   - wait: { until: { at: 'editor[file="main.nr"]', current-line: 15 }, timeout: 60s }
     as: copy
   - reload: original
+    settle: false
   - wait: { until: call-trace.loaded, timeout: 360s }
     as: original
   - wait: { until: { at: 'editor[file="main.nr"]', current-line: { gt: 17 } }, timeout: 60s }

@@ -4,7 +4,7 @@
 #
 #   ci/test/scenarios.sh build [part…]      the runner and the bindings' programs
 #   ci/test/scenarios.sh lint               the scenario linter over every scenario
-#   ci/test/scenarios.sh lane <flavour>     one lane: terminal | gpui | zgui | electron
+#   ci/test/scenarios.sh lane <flavour>     one lane: terminal | gpui | zgui | electron | firefox
 #                                           (SCENARIO_LANE_SHARD=i/n: one shard of it)
 #   ci/test/scenarios.sh run <flavour> <scenario.yaml> [dvs run args…]
 #   ci/test/scenarios.sh binding-test       the bindings' own tests (bindings/*/*.test.ts)
@@ -163,7 +163,7 @@ parts_of() {
 	terminal) echo "terminal" ;;
 	gpui) echo "gpui" ;;
 	zgui) echo "zgui" ;;
-	electron) echo "dvs playwright" ;;
+	electron | firefox) echo "dvs playwright" ;;
 	esac
 }
 
@@ -251,9 +251,9 @@ backend_of() {
 	case "$1" in
 	terminal) echo "termassert" ;;
 	gpui | zgui) echo "guiassert" ;;
-	electron) echo "cmd:node ${build_dir}/scenario-arm/src/main.ts --binding ${root}/${S}/bindings/playwright/codetracer-binding.ts" ;;
+	electron | firefox) echo "cmd:node ${build_dir}/scenario-arm/src/main.ts --binding ${root}/${S}/bindings/playwright/codetracer-binding.ts" ;;
 	*)
-		echo "scenarios: unknown flavour '$1' (terminal, gpui, zgui, electron)" >&2
+		echo "scenarios: unknown flavour '$1' (terminal, gpui, zgui, electron, firefox)" >&2
 		exit 64
 		;;
 	esac
@@ -264,7 +264,24 @@ runner_of() {
 	terminal) echo "${bin}/dvs-termassert-codetracer" ;;
 	gpui) echo "${bin}/dvs-guiassert-codetracer" ;;
 	zgui) echo "${bin}/dvs-guiassert-codetracer-zgui" ;;
-	electron) echo "${bin}/dvs" ;;
+	electron | firefox) echo "${bin}/dvs" ;;
+	esac
+}
+
+# browser_of <flavour>: the flavour's browser, for a scenario served to one
+# (`deployment: web`). The firefox flavour is the electron flavour's arm and
+# binding with the hosted page opened in Firefox (CT_SCENARIO_BROWSER, read
+# by the binding); its lane lists the scenarios that serve a page.
+browser_of() {
+	case "$1" in
+	firefox)
+		local engines="${PLAYWRIGHT_BROWSERS_PATH:-${HOME}/.cache/ms-playwright}"
+		if ! compgen -G "${engines}/firefox-*" >/dev/null; then
+			echo "scenarios: the firefox flavour needs Playwright's Firefox, and ${engines} has none" >&2
+			exit 1
+		fi
+		export CT_SCENARIO_BROWSER=firefox
+		;;
 	esac
 }
 
@@ -337,8 +354,9 @@ lint)
 	echo "scenarios: the Playwright bindings parse; a stray '}' is rejected as it must be"
 	;;
 lane)
-	flavour="${2:?usage: scenarios.sh lane <terminal|gpui|zgui|electron>}"
+	flavour="${2:?usage: scenarios.sh lane <terminal|gpui|zgui|electron|firefox>}"
 	runner="$(runner_of "${flavour}")"
+	browser_of "${flavour}"
 	[ -x "${runner}" ] || "$0" build
 	ensure_built "${flavour}"
 	# The desktop binding's own tests first: a reader that cannot read the
@@ -375,6 +393,7 @@ run)
 		if [ -n "${value}" ]; then limits+=("--${key}" "${value}"); fi
 	done
 	ensure_built "${flavour}"
+	browser_of "${flavour}"
 	"$(runner_of "${flavour}")" run "${scenario}" --pack "${S}/pack/codetracer.pack.yaml" \
 		--backend "$(backend_of "${flavour}")" --build "${build_dir}" "${limits[@]}" "$@"
 	;;

@@ -51,7 +51,10 @@ steps:
   - expect: { at: 'editor[file="main.nr"]', current-line: 17, holds: 2s }
     as: a
 
+  # Loading the page is setup: the next step waits for what it shows
+  # (DemoVideoScript b2dd47d), not the 15 s settle an input gets.
   - reload: b
+    settle: false
   - wait: { until: call-trace.loaded, timeout: 360s }
     as: b
   - wait: { until: { at: 'editor[file="main.nr"]', current-line: 15 }, timeout: 60s }
