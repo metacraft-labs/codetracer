@@ -975,4 +975,6 @@ src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/viewmo
 src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/viewmodel/views/isonim_event_log_view.nim	db9c4c6924195d6630347f931128a1d0a9d7c22f5b784749911716d1d5ac556a	929024db2e7f1a0804958948376ee61eab2c544bd8549afb4e3700adb42a6530
 src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend/viewmodel/views/isonim_event_log_view.nim	db9c4c6924195d6630347f931128a1d0a9d7c22f5b784749911716d1d5ac556a	929024db2e7f1a0804958948376ee61eab2c544bd8549afb4e3700adb42a6530
 src/frontend/viewmodel/tests/unit/plat18-marshalling-mutation-control.sha256	src/frontend/viewmodel/views/isonim_calltrace_view.nim	2697620b8aa813e868301bf028930639c30e3a78c839bd446a597c13dec886fc	0bddaf43de67e7d42e6a7dbd529fb925fab8c1bd1b1c2221072b60b2118ab881
-src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	.github/workflows/codetracer.yml#plat33-collab-lanes	ca5907537ee0f3bccfe8547053ab124f422db41985a64c3b6eff47bf25769206	e68aa5bd6af6e98223cc920519c97e890403cab72855b0c40c24986cbf90f024
+# 5bfdeb5ae64 moved the collaboration lanes into viewmodel-tests.yml; the examples
+# suite now reads codetracer.yml with the workflows it calls, so plat33-collab owes a re-grade.
+src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_editor_collab_examples.nim	9d5c50c7146301ed8a5552b668b51672db8f91af7473503a90334ad987228cbb	5ed19dba8795a97e566e7aeb6ac94d3d237a6d2f2eb22709eb852e8bcf2912b5

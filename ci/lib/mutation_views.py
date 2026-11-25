@@ -25,6 +25,7 @@ digest on stdout), so the two cannot disagree about a view.
 from __future__ import annotations
 
 import hashlib
+import re
 import sys
 from pathlib import Path
 
@@ -37,7 +38,8 @@ PLAT33_WINDOW = 400
 
 
 def _plat33_collab_lanes(text: str) -> str:
-    """What the examples suite reads of `.github/workflows/codetracer.yml`:
+    """What the examples suite reads of `.github/workflows/codetracer.yml`
+    and the workflows it calls:
     for each collaboration lane, whether `just test-<lane>` occurs, and the
     window before its first occurrence that the suite searches for
     `!cancelled()`."""
@@ -75,11 +77,38 @@ def split_subject(subject: str) -> tuple[str, str]:
     return path, view if sep else ""
 
 
+CALLED_WORKFLOW = re.compile(r"^\s*uses:\s*\./\.github/workflows/(\S+\.ya?ml)\s*$",
+                             re.MULTILINE)
+
+
+def with_called_workflows(path: Path) -> str:
+    """`path`'s text followed by every local workflow its `uses:` lines call,
+    in the order they are called. A job moved into a reusable workflow
+    (`5bfdeb5ae64` moved twelve out of `codetracer.yml`) still runs as part
+    of the caller, so a view of what the caller runs reads the callee too —
+    the same reading `ci/lib/codetracer_workflow.py` gives the other gates."""
+    text = path.read_text(encoding="utf-8")
+    parts = [text]
+    for name in CALLED_WORKFLOW.findall(text):
+        called = path.parent / name
+        if called.is_file():
+            parts.append(called.read_text(encoding="utf-8"))
+    return "".join(parts)
+
+
+# Views over a workflow read what it runs, its called workflows included.
+READERS = {
+    "plat33-collab-lanes": with_called_workflows,
+}
+
+
 def view_text(path: Path, view: str) -> str:
     """The view's text over `path`. An unknown view is a KeyError: an entry
     naming a view nobody defines has nothing to digest, and is never quietly
     read as the whole file."""
-    return VIEWS[view](path.read_text(encoding="utf-8"))
+    fn = VIEWS[view]
+    reader = READERS.get(view, lambda p: p.read_text(encoding="utf-8"))
+    return fn(reader(path))
 
 
 def view_digest(path: Path, view: str) -> str:
