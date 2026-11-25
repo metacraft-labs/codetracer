@@ -3,6 +3,12 @@
 ## MockBackendService replaces only the replay transport so this focused test
 ## can seed visited positions and inspect exact history-jump requests without
 ## recording a program. The view, VM, document events and compiled theme are real.
+## A right press reaches the history menu the way it does on the desktop: the
+## renderer's key router (`ui/key_router.installKeyRouter`, the call the
+## desktop makes at start-up) installs the window's one pointer listener
+## (`dom_pointer`), which resolves the press to `context-menu.open` and opens
+## the menu the button's view handed it (`bindPressMenu`); the view itself no
+## longer listens for `contextmenu`.
 ## Run in the renderer-chromium lane; build the theme before compiling this file.
 ## `CODETRACER_BUILD_DIR` names the build output it is read from.
 
@@ -13,6 +19,7 @@ import ../viewmodel/backend/[backend_service, mock_backend]
 import ../viewmodel/store/[replay_data_store, types]
 import ../viewmodel/viewmodels/debug_controls_vm
 import ../viewmodel/views/isonim_debug_controls_view
+import ../ui/key_router
 
 # The build output differs per platform and the dev shell names it, the same
 # rule as `src/tests/gui/lib/fixtures.ts`. `ci/test/chromium-theme-build-dir-test.sh`
@@ -32,7 +39,9 @@ proc prepare(css: cstring) {.importjs: """
     document.head.appendChild(style);
     document.body.innerHTML = '<div id="menu"><div id="isonim-debug-controls"></div></div>' +
       '<button id="outside" style="position:fixed;top:500px;left:20px;z-index:9000">Outside</button>';
-    document.addEventListener('contextmenu', function(e) { window.historyContextEvent = e; }, true);
+    // On the window and first: the pointer listener, installed after it on the
+    // window, stops a press it performs, so a later listener never sees it.
+    window.addEventListener('contextmenu', function(e) { window.historyContextEvent = e; }, true);
   })(#)
 """.}
 proc toolbarHost(): Node {.importjs: "document.getElementById('isonim-debug-controls')".}
@@ -71,6 +80,7 @@ proc main() {.async.} =
   var disposeRoot: proc()
   try:
     prepare(cstring ThemeCss)
+    installKeyRouter()
     let mock = newMockBackendService(autoRespond = true)
     let store = createReplayDataStore(mock.toBackendService())
     var vm: DebugControlsVM
