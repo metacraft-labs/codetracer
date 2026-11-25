@@ -28,13 +28,34 @@
 #
 # The output tree is fixed to `debug` because `main.ts` reads
 # `src/build-debug-repro`, whatever `CODETRACER_CONFIG` the caller has set.
+#
+# THE STAMP. After a successful build this sets
+# `src/build-debug-repro/frontend-styles.compiled` to the time the build
+# STARTED. `tools/visual-review/storybook-freshness.mjs` refuses a corpus whose
+# compiled stylesheets are older than a `.styl` source, and it reads them as
+# compiled at the later of that stamp and the oldest `.css`: the stylus edges
+# are cached, so a build that has nothing to recompile leaves every `.css` with
+# its old mtime, and without the stamp the guard would refuse it. The start
+# time, not the end, so that an edit made while the build reads the sources is
+# still newer than the stamp; the same ordering as
+# `scripts/build-storybook-components.sh`. A failed build is not stamped
+# (`set -e` stops before the `touch`). The stamp sits beside `frontend/`, not
+# in it, so `storybook build` does not copy it into the corpus.
 set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd -- "${repo_root}"
+
+styles_stamp=src/build-debug-repro/frontend-styles.compiled
+start_stamp="$(mktemp)"
+trap 'rm -f -- "${start_stamp}"' EXIT
 
 CODETRACER_CONFIG=debug \
 	CODETRACER_REPROBUILD_COMMAND=build \
 	CODETRACER_REPROBUILD_PARTIAL=1 \
 	CODETRACER_REPROBUILD_TARGET=".#frontend-styles" \
 	bash scripts/build-once.sh
+
+# `touch -r` copies the reference's mtime: the portable spelling (BSD touch has
+# no GNU `-d @epoch`).
+touch -r "${start_stamp}" "${styles_stamp}"

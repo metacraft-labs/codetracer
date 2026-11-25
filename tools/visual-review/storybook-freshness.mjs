@@ -94,6 +94,45 @@ export function componentsCompiledAt(bundle) {
   return Math.max(at(bundle), at(join(dirname(bundle), COMPONENTS_STAMP)));
 }
 
+// The stamp `just storybook-styles` (scripts/build-storybook-styles.sh) sets to
+// the START of every successful compile of the stylesheets StoryBook draws,
+// `src/build-debug-repro/frontend/styles/*.css`. It sits beside the
+// `frontend` directory, not in it, so `storybook build` does not copy it into
+// the corpus and it is no source of `storybook-static`. It does for the
+// stylesheets what `COMPONENTS_STAMP` does for the bundle: the stylus edges are
+// cached, so a build after an edit that leaves the CSS byte-identical (or a
+// checkout that only rewrites a `.styl`'s mtime) need not rewrite a `.css`.
+export const STYLES_STAMP = "frontend-styles.compiled";
+
+// stylesheetsCompiledAt(stylesDir, stamp) -> { at, oldest }: when the compiled
+// stylesheets in `stylesDir` were last compiled, as one set, and the oldest of
+// them. `at` is the later of the stamp's mtime and the OLDEST stylesheet's
+// mtime: every one of them is current as of then, and one older stylesheet is
+// enough to draw a story with CSS from before an edit. `oldest` is null when
+// there are no stylesheets.
+export function stylesheetsCompiledAt(stylesDir, stamp) {
+  let oldest = null;
+  let entries = [];
+  try {
+    entries = readdirSync(stylesDir, { withFileTypes: true });
+  } catch {
+    entries = [];
+  }
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".css")) continue;
+    const path = join(stylesDir, entry.name);
+    const mtimeMs = statSync(path).mtimeMs;
+    if (oldest === null || mtimeMs < oldest.mtimeMs) oldest = { path, mtimeMs };
+  }
+  let stampAt = 0;
+  try {
+    stampAt = statSync(stamp).mtimeMs;
+  } catch {
+    stampAt = 0;
+  }
+  return { at: Math.max(stampAt, oldest === null ? 0 : oldest.mtimeMs), oldest };
+}
+
 // requireFreshStorybookStatic(repoRoot) — throws unless the storybook corpus is
 // current with respect to everything it is made of.
 //
@@ -147,6 +186,39 @@ export function requireFreshStorybookStatic(repoRoot) {
         "These screenshots would be reviewed as the current design while showing an older one.\n" +
         "Rebuild with `just storybook-build` (i.e. run this without --no-build), then run this again.",
     );
+  }
+
+  // THE COMPILED STYLESHEETS AGAINST THEIR SOURCES. The rule above compares
+  // the corpus with the `.styl` files and with the build tree it copies, and
+  // neither catches a corpus built AFTER a stylesheet edit from a build tree
+  // whose CSS was compiled BEFORE it: `npm run build-storybook` (or any
+  // `storybook build` without `just storybook-styles`) copies whatever CSS the
+  // last `just build-once` left, and the copy is newer than both. Measured
+  // 2026-11-25 on codetracer bc0793acb4: a corpus built at 13:09 from `.styl`
+  // files checked out at 13:06 carried CSS compiled on 2026-11-22, before the
+  // ring became an `outline` and before the busy spinner existed; this guard
+  // passed it, and the render check then refused three stories over play
+  // assertions (`outlineStyle` 'none', spinner width 0) that were right about
+  // the stylesheet and wrong about why. So the stylesheets are refused here,
+  // before any story is drawn, naming the cause.
+  const stylesDir = join(repoRoot, `src/${buildDir}/frontend/styles`);
+  const stylSources = join(repoRoot, "src/frontend/styles");
+  if (existsSync(stylSources)) {
+    const { at: stylesAt, oldest } = stylesheetsCompiledAt(stylesDir, join(repoRoot, `src/${buildDir}`, STYLES_STAMP));
+    if (oldest === null) {
+      throw new Error(
+        `Missing compiled stylesheets: ${stylesDir} has no .css, so the corpus draws no stylesheet.\n` +
+          "Rebuild with `just storybook-build`, which compiles them (`just storybook-styles`), then run this again.",
+      );
+    }
+    const newerStyl = firstNewerThan([stylSources], stylesAt);
+    if (newerStyl) {
+      throw new Error(
+        `Stale storybook stylesheets: ${oldest.path} was compiled before its source ${newerStyl}.\n` +
+          "The corpus would draw the CSS from before that edit.\n" +
+          "Rebuild with `just storybook-build`, which compiles them (`just storybook-styles`), then run this again.",
+      );
+    }
   }
 
   // The components bundle is the other end of the same chain: `storybook-build`

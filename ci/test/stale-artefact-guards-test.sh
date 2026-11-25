@@ -124,7 +124,7 @@ BUILD_SIBLINGS="${SUITE_ROOT}/scripts/build-siblings.sh"
 # Every contract this suite claims to check. A suite that silently runs fewer
 # assertions than it advertises is a suite that stops protecting anything, so
 # the count is asserted at the end and has to be changed deliberately.
-EXPECTED_ASSERTIONS=167
+EXPECTED_ASSERTIONS=177
 
 ASSERTIONS=0
 FAILURES=0
@@ -433,6 +433,9 @@ SB_T_REBUILD4=202001120000 # corpus rebuilt, fresh again
 SB_T_STYL=202001130000     # a stylesheet source outruns the corpus
 SB_T_STAMP2=202001140000   # the bundle recompiled unchanged after that edit
 SB_T_REBUILD5=202001150000 # corpus rebuilt (styles recompiled), fresh again
+SB_T_STYL2=202001160000    # a stylesheet edit after the styles were compiled
+SB_T_REBUILD6=202001170000 # corpus rebuilt WITHOUT recompiling the styles
+SB_T_SSTAMP=202001180000   # `just storybook-styles`: cached, only its stamp moves
 
 # `firstNewerThan` walks directories but only ever COMPARES files (it recurses
 # on `isDirectory()` and stats the leaves), so stamping the files is enough and
@@ -536,9 +539,11 @@ touch -t "${SB_T_NIM}" "${SB}/src/frontend/ui.nim"
 # `.styl` edit leaves `components.js` byte-identical, so the remedy that rule
 # names (`just build-storybook-components`) moves only the stamp, and the
 # corpus then passed both rules with stale CSS.
-mkdir -p "${SB}/src/frontend/styles"
+mkdir -p "${SB}/src/frontend/styles" "${SB}/src/build-debug-repro/frontend/styles"
 printf 'x\n' >"${SB}/src/frontend/styles/loader.styl"
-touch -t "${SB_T_SOURCES}" "${SB}/src/frontend/styles/loader.styl"
+printf 'x\n' >"${SB}/src/build-debug-repro/frontend/styles/loader.css"
+touch -t "${SB_T_SOURCES}" "${SB}/src/frontend/styles/loader.styl" \
+	"${SB}/src/build-debug-repro/frontend/styles/loader.css"
 touch -t "${SB_T_REBUILD4}" "${SB}/storybook/dist/components.js" \
 	"${SB}/storybook/storybook-static/index.html"
 assert_contains "$(check_storybook)" "FRESH" \
@@ -551,9 +556,73 @@ assert_contains "$(check_storybook)" "loader.styl" \
 	"the refusal names the stylesheet that outran the build"
 assert_contains "$(check_storybook)" "just storybook-build" \
 	"the refusal names the recipe that recompiles the stylesheets"
-touch -t "${SB_T_REBUILD5}" "${SB}/storybook/storybook-static/index.html"
+# `just storybook-build` recompiles the stylesheet and then builds the corpus;
+# equal mtimes read as fresh (the compare is strict).
+touch -t "${SB_T_REBUILD5}" "${SB}/src/build-debug-repro/frontend/styles/loader.css" \
+	"${SB}/storybook/storybook-static/index.html"
 assert_contains "$(check_storybook)" "FRESH" \
 	"rebuilding the corpus makes it green again"
+
+# THE CORPUS NEWER THAN THE STYLESHEET SOURCES, ITS CSS OLDER THAN THEM. A
+# `storybook build` run without `just storybook-styles` (`npm run
+# build-storybook` by hand) after a `.styl` edit copies the CSS the last
+# `just build-once` left. The corpus is newer than every source, so the rule
+# above passes it, and its stories draw the stylesheet from before the edit.
+# Measured on codetracer bc0793acb4 (2026-11-25): such a corpus passed this
+# guard and the render check then refused three Agent Harbor stories over
+# play assertions about a ring and a spinner the stale CSS did not have.
+# As in that measurement, the components bundle was recompiled after the edit
+# (`just build-storybook-components`, which only moves its stamp), so the
+# components rule passes it too and only the stylesheet rule can refuse it.
+touch -t "${SB_T_STYL2}" "${SB}/src/frontend/styles/loader.styl"
+touch -t "${SB_T_REBUILD6}" "${SB}/storybook/dist/components.js.compiled" \
+	"${SB}/storybook/storybook-static/index.html"
+run_expect_failure "a corpus built after a stylesheet edit from CSS compiled before it is refused" \
+	"Stale storybook stylesheets" -- check_storybook
+assert_contains "$(check_storybook)" "loader.css" \
+	"the refusal names the compiled stylesheet"
+assert_contains "$(check_storybook)" "loader.styl" \
+	"...and the source that outran it"
+assert_contains "$(check_storybook)" "just storybook-styles" \
+	"...and the recipe that compiles the stylesheets"
+
+# The stylus edges are cached: `just storybook-styles` after an edit that
+# leaves the CSS byte-identical rewrites no `.css`, and sets only its stamp
+# (`src/build-debug-repro/frontend-styles.compiled`) to the start of the
+# build. The stylesheets are current as of the stamp, and the stamp is no
+# source of the corpus (it sits beside `frontend/`, which `storybook build`
+# copies), so the corpus stays fresh. The same `just storybook-build` also
+# recompiles the components bundle, which the `.styl` edit (a file under
+# `src/frontend`) would otherwise leave stale by the components rule.
+touch -t "${SB_T_SSTAMP}" "${SB}/src/build-debug-repro/frontend-styles.compiled" \
+	"${SB}/storybook/dist/components.js.compiled"
+assert_contains "$(check_storybook)" "FRESH" \
+	"a styles compile stamp newer than the source keeps unchanged CSS current, and the corpus fresh"
+rm -f "${SB}/src/build-debug-repro/frontend-styles.compiled"
+run_expect_failure "...and without the stamp the same CSS is refused" \
+	"Stale storybook stylesheets" -- check_storybook
+touch -t "${SB_T_SSTAMP}" "${SB}/src/build-debug-repro/frontend-styles.compiled"
+
+# One stale stylesheet is enough: the oldest decides, not the newest.
+printf 'x\n' >"${SB}/src/build-debug-repro/frontend/styles/theme.css"
+touch -t "${SB_T_SOURCES}" "${SB}/src/build-debug-repro/frontend/styles/theme.css"
+rm -f "${SB}/src/build-debug-repro/frontend-styles.compiled"
+touch -t "${SB_T_SSTAMP}" "${SB}/src/build-debug-repro/frontend/styles/loader.css" \
+	"${SB}/storybook/storybook-static/index.html"
+run_expect_failure "one compiled stylesheet older than the sources is refused while another is current" \
+	"theme.css" -- check_storybook
+rm -f "${SB}/src/build-debug-repro/frontend/styles/theme.css"
+assert_contains "$(check_storybook)" "FRESH" \
+	"...and removing it makes it green again"
+
+# A build tree with stylesheet sources and no compiled stylesheet draws every
+# story unstyled: refused, with the remedy.
+mv "${SB}/src/build-debug-repro/frontend/styles/loader.css" "${TEST_ROOT}/loader.css.saved"
+run_expect_failure "stylesheet sources with no compiled stylesheet are refused" \
+	"Missing compiled stylesheets" -- check_storybook
+mv "${TEST_ROOT}/loader.css.saved" "${SB}/src/build-debug-repro/frontend/styles/loader.css"
+assert_contains "$(check_storybook)" "FRESH" \
+	"...and restoring it makes it green again"
 rm -f "${SB}/storybook/dist/components.js.compiled"
 touch -t "${SB_T_REBUILD3}" "${SB}/storybook/dist/components.js"
 
