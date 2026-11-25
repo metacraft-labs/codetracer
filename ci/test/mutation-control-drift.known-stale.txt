@@ -255,7 +255,6 @@ src/frontend/tui/tests/plat55-problems-mutation-control.sha256	src/frontend/head
 src/frontend/tui/tests/plat59-visual-replay-mutation-control.sha256	src/frontend/view_vocabulary/pane_views.nim	81eff64b1711b9a013b85a03cd3c7014747b8d9014fd3ddc3084ba7383350bea	5b322241f6c9aeb977548b135edcf9f5995b56d6c3c9469379a6ef1810c677f0
 src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/view_vocabulary/pane_views.nim	81eff64b1711b9a013b85a03cd3c7014747b8d9014fd3ddc3084ba7383350bea	5b322241f6c9aeb977548b135edcf9f5995b56d6c3c9469379a6ef1810c677f0
 src/frontend/tui/tests/plat70b-table-mutation-control.sha256	src/frontend/tui/app/views/shell.nim	2ffb13fa4541be85cde288716f6194d877ab06069ee57f2b4386f3edc9e7afae	6a21298445ac4d112fa8dc906f943865ec39d4b42040fbfaf6d1b147778f2d8a
-src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/viewmodel/views/isonim_low_level_code_view.nim	efdc4537b69d3f243da39f93f2ac218aab72ec4af8e61bd94990fad61fe178b2	4639999928ec77f6ba9cddee0bd6dd5a96770405721896505ff4679c94536dea
 
 # The Test Results pane leaves a running test's duration empty
 # (test_results_vm.rowDuration, with one added check in the PLAT-53 unit test),
@@ -593,11 +592,8 @@ ci/test/plat70-find-decisions-mutation-control.sha256	src/frontend/gpui/app/leav
 # terminal output's value reads gained a frame arm), the panel host,
 # dom_pane_presses and ui_js gained the -d:ctWasmPanes arm, the lane file
 # lists the transport test and the lane runner shares the wasm object cache.
-src/frontend/tui/tests/plat52-terminal-mutation-control.sha256	src/frontend/viewmodel/views/isonim_terminal_output_view.nim	a0cefbc87feb909e990970968e69f06cbdcad37ceb53420628727d68e6dc9158	3d101f8799b6b69d24ddf719a16f32205166391ec4319264ad57e2adf711bf7e
 src/frontend/tui/tests/plat56-build-output-mutation-control.sha256	src/frontend/viewmodel/views/isonim_build_view.nim	9b539e6905aabf437123f72cec1a204c75594ef0490ed16390aec50d7ccdfa78	cf4aaa4d73c38d3a48ff143f5ef9b564bf8cef969b55ff1e3f2d8fc0ddc571fb
-src/frontend/tui/tests/plat57-find-in-files-mutation-control.sha256	src/frontend/viewmodel/views/isonim_search_results_view.nim	f46ce588770cdc9b283d2d8cd33333962f15391bc9343b3207b3f55f243c531d	f0ad78aa5b0d77803be89e2fad8df7c27cf849ae20b3a5bb1fd7ea864cba826d
 src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend/viewmodel/input/dom_pane_presses.nim	c81194a315115893a9bacf18b75fb8c4ee3c1264d558dc3f97ea9ff10cf8a12a	a858b4295174a03fd8dd6a2a8185d2be5373e153502a4150f35e0040f0327fe6
-src/frontend/tui/tests/plat70d-grep-mutation-control.sha256	src/frontend/viewmodel/views/isonim_search_results_view.nim	f46ce588770cdc9b283d2d8cd33333962f15391bc9343b3207b3f55f243c531d	f0ad78aa5b0d77803be89e2fad8df7c27cf849ae20b3a5bb1fd7ea864cba826d
 
 # 2026-11-21, the terminal binding's Variables reader reads the column layout
 # (a fold glyph, then name, type and value), for the project-definitions port.
@@ -975,3 +971,7 @@ src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/viewmo
 src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/viewmodel/views/isonim_agent_activity_view.nim	7ec8761f6a0ce7efd11398c30cd70dffc44c62bf3309573f21a6622fb05cf619	4805976531f6d5bd354440fc459b66ecbd7d62e31010e5ce617a7a5c807eb344
 src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	8bda0738c9719a3f394aa9ee384bc2c920800d78e38e9b540d58ff8a018e0cc0	45861601d924d06eb06ccff5863428caad370c895a21b723c835fa09b7a568ad
 src/frontend/viewmodel/tests/unit/plat18-marshalling-mutation-control.sha256	src/frontend/viewmodel/views/isonim_calltrace_view.nim	2697620b8aa813e868301bf028930639c30e3a78c839bd446a597c13dec886fc	01309d7e269b44babab798d9a68e55af2126b8da1ef75931ae30e18a29a477de
+src/frontend/tui/tests/plat52-terminal-mutation-control.sha256	src/frontend/viewmodel/views/isonim_terminal_output_view.nim	a0cefbc87feb909e990970968e69f06cbdcad37ceb53420628727d68e6dc9158	6000d4614d77638810efaff5a860360c0acda83d026e05fbf16acfe0e717db24
+src/frontend/tui/tests/plat57-find-in-files-mutation-control.sha256	src/frontend/viewmodel/views/isonim_search_results_view.nim	f46ce588770cdc9b283d2d8cd33333962f15391bc9343b3207b3f55f243c531d	f4a1895deb9ba53fb412013c335fd2559e2239a5e56f7a6c34728c5ff41bd6a1
+src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/viewmodel/views/isonim_low_level_code_view.nim	efdc4537b69d3f243da39f93f2ac218aab72ec4af8e61bd94990fad61fe178b2	79db397eca5b2087f2519af99bc1003ced3222fa5e3de256f207d0afe63704bc
+src/frontend/tui/tests/plat70d-grep-mutation-control.sha256	src/frontend/viewmodel/views/isonim_search_results_view.nim	f46ce588770cdc9b283d2d8cd33333962f15391bc9343b3207b3f55f243c531d	f4a1895deb9ba53fb412013c335fd2559e2239a5e56f7a6c34728c5ff41bd6a1
