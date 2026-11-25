@@ -1660,6 +1660,16 @@ if ([string]::IsNullOrWhiteSpace($clExe)) {
   }
 }
 [Environment]::SetEnvironmentVariable("WINDOWS_DIY_CL_EXE", $clExe, "Process")
+# Cargo's x64 MSVC linker as an ABSOLUTE path, from beside the x64 cl.exe.
+# The bare "link.exe" set above resolves to Git Bash's coreutils `link` when
+# cargo runs under bash, as the origin-DAP gates do, and every build script
+# then fails with "link: extra operand" (run 45686408279).
+if (-not [string]::IsNullOrWhiteSpace($clExe) -and $clExe -match '\\x64\\cl\.exe$') {
+  $msvcLink = Join-Path (Split-Path -Parent $clExe) "link.exe"
+  if (Test-Path -LiteralPath $msvcLink -PathType Leaf) {
+    [Environment]::SetEnvironmentVariable("CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER", $msvcLink, "Process")
+  }
+}
 # The toolset-version assertion reads the version out of the resolved cl.exe,
 # so it is only meaningful when one was found.
 if (-not [string]::IsNullOrWhiteSpace($msvcToolsetPinnedVersion) -and
