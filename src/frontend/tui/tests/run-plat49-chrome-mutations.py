@@ -1461,6 +1461,21 @@ def build_for(suite: str) -> bool:
 
 
 _ACTIVE: list | None = None
+_DIRTY: set = set()
+  # binaries last built from a MUTATED tree ("tui", "gpui")
+
+
+def rebuild_restored() -> bool:
+    """Rebuild every binary a mutant left behind, from the restored tree."""
+    ok = True
+    if "tui" in _DIRTY:
+        ok = build_tui() and ok
+    if "gpui" in _DIRTY:
+        ok = build_gpui() and ok
+    _DIRTY.clear()
+    if not ok:
+        print("the restored tree's binary does not build")
+    return ok
 
 
 def install_restore_on_signal() -> None:
@@ -1694,10 +1709,14 @@ def main() -> int:
                 if digest(p) != baseline[p]:
                     print(f"{arm.id:<4} HARNESS-FAILURE      {p} did not "
                           "restore to its control bytes")
+                    rebuild_restored()
                     return 2
-            if not build_for(suite):
-                print("the restored tree's binary does not build")
-                return 2
+            # The restored tree's binary is rebuilt before the harness exits
+            # (`rebuild_restored`), not after every arm: the next arm graded
+            # on that binary rebuilds it with its own defect anyway, and no
+            # other suite runs it. That halves the builds of a binary arm.
+            if suite in BINARY_SUITES or suite in GPUI_BINARY_SUITES:
+                _DIRTY.add(suite in BINARY_SUITES and "tui" or "gpui")
         if res.hung:
             verdict, note = "HUNG", f"no result in {SUITE_TIMEOUT}s"
             problems += 1
@@ -1716,6 +1735,8 @@ def main() -> int:
         print(f"{arm.id:<4} {verdict:<16} {note}")
         sys.stdout.flush()
 
+    if not rebuild_restored():
+        problems += 1
     print(f"\n{killed}/{len(wanted)} killed, {problems} problem(s)")
     return 0 if problems == 0 else 1
 
