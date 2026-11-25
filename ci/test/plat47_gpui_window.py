@@ -427,8 +427,15 @@ def hover_reveal(win, ptr, rect):
         if rv:
             break
     if rv:
+        # The geometry says the pane is revealed as soon as the window decided
+        # it; the frame that DRAWS it may still be pending. Waiting only for the
+        # geometry, a capture under load grabbed the pre-reveal frame: "changed
+        # @[]" between dock-committed and dock-revealed (2026-11-23 and
+        # 2026-11-24, one run of five each, 50 stress-ng workers).
+        drawn_after_change(win, "the docked pane revealed by the hover")
         ptr.move(*centre(rv["rect"]), steps=3, pause_ms=20)
         time.sleep(0.4)
+        drawn_after_change(win, "the pointer moved into the revealed pane")
     return rv
 
 
@@ -625,37 +632,42 @@ def capture():
         # --- the VCS pane refreshes on its own, as the desktop's does: a file
         # written by ANOTHER program, no input to the window, one refresh
         # interval (5 s, `vcs_vm.VCSRefreshIntervalMs`) and a margin.
-        # The refreshes counted are the ones after this write: the pane's
-        # first read is applied in the background and traced the same way.
-        # So that first read must be in before the write. Under load it came
-        # back after the count was taken and was counted as the refresh: the
-        # capture then showed "Working Tree (3)" with no late.txt and no
-        # pixel changed (two of five runs, 2026-11-23, 50 stress-ng workers).
-        def vcs_refreshes():
+        # Each refresh that redraws the pane traces `vcs refreshed working=N`,
+        # N the working tree's rows. The refresh this step is about is the one
+        # that shows one row MORE than before the write: a read that was already
+        # in flight when the file was written (the pane's first read, or the
+        # re-read its newly measured history list asks for when the VCS tab is
+        # activated) redraws the pane too, and under load such a read landed
+        # after the write and was taken for it -- the capture then showed
+        # "Working Tree (3)", no late.txt and no changed pixel (2026-11-23 two
+        # runs of five, 2026-11-24 run 1 of five, 50 stress-ng workers).
+        def vcs_counts():
             with open(os.path.join(OUT, "a.run.log")) as f:
-                return sum(1 for l in f.read().splitlines() if l == "gesture vcs refreshed")
+                return [int(l.rsplit("=", 1)[1]) for l in f.read().splitlines()
+                        if l.startswith("gesture vcs refreshed working=")]
         deadline = time.time() + 120.0
-        while vcs_refreshes() == 0:
+        while not vcs_counts():
             if time.time() > deadline:
                 raise RuntimeError("PLAT-47: the VCS pane's first read was never "
                                    "applied (no 'gesture vcs refreshed' within 120s)")
             time.sleep(0.25)
-        seen = vcs_refreshes()
+        before = vcs_counts()
         with open(os.path.join(OUT, "vcs-refresh.before"), "w") as f:
-            f.write(str(seen))
+            json.dump({"refreshes": len(before), "working": before[-1]}, f)
         with open(os.path.join(repo, "late.txt"), "w") as f:
             f.write("written while the window was open\n")
         # Not a fixed sleep: under load one refresh interval and a margin did
-        # not see the refresh applied. Wait for the window to trace a refresh
-        # after the write, then for a frame drawn after it.
+        # not see the refresh applied. Wait for the window to trace the refresh
+        # that lists the new file, then for a frame drawn after it.
         deadline = time.time() + 120.0
         while time.time() < deadline:
-            if vcs_refreshes() > seen:
+            if before[-1] + 1 in vcs_counts()[len(before):]:
                 break
             time.sleep(0.25)
         else:
-            raise RuntimeError("PLAT-47: the VCS pane traced no refresh within 120s "
-                               "of a file written into its repository")
+            raise RuntimeError("PLAT-47: the VCS pane traced no refresh listing "
+                               f"{before[-1] + 1} working-tree rows within 120s of a "
+                               "file written into its repository")
         drawn_after_change(win, "the VCS refresh")
         steps["vcs-refresh"] = settle("vcs-refresh")
         # --- a docked pane stays reachable: dock the Variables pane with its
@@ -711,11 +723,29 @@ def capture():
         body = node_of(g, "calltrace")["body"]
         bx, by = centre(body)
         ptr.jump(bx, by)
-        # Turn the wheel until the pane stops moving (its last row is then
-        # the trace's last call), a burst at a time.
+        # Turn the wheel until the pane shows the trace's last row, a burst at
+        # a time. The pane traces `calltrace top=T rows=R total=N`, so the end
+        # is T + R >= N, not a guess from the top standing still. Under load a
+        # burst moved the pane one section (9 rows), and 40 bursts stopped at
+        # top 288 of 603 (2026-11-24, run 4 of five, 50 stress-ng workers).
+        # The cap is a time bound now, and a pane that stops moving short of
+        # the end for five bursts in a row ends the turning too (the record
+        # then shows where it stopped).
         last = None
         unchanged = 0
-        for _ in range(40):
+        wheel_deadline = time.time() + 1800.0
+        while time.time() < wheel_deadline:
+            # A one-pixel motion and back over the body before each burst.
+            # Under CPU load, sway delivered NONE of a burst's axis events to
+            # the window unless the pointer had just moved over it: the
+            # virtual pointer sent all 80 `wheel 3` of a probe and sway
+            # acknowledged every round trip in milliseconds, yet the window's
+            # client received 0, 38, 40 or 70 of them (50 stress-ng workers on
+            # its CPUs); with this motion before each burst it received 80 of
+            # 80, twice, and handled every one (codetracer-pm issue
+            # 2026-11-25-headless-sway-drops-wheel-events-without-a-fresh-
+            # pointer-motion-under-load.md).
+            ptr.send(f"abs {bx + 1} {by}", "sleep 30", f"abs {bx} {by}", "sleep 30")
             for _ in range(10):
                 ptr.send("wheel 3", "sleep 30")
             ptr.send("sleep 400")
@@ -743,11 +773,13 @@ def capture():
             tops = [l for l in open(os.path.join(OUT, "b.run.log")).read().splitlines()
                     if l.startswith("gesture calltrace top=")]
             top = tops[-1] if tops else None
-            # The end is the same top after THREE bursts in a row: one burst
-            # the window took late must not read as the end.
+            if top is not None:
+                f = dict(kv.split("=", 1) for kv in top.split()[2:])
+                if int(f["top"]) + int(f["rows"]) >= int(f["total"]):
+                    break
             if top is not None and top == last:
                 unchanged += 1
-                if unchanged >= 2:
+                if unchanged >= 5:
                     break
             else:
                 unchanged = 0
@@ -1277,8 +1309,12 @@ def record():
     log_a = open(os.path.join(OUT, "a.run.log")).read().splitlines()
     out["vcsRefresh"] = {
         "text": ocr(os.path.join(OUT, "vcs-refresh.ppm"), files["body"], "vcs-refresh"),
-        "refreshes": sum(1 for l in log_a if l == "gesture vcs refreshed") -
-                     int(open(os.path.join(OUT, "vcs-refresh.before")).read()),
+        # The redraws the write caused: refreshes after it that list the new
+        # row count (a re-read in flight across the write is not one of them).
+        "refreshes": (lambda b: sum(
+            1 for l in log_a[:] if l.startswith("gesture vcs refreshed working=")
+            and int(l.rsplit("=", 1)[1]) == b["working"] + 1))(
+            json.load(open(os.path.join(OUT, "vcs-refresh.before")))),
         "changedPixels": changed_bbox(frames["vcs"], frames["vcs-refresh"])[1],
         "changedBBox": changed_bbox(frames["vcs"], frames["vcs-refresh"])[0],
         "paneBody": files["body"],

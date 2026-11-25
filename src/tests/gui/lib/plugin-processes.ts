@@ -192,3 +192,84 @@ export async function pressRecoveryChord(page: Page): Promise<void> {
   await Promise.all(sent);
   await cdp.detach();
 }
+
+/** A plugin's status item `item`, as the session's plugin state names it. */
+export function statusText(st: any, plugin: string, item: string): string {
+  const it = (st?.status ?? []).find((s: any) => s.plugin === plugin && s.item === item);
+  return it ? String(it.text) : "";
+}
+
+/** The page's debugger line, for a red run's message ("?" before a stop). */
+export async function debuggerLine(page: Page): Promise<string> {
+  return await page.evaluate(() => {
+    const d = (window as any).data;
+    const loc = d?.sessions?.[d.activeSessionIndex]?.services?.debugger?.location;
+    return loc ? `line ${loc.line}` : "?";
+  });
+}
+
+/** A plugin's command `op`, as the session's plugin state lists it, or null. */
+export function commandOf(st: any, plugin: string, op: string): any {
+  return (st?.commands ?? []).find((c: any) => c.plugin === plugin && c.op === op) ?? null;
+}
+
+/**
+ * Step over (F10, which no plugin binds) until `plugin`'s status item `item`
+ * names exactly ONE changed value, at most 25 times and within 6 minutes (so
+ * a red run still reaches its assertion and says what the item read at each
+ * stop). Returns that value ("" when no step did) and what the item read at
+ * each stop, for the failure message.
+ *
+ * The item is read only once the plugin has answered about the NEW stop: the
+ * session has moved past the stop before the key, and `command`'s enablement
+ * (pushed with the item, after it) was computed there. Read as soon as the
+ * key was pressed, the item still named the last stop's change: F7 then
+ * watched that value while the step landed on the next stop, whose own
+ * change it never watched (measured at load ~170). The same early read made
+ * the loop press F10 again at once, while the step was still running: the
+ * window ignores a step key during a step (7 presses in 0.6 s made one `next`
+ * request, measured), so 25 tries were spent inside a few slow steps and
+ * stepping looked stopped. The wait is on the new stop, so it is long enough
+ * for a loaded replay. "changed: …" is the plugin's reading before it knows
+ * the new stop's changes. At a new stop the plugin may push more than one
+ * reading (what it can tell at once, then the stop's own changes as they
+ * arrive), so the item is taken once it has held still for 1.5 s at the new
+ * stop.
+ */
+export async function stepUntilOneChange(
+  page: Page, plugin: string, item: string, command: string,
+): Promise<{ changed: string; seen: string[] }> {
+  let changed = "";
+  const seen: string[] = [];
+  const loopUntil = Date.now() + 360_000;
+  for (let i = 0; i < 25 && changed === "" && Date.now() < loopUntil; i++) {
+    const before = (await pluginState(page))?.position ?? -1;
+    // The window's key, not a focused control's.
+    await page.evaluate(() => (document.activeElement as any)?.blur?.());
+    await page.keyboard.press("F10");
+    const deadline = Date.now() + 60_000;
+    let text = "";
+    let heldSince = 0;
+    let held = "";
+    while (Date.now() < deadline) {
+      const st = await pluginState(page);
+      const at = st?.position ?? -1;
+      const cmd = commandOf(st, plugin, command);
+      text = statusText(st, plugin, item);
+      const current = at > before && cmd?.position === at &&
+        text.startsWith("changed: ") && text !== "changed: …";
+      if (!current) {
+        held = ""; heldSince = 0;
+      } else if (text !== held) {
+        held = text; heldSince = Date.now();
+      } else if (Date.now() - heldSince >= 1_500) {
+        break;
+      }
+      await page.waitForTimeout(300);
+    }
+    seen.push(`${await debuggerLine(page)}: ${text}`);
+    const m = /^changed: ([^,\s…]+)$/.exec(text);
+    if (m && m[1] !== "none") changed = m[1];
+  }
+  return { changed, seen };
+}

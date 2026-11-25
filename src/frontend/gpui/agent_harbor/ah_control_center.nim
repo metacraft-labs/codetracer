@@ -106,7 +106,9 @@ const
     ## about one initiative's title, bar and current milestone (GPUI review
     ## round 3, 2026-11-24: capped only to the overview less the panel's
     ## head, the waiting list left the panel its head and one title at the
-    ## sidebar size; study D84).
+    ## sidebar size; study D84). The least of it: where the first
+    ## initiative is taller, the panel keeps that row whole instead
+    ## (`initiativesFloorPx`).
   OverviewFloorPx* = HeadPx + 2 * ListPadPx + WaitingRowMostPx + MoreLinePx +
                      ColumnGapPx + HeadPx + InitiativesFloorPx
     ## The least height the overview keeps under the launch column in one
@@ -115,6 +117,25 @@ const
     ## Under it the form folds to its summary (study D84). The panel's head
     ## is counted here as one line (`HeadPx`); where its summary wraps, the
     ## one column adds the rest (`initiativesHeadPx`).
+
+proc initiativesFloorPx*(vm: ControlCenterVM; widthPx: int): int =
+  ## What the Initiatives panel keeps under its head band in one column:
+  ## `InitiativesFloorPx`, and at least its first initiative whole with the
+  ## `+N more` line under it. The panel draws whole rows only and counts the
+  ## rest (a GPUI window does not scroll), and 120px holds no whole
+  ## initiative at the sidebar size (the synthetic set's first is 213px with
+  ## its sessions): the panel would be its head over `+4 more` (issue
+  ## 2026-11-24-the-gpui-initiatives-panel-cuts-its-last-row-through-its-letters).
+  ## The waiting list keeps one whole row and its `+N more` line the same way
+  ## (`OverviewFloorPx`), and first: where the window cannot hold both, the
+  ## waiting row stays and the panel counts its initiatives instead.
+  result = InitiativesFloorPx
+  let ini = vm.initiatives
+  if ini.state.val == asReady:
+    let rows = ini.rows
+    if rows.len > 0:
+      result = max(result, initiativeRowPx(rows[0], widthPx, TabLinePx) +
+                           (if rows.len > 1: ListMoreLinePx else: 0))
 
 proc launchWidthPx*(widthPx: int): int =
   ## The launch column's width in two columns: 45% of the tab, never under
@@ -369,6 +390,15 @@ proc waitingHeightPx*(vm: ControlCenterVM; innerPx: int): int =
   if rows.len == 0: return result + NoneLinePx
   for row in rows: result += waitingRowHeightPx(row, innerPx)
 
+proc firstWaitingRowPx(vm: ControlCenterVM; innerPx: int): int =
+  ## The waiting section with its first row whole and the `+N more` line
+  ## counting the others: what one column keeps for it before the
+  ## Initiatives panel is given its first initiative whole (study D84). The
+  ## whole section where it has no row or only one.
+  let rows = vm.waiting
+  if rows.len <= 1: return vm.waitingHeightPx(innerPx)
+  HeadPx + 2 * ListPadPx + waitingRowHeightPx(rows[0], innerPx) + MoreLinePx
+
 proc stateInk(p: AhPalette; attention: SessionAttention): string =
   ## Needs input: the warning role, Light's readable hover step at caption
   ## size (the web's and the composer's rule); an ended turn: the caption.
@@ -413,7 +443,7 @@ proc drawWaitingRow(r: GpuiRenderer; p: AhPalette; row: WaitingRow; innerPx: int
 
 proc overviewColumn(r: GpuiRenderer; p: AhPalette; vm: ControlCenterVM;
                     widthPx, heightPx: int; press: ControlCenterPress;
-                    waitingCapPx = -1): GpuiElement =
+                    waitingCapPx = -1; visiblePx = -1): GpuiElement =
   ## The waiting sessions over the Initiatives panel, `widthPx` ×
   ## `heightPx` (study D73): the waiting list as tall as its rows and at
   ## most 45%, the panel filling the rest. In one column the web's tab
@@ -427,6 +457,11 @@ proc overviewColumn(r: GpuiRenderer; p: AhPalette; vm: ControlCenterVM;
   r.setStyle(result, "height", $heightPx & "px")
   r.tag(result, "cc-overview", "overview")
   r.tag(result, "overview-px", $heightPx)
+  # `visiblePx`: how much of the column the window shows, where it is held
+  # taller than that (one column keeps the overview at its floor even where
+  # the folded form leaves less above the window's foot).
+  let shownPx = if visiblePx >= 0: min(heightPx, visiblePx) else: heightPx
+  r.tag(result, "overview-visible-px", $shownPx)
   let inner = widthPx - 2 * PadXPx
   let ready = vm.state == asReady
   # Whole rows only (GPUI follow-up review): a window that cannot scroll
@@ -437,7 +472,8 @@ proc overviewColumn(r: GpuiRenderer; p: AhPalette; vm: ControlCenterVM;
   # Two columns: at most 45% (D73). One column: the web's list is not capped
   # there (its tab scrolls); a GPUI window does not, so the list keeps to
   # the overview's visible height (`waitingCapPx`), leaving the Initiatives
-  # panel its head and `InitiativesFloorPx` under it.
+  # panel its head and its first initiative whole under it
+  # (`initiativesFloorPx`).
   let capPx = if waitingCapPx >= 0: waitingCapPx else: heightPx * 45 div 100
   var shown = rows.len
   var waitingH = if ready: vm.waitingHeightPx(inner) else: 0
@@ -515,7 +551,11 @@ proc overviewColumn(r: GpuiRenderer; p: AhPalette; vm: ControlCenterVM;
     let host = r.createElement("div")
     r.styles(host, [("width", $widthPx & "px"), ("height", $restH & "px"),
                     ("flex-shrink", "0")])
-    drawInitiativesPanel(r, host, vm.initiatives, p, widthPx, linePx = TabLinePx)
+    # The list keeps to what the window shows of the panel: held at the
+    # overview's floor, the column can end below the window, and a row the
+    # panel drew whole there was cut by the window's foot instead.
+    drawInitiativesPanel(r, host, vm.initiatives, p, widthPx, linePx = TabLinePx,
+                         heightPx = max(0, min(restH, shownPx - (heightPx - restH))))
     # The panel sets its host to fill its parent (`height: 100%`, the
     # column's whole height): here it has the rest under the waiting list.
     r.setStyle(host, "height", $restH & "px")
@@ -563,9 +603,13 @@ proc drawControlCenter*(r: GpuiRenderer; host: GpuiElement; vm: ControlCenterVM;
     # 2026-11-25: with one line assumed, the first session line fell below
     # the window).
     let initiativesHead = vm.initiatives.initiativesHeadPx(widthPx, TabLinePx)
+    # And under that head the panel's first initiative whole, which the
+    # panel draws or leaves out whole (`initiativesFloorPx`).
+    let initiativesFloor = vm.initiativesFloorPx(widthPx)
     let floor = if vm.isEmptyFleet:
                   vm.waitingHeightPx(widthPx - 2 * PadXPx) + ColumnGapPx + HeadPx + EmptyLinePx
-                else: OverviewFloorPx - HeadPx + initiativesHead
+                else: OverviewFloorPx - HeadPx + initiativesHead -
+                      InitiativesFloorPx + initiativesFloor
     if heightPx - launchH - ColumnGapPx < floor:
       (launch, launchH) = r.launchColumn(p, vm, widthPx, press, folded = true)
     r.setStyle(launch, "height", $launchH & "px")
@@ -573,8 +617,10 @@ proc drawControlCenter*(r: GpuiRenderer; host: GpuiElement; vm: ControlCenterVM;
     let rest = max(0, heightPx - launchH - ColumnGapPx)
     if rest > 0:
       r.appendChild(host, r.overviewColumn(p, vm, widthPx, max(rest, floor), press,
-                                           waitingCapPx = max(0, rest - initiativesHead -
-                                                                 InitiativesFloorPx)))
+                                           visiblePx = rest,
+                                           waitingCapPx = max(
+                                             vm.firstWaitingRowPx(widthPx - 2 * PadXPx),
+                                             rest - initiativesHead - initiativesFloor)))
 
 proc mountControlCenter*(r: GpuiRenderer; host: GpuiElement; vm: ControlCenterVM;
                          p: AhPalette; widthPx, heightPx: int;

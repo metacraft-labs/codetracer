@@ -90,6 +90,7 @@ else:
   import std/[os, posix]
 
 import ./protocol
+import ./byte_append
 
 const
   MaxQueuedBytes* = 16 * 1024 * 1024
@@ -418,7 +419,7 @@ when defined(js):
     let logged = proc(d: JsObject) =
       let data = toNimString(d)
       if not link.stderrSink.isNil: link.stderrSink(data)
-      link.stderrTail.add data
+      link.stderrTail.appendBytes data   # a pipe chunk (`byte_append`)
       if link.stderrTail.len > MaxStderrKeep:
         link.stderrTail = link.stderrTail[^MaxStderrKeep .. ^1]
     if not jsIsNil(fromChild):
@@ -810,11 +811,12 @@ proc send*(p: ProcessLink; msg: JsonNode): bool {.discardable.} =
     # frames queued for a child that is slow to read them.
     if p.livenessQueue.len > MaxLivenessQueuedBytes:
       return false
-    p.livenessQueue.add frame
+    p.livenessQueue.appendBytes frame
     return true
   if p.queuedBytes > MaxQueuedBytes:
     return false
-  p.outQueue.add frame
+  # A frame of any size (`byte_append`): `add` throws on the JS backend.
+  p.outQueue.appendBytes frame
   true
 
 proc describeExit*(p: ProcessLink): string =

@@ -384,8 +384,21 @@ proc checkInitiatives(view: GpuiElement; vm: InitiativesVM; mode = dmDark): seq[
   if rows.len == 0:
     result.expect("empty notice", view.values("notice"), @["empty"])
     return
+  # A panel shorter than its rows draws the whole rows that fit, from the
+  # first, and counts the rest on a `+N more` line (a GPUI window does not
+  # scroll; issue
+  # 2026-11-24-the-gpui-initiatives-panel-cuts-its-last-row-through-its-letters):
+  # every initiative is drawn or counted, never both and never neither.
+  let drawn = view.values("initiative").len
+  let more = view.values("initiatives-more")
+  if more.len > 0:
+    result.expect("initiatives counted on the `+N more` line", more,
+                  @[$(rows.len - drawn)])
+    if drawn >= rows.len:
+      result.add "a `+N more` line under all " & $rows.len & " initiatives"
   var ids, selected, folded: seq[string]
-  for row in rows:
+  for i, row in rows:
+    if more.len > 0 and i >= drawn: break
     ids.add row.id
     selected.add $row.selected
     folded.add $row.folded

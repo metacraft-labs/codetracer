@@ -36,7 +36,8 @@ import ../../stories/agent_harbor_control_center_stories
 from ../../viewmodel/input/element_press import OperationAttribute
 from ../chrome import contrastRatio
 import ../agent_harbor/ah_control_center as cc
-from ../agent_harbor/ah_initiative_panels import initiativesHeadPx
+from ../agent_harbor/ah_initiative_panels import initiativesHeadPx, initiativeRowPx,
+  ListMoreLinePx, HeadLinePx
 import ../../../tests/visual/agent_harbor/ctf_layout_judge
 
 let r = GpuiRenderer()
@@ -145,7 +146,12 @@ suite "CTF-P2c: the GPUI control center":
           # under its title, two lines, not `HeadPx`'s one.
           let head = s.center.initiatives.initiativesHeadPx(360, cc.TabLinePx)
           check head > cc.HeadPx
-          check overviewH[0] - waitingH[0] - cc.ColumnGapPx >= head + cc.InitiativesFloorPx
+          # And under the head its first initiative whole, which the panel
+          # draws or leaves out whole (issue
+          # 2026-11-24-the-gpui-initiatives-panel-cuts-its-last-row-through-its-letters).
+          check cc.initiativesFloorPx(s.center, 360) > cc.InitiativesFloorPx
+          check overviewH[0] - waitingH[0] - cc.ColumnGapPx >=
+            head + cc.initiativesFloorPx(s.center, 360)
       s.dispose()
     let whole = mount("populated")
     check whole.view.tagged("form-summary").len == 0
@@ -159,7 +165,11 @@ suite "CTF-P2c: the GPUI control center":
     check panels.len == 1
     # The waiting list first, then the panel (study D73).
     check overview.nthChild(0).fact("waiting-section") == "3"
-    check overview.tagged("initiative").len == 4
+    # A GPUI window does not scroll: the panel's whole rows that fit, the
+    # rest counted on its `+N more` line.
+    let more = overview.tagged("initiatives-more")
+    check overview.tagged("initiative").len +
+      (if more.len == 1: parseInt(more[0].fact("initiatives-more")) else: 0) == 4
     let rows = overview.tagged("waiting-session")
     check rows.mapIt(it.fact("waiting-title")) == @[
       "Make calculate_damage safe for masses above u32",
@@ -296,6 +306,83 @@ suite "CTF-P2c: the GPUI control center":
     check m.controlCenterKey("Enter") == ControlCenterOpenOperation
     check m.center.requestedSession.val == first
     m.dispose()
+
+  test "the Initiatives panel draws whole rows only and counts the rest":
+    # Issue 2026-11-24-the-gpui-initiatives-panel-cuts-its-last-row-through-its-letters:
+    # at the sidebar size the control center gives the panel less height
+    # than its rows take, and its list clipped the last row through its
+    # letters at the panel's foot (`CURRENT SH-M1: Clamp at zero`). A GPUI
+    # window does not scroll: the rows drawn are whole and within the panel,
+    # the next one would not have fitted above the `+N more` line, and that
+    # line counts every row left out -- as the waiting list does (study D84).
+    var counted = 0
+    proc check(m: AhStoryMount; vm: InitiativesVM; linePx: int; where: string) =
+      let found = m.view.tagged("surface").filterIt(
+        it.fact("surface") == "agent-harbor-initiatives")
+      check found.len == 1
+      if found.len != 1: return
+      let panel = found[0]
+      let rows = vm.rows
+      check panel.fact("panel-px").len > 0
+      if panel.fact("panel-px").len == 0: return
+      let panelPx = parseInt(panel.fact("panel-px"))
+      let widthPx = parseInt(panel.fact("panel-width-px"))
+      let drawn = panel.tagged("initiative")
+      let more = panel.tagged("initiatives-more")
+      let left = if more.len == 1: parseInt(more[0].fact("initiatives-more")) else: 0
+      check more.len <= 1
+      check drawn.len + left == rows.len
+      check drawn.mapIt(it.fact("initiative")) == rows[0 ..< drawn.len].mapIt(it.id)
+      var used = initiativesHeadPx(vm, widthPx, linePx)
+      for row in rows[0 ..< drawn.len]: used += initiativeRowPx(row, widthPx, linePx)
+      if left > 0:
+        used += ListMoreLinePx
+        # Whole rows as many as fit: the next one would have gone under the foot.
+        check used + initiativeRowPx(rows[drawn.len], widthPx, linePx) > panelPx
+        inc counted
+      if used > panelPx:
+        checkpoint where & ": the rows drawn take " & $used & "px of the panel's " &
+                   $panelPx & "px; the last is cut at its foot"
+      check used <= panelPx
+      # And the panel's budget is what the window shows of it: the overview
+      # may be held taller than the window (its floor), never the list.
+      let overview = m.view.tagged("overview-visible-px")
+      if overview.len == 1:
+        let waiting = m.view.tagged("waiting-px").mapIt(parseInt(it.fact("waiting-px")))
+        let above = if waiting.len == 1 and waiting[0] > 0: waiting[0] + cc.ColumnGapPx else: 0
+        check panelPx <= parseInt(overview[0].fact("overview-visible-px")) - above
+    for fixture in ["populated", "launching", "launched", "launch-failed"]:
+      for (w, h) in [(360, 900), (760, 640), (1440, 900)]:
+        let m = mount(fixture, w, h)
+        check(m, m.center.initiatives, cc.TabLinePx, fixture & " " & $w & "x" & $h)
+        m.dispose()
+    for fixture in ["off", "tracking", "paused"]:
+      let m = gaze(fixture, 360, 900)
+      check(m, m.center.initiatives, cc.TabLinePx, "gaze " & fixture)
+      m.dispose()
+    # At the sidebar size one column keeps a whole waiting row first and,
+    # where the window has room for it as well, the panel's first initiative
+    # whole: the populated story at 360x900. Where it has not (the gaze
+    # stories' status line, the launched notice), the waiting row stays and
+    # the panel counts every initiative (the check above holds that the
+    # first would not have fitted).
+    for fixture in ["populated", "launching", "launched", "launch-failed"]:
+      let s = mount(fixture, 360, 900)
+      check s.view.tagged("waiting-session").len >= 1
+      if fixture == "populated": check s.view.tagged("initiative").len >= 1
+      s.dispose()
+    for fixture in ["off", "tracking", "paused"]:
+      let g = gaze(fixture, 360, 900)
+      check g.view.tagged("waiting-session").len >= 1
+      g.dispose()
+    # The panel on its own, in a window shorter than its rows.
+    gpui_reset_tree()
+    let alone = r.mountAgentHarborStoryGpui("agent-harbor-initiatives", "populated",
+                                            360, 400, dmDark)
+    check(alone, alone.initiatives, HeadLinePx, "the panel alone at 360x400")
+    alone.dispose()
+    # The condition the issue names does occur here: rows are left out.
+    check counted > 0
 
 suite "CTF-P2c: the GPUI gaze mark":
   test "off draws nothing; tracking and paused draw the eye and the words":
