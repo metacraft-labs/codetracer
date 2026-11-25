@@ -66,9 +66,9 @@ ARMS = [
              "  let inTime = await p.own(withTimeout(exited, high(int32)))")],
      [(SUITE, DEADLINE)],
      "a tool past its deadline is left running"),
-    ("M3", [(SDK, "  let body = toolBody(p, run, env, workingDir, timeoutMs, maxOutput)",
-             "  let body = toolBody(p, run, env, workingDir, timeoutMs, maxOutput)\n"
-             "  while not body.finished: poll(5)")],
+    ("M3", [(SDK, "    let body = toolBody(p, run, env, workingDir, timeoutMs, maxOutput)",
+             "    let body = toolBody(p, run, env, workingDir, timeoutMs, maxOutput)\n"
+             "    while not body.finished: asyncdispatch.poll(5)")],
      [(SUITE, SLOW)],
      "the handler waits for the tool, holding the sibling plugin"),
     ("M4", [(WATCH, "  p.pushEnablement(\"watch.add-changed\", pending.len > 0, reason)",

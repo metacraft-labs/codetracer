@@ -2,7 +2,7 @@
 # subjects AND the suites the arms are graded by.
 # Refreshed with --record-control-hashes, gated by the
 # needle scan.
-55bf6277bdf57ce65709fbfc0f0b19cf5f5f4810fbdf25323268b24a4de27a51  src/frontend/tui/app/views/glyph_table.nim
+d3e128f8bb192ddfeb59825c747e8821d82798b1265f2fcf9042f3fb95437264  src/frontend/tui/app/views/glyph_table.nim
 006af6b962ebf9c4737a70b2b3b51971cdec937a6cc1d2340e071ae48a2ae938  src/frontend/tui/app/views/scrollbar_styles.nim
 7139873731627681ca18ae41de91e1e209026b61e07e5bac8d17c23f4b68b512  src/frontend/tui/app/views/styled_row.nim
 9dce6ddf2027ab26ba85d8841af05c76c56351bc05ca5639f79c0cd16f81e061  src/frontend/tui/app/theme/degradation.nim
@@ -14,7 +14,7 @@ aac0db5d3efaf494bd1da75fd17cf7c3210c35430ea8a02d9f2ce2e55ea9d0e4  src/frontend/t
 9d018cd51a134de40d25c4643fde417c9c72e21d229204952b08cc9557356602  src/frontend/tui/app/views/tree_node.nim
 cf3457e78b42ede2a2cfb7180412e36166f8ba4993d901f777bb3ecc9223053c  src/frontend/tui/app/formatters/type_formatters.nim
 2a798fae1408b2147eea9779d4726bd3dbbf8c778c41ecf3caaff20e8c858d40  src/frontend/viewmodel/viewmodels/table_overflow.nim
-47d1c433c9838314c782aa53510815f5fdf60c93486b1da9a63f1f9719f04c2a  src/frontend/tui/app/tests/test_plat71_terminal_profile.nim
+5177500108a19cedd2952493e3ce955b471e69b19f93a51ca73e0449681236ee  src/frontend/tui/app/tests/test_plat71_terminal_profile.nim
 0007aaf532a43e5d5aa55031759552bc048dee43170920b8ed3c71d912356804  src/frontend/tui/tests/test_plat71_glyph_table.nim
 6fdddbbeb04c8164678eca6a41799f08d206377ccefd55553226d3f08cfdb091  src/frontend/tui/tests/real_terminal/test_plat71_terminal_pty.nim
 d8df26f455c88d12ac5645586500b58c9cc517a9ca1ba9e1f299cd363a74da2d  src/frontend/viewmodel/tests/unit/test_plat70b_table_overflow.nim

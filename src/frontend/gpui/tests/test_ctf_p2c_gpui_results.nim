@@ -11,17 +11,33 @@
 ## * **A key is routed**: `Down` / `Up` move the selection, `Enter` opens,
 ##   `Tab` inserts a completion, through `resultsKey`.
 ##
+## * **Every region the web record holds is drawn** (issue
+##   2026-11-24-gpui-omnibox-control-center-and-gaze-captures-fail-the-ctf-p1b-layout-gate):
+##   for every results story, at the laptop and sidebar sizes and in both
+##   themes, each region the committed web layout record
+##   (`agent-harbor-web-regions.json`) holds for its capture is found in the
+##   GPUI tree by the region's declared GPUI facts
+##   (`agent-harbor-regions.json`, matched as the story window's region dump
+##   matches them), and no region the record lacks is. The omnibox field once
+##   carried no `data-ah-field-row`, so every window capture reported
+##   `composer-field` "drawn only on web"; and a result row's selection was
+##   the `data-ah-selected` the fleet's `selected-row` region reads, so the
+##   selected result was "drawn only on gpui".
+##
 ## No mocks: the real isonim-gpui shadow tree (the shim loaded in process, no
 ## window) and the results stories' own viewmodels over their scripted
 ## providers and Agent Harbor source.
 
-import std/[sequtils, strutils, unittest]
+import std/[json, os, sequtils, strutils, unittest]
 
 import isonim_gpui/renderer
 from isonim_gpui/bindings import gpui_reset_tree
 
 import ../agent_harbor/ah_stories
 from ../../viewmodel/input/element_press import OperationAttribute
+import ../../stories/codetracer_stories
+import ../../../../tools/stories/emit_storybook_stories
+import ../../../tests/visual/agent_harbor/ctf_layout_judge
 
 let r = GpuiRenderer()
 
@@ -127,3 +143,106 @@ suite "CTF-P2c: manager note 132's follow-ups in GPUI (D60-D63)":
       check m.view.facts("selected-ground") ==
             @[DesignTokenHex[dtColorsEditorSurfaceSelect][mode]]
       m.dispose()
+
+# ---------------------------------------------------------------------------
+# The regions the window capture is judged on
+# ---------------------------------------------------------------------------
+
+proc matchesFacts(el: GpuiElement; facts: JsonNode): bool =
+  ## The story window's region match (`ah_story_window.matches`): every
+  ## declared `data-ah-*` attribute present, with its value when one is given.
+  for attr, want in facts.pairs:
+    let have = getAttribute(el, attr)
+    if have.len == 0 or (want.getStr.len > 0 and have != want.getStr): return false
+  true
+
+proc anyMatching(node: GpuiElement; facts: JsonNode): bool =
+  if node.isNil: return false
+  if node.matchesFacts(facts): return true
+  for i in 0 ..< childCount(node):
+    if anyMatching(nthChild(node, i), facts): return true
+  false
+
+suite "CTF-P1b: a results story draws the regions the web draws, and no others":
+  test "each region of every results story is matched by its GPUI facts exactly when the web has it":
+    let regionsDir = repoRoot / "src" / "tests" / "visual"
+    let record = loadWebRecord(regionsDir / "agent-harbor-web-regions.json")
+    var declared: seq[(string, JsonNode)]
+    for region in parseJson(readFile(regionsDir / "agent-harbor-regions.json"))["regions"]:
+      declared.add (region["name"].getStr, region["gpui"])
+    var stories, compared = 0
+    var problems: seq[string]
+    for story in agentHarborSection().stories:
+      if story.surface != "agent-harbor-results": continue
+      inc stories
+      let sid = storybookId(agentHarborSection(), story)
+      for (size, w, h) in Sizes:
+        for (mode, theme) in [(dmDark, "dark"), (dmLight, "light")]:
+          let id = ViewPrefix & sid[StoryIdPrefix.len .. ^1] & "-" & size & "-" & theme
+          let web = record{id}{"regions"}
+          if web.isNil:
+            problems.add id & ": the web record has no capture"
+            continue
+          gpui_reset_tree()
+          let m = r.mountAgentHarborStoryGpui(story.surface, story.fixture, w, h, mode)
+          for (name, facts) in declared:
+            inc compared
+            let drawn = m.root.anyMatching(facts)
+            if web.hasKey(name) and not drawn:
+              problems.add id & ": region " & name & " is drawn only on web"
+            elif drawn and not web.hasKey(name):
+              problems.add id & ": region " & name & " is drawn only on gpui"
+          m.dispose()
+    for p in problems: checkpoint p
+    check stories == 18
+    check compared > 0
+    check problems.len == 0
+
+proc firstWith(node: GpuiElement; name: string): GpuiElement =
+  var all: seq[GpuiElement]
+  collect(node, name, all)
+  if all.len > 0: all[0] else: nil
+
+suite "CTF-P1b: a results story's sheet is as tall as the web's":
+  test "every results story's sheet has the web's top and height, both sizes":
+    # Every line of the web's results inherits the sheet's 24px; a row is
+    # its 5px paddings around its line, a group its head's line and 0.25rem
+    # paddings, the body ends with its last part's 0.5rem, and a body taller
+    # than the window's room is the sheet's `max-height`. The GPUI sheet was
+    # laid out on 16px lines and stopped up to 99px short (issue
+    # 2026-11-24-gpui-omnibox-control-center-and-gaze-captures-fail-the-ctf-p1b-layout-gate).
+    let record = loadWebRecord(repoRoot / "src" / "tests" / "visual" /
+                               "agent-harbor-web-regions.json")
+    var compared = 0
+    var problems: seq[string]
+    for story in agentHarborSection().stories:
+      if story.surface != "agent-harbor-results": continue
+      let sid = storybookId(agentHarborSection(), story)
+      # The web story GPUI's drawing is judged against (the judge's own
+      # pairing: the rich rows are the web's text form, `GpuiDrawsAs`).
+      var name = sid[StoryIdPrefix.len .. ^1]
+      for (gpui, web) in GpuiDrawsAs:
+        if name == gpui: name = web
+      for (size, w, h) in Sizes:
+        let id = ViewPrefix & name & "-" & size & "-dark"
+        let web = record{id}{"regions"}{"composer-sheet"}
+        if web.isNil:
+          problems.add id & ": the web record has no composer-sheet"
+          continue
+        gpui_reset_tree()
+        let m = r.mountAgentHarborStoryGpui(story.surface, story.fixture, w, h, dmDark)
+        let sheet = m.view.firstWith("data-ah-sheet-height")
+        if sheet.isNil:
+          problems.add id & ": no sheet drawn"
+        else:
+          inc compared
+          let top = parseFloat(getAttribute(sheet, "data-ah-sheet-top"))
+          let height = parseFloat(getAttribute(sheet, "data-ah-sheet-height"))
+          if abs(top - web["y"].getFloat) > PxTolerance:
+            problems.add id & ": sheet top " & $top & ", the web's " & $web["y"].getFloat
+          if abs(height - web["h"].getFloat) > PxTolerance:
+            problems.add id & ": sheet height " & $height & ", the web's " & $web["h"].getFloat
+        m.dispose()
+    for p in problems: checkpoint p
+    check compared == 36
+    check problems.len == 0

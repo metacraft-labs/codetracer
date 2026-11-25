@@ -7,14 +7,15 @@
 ## and `Gaze paused`; when off, nothing.
 ##
 ## The story draws it where the web story does: in the window's status line
-## (24px, the window frame's ground as the web status bar's, the language and
-## the encoding at its start), at
-## the start of its right-hand zone, 12px in from the edge, under the control
-## center as L7 shows it. A press on it is
-## routed: it carries `gaze.toggle-pause` and reports the press to the
-## host's `GazePress`.
+## (32px, `StatusBarPx`, the window frame's ground as the web status bar's,
+## the language and the encoding at its start), at the start of its
+## right-hand zone, 12px in from the edge, under the control center as L7
+## shows it. A press on it is routed: it carries `gaze.toggle-pause` and
+## reports the press to the host's `GazePress`.
 ##
 ## Facts (`data-ah-*`): `markFacts` on the host, `gaze-mark` on the mark.
+
+import std/math
 
 import isonim/core/computation
 import ../../viewmodel/views/agent_harbor_gaze_words
@@ -26,37 +27,47 @@ import ../../styles/generated/design_tokens
 export agent_harbor_gaze_words
 
 const
-  StatusLinePx* = 24     ## CONTROL_HEIGHT_SM: the gaze mark's own line
   StatusBarPx* = 32
     ## The status line itself: the web's `STATUS_BAR_CONTENT_HEIGHT` (2rem,
     ## status_bar.styl), measured 32px in the web captures. (It was drawn at
     ## the mark's 24px; GPUI review of 2026-11-24.)
   MarkGapPx* = 4         ## between the eye and the words (0.25rem)
   EdgePx* = 12           ## the mark's margin from the right-hand zone's end
+  EyePx* = 12            ## the eye's box: `.ah-gaze-glyph`'s 0.75rem
+  StatusTextPx* = BodyPx
+    ## The status bar's text: `STATUS_BAR_TEXT_SIZE` (0.875rem, 14px) in
+    ## `status_bar.styl`, which the web's mark inherits ("at the bar's own
+    ## size"), not the caption's 12px.
+  MarkLinePx* = 21
+    ## The mark's height: one line of the bar's text, 14px at the browser's
+    ## `line-height: normal` for the face, 1.5 (the web's `.ah-gaze-mark` is
+    ## 21px tall, centred in the status bar, `StatusBarPx`).
 
 type
   GazePress* = proc(operation: string)
     ## A host's route for a press on the mark: the operation it carries.
 
 proc markWidthPx*(vm: GazeStatusVM): int =
-  ## The mark's width: the eye (14px), the gap, the words.
-  14 + MarkGapPx + textPx(vm.text, CaptionPx)
+  ## The mark's width, as the web lays it out: the eye (12px), the gap, the
+  ## words at the status bar's size, kerned as a browser and GPUI's shaper
+  ## set them, rounded up so the last glyph is never clipped.
+  EyePx + MarkGapPx + int(ceil(textWidth(vm.text, StatusTextPx)))
 
 proc drawGazeMark*(r: GpuiRenderer; p: AhPalette; vm: GazeStatusVM;
                    press: GazePress = nil): GpuiElement =
   ## The mark (nil when it is not shown).
   if not vm.shown: return nil
-  result = r.box(pairs = [("height", $StatusLinePx & "px"), ("items", "center"),
+  result = r.box(pairs = [("height", $MarkLinePx & "px"), ("items", "center"),
                           ("gap", $MarkGapPx & "px"), ("flex-shrink", "0"),
                           ("width", $vm.markWidthPx & "px")])
   r.tag(result, "gaze-mark", $vm.state.val)
   r.tag(result, "tooltip", vm.tooltip)
   r.tag(result, "accessible-name", vm.text)
-  let glyph = r.text(vm.glyphOf, CaptionPx + 2, p.textCaption, shrink = false,
-                     pairs = [("width", "14px")])
+  let glyph = r.text(vm.glyphOf, EyePx, p.textCaption, shrink = false,
+                     pairs = [("width", $EyePx & "px")])
   r.tag(glyph, "glyph", vm.glyphOf)
   r.appendChild(result, glyph)
-  r.appendChild(result, r.text(vm.text, CaptionPx, p.textCaption, shrink = false))
+  r.appendChild(result, r.text(vm.text, StatusTextPx, p.textCaption, shrink = false))
   r.setAttribute(result, OperationAttribute, GazeTogglePauseOperation)
   r.setStyle(result, "cursor", pointerShapeOf(HitTarget(kind: hkControl)).cssName)
   if press != nil:

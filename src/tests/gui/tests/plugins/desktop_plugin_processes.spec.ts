@@ -18,7 +18,7 @@ import { test, expect } from "../../lib/fixtures";
 import { CommandPalette } from "../../page-objects/command-palette/command-palette";
 import {
   installAcmeTools, pluginEnv, pluginPids, describePids, pluginState, pluginOf, paneText,
-  pluginStatusItem, countBodyKeys, bodyKeys, type PluginHome,
+  pluginStatusItem, countBodyKeys, bodyKeys, pressRecoveryChord, type PluginHome,
 } from "../../lib/plugin-processes";
 
 // Recording, starting the replay and building the plugin package take
@@ -136,7 +136,7 @@ test.describe("desktop: a plugin layer and the recovery chord", () => {
 
     // THE CHORD: three Escapes within a second. The layer goes at once, and
     // the recovery dialog names the plugin that held the keyboard.
-    for (let i = 0; i < 3; i++) await ctPage.keyboard.press("Escape");
+    await pressRecoveryChord(ctPage);
     const dialog = ctPage.locator("[data-ct-plugin-dialog]");
     await expect(dialog).toContainText("RECOVER INPUT", { timeout: 30_000 });
     await expect(dialog).toContainText(FLAME);

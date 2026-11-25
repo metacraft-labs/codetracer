@@ -120,6 +120,21 @@ type
     narrow: bool
     press: ComposerPress ## where a press is reported (nil: nowhere)
     locked: bool         ## the control center's launch in flight: toggles disabled
+    labelLinePx: int
+      ## A field label's line: the sheet's `LinePx`, or the host's own (the
+      ## control center's 18px, `drawLaunchForm`). 0: `LinePx`.
+    bodyLinePx: int
+      ## A line the form inherits at the body size (the schedule's head):
+      ## the sheet's `LinePx`, or the host's own. 0: `LinePx`.
+    outside: bool
+      ## Drawn outside the sheet (`drawLaunchForm`): the form ends with its
+      ## last field, without the sheet's form padding under it.
+
+proc labelLine(lay: Layout): int =
+  if lay.labelLinePx > 0: lay.labelLinePx else: LinePx
+
+proc bodyLine(lay: Layout): int =
+  if lay.bodyLinePx > 0: lay.bodyLinePx else: LinePx
 
 proc tokenHexOf(token: DesignToken; mode: DesignMode): string =
   ## A design-system role the palette does not carry, in `mode`.
@@ -178,11 +193,12 @@ proc wrapText(r: GpuiRenderer; s: string; sizePx, lineHeightPx: int; colour: str
                   ("flex-shrink", "1"), ("min-width", "0px")])
 
 proc onLine(r: GpuiRenderer; s: string; sizePx: int; colour: string;
-            bold = false; shrink = true): GpuiElement =
+            bold = false; shrink = true; linePx = LinePx): GpuiElement =
   ## One line of text on the composer's line pitch (`LinePx`), as the web
-  ## sets every line it does not give a height of its own.
+  ## sets every line it does not give a height of its own; `linePx` where a
+  ## host sets another (the control center's).
   r.text(s, sizePx, colour, bold = bold, shrink = shrink,
-         pairs = [("height", $LinePx & "px"), ("line-height", $LinePx & "px"),
+         pairs = [("height", $linePx & "px"), ("line-height", $linePx & "px"),
                   ("flex-shrink", if shrink: "1" else: "0")])
 
 proc medium(r: GpuiRenderer; el: GpuiElement; tracked = false): GpuiElement =
@@ -438,14 +454,15 @@ proc inputValueShown*(value: string; boxPx: int): string =
     proc(t: string): int = int(textWidth(t, BodyPx, faceGlyphs = true) + 0.999))
 
 proc fieldEl(r: GpuiRenderer; p: AhPalette; label, value, problem: string;
-             widthPx: int; placeholder = ""; locked = false): (GpuiElement, int) =
-  ## A field: its label over its value drawn as the app's input field, and
-  ## its problem under it. The value is one line, cut in its middle when it
-  ## is wider than the field (`inputValueShown`).
+             widthPx: int; placeholder = ""; labelPx = LinePx;
+             locked = false): (GpuiElement, int) =
+  ## A field: its label (on a `labelPx` line) over its value drawn as the
+  ## app's input field, and its problem under it. The value is one line, cut
+  ## in its middle when it is wider than the field (`inputValueShown`).
   let el = r.box(column = true, pairs = [("gap", "3px"), ("width", $widthPx & "px"),
                                          ("min-width", "0px"), ("flex-shrink", "0")])
   r.tag(el, "field-label", label)
-  let l = r.onLine(label, CaptionPx, p.textLabel, shrink = false)
+  let l = r.onLine(label, CaptionPx, p.textLabel, shrink = false, linePx = labelPx)
   r.tag(l, "field-name", label)
   r.appendChild(el, l)
   # The value box is the web's `.ah-composer-field-value`: the control's
@@ -477,7 +494,7 @@ proc fieldEl(r: GpuiRenderer; p: AhPalette; label, value, problem: string;
   r.tag(t, "value-empty", $(value.len == 0))
   r.appendChild(v, t)
   r.appendChild(el, v)
-  var h = LinePx + 3 + ControlPx
+  var h = labelPx + 3 + ControlPx
   if problem.len > 0:
     let pr = r.wrapText(problem, CaptionPx, 16, p.textError)
     r.tag(pr, "problem", problem)
@@ -486,12 +503,13 @@ proc fieldEl(r: GpuiRenderer; p: AhPalette; label, value, problem: string;
   (el, h)
 
 proc choiceEl(r: GpuiRenderer; p: AhPalette; label: string; options, chosen: seq[string];
-              widthPx: int; problem = ""; several = false; locked = false): (GpuiElement, int) =
+              widthPx: int; problem = ""; several = false;
+              labelPx = LinePx; locked = false): (GpuiElement, int) =
   ## A choice among a few options: a row of toggles, the chosen ones in the
   ## action border (`✓` before each when several may be).
   let el = r.box(column = true, pairs = [("gap", "3px"), ("width", $widthPx & "px")])
   r.tag(el, "field-label", label)
-  let l = r.onLine(label, CaptionPx, p.textLabel, shrink = false)
+  let l = r.onLine(label, CaptionPx, p.textLabel, shrink = false, linePx = labelPx)
   r.tag(l, "field-name", label)
   r.appendChild(el, l)
   var items: seq[FlowItem]
@@ -504,12 +522,16 @@ proc choiceEl(r: GpuiRenderer; p: AhPalette; label: string; options, chosen: seq
     r.tag(c, "chosen", $on)
     r.tag(c, "disabled", $locked)
     r.acts(c, "choose-option", o)
-    items.add FlowItem(el: c, widthPx: w)
+    # Its exact width, the face's kerned advances (the `✓` at its own), so
+    # the row breaks where the browser's does: a line overflowing by a
+    # fraction of a pixel breaks there too (`flowLineStarts`).
+    items.add FlowItem(el: c, widthPx: w,
+                       exactPx: textWidth(shown, CaptionPx, faceGlyphs = true) + 18)
   let lines = flowLineCount(items, widthPx, 4)
   let flow = r.flowLines(items, widthPx, 4, ControlPx, 4)
   r.tag(flow, "flow-lines", $lines)   # the lines the field was sized for
   r.appendChild(el, flow)
-  var h = LinePx + 3 + lines * ControlPx + (lines - 1) * 4
+  var h = labelPx + 3 + lines * ControlPx + (lines - 1) * 4
   if problem.len > 0:
     let pr = r.wrapText(problem, CaptionPx, 16, p.textError)
     r.tag(pr, "problem", problem)
@@ -548,6 +570,11 @@ proc formBlocks(r: GpuiRenderer; p: AhPalette; vm: OmniboxComposerVM;
   let w = lay.widthPx
   let narrow = lay.narrow
   let colW = if narrow: w else: (w - 12) div 2
+  let lab = lay.labelLine
+  # The sheet's form ends with its own 0.5rem of padding; drawn outside the
+  # sheet (the control center's `.ah-cc-form`, a bare grid) it ends with
+  # its last part.
+  let endPad = if lay.outside: 0 else: 8
   let head = r.box(column = true, pairs = [("border-top-width", "1px"),
                                            ("border-color", p.borderSecondary)])
   r.tag(head, "form", $vm.intent)
@@ -564,21 +591,21 @@ proc formBlocks(r: GpuiRenderer; p: AhPalette; vm: OmniboxComposerVM;
   if vm.intent == riLaunchTask:
     let o = vm.launch
     fields.add (r.fieldEl(p, "Repository", o.repository, problemOf(problems, "repository"),
-                          colW, "Choose a repository", locked = lay.locked), false)
-    fields.add (r.fieldEl(p, "Branch", o.branch, "", colW, "default branch", locked = lay.locked), false)
+                          colW, "Choose a repository", labelPx = lab, locked = lay.locked), false)
+    fields.add (r.fieldEl(p, "Branch", o.branch, "", colW, "default branch", labelPx = lab, locked = lay.locked), false)
     fields.add (r.choiceEl(p, "Agents", vm.agentChoices, o.agents, w,
-                           problemOf(problems, "agents"), several = true, locked = lay.locked), true)
+                           problemOf(problems, "agents"), several = true, labelPx = lab, locked = lay.locked), true)
     var runOn: seq[string]
     for v in RunOn: runOn.add $v
-    fields.add (r.choiceEl(p, "Runs on", runOn, @[$o.runOn], w, locked = lay.locked), true)
+    fields.add (r.choiceEl(p, "Runs on", runOn, @[$o.runOn], w, labelPx = lab, locked = lay.locked), true)
     if o.runOn == roExecutor:
       fields.add (r.fieldEl(p, "Executor", o.executor, problemOf(problems, "executor"),
-                            colW, "Choose an executor", locked = lay.locked), false)
+                            colW, "Choose an executor", labelPx = lab, locked = lay.locked), false)
     fields.add (r.fieldEl(p, "Session name", o.sessionName, "", colW,
-                          "named by the server", locked = lay.locked), o.runOn != roExecutor)
+                          "named by the server", labelPx = lab, locked = lay.locked), o.runOn != roExecutor)
     var openIn: seq[string]
     for v in OpenIn: openIn.add $v
-    fields.add (r.choiceEl(p, "Opens in", openIn, @[$o.openIn], w, locked = lay.locked), true)
+    fields.add (r.choiceEl(p, "Opens in", openIn, @[$o.openIn], w, labelPx = lab, locked = lay.locked), true)
     let (grid, gh) = r.gridOf(fields, narrow)
     result.add r.spaced(grid, gh + 8, bottom = 8)
     # The schedule's head line, and its fields when open.
@@ -587,7 +614,7 @@ proc formBlocks(r: GpuiRenderer; p: AhPalette; vm: OmniboxComposerVM;
     # The schedule is the form grid's last part (0.5rem under the fields,
     # the grid's gap, which the block above ends with); closed, the form's
     # bottom padding follows it, open, its own grid 0.5rem under it.
-    let sh = r.box(pairs = [("height", $LinePx & "px"), ("items", "center"), ("gap", "6px")])
+    let sh = r.box(pairs = [("height", $lay.bodyLine & "px"), ("items", "center"), ("gap", "6px")])
     r.tag(sh, "schedule", $sopen)
     r.acts(sh, "schedule", "")
     # Locked (the control center's launch in flight), the disclosure is not
@@ -607,39 +634,42 @@ proc formBlocks(r: GpuiRenderer; p: AhPalette; vm: OmniboxComposerVM;
                                         elif lay.locked: p.textLabel else: p.textCaption)
     r.tag(ss, "schedule-summary", summary)
     r.appendChild(sh, ss)
-    result.add r.spaced(sh, LinePx + (if sopen: 0 else: 8), bottom = if sopen: 0 else: 8)
+    result.add r.spaced(sh, lay.bodyLine + (if sopen: 0 else: endPad),
+                        bottom = if sopen: 0 else: endPad)
     result[^1].schedule = not sopen
     if sopen:
       let s = o.schedule
       var sched: seq[((GpuiElement, int), bool)]
       sched.add (r.fieldEl(p, "Cron", s.cron, problemOf(problems, "cron"), colW,
-                           "minute hour day month weekday", locked = lay.locked), false)
+                           "minute hour day month weekday", labelPx = lab, locked = lay.locked), false)
       sched.add (r.fieldEl(p, "Time zone", s.timezone, problemOf(problems, "timezone"),
-                           colW, "UTC", locked = lay.locked), false)
+                           colW, "UTC", labelPx = lab, locked = lay.locked), false)
       sched.add (r.fieldEl(p, "Jitter", $s.jitterSeconds & " s",
-                           problemOf(problems, "jitter"), colW, locked = lay.locked), true)
+                           problemOf(problems, "jitter"), colW, labelPx = lab, locked = lay.locked), true)
       var conc, mis: seq[string]
       for v in Concurrency: conc.add $v
       for v in Misfire: mis.add $v
-      sched.add (r.choiceEl(p, "Concurrency", conc, @[$s.concurrency], w, locked = lay.locked), true)
-      sched.add (r.choiceEl(p, "Misfire", mis, @[$s.misfire], w, locked = lay.locked), true)
+      sched.add (r.choiceEl(p, "Concurrency", conc, @[$s.concurrency], w, labelPx = lab, locked = lay.locked), true)
+      sched.add (r.choiceEl(p, "Misfire", mis, @[$s.misfire], w, labelPx = lab, locked = lay.locked), true)
       let (g2, h2) = r.gridOf(sched, narrow)
-      result.add r.spaced(g2, 8 + h2 + 8, top = 8, bottom = 8)
+      result.add r.spaced(g2, 8 + h2 + endPad, top = 8, bottom = endPad)
       result[^1].schedule = true
   else:
     let f = vm.initiative
     fields.add (r.fieldEl(p, "Goal", f.goal, problemOf(problems, "goal"), w,
-                          "What the initiative is for", locked = lay.locked), true)
+                          "What the initiative is for", labelPx = lab, locked = lay.locked), true)
     var modes: seq[string]
     for v in IterationMode: modes.add $v
-    fields.add (r.choiceEl(p, "Iterations", modes, @[$f.iteration], w, locked = lay.locked), true)
+    fields.add (r.choiceEl(p, "Iterations", modes, @[$f.iteration], w, labelPx = lab, locked = lay.locked), true)
     if f.iteration == imCount:
       fields.add (r.fieldEl(p, "Number of iterations", $f.iterations,
-                            problemOf(problems, "iterations"), colW, locked = lay.locked), true)
-    fields.add (r.fieldEl(p, "Plan file", vm.planPreview, problemOf(problems, "plan"), w, locked = lay.locked), true)
-    fields.add (r.fieldEl(p, "Related specs", f.relatedSpecs.join(", "), "", w, "none", locked = lay.locked), true)
+                            problemOf(problems, "iterations"), colW, labelPx = lab, locked = lay.locked), true)
+    fields.add (r.fieldEl(p, "Plan file", vm.planPreview, problemOf(problems, "plan"), w,
+                          labelPx = lab, locked = lay.locked), true)
+    fields.add (r.fieldEl(p, "Related specs", f.relatedSpecs.join(", "), "", w, "none",
+                          labelPx = lab, locked = lay.locked), true)
     let (grid, gh) = r.gridOf(fields, narrow)
-    result.add r.spaced(grid, gh + 8, bottom = 8)
+    result.add r.spaced(grid, gh + endPad, bottom = endPad)
 
 proc bodyBlocks(r: GpuiRenderer; p: AhPalette; vm: OmniboxComposerVM;
                 lay: Layout): seq[Block] =
@@ -777,15 +807,21 @@ proc sendLine*(r: GpuiRenderer; p: AhPalette; vm: OmniboxComposerVM;
 proc drawLaunchForm*(r: GpuiRenderer; p: AhPalette; vm: OmniboxComposerVM;
                      innerPx: int; narrow: bool;
                      press: ComposerPress = nil; padPx = PadPx;
+                     labelLinePx = LinePx; bodyLinePx = LinePx;
                      locked = false): (GpuiElement, int) =
   ## The launch or initiative form's fields, without the sheet's form title
   ## (a host that draws the form outside the sheet, the control center, has
   ## a heading of its own): one column whose parts are padded `padPx` to
   ## either side of `innerPx` (the sheet's `PadPx` by default; the host's
   ## inset where it has its own), and its height. The same blocks the sheet
-  ## draws (`formBlocks`), so the two never differ.
+  ## draws (`formBlocks`), so the two never differ in what they hold; their
+  ## lines are the host's (`labelLinePx` for a field's label, `bodyLinePx`
+  ## for the schedule's head), as the web's form inherits its host's
+  ## line-height, and it ends with its last part, as the host's bare grid
+  ## does, not with the sheet's form padding.
   let blocks = r.formBlocks(p, vm, Layout(widthPx: innerPx, narrow: narrow, press: press,
-                                          locked: locked))
+                                          labelLinePx: labelLinePx, bodyLinePx: bodyLinePx,
+                                          outside: true, locked: locked))
   let col = r.box(column = true, pairs = [("width", $(innerPx + 2 * padPx) & "px"),
                                           ("flex-shrink", "0")])
   var h = 0

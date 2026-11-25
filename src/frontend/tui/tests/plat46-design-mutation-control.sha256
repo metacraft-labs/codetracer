@@ -6,7 +6,7 @@ bd4768a43ab21b91aebff34c3ac2de9a5f512c46898cbedeb1f4580a56367dd3  src/frontend/t
 f3d393fc820cf09de46805d0639661ae72c75cb26725e3e867441031852d7a60  src/frontend/tui/app/theme/palette.nim
 a1a223ba76a4b30733d0b71c46886747b42d7b9ca0a7b0e8d5e9221a77c0889f  src/frontend/tui/app/theme/capabilities.nim
 ab670c238d9e98d67b821087fb17d9bfe4ccc48ea6a0eb112e12c9b7e258f0d6  src/frontend/tui/app/theme/colour_math.nim
-df5ac6b9934a2c537ba95bde700e1484fd5193a037a88c60135c5bb0982933ea  src/frontend/tui/app/views/shell.nim
+6a21298445ac4d112fa8dc906f943865ec39d4b42040fbfaf6d1b147778f2d8a  src/frontend/tui/app/views/shell.nim
 1401d5b4cf40ba3ad68794ff1fe38ca34887bf337dac87d553a0eb86f3867e1c  src/frontend/tui/app/views/gutter.nim
 62754118e20e123bf0bac592f4d0b6f748abc7aaf05de431a28f7a11b0662b85  src/frontend/tui/app/views/source_pane.nim
 f10f7110453df54a68784ec44af2ff981d0385ab03d8ceb826f70bbf78d446c2  src/frontend/tui/host/terminal_probe.nim

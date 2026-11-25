@@ -1246,9 +1246,14 @@ proc updateGlyphMarks*(self: EditorViewComponent) =
   # mark); a decoration is drawn after the line's code. Read from what the
   # plugins pushed (`plugin_panes`), never by running plugin code.
   if not pluginEditorMarks.isNil:
+    # Only the lines this editor's model has: an expansion editor shows one
+    # function's lines of the file, and Monaco throws on a line past its
+    # model's end — inside the effect that draws a stop, which then stopped
+    # drawing (and the session stopped settling) at every later stop.
+    let lineCount = editorInstance.getModel().getLineCount()
     for m in pluginEditorMarks($self.path):
       let line = m.line - firstLine + 1
-      if line < 1: continue
+      if line < 1 or line > lineCount: continue
       if m.marker:
         if m.line in seen or m.glyph.len == 0: continue
         seen.add m.line

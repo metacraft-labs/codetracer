@@ -56,11 +56,22 @@ const
   PadYPx* = 8
   PartGapPx* = 8          ## between the launch column's parts
   SectionPx* = 4 + 24     ## a section label: 0.25rem over a 1.5rem line
-  HeadPx* = 4 + 24 + 4 + 1
-    ## A panel's head band (`drawSectionHeader`): 4px over and under a 24px
-    ## line, and its hairline.
+  TabLinePx* = 21
+    ## The line the tab's parts inherit: `.ah-control-center` is set at the
+    ## body size (14px) on 1.5 lines, where a panel on its own is set at
+    ## 16px on 24px lines. The heads' spans are set on it
+    ## (`agent_harbor_control_center.styl`), and the Initiatives panel and
+    ## the form inherit it.
+  HeadPx* = 4 + TabLinePx + 4 + 1
+    ## A panel's head band (`drawSectionHeader`): 4px over and under the
+    ## tab's line, and its hairline.
   ListPadPx = 4           ## the waiting list's rows' inset above and below
-  FieldLabelPx = 24       ## a form field's label line (the composer's `LinePx`)
+  NoneLinePx = 4 + 16 + 4
+    ## A "nothing here" line (`.ah-cc-none`): a caption line padded 0.25rem
+    ## above and below.
+  FieldLabelPx = 18
+    ## A form field's label line: the caption (12px) on the tab's 1.5 lines,
+    ## not the composer sheet's 24px (`LinePx`), which the sheet sets itself.
   TitleLinePx = 20        ## a waiting row's title, a recent launch's text
   RowPadPx = 6            ## a waiting row's padding
   RecentPadPx = 4         ## a recent launch's padding
@@ -101,7 +112,9 @@ const
     ## The least height the overview keeps under the launch column in one
     ## column: the waiting list's head, one whole row and its `+N more`
     ## line, then the Initiatives panel's head and `InitiativesFloorPx`.
-    ## Under it the form folds to its summary (study D84).
+    ## Under it the form folds to its summary (study D84). The panel's head
+    ## is counted here as one line (`HeadPx`); where its summary wraps, the
+    ## one column adds the rest (`initiativesHeadPx`).
 
 proc launchWidthPx*(widthPx: int): int =
   ## The launch column's width in two columns: 45% of the tab, never under
@@ -132,6 +145,12 @@ proc toggleEl(r: GpuiRenderer; p: AhPalette; label, operation, target: string;
   r.tag(el, "disabled", $locked)
   r.acts(el, operation, target, if locked: nil else: press)
   (el, textPx(label, CaptionPx) + 18)
+
+proc toggleItem(el: GpuiElement; widthPx: int; label: string): FlowItem =
+  ## A toggle in a wrapping row, with its exact width (the face's kerned
+  ## advances), so the row breaks where the browser's does.
+  FlowItem(el: el, widthPx: widthPx,
+           exactPx: textWidth(label, CaptionPx, faceGlyphs = true) + 18)
 
 proc toggleRow(r: GpuiRenderer; items: seq[FlowItem]; widthPx: int): (GpuiElement, int) =
   let lines = flowLineCount(items, widthPx, 4)
@@ -207,7 +226,7 @@ proc launchColumn(r: GpuiRenderer; p: AhPalette; vm: ControlCenterVM;
   r.tag(col, "cc-launch", "launch")
   # The head band every panel of the tab has (the Initiatives panel's own),
   # so the columns' heads line up; the parts under it at the panel's inset.
-  let head = r.drawSectionHeader(p, LaunchHeading, "", "", widthPx)
+  let head = r.drawSectionHeader(p, LaunchHeading, "", "", widthPx, linePx = TabLinePx)
   r.tag(head, "head", "launch")
   r.appendChild(col, head)
   let body = r.box(column = true, pairs = [("width", $widthPx & "px"),
@@ -225,7 +244,7 @@ proc launchColumn(r: GpuiRenderer; p: AhPalette; vm: ControlCenterVM;
   var modes: seq[FlowItem]
   for (_, label, operation, on) in vm.modeChoices:
     let (el, w) = r.toggleEl(p, label, operation, "", on, press, locked)
-    modes.add FlowItem(el: el, widthPx: w)
+    modes.add toggleItem(el, w, label)
   let (modesEl, modesH) = r.toggleRow(modes, inner)
   r.tag(modesEl, "cc-modes", $vm.mode)
   add(modesEl, modesH)
@@ -239,7 +258,7 @@ proc launchColumn(r: GpuiRenderer; p: AhPalette; vm: ControlCenterVM;
   for choice in vm.launchChoices:
     let (el, w) = r.toggleEl(p, choice.title, ControlCenterLaunchForOperation, choice.id,
                              choice.chosen, press, locked)
-    choices.add FlowItem(el: el, widthPx: w)
+    choices.add toggleItem(el, w, choice.title)
   let (choicesEl, choicesH) = r.toggleRow(choices, inner)
   r.appendChild(forEl, choicesEl)
   add(forEl, FieldLabelPx + 3 + choicesH)
@@ -287,6 +306,7 @@ proc launchColumn(r: GpuiRenderer; p: AhPalette; vm: ControlCenterVM;
       else: (proc(operation, target: string) =
                if press != nil: press(operation, target))
     let (form, formH) = r.drawLaunchForm(p, c, inner, inner < 480, formPress, padPx = 0,
+                                         labelLinePx = FieldLabelPx, bodyLinePx = TabLinePx,
                                          locked = locked)
     r.tag(form, "form", $c.intent)
     r.tag(form, "locked", $locked)
@@ -315,8 +335,10 @@ proc launchColumn(r: GpuiRenderer; p: AhPalette; vm: ControlCenterVM;
   let launches = vm.recent
   if launches.len == 0:
     let (none, noneH) = r.caption(NoRecentLaunchesWords, p.textCaption, inner)
+    r.styles(none, [("padding-top", "4px"), ("padding-bottom", "4px"),
+                    ("height", $(noneH + 8) & "px")])
     r.appendChild(recent, none)
-    rh += 2 + noneH
+    rh += 2 + noneH + 8
   for launch in launches:
     let row = r.box(column = true, pairs = [("padding-top", $RecentPadPx & "px"),
                                             ("padding-bottom", $RecentPadPx & "px"),
@@ -344,7 +366,7 @@ proc waitingHeightPx*(vm: ControlCenterVM; innerPx: int): int =
   ## its rows (or its "nothing waits" line).
   result = HeadPx + 2 * ListPadPx
   let rows = vm.waiting
-  if rows.len == 0: return result + 16
+  if rows.len == 0: return result + NoneLinePx
   for row in rows: result += waitingRowHeightPx(row, innerPx)
 
 proc stateInk(p: AhPalette; attention: SessionAttention): string =
@@ -357,7 +379,14 @@ proc stateInk(p: AhPalette; attention: SessionAttention): string =
 proc drawWaitingRow(r: GpuiRenderer; p: AhPalette; row: WaitingRow; innerPx: int;
                     focused: bool; press: ControlCenterPress): GpuiElement =
   let h = waitingRowHeightPx(row, innerPx)
-  result = r.box(column = true, pairs = [("height", $h & "px"), ("width", $innerPx & "px"),
+  # The row spans the column, its words inset by the panel's inset: the
+  # web's row (`.ah-cc-waiting-row`, `padding: 0.375rem 0.5rem; margin: 0
+  # -0.5rem`, 0.5rem being the list's side padding, `AH_CC_PAD`) takes that
+  # padding back, so its ground and its focus bar reach the column's edges.
+  result = r.box(column = true, pairs = [("height", $h & "px"),
+                                         ("width", $(innerPx + 2 * PadXPx) & "px"),
+                                         ("padding-left", $PadXPx & "px"),
+                                         ("padding-right", $PadXPx & "px"),
                                          ("padding-top", $RowPadPx & "px"),
                                          ("gap", "1px"), ("flex-shrink", "0"),
                                          ("overflow", "hidden")])
@@ -387,11 +416,15 @@ proc overviewColumn(r: GpuiRenderer; p: AhPalette; vm: ControlCenterVM;
                     waitingCapPx = -1): GpuiElement =
   ## The waiting sessions over the Initiatives panel, `widthPx` ×
   ## `heightPx` (study D73): the waiting list as tall as its rows and at
-  ## most 45%, the panel filling the rest.
+  ## most 45%, the panel filling the rest. In one column the web's tab
+  ## scrolls (`[data-ah-columns="one"]`: `.ah-cc-waiting max-height: none`,
+  ## the panel `flex: 1 0 auto; min-height: 12rem`); a GPUI window does not,
+  ## so here the column keeps to `heightPx`, the waiting list to
+  ## `waitingCapPx` in whole rows, and the panel to the rest (study D84).
   result = r.box(column = true, pairs = [("width", $widthPx & "px"),
-                                         ("height", $heightPx & "px"),
                                          ("gap", $ColumnGapPx & "px"),
                                          ("overflow", "hidden"), ("flex-shrink", "0")])
+  r.setStyle(result, "height", $heightPx & "px")
   r.tag(result, "cc-overview", "overview")
   r.tag(result, "overview-px", $heightPx)
   let inner = widthPx - 2 * PadXPx
@@ -425,18 +458,21 @@ proc overviewColumn(r: GpuiRenderer; p: AhPalette; vm: ControlCenterVM;
                                                 ("overflow", "hidden"), ("flex-shrink", "0")])
     r.tag(waiting, "waiting-section", $rows.len)
     r.tag(waiting, "waiting-px", $waitingH)
-    let head = r.drawSectionHeader(p, WaitingHeading, "", waitingCountText(rows.len), widthPx)
+    let head = r.drawSectionHeader(p, WaitingHeading, "", waitingCountText(rows.len), widthPx,
+                                   linePx = TabLinePx)
     r.tag(head, "head", "waiting")
     # The count sits where a panel has its summary, but the tab's summary is
     # the Initiatives panel's own: a reader of the tab finds that one.
     r.renameFact(head, "summary", "waiting-count")
     r.appendChild(waiting, head)
-    let list = r.box(column = true, pairs = [("padding-left", $PadXPx & "px"),
-                                             ("padding-right", $PadXPx & "px"),
-                                             ("padding-top", $ListPadPx & "px"),
+    # The rows span the column (`drawWaitingRow`); the "nothing waits"
+    # line keeps the panel's inset.
+    let list = r.box(column = true, pairs = [("padding-top", $ListPadPx & "px"),
                                              ("flex-shrink", "0")])
     if rows.len == 0:
       let (none, _) = r.caption(NothingWaitingWords, p.textCaption, inner)
+      r.styles(none, [("margin-left", $PadXPx & "px"), ("padding-top", "4px"),
+                      ("padding-bottom", "4px"), ("height", $NoneLinePx & "px")])
       r.appendChild(list, none)
     let focused = vm.focused.val
     for i, row in rows:
@@ -454,12 +490,14 @@ proc overviewColumn(r: GpuiRenderer; p: AhPalette; vm: ControlCenterVM;
   if vm.isEmptyFleet:
     # An empty fleet's line in the panel's place, filling it.
     let empty = r.box(column = true, pairs = [("width", $widthPx & "px"),
-                                              ("height", $restH & "px"),
                                               ("background", p.panel),
                                               ("flex-shrink", "0")])
+    # It fills what is left, no more.
+    r.setStyle(empty, "height", $max(0, restH) & "px")
     # The panel's place keeps a panel's head band: the Initiatives panel's
     # title and source, then the line.
-    let head = r.drawSectionHeader(p, "Initiatives", vm.initiatives.sourceLabel, "", widthPx)
+    let head = r.drawSectionHeader(p, "Initiatives", vm.initiatives.sourceLabel, "", widthPx,
+                                   linePx = TabLinePx)
     r.tag(head, "head", "initiatives")
     r.appendChild(empty, head)
     let lineBox = r.box(pairs = [("padding-left", $PadXPx & "px"),
@@ -473,7 +511,10 @@ proc overviewColumn(r: GpuiRenderer; p: AhPalette; vm: ControlCenterVM;
     let host = r.createElement("div")
     r.styles(host, [("width", $widthPx & "px"), ("height", $restH & "px"),
                     ("flex-shrink", "0")])
-    drawInitiativesPanel(r, host, vm.initiatives, p, widthPx)
+    drawInitiativesPanel(r, host, vm.initiatives, p, widthPx, linePx = TabLinePx)
+    # The panel sets its host to fill its parent (`height: 100%`, the
+    # column's whole height): here it has the rest under the waiting list.
+    r.setStyle(host, "height", $restH & "px")
     r.appendChild(result, host)
 
 proc drawControlCenter*(r: GpuiRenderer; host: GpuiElement; vm: ControlCenterVM;
@@ -512,9 +553,15 @@ proc drawControlCenter*(r: GpuiRenderer; host: GpuiElement; vm: ControlCenterVM;
     # lines: that, not `OverviewFloorPx`, is what it must keep, so the whole
     # form stays (GPUI review of 2026-11-24: about 500px left blank under a
     # folded form at the sidebar size; the terminal folds by the same rule).
+    # The Initiatives panel's head as it will be drawn: at a sidebar's width
+    # its summary wraps under its title, so it is taller than `HeadPx`, and
+    # `InitiativesFloorPx` is kept under the whole of it (merge review of
+    # 2026-11-25: with one line assumed, the first session line fell below
+    # the window).
+    let initiativesHead = vm.initiatives.initiativesHeadPx(widthPx, TabLinePx)
     let floor = if vm.isEmptyFleet:
                   vm.waitingHeightPx(widthPx - 2 * PadXPx) + ColumnGapPx + HeadPx + EmptyLinePx
-                else: OverviewFloorPx
+                else: OverviewFloorPx - HeadPx + initiativesHead
     if heightPx - launchH - ColumnGapPx < floor:
       (launch, launchH) = r.launchColumn(p, vm, widthPx, press, folded = true)
     r.setStyle(launch, "height", $launchH & "px")
@@ -522,7 +569,8 @@ proc drawControlCenter*(r: GpuiRenderer; host: GpuiElement; vm: ControlCenterVM;
     let rest = max(0, heightPx - launchH - ColumnGapPx)
     if rest > 0:
       r.appendChild(host, r.overviewColumn(p, vm, widthPx, max(rest, floor), press,
-                                           waitingCapPx = max(0, rest - HeadPx - InitiativesFloorPx)))
+                                           waitingCapPx = max(0, rest - initiativesHead -
+                                                                 InitiativesFloorPx)))
 
 proc mountControlCenter*(r: GpuiRenderer; host: GpuiElement; vm: ControlCenterVM;
                          p: AhPalette; widthPx, heightPx: int;

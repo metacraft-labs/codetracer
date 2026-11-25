@@ -2531,7 +2531,8 @@ test_lane_files() {
 		# takes on GuiAssert's headless sway (`build/ctf-p1b/gpui/`) and the
 		# committed web record, so it is not in `gpui-shell`, whose recipe opens
 		# no window. `just ctf-p1b-gpui-captures` captures first and then runs
-		# this lane; the `gpui-window-captures` CI job runs that recipe.
+		# this lane. In CI the `gpui-window-captures` shards take the captures in
+		# shares and its `ctf-p1b-gpui-layout` job runs this lane over the union.
 		# CTF-P1c's `test_ctf_p1c_gpui_capture_matches_web_layout_at_moments.nim`
 		# is the same check over the playback stories at each named moment
 		# (`build/ctf-p1c/gpui/`, which the same recipe takes); the shared
