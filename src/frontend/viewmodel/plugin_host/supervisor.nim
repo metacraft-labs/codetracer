@@ -357,6 +357,9 @@ type
       ## Extra environment for every plugin process.
     reservedKeys*: seq[string]
     escapeTimes: seq[int64]
+    escapeHolders: seq[seq[string]]
+      ## For each Escape in `escapeTimes`, the plugins holding a layer when
+      ## it arrived.
     recoveryOpen*: bool
     recoveryPlugins*: seq[string]
     hostModalOpen*: proc(): bool
@@ -2088,19 +2091,36 @@ proc observeEscape*(sup: Supervisor; arrivedMs: int64 = -1): bool {.discardable.
   ## by handling would never fire. Without `arrivedMs` the key is taken as
   ## arriving now. A key that arrived before one already counted (the
   ## caller's clock started again: a reloaded page) starts the count over.
+  ##
+  ## The dialog names every plugin that held the keyboard while the chord was
+  ## pressed, not only those still holding it at the third Escape: on a loaded
+  ## machine a layer that swallowed the first two Escapes can lose it to its
+  ## own breaker before the third is read, and the dialog then named no one.
   let t = if arrivedMs >= 0: arrivedMs else: sup.now()
+  var holding: seq[string]
+  for s in sup.slots.values:
+    if s.layers.len > 0: holding.add s.id
   var kept: seq[int64]
-  for x in sup.escapeTimes:
-    if x <= t and t - x <= RecoveryChordWindowMs: kept.add x
+  var keptHolders: seq[seq[string]]
+  for i, x in sup.escapeTimes:
+    if x <= t and t - x <= RecoveryChordWindowMs:
+      kept.add x
+      keptHolders.add sup.escapeHolders[i]
   kept.add t
+  keptHolders.add holding
   sup.escapeTimes = kept
+  sup.escapeHolders = keptHolders
   if kept.len < RecoveryChordCount:
     return false
   sup.escapeTimes = @[]
+  sup.escapeHolders = @[]
   sup.recoveryPlugins = @[]
+  for ids in keptHolders:
+    for id in ids:
+      if id notin sup.recoveryPlugins: sup.recoveryPlugins.add id
   for s in sup.slots.values:
     if s.layers.len > 0:
-      sup.recoveryPlugins.add s.id
+      if s.id notin sup.recoveryPlugins: sup.recoveryPlugins.add s.id
       for l in s.layers:
         if not s.instance.isNil:
           s.instance.sendTo(%*{"type": "layer-popped", "plugin": s.id,

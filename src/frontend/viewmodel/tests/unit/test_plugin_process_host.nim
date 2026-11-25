@@ -753,6 +753,28 @@ suite "§11.7.6: the escape no plugin can capture":
       r.sup.answers.anyIt(it.id == id and it.kind == "done"))
     r.sup.shutdown()
 
+  test "the dialog names a plugin that held the keyboard during the chord, even if its breaker took the layer first":
+    # Under load a layer that swallowed the first Escapes lost it to its own
+    # breaker before the third was read, and the dialog said "the plugins that
+    # held the keyboard: none". The Escapes carry their arrival times (inside
+    # the chord's window, however long the breaker takes to open here).
+    var r = newRig("swallow-input", manifest = inputManifest())
+    r.sup.inputDeadlineMs = 200
+    r.sup.strikesToOpen = 1
+    r.both()
+    check r.layerUp()
+    check not r.sup.observeEscape(arrivedMs = 1_000)
+    # The swallowed key's deadline passes: one strike opens the breaker, and
+    # the layer goes before the chord is complete.
+    check r.press("j").found
+    check r.sup.waitUntil("breaker open, layer gone", proc(): bool =
+      r.sup.slot("acme-tools.flame").breaker == bsOpen and
+        r.sup.slot("acme-tools.flame").layers.len == 0)
+    check not r.sup.observeEscape(arrivedMs = 1_100)
+    check r.sup.observeEscape(arrivedMs = 1_200)
+    check r.sup.recoveryPlugins == @["acme-tools.flame"]
+    r.sup.shutdown()
+
   test "the chord landing while a routine ping is in flight still probes the plugin":
     # The race the case above leaves to timing, made certain: the process is
     # stopped so a routine ping is OUTSTANDING when the chord fires (the chord
