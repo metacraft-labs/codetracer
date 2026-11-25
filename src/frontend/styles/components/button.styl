@@ -30,6 +30,13 @@ CONTROL_BORDER_WIDTH = 0.0625rem
 CONTROL_BORDER_COLOR = colors-ui-border-secondary
 CONTROL_RADIUS = 0.375rem
 
+// Control gap — ONE space between neighbouring controls: button and button,
+// field and button, in a row or stacked (Nikolay, 2026-11-03).  It is the
+// Figma design system's `space / gap/control` variable, Compact density —
+// 6px — read from the generated token so Figma stays the source of truth.
+// Not for tabs: strip tabs and sub-tabs keep their own spacing.
+CONTROL_GAP = unit(gap-control / 16, 'rem')
+
 // Panel inset — ONE distance between a panel's edges and its content: 8px on
 // the left, the right and the top, in every panel (Nikolay, 2026-09-14).
 //   * top: the panel body's own padding (`.lm_content`, golden_layout.styl; the
@@ -80,6 +87,28 @@ key-focus()
 
 BUTTON_TRANSITION_TIMING = 100ms ease
 BUTTON_TRANSITION = background-color BUTTON_TRANSITION_TIMING, color BUTTON_TRANSITION_TIMING, border-color BUTTON_TRANSITION_TIMING
+
+// A Design System icon (Figma icons page, node 1:12) painted through a mask in
+// the element's text colour, so it follows the theme and the hover colour —
+// the way the session tabs' chevron is drawn (D-33).  For an empty element of
+// its own: the mask covers the whole box.
+ICON_CHEVRON_DOWN = url('../../public/resources/shared/build_chevron_down.svg')
+ICON_OPEN_DIFF = url('../../public/resources/shared/vc-open-diff.svg')
+
+mask-icon(img, size = 1rem)
+  display: inline-block
+  flex: 0 0 auto
+  width: size
+  height: size
+  background: currentColor
+  -webkit-mask-image: img
+  mask-image: img
+  -webkit-mask-repeat: no-repeat
+  mask-repeat: no-repeat
+  -webkit-mask-position: center
+  mask-position: center
+  -webkit-mask-size: contain
+  mask-size: contain
 
 // Button look — ONE look and ONE set of states for every button that is not a
 // primary call to action, in the panels and on the welcome screens (Nikolay,
@@ -622,8 +651,8 @@ tooltip-look()
 
 // The value-origin badge on each State row sits beside the value-history toggle
 // (above), so it is built as the same extra-small icon button: 20px tall, the
-// shared control outline (CONTROL_BORDER_*, 6px corners), 8px from its
-// neighbour.  With text it grows sideways into a pill; with none — the backend
+// shared control outline (CONTROL_BORDER_*, 6px corners), the control gap
+// (CONTROL_GAP, 6px) from its neighbour.  With text it grows sideways into a pill; with none — the backend
 // sends an empty expression for some terminators, e.g. "recording start" — it
 // stays a 20px square instead of a pill with a hole where the text would be.
 // Sizes are `rem`, not `em`: the badge's own 12px font would otherwise shrink
@@ -645,7 +674,7 @@ tooltip-look()
   // The shared button transition (BUTTON_TRANSITION, top of this file).
   transition: BUTTON_TRANSITION
   vertical-align: middle
-  margin-left: 0.5rem
+  margin-left: CONTROL_GAP
 
   // Design system colors matching secondary image button
   background-color: colors-ui-surface-primary-default
