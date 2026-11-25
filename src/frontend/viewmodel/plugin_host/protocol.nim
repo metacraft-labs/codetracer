@@ -58,6 +58,17 @@ const
   PingIdleIntervalMs* = 10_000
   PingBusyIntervalMs* = 2_000
   PongDeadlineMs* = 2_000
+  PingMissesForHang* = 3
+    ## Missed pong deadlines in a row that make a silent process hung. One
+    ## miss is not evidence of a hang, because the host can be the one that is
+    ## late. On Node (the desktop's main process and `ct host`) a pipe's bytes
+    ## reach the supervisor only through an I/O callback, and after the event
+    ## loop has been blocked, its next turn runs the EXPIRED TIMERS FIRST and
+    ## the I/O callbacks after them. The timer that polls the supervisor then
+    ## sees the deadline passed with nothing read, while the pong is already
+    ## sitting in the pipe, unread. So each miss sends a fresh ping, and only
+    ## this many misses in a row, with nothing read between them, make a
+    ## process hung. Any pong or arriving bytes reset the count.
   BusyHangMs* = 5_000
 
   # ---- §11.7.4 input deadlines ----------------------------------------------

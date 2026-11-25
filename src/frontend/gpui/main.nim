@@ -4510,6 +4510,15 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
   var r = r0
   if kind in {gekPointerDown, gekContextMenu, gekAuxDown}:
     gAltTap.interrupted()        # Alt+press is not Alt tapped
+    # Every press the window receives, before anything decides what it does
+    # (or returns early): a capture whose press drew nothing then says whether
+    # the press reached the window at all.
+    traceGesture("press " &
+      (case kind
+       of gekContextMenu: "right"
+       of gekAuxDown: "middle"
+       else: "left") &
+      " at " & $x & "," & $y & " pane=" & gGeom.activePaneAt(x, y))
   if gShell.isNil:
     return
   var step: GestureStep
@@ -5068,7 +5077,7 @@ proc pointerHandler(r0: GpuiRenderer): GpuiEventHandler =
     windowPointer(r0, ev.kind, int(p.x), int(p.y), dy, dx)
 
 
-proc windowKey(key: string; mods: seq[string]) =
+proc windowKey(key: string; mods: seq[string]; arrivedMs = -1'i64) =
   ## One key of a replay window, from a pane's `keydown` listener or from
   ## `--window-ops`. What draws its own key handling first — the open
   ## program menu or a text shown over the window, a new tab's Welcome
@@ -5088,7 +5097,8 @@ proc windowKey(key: string; mods: seq[string]) =
   # plugin layer's, a menu's, a text over the window — can take it. The key is
   # still delivered as usual; the third within a second popped every plugin
   # layer, and the recovery dialog says which plugins held the keyboard.
-  gPluginRecoveryKey = gPlugins.observeWindowEscape(canonicalKeyOfGpui(key, mods))
+  gPluginRecoveryKey = gPlugins.observeWindowEscape(canonicalKeyOfGpui(key, mods),
+                                                    arrivedMs)
   defer:
     if gPluginRecoveryKey:
       gPluginRecoveryKey = false
@@ -5116,9 +5126,11 @@ proc gestureKeyHandler(el: GpuiElement): GpuiEventHandler =
   ## A replay window's `keydown` listener: `Esc` cancels a layout gesture.
   ## (An edit window's editor listener does the same before typing a key.)
   result = proc(ev: GpuiEvent) =
-    discard ev
     if el.lastEventKind() != gekKeyDown: return
-    windowKey(el.lastEventKey(), modifierNamesOf(el.lastEventModifiers()))
+    # The key's own time on the display server's clock (0 when the platform
+    # gives none): the recovery chord is timed on when keys arrived.
+    windowKey(el.lastEventKey(), modifierNamesOf(el.lastEventModifiers()),
+              (if ev.timeMs > 0: int64(ev.timeMs) else: -1'i64))
 
 proc windowModifiers(mods: seq[string]) =
   ## The held modifiers changed (GPUI's `modifierschange`, or `--window-ops`'

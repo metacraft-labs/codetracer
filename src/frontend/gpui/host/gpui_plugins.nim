@@ -132,14 +132,21 @@ func pluginKeyName*(canonical: string): string =
   ## modifiers' spelling folded, the key's own case kept — `J` is not `j`.
   bindingKeyName(canonical)
 
-proc observeWindowEscape*(p: SessionPlugins; canonical: string): bool =
+proc observeWindowEscape*(p: SessionPlugins; canonical: string;
+                          arrivedMs = -1'i64): bool =
   ## §11.7.6, called for EVERY key before anything resolves it: an `Escape`
   ## is counted towards the recovery chord, and the key is still delivered as
   ## usual. True on the third within a second, which popped every plugin
   ## layer: the window then shows the recovery dialog.
+  ##
+  ## `arrivedMs` is when the key HAPPENED, on the display server's clock (the
+  ## platform event's own time, `GpuiEvent.timeMs`), and the chord is timed
+  ## on it: a window busy between three quick Escapes handles them seconds
+  ## apart, which is when recovery is needed most. Without it (a scripted key,
+  ## a platform that gives no time) the key is taken as arriving now.
   if p.isNil or not p.sup.extensionsEnabled: return false
   if pluginKeyName(canonical) != "Esc": return false
-  p.sup.observeEscape()
+  p.sup.observeEscape(arrivedMs)
 
 proc routePluginKey*(p: SessionPlugins; canonical: string;
                      userBound: bool): bool =

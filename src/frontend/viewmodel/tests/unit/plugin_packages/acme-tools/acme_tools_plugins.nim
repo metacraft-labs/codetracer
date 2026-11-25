@@ -45,6 +45,8 @@
 ##   flood           pushes status items as fast as it can for `floodMs`
 ##   flood-relay     `flame.refresh` floods for `floodMs`, then relays
 ##                   `state.addWatch` and answers, behind its own pushes
+##   flood-final     `flame.refresh` floods one status item for `floodMs`,
+##                   then sets it to `final` once, and answers
 ##   swallow-input   pushes a window layer binding every printable key, and
 ##                   never acknowledges the keys it gets
 ##   slow-ack        acknowledges each key after `ackDelayMs`
@@ -379,6 +381,15 @@ proc setupFlame(sdk: PluginSdk) =
       p.done(req))
   f.onInvoke("flame.refresh", proc(p: Plugin; args: JsonNode; req: Request) =
     case p.settings{"mode"}.getStr("normal")
+    of "flood-final":
+      let until = getMonoTime() + initDuration(milliseconds =
+        p.settings{"floodMs"}.getInt(1_000))
+      var i = 0
+      while getMonoTime() < until:
+        p.pushStatus("flame.flood", viewText("flame.flood", $i))
+        inc i
+      p.pushStatus("flame.flood", viewText("flame.flood", "final"))
+      p.done(req)
     of "flood-relay":
       let until = getMonoTime() + initDuration(milliseconds =
         p.settings{"floodMs"}.getInt(1_000))
