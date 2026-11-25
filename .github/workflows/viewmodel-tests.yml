@@ -198,6 +198,15 @@ jobs:
         # the compiled stylesheets, so it needs the dev shell's `stylus`.
         run: nix develop .#devShells.x86_64-linux.default --command just test-css-has-invalidation
 
+      - name: Every url() in every shipped stylesheet names a file that exists
+        # A missing file compiles clean and paints nothing; two toolbar icons
+        # and a font fallback shipped that way and were found only by a
+        # renderer that reports what it cannot load. Runs its planted fixtures
+        # first, then resolves each url() in the compiled stylesheets against
+        # where the sheet ships. Needs the dev shell's `stylus` and the
+        # design-system submodule (checked out above).
+        run: nix develop .#devShells.x86_64-linux.default --command just test-css-url-resolution
+
       - name: The light theme paints its panels and editor ground from the light palette
         # The light stylesheet once carried every design-token surface in its
         # DARK value (#282828 behind codetracerWhite's text, 1.56:1) and

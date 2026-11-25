@@ -4313,6 +4313,15 @@ test-css-token-resolution:
 test-css-has-invalidation:
   bash ci/test/css-has-invalidation.sh
 
+# Every url() in every shipped stylesheet names a file that exists. A missing
+# file compiles clean and paints nothing: two toolbar icons and a FontAwesome
+# fallback shipped that way. Runs the guard's planted fixtures, compiles the
+# shipped stylesheets and resolves each url() against where the sheet ships
+# (`src/build-<type>-repro/frontend/styles`). Needs `stylus` and the
+# design-system submodule. See ci/test/css-url-resolution-guard.py.
+test-css-url-resolution:
+  bash ci/test/css-url-resolution.sh
+
 # The guard above, shown failing. Ten arms: four defects it must report (an
 # unresolved token, a theme redefining a token, and a legacy palette leak —
 # alone, and beside the retired ceilings file), three legal constructs it must
