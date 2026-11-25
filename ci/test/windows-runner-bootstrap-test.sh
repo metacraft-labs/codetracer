@@ -111,10 +111,14 @@ if [ -n "${1:-}" ]; then
 else
 	WORKFLOW="$(mktemp "${TMPDIR:-/tmp}/codetracer-inlined.XXXXXX.yml")"
 	trap 'rm -f "$WORKFLOW"' EXIT
-	python3 "$REPO_ROOT/ci/lib/inline-codetracer-workflow.py" >"$WORKFLOW" || {
+	# python3, else python: a Windows runner's gate (`just test-origin-dap`
+	# under Git Bash) has only the job's venv `python`.
+	inline_python="$(command -v python3 || command -v python || true)"
+	if [ -z "$inline_python" ] ||
+		! "$inline_python" "$REPO_ROOT/ci/lib/inline-codetracer-workflow.py" >"$WORKFLOW"; then
 		echo "windows-runner-bootstrap-test: could not inline codetracer.yml's called workflows" >&2
 		exit 1
-	}
+	fi
 fi
 readonly WORKFLOW
 # Local composite actions a job can reach `setup-dev-env` through. Section 4
