@@ -12,6 +12,9 @@ readonly SCRIPT_DIR
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
 readonly REPO_ROOT
 readonly GATE="$REPO_ROOT/scripts/test-origin-dap.sh"
+# The workflow these Windows-YAML assertions read. Overridden only by this
+# script's own whole-gate cases below, which feed it a mutated copy.
+readonly WORKFLOW="${ORIGIN_DAP_GATE_WORKFLOW:-$REPO_ROOT/.github/workflows/codetracer.yml}"
 
 fail() {
 	echo "origin-DAP shell contract test failed: $*" >&2
@@ -81,7 +84,7 @@ workflow_job() {
     $0 == "  " job ":" { active = 1; print; next }
     active && $0 ~ /^  [A-Za-z0-9_-]+:$/ { exit }
     active { print }
-  ' "$REPO_ROOT/.github/workflows/codetracer.yml"
+  ' "$WORKFLOW"
 }
 
 workflow_step() {
@@ -103,8 +106,8 @@ windows_nightly="$(workflow_job origin-dap-windows-nightly)"
 if grep -Fq 'shell: pwsh' <<<"$windows_per_pr"; then
 	fail "Windows per-PR origin-DAP job must not require unavailable PowerShell Core"
 fi
-[ "$(printf '%s\n' "$windows_per_pr" | grep -c 'shell: powershell$')" -eq 9 ] ||
-	fail "Windows per-PR origin-DAP job must run all nine PowerShell steps with Windows PowerShell"
+[ "$(printf '%s\n' "$windows_per_pr" | grep -c 'shell: powershell$')" -eq 11 ] ||
+	fail "Windows per-PR origin-DAP job must run all eleven PowerShell steps with Windows PowerShell"
 
 [ "$(printf '%s\n' "$windows_per_pr" | grep -c 'CT_TEST_LANGS: python$')" -eq 1 ] ||
 	fail "Windows per-PR origin-DAP job must select Python exactly once"
@@ -113,8 +116,8 @@ fi
 [ "$(printf '%s\n' "$windows_nightly" | grep -c 'CT_TEST_LANGS: all$')" -eq 1 ] ||
 	fail "Windows nightly origin-DAP job must use the documented routed 'all' selector"
 
-if printf '%s\n%s\n' "$windows_per_pr" "$windows_nightly" |
-	grep -Eiq 'python[[:space:]]*\+[[:space:]]*rust|python,rust|full matrix|all languages|MCP/CLI smoke'; then
+if grep -Eiq 'python[[:space:]]*\+[[:space:]]*rust|python,rust|full matrix|all languages|MCP/CLI smoke' \
+	<<<"$windows_per_pr"$'\n'"$windows_nightly"; then
 	fail "Windows origin-DAP jobs retain a rejected selector or a false coverage claim"
 fi
 if grep -Eiq 'choco(latey)?([.]exe)?([[:space:]]|$)' <<<"$windows_per_pr"; then
@@ -191,17 +194,14 @@ required_gate_step="$(printf '%s\n' "$windows_per_pr" | workflow_step 'Run requi
 # discovery, pinned provisioning, version verification and PATH propagation;
 # the workflow must call that same file, not retain an untested inline clone.
 # shellcheck disable=SC2016 # Match the literal GitHub Actions expression.
-printf '%s\n' "$git_bootstrap" |
-	grep -Fq 'CODETRACER_GIT_BOOTSTRAP_REVISION: ${{ github.sha }}' ||
+grep -Fq 'CODETRACER_GIT_BOOTSTRAP_REVISION: ${{ github.sha }}' <<<"$git_bootstrap" ||
 	fail "Windows Git bootstrap must be tied to the immutable workflow revision"
 grep -Fq "'^[0-9a-f]{40}$'" <<<"$git_bootstrap" ||
 	fail "Windows Git bootstrap must validate the immutable revision"
-printf '%s\n' "$git_bootstrap" |
-	grep -Fq 'https://raw.githubusercontent.com/metacraft-labs/codetracer/' ||
+grep -Fq 'https://raw.githubusercontent.com/metacraft-labs/codetracer/' <<<"$git_bootstrap" ||
 	fail "Windows Git bootstrap must retrieve only the CodeTracer helper"
 # shellcheck disable=SC2016 # Match literal inline PowerShell.
-printf '%s\n' "$git_bootstrap" |
-	grep -Fq '"$revision/ci/ensure-git-for-checkout.ps1"' ||
+grep -Fq '"$revision/ci/ensure-git-for-checkout.ps1"' <<<"$git_bootstrap" ||
 	fail "Windows Git bootstrap helper URL must contain the validated revision"
 grep -Fq '/ci/ensure-git-for-checkout.ps1' <<<"$git_bootstrap" ||
 	fail "Windows Git bootstrap must retrieve the tested helper path"
@@ -216,13 +216,11 @@ grep -Fq 'Invoke-WebRequest' <<<"$git_bootstrap" ||
 # of the day: this check previously named `app-token` literally and would have
 # gone quietly blind the moment that step was renamed, which is exactly what
 # the consolidation onto a single `ci_token` mint step did.
-if printf '%s\n' "$git_bootstrap" |
-	grep -Eq 'steps\.[A-Za-z0-9_-]+\.outputs\.token|SIBLING_TOKEN|[Aa]uthorization|[Hh]eader'; then
+if grep -Eq 'steps\.[A-Za-z0-9_-]+\.outputs\.token|SIBLING_TOKEN|[Aa]uthorization|[Hh]eader' <<<"$git_bootstrap"; then
 	fail "Windows Git bootstrap must not receive or transmit repository credentials"
 fi
 # shellcheck disable=SC2016 # Match literal inline PowerShell.
-printf '%s\n' "$git_bootstrap" |
-	grep -Fq 'Remove-Item -LiteralPath $bootstrapScript' ||
+grep -Fq 'Remove-Item -LiteralPath $bootstrapScript' <<<"$git_bootstrap" ||
 	fail "Windows Git bootstrap must clean the downloaded helper"
 if grep -Fq 'choco.exe' <<<"$git_bootstrap"; then
 	fail "Windows Git bootstrap must not require an absent package manager"
@@ -244,8 +242,7 @@ grep -Fq '"GIT_CONFIG_KEY_0=core.longpaths"' \
 grep -Fq '"GIT_CONFIG_PARAMETERS="' \
 	"$REPO_ROOT/ci/ensure-git-for-checkout.ps1" ||
 	fail "Windows Git bootstrap must neutralize inherited inline Git configuration"
-printf '%s\n' "$bootstrap_contract_step" |
-	grep -Fq './ci/test/ensure-git-for-checkout.ps1' ||
+grep -Fq './ci/test/ensure-git-for-checkout.ps1' <<<"$bootstrap_contract_step" ||
 	fail "Windows job must run the Git bootstrap behavioral contract"
 
 # Post-checkout compiler/build-tool provisioning uses only reviewed official
@@ -260,8 +257,7 @@ printf '%s\n' "$bootstrap_contract_step" |
 	fail "Windows job must invoke the reviewed origin-DAP toolchain helper exactly once"
 [ "$(printf '%s\n' "$toolchain_step" | grep -c 'shell: powershell$')" -eq 1 ] ||
 	fail "Windows toolchain provisioning must remain Windows PowerShell 5.1 compatible"
-printf '%s\n' "$bootstrap_contract_step" |
-	grep -Fq './ci/test/ensure-origin-dap-windows-toolchain.ps1' ||
+grep -Fq './ci/test/ensure-origin-dap-windows-toolchain.ps1' <<<"$bootstrap_contract_step" ||
 	fail "Windows job must run the origin-DAP toolchain behavioral contract"
 grep -Fq 'JUST_WIN_X64_SHA256=f0acf3f8ccbcf360b481baae9cae4c921774c89d5d932012481d3e0bda78ab39' \
 	"$REPO_ROOT/non-nix-build/windows/toolchain-versions.env" ||
@@ -282,8 +278,98 @@ for required_companion in capnpc-c++.exe capnpc-capnp.exe nimble.exe; do
 		fail "Windows origin-DAP toolchain omitted $required_companion"
 done
 
-[ "$(printf '%s\n' "$checkout_step" | grep -c 'submodules: recursive$')" -eq 1 ] ||
-	fail "Windows checkout must retain recursive submodules"
+# The job checks out WITHOUT submodules and fetches the ones it uses itself
+# (a recursive checkout cloned all 37 one by one, 13 of a 20-minute Checkout
+# on an ephemeral runner). What `submodules: recursive` used to protect
+# against is actions/checkout's REST-API fallback, which cannot fetch
+# submodules and leaves no .git. Three things together keep that protection:
+#   (a) Git is installed before actions/checkout, so there is no fallback;
+#   (b) exactly the listed submodules are fetched explicitly after checkout;
+#   (c) the step right after checkout fails the job when there is no .git.
+# check_windows_checkout_contract prints the first one a job lacks and
+# returns 1; the cases below prove it refuses each missing piece.
+readonly WINDOWS_PER_PR_SUBMODULES="libs/nim-result
+libs/nim-stew
+libs/tree-sitter-aiken
+libs/tree-sitter-cadence
+libs/tree-sitter-cairo
+libs/tree-sitter-circom
+libs/tree-sitter-leo
+libs/tree-sitter-masm
+libs/tree-sitter-move-on-aptos
+libs/tree-sitter-nim
+libs/tree-sitter-sway
+libs/tree-sitter-tolk"
+
+check_windows_checkout_contract() {
+	local job="$1" names git_n co_n verify_n fetch_n co_text verify_text fetch_text fetched
+	names="$(printf '%s\n' "$job" | sed -n 's/^      - name: //p')"
+	git_n="$({ grep -nFx 'Ensure Git and Git Bash are on PATH' <<<"$names" || true; } | head -n1 | cut -d: -f1)"
+	co_n="$({ grep -nFx 'Checkout' <<<"$names" || true; } | head -n1 | cut -d: -f1)"
+	verify_n="$({ grep -nFx 'Verify the checkout is a Git repository' <<<"$names" || true; } | head -n1 | cut -d: -f1)"
+	fetch_n="$({ grep -nFx 'Fetch the submodules this job uses' <<<"$names" || true; } | head -n1 | cut -d: -f1)"
+	if [ -z "$git_n" ] || [ -z "$co_n" ] || [ "$git_n" -ge "$co_n" ]; then
+		echo "(a) Git must be installed before actions/checkout"
+		return 1
+	fi
+	co_text="$(printf '%s\n' "$job" | workflow_step 'Checkout')"
+	if ! grep -q '^          submodules: false$' <<<"$co_text"; then
+		echo "(b) actions/checkout must not fetch submodules itself (submodules: false)"
+		return 1
+	fi
+	if [ -z "$fetch_n" ] || [ "$fetch_n" -le "$co_n" ]; then
+		echo "(b) the submodules must be fetched explicitly after checkout"
+		return 1
+	fi
+	fetch_text="$(printf '%s\n' "$job" | workflow_step 'Fetch the submodules this job uses')"
+	fetched="$({ grep -oE '"libs/[A-Za-z0-9_.-]+"' <<<"$fetch_text" || true; } | tr -d '"' | sort -u)"
+	if ! grep -q 'submodule update --init' <<<"$fetch_text" ||
+		[ "$fetched" != "$WINDOWS_PER_PR_SUBMODULES" ]; then
+		echo "(b) the explicit fetch must fetch exactly the listed submodules"
+		return 1
+	fi
+	verify_text="$(printf '%s\n' "$job" | workflow_step 'Verify the checkout is a Git repository')"
+	if [ -z "$verify_n" ] || [ "$verify_n" -ne $((co_n + 1)) ] ||
+		! grep -Fq '".git"' <<<"$verify_text" || ! grep -q 'throw' <<<"$verify_text"; then
+		echo "(c) the step right after checkout must fail the job when there is no .git"
+		return 1
+	fi
+	return 0
+}
+
+# Drop the step named $2 from job text $1.
+without_step() {
+	printf '%s\n' "$1" | awk -v step="$2" '
+    $0 == "      - name: " step { skip = 1; next }
+    skip && $0 ~ /^      - name: / { skip = 0 }
+    !skip { print }
+  '
+}
+
+expect_checkout_refused() { # label, expected reason prefix, job text
+	local reason
+	if reason="$(check_windows_checkout_contract "$3")"; then
+		fail "the Windows checkout contract accepted a job $1"
+	fi
+	[[ "$reason" == "$2"* ]] ||
+		fail "the Windows checkout contract refused a job $1 for the wrong reason: $reason"
+}
+
+if ! checkout_reason="$(check_windows_checkout_contract "$windows_per_pr")"; then
+	fail "Windows per-PR origin-DAP checkout: $checkout_reason"
+fi
+expect_checkout_refused "without the Git bootstrap" "(a)" \
+	"$(without_step "$windows_per_pr" 'Ensure Git and Git Bash are on PATH')"
+expect_checkout_refused "whose checkout fetches submodules recursively" "(b)" \
+	"${windows_per_pr//          submodules: false/          submodules: recursive}"
+expect_checkout_refused "without the explicit submodule fetch" "(b)" \
+	"$(without_step "$windows_per_pr" 'Fetch the submodules this job uses')"
+expect_checkout_refused "that fetches a submodule too few" "(b)" \
+	"$(grep -v '"libs/nim-stew", ' <<<"$windows_per_pr" || true)"
+expect_checkout_refused "that fetches an unlisted submodule" "(b)" \
+	"${windows_per_pr//\"libs\/tree-sitter-cadence\")/\"libs/tree-sitter-cadence\", \"libs/zip\")}"
+expect_checkout_refused "without the .git check" "(c)" \
+	"$(without_step "$windows_per_pr" 'Verify the checkout is a Git repository')"
 # Matched by SHAPE, not by the mint step's id of the day. The id moved from
 # `app-token` to `ci_token` when the workflows were consolidated onto a single
 # mint step per job, and an id-literal assertion would have started failing on
@@ -354,8 +440,7 @@ required_success="$(
 		ORIGIN_DAP_CARGO_BIN="$fake_cargo" \
 		"$GATE" 2>&1
 )"
-printf '%s\n' "$required_success" |
-	grep -Fq "origin-DAP required summary: expected=7 executed=7 skipped=0" ||
+grep -Fq "origin-DAP required summary: expected=7 executed=7 skipped=0" <<<"$required_success" ||
 	fail "required success did not emit the exact completion summary"
 
 set +e
@@ -372,8 +457,7 @@ set -e
 [ "$required_skip_status" -ne 0 ] || fail "required mode accepted a SKIPPED sentinel"
 grep -Fq "emitted a SKIPPED sentinel" <<<"$required_skip" ||
 	fail "required skip reported the wrong failure"
-if printf '%s\n' "$required_skip" |
-	grep -Fq "origin-DAP required summary: expected=7 executed=7 skipped=0"; then
+if grep -Fq "origin-DAP required summary: expected=7 executed=7 skipped=0" <<<"$required_skip"; then
 	fail "required skip emitted the successful completion summary"
 fi
 
@@ -398,9 +482,53 @@ if [ "${ORIGIN_DAP_AMBIENT_REQUIRED_CHILD:-0}" != "1" ]; then
 			ORIGIN_DAP_AMBIENT_REQUIRED_CHILD=1 \
 			bash "$REPO_ROOT/ci/test/origin-dap-gate.sh" 2>&1
 	)" || fail "shell contract self-test failed under ambient required mode"
-	printf '%s\n' "$ambient_required_self_test" |
-		grep -Fq "origin-DAP shell contract tests passed" ||
+	grep -Fq "origin-DAP shell contract tests passed" <<<"$ambient_required_self_test" ||
 		fail "ambient-required shell contract self-test omitted its success marker"
+fi
+
+# (c) on the WHOLE gate, not only on the contract function: a copy of the real
+# workflow whose only defect is the missing .git check must be refused with the
+# (c) message. Two ways to have that one defect while keeping every other
+# assertion -- including the eleven-step Windows PowerShell count -- intact:
+# the step stays but checks nothing, or it checks but no longer comes right
+# after checkout. The child sentinel prevents recursion.
+if [ "${ORIGIN_DAP_GATE_MUTATION_CHILD:-0}" != "1" ]; then
+	mutation_dir="$(mktemp -d "${TMPDIR:-/tmp}/codetracer-origin-dap-gate-mutation.XXXXXX")"
+	expect_whole_gate_refuses_c() { # label, mutated workflow file
+		local out
+		if out="$(ORIGIN_DAP_GATE_MUTATION_CHILD=1 ORIGIN_DAP_AMBIENT_REQUIRED_CHILD=1 \
+			ORIGIN_DAP_GATE_WORKFLOW="$2" bash "$REPO_ROOT/ci/test/origin-dap-gate.sh" 2>&1)"; then
+			rm -rf "$mutation_dir"
+			fail "the whole gate accepted a workflow $1"
+		fi
+		grep -Fq "(c) the step right after checkout must fail the job when there is no .git" <<<"$out" || {
+			rm -rf "$mutation_dir"
+			fail "the whole gate refused a workflow $1, but not for (c): $(tail -n1 <<<"$out")"
+		}
+	}
+	# The .git check's body replaced by a step that checks nothing.
+	awk '
+		/^  origin-dap-windows:$/ { job = 1 }
+		job && /^  [A-Za-z0-9_-]+:$/ && !/^  origin-dap-windows:$/ { job = 0 }
+		job && $0 == "      - name: Verify the checkout is a Git repository" { step = 1; print; next }
+		step && /^      - name: / { step = 0 }
+		step && /^        run: \|$/ { print; print "          Write-Host \"no check\""; skip = 1; next }
+		step && skip && /^          / { next }
+		{ print }
+	' "$WORKFLOW" >"$mutation_dir/neutered.yml"
+	expect_whole_gate_refuses_c "whose .git check checks nothing" "$mutation_dir/neutered.yml"
+	# The .git check moved after the submodule fetch.
+	awk '
+		/^  origin-dap-windows:$/ { job = 1 }
+		job && /^  [A-Za-z0-9_-]+:$/ && !/^  origin-dap-windows:$/ { job = 0 }
+		job && $0 == "      - name: Verify the checkout is a Git repository" { held = 1 }
+		held && $0 == "      - name: Fetch the submodules this job uses" { held = 0; moving = 1 }
+		moving && $0 == "      - name: Restore the toolchain cache" { printf "%s", block; moving = 0 }
+		held { block = block $0 "\n"; next }
+		{ print }
+	' "$WORKFLOW" >"$mutation_dir/moved.yml"
+	expect_whole_gate_refuses_c "whose .git check is not right after checkout" "$mutation_dir/moved.yml"
+	rm -rf "$mutation_dir"
 fi
 
 echo "origin-DAP shell contract tests passed"

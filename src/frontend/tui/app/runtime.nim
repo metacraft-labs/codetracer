@@ -10532,6 +10532,19 @@ proc handleTokenUnwatched(rt: TuiRuntime; token: string;
     rt.showContent(title, body, false, result)
     result.repaint = true
 
+proc observeEscapePress*(rt: TuiRuntime): RuntimeOutcome =
+  ## An `Escape` press that is not a key (`terminal_driver.dekEscapePress`):
+  ## the second `ESC` of a pair read in one burst, which the keymap reads as
+  ## one `Esc`. Counted towards the plugins' recovery chord, as every `Esc`
+  ## key is (`handleTokenUnwatched`), and nothing else: three Escapes pressed
+  ## while the loop was busy are still the chord.
+  if rt.plugins.isNil or rt.plugins.observeEscape.isNil:
+    return
+  if rt.plugins.observeEscape():
+    let (title, body) = rt.plugins.control(@["recovery-dialog"])
+    rt.showContent(title, body, false, result)
+    result.repaint = true
+
 proc handleToken*(rt: TuiRuntime; token: string; nowMs: int64): RuntimeOutcome =
   ## ONE input token, end to end (`handleTokenUnwatched`), noting whether it
   ## wrote a status-line message of its own: in the screen-reader mode that

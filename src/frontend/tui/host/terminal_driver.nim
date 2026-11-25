@@ -308,8 +308,18 @@ proc feed*(f: var InputFramer; b: char): (bool, string) =
         f.paired = true
         return (true, $Esc)
       if f.paired:
-        # The pair's second `ESC`, continued by no escape sequence: the byte
-        # on its own, as `ESC ESC <byte>` has always been read.
+        if b < ' ' or b == '\x7f':
+          # The pair's second `ESC` and a control byte or DEL: the Alt chord
+          # a lone `ESC` and that byte frame as (below). `Esc`, then
+          # Ctrl+Alt+K (`ESC 0x0b`), typed while the loop was busy, reach
+          # the kernel as `ESC ESC 0x0b`; dropping the second `ESC` turned
+          # the chord into Ctrl+K.
+          let alt = Esc & $b
+          f.reset()
+          return (true, alt)
+        # The pair's second `ESC`, continued by no escape sequence and a
+        # printable byte: the byte on its own, as `ESC ESC <char>` has always
+        # been read (`Esc` then `j`, not Alt+J).
         let broke = $b
         f.reset()
         return (true, broke)
@@ -593,6 +603,14 @@ type
     dekResize = "resize"
     dekIdle = "idle"
     dekEof = "eof"
+    dekEscapePress = "escape-press"
+      ## An `Escape` PRESS that is not a key: the second `ESC` of a pair read
+      ## in one burst, which the framer drops because `ESC ESC` is one `Esc`
+      ## (`InputFramer.paired`). Three Escapes a user presses while the loop
+      ## is busy reach the kernel's buffer together and frame as two keys;
+      ## the plugins' recovery chord (Extensibility-Model §11.7.6) counts
+      ## presses, so this event lets it count the third. Nothing else sees it:
+      ## no keymap, no journal, no prompt.
     dekFocus = "focus"
       ## The terminal window gained or lost focus (DECSET 1004's `CSI I` /
       ## `CSI O`, see `focusReportOf`). AN EVENT OF ITS OWN AND NOT A TOKEN,
@@ -1158,6 +1176,13 @@ proc nextEvent*(d: TerminalDriver; timeoutMs: int = 100): DriverEvent =
     # was one `Esc`, already delivered.
     let paired = d.framer.paired
     d.framer.reset()
+    if paired and next >= 0 and next != ord(Esc) and
+       (next < ord(' ') or next == 0x7f) and after < 0:
+      # The pair's second `ESC` and a control byte waiting behind it: the Alt
+      # chord, as the framer reads it when the two arrive while it is
+      # reading (`InputFramer.feed`).
+      d.takeExtra()
+      return tokenEvent(Esc & $char(next))
     if next >= 0:
       # The waiting byte, framed after the `Esc` (an `ESC` begins a new
       # sequence, held from now).
@@ -1182,6 +1207,9 @@ proc nextEvent*(d: TerminalDriver; timeoutMs: int = 100): DriverEvent =
       return DriverEvent(kind: dekToken, token: $Esc)
     if next >= 0:
       return DriverEvent(kind: dekIdle)
+    # The pair's second `ESC`, continued by nothing: dropped as a key, still
+    # a press for the recovery chord.
+    return DriverEvent(kind: dekEscapePress)
   var wait = timeoutMs
   if d.framer.holdsEscPrefix:
     let left = int(EscDelayMs - (clock - d.framer.escSinceMs))
@@ -1211,6 +1239,7 @@ proc nextEvent*(d: TerminalDriver; timeoutMs: int = 100): DriverEvent =
       d.framer.reset()
       if not paired:
         return DriverEvent(kind: dekToken, token: $Esc)
+      return DriverEvent(kind: dekEscapePress)
     return DriverEvent(kind: dekIdle)
   var (complete, token) = d.framer.feed(char(b))
   # PLAT-48: THE REST OF A SEQUENCE THAT IS ALREADY WAITING IS TAKEN NOW.

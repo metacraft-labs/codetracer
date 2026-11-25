@@ -15,6 +15,9 @@
 
 AH_COMPOSER_INSET = 0.5rem
 AH_COMPOSER_PAD = 0.75rem
+// The "More above" line: 0.25rem over and under a 1.5rem line, and its
+// hairline (GPUI's `MoreLinePx`, 33px).
+AH_COMPOSER_MORE_LINE = 2.0625rem
 
 // The story's whole window (storybook_components.mountAgentHarborComposerStory):
 // the caption bar and the window under it, both fixed to the viewport.
@@ -160,6 +163,29 @@ AH_COMPOSER_PAD = 0.75rem
   &::-webkit-scrollbar-thumb
     background: colors-ui-border-primary
     border-radius: 0.25rem
+
+  // While the body is scrolled past its start: the matching quiet line
+  // pinned to its top edge, its hairline under it, so a scrolled body is
+  // always parted from the header and what is above it (the context chips)
+  // reads as above rather than gone. It overlays the content instead of
+  // adding to it (the negative margin takes its height back), so showing it
+  // moves nothing and the scroll offset alone decides it.
+  &[data-ah-above]::before
+    content: "More above \2191"
+    position: sticky
+    top: 0
+    z-index: 1
+    display: block
+    box-sizing: border-box
+    height: AH_COMPOSER_MORE_LINE
+    margin-bottom: (-1 * AH_COMPOSER_MORE_LINE)
+    padding: 0.25rem AH_COMPOSER_PAD
+    line-height: 1.5rem
+    background: colors-ui-surface-primary-default
+    border-bottom: 0.0625rem solid colors-ui-border-secondary
+    font-size: ah-rem(type-ui-size-caption-md)
+    color: colors-ui-text-primary-caption
+    text-align: right
 
   // While the body holds more below: a quiet line pinned to its bottom edge.
   &[data-ah-more]::after

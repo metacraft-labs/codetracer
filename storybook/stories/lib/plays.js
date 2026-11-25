@@ -416,6 +416,9 @@ const composerChecks = {
   "agent-harbor-composer-launch": composerCheck(async (el) => {
     await composedTo(el, "manager");
     expect(el.querySelector(".ah-composer-form").dataset.ahForm).toBe("launch-task");
+    // A body at its start claims nothing above it.
+    expect(el.querySelector(".ah-composer-body").scrollTop).toBe(0);
+    expect(el.querySelector(".ah-composer-body").hasAttribute("data-ah-above")).toBe(false);
     expect(sendButton(el).textContent).toBe("Launch");
     expect(sendButton(el).disabled).toBe(false);
   }),
@@ -443,6 +446,20 @@ const composerChecks = {
     // The schedule is the form's last part: scrolled to it, nothing is
     // below, so no "More below" line claims there is.
     await waitUntil(() => !body.hasAttribute("data-ah-more"), "no More below at the end");
+    // Scrolled past its start, the body says so at its top edge, as it says
+    // "More below" at its bottom one: the chips are above, not gone, and a
+    // hairline parts the header from the scrolled body.
+    expect(body.scrollTop).toBeGreaterThan(4);
+    await waitUntil(() => body.hasAttribute("data-ah-above"), "More above once scrolled");
+    const above = getComputedStyle(body, "::before");
+    expect(above.content).toBe('"More above ↑"');
+    expect(above.position).toBe("sticky");
+    expect(above.borderBottomWidth).toBe("1px");
+    expect(above.borderBottomStyle).toBe("solid");
+    expect(parseFloat(above.height)).toBeGreaterThan(0);
+    // It overlays the content rather than adding to it: shown, it moves
+    // nothing (its negative margin takes its height back).
+    expect(parseFloat(above.marginBottom)).toBeCloseTo(-parseFloat(above.height), 1);
     expect(el.querySelector('[data-ah-field="Cron"] .ah-composer-field-value').textContent).toBe("30 6 * * 1-5");
   }),
   "agent-harbor-composer-launched": composerCheck(async (el) => {

@@ -5,7 +5,7 @@
   "M12": "r.sup.waitUntil(\"the decoration\", proc (): bool =",
   "M13": "r.sup.waitUntil(\"the jump reached the backend\", proc (): bool =",
   "M2": "r.sup.waitUntil(\"deadline\", proc (): bool =",
-  "M3": "Unhandled exception: viewmodel/tests/unit/ct_lens_fixture.nim(58, 3) `code == 0` building the ct-lens package failed:",
+  "M3": "r.sup.waitUntil(\"asking git\", proc (): bool =",
   "M4": "r.sup.waitUntil(\"disabled with the reason\", proc (): bool =",
   "M5": "r.sup.waitUntil(\"disabled with the reason\", proc (): bool =",
   "M6": "r.sup.waitUntil(\"the primary watches a\", proc (): bool =",

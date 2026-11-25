@@ -90,7 +90,7 @@ const
   FooterPx = 1 + 8 + ControlPx + 8
     ## The send line: its hairline, 0.5rem above and below its button.
   MoreLinePx = 1 + 4 + LinePx + 4
-    ## `More below ↓`: its hairline and a line padded 0.25rem.
+    ## `More below ↓` and `More above ↑`: a hairline and a line padded 0.25rem.
   MenuItemPx = 36         ## a dropdown row (`ct-menu-item`, 2.25rem)
   FieldTopPx* = 5
     ## The omnibox field's top in the caption bar: where the web lays out
@@ -952,6 +952,7 @@ proc drawComposer*(r: GpuiRenderer; host: GpuiElement; vm: OmniboxComposerVM;
   r.tag(sheet, "sheet", $vm.phase)
   r.tag(sheet, "hidden-above", $first)
   r.tag(sheet, "hidden-below", $(blocks.high - last))
+  r.tag(sheet, "scroll", $scroll)
   # Where the sheet is laid out, for a check that needs no window
   # (`test_ctf_p2c_gpui_composer`, against the web's layout record).
   r.tag(sheet, "sheet-top", $SheetTopPx)
@@ -987,6 +988,24 @@ proc drawComposer*(r: GpuiRenderer; host: GpuiElement; vm: OmniboxComposerVM;
                            ("background", p.ground)])
     let t = r.onLine(MoreBelow, CaptionPx, p.textCaption, shrink = false)
     r.tag(t, "more-below", MoreBelow)
+    r.appendChild(m, t)
+    r.appendChild(body, m)
+  if scroll > 0:
+    # Scrolled past its start, the body says so at its top edge as it says
+    # `More below` at its bottom one (brief "The composer"): the web's
+    # sticky `More above ↑` line, over the content it hides, its hairline
+    # under it parting the header from the scrolled body, so the parts
+    # above (`In view`, the chips) read as above rather than gone.
+    let m = r.box(pairs = [("position", "absolute"), ("left", "0px"),
+                           ("top", "0px"),
+                           ("width", $(sheetW - 2) & "px"),
+                           ("height", $MoreLinePx & "px"),
+                           ("items", "center"), ("justify", "end"),
+                           ("padding-right", $PadPx & "px"),
+                           ("border-bottom-width", "1px"), ("border-color", p.borderSecondary),
+                           ("background", p.ground)])
+    let t = r.onLine(MoreAbove, CaptionPx, p.textCaption, shrink = false)
+    r.tag(t, "more-above", MoreAbove)
     r.appendChild(m, t)
     r.appendChild(body, m)
   r.appendChild(sheet, body)

@@ -65,6 +65,17 @@ proc nextToken(d: TerminalDriver; budgetMs: int): (string, int64) =
       return (ev.token, (getMonoTime() - t0).inMilliseconds)
   ("", (getMonoTime() - t0).inMilliseconds)
 
+proc events(d: TerminalDriver; budgetMs: int): seq[string] =
+  ## Every token and Escape press in `budgetMs`, in order: a token as its
+  ## bytes, a press (`dekEscapePress`) as "press".
+  let t0 = getMonoTime()
+  while (getMonoTime() - t0).inMilliseconds < budgetMs:
+    let ev = d.nextEvent(20)
+    case ev.kind
+    of dekToken: result.add ev.token
+    of dekEscapePress: result.add "press"
+    else: discard
+
 suite "the lone ESC delay, over a real pipe":
 
   test "a lone ESC is the Esc key after EscDelayMs, and not before":
@@ -233,6 +244,32 @@ suite "an Esc, then another key's escape sequence":
     let (none, _) = d.nextToken(150)
     ck none == ""
 
+  test "Esc, then Ctrl+Alt+K, in one burst: Esc, then the chord":
+    # A user's Esc and then Ctrl+Alt+K (`ESC 0x0b`), typed while the loop is
+    # busy, reach the kernel together. The pair's second `ESC` is the
+    # chord's Alt, as a lone `ESC` and a control byte frame as Alt.
+    let (d, w) = pipeDriver()
+    w.put("\x1b\x1b\x0b")
+    ck d.nextToken(1000)[0] == "\x1b"
+    ck d.nextToken(1000)[0] == "\x1b\x0b"
+    let (none, _) = d.nextToken(150)
+    ck none == ""
+
+  test "Esc held alone, then Ctrl+Alt+K waiting behind it for a late reader: Esc, then the chord":
+    let (d, w) = pipeDriver()
+    w.put("\x1b")
+    let held = d.nextEvent(20)
+    ck held.kind == dekIdle
+    w.put("\x1b\x0b")
+    os.sleep(int(EscDelayMs) * 3)
+    var got: seq[string]
+    let t0 = getMonoTime()
+    while got.len < 2 and (getMonoTime() - t0).inMilliseconds < 1000:
+      let ev = d.nextEvent(20)
+      if ev.kind == dekToken: got.add ev.token
+    checkpoint("tokens " & $got)
+    ck got == @["\x1b", "\x1b\x0b"]
+
   test "ESC ESC ESC is two Escs, as it always was":
     let (d, w) = pipeDriver()
     w.put("\x1b\x1b\x1b")
@@ -240,6 +277,33 @@ suite "an Esc, then another key's escape sequence":
     ck d.nextToken(1000)[0] == "\x1b"
     let (none, _) = d.nextToken(200)
     ck none == ""
+
+suite "Escape presses the keymap reads as one Esc, for the recovery chord":
+  # The plugins' recovery chord (Extensibility-Model §11.7.6) is three Escape
+  # PRESSES within a second. A pair read in one burst is one `Esc` key; its
+  # second `ESC`, continued by nothing, is still a press.
+
+  test "ESC ESC ESC in one burst: two Escs and one press, three in all":
+    let (d, w) = pipeDriver()
+    w.put("\x1b\x1b\x1b")
+    ck d.events(400) == @["\x1b", "\x1b", "press"]
+
+  test "ESC ESC: one Esc, then one press":
+    let (d, w) = pipeDriver()
+    w.put("\x1b\x1b")
+    ck d.events(400) == @["\x1b", "press"]
+
+  test "a lone ESC is a key and no extra press":
+    let (d, w) = pipeDriver()
+    w.put("\x1b")
+    ck d.events(400) == @["\x1b"]
+
+  test "a pair continued by a key or a sequence is no press":
+    let (d, w) = pipeDriver()
+    w.put("\x1b\x1bj")
+    ck d.events(400) == @["\x1b", "j"]
+    w.put("\x1b\x1b[A")
+    ck d.events(400) == @["\x1b", "\x1b[A"]
 
 suite "a terminal's answer behind a held ESC":
   # A DECRQSS answer, as libvterm (and xterm) write it for the start-up

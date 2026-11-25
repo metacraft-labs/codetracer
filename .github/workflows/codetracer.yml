@@ -391,11 +391,53 @@ jobs:
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
+      # Not `submodules: recursive`: on an ephemeral runner that cloned all 37
+      # submodules one after another, 13 of a 20-minute Checkout (run
+      # 45134129306). The Git bootstrap above keeps checkout off the REST
+      # fallback, the next step proves it, and the step after fetches only the
+      # submodules this job uses. ci/test/origin-dap-gate.sh holds all three.
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          submodules: recursive
+          submodules: false
           token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Verify the checkout is a Git repository
+        # actions/checkout falls back to downloading a tarball over the REST
+        # API when it finds no usable Git, and that tree has no .git, so the
+        # explicit submodule fetch below could not run. The Git bootstrap
+        # above is what prevents the fallback; this makes a fallback fail here.
+        shell: powershell
+        run: |
+          if (-not (Test-Path -LiteralPath (Join-Path $env:GITHUB_WORKSPACE ".git"))) {
+            throw "actions/checkout left no .git in $env:GITHUB_WORKSPACE: it fell back to the REST API"
+          }
+
+      - name: Fetch the submodules this job uses
+        # db-backend's Cargo.toml names every tree-sitter grammar as a path
+        # dependency (cargo reads optional ones' manifests too); the Nim side
+        # needs nim-stew and nim-result (CT_EMULATOR_EXTRA_NIM_PATHS).
+        shell: powershell
+        run: |
+          $paths = @(
+            "libs/nim-stew", "libs/nim-result",
+            "libs/tree-sitter-nim", "libs/tree-sitter-cairo", "libs/tree-sitter-aiken",
+            "libs/tree-sitter-move-on-aptos", "libs/tree-sitter-sway", "libs/tree-sitter-circom",
+            "libs/tree-sitter-leo", "libs/tree-sitter-tolk", "libs/tree-sitter-masm",
+            "libs/tree-sitter-cadence")
+          # git reports progress on stderr; the exit code decides.
+          $ErrorActionPreference = "Continue"
+          git -c protocol.version=2 submodule update --init --recursive --depth=1 --jobs 8 -- @paths
+          if ($LASTEXITCODE -ne 0) { throw "git submodule update exited $LASTEXITCODE" }
+
+      - name: Restore the toolchain cache
+        # Written by origin-dap-windows-toolchain on scheduled and dispatched
+        # runs. A miss is not an error here: env.ps1 then installs the
+        # components itself.
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}\ct-diy
+          key: windows-diy-origin-dap-v3-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}
 
       - name: Setup db-backend siblings
         # This job needs exactly one thing from this action: the three
@@ -423,8 +465,11 @@ jobs:
         # origin_python_dap_test), and nothing in it touches TTD or WinDbg. The
         # check made it fail setup on a runner without the WinDbg package in
         # run 45069526428. The nightly matrix below keeps TTD required.
+        # The nightly job's cached root and component list, so the two share one
+        # cache. TTD is in the list only for that, and stays unchecked here.
         env:
-          WINDOWS_DIY_SKIP_NARGO: "1"
+          WINDOWS_DIY_INSTALL_ROOT: ${{ runner.temp }}\ct-diy
+          WINDOWS_DIY_ONLY: "GCC,ZSTD,ZLIB,RUST,NIM,CAPNP,UV,NODE,JUST,TTD"
           WINDOWS_DIY_ENSURE_TTD: "false"
         uses: ./.github/actions/setup-db-backend-siblings
         with:
@@ -617,7 +662,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}\ct-diy
-          key: windows-diy-origin-dap-v2-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}
+          key: windows-diy-origin-dap-v3-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}
           lookup-only: true
 
       - name: Bootstrap the toolchain through env.ps1
@@ -638,11 +683,15 @@ jobs:
           # proxies in cargo\bin are hard links to one rustup.exe; tar stores
           # them as links, and Windows tar cannot recreate a link whose target
           # runs through `..`, which every path here does (the root is outside
-          # the workspace): the v1 cache failed to restore with "Can't create
+          # the workspace): the first cache failed to restore with "Can't create
           # '\\?\...\..\..\_temp\ct-diy\cargo\bin\cargo.exe': Invalid argument"
           # (run 45471393785). Rustup's proxies work as copies.
-          $linked = @(Get-ChildItem -LiteralPath $env:WINDOWS_DIY_INSTALL_ROOT -Recurse -File |
-            Where-Object { $_.LinkType -eq "HardLink" })
+          # Every file in cargo\bin is rewritten, not only those LinkType calls
+          # a hard link: on win-ci-bare-001 LinkType reported none, and the v2
+          # cache still failed the same way (run 45590873552).
+          $linked = @(Get-ChildItem -LiteralPath (Join-Path $env:WINDOWS_DIY_INSTALL_ROOT "cargo\bin") -File) +
+            @(Get-ChildItem -LiteralPath $env:WINDOWS_DIY_INSTALL_ROOT -Recurse -File |
+              Where-Object { $_.LinkType -eq "HardLink" -and $_.DirectoryName -notlike "*\cargo\bin" })
           foreach ($f in $linked) {
             $copy = "$($f.FullName).unlinked"
             Copy-Item -LiteralPath $f.FullName -Destination $copy
@@ -656,7 +705,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}\ct-diy
-          key: windows-diy-origin-dap-v2-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}
+          key: windows-diy-origin-dap-v3-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}
 
   origin-dap-windows-nightly:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
@@ -724,6 +773,17 @@ jobs:
           submodules: false
           token: ${{ steps.ci_token.outputs.token }}
 
+      - name: Verify the checkout is a Git repository
+        # actions/checkout falls back to downloading a tarball over the REST
+        # API when it finds no usable Git, and that tree has no .git, so the
+        # explicit submodule fetch below could not run. The Git bootstrap
+        # above is what prevents the fallback; this makes a fallback fail here.
+        shell: pwsh
+        run: |
+          if (-not (Test-Path -LiteralPath (Join-Path $env:GITHUB_WORKSPACE ".git"))) {
+            throw "actions/checkout left no .git in $env:GITHUB_WORKSPACE: it fell back to the REST API"
+          }
+
       - name: Fetch the submodules this job uses
         shell: pwsh
         run: |
@@ -742,7 +802,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}\ct-diy
-          key: windows-diy-origin-dap-v2-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}
+          key: windows-diy-origin-dap-v3-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}
           fail-on-cache-miss: true
 
       - name: Setup db-backend siblings

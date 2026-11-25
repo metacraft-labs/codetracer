@@ -59,7 +59,10 @@ when defined(js):
     (function (b) {
       // `data-ah-more` while the body holds more than it shows below: the
       // stylesheet's quiet "More below" line (a capture's browser hides
-      // scrollbars, and a thin one is easy to miss).
+      // scrollbars, and a thin one is easy to miss). `data-ah-above` while
+      // it is scrolled past its start: the matching "More above" line, its
+      // hairline under the header, so what is above reads as above rather
+      // than gone.
       if (b.__ahMore) return;
       var mark = function () {
         // Measured on the content alone: the line's own height is not more
@@ -68,6 +71,9 @@ when defined(js):
           (parseFloat(getComputedStyle(b, '::after').height) || 0) : 0;
         var more = b.scrollHeight - line - b.scrollTop - b.clientHeight > 4;
         if (more) b.setAttribute('data-ah-more', ''); else b.removeAttribute('data-ah-more');
+        // The "More above" line takes no room in the content (its negative
+        // margin), so the scroll offset alone says whether it shows.
+        if (b.scrollTop > 4) b.setAttribute('data-ah-above', ''); else b.removeAttribute('data-ah-above');
       };
       b.__ahMore = mark;
       b.addEventListener('scroll', mark);
