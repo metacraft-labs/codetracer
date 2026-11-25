@@ -663,6 +663,9 @@ proc renderCallLineRow*[R, N](r: R; vm: CalltraceVM;
   ## toggle expands or collapses its children. A leaf's dot is neither. With a
   ## host's link builder the call text is a link instead (`renderCallText`) to
   ## the address of the held row at `slot`, the position this row is drawn at.
+  # Open, so the caller's renderer is found: with only MockRenderer's
+  # `insertBefore` in scope here a native instantiation bound to it.
+  mixin insertBefore
   var argsHost, callTextEl, childBoxEl, callArgsEl: N
   let row = ui(r):
     tdiv(class = rowClass(vm, item),

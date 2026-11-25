@@ -232,6 +232,7 @@ proc renderCommandPalettePanel*[R, N](r: R; vm: CommandPaletteVM): N =
   ## results dropdown + empty overlay) is built once via the DSL.
   ## A single outer ``createRenderEffect`` rebuilds the dynamic
   ## content whenever any source signal changes.
+  mixin setAttribute, clearChildren, appendChild
   var outerContainer: N
   var inputField: N
   var placeholderSpan: N
