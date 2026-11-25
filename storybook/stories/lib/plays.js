@@ -180,22 +180,27 @@ function terminalCheck(assert) {
 // destination row's mark, delivery and actions, the chips and the form.
 
 // Where every composer story's sheet hangs (note 237, the coordinator's
-// follow-up): DROPDOWN_TRIGGER_GAP (6px) below the field, and its tallest
-// form still 1rem (16px) above the window's foot, so the gap does not eat
-// into that clearance.
-function expectSheetPlaced(el) {
+// follow-up): DROPDOWN_TRIGGER_GAP (6px) below the field's row, and its
+// tallest form still 1rem (16px) above the window's foot, so the gap does
+// not eat into that clearance. Measured against the field's row itself, not
+// the sheet's offset parent, and once the two have settled (up to
+// `waitUntil`'s 5s): a check made while the story was still laying out, or
+// before the theme's stylesheet had replaced the other theme's, read the
+// sheet 168-186px above its offset parent, or 0px under its field, at the
+// panel size (merge review of 2026-11-25), in about one run in three.
+async function expectSheetPlaced(el) {
   const sheet = el.querySelector(".ah-composer-sheet");
-  if (!sheet || !sheet.offsetParent) return;
-  const s = sheet.getBoundingClientRect();
-  if (s.height === 0) return;
-  // The block the sheet hangs from (`top: calc(100% + gap)`): the field's row.
-  const f = sheet.offsetParent.getBoundingClientRect();
-  expect(Math.round(s.top - f.bottom)).toBe(6);
-  expect(s.bottom).toBeLessThanOrEqual(window.innerHeight - 16 + 0.5);
+  const row = el.querySelector(".ah-composer-input-row");
+  if (!sheet || !row || !sheet.offsetParent) return;
+  if (sheet.getBoundingClientRect().height === 0) return;
+  const gap = () => Math.round(sheet.getBoundingClientRect().top - row.getBoundingClientRect().bottom);
+  await waitUntil(() => gap() === 6, "the composer sheet 6px under its field").catch(() => {});
+  expect(gap()).toBe(6);
+  expect(sheet.getBoundingClientRect().bottom).toBeLessThanOrEqual(window.innerHeight - 16 + 0.5);
 }
 const composerCheck = (assert) => hostCheck(".ah-composer-sheet", async (el) => {
   await assert(el);
-  expectSheetPlaced(el);
+  await expectSheetPlaced(el);
 });
 const sheetOf = (el) => el.querySelector(".ah-composer-body");
 const headerOf = (el) => el.querySelector(".ah-composer-header")?.textContent ?? "";
