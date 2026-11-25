@@ -126,7 +126,8 @@ src/frontend/viewmodel/views/isonim_event_log_view.nim :: " ct-menu-item"
 src/frontend/viewmodel/views/isonim_event_log_view.nim :: "ct-button-md-secondary "
 src/frontend/viewmodel/viewmodels/event_log_vm.nim :: func placeColumn*
 src/frontend/viewmodel/viewmodels/event_log_vm.nim :: func placeColumnLower*
-src/frontend/viewmodel/views/isonim_event_log_view.nim :: wireColumnHandleKey(vm, handleEl, item)
+src/frontend/viewmodel/views/isonim_event_log_view.nim :: `data-ct-operation` = EventLogColumnMoveDownOperation
+src/frontend/ui/event_log.nim :: registerElementOperation(EventLogColumnMoveDownOperation
 ```
 
 ### D-08: Every checkbox is the design system's Checkbox
