@@ -1,0 +1,19 @@
+# The zgui flavour: the `codetracer-zgui` window (`just build-zgui`) on a
+# private X display, read by vision and driven by OS-level input (DemoVideoScript-
+# GuiAssert), with CodeTracer's zgui binding linked in process
+# (`dvs-guiassert-codetracer-zgui`). zgui draws through wgpu, so on a host with
+# no GPU the window needs Mesa's software Vulkan driver (the dev shell's runtime
+# set, as `just test-zgui` finds it). Run from the repository root:
+# `ci/test/scenarios.sh lane zgui`.
+lane: 1
+name: zgui
+pack: ../pack/codetracer.pack.yaml
+backend: guiassert
+modes: [fast, realistic]
+retention: { runs: 5, failure-days: 7 }
+# a GPU window drawn by a software renderer takes longer to settle
+settle-timeout: 30000
+# a stage that records a program does so on a cold fixture cache
+stage-timeout: 300000
+applicable:
+  - ../tour/calc-debugging-session.yaml

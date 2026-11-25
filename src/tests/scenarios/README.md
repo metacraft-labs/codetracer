@@ -2,9 +2,10 @@
 
 CodeTracer's user-level tests, written once in the
 [DemoVideoScript](https://github.com/metacraft-labs/DemoVideoScript) scenario format and
-run against every front-end: the desktop (Electron, through Playwright), the terminal
-(`codetracer-tui`, through TermAssert) and the GPUI window (through GuiAssert, by
-vision). The VS Code extension's binding lives in `codetracer-vscode-extension`, beside
+run against every front-end: the desktop (Electron, through Playwright; the same binding
+opens the browser deployment with `CT_SCENARIO_DEPLOYMENT=web`), the terminal
+(`codetracer-tui`, through TermAssert), and the GPUI and zgui windows (through GuiAssert,
+by vision). The VS Code extension's binding lives in `codetracer-vscode-extension`, beside
 its WebDriverIO suites.
 
 A scenario is a **stage** — set-up code called by name: record a program, write a
@@ -39,10 +40,11 @@ steps:
 | `resolver/` | The binding resolver for the native front-ends: `chord: { bound: <operation> }` is the chord the shared keymap router resolves |
 | `bindings/playwright/` | The desktop: the DOM read with the page objects' selectors; the resolver asks the window's router |
 | `bindings/termassert/` | The terminal: the screen read cell by cell (`ct_tui_screen.nim`) |
-| `bindings/guiassert/` | The GPUI window: pixels and OCR, as the screen oracle reads them |
+| `bindings/guiassert/` | The GPUI window (`ct_gui_binding`) and the zgui window (`ct_zgui_binding`): pixels and OCR |
 | `lanes/` | Which scenarios each flavour runs, in which timing modes |
 | `inventory/` | Every UI test of the repository, classified, and what ports it |
 | `<area>/*.yaml` | The scenarios |
+| `tour/` | A whole debugging session that runs unchanged on every front-end, for videos |
 | `tests/` | Scenarios the pack's own checks run (the deliberately broken one) |
 
 ## Running
@@ -52,6 +54,7 @@ just scenario-build                 # dvs, ct-scenario-stage and the three flavo
 just scenario-lint                  # every scenario against the pack
 just scenario-lane terminal         # one lane
 just scenario-lane-xvfb electron    # the desktop and GPUI need a display
+bash ci/test/scenarios.sh lane zgui # the zgui window (`just build-zgui`) on its own display
 bash ci/test/scenarios.sh run terminal src/tests/scenarios/tracing/trace-macro-at-caret.yaml \
   --mode realistic --record always  # one scenario
 ```
