@@ -381,3 +381,72 @@ suite "CTF-P2c: the GPUI composer's parts take the web's styles":
     let plan = m.planOf
     m.dispose()
     check plan.allWith("data-ah-chip-state").anyIt(it.attr("data-ah-chip-state") == "uncited")
+
+# ---------------------------------------------------------------------------
+# A scrolled body says what is above it
+# ---------------------------------------------------------------------------
+
+proc scrolledOf(sheet: JsonNode): bool =
+  ## Whether the sheet's body is scrolled past its start: by the pixels it
+  ## was scrolled (`data-ah-scroll`), or by the parts it scrolled past.
+  sheet.attr("data-ah-scroll").len > 0 and parseInt(sheet.attr("data-ah-scroll")) > 0 or
+    parseInt(sheet.attr("data-ah-hidden-above")) > 0
+
+proc aboveCueProblems(fixture: string; w, h: int; mode: DesignMode;
+                      scrolled: var bool): seq[string] =
+  ## The `More above ↑` cue against the body's scroll: drawn when the body
+  ## is scrolled past its start, as `More below ↓` is drawn while it holds
+  ## more below (brief "The composer"), at the body's top edge, on the
+  ## sheet's ground, with the hairline that parts it from the scrolled
+  ## content; absent otherwise.
+  gpui_reset_tree()
+  let m = r.mountAgentHarborStoryGpui("agent-harbor-composer", fixture, w, h, mode)
+  let plan = m.planOf
+  m.dispose()
+  let at = fixture & " " & $w & "x" & $h & " " & $mode & ": "
+  let sheets = plan.allWith("data-ah-sheet")
+  if sheets.len != 1: return @[at & $sheets.len & " sheets drawn"]
+  let sheet = sheets[0]
+  scrolled = sheet.scrolledOf
+  let cues = plan.allWith("data-ah-more-above")
+  if not scrolled:
+    if cues.len > 0: result.add at & "a body at its start says there is more above"
+    return
+  if cues.len != 1:
+    return @[at & "the body is scrolled past its start and nothing says so (" &
+             $cues.len & " `More above` cues)"]
+  let t = cues[0]
+  if t.attr("data-ah-more-above") != MoreAbove:
+    result.add at & "the cue reads '" & t.attr("data-ah-more-above") & "'"
+  if t.style("text_color") != hexOf(dtColorsUiTextPrimaryCaption, mode):
+    result.add at & "the cue is not in the caption role"
+  var boxes: seq[JsonNode]
+  plan.parentsOf("data-ah-more-above", boxes)
+  if boxes.len != 1: return result & @[at & "the cue has no line of its own"]
+  let line = boxes[0]
+  if line.style("top") != "0px":
+    result.add at & "the cue's line is not at the body's top edge (top " & line.style("top") & ")"
+  if line.style("border_bottom_width") != "1px" or
+      line.style("border_color") != hexOf(dtColorsUiBorderSecondary, mode):
+    result.add at & "no hairline parts the header from the scrolled body"
+  if line.style("bg") != sheet.style("bg"):
+    result.add at & "the cue's line is not on the sheet's ground"
+
+suite "CTF-P2c: a scrolled GPUI composer body says what is above it":
+  test "More above ↑ under the header's hairline exactly while the body is scrolled":
+    var problems: seq[string]
+    var scrolledSeen: seq[string]
+    for story in agentHarborSection().stories:
+      if story.surface != "agent-harbor-composer": continue
+      for (w, h) in [(1440, 900), (360, 900), (960, 600)]:
+        for mode in [dmDark, dmLight]:
+          var scrolled = false
+          problems.add aboveCueProblems(story.fixture, w, h, mode, scrolled)
+          if scrolled: scrolledSeen.add story.fixture & " " & $w & "x" & $h
+    for p in problems: checkpoint p
+    checkpoint "scrolled: " & $scrolledSeen
+    # The issue's view: the open schedule is scrolled into view, so the body
+    # starts below `In view` and the context chips.
+    check scrolledSeen.anyIt(it.startsWith("launch-scheduled 1440x900"))
+    check scrolledSeen.anyIt(it.startsWith("launch-scheduled 360x900"))
+    check problems.len == 0
