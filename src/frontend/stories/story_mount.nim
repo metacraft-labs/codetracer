@@ -18,6 +18,7 @@ import ../viewmodel/viewmodels/[agent_activity_vm, build_vm, calltrace_vm,
   repl_vm, scratchpad_vm, search_results_vm, state_vm, terminal_output_vm,
   trace_log_vm]
 import ../viewmodel/views/[isonim_agent_activity_view, isonim_build_view,
+  isonim_errors_view,
   isonim_calltrace_view, isonim_command_palette_view, isonim_errors_view,
   isonim_event_log_view, isonim_filesystem_view, isonim_low_level_code_view,
   isonim_repl_view, isonim_scratchpad_view, isonim_search_results_view,
@@ -49,7 +50,8 @@ proc withStore(body: proc(store: ReplayDataStore): StoryDispose): StoryDispose =
 
 const nativePanelSurfaces* = ["event-log", "calltrace", "state", "filesystem",
   "scratchpad", "agent-activity", "build",
-  "command-palette"]
+  "errors", "trace-log", "repl", "search-results", "terminal-output",
+  "low-level-code", "command-palette"]
   ## The panel surfaces `mountPanelStory` mounts, each as
   ## `storybook_components.mountCodeTracerStory` mounts it for the DOM.
 
@@ -102,6 +104,43 @@ proc mountPanelStory*[R, N](r: R; container: N; surface, fixture: string): Story
     panelStory(r, container, createBuildVM):
       vm.applyBuild(fixture)
     do: renderBuildPanel[R, N](r, vm)
+  of "errors":
+    panelStory(r, container, createErrorsVM):
+      if fixture != "empty": vm.applyErrors()
+    do: renderErrorsPanel[R, N](r, vm)
+  of "trace-log":
+    panelStory(r, container, createTraceLogVM):
+      if fixture != "empty": vm.applyTraceLog()
+    do: renderTraceLogPanel[R, N](r, vm)
+  of "repl":
+    panelStory(r, container, createReplVM):
+      if fixture == "materialized": vm.setMaterialized(true) else: vm.applyRepl()
+    do: renderReplPanel[R, N](r, vm)
+  of "search-results":
+    panelStory(r, container, createSearchResultsVM):
+      if fixture != "empty": vm.applySearchResults()
+    do: renderSearchResultsPanel[R, N](r, vm)
+  of "terminal-output":
+    panelStory(r, container, createTerminalOutputVM):
+      case fixture
+      of "loading":
+        vm.clearLines()
+        vm.setCurrentRRTicks(0'u64)
+      of "empty":
+        vm.setLines(@[])
+        vm.setCurrentRRTicks(0'u64)
+      of "demo":
+        vm.setEvents(demoTerminalEvents())
+        vm.setCurrentRRTicks(180'u64)
+      else:
+        vm.setLines(storyLines())
+        vm.setCurrentRRTicks(0'u64)
+    do: renderTerminalOutputPanel[R, N](r, vm)
+  of "low-level-code":
+    panelStory(r, container, createLowLevelCodeVM):
+      if fixture == "error": vm.setErrorMessage("Unable to load assembly")
+      else: vm.applyLowLevelCode()
+    do: renderLowLevelCodePanel[R, N](r, vm)
   of "command-palette":
     panelStory(r, container, createCommandPaletteVM):
       if fixture != "empty": vm.applyCommandPalette()

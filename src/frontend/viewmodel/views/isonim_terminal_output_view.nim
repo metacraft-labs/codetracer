@@ -139,7 +139,12 @@ proc stepKey*(vm: TerminalOutputVM; key: string): bool =
 # layout to fit and an `Event` to read.
 
 proc valueOf[R, N](r: R; n: N): string =
-  template headless(): string = n.attributes.getOrDefault("value", "")
+  mixin fieldValueOf
+  template headless(): string =
+    # `MockRenderer` keeps the value as an attribute; another native renderer
+    # answers it through its host (`fieldValueOf`, e.g. `zgui_view_support`).
+    when compiles(n.attributes): n.attributes.getOrDefault("value", "")
+    else: fieldValueOf(r, n)
   template domOrHeadless(): string =
     when defined(js):
       when N is isonim_dom.Element: $inputValue(isonim_dom.Node(n))
@@ -156,6 +161,7 @@ proc valueOf[R, N](r: R; n: N): string =
     domOrHeadless()
 
 proc setValue[R, N](r: R; n: N; v: string) =
+  mixin setAttribute
   when defined(js):
     when N is isonim_dom.Element:
       setInputValue(isonim_dom.Node(n), cstring(v))
@@ -172,6 +178,7 @@ proc fitGrid[R, N](r: R; box, grid: N) =
 
 proc wireStepKeys[R, N](r: R; node: N; vm: TerminalOutputVM) =
   ## ArrowLeft / ArrowRight on the screen step by write (`stepKey`).
+  mixin addEventListener
   when defined(js):
     when N is isonim_dom.Element:
       r.addEventListener(node, KeyDownEvent, proc(ev: isonim_dom.Event) =
@@ -179,9 +186,15 @@ proc wireStepKeys[R, N](r: R; node: N; vm: TerminalOutputVM) =
     else:
       r.addEventListener(node, KeyDownEvent, proc(ev: MockEvent) =
         if stepKey(vm, ev.key): ev.preventDefault())
-  else:
+  elif N is MockNode:
     r.addEventListener(node, KeyDownEvent, proc(ev: MockEvent) =
       if stepKey(vm, ev.key): ev.preventDefault())
+  else:
+    # Another native renderer: its host names the event type its listeners
+    # take (`KeyEvent`) and how to read a key off one (`eventKey`).
+    mixin KeyEvent, eventKey, preventDefault
+    r.addEventListener(node, KeyDownEvent, proc(ev: KeyEvent(r)) =
+      if stepKey(vm, eventKey(ev)): ev.preventDefault())
 
 # A fragment's press, and a press on a line past its text, are the pointer
 # row `terminal-output.jump-to-write`, performed by the front-end on the
@@ -193,11 +206,13 @@ proc wireStepKeys[R, N](r: R; node: N; vm: TerminalOutputVM) =
 # ---------------------------------------------------------------------------
 
 proc el[R](r: R; tag, class: string): auto =
+  mixin createElement, setAttribute
   result = r.createElement(tag)
   if class.len > 0:
     r.setAttribute(result, "class", class)
 
 proc styledSpan[R](r: R; text: string; style: TermAttrs): auto =
+  mixin createElement, setAttribute, appendChild, createTextNode
   result = r.createElement("span")
   let css = cssOf(style)
   if css.len > 0:
@@ -208,6 +223,7 @@ proc renderTerminalOutputPanel*[R, N](r: R; vm: TerminalOutputVM): N =
   ## The Terminal Output panel. It takes no id: the host it is mounted into
   ## carries the pane's (`terminalComponent-<n>`), and an id names one
   ## element.
+  mixin createElement, setAttribute, clearChildren, appendChild, createTextNode, setStyle, addEventListener
   let panel = r.createElement("div")
   r.setAttribute(panel, "class",
                  "component-container terminal isonim-terminal-output")

@@ -137,8 +137,19 @@ proc wireHeadlessSubmit[R, N](r: R; vm: ReplVM; formEl, inputEl: N) =
           r.setInputValue(field, ""))
     else:
       mockSubmit()
-  else:
+  elif compiles(inputEl.attributes):
     mockSubmit()
+  else:
+    # Another native renderer reads and clears the field through the
+    # operations its host answers (`fieldValueOf`, `setFieldValue`), as the
+    # zgui front-end's `zgui_view_support` does.
+    mixin fieldValueOf, setFieldValue
+    let field = inputEl
+    r.addEventListener(formEl, "submit", proc() =
+      let value = fieldValueOf(r, field)
+      if value.len > 0:
+        vm.submitInput(value)
+        setFieldValue(r, field, ""))
 
 proc renderEnabled[R, N](r: R; vm: ReplVM): N =
   ## The input form and the history.

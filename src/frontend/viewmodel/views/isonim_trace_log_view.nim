@@ -130,6 +130,7 @@ proc renderTraceLogPanel*[R, N](r: R; vm: TraceLogVM): N =
   ## The Trace Log panel. The static shell (header and body) is built once;
   ## one render effect rebuilds the body whenever ``entries`` or
   ## ``selectedIndex`` change and toggles the empty-state placeholder.
+  mixin setAttribute, clearChildren, appendChild
   var bodyContainer, emptyContainer: N
 
   let panel = ui(r):

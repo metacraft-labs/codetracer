@@ -33,7 +33,7 @@ import ../../stories/[story_frames, story_mount]
 import ../zgui_view_support
 
 var countedAssertions = 0
-const ExpectedAssertions = 10
+const ExpectedAssertions = 18
 
 template ck(condition: untyped) =
   inc countedAssertions
@@ -82,6 +82,19 @@ suite "a panel story mounted through ZguiRenderer":
     finally:
       dispose()
       closeHeadless()
+
+  test "every panel story the harness mounts instantiates with ZguiRenderer":
+    # The REPL, Terminal Output, Low Level Code, Trace Log and Errors views
+    # read MockRenderer's nodes or bound its operations natively, and could
+    # not be drawn by any other native renderer.
+    for surface in ["repl", "terminal-output", "low-level-code", "trace-log",
+                    "errors", "search-results", "state", "filesystem"]:
+      let (host, dispose) = mountStory(surface, titleize(surface))
+      try:
+        ck host.childCount > 0
+      finally:
+        dispose()
+        closeHeadless()
 
   test "the frame's one tab is active and names the panel":
     var root: ZguiNode
