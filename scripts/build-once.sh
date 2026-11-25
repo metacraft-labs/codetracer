@@ -140,6 +140,35 @@ if [ -n "${CODETRACER_OFF_LOCK_SIBLING:-}" ] || [ "${CODETRACER_REQUIRE_LOCKED_S
 	"${BASH:-bash}" "$CT_ROOT/ci/sibling-lock-agreement.sh" "$CT_ROOT"
 fi
 
+# THE SIBLING, NOT REPRO'S OWN COPY. `config.nims` reads these five variables
+# AFTER the matching workspace sibling, so a set variable overrides the sibling.
+# The dev shell's hook sets them (to the flake inputs). A shell that never ran
+# that hook leaves them unset: `nix print-dev-env` output sourced into a
+# script, `repro exec`, a captured environment. The `repro` command then
+# fills them itself. Its Nix wrapper runs `--set-default` with the copies
+# reprobuild was built against, and the actions inherit them. Measured
+# 2026-11-25, repro 0.2.31: `ct-binary` compiled `print_trace.nim` against
+# reprobuild's `/nix/store/gmavsg36…` copy of codetracer-trace-format-nim,
+# which lacks `forEachMarkerEvent`, while the sibling at its pin had it
+# (reprobuild-pm issue 2026-11-25-a-daemon-hosted-codetracer-build-compiles-
+# print-trace-against-a-trace-format-copy-without-formarkerevent). So an
+# unset variable is pinned here to the sibling, and a value the caller set is
+# left alone.
+_ct_workspace_root="$(cd "$CT_ROOT/.." && pwd)"
+for _ct_pair in \
+	CODETRACER_TRACE_FORMAT_NIM_SRC:codetracer-trace-format-nim \
+	IO_MON_SRC:io-mon \
+	SHM_GSET_SRC:nim-shm-gset \
+	SHM_QUEUE_SRC:nim-shm-queue \
+	TEST_CERTIFICATES_TOOLS_SRC:test-certificates-tools; do
+	_ct_var="${_ct_pair%%:*}"
+	_ct_dir="$_ct_workspace_root/${_ct_pair#*:}/src"
+	if [ -z "${!_ct_var:-}" ] && [ -d "$_ct_dir" ]; then
+		export "$_ct_var=$_ct_dir"
+	fi
+done
+unset _ct_pair _ct_var _ct_dir _ct_workspace_root
+
 "$SCRIPT_DIR/build-tailwind.sh"
 
 # ---------------------------------------------------------------------------
