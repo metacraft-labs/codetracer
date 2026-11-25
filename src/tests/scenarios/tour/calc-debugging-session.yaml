@@ -136,9 +136,10 @@ steps:
   - beat: inspect
     caption: { text: "mul() has its arguments; the call trace shows the path to it" }
     steps:
-      # the values themselves (left=6, right=7) are on screen; what is checked
-      # is what every front-end reads reliably (a vision-read single digit is not)
-      - wait: { until: { at: variables, assert: 'has-variable("left")' }, timeout: 60s }
+      # the GPUI binding reads a number's digits by the code face's outlines
+      # (codetracer-pm spec/Testing/GPUI-Binding-Code-Face-Digits.md), so the
+      # value is checked on every front-end
+      - wait: { until: { at: variables, assert: 'value-of("left", "6")' }, timeout: 60s }
         dwell: 1500ms
       - wait: { until: { at: call-trace, assert: 'has-call("mul")' }, timeout: 30s }
         dwell: 1500ms

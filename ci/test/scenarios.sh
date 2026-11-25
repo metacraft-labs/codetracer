@@ -9,6 +9,7 @@
 #   ci/test/scenarios.sh run <flavour> <scenario.yaml> [dvs run args…]
 #   ci/test/scenarios.sh binding-test       the bindings' own tests (bindings/*/*.test.ts)
 #   ci/test/scenarios.sh stage-test         the stage tool's own tests (stages/*_test.nim)
+#   ci/test/scenarios.sh gui-binding-test   the GPUI binding's own tests (bindings/guiassert/*_test.nim)
 #
 # The pack, its scenarios and its lanes are under src/tests/scenarios
 # (README.md there). The general-purpose runner and backends are siblings of
@@ -363,6 +364,11 @@ lane)
 	# product's large panes in bounded time fails here, by name, rather than as
 	# scenarios timing out.
 	if [ "${flavour}" = electron ]; then "$0" binding-test || exit 1; fi
+	# The same for the GPUI window's binding: what it reads off saved frames
+	# (once per lane: in its first shard when it is sharded).
+	if [ "${flavour}" = gpui ] && [[ ${SCENARIO_LANE_SHARD:-1/1} == 1/* ]]; then
+		"$0" gui-binding-test || exit 1
+	fi
 	"$0" stage-test || exit 1
 	lane_file="${S}/lanes/${flavour}.lane.yaml"
 	# SCENARIO_LANE_SHARD=i/n runs one shard of the lane: every n-th entry of
@@ -404,6 +410,22 @@ stage-test)
 	for t in "${root}/${S}"/stages/*_test.nim; do
 		echo "== ${t#"${root}/"}"
 		nim c -r "${nim_common[@]}" --nimcache:"${nimcache}/stage-test-$(basename "${t}" .nim)" \
+			-o:"${bin}/$(basename "${t}" .nim)" "${t}" || rc=1
+	done
+	exit "${rc}"
+	;;
+gui-binding-test)
+	# The GPUI binding's own tests (bindings/guiassert/*_test.nim): what it reads
+	# off committed frames of the window, through the same OCR engine and code a
+	# lane run uses, without the window (e.g. that a code-face digit the engine
+	# misreads is read by its outline). Built like the binding (`build_gpui`).
+	require "DemoVideoScript-GuiAssert" "${dga_src}/demo_video_script_guiassert.nim"
+	check_siblings gpui
+	rc=0
+	for t in "${root}/${S}"/bindings/guiassert/*_test.nim; do
+		echo "== ${t#"${root}/"}"
+		nim c -r "${nim_common[@]}" --path:"${ga_src}" --path:"${dvs_src}" --path:"${dga_src}" \
+			--nimcache:"${nimcache}/gui-binding-test-$(basename "${t}" .nim)" \
 			-o:"${bin}/$(basename "${t}" .nim)" "${t}" || rc=1
 	done
 	exit "${rc}"
