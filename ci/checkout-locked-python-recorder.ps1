@@ -81,8 +81,20 @@ function Invoke-RecorderGit {
     [string]$EncodedCredential = ""
   )
 
-  $output = & $GitCommand @Arguments 2>&1 | Out-String
-  $status = $LASTEXITCODE
+  # Git's stderr is captured for redaction, never raised. Under Windows
+  # PowerShell 5.1 with ErrorActionPreference=Stop, `2>&1` turns each stderr
+  # line into a terminating NativeCommandError whose message is the raw,
+  # UNREDACTED line, which escaped ahead of the redaction below (the
+  # fetch-failure contract test, run 45674925596). Run git with Continue so
+  # its exit status decides and its output goes through redaction.
+  $savedPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    $output = & $GitCommand @Arguments 2>&1 | Out-String
+    $status = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $savedPreference
+  }
   if ($null -eq $status) {
     $status = if ($?) { 0 } else { 1 }
   }
@@ -172,23 +184,28 @@ function Invoke-LockedPythonRecorderCheckout {
       "-C", $Destination, "remote", "add", "origin", $script:PythonRecorderUrl
     ) | Out-Null
 
-    $env:GIT_CONFIG_COUNT = "6"
+    # The two settings whose value is EMPTY (an empty credential.helper resets
+    # the helper list; an empty core.askPass disables askpass) go on argv as
+    # `-c key=`. They are not secret, and PowerShell cannot pass them through
+    # the environment: on Windows assigning "" to $env:NAME deletes the
+    # variable, so git
+    # saw GIT_CONFIG_KEY_1 without GIT_CONFIG_VALUE_1 and refused to run
+    # ("missing config value GIT_CONFIG_VALUE_1", run 45674925596). Only the
+    # credential header stays out of argv.
+    $env:GIT_CONFIG_COUNT = "4"
     $env:GIT_CONFIG_KEY_0 =
       "http.$($script:PythonRecorderUrl).extraHeader"
     $env:GIT_CONFIG_VALUE_0 = "AUTHORIZATION: basic $encodedCredential"
-    $env:GIT_CONFIG_KEY_1 = "credential.helper"
-    $env:GIT_CONFIG_VALUE_1 = ""
-    $env:GIT_CONFIG_KEY_2 = "core.askPass"
-    $env:GIT_CONFIG_VALUE_2 = ""
-    $env:GIT_CONFIG_KEY_3 = "http.followRedirects"
-    $env:GIT_CONFIG_VALUE_3 = "false"
-    $env:GIT_CONFIG_KEY_4 = "protocol.allow"
-    $env:GIT_CONFIG_VALUE_4 = "never"
-    $env:GIT_CONFIG_KEY_5 = "protocol.https.allow"
-    $env:GIT_CONFIG_VALUE_5 = "always"
+    $env:GIT_CONFIG_KEY_1 = "http.followRedirects"
+    $env:GIT_CONFIG_VALUE_1 = "false"
+    $env:GIT_CONFIG_KEY_2 = "protocol.allow"
+    $env:GIT_CONFIG_VALUE_2 = "never"
+    $env:GIT_CONFIG_KEY_3 = "protocol.https.allow"
+    $env:GIT_CONFIG_VALUE_3 = "always"
     try {
       Invoke-RecorderGit -GitCommand $GitCommand -Arguments @(
         "-C", $Destination,
+        "-c", "credential.helper=", "-c", "core.askPass=",
         "fetch", "--depth=1", "origin", $Revision
       ) -EncodedCredential $encodedCredential | Out-Null
     }

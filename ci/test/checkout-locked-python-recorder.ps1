@@ -110,6 +110,15 @@ $entry = [ordered]@{
     $env:GIT_CONFIG_KEY_4,
     $env:GIT_CONFIG_KEY_5
   )
+  # Every declared GIT_CONFIG_VALUE_<n> must exist, as real git requires. On
+  # Windows a PowerShell "" assignment deletes the variable, which made git
+  # refuse the fetch while this fake still read the missing value as "". (On
+  # Linux pwsh keeps an empty variable, so this only bites on Windows.)
+  MissingConfigValues = @(
+    0..([int]("0" + $env:GIT_CONFIG_COUNT) - 1) | Where-Object {
+      $null -eq [Environment]::GetEnvironmentVariable("GIT_CONFIG_VALUE_$_")
+    }
+  )
   NonHeaderConfigValues = @(
     $env:GIT_CONFIG_VALUE_1,
     $env:GIT_CONFIG_VALUE_2,
@@ -148,7 +157,13 @@ $entry = [ordered]@{
 }
 ($entry | ConvertTo-Json -Compress) | Add-Content -LiteralPath $env:FAKE_GIT_LOG
 
-$operation = if ($GitArguments.Count -ge 3) { $GitArguments[2] } else { "" }
+# The subcommand: the first argument after the `-C <dir>` and `-c <k=v>` pairs.
+$operation = ""
+for ($i = 0; $i -lt $GitArguments.Count; $i++) {
+  if ($GitArguments[$i] -ceq "-C" -or $GitArguments[$i] -ceq "-c") { $i++; continue }
+  $operation = $GitArguments[$i]
+  break
+}
 if ($operation -eq "fetch" -and $env:FAKE_GIT_FAIL_FETCH -eq "1") {
   [Console]::Error.WriteLine("fatal: $header")
   exit 73
@@ -238,7 +253,8 @@ exec pwsh -NoLogo -NoProfile -File "$(dirname "$0")/fake-git-impl.ps1" "$@"
   $expectedArguments = @(
     (@("-C", $destination, "init") -join "`0"),
     (@("-C", $destination, "remote", "add", "origin", $repositoryUrl) -join "`0"),
-    (@("-C", $destination, "fetch", "--depth=1", "origin", $revision) -join "`0"),
+    (@("-C", $destination, "-c", "credential.helper=", "-c", "core.askPass=",
+        "fetch", "--depth=1", "origin", $revision) -join "`0"),
     (@("-C", $destination, "checkout", "--detach", "FETCH_HEAD") -join "`0"),
     (@("-C", $destination, "rev-parse", "HEAD") -join "`0")
   )
@@ -279,19 +295,21 @@ exec pwsh -NoLogo -NoProfile -File "$(dirname "$0")/fake-git-impl.ps1" "$@"
   }
 
   $fetch = $entries[2]
-  Assert-True ($fetch.ConfigCount -ceq "6") "The fetch lacks process-only Git configuration."
+  Assert-True ($fetch.ConfigCount -ceq "4") "The fetch lacks process-only Git configuration."
+  Assert-True (@($fetch.MissingConfigValues).Count -eq 0) `
+    "A declared GIT_CONFIG_VALUE_<n> is missing from the fetch's environment, which git refuses."
   Assert-True `
     -Condition ($fetch.ConfigKeys[0] -ceq `
       "http.https://github.com/metacraft-labs/codetracer-python-recorder.git.extraHeader") `
     -Message "The HTTP header is not associated with the fixed recorder origin."
-  Assert-True ($fetch.ConfigKeys[1] -ceq "credential.helper") "Credential helpers were not blocked."
-  Assert-True ($fetch.ConfigKeys[2] -ceq "core.askPass") "Git askpass config was not blocked."
-  Assert-True ($fetch.ConfigKeys[3] -ceq "http.followRedirects") "HTTP redirects were not controlled."
-  Assert-True ($fetch.ConfigKeys[4] -ceq "protocol.allow") "Alternate Git protocols were not blocked."
-  Assert-True ($fetch.ConfigKeys[5] -ceq "protocol.https.allow") "HTTPS was not explicitly allowed."
+  Assert-True ($fetch.ConfigKeys[1] -ceq "http.followRedirects") "HTTP redirects were not controlled."
+  Assert-True ($fetch.ConfigKeys[2] -ceq "protocol.allow") "Alternate Git protocols were not blocked."
+  Assert-True ($fetch.ConfigKeys[3] -ceq "protocol.https.allow") "HTTPS was not explicitly allowed."
   Assert-True `
-    -Condition (($fetch.NonHeaderConfigValues -join "`0") -ceq "`0`0false`0never`0always") `
-    -Message "Fetch credential, redirect, or protocol defenses have unexpected values."
+    -Condition (($fetch.NonHeaderConfigValues -join "`0") -ceq "false`0never`0always`0`0") `
+    -Message "Fetch redirect or protocol defenses have unexpected values."
+  # Credential helpers and askpass are reset on argv (`-c key=`), checked with
+  # the rest of the fetch argv above.
   Assert-True $fetch.HeaderHasBasicPrefix "The fetch did not receive the expected header form."
   Assert-True `
     -Condition ($fetch.HeaderSha256 -ceq (Get-StringSha256 $header)) `
