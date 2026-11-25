@@ -32,7 +32,7 @@ from ../viewmodel/viewmodels/event_log_vm import EventLogVM,
   setSelectedKinds, selectRow, doubleClickRow, reload, resetLog, eventLogText,
   EventLogColumn, setColumnWidth, resizeColumn, columnWidthEntries,
   withColumnWidths, EventLogTableName, columnResizeTarget, parseEventLogColumn,
-  placeColumn
+  placeColumn, placeColumnLower
 from ../viewmodel/viewmodels/omnibar_sources import parseColumnWidthLine
 from ../viewmodel/session_vm import SessionViewModel
 from isonim/core/signals import val, `val=`
@@ -41,6 +41,7 @@ from isonim/core/signals import val, `val=`
 import ../viewmodel/views/table_overflow_dom
 from ../viewmodel/views/isonim_event_log_view import columnClass,
   EventLogColumnGripAttribute, EventLogColumnOptionClass,
+  EventLogColumnMoveDownOperation,
   EventLogColumnDraggingClass,
   EventLogColumnDropBeforeClass, EventLogColumnDropAfterClass
 from isonim/web/dom_api import nil
@@ -358,6 +359,35 @@ proc rowAtPosition(vm: EventLogVM; position: int): Option[EventLogRow] =
   let at = position - vm.store.eventLog.loadedStart.val
   let rows = vm.eventRows.val
   if at >= 0 and at < rows.len: some(rows[at]) else: none(EventLogRow)
+
+# Enter or Space on a Columns menu row's focused handle moves the row one
+# lower (Nikolay, 2026-11-02): the handle carries
+# `event-log.columns.move-down`, and this is its procedure, on the pane the
+# nim js shell draws and on the one the WebAssembly core draws alike (that
+# pane's columns are the tab's EventLogVM's, which the core mirrors).
+# `isonim_activation` turns those keys into the handle's `click()`, whose
+# `detail` is 0; a mouse click's is 1 or more, and the mouse reorders by
+# dragging, so it moves nothing here. Moving the row drops the focus, so the
+# handle takes it back and can be pressed again.
+proc clickDetailOf(ev: JsObject): int {.importjs: "((e) => (e && e.detail) || 0)(#)".}
+proc columnOptionOfElement(el: JsObject): Element {.importjs:
+  "((e) => (e && e.closest && e.closest('.eventLog-column-option')) || null)(#)".}
+proc focusLater(el: JsObject) {.importjs:
+  "((e) => setTimeout(() => { if (e && e.isConnected) e.focus(); }, 0))(#)".}
+
+registerElementOperation(EventLogColumnMoveDownOperation, proc(p: ElementPress): bool =
+  let vm = paneVM()
+  if vm.isNil or clickDetailOf(p.event) != 0:
+    return false
+  let row = columnOptionOfElement(p.element)
+  if row.isNil:
+    return false
+  let (known, col) = parseEventLogColumn($row.getAttribute(cstring"data-column"))
+  if not known:
+    return false
+  discard vm.placeColumnLower(col)
+  focusLater(p.element)
+  true)
 
 # A right press on a recorded event opens its text in an editor view: the
 # pointer row `event-log.show-content` (K25), performed here on the row the

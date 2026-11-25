@@ -1,0 +1,30 @@
+scenario: 1
+name: event-log/columns-handle-enter-moves-row-down
+pack: codetracer
+summary: >-
+  Enter on a Columns menu row's drag handle moves that row one lower, and the
+  handle keeps the focus, so a second Enter moves it again: the `#` column,
+  below the hidden `location`, then below `kind`, so the table reads tick,
+  kind, #, output. The keyboard's way to reorder the columns, the same on the
+  nim js pane and on the one the WebAssembly core draws.
+
+stage:
+  - use: record-program
+    with: { program: py_long_event_log/main.py }
+  - use: open-recording
+
+steps:
+  - wait: { until: replay-idle, timeout: 120s }
+  - wait: { until: { at: event-log, total: 80 }, timeout: 120s }
+  - click: 'pane-tab[label="EVENT LOG"]'
+  - expect: { at: event-log, columns: ["tick", "#", "", "output"] }
+  - click: event-log/columns-button
+  - wait: { until: { at: event-log/columns-menu, present: true }, timeout: 10s }
+  - key: Down
+  - wait: { until: { at: 'event-log/columns-menu/column-option[name="#"]', outline: row }, timeout: 10s }
+  - key: Right
+  - wait: { until: { at: 'event-log/columns-menu/column-option[name="#"]', outline: handle }, timeout: 10s }
+  - key: Enter
+  - wait: { until: { at: 'event-log/columns-menu/column-option[name="#"]', outline: handle }, timeout: 10s }
+  - key: Enter
+  - wait: { until: { at: event-log, columns: ["tick", "", "#", "output"] }, timeout: 10s }

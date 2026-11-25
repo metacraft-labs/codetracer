@@ -86,6 +86,11 @@ const
   ## system's `type=arrows-expand-vertical-diamond, theme=dark`.  Rows are
   ## reordered by dragging; it replaced the move-left / move-right arrows.
   EventLogColumnHandleClass* = "eventLog-column-handle"
+  EventLogColumnMoveDownOperation* = "event-log.columns.move-down"
+    ## The operation a Columns menu row's handle carries: Enter or Space on
+    ## the focused handle (`isonim_activation` turns them into its click)
+    ## moves its row one lower. The front-end's router performs it
+    ## (`ui/event_log`), so a user's keybindings row can rebind it.
   EventLogColumnDraggingClass* = "dragging"
   EventLogColumnDropBeforeClass* = "drop-before"
   EventLogColumnDropAfterClass* = "drop-after"
@@ -688,21 +693,6 @@ when defined(js):
         rowEl.clearDropMarks()
         drag.column = none(EventLogColumn))
 
-when defined(js):
-  proc wireColumnHandleKey(vm: EventLogVM; handleEl: isonim_dom.Element;
-                           item: proc(): EventLogColumn) =
-    ## Enter or Space on the focused drag handle moves its row one lower
-    ## (Nikolay, 2026-11-02).  `isonim_activation` turns those keys into a
-    ## `click()`, whose `detail` is 0; a mouse click's is 1 or more, and the
-    ## mouse reorders by dragging, so it moves nothing here.  Moving the row
-    ## drops the focus, so the handle takes it back and can be pressed again.
-    isonim_dom.addEventListener(isonim_dom.Node(handleEl), cstring"click",
-      proc(ev: isonim_dom.Event) =
-        ev.stopClick()
-        if ev.clickDetail == 0:
-          discard vm.placeColumnLower(item())
-          handleEl.focusElement())
-
 proc renderEventLogPanel*[R, N](r: R; vm: EventLogVM;
                                 links: RowLinks = nil): N =
   ## The Event Log panel. `links` is a host's link builder
@@ -850,12 +840,12 @@ proc renderEventLogPanel*[R, N](r: R; vm: EventLogVM;
             text columnOptionTitle(item())
           span(ref = handleEl, class = EventLogColumnHandleClass,
                role = "button", tabindex = "-1",
+               `data-ct-operation` = EventLogColumnMoveDownOperation,
                title = "Drag to reorder, or press Enter to move it down",
                `aria-label` = "Move " & columnOptionTitle(item()) & " down")
       when defined(js):
         when N is isonim_dom.Element:
-          wireColumnDrag(vm, rowEl, item, dragged)
-          wireColumnHandleKey(vm, handleEl, item))
+          wireColumnDrag(vm, rowEl, item, dragged))
 
   when defined(js):
     when N is isonim_dom.Element:

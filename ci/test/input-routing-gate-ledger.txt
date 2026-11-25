@@ -48,7 +48,7 @@ src/frontend/viewmodel/views/isonim_debug_controls_view.nim click 16
 src/frontend/viewmodel/views/isonim_edit_mode_toolbar_view.nim click 1
 src/frontend/viewmodel/views/isonim_errors_view.nim click 5
 src/frontend/viewmodel/views/isonim_event_log_filter_dropdown_view.nim click 2
-src/frontend/viewmodel/views/isonim_event_log_view.nim click 6
+src/frontend/viewmodel/views/isonim_event_log_view.nim click 5
 src/frontend/viewmodel/views/isonim_filesystem_view.nim click 4
 src/frontend/viewmodel/views/isonim_flow_inline_view.nim click 3
 src/frontend/viewmodel/views/isonim_flow_view.nim click 5
