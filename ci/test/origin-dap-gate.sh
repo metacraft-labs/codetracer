@@ -116,8 +116,8 @@ fi
 [ "$(printf '%s\n' "$windows_nightly" | grep -c 'CT_TEST_LANGS: all$')" -eq 1 ] ||
 	fail "Windows nightly origin-DAP job must use the documented routed 'all' selector"
 
-if printf '%s\n%s\n' "$windows_per_pr" "$windows_nightly" |
-	grep -Eiq 'python[[:space:]]*\+[[:space:]]*rust|python,rust|full matrix|all languages|MCP/CLI smoke'; then
+if grep -Eiq 'python[[:space:]]*\+[[:space:]]*rust|python,rust|full matrix|all languages|MCP/CLI smoke' \
+	<<<"$windows_per_pr"$'\n'"$windows_nightly"; then
 	fail "Windows origin-DAP jobs retain a rejected selector or a false coverage claim"
 fi
 if grep -Eiq 'choco(latey)?([.]exe)?([[:space:]]|$)' <<<"$windows_per_pr"; then
@@ -194,17 +194,14 @@ required_gate_step="$(printf '%s\n' "$windows_per_pr" | workflow_step 'Run requi
 # discovery, pinned provisioning, version verification and PATH propagation;
 # the workflow must call that same file, not retain an untested inline clone.
 # shellcheck disable=SC2016 # Match the literal GitHub Actions expression.
-printf '%s\n' "$git_bootstrap" |
-	grep -Fq 'CODETRACER_GIT_BOOTSTRAP_REVISION: ${{ github.sha }}' ||
+grep -Fq 'CODETRACER_GIT_BOOTSTRAP_REVISION: ${{ github.sha }}' <<<"$git_bootstrap" ||
 	fail "Windows Git bootstrap must be tied to the immutable workflow revision"
 grep -Fq "'^[0-9a-f]{40}$'" <<<"$git_bootstrap" ||
 	fail "Windows Git bootstrap must validate the immutable revision"
-printf '%s\n' "$git_bootstrap" |
-	grep -Fq 'https://raw.githubusercontent.com/metacraft-labs/codetracer/' ||
+grep -Fq 'https://raw.githubusercontent.com/metacraft-labs/codetracer/' <<<"$git_bootstrap" ||
 	fail "Windows Git bootstrap must retrieve only the CodeTracer helper"
 # shellcheck disable=SC2016 # Match literal inline PowerShell.
-printf '%s\n' "$git_bootstrap" |
-	grep -Fq '"$revision/ci/ensure-git-for-checkout.ps1"' ||
+grep -Fq '"$revision/ci/ensure-git-for-checkout.ps1"' <<<"$git_bootstrap" ||
 	fail "Windows Git bootstrap helper URL must contain the validated revision"
 grep -Fq '/ci/ensure-git-for-checkout.ps1' <<<"$git_bootstrap" ||
 	fail "Windows Git bootstrap must retrieve the tested helper path"
@@ -219,13 +216,11 @@ grep -Fq 'Invoke-WebRequest' <<<"$git_bootstrap" ||
 # of the day: this check previously named `app-token` literally and would have
 # gone quietly blind the moment that step was renamed, which is exactly what
 # the consolidation onto a single `ci_token` mint step did.
-if printf '%s\n' "$git_bootstrap" |
-	grep -Eq 'steps\.[A-Za-z0-9_-]+\.outputs\.token|SIBLING_TOKEN|[Aa]uthorization|[Hh]eader'; then
+if grep -Eq 'steps\.[A-Za-z0-9_-]+\.outputs\.token|SIBLING_TOKEN|[Aa]uthorization|[Hh]eader' <<<"$git_bootstrap"; then
 	fail "Windows Git bootstrap must not receive or transmit repository credentials"
 fi
 # shellcheck disable=SC2016 # Match literal inline PowerShell.
-printf '%s\n' "$git_bootstrap" |
-	grep -Fq 'Remove-Item -LiteralPath $bootstrapScript' ||
+grep -Fq 'Remove-Item -LiteralPath $bootstrapScript' <<<"$git_bootstrap" ||
 	fail "Windows Git bootstrap must clean the downloaded helper"
 if grep -Fq 'choco.exe' <<<"$git_bootstrap"; then
 	fail "Windows Git bootstrap must not require an absent package manager"
@@ -247,8 +242,7 @@ grep -Fq '"GIT_CONFIG_KEY_0=core.longpaths"' \
 grep -Fq '"GIT_CONFIG_PARAMETERS="' \
 	"$REPO_ROOT/ci/ensure-git-for-checkout.ps1" ||
 	fail "Windows Git bootstrap must neutralize inherited inline Git configuration"
-printf '%s\n' "$bootstrap_contract_step" |
-	grep -Fq './ci/test/ensure-git-for-checkout.ps1' ||
+grep -Fq './ci/test/ensure-git-for-checkout.ps1' <<<"$bootstrap_contract_step" ||
 	fail "Windows job must run the Git bootstrap behavioral contract"
 
 # Post-checkout compiler/build-tool provisioning uses only reviewed official
@@ -263,8 +257,7 @@ printf '%s\n' "$bootstrap_contract_step" |
 	fail "Windows job must invoke the reviewed origin-DAP toolchain helper exactly once"
 [ "$(printf '%s\n' "$toolchain_step" | grep -c 'shell: powershell$')" -eq 1 ] ||
 	fail "Windows toolchain provisioning must remain Windows PowerShell 5.1 compatible"
-printf '%s\n' "$bootstrap_contract_step" |
-	grep -Fq './ci/test/ensure-origin-dap-windows-toolchain.ps1' ||
+grep -Fq './ci/test/ensure-origin-dap-windows-toolchain.ps1' <<<"$bootstrap_contract_step" ||
 	fail "Windows job must run the origin-DAP toolchain behavioral contract"
 grep -Fq 'JUST_WIN_X64_SHA256=f0acf3f8ccbcf360b481baae9cae4c921774c89d5d932012481d3e0bda78ab39' \
 	"$REPO_ROOT/non-nix-build/windows/toolchain-versions.env" ||
@@ -447,8 +440,7 @@ required_success="$(
 		ORIGIN_DAP_CARGO_BIN="$fake_cargo" \
 		"$GATE" 2>&1
 )"
-printf '%s\n' "$required_success" |
-	grep -Fq "origin-DAP required summary: expected=7 executed=7 skipped=0" ||
+grep -Fq "origin-DAP required summary: expected=7 executed=7 skipped=0" <<<"$required_success" ||
 	fail "required success did not emit the exact completion summary"
 
 set +e
@@ -465,8 +457,7 @@ set -e
 [ "$required_skip_status" -ne 0 ] || fail "required mode accepted a SKIPPED sentinel"
 grep -Fq "emitted a SKIPPED sentinel" <<<"$required_skip" ||
 	fail "required skip reported the wrong failure"
-if printf '%s\n' "$required_skip" |
-	grep -Fq "origin-DAP required summary: expected=7 executed=7 skipped=0"; then
+if grep -Fq "origin-DAP required summary: expected=7 executed=7 skipped=0" <<<"$required_skip"; then
 	fail "required skip emitted the successful completion summary"
 fi
 
@@ -491,8 +482,7 @@ if [ "${ORIGIN_DAP_AMBIENT_REQUIRED_CHILD:-0}" != "1" ]; then
 			ORIGIN_DAP_AMBIENT_REQUIRED_CHILD=1 \
 			bash "$REPO_ROOT/ci/test/origin-dap-gate.sh" 2>&1
 	)" || fail "shell contract self-test failed under ambient required mode"
-	printf '%s\n' "$ambient_required_self_test" |
-		grep -Fq "origin-DAP shell contract tests passed" ||
+	grep -Fq "origin-DAP shell contract tests passed" <<<"$ambient_required_self_test" ||
 		fail "ambient-required shell contract self-test omitted its success marker"
 fi
 
