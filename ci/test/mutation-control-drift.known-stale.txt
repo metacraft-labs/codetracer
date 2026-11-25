@@ -529,7 +529,7 @@ src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend
 # 2026-11-23, the justfile gained the RunQuota prefix variables and a recipe
 # for the bridge test; none of it touches the WebAssembly profile this control
 # grades.
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	8bda0738c9719a3f394aa9ee384bc2c920800d78e38e9b540d58ff8a018e0cc0	3f2f331be750d2cc3ec99ca96cb8a589d0f1c4ca7311631bb09a88a478cb776d
+src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	8bda0738c9719a3f394aa9ee384bc2c920800d78e38e9b540d58ff8a018e0cc0	ad7cbcff4486f41f9ea09b0a22a6adc3a5ca5c7f95193802b008d1de6ef4e48f
 # src/frontend/tui/app/runtime.nim, ci/lib/test-lane-files.sh, ci/test/vm-unit-wasm-parity.sh: moved by the ct-lens package (lane rows) and the
 # plugin status-item fix. Re-grade the harnesses named.
 
@@ -918,3 +918,6 @@ src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	src/f
 src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00
 src/frontend/tui/tests/plat70b-table-mutation-control.sha256	src/frontend/viewmodel/views/table_overflow_dom.nim	3cafcc6a3e9313fd18877db72be64ad195f0a86801bf89f119e79601d250fe83	651dc6c35d6eb035eda0eb6e83cfb7d48fc61d50618e29cbe67e098c825d64f4
 src/frontend/viewmodel/tests/unit/plat29-async-mutation-control.sha256	src/frontend/ui/state.nim	dffab8fbd926da0a6350b4bfa1ee15ae5940fb3b35e8630fe3fc07cb370f4e9f	bd66da9527b6298b1f91aaef8e60c68aa75e1b7847189f039b7d0bbd6671274e
+
+# Re-grades owed for subjects moved by a379c1fc4e6 without ledger lines;
+# the harnesses that digest them owe a re-grade of the arms that sit in them.
