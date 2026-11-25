@@ -1251,7 +1251,11 @@ proc updateGlyphMarks*(self: EditorViewComponent) =
     # model's end — inside the effect that draws a stop, which then stopped
     # drawing (and the session stopped settling) at every later stop.
     let lineCount = editorInstance.getModel().getLineCount()
-    for m in pluginEditorMarks($self.path):
+    for markItem in pluginEditorMarks($self.path):
+      # A copy: the iterator yields `lent`, and the `js{...}` decoration
+      # below captures `m`, which a `lent` cannot be (the Nix toolchain's
+      # Nim 2.2 refuses it).
+      let m = markItem
       let line = m.line - firstLine + 1
       if line < 1 or line > lineCount: continue
       if m.marker:

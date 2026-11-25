@@ -704,7 +704,7 @@ src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	src/frontend/ui/ke
 # them (plugin_sessions). plat50, plat53, plat60, plat70g and plat81-node-plugin-host
 # owe re-grades.
 src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/ui/editor.nim	3ae3540e694e8e2ec989dfa8d59ffb7c3975f9713dfd319120e95ce089609b25	93c108e5ad262bb6749f9c6430abe16ecef7ef1e977332248cb8f64c83c01db8
-src/frontend/tui/tests/plat70g-multiclick-mutation-control.sha256	src/frontend/ui/trace.nim	a98d49ef54a45b722f1ab02156a2dbb1e973ee7d59b902fe3cd3668d40d69e10	aee68a90d655abd9d84c93330961f6b1bb4d321a9f180fe624bb79b60b299a73
+src/frontend/tui/tests/plat70g-multiclick-mutation-control.sha256	src/frontend/ui/trace.nim	a98d49ef54a45b722f1ab02156a2dbb1e973ee7d59b902fe3cd3668d40d69e10	6cda94da93d6c4f09a7cb45712e513a7524a7e2dd9cfecb9c426b2798cf52fbf
 
 # 2026-11-24, ci/lib/test-lane-files.sh moved in 24bb8bb4a10 (agent-harbor web views
 # for a change's tests and trace links) without its ledger lines; recorded here so the
