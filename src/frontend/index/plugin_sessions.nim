@@ -158,8 +158,13 @@ proc stateOf*(ps: PluginSession): JsonNode =
   var commands = newJArray()
   for c in sup.commands:
     let (enabled, reason) = sup.enablementOf(c.plugin, c.op)
+    # `position`: the stop the plugin computed this enablement at, so a
+    # reader can tell an answer about this stop from one about the last.
+    let slot = sup.slot(c.plugin)
+    let at = if slot.isNil or not slot.enablement.hasKey(c.op): -1'i64
+             else: slot.enablement[c.op].epoch.position
     commands.add %*{"plugin": c.plugin, "op": c.op, "title": c.title,
-                    "enabled": enabled, "reason": reason}
+                    "enabled": enabled, "reason": reason, "position": at}
   var notes = newJArray()
   for n in sup.notifications:
     notes.add %*{"plugin": n.plugin, "text": n.text, "actions": n.actions,
@@ -186,6 +191,8 @@ proc stateOf*(ps: PluginSession): JsonNode =
                    "strikes": s.totalStrikes, "slowAcks": s.slowAcks,
                    "ackP50": p50, "ackP99": p99}
   %*{"sessionId": ps.tab,
+     "position": sup.epoch.position,
+       # The stop the session is at (each command's `position` names its own).
      "extensionsEnabled": sup.extensionsEnabled,
      "panes": panes, "status": status, "commands": commands,
      "awaitingConsent": p.awaitingConsent, "notifications": notes,
