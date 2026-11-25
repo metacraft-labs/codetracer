@@ -46,6 +46,7 @@ import {
 } from "./layout-reset";
 import {
   LIMIT_CACHED_RECORDING_MS,
+  LIMIT_WINDOW_SETUP_MS,
   LIMIT_RECORDER_TIMEOUT_MS,
   LIMIT_ELECTRON_LAUNCH_MS,
   LIMIT_FIRST_WINDOW_MS,
@@ -891,8 +892,8 @@ function sleep(ms: number): Promise<void> {
  */
 async function getEditorWindow(app: ElectronApplication): Promise<Page> {
   await installRendererInitScript(app);
-  await app.firstWindow({ timeout: 45_000 });
-  const deadline = Date.now() + 45_000;
+  await app.firstWindow({ timeout: LIMIT_WINDOW_SETUP_MS });
+  const deadline = Date.now() + LIMIT_WINDOW_SETUP_MS;
   while (Date.now() < deadline) {
     const editor = app.windows().find((window) => {
       const url = window.url();

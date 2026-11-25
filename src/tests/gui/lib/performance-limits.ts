@@ -56,6 +56,14 @@ export const LIMIT_RR_RECORDING_MS = process.platform === "win32" ? 900_000 : 90
  * anything. */
 export const LIMIT_RECORDER_TIMEOUT_MS = LIMIT_RR_RECORDING_MS;
 
+/** How long Electron may take to show its editor window: the first window,
+ * then that window's navigation from `about:blank` to the editor. Setup, not
+ * the behaviour under test, and the wait returns the moment the editor is
+ * there, so the bound only decides when a loaded host is given up on. At 45 s
+ * a host at load ~200 failed `desktop_ct_lens` here before it tested anything,
+ * with a launch whose run-queue wait alone was minutes. */
+export const LIMIT_WINDOW_SETUP_MS = 180_000;
+
 // ---------------------------------------------------------------------------
 // UI interactions (with loaded trace)
 // ---------------------------------------------------------------------------
