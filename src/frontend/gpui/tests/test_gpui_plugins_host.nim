@@ -328,6 +328,25 @@ suite "GPUI: the window's plugins (host/gpui_plugins)":
     ck "acme-tools.flame" in p.control(@["recovery-dialog"]).body
     p.close()
 
+  test "the chord is timed on when each Escape happened, not when the window got to it":
+    # Three Escapes 20 ms apart on the display server's clock (the platform
+    # event's own time, `GpuiEvent.timeMs`), handled 600 ms apart as a busy
+    # window handles them: 1.2 s from the first to the third by the window's
+    # clock, past the chord's second, and inside it by the keys' own.
+    let home = newHome(capture = true, flameMode = "swallow-input")
+    let p = openFor(home)
+    p.grantBoth()
+    ck p.waitFor("the flame layer", proc(): bool =
+      p.layerHeld)
+    ck not p.observeWindowEscape("Esc", arrivedMs = 50_000)
+    os.sleep(600)
+    ck not p.observeWindowEscape("Esc", arrivedMs = 50_020)
+    os.sleep(600)
+    ck p.observeWindowEscape("Esc", arrivedMs = 50_040)
+    ck p.layerLabel == ""
+    ck "acme-tools.flame" in p.control(@["recovery-dialog"]).body
+    p.close()
+
   test "a key the plugin swallows is dropped and said, and the plugin loses the keyboard":
     let home = newHome(capture = true, flameMode = "swallow-input")
     let p = openFor(home)
@@ -567,5 +586,5 @@ suite "GPUI: the window's plugins (host/gpui_plugins)":
     ck markers.len == 1 and elementText(markers[0]) == "★"
 
   test "assertion count":
-    ck CHECKS == 159
+    ck CHECKS == 165
     echo "CHECKS: ", CHECKS
