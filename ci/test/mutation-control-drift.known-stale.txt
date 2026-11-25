@@ -777,7 +777,6 @@ src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/common/k
 src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	src/common/key_names.nim	1acf4821d23f7cf4529431a99b64ccde8d30f63f9df9547869f22af730c837c9	f1a70bdb7cbc96c678dee9f08374a322033a7d0ca8d9ab7422d6cd1030c1b741
 src/frontend/tui/tests/plat83-ct-lens-mutation-control.sha256	src/frontend/tui/app/runtime.nim	7f58388446ab2135d8e46b5e2b43760bb553d63e4b64674516a8278c4be8b794	a8f6c18817375c1435f4e1aabef5026a12730813e635a3ee159f497cd5a30c5d
 src/frontend/viewmodel/tests/unit/plat31-keymap-mutation-control.sha256	src/common/key_names.nim	1acf4821d23f7cf4529431a99b64ccde8d30f63f9df9547869f22af730c837c9	f1a70bdb7cbc96c678dee9f08374a322033a7d0ca8d9ab7422d6cd1030c1b741
-src/frontend/viewmodel/tests/unit/plat36-vim-import-mutation-control.sha256	src/frontend/tui/app/runtime.nim	7f58388446ab2135d8e46b5e2b43760bb553d63e4b64674516a8278c4be8b794	a8f6c18817375c1435f4e1aabef5026a12730813e635a3ee159f497cd5a30c5d
 src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/common/key_names.nim	1acf4821d23f7cf4529431a99b64ccde8d30f63f9df9547869f22af730c837c9	f1a70bdb7cbc96c678dee9f08374a322033a7d0ca8d9ab7422d6cd1030c1b741
 
 # 2026-11-21, computed plugin visualisers: the supervisor asks a plugin's computed rows
@@ -862,8 +861,6 @@ src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/fronten
 src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/tui/main.nim	022256c74ff14ca3aea002295a0688ac96d1b9d7866a336cce13ff912d83ca18	dc07c46cddae122d6e2d4b327728d4b45b11219fb59c29d77caf904f45e6168e
 src/frontend/tui/tests/plat83-ct-lens-mutation-control.sha256	src/frontend/host/plugin_processes.nim	e7c1a24b0eca583538cbea93d8b96a12484c27e35adde4303fd6d66f7e6c6a83	e8119b02bd08a7f1d1e46b03e2d97b5f7b7320dd4fb212942299dc9c537d7e59
 src/frontend/viewmodel/tests/unit/plat29-async-mutation-control.sha256	src/frontend/tui/tests/test_plat29_file_producer.nim	f53f3424366fcedbb6d63fc10431ae08f59755a0d5dbd294f516cdff17052171	28858e5527f820cc3efea5f505ef314f7100ced1d3d4aeeef42899e751a8a50f
-src/frontend/viewmodel/tests/unit/plat36-vim-import-mutation-control.sha256	src/frontend/host/edit_host.nim	f92742bc7fd15a87ad1b10cece52effdc0158a86a0214544f32468158b5cc1fa	c753c826064116ed10ef53239a2975dc799add1f8ea96e2a5de195e43a8e8db3
-src/frontend/viewmodel/tests/unit/plat36-vim-import-mutation-control.sha256	src/frontend/tui/tests/test_plat36_source_command.nim	a22c3637e5cf2491a7e23a10417e2c28a869eba4fd60a55ca99fcc3b798947e5	ac94faeb90dad3fe4e01b97a78ab8988a5fc6a03636685eb94bf6f64a347ee9b
 
 # 2026-11-24, a docked pane's open size moved into the layout model (DockedPane.openShare,
 # layout schema 12): layout_model, the terminal's layout binding, the GPUI window geometry and
