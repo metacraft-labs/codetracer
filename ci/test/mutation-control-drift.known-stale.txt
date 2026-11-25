@@ -789,7 +789,6 @@ ci/test/plat70i-fit-mutation-control.sha256	src/frontend/viewmodel/views/isonim_
 src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/viewmodel/views/pane_measure_dom.nim	e56c65daedd51c2a5a90863c831de5acc29421953202d82eaa815a96051d45bd	994c879356ae85c485b968913e6f9751cce67a6ff6738158a7d8216ce0a42d92
 src/frontend/tui/tests/plat52-terminal-mutation-control.sha256	src/frontend/viewmodel/viewmodels/terminal_output_vm.nim	e94568287f58d6cf7fb2817f5d5910468d22c01480004cd440148c6500e94230	095b7575f5c47155ca2ed853f8449c8f464fb24fd12507c9ea55d7901a1ef28a
 src/frontend/tui/tests/plat52-terminal-mutation-control.sha256	src/frontend/viewmodel/views/pane_measure_dom.nim	e56c65daedd51c2a5a90863c831de5acc29421953202d82eaa815a96051d45bd	994c879356ae85c485b968913e6f9751cce67a6ff6738158a7d8216ce0a42d92
-src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	ci/lib/test-lane-files.sh	f84ed976b90a0326f2564aaddf1ff1da4a89f86eaa50830b2c1b77c744513f96	6bc216be8edfb75d09db3103295e233200079c6d9c4cf78af18b5c3312b6df07
 
 # 2026-11-24, a refused tracepoint sweep ends its wait (dca5152a45a): the session
 # clock now ends on the sweep's results event or the engine's answer (tui_session,
