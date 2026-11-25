@@ -507,9 +507,12 @@ proc agentHarborSection*(): CodeTracerStorySection =
 
 proc sizesOf*(story: CodeTracerStory): seq[(string, int, int)] =
   ## The sizes a story is captured at: laptop and sidebar, and panel for the
-  ## session activity timeline.
+  ## session activity timeline and the suggested UI actions (the P2c study's
+  ## captures list them at `panel`; `ci/test/ctf_p1b_gpui_story_capture.nim`'s
+  ## `PanelFamilies` takes the same).
   result = @Sizes
-  if story.surface == "agent-harbor-session-activity": result.add PanelSize
+  if story.surface in ["agent-harbor-session-activity", "agent-harbor-suggested-actions"]:
+    result.add PanelSize
 
 proc expectedCaptures*(section: CodeTracerStorySection): seq[Expected] =
   for story in section.stories:
