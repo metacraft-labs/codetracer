@@ -24,6 +24,16 @@
 ## replay of its own would leave the panels at one position and the editor at
 ## another.
 ##
+## WHAT READS THE SESSION WAITS FOR IT TO ATTACH. Its panel ViewModels — the
+## state pane's locals-derived change set (`StateVM.valueChanges`), the call
+## trace, the flow — are built on the replay's first stop, and a sync
+## publisher mirrors the signals the session has when the publisher is made
+## (`sync_publisher.createSyncPublisher`). So the pages are published to only
+## once it attaches (below), and anything else that mirrors it — the plugins
+## `ct host` runs beside it (`index/host_clients`) — is opened from
+## `whenAttached`. Opened earlier, the plugins' mirror carried the store alone:
+## it followed the stop and never learned what a step changed.
+##
 ## THE SESSION OUTLIVES CONNECTIONS. A reloaded page continues its replay
 ## where it was, so a session is kept when its page goes away, and a page that
 ## connects receives its current state as a snapshot.
@@ -63,6 +73,11 @@ type
     ownsHost: bool
       ## Made for this session alone, so closing it disposes the host too.
     closed: bool
+    attached: bool
+      ## The replay has stopped and the session attached to it: its panel
+      ## ViewModels exist and the pages are published to.
+    onAttached: seq[proc()]
+      ## `whenAttached` callbacks waiting for that.
     pages: seq[tuple[socket: JsObject; channel: SyncChannel; event: string]]
 
 proc newHostedSessions*(): HostedSessions =
@@ -93,6 +108,12 @@ proc open(host: SyncHost; id: string; backend: BackendService;
       # store alone and a page never received what the state pane derives.
       # Registering activates the session for the pages pinned to it.
       host.addPrimary(id, debugger.session)
+      h.attached = true
+      # A COPY, emptied first: a callback may register another.
+      let waiting = h.onAttached
+      h.onAttached = @[]
+      for cb in waiting:
+        cb()
   debugger.followBackendMoves()
   h
 
@@ -112,6 +133,23 @@ proc openHostedPrimary*(backend: BackendService; traceFolder: string;
   result = open(newSyncHost(), HostedSessionId, backend, traceFolder,
                 sourceLanguageOf)
   result.ownsHost = true
+
+proc isAttached*(h: HostedPrimary): bool =
+  ## Whether the session has attached to its replay (its first stop arrived),
+  ## so its panel ViewModels exist.
+  not h.isNil and h.attached
+
+proc whenAttached*(h: HostedPrimary; cb: proc()) =
+  ## Run `cb` once the session has attached to its replay — now, if it has.
+  ## What mirrors the WHOLE session (a sync publisher over it) must be made
+  ## from here, not earlier (see the module's header). A session closed
+  ## before its first stop never runs `cb`.
+  if h.isNil or h.closed or cb.isNil:
+    return
+  if h.attached:
+    cb()
+  else:
+    h.onAttached.add cb
 
 proc connectPage*(h: HostedPrimary; socket: JsObject; tab = 0) =
   ## Serve the page at the other end of `socket`, whose tab `tab` (its tab id)
@@ -137,6 +175,7 @@ proc close*(h: HostedPrimary) =
   if h.closed:
     return
   h.closed = true
+  h.onAttached = @[]
   for page in h.pages:
     h.host.detach(page.channel)
     closeSocketSyncChannel(page.channel, page.socket, page.event)

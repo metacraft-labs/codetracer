@@ -27,7 +27,8 @@ import { test, expect } from "../../lib/fixtures";
 import { CommandPalette } from "../../page-objects/command-palette/command-palette";
 import {
   installCtLens, pluginEnv, pluginPids, describePids, pluginState, pluginOf, paneText,
-  pluginStatusItem, countBodyKeys, bodyKeys, LensExecutablePattern, pressRecoveryChord, type PluginHome,
+  pluginStatusItem, countBodyKeys, bodyKeys, LensExecutablePattern, pressRecoveryChord,
+  statusText, commandOf, stepUntilOneChange, type PluginHome,
 } from "../../lib/plugin-processes";
 
 test.setTimeout(600_000);
@@ -38,24 +39,6 @@ const JUMP = "ct-lens.jump";
 const LENS = [HISTORY, JUMP, WATCH];
 const HISTORY_PANE = "ct-lens.history/history";
 const CALLS_PANE = "ct-lens.jump/calls";
-
-function statusText(st: any, plugin: string, item: string): string {
-  const it = (st?.status ?? []).find((s: any) => s.plugin === plugin && s.item === item);
-  return it ? String(it.text) : "";
-}
-
-/** The tab's debugger line, for a red run's message ("?" before a stop). */
-async function debuggerLine(page: any): Promise<string> {
-  return await page.evaluate(() => {
-    const d = (window as any).data;
-    const loc = d?.sessions?.[d.activeSessionIndex]?.services?.debugger?.location;
-    return loc ? `line ${loc.line}` : "?";
-  });
-}
-
-function commandOf(st: any, plugin: string, op: string): any {
-  return (st?.commands ?? []).find((c: any) => c.plugin === plugin && c.op === op) ?? null;
-}
 
 async function grantLens(page: any): Promise<void> {
   // All three must be offered first: the palette runs its best fuzzy match.
@@ -110,54 +93,9 @@ test.describe("desktop: the ct-lens plugins", () => {
     // F7: step until ct-lens.watch's status item names ONE changed value,
     // then F7 watches it. The key is decided in the keydown and never
     // reaches the page.
-    let changed = "";
-    const seen: string[] = [];
-    // Bounded inside the test's own timeout, so a red run still reaches the
-    // assertion below and says what the item read at each stop.
-    const loopUntil = Date.now() + 360_000;
-    for (let i = 0; i < 25 && changed === "" && Date.now() < loopUntil; i++) {
-      // F10 is the window's step over (no plugin binds it).
-      const before = (await pluginState(ctPage))?.position ?? -1;
-      await ctPage.keyboard.press("F10");
-      // The item is read only once the plugin has answered about the NEW
-      // stop: the session has moved past `before`, and the watch command's
-      // enablement (pushed with the item, after it) was computed there. Read
-      // as soon as the key was pressed, the item still named the last stop's
-      // change: F7 then watched that value while the step landed on the next
-      // stop, whose own change it never watched (measured at load ~170). The
-      // same early read made the loop press F10 again at once, while the
-      // step was still running: the window ignores a step key during a step
-      // (7 presses in 0.6 s made one `next` request, measured), so 25 tries
-      // were spent inside a few slow steps and stepping looked stopped. The
-      // wait is on the new stop, so it is long enough for a loaded replay.
-      // "…" is the plugin's reading before it knows the new stop's changes.
-      // At a new stop the plugin may push more than one reading (what it can
-      // tell at once, then the stop's own changes as they arrive), so the item
-      // is taken once it has held still for 1.5 s at the new stop.
-      const deadline = Date.now() + 60_000;
-      let text = "";
-      let heldSince = 0;
-      let held = "";
-      while (Date.now() < deadline) {
-        const st = await pluginState(ctPage);
-        const at = st?.position ?? -1;
-        const cmd = commandOf(st, WATCH, "watch.add-changed");
-        text = statusText(st, WATCH, "watch.status");
-        const current = at > before && cmd?.position === at &&
-          text.startsWith("changed: ") && text !== "changed: …";
-        if (!current) {
-          held = ""; heldSince = 0;
-        } else if (text !== held) {
-          held = text; heldSince = Date.now();
-        } else if (Date.now() - heldSince >= 1_500) {
-          break;
-        }
-        await ctPage.waitForTimeout(300);
-      }
-      seen.push(`${await debuggerLine(ctPage)}: ${text}`);
-      const m = /^changed: ([^,\s…]+)$/.exec(text);
-      if (m && m[1] !== "none") changed = m[1];
-    }
+    // Each reading is of the stop the step landed on, once the plugin has
+    // answered about it and its reading has held still (`stepUntilOneChange`).
+    const { changed, seen } = await stepUntilOneChange(ctPage, WATCH, "watch.status", "watch.add-changed");
     expect(changed, `a step changed exactly one value; the status item read: ${seen.join(" | ")}`).not.toBe("");
     await expect.poll(async () => commandOf(await pluginState(ctPage), WATCH, "watch.add-changed")?.enabled,
       { timeout: 30_000 }).toBe(true);

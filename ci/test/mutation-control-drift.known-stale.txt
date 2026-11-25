@@ -809,7 +809,7 @@ src/frontend/tui/tests/plat62-constraints-mutation-control.sha256	src/frontend/t
 src/frontend/tui/tests/plat63-verification-mutation-control.sha256	src/frontend/tui/tests/test_plat63_verification.nim	af249a16439bc091fe296bc08c2fbddd4a6e5b4c86bbee916e509034d4f1ea8e	6f38cf8af0293a6b3856fa591df00ca66eeb81abc0e8aa6db4c1125bc5e41545
 src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend/tui/tests/test_plat48_top_bar.nim	8d176a5a5beafc3d74e57322412d846de668e9f33c223435d7f230a0e41c6aa6	0d9de228818643ec3c0ad2b6457f17c9b09a4bf59aee2b7f6282057683dfad78
 src/frontend/tui/tests/plat70d-grep-mutation-control.sha256	src/frontend/viewmodel/host/find_in_files.nim	7d78c16a901b281665310d163a9c30a4f2aba0385ae3cbf7a431f192ef93191d	574e842b0279e8132579ce2d1858cc9f3a0db260cc10fa1f54d88da4324cbb45
-src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/index/plugin_sessions.nim	b11872bdb3846299913918257d3bc9359c239ffa43078d3562efdf7ca18796f8	169a92da1e33b6f49b4b1813faba981528e790d36c8ec891c6afe09c150359a9
+src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/index/plugin_sessions.nim	b11872bdb3846299913918257d3bc9359c239ffa43078d3562efdf7ca18796f8	503c8ce71b8f01286ce0e4bb202445d183d4ceb261c05f491f9ccced65504617
 src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/tests/plugin_sessions_test.nim	fd4f7b3978e1f47d5713a0acb99d6396e370d838454132d8872b94513d38cd87	cfa57468f74db7da81599de6cccac0622676470279e3ff33eb7c387e4e0db282
 src/frontend/tui/tests/plat81-plugin-panes-mutation-control.sha256	src/frontend/host/plugin_panes.nim	b716e2b7781cc5abfd11c3027ef2dc760e1429f91422e4264bfc4d7d186ac28a	2cb413dd75f0431075931a5cfc72454652240084aaacd81c8b61ca5bee45e031
 src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/tui/host/plugin_service.nim	b1bf1fde41673cacebe77f0dc26c683be3fad804ef03f79529a58a8e66e7c5eb	9e0d2dac48c6557b18633570c6c14abdb71c3bc1f5a57cca772126d21e45ba1d
@@ -856,8 +856,8 @@ src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/fro
 # package by name and checks the admission; the suite changed, so the harness grading it owes
 # a re-grade.
 src/frontend/gpui/tests/plat20-mutation-control.sha256	src/frontend/gpui/tests/test_gpui_shell_split.nim	3d8325b36f086841e52b6032017041f6e015bba121482c5765a8b5140e05e1ee	e31ea3dce4e758df5744984ae12c76d3ab3c8b02d6a5ff199006e21bb9b604b4
-src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/viewmodel/plugin_host/supervisor.nim	37a911c95f7ce375ba18f590470046ad9550343fadf19166e6bf8ec65e2bd4fe	be1dfdc18f179a07ecd1ce86b9e3782b2aa4d678102ce31369e20b5388fae536
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/supervisor.nim	37a911c95f7ce375ba18f590470046ad9550343fadf19166e6bf8ec65e2bd4fe	be1dfdc18f179a07ecd1ce86b9e3782b2aa4d678102ce31369e20b5388fae536
+src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/viewmodel/plugin_host/supervisor.nim	37a911c95f7ce375ba18f590470046ad9550343fadf19166e6bf8ec65e2bd4fe	4d43574344afeb66d34e11ae1308c17bac3e9f7ef07c37a41d40cef4cf96b089
+src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/supervisor.nim	37a911c95f7ce375ba18f590470046ad9550343fadf19166e6bf8ec65e2bd4fe	4d43574344afeb66d34e11ae1308c17bac3e9f7ef07c37a41d40cef4cf96b089
 
 # 2026-11-25, the SDK acknowledges an autoAck plugin's invoke on its reader thread
 # (codetracer-pm 2026-11-24-a-freshly-activated-plugins-first-key-misses-its-input-
@@ -944,3 +944,13 @@ src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/fro
 src/frontend/tui/tests/plat81-plugin-panes-mutation-control.sha256	src/frontend/tui/tests/real_terminal/test_plat81_plugin_panes_pty.nim	0822d4743a479f2dd3c1aeb07f5c3d69c5d48a72dd748c40eb1801ed8b91c5f9	b31b0d2f24d2c62d476e71ae2ceae23a84ee91dde66dfa10d92c8239268f3188
 src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/tui/tests/real_terminal/test_plat81_plugin_processes_pty.nim	c749e75d8ec3e5c6204ea252f66eb94ea466498c2e48449cf6fba9818c95522e	f03c6e32a8e5c2241c3e68315c17de19efb420443c53d8c15b1d10d1eeabb018
 src/frontend/tui/tests/plat83-ct-lens-mutation-control.sha256	src/frontend/tui/tests/real_terminal/test_ct_lens_plugins_pty.nim	d198e9b4a687984bcdcadea48dd1d99b2d9e6a9560e1b68b043c4753325bb8fc	16e0bc7f2cd3ca607a7f33c1def20a275f91f556c08d45a16ace4fc11ea1408a
+
+# 2026-11-25, the plugin wire appends frames, frame queues and pipe chunks with
+# `appendBytes` (plugin_host/byte_append.nim), because stock Nim 2.2.4's JavaScript
+# `add` throws past ~100 000 bytes (codetracer-pm 2026-11-24-under-ct-host-a-plugins-
+# mirror-never-learns-what-a-step-changed). process_link.nim and plugin_io.nim moved;
+# the harnesses that digest them owe a re-grade of the arms that sit in them.
+src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/viewmodel/plugin_host/process_link.nim	67a0095978446fcf0f5c4b2ab6e769482b685d4041d552431b9bad3e9362de98	e1bea68ce26419dac6a0b580c0585dad027d0b1be26cde03e8a9b2f083135e75
+src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/process_link.nim	67a0095978446fcf0f5c4b2ab6e769482b685d4041d552431b9bad3e9362de98	e1bea68ce26419dac6a0b580c0585dad027d0b1be26cde03e8a9b2f083135e75
+src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/plugin_io.nim	d5de198bc351a80da5aa4c73b99ed7c6fd48d90d8a9a55ad3a59df7e1e664b26	b3e909347e32bd99c041e68ab80f841755487199c62388c1ffc61ae3b73fde98
+src/frontend/viewmodel/tests/unit/plat8-io-mutation-control.sha256	src/frontend/viewmodel/plugin_host/plugin_io.nim	d5de198bc351a80da5aa4c73b99ed7c6fd48d90d8a9a55ad3a59df7e1e664b26	b3e909347e32bd99c041e68ab80f841755487199c62388c1ffc61ae3b73fde98

@@ -30,6 +30,7 @@ import std/[json, strutils, tables]
 
 import ../../../common/view_vocabulary/vocabulary as view_vocabulary
 import ../../../common/key_names
+import ./byte_append
 
 export view_vocabulary.ViewNode
 
@@ -171,7 +172,10 @@ func encodeFrame*(payload: string): string =
   result.add chr((n shr 16) and 0xff)
   result.add chr((n shr 8) and 0xff)
   result.add chr(n and 0xff)
-  result.add payload
+  # Not `result.add payload`: on the JavaScript backend that is one call with
+  # a byte per argument, which throws for a frame of a few hundred KiB
+  # (`byte_append`).
+  result.appendBytes payload
 
 proc encodeMessage*(msg: JsonNode): string =
   encodeFrame($msg)
@@ -181,7 +185,7 @@ proc feed*(r: var FrameReader; data: string) =
   if r.pos > 0 and r.pos >= r.buf.len div 2:
     r.buf = r.buf[r.pos .. ^1]
     r.pos = 0
-  r.buf.add data
+  r.buf.appendBytes data   # a chunk of any size (`byte_append`)
 
 func buffered*(r: FrameReader): int = r.buf.len - r.pos
 

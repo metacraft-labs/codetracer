@@ -42,6 +42,37 @@ suite "§11.4.1: framing":
     var frame: string
     check r.next(frame) == fsOversize
 
+  test "a frame of several MiB is written and read back whole, on every backend":
+    # Up to the cap, a frame's size is the sender's business, and the hosts
+    # that run the wire on the JavaScript backend (the desktop's main
+    # process, `ct host`) send large ones: a mirrored batch carries the
+    # stop's locals, and a module's include `__builtins__`. There, appending
+    # the payload with `add` was one call with a byte per argument and threw
+    # past ~100 000 bytes, so the batch was never sent and the plugin's mirror
+    # stopped at the revision before it (codetracer-pm issues/
+    # 2026-11-24-under-ct-host-a-plugins-mirror-never-learns-what-a-step-changed.md).
+    let big = "x".repeat(3 * 1024 * 1024)
+    let msg = %*{"type": "signal-batch", "session": "s", "revision": 7,
+                 "batch": [{"key": "store.locals.locals", "value": big}]}
+    let frame = encodeMessage(msg)
+    let payload = $msg
+    check frame.len == 4 + payload.len
+    # Read back from ONE chunk of the whole frame (a pipe hands over as much
+    # as it has), then from a second frame split in two large chunks.
+    var r: FrameReader
+    r.feed(frame)
+    var got: string
+    check r.next(got) == fsFrame
+    check got.len == payload.len
+    check parseJson(got)["batch"][0]["value"].getStr.len == big.len
+    let half = frame.len div 2
+    r.feed(frame[0 ..< half])
+    check r.next(got) == fsIncomplete
+    r.feed(frame[half .. ^1])
+    check r.next(got) == fsFrame
+    check got == payload
+    check r.buffered == 0
+
 suite "§11.4.4: the message set":
 
   test "host to process":

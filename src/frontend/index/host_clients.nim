@@ -342,14 +342,27 @@ proc bindReplay(hc: HostClients; c: HostClient; tab: int; replayId: int;
                                     replayId, folder)
       # The plugins beside it: keyed by the client and its tab, delivered to
       # this client only, whatever context a later pump runs in.
+      #
+      # OPENED ONCE THE SESSION ATTACHES (its replay's first stop), not here:
+      # the plugins mirror the session through a publisher of the signals it
+      # has when they attach, and before the first stop it has only its
+      # store. Opened here, the mirror followed the stop and never received
+      # the state pane's locals-derived change set (`StateVM.valueChanges`):
+      # ct-lens.watch read "changed: …" at every stop.
       let owner = c
-      t.plugins = openPluginSession(
-        "ct-host/" & c.id & "/tab-" & $tab, tab, t.primary.debugger.session,
-        primaryIdFor(replayId),
-        proc(channel: cstring; payload: JsObject) =
-          runAsClient(owner.toJs, proc() =
-            mainWindow.webContents.send(channel, payload)),
-        "web")
+      let primary = t.primary
+      let pluginKey = "ct-host/" & c.id & "/tab-" & $tab
+      primary.whenAttached proc() =
+        # The tab may have moved to another replay, or closed, meanwhile;
+        # `close` drops a pending callback, and this guards the rest.
+        if t.primary != primary or not t.plugins.isNil:
+          return
+        t.plugins = openPluginSession(
+          pluginKey, tab, primary.debugger.session, primaryIdFor(replayId),
+          proc(channel: cstring; payload: JsObject) =
+            runAsClient(owner.toJs, proc() =
+              mainWindow.webContents.send(channel, payload)),
+          "web")
       if not c.socket.isNil:
         t.primary.connectPage(c.socket.toJs, tab)
   infoPrint "ct host: client ", c.id, " tab ", $tab, " replays ", $replayId

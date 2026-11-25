@@ -197,6 +197,7 @@
 import std/[strutils]
 
 import ./plugin_api
+import ./byte_append
 
 const
   PluginDeniedSyncIo*: array[41,
@@ -529,7 +530,7 @@ func encodeFrame*(payload: string; framing: Framing; delim = '\n'): string =
     result.add chr((n shr 16) and 0xff)
     result.add chr((n shr 8) and 0xff)
     result.add chr(n and 0xff)
-    result.add payload
+    result.appendBytes payload   # any size, on every backend (`byte_append`)
   of frDelimited:
     if delim in payload: return ""
     result = payload & delim

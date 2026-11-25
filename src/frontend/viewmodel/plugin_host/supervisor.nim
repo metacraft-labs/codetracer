@@ -604,6 +604,15 @@ proc attachSession*(sup: Supervisor; session: SessionViewModel;
                     sessionId: string) =
   ## Mirror `session` to every plugin. Batches are cut in `poll`, after the
   ## position has moved, so a batch never carries the previous stop's epoch.
+  ##
+  ## Attach a session whose panel ViewModels exist
+  ## (`initializePanelViewModels`): the publisher mirrors the signals the
+  ## session has NOW, so the plugins of a session attached before its panels
+  ## follow the stop and never see the locals' change set, the call trace or
+  ## the flow. Such an attach is recorded in the plugins' log and report.
+  if session.stateVM.isNil:
+    sup.note("session " & sessionId & " attached before its panel " &
+             "ViewModels exist: its plugins mirror the store alone")
   sup.session = session
   sup.sessionId = sessionId
   let s = sup
