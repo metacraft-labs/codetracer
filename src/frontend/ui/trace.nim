@@ -2271,11 +2271,14 @@ proc closeTrace*(self: TraceComponent) =
   # remove editor view zone
   removeMonacoViewZone(self.editorUI.tabInfo.monacoEditor, self.zoneId)
 
-  # remove its row from the point list, wherever its last run located it
-  let store = self.ownPaneStore()
-  if not store.isNil:
-    discard store.removeDeclaredTracepoint($self.name, self.line,
-                                           sweptHits(self.tracepoint.results))
+  # remove its row from the point list only when it was never run (issue #886):
+  # a tracepoint that produced results stays in the Point List after the editor
+  # closes, so the user can see what it found.
+  if not self.isRan:
+    let store = self.ownPaneStore()
+    if not store.isNil:
+      discard store.removeDeclaredTracepoint($self.name, self.line,
+                                             sweptHits(self.tracepoint.results))
 
   # remove trace component from the editor register
   discard jsDelete(self.editorUI.traces[self.line])
