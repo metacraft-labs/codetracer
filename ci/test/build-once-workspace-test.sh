@@ -140,12 +140,6 @@ readonly PREFLIGHT="$REPO_ROOT/scripts/require-siblings.sh"
 # (Two viewmodel-tests entries stood here too; they closed once that job
 # provisioned the lock-pinned siblings, and the suite asked for their removal.)
 KNOWN_GAPS=(
-	# viewmodel-tests provisions the IsoNim family and a few recorders through
-	# the lock, but codetracer-native-recorder is a private repository and so is
-	# declared by no public lock (repro.lock names only siblings that can be
-	# read without credentials); the lane that needs it must provision it
-	# itself, with an explicit revision, before this gap can close.
-	"viewmodel-tests.yml|viewmodel-tests|codetracer-native-recorder"
 
 	# windows-installer-build runs `bash scripts/build-once.sh` directly with an
 	# `env-flavor: windows-diy` setup-dev-env whose siblings: block carries only

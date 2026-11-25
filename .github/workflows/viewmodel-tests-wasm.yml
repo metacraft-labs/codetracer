@@ -165,6 +165,35 @@ jobs:
           substituters: ${{ vars.ATTIC_SUBSTITUTER }}
           gh-token: ${{ steps.ci_token.outputs.token }}
 
+      - name: Read the codetracer-native-recorder pin
+        # `just build-once` below runs scripts/require-siblings.sh first, which
+        # requires ../codetracer-native-recorder; without it the build refuses
+        # to start (ci/test/build-once-workspace-test.sh). It is private, so
+        # the public repro.lock cannot pin it: clone it at the one revision
+        # flake.lock locks.
+        id: native_recorder_pin
+        run: >-
+          nix develop . --command bash ci/lib/sibling-pin-outputs.sh
+          native_recorder=flake:codetracer-native-recorder
+
+      - name: Mint a token for the clone below
+        # Past the dev shell's realisation the job's first token may be near
+        # its hour (ci/test/late-clone-token-test.py).
+        id: late_token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      - name: Clone codetracer-native-recorder
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-native-recorder
+          ref: ${{ steps.native_recorder_pin.outputs.native_recorder }}
+          path: ${{ github.workspace }}/../codetracer-native-recorder
+          gh-token: ${{ steps.late_token.outputs.token }}
+          submodules: 'false'
+
       - name: Provision dependency siblings from repro.lock
         # The ViewModel suites compile against ``../isonim/src`` et al. via
         # codetracer's top-level ``config.nims``. After ``Install Nix``, not
