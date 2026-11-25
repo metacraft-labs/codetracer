@@ -1213,6 +1213,10 @@ test_lane_files() {
 		# is drawn into `#status` only while that tab is the one on screen.
 		echo src/frontend/tests/locals_answer_identity_test.nim
 		echo src/frontend/tests/later_session_launch_failure_test.nim
+		# `complete_move_redelivery_test.nim` holds the last move, asked for
+		# by a pane built after it, to reaching that pane only, and an editor
+		# to building its flow once for one jump that opens it.
+		echo src/frontend/tests/complete_move_redelivery_test.nim
 		# `debug_toolbar_follows_active_tab_test.nim` holds the window's one
 		# debugger toolbar to driving the tab on screen: its step, Run to
 		# Entry and history jump reach the active tab's views mediator, not
