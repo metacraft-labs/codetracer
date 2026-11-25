@@ -510,7 +510,7 @@ src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/fro
 # 2026-11-21, the browser's two keyboard oracles: test_cross_renderer_panes.nim
 # exports the four keyboard panes for the Chromium suite, and the renderer-chromium
 # lane lists that suite. Each harness below owes a re-grade for those bytes.
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/test-lane-files.sh	b463de41f09e76644ec644ddfe51bd166d7e2c033699c98ecca5083540215051	6bc216be8edfb75d09db3103295e233200079c6d9c4cf78af18b5c3312b6df07
+src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/test-lane-files.sh	b463de41f09e76644ec644ddfe51bd166d7e2c033699c98ecca5083540215051	8723f13449df6da6d5acdf55932cab0382378d8cb62d41cd89503d948c776663
 # 2026-11-21: a docked plugin pane previews on hover (auto_hide_hover, runtime); these harnesses digest those subjects and owe a re-grade.
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/headless_app/auto_hide_hover.nim	c2395cd53d7292e511d36c714f483d8f6ac8d8bf1f35c2c78237bebd54c73c62	0b4958cca008fcb95abaa5f2a2157cb461ed0b361fe1e0b702efc004cbbcf46f
 
@@ -529,7 +529,7 @@ src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend
 # 2026-11-23, the justfile gained the RunQuota prefix variables and a recipe
 # for the bridge test; none of it touches the WebAssembly profile this control
 # grades.
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	8bda0738c9719a3f394aa9ee384bc2c920800d78e38e9b540d58ff8a018e0cc0	9bc6645360d2bd15729bb3727cd6dd981ac3386bd80d4adcd372e0bf4fb67fff
+src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	8bda0738c9719a3f394aa9ee384bc2c920800d78e38e9b540d58ff8a018e0cc0	3f2f331be750d2cc3ec99ca96cb8a589d0f1c4ca7311631bb09a88a478cb776d
 # src/frontend/tui/app/runtime.nim, ci/lib/test-lane-files.sh, ci/test/vm-unit-wasm-parity.sh: moved by the ct-lens package (lane rows) and the
 # plugin status-item fix. Re-grade the harnesses named.
 
@@ -915,3 +915,4 @@ src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/fronten
 src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_plugin_process_host.nim	a89551d91a97127efb3167bff332656b21a67e21ce5bdc6e9222924210b3d119	ab4b6292c735ba76aac47a0cd9988dada2e16142b855653c525fa119f72b1c6a
 src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/plugin_sdk/codetracer_plugin_sdk.nim	2d4903eaa226c5295c0ced78d7a2666d9ecabd473c9bf9d3066d0a009d782fee	e2c939f3be8c6038dff6f10c0bb7c71b0faf5657f99ebcae999ea82b523483a1
 src/frontend/tui/tests/plat83-ct-lens-mutation-control.sha256	src/plugin_sdk/codetracer_plugin_sdk.nim	2d4903eaa226c5295c0ced78d7a2666d9ecabd473c9bf9d3066d0a009d782fee	e2c939f3be8c6038dff6f10c0bb7c71b0faf5657f99ebcae999ea82b523483a1
+src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	ci/lib/test-lane-files.sh	6bc216be8edfb75d09db3103295e233200079c6d9c4cf78af18b5c3312b6df07	8723f13449df6da6d5acdf55932cab0382378d8cb62d41cd89503d948c776663
