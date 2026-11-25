@@ -835,7 +835,6 @@ src/frontend/viewmodel/tests/unit/plat4-layout-mutation-control.sha256	src/front
 src/frontend/viewmodel/tests/unit/plat5-interaction-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_layout_interaction.nim	599aa6f135b102c88a4586e56c5b41fe8b3d4650e4d223046ecb1f4e9f05179a	f85106d769c5c68aac5ef5c4146c2b9b3ec0466b1df12d566a2f721cf46566ac
 src/frontend/viewmodel/tests/unit/plat5-interaction-mutation-control.sha256	src/frontend/headless_app/layout_model.nim	a1083e69d55c7d701ff22aceaf6a37c6fdb6a9a2920db19103313446bde1d55d	f31a4300672ca40e00b5ddd1d07b4d534185d1a829c28385e7f0e319cf6ce5cf
 src/frontend/viewmodel/tests/unit/plat5-interaction-mutation-control.sha256	src/frontend/tui/app/layout/binding.nim	8c3fb489dcb8c3afbdf3a6e8ff802b07e6635ce6362e5f8b48f1eb66c9867599	fac0190aca626b0ad8fdfe62cf8ba469f704e5a1c08f7a04c9345156e9aec3ee
-src/frontend/viewmodel/tests/unit/plat9-surface-mutation-control.sha256	src/frontend/headless_app/layout_model.nim	a1083e69d55c7d701ff22aceaf6a37c6fdb6a9a2920db19103313446bde1d55d	f31a4300672ca40e00b5ddd1d07b4d534185d1a829c28385e7f0e319cf6ce5cf
 
 # 2026-11-24, the terminal's plugin source marker that names no glyph is drawn from the
 # glyph table's new grPluginMarker role instead of a literal in views/shell.nim, and the
