@@ -4656,7 +4656,13 @@ proc onTraceLoadError*(sender: js, response: jsobject(error=cstring, preserveLoa
         welcome.loadingTrace = nil
       welcome.requestWelcomeScreenRender()
   cwarn "trace-load-error: " & errorMsg
-  data.viewsApi.errorMessage(errorMsg)
+  # `data.viewsApi` is nil when the tab's pipeline has not yet initialised
+  # (e.g. a native / C trace whose replay worker refused before the DAP
+  # handshake completed).  Without the guard the call throws and the handler
+  # exits silently — the user sees neither the loading overlay clear nor any
+  # message (issue #689).
+  if not data.viewsApi.isNil:
+    data.viewsApi.errorMessage(errorMsg)
 
 proc onReviewDatasetRead*(sender: js,
     response: jsobject(anchorId=cstring, datasetPath=cstring, kind=cstring,
