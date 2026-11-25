@@ -150,7 +150,7 @@ jobs:
         # path the binary is built for.
         run: |
           cd ../isonim-gpui
-          nix develop --command bash -c "cd rust && cargo build"
+          nix develop --profile "${CT_GCROOT_DIR:-$RUNNER_TEMP}/isonim-gpui-shell" --command bash -c "cd rust && cargo build"
           ls -la rust/target/debug/libgpui_nim_shim.so
 
       - name: Pack them
