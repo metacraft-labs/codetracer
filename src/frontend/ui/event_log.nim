@@ -31,7 +31,8 @@ from ../viewmodel/store/types as vmtypes import EventLogRow
 from ../viewmodel/viewmodels/event_log_vm import EventLogVM,
   setSelectedKinds, selectRow, doubleClickRow, reload, resetLog, eventLogText,
   EventLogColumn, setColumnWidth, resizeColumn, columnWidthEntries,
-  withColumnWidths, EventLogTableName, columnResizeTarget, parseEventLogColumn
+  withColumnWidths, EventLogTableName, columnResizeTarget, parseEventLogColumn,
+  placeColumn, placeColumnLower
 from ../viewmodel/viewmodels/omnibar_sources import parseColumnWidthLine
 from ../viewmodel/session_vm import SessionViewModel
 from isonim/core/signals import val, `val=`
@@ -39,12 +40,16 @@ from isonim/core/signals import val, `val=`
 # column widths, through the shared model.
 import ../viewmodel/views/table_overflow_dom
 from ../viewmodel/views/isonim_event_log_view import columnClass,
-  EventLogColumnGripAttribute
+  EventLogColumnGripAttribute, EventLogColumnOptionClass,
+  EventLogColumnHandleClass, EventLogColumnDraggingClass,
+  EventLogColumnDropBeforeClass, EventLogColumnDropAfterClass
 from isonim/web/dom_api import nil
 from ../viewmodel/views/isonim_event_log_filter_dropdown_view import
   FilterTabRecord, FilterTagRow, FilterKindRecord, FilterDropdownCallbacks,
   FilterDropdownContainerId, mountFilterDropdownInto
 import ./panel_host
+when defined(ctWasmPanes):
+  import ./wasm_pane_split
 import ../viewmodel/input/dom_pointer
 from ./trace import onTraceResultsChanged
 
@@ -474,12 +479,113 @@ proc setupColumnGrips(host: Element; vm: EventLogVM) =
     if not closestGrip(cast[Element](cast[JsObject](ev).target)).isNil:
       ev.stopPropagation())
 
+when defined(ctWasmPanes):
+  proc whenFilterButton(host: Element; then: proc())
+    {.importjs: """((h, cb) => {
+      if (h.querySelector('[id="category-image"]')) { cb(); return; }
+      const o = new MutationObserver(() => {
+        if (h.querySelector('[id="category-image"]')) { o.disconnect(); cb(); }
+      });
+      o.observe(h, { childList: true, subtree: true });
+    })(#, #)""".}
+    ## `then` once the pane's filter button is in `host`: the WebAssembly
+    ## core draws its pane after the panel host has mounted it.
+  proc columnOptionOf(target: JsObject; cls: cstring): Element {.importjs:
+    "((e, c) => (e && e.closest && e.closest('.' + c)) || null)(#, #)".}
+  proc columnOptionOfTarget(ev: Event): Element =
+    columnOptionOf(cast[JsObject](ev).target, cstring EventLogColumnOptionClass)
+  proc handleOfTarget(ev: Event): Element =
+    columnOptionOf(cast[JsObject](ev).target, cstring EventLogColumnHandleClass)
+  proc startMoveDrag(ev: Event; payload: cstring) {.importjs:
+    "(function(e, p){ if (e.dataTransfer) { e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', p); } })(#, #)".}
+  proc showMoveCursor(ev: Event) {.importjs:
+    "(function(e){ if (e.dataTransfer) { e.dataTransfer.dropEffect = 'move'; } })(#)".}
+  proc clickDetail(ev: Event): int {.importjs: "#.detail".}
+  proc insideWasmPane(el: Element): bool {.importjs:
+    "((e) => !!(e && e.closest && e.closest('.ct-web-core-pane')))(#)".}
+
+  proc setupColumnMenuDrag(host: Element; vm: proc(): EventLogVM) =
+    ## The Columns menu of a pane the WebAssembly core draws: its rows are the
+    ## core's nodes, so the drag that reorders them (`wireColumnDrag` in
+    ## `isonim_event_log_view`, which a `nim js` pane runs on its own rows) is
+    ## followed here, on the tab's EventLogVM, whose columns the core mirrors.
+    var dragged = none(EventLogColumn)
+    proc columnOf(row: Element): Option[EventLogColumn] =
+      if row.isNil: return none(EventLogColumn)
+      let (known, col) = parseEventLogColumn($row.getAttribute(cstring"data-column"))
+      if known: some(col) else: none(EventLogColumn)
+    proc clearMarks(row: Element) =
+      row.classList.remove(cstring EventLogColumnDraggingClass)
+      row.classList.remove(cstring EventLogColumnDropBeforeClass)
+      row.classList.remove(cstring EventLogColumnDropAfterClass)
+    host.addEventListener(cstring"dragstart", proc(ev: Event) =
+      let row = ev.columnOptionOfTarget
+      if row.isNil or not row.insideWasmPane: return
+      dragged = columnOf(row)
+      if dragged.isSome:
+        ev.startMoveDrag(cstring($dragged.get))
+        row.classList.add(cstring EventLogColumnDraggingClass))
+    host.addEventListener(cstring"dragover", proc(ev: Event) =
+      let row = ev.columnOptionOfTarget
+      let over = columnOf(row)
+      let model = vm()
+      if dragged.isNone or over.isNone or over == dragged or model.isNil: return
+      ev.preventDefault()
+      ev.showMoveCursor()
+      let order = model.columns.val.order
+      let down = order.find(dragged.get) < order.find(over.get)
+      row.classList.remove(cstring EventLogColumnDropBeforeClass)
+      row.classList.remove(cstring EventLogColumnDropAfterClass)
+      row.classList.add(cstring(if down: EventLogColumnDropAfterClass
+                                else: EventLogColumnDropBeforeClass)))
+    host.addEventListener(cstring"dragleave", proc(ev: Event) =
+      let row = ev.columnOptionOfTarget
+      if not row.isNil:
+        row.classList.remove(cstring EventLogColumnDropBeforeClass)
+        row.classList.remove(cstring EventLogColumnDropAfterClass))
+    host.addEventListener(cstring"drop", proc(ev: Event) =
+      let row = ev.columnOptionOfTarget
+      let over = columnOf(row)
+      if dragged.isNone or over.isNone: return
+      ev.preventDefault()
+      row.clearMarks()
+      let model = vm()
+      if not model.isNil:
+        discard model.placeColumn(dragged.get, over.get)
+      dragged = none(EventLogColumn))
+    host.addEventListener(cstring"dragend", proc(ev: Event) =
+      let row = ev.columnOptionOfTarget
+      if not row.isNil: row.clearMarks()
+      dragged = none(EventLogColumn))
+    # Enter or Space on a row's handle moves the row one lower: a `click()`
+    # whose `detail` is 0 (`wireColumnHandleKey`).
+    host.addEventListener(cstring"click", proc(ev: Event) =
+      let handle = ev.handleOfTarget
+      if handle.isNil or not handle.insideWasmPane or ev.clickDetail != 0: return
+      ev.stopPropagation()
+      let col = columnOf(ev.columnOptionOfTarget)
+      let model = vm()
+      if col.isSome and not model.isNil:
+        discard model.placeColumnLower(col.get)
+        handle.focus())
+
 proc decorateEventLog(host: dom_api.Element; session: SessionViewModel) =
   let vm = session.eventLogVM
   if vm.isNil:
     return
   let element = cast[Element](host)
-  setupFilterDropdown(element, vm)
+  when defined(ctWasmPanes):
+    if drawnByWasmCore(Content.EventLog):
+      # The WebAssembly core's pane: its filter button appears when the core
+      # has drawn it, and its Columns menu's drag is followed here. The
+      # filter, the columns and the reloads below act on the tab's
+      # EventLogVM, which the core's mirrors (`ui/panel_host`).
+      whenFilterButton(element, proc() = setupFilterDropdown(element, vm))
+      setupColumnMenuDrag(element, proc(): EventLogVM = session.eventLogVM)
+    else:
+      setupFilterDropdown(element, vm)
+  else:
+    setupFilterDropdown(element, vm)
   setupColumnGrips(element, vm)
   requestEventLogWidths(vm)
   # The rows' cells are table cells (`table_overflow_dom`): fitted, hovered,

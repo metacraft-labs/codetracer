@@ -38,10 +38,28 @@
 ##   4. `runHeadless` against an engine that reaches its first stop and then
 ##      answers nothing exits `ExitEngineStalled` after ONE budget, worded as a
 ##      stall after the open and without the open's "re-record it" advice.
+##   5. A sweep the engine REFUSES ends its wait in an interactive session —
+##      the session with no clock on a sweep and no interrupt — with
+##      `DapRequestRefusedError` carrying the engine's own sentence, and the
+##      session still answers the next request (codetracer#880, codetracer-pm
+##      `issues/2026-11-15-tui-a-refused-tracepoint-sweep-hangs-the-terminal-
+##      with-no-way-out.md`). `Handler::run_tracepoints` returns at the first
+##      `?` in `handle_trace_steps`, before `ct/tracepoint-results` is sent,
+##      and `dap_server.rs`'s `send_failed_response` answers the REQUEST
+##      `success: false` with that error's text as `message`: no event, ever.
+##      A wait for the event alone was a wait with nothing to end it, and in
+##      the terminal that froze the screen with no key answered.
+##   6. The terminal's `:tracepoint` line over that refusal leaves the
+##      sentence on the §3.3.6 notification line, and the runtime answers the
+##      next command.
+##
+## Cases 5 and 6 run under a WATCHDOG (`posix.alarm`): the defect is a wait
+## that never ends, so the unfixed code fails as a named `FAIL` line and a
+## non-zero exit within the watchdog's seconds, not as a lane that hangs.
 ##
 ## ## The mock, and what it is a mock OF
 ##
-## The peer, and only the peer: a ~100-line Python DAP server standing in for
+## The peer, and only the peer: a ~120-line Python DAP server standing in for
 ## `replay-server`, handed to the front-end through `REPLAY_SERVER_BIN`, the
 ## discovery override every headless suite uses. Everything on this side of
 ## the pipe is production code: `openTuiSession`, `openLocalTrace`,
@@ -57,17 +75,26 @@
 ## would stop testing the front-end the day that defect was fixed. The
 ## front-end's contract is with the DAP STREAM: the timings below hold for any
 ## peer, and the fake sends the message shapes and the ORDER the engine's
-## handlers send (cited above). The same technique and justification as
+## handlers send (cited above). The refusal is the same kind of shape: the
+## real engine refuses a sweep only when replaying the recording fails or a
+## handler panics — a defect in the engine or in the recording — and a test
+## that needed one would stop testing the front-end the day it was fixed. The
+## fake answers the way `send_failed_response` does (`success: false`, the
+## error's `Display` text as `message`, an empty body, no event), with a
+## sentence `db.rs`'s `load_location` raises, which `handle_trace_steps`
+## propagates with `?`. The same technique and justification as
 ## `test_container_version_refusal.nim` and the GPUI suite
 ## `test_gpui_handshake_bound.nim`.
 
 import std/[json, monotimes, os, posix, strutils, times, unittest]
 
 import ../app/cli
+import ../app/runtime
+import ../app/tui_app
 import ../app/theme/capabilities
 import ../host/headless
-import ../host/native_host   # `HandshakeEnvVar`
-import ../host/session_driver   # `runDebugControl`, the terminal's controls
+import ../../host/native_host   # `HandshakeEnvVar`
+import ../../host/session_driver   # `runDebugControl`, the terminal's controls
 import ../host/terminal_driver
 import ../host/tui_session
 import ../../viewmodel/backend/stdio_backend
@@ -81,6 +108,14 @@ const
   SlowMs = 3_500
     ## How long the fake's sweep and `continue` stay silent: several budgets,
     ## so a front-end that still timed them cannot pass by luck.
+  RefusalSentence = "load_location: unexpected negative call_key -2 (not NO_KEY)"
+    ## What the refusing fake says. A sentence the engine really raises
+    ## (`db.rs`'s `load_location`), which `handle_trace_steps` propagates with
+    ## `?` and `send_failed_response` sends as the refusal's `message`.
+  WatchdogSeconds = 20
+    ## How long a refusal case may take before the watchdog fails it by name.
+    ## The refusal arrives after `SlowMs`; an unfixed wait never ends, so any
+    ## bound well above `SlowMs` separates the two.
 
   FakeEngine = """
 #!/usr/bin/env python3
@@ -92,6 +127,11 @@ const
 #                            `ct/run-tracepoints` and `continue` stay silent
 #                            for FAKE_ENGINE_SLOW_MS and then answer in the
 #                            order the engine's handlers do.
+# FAKE_ENGINE_MODE=refuse -- as `slow`, except that `ct/run-tracepoints`,
+#                            after FAKE_ENGINE_SLOW_MS, is REFUSED as
+#                            `dap_server.rs`'s `send_failed_response` refuses
+#                            it: `success: false`, the error as `message`, an
+#                            empty body, and no event.
 # FAKE_ENGINE_MODE=settle -- complete the handshake to the first stop, then
 #                            read every request and answer nothing, except
 #                            the commands listed (comma-separated) in
@@ -153,6 +193,16 @@ while True:
         note("ignored " + str(cmd))
         continue
     note("got " + str(cmd))
+    if cmd == "ct/run-tracepoints" and mode == "refuse":
+        # `handle_trace_steps` returned an `Err` at its first `?`: no
+        # `ct/updated-trace`, no `ct/tracepoint-results`; the request answered
+        # as refused, with the error's text.
+        time.sleep(slow)
+        send({"type": "response", "request_seq": msg["seq"],
+              "success": False, "command": cmd,
+              "message": os.environ["FAKE_ENGINE_REFUSAL"], "body": {}})
+        note("refused sweep " + str(msg["arguments"]["session"]["id"]))
+        continue
     if cmd == "ct/run-tracepoints":
         # `Handler::run_tracepoints`: the sweep first, in silence; then one
         # `ct/updated-trace` per tracepoint, then the aggregate, which echoes
@@ -213,6 +263,30 @@ proc useEngine(mode: string; slowMs: int; folder: string): string =
   putEnv("FAKE_ENGINE_SLOW_MS", $slowMs)
   putEnv("FAKE_ENGINE_LOG", result)
   putEnv("FAKE_ENGINE_SOURCE", folder / "main.py")
+  putEnv("FAKE_ENGINE_REFUSAL", RefusalSentence)
+
+var watchdogCase: cstring = ""
+  ## The case the armed watchdog fails, for its `FAIL` line. A `cstring` to a
+  ## string literal, so the signal handler reads it without touching the GC.
+
+proc watchdogFired(sig: cint) {.noconv.} =
+  ## SIGALRM: the case did not finish in `WatchdogSeconds`. Only
+  ## async-signal-safe calls (`write`, `_exit`): the main thread is blocked
+  ## inside a `poll` that nothing else will end.
+  const head = "\nFAIL (watchdog): "
+  const tail = " did not finish; the refused sweep's wait never ended\n"
+  discard posix.write(2, head.cstring, head.len)
+  discard posix.write(2, watchdogCase, watchdogCase.len)
+  discard posix.write(2, tail.cstring, tail.len)
+  exitnow(1)
+
+proc armWatchdog(name: static string) =
+  watchdogCase = name
+  discard posix.signal(SIGALRM, watchdogFired)
+  discard posix.alarm(WatchdogSeconds)
+
+proc disarmWatchdog() =
+  discard posix.alarm(0)
 
 proc engineLog(path: string): seq[string] =
   if fileExists(path): readFile(path).strip().splitLines() else: @[]
@@ -226,6 +300,20 @@ proc specs(first: int; lines: openArray[int]; path: string):
   for i, line in lines:
     result.add TracepointSweepSpec(tracepointId: first + i, path: path,
                                    line: line, expression: "x")
+
+proc caps(): TerminalCapabilities =
+  resolveCapabilities(
+    initTerminalEnv(term = "xterm-256color", colorterm = "truecolor",
+                    lang = "en_US.UTF-8"),
+    initCapabilityFlags())
+
+proc typeLine(rt: TuiRuntime; line: string): RuntimeOutcome =
+  ## A `:` command typed key by key and submitted with `Enter`, as
+  ## `test_move_in_flight_badge.nim` types one.
+  result = rt.handleToken(":", 0'i64)
+  for ch in line:
+    result = rt.handleToken($ch, 0'i64)
+  result = rt.handleToken("\r", 0'i64)
 
 proc linesOf(hits: seq[TracepointSweepHit]): seq[int] =
   for h in hits:
@@ -344,6 +432,70 @@ suite "the terminal's session clock tells a slow engine from a stopped one":
                "; engine: " & engineLog(log).join(" | "))
     check failure == ""
     check linesOf(hits) == @[11]
+
+  test "an interactive session ends a refused sweep with the engine's sentence and stays usable":
+    let folder = recordingFolder("refused")
+    let log = useEngine("refuse", SlowMs, folder)
+    let s = openSession(folder)
+    defer: s.close()
+    s.allowSlowOperations()
+    let path = folder / "main.py"
+    var failure = ""
+    var failureType = ""
+    let started = getMonoTime()
+    armWatchdog("runTracepoints over a refusing engine")
+    try:
+      discard s.session.runTracepoints(specs(1, [3], path))
+    except CatchableError as e:
+      failureType = $e.name
+      failure = e.msg
+    disarmWatchdog()
+    let took = elapsedMs(started)
+    checkpoint("sweep: " & failureType & ": " & failure & " after " & $took &
+               " ms; engine: " & engineLog(log).join(" | "))
+    check "refused sweep 1" in engineLog(log)
+    # The refusal, by its own type and in the engine's own words — not a
+    # stall, not a budget that ran out.
+    check failureType == "DapRequestRefusedError"
+    check failure == RefusalSentence
+    # The wait ended ON the refusal: after the engine's silent work, and
+    # nowhere near the watchdog.
+    check took >= SlowMs - 200
+    check took < SlowMs + 3 * BudgetMs
+    # THE SESSION IS STILL USABLE: the next request is answered, as its own.
+    let answer = s.session.backend.sendDapRequest("stackTrace",
+                                                  %*{"threadId": 1})
+    checkpoint("stackTrace: " & $answer)
+    check answer{"success"}.getBool(false)
+    check answer{"command"}.getStr("") == "stackTrace"
+
+  test "the terminal's :tracepoint names the engine's refusal and keeps answering":
+    let folder = recordingFolder("refused-terminal")
+    let log = useEngine("refuse", SlowMs, folder)
+    let s = openSession(folder)
+    defer: s.close()
+    s.allowSlowOperations()
+    let rt = newTuiRuntime(newTuiApp(), caps(), 120, 40)
+    s.setViewportHeight(rt.sourcePaneRows())
+    s.refresh(rt)
+    armWatchdog(":tracepoint log(s1) over a refusing engine")
+    let swept = rt.typeLine("tracepoint log(s1)")
+    s.applyOutcome(rt, swept)
+    disarmWatchdog()
+    checkpoint("notification: " & rt.app.notification & "; engine: " &
+               engineLog(log).join(" | "))
+    check "refused sweep 1" in engineLog(log)
+    # §3.3.6: the notification line names the refusal, in the engine's words.
+    check "refused" in rt.app.notification
+    check RefusalSentence in rt.app.notification
+    # The positive twin through the same line: the runtime answers the next
+    # command, and it reaches the engine.
+    let broke = rt.typeLine("break 3")
+    s.applyOutcome(rt, broke)
+    checkpoint("after: " & rt.app.notification & "; engine: " &
+               engineLog(log).join(" | "))
+    check rt.app.notification.contains("breakpoint at ")
+    check "got setBreakpoints" in engineLog(log)
 
   proc settleHeadless(name, answered: string) =
     ## `runHeadless` against an engine that reaches its first stop and then

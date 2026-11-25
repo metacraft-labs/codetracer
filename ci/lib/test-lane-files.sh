@@ -218,9 +218,10 @@ _tlf_js_only_suites() {
 _TLF_VM_UNIT_JS_NOT_SHIPPED=(
 	'/test_agent_harbor_fleet_activity_error\.nim$'
 	'/test_agent_harbor_link_ink\.nim$'
-	'/test_agent_harbor_pie\.nim$'
+	'/test_agent_harbor_pie_sites\.nim$'
 	'/test_agent_harbor_session_list_view\.nim$'
 	'/test_agent_harbor_tests_view_followups\.nim$'
+	'/test_ctf_p2c_process_switcher_vm\.nim$'
 	'/test_ctf_p2c_results_followups\.nim$'
 	'/test_editor_gutter_lanes\.nim$'
 	'/test_editor_vocabulary_laws\.nim$'

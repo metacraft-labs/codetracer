@@ -480,13 +480,13 @@ proc saysShare(words: string): bool =
     if words[i] == '/' and words[i - 1] in Digits and words[i + 1] in Digits: return true
 
 proc pieProblems(m: AhTuiMount; e: AhNode; pie: ProgressPie; at: string;
-                 plate = false): seq[string] =
+                 onGround = ""): seq[string] =
   ## One site's drawn pie against the viewmodel's `pie` (CTF-P1d): one
   ## pie, with the same role, share (or unknown) and words; its cell holds
   ## the tier's glyph for that pie in the ink the palette resolves for the
   ## cell's own ground, at 3:1 or more -- so a view that recomputes a pie, or
-  ## draws another item's, differs. With `plate`, the cell's ground is the
-  ## panel's (`tone.body`) whatever the row's surface.
+  ## draws another item's, differs. With `onGround`, that ground is this
+  ## one: the pie sits on its site's own surface, with nothing between.
   let pies = e.all("pie")
   if pies.len != 1:
     return @[at & " draws " & $pies.len & " pies, not one"]
@@ -498,8 +498,8 @@ proc pieProblems(m: AhTuiMount; e: AhNode; pie: ProgressPie; at: string;
   let ground = d.attr("pie-ground")
   let p = ahPalette(m.mode)
   result.expect("pie ink at " & at, d.attr("pie-ink"), p.pieInks(pie.role, ground).wedge)
-  if plate:
-    result.expect("pie plate at " & at, ground, m.canvas.tone.body)
+  if onGround.len > 0:
+    result.expect("pie ground at " & at, ground, onGround)
   # A row the screen shows: its cell holds the glyph, in that ink, on that
   # ground (a row scrolled past the screen's last line has no cell).
   if d.row < m.canvas.rows:
@@ -785,9 +785,11 @@ proc checkFleet(view: AhNode; vm: FleetSnapshotVM; m: AhTuiMount): seq[string] =
         result.expect("activity of " & row.shortId, e.values("activity"),
                       row.activity[0 ..< shown])
         result.expect("title of " & row.shortId, e.first("title").attr("title"), row.title)
-        # The fleet's rows: the row's pie, a plate of the panel when selected; its
-        # status word stays and says no count or share.
-        result.add pieProblems(m, e, row.pie, "row " & row.shortId, plate = row.selected)
+        # The fleet's rows: the row's pie, on the selected-row ground when
+        # selected; its status word stays and says no count or share.
+        result.add pieProblems(m, e, row.pie, "row " & row.shortId,
+                               onGround = if row.selected: ahPalette(m.mode).activeRow
+                                          else: "")
         let status = e.first("status")
         if not status.isNil and saysShare(status.attr("status")):
           result.add "the status of " & row.shortId & " says a share: " & status.attr("status")
@@ -1337,19 +1339,25 @@ proc fleetInkProblems(view: AhNode; look: LookOf; rows: int; p: AhPalette;
                       vm: FleetSnapshotVM): seq[string] =
   ## The fleet's inks the shared rules decide: an activity line red only on
   ## a row with no failure line (`activityLineIsError`), else the caption
-  ## role, the selection's text on the selected row; the active filter's
-  ## count in the body role even at 0, another 0 in the disabled role.
+  ## role, on the selected row as on any other; the selected row's title in
+  ## the active row's title colour and its meta in its quiet role; the
+  ## active filter's count in the body role even at 0, another 0 in the
+  ## disabled role.
   for row in vm.rows:
     for e in view.all("row"):
       if e.attr("row") != row.id or e.row >= rows: continue
       let lines = e.all("activity")
       for i, a in lines:
-        let wanted = if row.selected: p.selectedText
-                     elif activityLineIsError(row, i): p.textError
+        let wanted = if activityLineIsError(row, i): p.textError
                      else: p.rowDetail
         result.expectInk(look, a, rows, "activity line " & $i & " of " & row.shortId &
                          (if row.failureText.len > 0: " (under a failure line)" else: ""),
                          wanted)
+      if row.selected:
+        result.expectInk(look, e.first("title"), rows,
+                         "the title of the selected row " & row.shortId, p.activeTabText)
+        result.expectInk(look, e.first("meta"), rows,
+                         "the meta of the selected row " & row.shortId, p.activeRowQuiet)
   for e in view.all("filter"):
     let active = e.attr("active") == "true"
     let count = e.first("count-of")
@@ -1493,7 +1501,7 @@ proc styleProblems(m: AhTuiMount; look: LookOf): seq[string] =
     for i, row in vm.rows:
       for e in view.all("initiative"):
         if e.attr("initiative") != row.id or e.row >= rows: continue
-        let wanted = if row.selected: p.selectedGround
+        let wanted = if row.selected: p.activeRow
                      elif i mod 2 == 1: t.band else: t.body
         # The row's first cells after its left edge (the bar is drawn there).
         let probe = AhNode(row: e.row, col: e.col + 1, width: 1, height: 1)
@@ -1524,12 +1532,12 @@ proc styleProblems(m: AhTuiMount; look: LookOf): seq[string] =
         if e.attr("row") != row.id or e.row >= rows: continue
         let probe = AhNode(row: e.row, col: e.col, width: 1, height: 1)
         result.expectGround(look, probe, rows, "fleet row " & row.shortId,
-          if row.selected: p.action elif i mod 2 == 1: t.band else: t.body)
+          if row.selected: p.activeRow elif i mod 2 == 1: t.band else: t.body)
         # The `+N` / `less` chip on its own ground; on the selected row a
         # visible step off the selection (`ControlGroundMinContrast`).
         let more = e.first("activity-more")
         if not more.isNil and more.row < rows:
-          let wanted = if row.selected: t.chipOnAction else: t.chip
+          let wanted = if row.selected: t.chipOnSelected else: t.chip
           result.expectGround(look, more, rows, "the chip " & more.attr("activity-more") &
                               " of " & row.shortId, wanted)
           if row.selected:

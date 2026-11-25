@@ -3,8 +3,8 @@
 # Refreshed with --record-control-hashes, gated by the
 # needle scan.
 9c1a4d14a52d12410bb6ce311b58fcdb493ba672c02105bab6e65639f99a6a38  src/frontend/gpui/host/gpui_plugins.nim
-e7c1a24b0eca583538cbea93d8b96a12484c27e35adde4303fd6d66f7e6c6a83  src/frontend/tui/host/plugin_processes.nim
+e7c1a24b0eca583538cbea93d8b96a12484c27e35adde4303fd6d66f7e6c6a83  src/frontend/host/plugin_processes.nim
 0f037c56269e3ad51c084fc0e545fcd851102cfa91ce32ed2507b9995f372f42  src/frontend/gpui/app/leaves.nim
 fa57785969e88f3e03240f840175b5d80fed03d8321770842b1ab18f8fafdd6b  src/frontend/gpui/window_clicks.nim
-d9aba9dc68dd568155b5c3fb22ff62bbb08fc190b601099cc12d3f26505cdf8c  src/frontend/tui/host/plugin_panes.nim
+d9aba9dc68dd568155b5c3fb22ff62bbb08fc190b601099cc12d3f26505cdf8c  src/frontend/host/plugin_panes.nim
 425d9555b41054c89f265e414d603e59eab892b361add30cb9e31590cd527d74  src/frontend/gpui/tests/test_gpui_plugins_host.nim

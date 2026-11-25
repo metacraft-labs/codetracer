@@ -35,7 +35,7 @@ import ../../tui/tests/fixtures/fixture_provider
 import std/[json, os, osproc, posix, streams, strtabs, strutils, tempfiles,
             times, unittest]
 import ./gpui_child_env
-from ../../tui/host/native_host import nativeCtBinary
+from ../../host/native_host import nativeCtBinary
 
 import gpui/chrome
 import gpui/window_geometry

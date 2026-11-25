@@ -233,6 +233,61 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 11. calc(). Stylus does not substitute a variable written inside `calc(…)`:
+#     `padding: 0 PANEL_INSET 0 calc(PANEL_INSET + 2.375rem)` compiles to
+#     `calc((PANEL_INSET + 2.375rem))`, the browser drops the whole
+#     declaration, and the element falls back to the rule under it. That
+#     shipped in the Agent Harbor Tests panel (three paddings) and the agent
+#     composer's sheet. The guard must name it, from inside the parentheses.
+# ---------------------------------------------------------------------------
+make_fixture "${work}/f11" '.row {
+  padding: 0 0.5rem 0 calc((PANEL_INSET + 2.375rem));
+  top: calc(100% + DROPDOWN_TRIGGER_GAP);
+}'
+out="$(run_guard "${work}/f11" || true)"
+if grep -q "theme.css:2  padding: PANEL_INSET" <<<"${out}" &&
+	grep -q "theme.css:3  top: DROPDOWN_TRIGGER_GAP" <<<"${out}" && grep -q "^FAIL" <<<"${out}"; then
+	report ok "a palette variable left inside calc() fails and is named"
+else
+	report fail "a palette variable left inside calc() fails and is named" "${out}"
+fi
+
+# ---------------------------------------------------------------------------
+# 12. calc(), through the real compiler. Pins the Stylus behaviour arm 11
+#     stands on, and the repair the stylesheets use (auto_hide.styl,
+#     menu_bar.styl): the value formatted with `%`, which Stylus does
+#     substitute, also inside `@container`. If a Stylus upgrade starts
+#     substituting inside calc(), the first half goes red and says so.
+# ---------------------------------------------------------------------------
+if command -v stylus >/dev/null 2>&1; then
+	make_fixture "${work}/f12" ''
+	styl="${work}/f12/calc.styl"
+	printf '%s\n' 'PANEL_INSET = 0.5rem' '.row' '  padding-left: calc(PANEL_INSET + 2.375rem)' >"${styl}"
+	stylus -p "${styl}" >"${work}/f12/css/theme.css" 2>&1
+	out="$(run_guard "${work}/f12" || true)"
+	if grep -q "padding-left: PANEL_INSET" <<<"${out}" && grep -q "^FAIL" <<<"${out}"; then
+		report ok "stylus leaves a variable inside calc() unsubstituted, and the guard fails it"
+	else
+		report fail "stylus leaves a variable inside calc() unsubstituted, and the guard fails it" "$(cat "${work}/f12/css/theme.css")
+${out}"
+	fi
+	printf '%s\n' 'PANEL_INSET = 0.5rem' 'INSET = "calc(%s + %s)" % (PANEL_INSET 2.375rem)' \
+		'.row' '  padding-left: INSET' '@container x (max-width: 34rem)' \
+		'  .row' '    padding-left: "calc(%s + 1.25rem)" % PANEL_INSET' >"${styl}"
+	stylus -p "${styl}" >"${work}/f12/css/theme.css" 2>&1
+	out="$(run_guard "${work}/f12" || true)"
+	if grep -q "^OK" <<<"${out}" && grep -q "calc(0.5rem + 2.375rem)" "${work}/f12/css/theme.css" &&
+		grep -q "calc(0.5rem + 1.25rem)" "${work}/f12/css/theme.css"; then
+		report ok "a calc() formatted with % resolves, also inside @container"
+	else
+		report fail "a calc() formatted with % resolves, also inside @container" "$(cat "${work}/f12/css/theme.css")
+${out}"
+	fi
+else
+	printf '  [SKIP]   stylus and calc(): the compiler arms (no stylus on PATH)\n'
+fi
+
+# ---------------------------------------------------------------------------
 # 10. END TO END, over the real tree. Compiles the shipped stylesheets with
 #     the real stylus and asserts the real guard is green. Read-only.
 #     Skipped rather than failed when stylus is absent, so the suite is still

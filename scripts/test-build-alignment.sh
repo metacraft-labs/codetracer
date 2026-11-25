@@ -713,6 +713,12 @@ nim_flag_divergence_actual() {
 # Nix invocation nor its recipe action (`ct-test` in `repro.nim`) carries
 # the product's common flags — `--mm:refc` least of all.
 #
+# The `ct-plugin-host` entries are by design as well: the WASM plugin host is an
+# ORC release build with its own flag set (`-d:release`, `ctPluginEngineLib`) in
+# both its Nix invocation and its recipe action (`pluginHost` in `repro.nim`),
+# and carries none of the product's common flags. The `./console` entries are
+# gone because the Nix `console` package was dropped (bc25e18c1).
+#
 # The `codetracer-tui` entries are by design too: no recipe action builds
 # `src/frontend/tui/main.nim`. The binary is an ORC release build whose
 # developer lane is the `build-tui` just recipe. These lines say only that it is
@@ -727,13 +733,14 @@ codetracer-tui -d:debug
 codetracer-tui -d:nimNoLentIterators
 codetracer-tui -d:ssl
 codetracer-tui --mm:refc
-./console -d:chronicles_sinks=json
-./console -d:chronicles_timestamps=UnixTime
-./console -d:debug
-./console -d:nimNoLentIterators
-./console -d:ssl
-./console --mm:refc
 ct -d:nimNoLentIterators
+ct-plugin-host -d:chronicles_line_numbers=true
+ct-plugin-host -d:chronicles_sinks=json
+ct-plugin-host -d:chronicles_timestamps=UnixTime
+ct-plugin-host -d:debug
+ct-plugin-host -d:nimNoLentIterators
+ct-plugin-host -d:ssl
+ct-plugin-host --mm:refc
 ct-test -d:chronicles_line_numbers=true
 ct-test -d:chronicles_sinks=json
 ct-test -d:chronicles_timestamps=UnixTime

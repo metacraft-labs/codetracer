@@ -52,8 +52,8 @@ import ../app/theme/capabilities
 import ../app/views/shell
 from ../app/views/call_trace import StackFallbackTitle, paintCallTrace,
   currentTraceIndex
-import ../host/native_host
-from ../host/session_driver import jumpToCall
+import ../../host/native_host
+from ../../host/session_driver import jumpToCall
 import ../host/tui_session
 import ./fixtures/fixture_provider
 import sdk/[debugger_session, stop_loader]

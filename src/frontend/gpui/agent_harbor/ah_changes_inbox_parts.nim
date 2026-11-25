@@ -18,8 +18,18 @@
 ## Every part a reader of the render plan looks for carries its
 ## `data-ah-*` fact (`ah_theme.tag`), and every fact that names a text names
 ## the text the element draws.
+##
+## **Presses are routed** (Input-Routing-And-Keymaps.md §5.1). A pressable
+## part carries its operation (`data-ct-operation`, the words module's
+## `changes.*` / `inbox.*` press operations) and the procedure that performs
+## it on that part (`pressable`). Its press-down listener only reports the
+## press to the panel's route (`PanelPress`), which resolves it through the
+## host's router over the pointer keymap — a user's row for the press first,
+## else the operation the part carries — and runs the part's procedure, or
+## the other operation a user's row named. The views hold no press handler.
 
 import ../../../common/pointer_shape
+import ../../../common/key_names
 import std/[math, strutils]
 
 import nim_agents_isonim_viewmodels/agent_harbor/changes_vm
@@ -27,6 +37,9 @@ from ../../viewmodel/views/agent_harbor_changes_code import vcsHunkRow, hunkHead
   lineMarker, VCSDiffLineRow, diffLineText
 from ../../viewmodel/views/agent_harbor_changes_inbox_words import NoHunksText
 import ../../viewmodel/views/agent_harbor_changes_inbox_palette
+import ../../viewmodel/input/element_press
+import ../../viewmodel/keymap/[base_keymaps, context_keys, editing_keymap, keymap_router,
+                               scope_path, user_keymap]
 import ../chrome
 import ./ah_theme
 from ./ah_session_activity import wrappedRows
@@ -57,6 +70,72 @@ const
   MonoAdvance* = 0.6
     ## Space Mono's advance, a fixed 0.6em per character
     ## (https://fonts.google.com/specimen/Space+Mono, a monospaced face).
+
+type
+  PanelPress* = proc(operation: string; run: proc()) {.closure.}
+    ## A panel's route for a press on one of its parts: the part carries
+    ## `operation`, and `run` is the procedure that performs it there.
+
+var drawingPress: PanelPress
+  ## The route of the panel being drawn (`drawingWith`), which `pressable`
+  ## hands to the listeners it adds. Drawing is synchronous, so each draw's
+  ## parts take their own panel's route.
+
+proc panelPresses*(scope: string; keymap = UserKeymap();
+                   other: proc(operation: string): bool = nil): PanelPress =
+  ## **THE ROUTE FOR A PRESS ON A PANEL IN `scope`** (`ChangesPanelScope`,
+  ## `InboxPanelScope`): resolved by GPUI's router — the base keymap with
+  ## `keymap`'s rows over it — at the panel's scope; a press that resolves to
+  ## the operation the part carries runs the part's procedure, one a user's
+  ## row resolves to another operation runs that through `other` (the
+  ## panel's key operations, `runChangesOperation` / `runInboxOperation`),
+  ## and one that resolves to nothing (a `-` row) runs nothing.
+  let router = initKeymapRouter(bkCua, KeyDelivery(frontEnd: feGpui, platform: hostPlatform(),
+                                                   keyProtocol: kpNative), user = keymap)
+  let resolve = routerResolver(router, SessionFacts())
+  let path = @[element(ekWindow, "window"), pane(scope)]
+  result = proc(operation: string; run: proc()) =
+    let outcome = resolveElementPress(resolve, path, ButtonElementKind, operation, {},
+                                      "Click")
+    if outcome.operation.len == 0: return
+    if outcome.operation == operation: run()
+    elif other != nil: discard other(outcome.operation)
+
+template drawingWith*(press: PanelPress; body: untyped) =
+  ## Draws `body` with `press` as its parts' route.
+  let outerPress = drawingPress
+  drawingPress = press
+  try:
+    body
+  finally:
+    drawingPress = outerPress
+
+proc pressable*(r: GpuiRenderer; el: GpuiElement; operation: string; run: proc()) =
+  ## `el` carries `operation` and `run` performs it there. Its press-down
+  ## listener is the hit test (GPUI delivers a press to the element under
+  ## it): it reports the press to the route of the panel being drawn, which
+  ## decides what the press runs. Without a route or a procedure, the part
+  ## takes no press.
+  if run.isNil: return
+  r.setAttribute(el, OperationAttribute, operation)
+  let route = drawingPress
+  if route.isNil: return
+  r.addEventListener(el, "mousedown", proc(ev: GpuiEvent) =  # ir1-gate: hit test
+    route(operation, run))
+
+proc taggedButtons(el: GpuiElement; into: var seq[GpuiElement]) =
+  ## Every element under `el` (itself included) carrying `data-ah-button`.
+  if getAttribute(el, "data-ah-button").len > 0: into.add el
+  for i in 0 ..< childCount(el): taggedButtons(nthChild(el, i), into)
+
+proc routedErrorBlock*(r: GpuiRenderer; p: AhPalette; title, message, operation: string;
+                       retry: proc()): GpuiElement =
+  ## The panels' load failure (`ah_theme.errorBlock`), its Retry carrying
+  ## `operation`, performed by `retry` (`pressable`).
+  result = r.errorBlock(p, title, message, nil)
+  var buttons: seq[GpuiElement]
+  taggedButtons(result, buttons)
+  for b in buttons: r.pressable(b, operation, retry)
 
 proc charCount(s: string): int =
   ## The characters of `s` (UTF-8 continuation bytes not counted).
@@ -118,13 +197,15 @@ proc chip*(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks;
 proc chipPx*(text: string): int = textPx(text, CaptionPx) + 12
 
 proc actionButton*(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; label: string;
-                   primary: bool; onClick: proc(); disabled = false): GpuiElement =
+                   primary: bool; operation: string; onClick: proc();
+                   disabled = false): GpuiElement =
   ## A form's button at the label size (`ct-button-sm-primary` / `-secondary`
   ## with `.ah-card-action`): 24px high, 7.5px in, rounded 6px; the primary
   ## filled in the action role with its text on it, the secondary outlined
   ## in a half-pixel primary border on the ground, its text body-subtle. A
   ## disabled one keeps its shape, its text in the disabled colour (on the
-  ## action fill, the on-action text at half strength) and does nothing.
+  ## action fill, the on-action text at half strength) and does nothing. An
+  ## enabled one carries `operation`, performed by `onClick` (`pressable`).
   let pad = formatFloat(ButtonPadPx, ffDecimal, 1) & "px"
   result = r.box(pairs = [("height", $ControlPx & "px"), ("items", "center"),
                           ("justify", "center"), ("padding-left", pad),
@@ -143,7 +224,7 @@ proc actionButton*(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; label: 
   r.tag(result, "button", label)
   r.tag(result, "primary", $primary)
   r.tag(result, "disabled", $disabled)
-  if onClick != nil and not disabled: r.addEventListener(result, "click", onClick)
+  if not disabled: r.pressable(result, operation, onClick)
 
 proc actionButtonPx*(label: string): int =
   int(ceil(2 * ButtonPadPx)) + textPx(label, LabelPx)

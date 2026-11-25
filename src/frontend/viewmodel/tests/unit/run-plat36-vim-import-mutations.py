@@ -111,7 +111,7 @@ DIFF = "src/frontend/viewmodel/tests/unit/test_editor_vim_import_differential.ni
 CORE = "src/frontend/viewmodel/editing_core.nim"
 BINDING = "src/frontend/tui/app/edit_binding.nim"
 RUNTIME = "src/frontend/tui/app/runtime.nim"
-EDIT_HOST = "src/frontend/tui/host/edit_host.nim"
+EDIT_HOST = "src/frontend/host/edit_host.nim"
 SOURCE = "src/frontend/tui/tests/test_plat36_source_command.nim"
 
 TOUCHED = [IMPORTER, CORPUS, LAWS, DIFF, CORE, BINDING, RUNTIME, EDIT_HOST,

@@ -67,7 +67,7 @@ import ../app/runtime
 import ../app/tui_app
 import ../app/theme/capabilities
 import ../app/layout/persistence
-import ../host/native_host
+import ../../host/native_host
 import ../host/tui_session
 import ../host/terminal_driver
 import ../../../tests/visual/screen_oracle/[domain_models, pane_grammar,

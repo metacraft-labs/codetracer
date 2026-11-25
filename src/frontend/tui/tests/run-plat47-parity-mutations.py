@@ -136,7 +136,7 @@ GUTTER = "src/frontend/tui/app/views/gutter.nim"
 SESSION = "src/frontend/tui/host/tui_session.nim"
 # The per-stop loads every front-end runs (`d883db0e2`, one per-stop loader
 # for every front-end): the no-call-trace stack fallback moved here from
-# `tui/host/native_host.nim`, which now only asks the loader for it.
+# `host/native_host.nim`, which now only asks the loader for it.
 STOPLOADER = "src/frontend/viewmodel/sdk/stop_loader.nim"
 SHELL = "src/frontend/tui/app/views/shell.nim"
 CTVIEW = "src/frontend/tui/app/views/call_trace.nim"

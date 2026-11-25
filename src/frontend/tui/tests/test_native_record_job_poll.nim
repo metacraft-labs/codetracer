@@ -14,7 +14,7 @@
 
 import std/[monotimes, os, osproc, strutils, times, unittest]
 
-import ../host/native_host
+import ../../host/native_host
 
 const
   SilenceMs = 2000

@@ -111,12 +111,11 @@ type
       ## `by-mode(caption, label)` -- on Light's warm panel the caption role
       ## sits near 3:1 under a title.
     addText*: string         ## "+": `by-mode(#b0b0b0, text-primary-label)`
-    selectedText*: string
-      ## Every text of a row on the action surface (the fleet's selected
-      ## row): the selected commit row's, `by-mode(on-action, text-primary-body)`.
     selectedTint*: string
-      ## The selected initiative: `by-mode(rgba(surface-action-primary, 0.28),
-      ## surface-primary-secondary-hover)`, as `#rrggbbaa`.
+      ## A selection tint: `by-mode(rgba(surface-action-primary, 0.28),
+      ## surface-primary-secondary-hover)`, as `#rrggbbaa` (the changes
+      ## inbox's selection and the composer's cited line; a list's selected
+      ## row uses `activeRow`).
 
   MarkStyle* = object
     ## A status mark: a filled dot, or a hollow ring (idle, planned).
@@ -181,8 +180,6 @@ proc ahPalette*(mode: DesignMode): AhPalette =
     rowDetail: (if mode == dmDark: t(dtColorsUiTextPrimaryCaption)
                 else: t(dtColorsUiTextPrimaryLabel)),
     addText: (if mode == dmDark: "#b0b0b0" else: t(dtColorsUiTextPrimaryLabel)),
-    selectedText: (if mode == dmDark: t(dtColorsUiTextOnActionPrimary)
-                   else: t(dtColorsUiTextPrimaryBody)),
     # 0.28 of 255 is 71.4: alpha 0x47.
     selectedTint: (if mode == dmDark: t(dtColorsUiSurfaceActionPrimary) & "47"
                    else: t(dtColorsUiSurfacePrimarySecondaryHover)))
@@ -696,12 +693,6 @@ const
     ## A pie in a tab, a menu or a `+N` chip.
   PieCaptionPx* = 16
     ## The caption bar's pie (CodeTracer's own agent tab).
-  PiePlatePx* = 2
-    ## Where a pie sits on a surface it was not resolved for -- the action
-    ## surface of a selected fleet row, on which no six inks hold the floors
-    ## (Dark's `#6366f1` leaves ended no grey 3.3:1 and 20 apart from the
-    ## light inks) -- it sits on a plate of the ground it was resolved for
-    ## (the panel), this many pixels around it, so its inks keep the floors.
   PieDotFraction* = 1.0 / 4.0
     ## An unknown pie's dot: this share of the diameter, centred -- a quarter,
     ## so at native size it stays well short of the wedge's disc (8 px of a

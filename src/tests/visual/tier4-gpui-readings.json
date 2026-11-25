@@ -576,7 +576,7 @@
       "id": "PLAT35-F6",
       "severity": "P1",
       "finding": "the Files pane reported 'no source files have been loaded for this recording' while the editor beside it rendered that recording's source — two panes of one window contradicting each other about one fact. 6 of 6 readings in iterations 1 and 2; two graded it P1 unprompted ('one of the two is lying').",
-      "remedy": "UPSTREAM, `3269fb238` (fix(tui,gpui): list every source folder of a freshly recorded trace) in `src/frontend/tui/host/native_host.nim` — the one producer both native front-ends read. The stated cause was `recordingFileTree` reading `<traceFolder>/paths.json` and returning an empty tree when a CTFS bundle keeps its paths inside the container.",
+      "remedy": "UPSTREAM, `3269fb238` (fix(tui,gpui): list every source folder of a freshly recorded trace) in `src/frontend/host/native_host.nim` — the one producer both native front-ends read. The stated cause was `recordingFileTree` reading `<traceFolder>/paths.json` and returning an empty tree when a CTFS bundle keeps its paths inside the container.",
       "confirmedBy": [
         "All six iteration-3 window plans list `source folders / calc /",
         "main.py` in the fileTree pane, and the pixel reader of `shell` reads",

@@ -1,5 +1,6 @@
-## LAYER RULE — `src/frontend/tui/host/` is the NATIVE HOST half of the TUI,
-## and it is the ONLY part of the TUI outside the Embed SDK facade.
+## LAYER RULE — `src/frontend/host/` is the NATIVE HOST layer both native
+## front-ends share (the terminal and the GPUI window), and with
+## `src/frontend/tui/host/` it is outside the Embed SDK facade.
 ##
 ## A module here may import everything `src/frontend/tui/app/` may, and
 ## additionally `backend/stdio_backend`, `viewmodel/headless_session`,
@@ -55,13 +56,13 @@ import viewmodels/filesystem_vm   # the replay file tree's `setRoot`
 from viewmodels/calltrace_vm import selectEntry, currentCallInSectionOf   # PLAT-49 part B
 from viewmodels/debug_controls_vm import invokeToolbarAction   # M76: the native Stop
 from viewmodels/omnibar_vm import OmnibarEntry, OmnibarMode   # `recordingsBeside`
-import ../../../common/trace_source_paths   # the shared source-folder rule
-import ../../../common/replay_server_path   # the one replay-server search order
-import ../../viewmodel/host/find_in_files   # PLAT-57: the one search runner
-from ../../viewmodel/host/native_visual_replay_host import recordingHasGraphics
+import ../../common/trace_source_paths   # the shared source-folder rule
+import ../../common/replay_server_path   # the one replay-server search order
+import ../viewmodel/host/find_in_files   # PLAT-57: the one search runner
+from ../viewmodel/host/native_visual_replay_host import recordingHasGraphics
 from viewmodels/search_results_vm import SearchResultsVM, acceptBatch
-import ../../../ct/trace/trace_kind   # the shared test-oracle refusal
-import ../../../ct/trace/recorder_output   # `ct record-test`'s recording id
+import ../../ct/trace/trace_kind   # the shared test-oracle refusal
+import ../../ct/trace/recorder_output   # `ct record-test`'s recording id
 export headless_session
 
 type

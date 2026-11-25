@@ -884,7 +884,7 @@ proc userBindsKey*(name: string): bool =
   ## user's, and a plugin's static binding for it is not consulted (the
   ## terminal's rule, `tui/app/runtime`).
   let k = name.toLowerAscii
-  for b in deskRouter.user.bindings:
+  for b in deskRouter.user.rows:
     if b.chords.len == 1 and b.chords[0].toLowerAscii == k:
       return true
   false

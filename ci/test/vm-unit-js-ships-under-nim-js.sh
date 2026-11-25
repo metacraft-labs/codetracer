@@ -81,11 +81,11 @@ graph() {
 	fi
 }
 echo "--- the bundles that ship under nim js ---"
-graph desktop -d:chronicles_enabled=off -d:ctRenderer -d:ctWasmPanes src/frontend/ui_js.nim
-graph web -d:chronicles_enabled=off -d:ctRenderer -d:ctWeb -d:ctWasmPanes src/frontend/ui_js.nim
+graph desktop "${common[@]}" -d:chronicles_enabled=off -d:ctRenderer -d:ctWasmPanes src/frontend/ui_js.nim
+graph web "${common[@]}" -d:chronicles_enabled=off -d:ctRenderer -d:ctWeb -d:ctWasmPanes src/frontend/ui_js.nim
 graph index "${common[@]}" -d:ctIndex -d:nodejs src/frontend/index.nim
 graph server "${common[@]}" -d:ctIndex -d:server -d:nodejs src/frontend/index.nim
-graph subwindow -d:chronicles_enabled=off -d:ctRenderer src/frontend/subwindow.nim
+graph subwindow "${common[@]}" -d:chronicles_enabled=off -d:ctRenderer src/frontend/subwindow.nim
 graph vscode_host -d:nodejs -d:chronicles_enabled=off src/frontend/entries/vscode_host.nim
 graph vscode_panel -d:chronicles_enabled=off src/frontend/entries/vscode_panel.nim
 graph embed_sdk -d:chronicles_enabled=off --path:src/frontend/viewmodel --path:src/frontend --path:src \

@@ -58,7 +58,7 @@ import ../app/cli
 # is legitimate from a test, which is not `app/` and carries no
 # `.sdk-consumer` marker: the rule this campaign enforces is that the
 # APPLICATION layer cannot reach a process, not that nothing may.
-import ../host/native_host
+import ../../host/native_host
 
 # The product version the TUI reports. Imported here as well as in `app/cli.nim`
 # so the assertion below compares two independent readings of it rather than

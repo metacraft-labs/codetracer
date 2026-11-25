@@ -204,7 +204,7 @@ kind_of() {
 	# the canonical hostile paths, so a file that tests traversal defences is
 	# guaranteed to contain the word — the presence is evidence the defence is
 	# tested, not that a credential is handled.
-	src/frontend/gpui/host/gpui_host.nim | src/frontend/tui/host/edit_host.nim) printf 'traversalfixture' ;;
+	src/frontend/gpui/host/gpui_host.nim | src/frontend/host/edit_host.nim) printf 'traversalfixture' ;;
 	src/common/plugin_surfaces_test.nim | src/common/project_definitions_test.nim) printf 'traversalfixture' ;;
 	# The plugin permission model's own WARNING TEXT: a capability that can
 	# reach "credentials, keys and customer data" says so to the person

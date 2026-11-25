@@ -18,7 +18,7 @@
 ## No mocks: the binary, the pty, libvterm, the replay server and the
 ## recordings are the real ones.
 
-import std/[exitprocs, json, options, os, strutils, tables]
+import std/[exitprocs, json, options, os, posix, strutils, tables, times]
 from std/unicode import `$`
 import term_assert
 import demo_video_script_termassert
@@ -28,6 +28,17 @@ import ./ct_tui_screen
 import ../../../../frontend/viewmodel/keymap/[context_keys, keymap_router]
 import ../../../../frontend/viewmodel/viewmodels/product_mode
 import ../../../../common/key_names
+import ../../../../frontend/tui/app/theme/[roles, colour_math]
+
+proc groundKeys(role: SemanticRole): seq[string] =
+  ## A role's background in both modes, as `colorKey` spells an RGB cell.
+  for mode in [dmDark, dmLight]:
+    var ok = false
+    let c = parseHexColour(tokenHex(RoleSpecs[role].bg, mode), ok)
+    if ok: result.add "#" & $c.r & "," & $c.g & "," & $c.b
+
+findMatchGrounds = groundKeys(srSurfaceFindMatch)
+findCurrentGrounds = groundKeys(srSurfaceFindMatchCurrent)
 
 proc tuiBinary*(): string =
   result = getEnv("CODETRACER_TUI_BIN")
@@ -40,6 +51,10 @@ proc colorKey(c: Color): string =
   of ckDefault: "d"
   of ckIndexed: "i" & $c.idx
   of ckRgb: "#" & $c.r & "," & $c.g & "," & $c.b
+
+var notedPluginPids: Table[string, int]
+  ## `note-plugin-process`: a plugin's process, as the `:plugins` overlay
+  ## named it, for a later `signal-plugin` (test-only).
 
 proc grid*(ctx: TermContext): ScreenGrid =
   ## The screen as cells.
@@ -65,8 +80,9 @@ proc roles(): JsonNode =
     "pane-tab": {"properties": ["label", "active"], "affordances": ["click", "context-click", "drag-source"]},
     "editor": {"properties": ["file", "active", "focused", "current-line", "caret-line",
                               "first-visible", "last-visible", "text"],
-               "affordances": ["click", "context-click", "wheel", "focusable", "text-entry"]},
-    "line": {"properties": ["number", "text", "current", "caret", "breakpoint", "tracepoint"],
+               "affordances": ["click", "context-click", "wheel", "focusable", "text-entry", "drop-target"]},
+    "line": {"properties": ["number", "text", "current", "caret", "breakpoint", "tracepoint", "find-matches", "find-current",
+                             "plugin-mark"],
              "affordances": ["click", "double-click", "context-click"]},
     "call-trace": {"properties": ["count"], "affordances": ["wheel", "focusable"]},
     "call": {"properties": ["name", "arguments", "current", "selected"],
@@ -268,6 +284,95 @@ proc ctTermBinding*(): TermBinding =
       # --- terminal --- the pack's actions: changes another program makes
       # in the stage's project folder while the front-end runs
       let s = ctx.stageState()
+      case use
+      of "relaunch-front-end":
+        # The user quits the front-end and starts it again, with the same
+        # state, configuration and components (a later session).
+        ctx.sess.send(":quit\r")
+        discard ctx.sess.waitExit(initDuration(seconds = 30))
+        ctx.sess.terminate()
+        ctx.sess.close()
+        ctx.launchTui(s)
+        return
+      of "remove-plugin-package", "signal-plugin", "note-plugin-process":
+        # Test-only, and only ever on the package `plugin-package` installed
+        # under THIS run's components root: its directory, or one of its
+        # plugin processes found by that executable's path, never a process
+        # by name. `plugin:` picks, among the package's processes, the one the
+        # open `:plugins` overlay says runs that plugin.
+        let package = args{"package"}.getStr
+        const Packages = {"acme-tools": ("acme-tools@1.0.0", "acme-tools-plugins"),
+                          "ct-lens": ("ct-lens@0.1.0", "ct-lens-plugins")}
+        var found = false
+        var component, executable: string
+        for (name, layout) in Packages:
+          if name == package:
+            (component, executable) = layout
+            found = true
+        if not found:
+          raise newException(ValueError, use & ": only a stage's `acme-tools` or `ct-lens` package, not '" &
+                             package & "'")
+        let dir = s.root / "components" / component
+        if not dirExists(dir):
+          raise newException(ValueError, use & ": no `plugin-package` of " & package & " was installed in this run")
+        if use == "remove-plugin-package":
+          removeDir(dir)
+          return
+        var sig = SIGCONT
+        if use == "signal-plugin":
+          case args{"signal"}.getStr
+          of "KILL": sig = SIGKILL
+          of "STOP": sig = SIGSTOP
+          of "CONT": sig = SIGCONT
+          else: raise newException(ValueError, "signal-plugin: KILL, STOP or CONT, not '" &
+                                   args{"signal"}.getStr & "'")
+        let exe = dir / "bin" / executable
+        var pids: seq[int]
+        for kind, entry in walkDir("/proc"):
+          let pid = try: parseInt(entry.extractFilename) except ValueError: -1
+          if pid <= 0: continue
+          let target = try: expandSymlink(entry / "exe") except OSError: ""
+          if target == exe: pids.add pid
+        let plugin = args{"plugin"}.getStr
+        var pick = 0
+        if use == "note-plugin-process":
+          # The pid the open `:plugins` overlay names for `plugin`
+          # (`<package>[<plugin>] running pid N`), kept for a later
+          # `signal-plugin` that names the same plugin.
+          let marker = "[" & plugin & "] running pid "
+          let g = ctx.grid()
+          for r in 0 ..< g.height:
+            let row = g.rowText(r)
+            let at = row.find(marker)
+            if at < 0: continue
+            var digits = ""
+            for ch in row[at + marker.len .. ^1]:
+              if ch in Digits: digits.add ch
+              else: break
+            if digits.len > 0: pick = parseInt(digits)
+          if pick == 0:
+            raise newException(ValueError, "note-plugin-process: the screen names no process running " &
+                               plugin & " (open `:plugins` first)")
+          if pick notin pids:
+            raise newException(ValueError, "note-plugin-process: pid " & $pick & " is not a " & package &
+                               " plugin process of this run")
+          notedPluginPids[plugin] = pick
+          return
+        if plugin.len == 0:
+          if pids.len != 1:
+            raise newException(ValueError, "signal-plugin: expected one " & package &
+                               " plugin process of this run, found " & $pids.len & " (name the `plugin:`)")
+          pick = pids[0]
+        else:
+          pick = notedPluginPids.getOrDefault(plugin, 0)
+          if pick == 0:
+            raise newException(ValueError, "signal-plugin: no `note-plugin-process` noted " & plugin)
+          if pick notin pids:
+            raise newException(ValueError, "signal-plugin: pid " & $pick & " (" & plugin &
+                               ") is no longer a " & package & " plugin process of this run")
+        discard posix.kill(Pid(pick), sig)
+        return
+      else: discard
       let file = args{"file"}.getStr
       if file.len == 0 or file.isAbsolute or file.contains(".."):
         raise newException(ValueError, use & ": '" & file &

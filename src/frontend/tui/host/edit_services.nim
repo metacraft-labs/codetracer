@@ -25,9 +25,9 @@
 import std/[os, strutils]
 import ../app/runtime
 import ../app/tui_app
-import ../app/build_session
-import ./build_runner
-import ./edit_host
+import ../../headless_app/build_session
+import ../../host/build_runner
+import ../../host/edit_host
 import ../../viewmodel/host/keymap_preference
 import ../../viewmodel/host/native_nim_tracer
 import ../../viewmodel/viewmodels/nim_tracing_vm

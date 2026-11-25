@@ -4,7 +4,7 @@
 # needle scan.
 332e55202ae3efd3d7b12399cc79765098aa20dd71cdac41296530d83fccb3d6  src/frontend/tui/app/layout/project.nim
 a1083e69d55c7d701ff22aceaf6a37c6fdb6a9a2920db19103313446bde1d55d  src/frontend/headless_app/layout_model.nim
-b716e2b7781cc5abfd11c3027ef2dc760e1429f91422e4264bfc4d7d186ac28a  src/frontend/tui/host/plugin_panes.nim
+b716e2b7781cc5abfd11c3027ef2dc760e1429f91422e4264bfc4d7d186ac28a  src/frontend/host/plugin_panes.nim
 df5ac6b9934a2c537ba95bde700e1484fd5193a037a88c60135c5bb0982933ea  src/frontend/tui/app/views/shell.nim
 895162855b3fdb5a311777d54909a38eb1949fb4ad88833802187478ccf3fa94  src/frontend/headless_app/layout_interaction.nim
 82b115fdd074aa9019a32993aad694c5d64c13676f7c0e3adeb9e0b34afc9710  src/frontend/tui/app/runtime.nim

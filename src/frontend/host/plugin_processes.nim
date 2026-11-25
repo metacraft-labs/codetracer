@@ -30,19 +30,19 @@ import std/[json, sequtils, sets, strutils, tables, times]
 when defined(js):
   # Node (the desktop's main process, `ct host`): `std/os`'s file procedures
   # are not this backend's (common/node_os).
-  import ../../../common/node_os
+  import ../../common/node_os
   proc readFile(path: string): string = readFileBytes(path)
   proc writeFile(path, content: string) = writeFileBytes(path, content)
 else:
   import std/os
 
-import ../../../common/plugin_model
-import ../../../common/plugin_host_path
-import ../../../ct/launch/[grant_store, plugin_components]
-import ../../viewmodel/session_vm
-import ../../viewmodel/plugin_host/[host, supervisor]
-import ../../viewmodel/viewmodels/omnibar_vm
-import ../../../common/view_vocabulary/vocabulary
+import ../../common/plugin_model
+import ../../common/plugin_host_path
+import ../../ct/launch/[grant_store, plugin_components]
+import ../viewmodel/session_vm
+import ../viewmodel/plugin_host/[host, supervisor]
+import ../viewmodel/viewmodels/omnibar_vm
+import ../../common/view_vocabulary/vocabulary
 
 type
   SessionPlugins* = ref object

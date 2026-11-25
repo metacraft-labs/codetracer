@@ -601,7 +601,7 @@ suite "CTUI-0: TUI build prerequisites":
                reached.join(", "))
     for expected in ["src/frontend/tui/app/cli.nim",
                      "src/frontend/tui/app/tui_app.nim",
-                     "src/frontend/tui/host/native_host.nim",
+                     "src/frontend/host/native_host.nim",
                      "src/ct/version.nim"]:
       if expected notin reached:
         checkpoint("the import walker did not reach " & expected &

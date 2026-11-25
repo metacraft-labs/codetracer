@@ -17,7 +17,7 @@
 # re-recording from a tree whose arms have stopped matching certifies the arms
 # along with the bytes.
 3880fd8d31aeab431bebc14261d823900f5316054b3718f0bf405ac65db6e3ac  src/common/view_vocabulary/editor_rows.nim
-93db99e62c8f43c7ce6520366fddcdca1f9633521f73b3ad4125505f2ace5f9d  src/frontend/view_vocabulary/editor_surface.nim
+2709b9364df4cafb4857136061f86cb343468cf7b2836fe36ce770ba61a9996f  src/frontend/view_vocabulary/editor_surface.nim
 0f037c56269e3ad51c084fc0e545fcd851102cfa91ce32ed2507b9995f372f42  src/frontend/gpui/app/leaves.nim
 094f79d7ce65bca148eb8b54882e85c46e558e8bcfa99e8d55d5e0c06c383096  src/frontend/headless_app/headless_app.nim
 ff398d15c8fab2de97cacf4d917b9d20bdf5c36b967ab0dfa036b1c79010f900  src/ct/ui_selection.nim

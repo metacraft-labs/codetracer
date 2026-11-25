@@ -8,8 +8,8 @@
 ##
 ##   * the host: `gpui/host/gpui_host` spawns `replay-server` and completes the
 ##     DAP handshake (`openGpuiTrace`), and serves the editor's source window
-##     (`newGpuiSourceService`); `tui/host/native_host` and
-##     `tui/host/session_driver` load the panes and run a debugger control —
+##     (`newGpuiSourceService`); `host/native_host` and
+##     `host/session_driver` load the panes and run a debugger control —
 ##     the producers both native front-ends already call;
 ##   * the shell: `gpui/app/shell` (`HeadlessApp` plus the window's layout) and
 ##     its dock projection, the shared default layout;
@@ -49,7 +49,7 @@ import headless_app/[headless_app, layout_model, window_set]
 import ../gpui/app/[shell, dock_projection]
 import ../gpui/host/gpui_host
 import ../gpui/replay_ops
-import ../tui/host/[native_host, session_driver]
+import ../host/[native_host, session_driver]
 import ../view_vocabulary/[editor_surface, zgui_binding]
 import ../viewmodel/viewmodels/[menu_vm, product_menu]
 import ../viewmodel/host/keymap_preference
@@ -612,8 +612,7 @@ proc run(cmd: Command): int =
   if not gSession.session.editorVM.isNil:
     gSession.session.editorVM.showFlowOverlay.val = FlowOverlayShownByDefault
 
-  gShell = newGpuiShell(DockViewport(width: cmd.width, height: cmd.height,
-                                     dockExtent: DefaultGpuiViewport.dockExtent))
+  gShell = newGpuiShell(DockViewport(width: cmd.width, height: cmd.height))
   let layout = initLayout(sharedDefaultLayout().tree,
                           sharedDefaultLayout().docked)
   let slot = gShell.app.openSession(gSession.backend.toBackendService(),

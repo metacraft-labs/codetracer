@@ -60,6 +60,7 @@ import ./agent_harbor_changes_inbox_words
 import ./agent_harbor_changes_code
 import ./isonim_vcs_view
 import ./agent_harbor_dropdown_view
+import ../input/element_operations
 from ../keymap/scope_path import ChangesPanelScope
 
 export signals, computation, components, changes_vm, agent_harbor_changes_inbox_words
@@ -108,17 +109,28 @@ proc renderOverlay[R](r: R; message, kind: string): auto =
     tdiv(class = "empty-overlay ah-changes-notice", `data-ah-notice` = kind):
       text message
 
+proc presses[R, N](r: R; node: N; operation: string; run: proc()) =
+  ## `node` carries `operation` and `run` performs it there: the page's one
+  ## pointer listener resolves a press through the pointer keymap and runs
+  ## it (`element_operations.bindOperation`, Input-Routing-And-Keymaps.md
+  ## §5.1). The view holds no press handler.
+  if run != nil:
+    r.bindOperation(node, operation, proc(press: PressInfo) = run())
+
 proc renderError[R](r: R; title, message: string; retry: proc()): auto =
   ## The Agent Harbor panels' error block: a red title, the reason (the
   ## failed read, named by its route), an outlined Retry.
-  ui(r):
+  var retryButton: typeof(r.createElement("button"))
+  let node = ui(r):
     tdiv(class = "ah-fleet-error", `data-ah-notice` = "error"):
       tdiv(class = "ah-fleet-error-title"):
         text title
       tdiv(class = "ah-fleet-error-message"):
         text message
-      button(class = "ah-fleet-retry", onclick = retry):
+      button(ref = retryButton, class = "ah-fleet-retry"):
         text RetryLabel
+  r.presses(retryButton, ChangesRetryOperation, retry)
+  node
 
 proc renderGroupHead[R](r: R; name: string; count: int): auto =
   ## A small-caps group head with its count, as the progress panel's.
@@ -185,8 +197,7 @@ proc renderTab[R](r: R; vm: ChangesVM; tab: ChangesTabView): auto =
   let node = ui(r):
     button(class = "ah-changes-tab" & (if tab.active: " ah-changes-tab-active" else: "") &
                    (if tab.empty: " ah-changes-tab-empty" else: ""),
-           role = "tab", title = tabTitle(tab),
-           onclick = proc() = vm.selectTab(which)):
+           role = "tab", title = tabTitle(tab)):
       span(class = "ah-changes-tab-label ah-changes-tab-full"):
         text tab.label
       span(class = "ah-changes-tab-label ah-changes-tab-compact"):
@@ -195,6 +206,7 @@ proc renderTab[R](r: R; vm: ChangesVM; tab: ChangesTabView): auto =
         text $tab.count
   r.tagFacts(node, [("tab", $tab.tab), ("count", $tab.count),
                     ("active", (if tab.active: "true" else: "false"))])
+  r.presses(node, ChangesSelectTabOperation, proc() = vm.selectTab(which))
   node
 
 proc renderTabBar[R, N](r: R; vm: ChangesVM): N =
@@ -237,10 +249,10 @@ proc renderCardActions[R, N](r: R; vm: ChangesVM; card: SpecCardView): N =
     first = false
     let busy = card.action == astSubmitting
     let b = ui(r):
-      button(class = cls & " ah-card-action", `data-ah-action` = label,
-             onclick = action):
+      button(class = cls & " ah-card-action", `data-ah-action` = label):
         text label
     r.setFlag(b, "disabled", busy)
+    r.presses(b, ChangesCardActionOperation, action)
     r.appendRendered(row, b)
   if card.staged:
     add(ApproveApplyLabel, proc() = discard vm.applyStaged(key))
@@ -255,24 +267,27 @@ proc renderCardActions[R, N](r: R; vm: ChangesVM; card: SpecCardView): N =
 proc renderRevertConfirm[R](r: R; vm: ChangesVM; card: SpecCardView): auto =
   ## The question Undo / Revert asks, in place of the card's buttons: the
   ## spec it would revert, `Revert` (the press that sends it) and `Cancel`.
-  ui(r):
+  var confirm, cancel: typeof(r.createElement("button"))
+  let node = ui(r):
     tdiv(class = "ah-revert-confirm", `data-ah-confirm` = "revert"):
       tdiv(class = "ah-revert-question"):
         text revertQuestion(card)
       tdiv(class = "ah-card-actions"):
-        button(class = "ct-button-sm-primary ah-card-action",
-               `data-ah-action` = ConfirmRevertLabel,
-               onclick = proc() = discard vm.confirmRevert()):
+        button(ref = confirm, class = "ct-button-sm-primary ah-card-action",
+               `data-ah-action` = ConfirmRevertLabel):
           text ConfirmRevertLabel
-        button(class = "ct-button-sm-secondary ah-card-action", `data-ah-action` = CancelLabel,
-               onclick = proc() = vm.cancelRevert()):
+        button(ref = cancel, class = "ct-button-sm-secondary ah-card-action",
+               `data-ah-action` = CancelLabel):
           text CancelLabel
+  r.presses(confirm, ChangesCardActionOperation, proc() = discard vm.confirmRevert())
+  r.presses(cancel, ChangesCardActionOperation, proc() = vm.cancelRevert())
+  node
 
 proc renderRequestInput[R, N](r: R; vm: ChangesVM): N =
   ## The inline Request Changes input under a card: its text (kept by the
   ## viewmodel, not read by this render), Submit and Cancel.
   mixin inputValue
-  var field: N
+  var field, submit, cancel: N
   let typed = untrack(proc(): string = vm.requestText.val)
   result = ui(r):
     tdiv(class = "ah-request-input"):
@@ -281,12 +296,14 @@ proc renderRequestInput[R, N](r: R; vm: ChangesVM): N =
                oninput = proc() = vm.setRequestText(r.inputValue(field))):
         text typed
       tdiv(class = "ah-card-actions"):
-        button(class = "ct-button-sm-primary ah-card-action", `data-ah-action` = SubmitLabel,
-               onclick = proc() = discard vm.submitRequestChanges()):
+        button(ref = submit, class = "ct-button-sm-primary ah-card-action",
+               `data-ah-action` = SubmitLabel):
           text SubmitLabel
-        button(class = "ct-button-sm-secondary ah-card-action", `data-ah-action` = CancelLabel,
-               onclick = proc() = vm.closeRequestChanges()):
+        button(ref = cancel, class = "ct-button-sm-secondary ah-card-action",
+               `data-ah-action` = CancelLabel):
           text CancelLabel
+  r.presses(submit, ChangesCardActionOperation, proc() = discard vm.submitRequestChanges())
+  r.presses(cancel, ChangesCardActionOperation, proc() = vm.closeRequestChanges())
 
 proc renderSpecCard[R, N](r: R; vm: ChangesVM; card: SpecCardView): N =
   let key = card.key
@@ -298,8 +315,7 @@ proc renderSpecCard[R, N](r: R; vm: ChangesVM; card: SpecCardView): N =
                  (if card.staged: " ah-card-staged" else: "") &
                  (if card.focused: " ah-card-focused" else: "")):
       tdiv(ref = head, class = "ah-spec-card-head", role = "button", tabindex = "0",
-           title = (if card.open: "Close" else: "Open"),
-           onclick = proc() = vm.toggleCard(key)):
+           title = (if card.open: "Close" else: "Open")):
         span(class = "ah-fold"):
           text chevron
         span(`data-ah-cut` = (if isPath: CutPathValue else: "line"),
@@ -311,6 +327,7 @@ proc renderSpecCard[R, N](r: R; vm: ChangesVM; card: SpecCardView): N =
       tdiv(ref = body, class = "ah-spec-card-body")
   r.tagFacts(result, [("card", key), ("tier", $card.tier), ("state", card.stateText),
                       ("focused", $card.focused)])
+  r.presses(head, ChangesToggleCardOperation, proc() = vm.toggleCard(key))
   # The state word sits at the head's right.
   r.appendRendered(head, renderStateWord(r, card.stateText, changeStateRole(card)))
   if not card.open: return
@@ -339,16 +356,17 @@ proc renderSpecCard[R, N](r: R; vm: ChangesVM; card: SpecCardView): N =
           text commitsText(card)
     r.appendRendered(body, c)
   let showsDiff = card.showsDiff
+  var summarySide, diffSide: N
   let toggle = ui(r):
     tdiv(class = "ah-side-toggle", role = "group", `data-ah-side` = (if showsDiff: "diff" else: "summary")):
-      button(class = "ah-side" & (if not showsDiff: " ah-side-active" else: ""),
-             onclick = proc() =
-               if showsDiff: vm.toggleDiff(key)):
+      button(ref = summarySide, class = "ah-side" & (if not showsDiff: " ah-side-active" else: "")):
         text SummaryLabel
-      button(class = "ah-side" & (if showsDiff: " ah-side-active" else: ""),
-             onclick = proc() =
-               if not showsDiff: vm.toggleDiff(key)):
+      button(ref = diffSide, class = "ah-side" & (if showsDiff: " ah-side-active" else: "")):
         text DiffLabel
+  r.presses(summarySide, ChangesShowSideOperation, proc() =
+    if showsDiff: vm.toggleDiff(key))
+  r.presses(diffSide, ChangesShowSideOperation, proc() =
+    if not showsDiff: vm.toggleDiff(key))
   r.appendRendered(body, toggle)
   if showsDiff:
     r.appendRendered(body, renderHunks[R, N](r, vm.cardDiff(key)))
@@ -395,11 +413,12 @@ proc renderSpecChanges[R, N](r: R; vm: ChangesVM; list: N) =
 
 proc renderFileLink[R](r: R; vm: ChangesVM; path: string): auto =
   ## A file named by the plan, as a link that asks the host to open it.
-  ui(r):
+  let node = ui(r):
     span(`data-ah-cut` = CutPathValue, class = "ah-file-link ah-mono", title = path,
-         role = "link", tabindex = "0",
-         onclick = proc() = vm.openInEditor(path)):
+         role = "link", tabindex = "0"):
       text path
+  r.presses(node, ChangesOpenFileOperation, proc() = vm.openInEditor(path))
+  node
 
 proc renderTest[R](r: R; vm: ChangesVM; entry: VerificationEntry): auto =
   let word = testStatusWord(entry)
@@ -478,27 +497,27 @@ proc renderFileDiff[R, N](r: R; vm: ChangesVM; path: string): N =
   ## The selected file's diff under its row: its state, its hunks, and the
   ## file navigation (`n of m`, previous, next, open in the editor).
   let view = vm.fileDiff(path)
-  var host: N
+  var host, previous, next, open: N
   result = ui(r):
     tdiv(ref = host, class = "ah-file-diff", `data-ah-file-diff` = $view.state):
       tdiv(class = "ah-file-nav"):
         span(class = "ah-file-position"):
           text vm.selectedPosition
-        button(class = "ah-file-step", title = PreviousFileLabel,
-               onclick = proc() = discard vm.stepFile(-1)):
+        button(ref = previous, class = "ah-file-step", title = PreviousFileLabel):
           text PreviousArrow
-        button(class = "ah-file-step", title = NextFileLabel,
-               onclick = proc() = discard vm.stepFile(1)):
+        button(ref = next, class = "ah-file-step", title = NextFileLabel):
           text NextArrow
-        button(class = "ct-button-sm-secondary ah-file-open",
-               onclick = proc() = vm.openInEditor(path)):
+        button(ref = open, class = "ct-button-sm-secondary ah-file-open"):
           text OpenInEditorLabel
+  r.presses(previous, ChangesStepFileOperation, proc() = discard vm.stepFile(-1))
+  r.presses(next, ChangesStepFileOperation, proc() = discard vm.stepFile(1))
+  r.presses(open, ChangesOpenFileOperation, proc() = vm.openInEditor(path))
   case view.state
   of fdNotLoaded:
     let b = ui(r):
-      button(class = "ct-button-sm-secondary ah-load-diff",
-             onclick = proc() = vm.loadFile(path)):
+      button(class = "ct-button-sm-secondary ah-load-diff"):
         text LoadDiffLabel
+    r.presses(b, ChangesLoadDiffOperation, proc() = vm.loadFile(path))
     r.appendRendered(host, b)
   of fdLoading:
     let l = ui(r):

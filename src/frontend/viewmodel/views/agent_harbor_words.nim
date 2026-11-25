@@ -121,8 +121,7 @@ proc activityLineIsError*(row: FleetRow; line: int): bool =
   ## twice in red: a failed row shows a red failure line, or else an
   ## error-coloured activity line. One rule for the three front-ends: the
   ## web sets `ah-fleet-activity-error` from it, GPUI and the terminal pick
-  ## the ink from it. A selected row draws every line in the selection's
-  ## text colour, whatever this says.
+  ## the ink from it, on a selected row as on any other.
   line >= 0 and line < row.activityLevels.len and row.activityLevels[line] == "error" and
     row.failureText.len == 0
 

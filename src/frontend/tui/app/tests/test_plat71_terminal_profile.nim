@@ -61,7 +61,9 @@ import ./personas/personas
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 626
+const ExpectedAssertions = 629
+  ## 626 -> 629, measured: the new `grPluginMarker` role, which the
+  ## per-role sweeps visit once each.
   ## 613 -> 626, measured: the report's `screenReader` axis (§9.4), which
   ## TA-13 sweeps once per persona (+12 for the twelve personas), and tmux in
   ## kitty's pointer answer, re-captured with the query after the fence (+1).

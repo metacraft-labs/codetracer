@@ -137,9 +137,9 @@ from ../viewmodel/store/types import StopLocation
 import ./host/trace_nimcache   # a `ct record` recording's own nimcache
 import ./host/certificate_indicator
 import ./design_font_metrics
-import ../tui/host/native_host   # `loadStopPanes`, the terminal's own producer
-import ../tui/host/session_driver   # HSF-S1: what follows a control or a click, shared with the terminal
-import ../tui/host/project_definitions_host   # the checkout's .codetracer/, per session
+import ../host/native_host   # `loadStopPanes`, the terminal's own producer
+import ../host/session_driver   # HSF-S1: what follows a control or a click, shared with the terminal
+import ../host/project_definitions_host   # the checkout's .codetracer/, per session
 import ../styles/generated/design_tokens
 
 # PLAT-34. The editing core, through the sanctioned facade: `editSurfaceFor`
@@ -192,9 +192,9 @@ import ./build_output_leaf     # PLAT-56: Build Output, drawn natively
 # PLAT-55: the window's builds (`:build`, the terminal's runner) and the
 # shared reader that fills its Problems pane — PLAT-56's Build Output reads
 # the same `BuildSession`.
-import ../tui/app/build_session
-import ../tui/host/build_runner
-import ../tui/host/build_problems
+import ../headless_app/build_session
+import ../host/build_runner
+import ../host/build_problems
 import ./requests_leaf         # PLAT-58: the Requests pane, drawn natively
 import ../viewmodel/host/native_requests_host   # PLAT-58: its host
 import ./constraints_leaf      # PLAT-62: the Constraints pane, drawn natively
@@ -1517,7 +1517,7 @@ var
     ## replay, the project of the Edit window, a folder tab's folder.
   gProblems: BuildProblems = nil
     ## PLAT-55: the WINDOW's Problems ViewModel and the reader that fills it
-    ## from the window's builds (`tui/host/build_problems`), shared by every
+    ## from the window's builds (`host/build_problems`), shared by every
     ## tab: a build is of the working tree.
   gProblemsPane = initGProblemsPane()
   gLowLevel = initGLowLevelPane()
@@ -1541,7 +1541,7 @@ var
     ## PLAT-56: where the footer's build indicator is drawn (empty when none).
   gBuild: RunningBuild = nil
     ## PLAT-55: the window's `:build` in flight, or the last one (the
-    ## terminal's runner, `tui/host/build_runner`).
+    ## terminal's runner, `host/build_runner`).
   gBuildRoot = ""
     ## PLAT-55: where a `:build` runs — the window's project, as for the
     ## terminal's `:build` (the Edit window's folder, a folder tab's, a
@@ -2435,9 +2435,17 @@ proc editorVScrollbarGeometry(rect: proc (p: PxRect): JsonNode): JsonNode =
 
 proc unpinButtonRect(): PxRect
 
-proc writeGeometry() =
+var gGeometryChangedAt = -1'i64
+  ## The shim's drawn-frame count when the window's state last CHANGED (a
+  ## `writeGeometry` call from an input, a refresh, a redraw, not from the
+  ## per-frame callback). `frames > changedAt` in the report means a frame
+  ## was drawn after the last change, however late the reader looks.
+
+proc writeGeometry(afterFrame = false) =
   if geometryOut.len == 0:
     return
+  if not afterFrame:
+    gGeometryChangedAt = int64(gpui_frames_drawn())
   proc rect(p: PxRect): JsonNode = %*[p.x, p.y, p.w, p.h]
   var nodes = newJArray()
   for n in gGeom.nodes:
@@ -2461,6 +2469,11 @@ proc writeGeometry() =
       var pins = newJArray()
       for p in n.pins: pins.add rect(p)
       j["pins"] = pins
+      # And each tab's close icon (`layout.close-pane`), the one way an Edit
+      # window removes a pane: its tab menu is a replay window's.
+      var closes = newJArray()
+      for p in n.closes: closes.add rect(p)
+      j["closes"] = closes
     nodes.add j
   var dividers = newJArray()
   for d in gGeom.dividers:
@@ -2494,7 +2507,12 @@ proc writeGeometry() =
     let openDock =
       if gGeom.openDock.isEmpty: newJNull()
       else: %*{"pane": gGeom.openDockPane, "rect": rect(gGeom.openDock)}
-    writeFile(geometryOut, $(%*{"area": rect(gGeom.area),
+    # Written to a sibling file and renamed over the report: since the report
+    # is rewritten after every drawn frame, a capture reading it mid-write
+    # read an empty or partial file (JSONDecodeError at plat47's VCS step,
+    # load loop under generated load). A rename is atomic on one file system.
+    let geometryTmp = geometryOut & ".tmp"
+    writeFile(geometryTmp, $(%*{"area": rect(gGeom.area),
                                 "inner": rect(gGeom.inner), "nodes": nodes,
                                 "dividers": dividers, "strips": strips,
                                 "revealed": revealed, "topBar": top,
@@ -2508,10 +2526,13 @@ proc writeGeometry() =
                                 # still screen can be one not yet redrawn.
                                 "input": %*{"handled": gGeometryInputs,
                                             "keys": gGeometryKeys,
+                                            "frames": gpui_frames_drawn(),
+                                            "changedAt": gGeometryChangedAt,
                                             "pointer": [gGeometryPointer.x,
                                                         gGeometryPointer.y]},
                                 "gesture": %*{"active": gGestures.active,
                                               "revealing": gGestures.revealing}}))
+    moveFile(geometryTmp, geometryOut)
   except IOError:
     discard
 
@@ -6926,6 +6947,10 @@ proc openEditFile(path: string): bool =
   focusEditKeys()
   true
 
+proc revealOpenedEditor(r: GpuiRenderer)
+  ## M102 (#877): forward-declared for the Files pane's open paths; defined
+  ## beside `showPaneFromMenu`, whose rule it uses.
+
 proc editFileOperationDone(root: string; res: FileTreeOperationResult) =
   ## The disk's answer to a Create, Rename or Delete: the folder listed
   ## again, a new file opened in the editor (Filesystem-Pane.md, "Create
@@ -6936,7 +6961,8 @@ proc editFileOperationDone(root: string; res: FileTreeOperationResult) =
   if res.error.len == 0 and not vm.isNil:
     relistEditFiles(vm, root)
   if res.error.len == 0 and res.operation == ftaCreate:
-    discard openEditFile(res.path)
+    if openEditFile(res.path):
+      revealOpenedEditor(r)
   filesSay(describeFileTreeOperation(res, root))
   redrawPaneOf(r, paneFileTree)
 
@@ -7540,6 +7566,26 @@ proc showPaneFromMenu(r: GpuiRenderer; pane: PaneKind) =
     focusWindowPane(r, $pane)
   discard drawArrangement(r)
 
+proc revealOpenedEditor(r: GpuiRenderer) =
+  ## M102 (#877): a file opened from the Files pane is the ACTIVE EDITOR —
+  ## *"its tab is the one on screen and the one the editor's commands act
+  ## on"* (codetracer-pm `spec/GUI/Core-Panes/Filesystem-Pane.md` § "Opening
+  ## a file"). Drawing the file into the editor's leaf is not enough when no
+  ## pane shows that leaf: a tab's Close removes the editor from the
+  ## arrangement (`layout_model.lcRemovePane` does not protect it), and the
+  ## arrangement is remembered across launches, so a later start can have no
+  ## editor at all; or the editor's tab can sit behind another of its stack.
+  ## The editor is brought forward by the View menu's rule
+  ## (`showPaneFromMenu`): re-added when the arrangement does not place it
+  ## (PLAT-50), its tab activated when it is behind another, then focused —
+  ## the terminal's `revealEditor`. The leaf is moved into the arrangement,
+  ## never rebuilt, so the file already drawn into it stays.
+  showPaneFromMenu(r, paneEditor)
+  # An Edit window reads its keys from the edit arm's own listener, not the
+  # pane's element `showPaneFromMenu` focused (`focusEditKeys`).
+  if not openArm.isNil:
+    focusEditKeys()
+
 proc windowPluginEntries(): seq[OmnibarEntry] =
   ## Extensibility-Model §11.7.6: the reserved *Plugins: …* entries, every
   ## plugin command and pane, and *Review* / *Grant* for a plugin waiting for
@@ -7785,6 +7831,13 @@ proc runGpuiTracepoint(r: GpuiRenderer; path: string; line: int;
     hits = gSession.runTracepoints(@[TracepointSweepSpec(
       tracepointId: gTracepointsRun - 1, path: path, line: line,
       expression: expression)])
+  except DapRequestRefusedError as e:
+    # The engine refused the sweep (codetracer#880): its sentence on the
+    # window's status line, where the user reads it; the session goes on.
+    sayStatus(tracepointRefusalText(e.msg))
+    refreshReplayWindow(r)
+    drawTopBar(r)
+    return
   except CatchableError as e:
     traceGesture("tracepoint failed: " & e.msg)
     return
@@ -7818,6 +7871,11 @@ proc runGpuiPointMenuOp(r: GpuiRenderer; op: PointMenuOp) =
   gTracepointsRun = nextId
   traceGesture("menu " & PointMenuActions[op] & ": " & done.message)
   refreshReplayWindow(r)
+  if op == pmoRunAllTracepoints and not done.performed:
+    # A sweep that did not run — the engine refused it (codetracer#880), or
+    # there was nothing to run — says why on the status line.
+    sayStatus(done.message)
+    drawTopBar(r)
   if op == pmoRunAllTracepoints and done.performed:
     showTracepointHits(r, done.swept,
       "tracepoints: " & $done.sweptSpecs & " run — " & $done.swept.len &
@@ -11847,13 +11905,19 @@ proc runWatchCommand(r: GpuiRenderer; query: string): bool =
 
 proc openTreeFile(r: GpuiRenderer; path: string) =
   ## K17 (and the Files menu's Edit): the file in the editor, as the
-  ## desktop's `FilesystemVM.openFile` opens it.
+  ## desktop's `FilesystemVM.openFile` opens it, and the editor brought
+  ## forward to show it (M102, `revealOpenedEditor`).
   gViewedFile = path
   if gViewedFile == gSession.getCurrentFile():
     gViewedFile = ""
     refreshReplayWindow(r)
   else:
     showViewedFile(r)
+    if gViewedFile.len == 0:
+      # It could not be read; `showViewedFile` said why. Nothing was opened,
+      # so the arrangement is left as it is.
+      return
+  revealOpenedEditor(r)
 
 proc runContextAction(r: GpuiRenderer; action: ContextAction;
                       target: ContextTarget) =
@@ -12035,7 +12099,8 @@ proc runContextAction(r: GpuiRenderer; action: ContextAction;
       if why.len > 0:
         filesSay(why)
       elif not openArm.isNil:
-        discard openEditFile(target.path)
+        if openEditFile(target.path):
+          revealOpenedEditor(r)
       else:
         openTreeFile(r, target.path)
       return
@@ -13432,7 +13497,8 @@ proc buildWindowOperationTables(r: GpuiRenderer) =
       vm.toggleExpanded(e.path)
       redrawPaneOf(r, paneFileTree)
     elif not openArm.isNil:
-      discard openEditFile(e.path)
+      if openEditFile(e.path):
+        revealOpenedEditor(r)
     else:
       openTreeFile(r, e.path)
   # What the other panes' elements run (`pointer_rows`, and the operation a
@@ -13981,7 +14047,7 @@ proc routeWindowKey(r: GpuiRenderer; key: string; mods: seq[string]) =
   # and the status bar says so (`pumpPluginsWindow`).
   if not gPlugins.isNil and not gPluginRecoveryKey:
     var userBound = false
-    for b in gRouter.user.bindings:
+    for b in gRouter.user.rows:
       if b.chords.len == 1 and b.chords[0] == name:
         userBound = true
     if gPlugins.routePluginKey(name, userBound):
@@ -16407,6 +16473,19 @@ proc applyWindowPolicy(cmd: var GpuiCommand) =
   cmd.width = gLaunch.width
   cmd.height = gLaunch.height
 
+proc geometryAfterFrame() {.cdecl.} =
+  ## The shim's drawn-frame callback (`gpui_on_frame_drawn`), registered only
+  ## when a capture asked for the geometry report: the report is written
+  ## again after each DRAWN frame, carrying the shim's monotonic frame count
+  ## (`input.frames`). A capture waits for that count to pass the one the
+  ## report carried when its input was handled, so it reads a frame drawn
+  ## after the input. A still screen is not that: under load a window that has
+  ## handled an input and not yet drawn it shows the old frame, still (the
+  ## plat47 suite read pre-move and pre-Esc frames that way). The shim calls
+  ## this once per drawn frame, after the paint, and never while nothing is
+  ## drawn, so it is coalesced to the frames there are.
+  writeGeometry(afterFrame = true)
+
 proc launchWindow(cmd: GpuiCommand; title: string;
                   outcome: LeafRenderOutcome; dock: JsonNode = nil): int =
   ## Open the window, run the event loop, and return when it stops.
@@ -16456,6 +16535,10 @@ proc launchWindow(cmd: GpuiCommand; title: string;
   # with the desktop; `gpui_launch`'s size is the windowed (restore) size.
   gWindowTitle = title
   prepareWindowLaunch(gLaunch)
+  # Only for a capture: a window opened without CODETRACER_GPUI_GEOMETRY_OUT
+  # registers no drawn-frame callback and writes nothing per frame.
+  if geometryOut.len > 0:
+    gpui_on_frame_drawn(geometryAfterFrame)
   let startedAt = epochTime()
   gpui_launch(title.cstring, float(cmd.width), float(cmd.height),
               paintWindowChrome)
@@ -16603,8 +16686,7 @@ proc runEdit(cmd: GpuiCommand): int =
   defer: gVerification.finishWait()   # PLAT-63: a Verno run still going
   # PLAT-62: and the project's `nargo info`.
   defer: stopConstraintsHost()
-  var shell = newGpuiShell(DockViewport(width: cmd.width, height: cmd.height,
-                                        dockExtent: DefaultGpuiViewport.dockExtent))
+  var shell = newGpuiShell(DockViewport(width: cmd.width, height: cmd.height))
   # EDIT MODE OPENS WHAT IT REMEMBERS (`gpui-layout-edit.json`), or the
   # shared Edit default — the arrangement the desktop's edit mode and the
   # terminal's show — at depth 0 (this front-end has no pixel minimums, so it
@@ -16855,8 +16937,7 @@ proc runOpen(cmd: GpuiCommand): int =
                        $declared & " declared operations")
       return 1
 
-  var shell = newGpuiShell(DockViewport(width: cmd.width, height: cmd.height,
-                                        dockExtent: DefaultGpuiViewport.dockExtent))
+  var shell = newGpuiShell(DockViewport(width: cmd.width, height: cmd.height))
   # `toBackendService` is the adapter `headless_session` itself uses to inject
   # the stdio transport as the SDK's `BackendService` (spec §3.1). The shell
   # takes its backend BY INJECTION and never constructs one — that is

@@ -25,7 +25,7 @@
 ## no clock, and that is a defect a terminal front-end cannot survive.  CTUI-11
 ## measured the first half of it and closed it: ``replay-server`` exits 2 and
 ## writes no DAP at all for a folder it cannot open, so
-## ``src/frontend/tui/host/native_host.traceFolderProblem`` now ``stat``s for
+## ``src/frontend/host/native_host.traceFolderProblem`` now ``stat``s for
 ## the three trace shapes BEFORE the tty is claimed.  CTUI-14 measured the other
 ## half, on a folder that passes every one of those ``stat``s:
 ##
@@ -183,6 +183,29 @@ type
 
   DapInterruptedError* = object of CatchableError
     ## The user asked for the read to stop.  Not a failure of the peer.
+
+  DapRequestRefusedError* = object of CatchableError
+    ## The peer ANSWERED a request whose answer the caller was synchronising
+    ## on through an event, and the answer was ``success: false``.  ``msg`` is
+    ## the engine's ``message``, verbatim (``requestRefusalText``).
+    ##
+    ## A DISTINCT TYPE, for the reason ``DapStalledError`` is one: "the engine
+    ## refused this", "the engine went quiet" and "the engine refused the whole
+    ## recording" (``DapLaunchRefusedError``) are different reports, and a
+    ## refusal is the one after which the session is still good — the engine
+    ## stopped working on THIS request and is serving the next one.
+    ##
+    ## It exists because a refusal can be the ONLY answer.  A request sent
+    ## with ``sendDapRequestNoResponse`` whose result is an event —
+    ## ``ct/run-tracepoints``, answered by ``ct/tracepoint-results`` — is
+    ## refused by a response and no event: ``Handler::run_tracepoints``
+    ## (``src/db-backend/src/dap_handler.rs``) returns at the first ``?`` in
+    ## ``handle_trace_steps`` before the event is sent, and ``dap_server.rs``'s
+    ## ``send_failed_response`` answers the request ``success: false`` with the
+    ## error's text.  A wait for the event alone then has nothing to end it,
+    ## and in an attended terminal — no clock on an operation, no interrupt —
+    ## that froze the screen for good (codetracer#880).  ``waitForEvent``'s
+    ## ``answerOf`` ends the wait on that response and raises this.
 
   DapLaunchRefusedError* = object of CatchableError
     ## The peer ANSWERED, and what it answered was that the trace it had
@@ -687,8 +710,10 @@ proc sendDapRequest*(backend: DapStdioBackend; command: string;
     # Ignore other messages (e.g. reverse requests from the server).
 
 proc sendDapRequestNoResponse*(backend: DapStdioBackend; command: string;
-                                args: JsonNode = newJObject()) =
-  ## Send a DAP request and return without reading its reply.
+                                args: JsonNode = newJObject()): int
+                                {.discardable.} =
+  ## Send a DAP request and return without reading its reply.  Returns the
+  ## request's ``seq``.
   ##
   ## This does NOT mean the command is unanswered.  ``ct/calltrace-jump``,
   ## ``ct/event-jump`` and ``ct/trace-jump`` each end in ``respond_dap`` and
@@ -704,8 +729,15 @@ proc sendDapRequestNoResponse*(backend: DapStdioBackend; command: string;
   ##
   ## The caller should follow up with ``waitForEvent`` to consume the
   ## events emitted by the handler.
+  ##
+  ## The ``seq`` is returned for the caller whose event may never come: a
+  ## request the engine can REFUSE, which it does with a response and no
+  ## event, passes it to ``waitForEvent`` as ``answerOf`` so that the refusal
+  ## ends the wait.  DISCARDABLE because every other caller synchronises on
+  ## events its request always produces and has no use for it.
   inc backend.seqCounter
   let seqId = backend.seqCounter
+  result = seqId
 
   let request = %*{
     "seq": seqId,
@@ -715,9 +747,23 @@ proc sendDapRequestNoResponse*(backend: DapStdioBackend; command: string;
   }
   backend.writeDapMessage(request)
 
+proc requestRefusalText*(response: JsonNode): string =
+  ## The sentence a refused DAP response carries: its ``message`` (the
+  ## engine's own words — ``send_failed_response`` puts the handler's error
+  ## there), stripped; or, when it carries none, a sentence naming the
+  ## command, so a refusal is never reported as an empty string.
+  if response.isNil or response.kind != JObject:
+    return "the engine refused the request without saying why"
+  result = response.getOrDefault("message").getStr("").strip()
+  if result.len == 0:
+    result = "the engine refused '" &
+      response.getOrDefault("command").getStr("the request") &
+      "' without saying why"
+
 proc waitForEvent*(backend: DapStdioBackend; eventName: string;
                    maxMessages: int = 50; operation = false;
-                   accept: proc(event: JsonNode): bool = nil): JsonNode =
+                   accept: proc(event: JsonNode): bool = nil;
+                   answerOf = -1): JsonNode =
   ## Wait for a specific DAP event by name.
   ##
   ## First checks the buffered ``eventQueue``; if not found, reads new
@@ -744,6 +790,26 @@ proc waitForEvent*(backend: DapStdioBackend; eventName: string;
   ## to the subscribers like every event (``undelivered``) and neither queued
   ## nor returned. A queued one would otherwise be returned to the next
   ## caller that waits for the same name.
+  ##
+  ## ``answerOf``: the ``seq`` of the request (``sendDapRequestNoResponse``)
+  ## whose answer the event is. When given, that request's RESPONSE also ends
+  ## the wait, because the engine may answer with the response alone:
+  ##
+  ##   * ``success: false`` — the engine refused the request and will send no
+  ##     event for it: raises ``DapRequestRefusedError`` with its sentence
+  ##     (``requestRefusalText``). Without this a refused request was waited
+  ##     on for ever wherever the read has no clock (an attended terminal),
+  ##     and declared a dead channel wherever it has one.
+  ##   * ``success: true`` with no accepted event before it — a protocol
+  ##     violation, since the handlers this serves send their event BEFORE
+  ##     their response (``Handler::run_tracepoints``): raises ``ValueError``
+  ##     naming it, rather than waiting for an event that cannot follow.
+  ##
+  ## Only a response whose ``request_seq`` IS ``answerOf`` counts: an earlier
+  ## request's late response — a sweep whose wait ran out of its message
+  ## budget and whose answer is still in the stream — is skipped as every
+  ## response here always was. Events read before the response are queued
+  ## and delivered exactly as without it.
   proc wanted(event: JsonNode): bool =
     accept.isNil or accept(event)
 
@@ -769,8 +835,17 @@ proc waitForEvent*(backend: DapStdioBackend; eventName: string;
           return msg
       else:
         backend.eventQueue.add(msg)
-    # Responses without a pending request are ignored (shouldn't happen
-    # in a well-behaved session but we tolerate it).
+    elif msgType == "response" and answerOf >= 0 and
+         msg.getOrDefault("request_seq").getInt(-1) == answerOf:
+      let success = msg.getOrDefault("success")
+      if success.isNil or success.kind != JBool or success.getBool():
+        raise newException(ValueError,
+          "DapStdioBackend: the engine answered '" &
+          msg.getOrDefault("command").getStr("") & "' without the '" &
+          eventName & "' event it sends before that answer")
+      raise newException(DapRequestRefusedError, requestRefusalText(msg))
+    # Every other response is ignored: another request's, left in the stream
+    # by a caller that synchronised on events (`sendDapRequestNoResponse`).
 
   raise newException(ValueError,
     "DapStdioBackend: did not receive '" & eventName &

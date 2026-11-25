@@ -222,7 +222,9 @@ suite "the web view":
       check root.byClass(ProcessSwitcherTabClass)[0].attr("data-ah-process-active") == "3")
 
   test "the source draws the switcher with the recording switcher's own view":
-    let source = readFile(currentSourcePath().parentDir / ".." / ".." / "views" /
-                          "isonim_agent_harbor_process_switcher_view.nim")
+    # Read when the suite compiles: `readFile` has no file system under
+    # `nim js` ("fopen is not defined" under node).
+    const source = staticRead(currentSourcePath().parentDir / ".." / ".." / "views" /
+                              "isonim_agent_harbor_process_switcher_view.nim")
     check "renderRecordingSwitcher[R, N](r, buttons" in source
     check "SEAM(press)" in source

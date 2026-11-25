@@ -40,13 +40,13 @@
 
 import std/[os, sets, strutils, times]
 
-import ../../../ct/launch/checkout_definitions
-import ../../../ct/launch/project_executable_tier
-import ../../../ct/launch/project_trust_store
-import ../../../common/value_comparison
-import ../../viewmodel/viewmodels/point_list_vm
-import ../../viewmodel/viewmodels/point_collection_source
-import ../../viewmodel/store/types as store_types
+import ../../ct/launch/checkout_definitions
+import ../../ct/launch/project_executable_tier
+import ../../ct/launch/project_trust_store
+import ../../common/value_comparison
+import ../viewmodel/viewmodels/point_list_vm
+import ../viewmodel/viewmodels/point_collection_source
+import ../viewmodel/store/types as store_types
 
 export checkout_definitions.CheckoutDefinitions
 

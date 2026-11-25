@@ -176,7 +176,7 @@ suite "PLAT-48 GPUI: the TOP dock edge":
                                  pane(paneCalltrace)]))
     let docked = layout.apply(cmdDock(paneState, leTop))
     ck docked.kind == loApplied
-    let viewport = DockViewport(width: 1920, height: 1080, dockExtent: 300)
+    let viewport = DockViewport(width: 1920, height: 1080)
     let projection = projectDock(docked.layout, viewport)
     ck projection.status == dpsProjected
     let g = windowGeometryOf(docked.layout, projection.state, 1920, 1080,
@@ -219,7 +219,7 @@ suite "PLAT-48 GPUI: the TOP dock edge":
     let restored = restoreLayoutDocument(parseJson($doc))
     ck restored.dockedAt(leTop).len == 1
     let projection = projectDock(restored, DockViewport(width: 1920,
-                                  height: 1080, dockExtent: 300))
+                                  height: 1080))
     ck projection.status == dpsProjected
     # The footer's bottom dock is in the document; the top one is the
     # window's own.

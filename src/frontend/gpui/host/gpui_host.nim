@@ -14,7 +14,7 @@
 ## directory on the far side of the line. The same sentence is true here, word
 ## for word, which is why the same shape is used.
 ##
-## ## THIS MODULE DOES NOT RE-DERIVE `tui/host/native_host.nim`, AND THAT IS
+## ## THIS MODULE DOES NOT RE-DERIVE `host/native_host.nim`, AND THAT IS
 ## ## A DECISION WITH A COST
 ##
 ## `openLocalTrace`, `resolveTraceFolder`, `traceFolderProblem`,
@@ -73,7 +73,7 @@ import codetracer_embed
 
 import ../../view_vocabulary/editor_surface
 
-import tui/host/native_host
+import host/native_host
 export native_host
 
 import pane_viewport   # HSF-V2: a pane's size as a Viewport
@@ -90,7 +90,7 @@ import pane_viewport   # HSF-V2: a pane's size as a Viewport
 # It widens PLAT-20's residue 2 from one import to two and from one call site to
 # four. The remedy is unchanged and still a rename: a neutral
 # `src/frontend/host/` both front-ends import.
-import tui/host/edit_host
+import host/edit_host
 export edit_host
 
 # The one adapter this front-end needs from the withheld half: a

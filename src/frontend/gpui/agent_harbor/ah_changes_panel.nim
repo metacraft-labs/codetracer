@@ -29,7 +29,10 @@
 ##
 ## Every press calls the viewmodel (`selectTab`, `toggleCard`, `approve`,
 ## `requestRevert`, `confirmRevert`, …), whose writes leave only through the
-## data source's `submitAction`. Nothing here talks to a server or decides a
+## data source's `submitAction`. A press is routed: each pressable part
+## carries its `changes.*` operation and the procedure that performs it
+## (`ah_changes_inbox_parts.pressable`), and the panel's route resolves it
+## through the pointer keymap in the `changes` scope (`panelPresses`). Nothing here talks to a server or decides a
 ## state: the words are the viewmodel's and those of
 ## `viewmodel/views/agent_harbor_changes_inbox_words.nim`, which the web view
 ## says too.
@@ -47,6 +50,8 @@ import nim_agents_isonim_viewmodels/agent_harbor/changes_vm
 import ../../viewmodel/views/agent_harbor_changes_inbox_words
 import ../../viewmodel/views/agent_harbor_changes_code
 
+import ../../viewmodel/keymap/user_keymap
+from ../../viewmodel/keymap/scope_path import ChangesPanelScope
 import ./ah_changes_inbox_parts
 from ./ah_initiative_panels import drawSectionHeader
 
@@ -115,7 +120,7 @@ proc drawTab(r: GpuiRenderer; p: AhPalette; vm: ChangesVM; tab: ChangesTabView;
   if tab.active:
     r.setStyle(result, "background", p.secondary)
     r.appendChild(result, r.underline(p.borderAction, 0, widthPx))
-  r.addEventListener(result, "click", proc() = vm.selectTab(which))
+  r.pressable(result, ChangesSelectTabOperation, proc() = vm.selectTab(which))
 
 proc drawTabBar(r: GpuiRenderer; p: AhPalette; vm: ChangesVM; widthPx: int): GpuiElement =
   ## `.ah-changes-tabs`: 4px above, 8px in, tabs 2px apart, over a hairline.
@@ -175,7 +180,7 @@ proc drawSideToggle(r: GpuiRenderer; p: AhPalette; vm: ChangesVM; card: SpecCard
     r.appendChild(b, r.text(label, LabelPx, if active: p.textBody else: p.textLabel,
                             shrink = false))
     r.tag(b, "button", label)
-    if not active: r.addEventListener(b, "click", proc() = vm.toggleDiff(key))
+    if not active: r.pressable(b, ChangesShowSideOperation, proc() = vm.toggleDiff(key))
     r.appendChild(result, b)
 
 proc actionRow(r: GpuiRenderer; buttons: seq[(GpuiElement, int)]; availPx: int): GpuiElement =
@@ -193,7 +198,8 @@ proc drawCardActions(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: C
   let busy = card.action == astSubmitting
   var buttons: seq[(GpuiElement, int)]
   proc add(label: string; action: proc()) =
-    buttons.add (r.actionButton(p, ink, label, buttons.len == 0, action, busy),
+    buttons.add (r.actionButton(p, ink, label, buttons.len == 0, ChangesCardActionOperation,
+                                action, busy),
                  actionButtonPx(label))
   if card.staged:
     add(ApproveApplyLabel, proc() = discard vm.applyStaged(key))
@@ -216,9 +222,11 @@ proc drawRevertConfirm(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm:
   r.tag(q, "question", revertQuestion(card))
   r.appendChild(result, q)
   r.appendChild(result, r.actionRow(@[
-    (r.actionButton(p, ink, ConfirmRevertLabel, true, proc() = discard vm.confirmRevert()),
+    (r.actionButton(p, ink, ConfirmRevertLabel, true, ChangesCardActionOperation,
+                    proc() = discard vm.confirmRevert()),
      actionButtonPx(ConfirmRevertLabel)),
-    (r.actionButton(p, ink, CancelLabel, false, proc() = vm.cancelRevert()),
+    (r.actionButton(p, ink, CancelLabel, false, ChangesCardActionOperation,
+                    proc() = vm.cancelRevert()),
      actionButtonPx(CancelLabel))], availPx))
 
 proc drawRequestInput(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: ChangesVM;
@@ -230,9 +238,11 @@ proc drawRequestInput(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: 
   r.appendChild(result, r.textField(p, ink, vm.requestText.val, RequestChangesPlaceholder,
                                     false))
   r.appendChild(result, r.actionRow(@[
-    (r.actionButton(p, ink, SubmitLabel, true, proc() = discard vm.submitRequestChanges()),
+    (r.actionButton(p, ink, SubmitLabel, true, ChangesCardActionOperation,
+                    proc() = discard vm.submitRequestChanges()),
      actionButtonPx(SubmitLabel)),
-    (r.actionButton(p, ink, CancelLabel, false, proc() = vm.closeRequestChanges()),
+    (r.actionButton(p, ink, CancelLabel, false, ChangesCardActionOperation,
+                    proc() = vm.closeRequestChanges()),
      actionButtonPx(CancelLabel))], availPx))
 
 proc metaPx(label, text: string; availPx: int): int =
@@ -318,7 +328,7 @@ proc drawSpecCard(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: Chan
   heights.add ShortLinePx
   let head = r.flowLinesFit(items, heights, avail, 6, 2)
   r.setStyle(head, "cursor", cursorOf(hkRow))
-  r.addEventListener(head, "click", proc() = vm.toggleCard(key))
+  r.pressable(head, ChangesToggleCardOperation, proc() = vm.toggleCard(key))
   r.appendChild(cardEl, head)
   let headPx = flowFitHeightPx(items, heights, avail, 6, 2)
   if not card.open: return (cardEl, 10 + headPx)
@@ -410,7 +420,7 @@ proc drawFileLink(r: GpuiRenderer; ink: ChangesInboxInks; vm: ChangesVM; path: s
   result = r.mono(r.pathText(path, CaptionPx, ink.textInfo))
   r.styles(result, [("line-height", $ShortLinePx & "px"), ("cursor", cursorOf(hkControl))])
   r.tag(result, "file-link", path)
-  r.addEventListener(result, "click", proc() = vm.openInEditor(path))
+  r.pressable(result, ChangesOpenFileOperation, proc() = vm.openInEditor(path))
 
 proc testPx(entry: VerificationEntry; widthPx: int): int =
   ## `drawTest`'s height: 5px above and below, its lines 2px apart.
@@ -597,7 +607,13 @@ proc drawVcsRow(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: Change
       statsText.add "-" & $vcs.deletions
     r.tag(stats, "vcs-file-stats", statsText)
     r.appendChild(result, stats)
-  r.addEventListener(result, "click", proc() = vm.selectFile(path))
+  r.pressable(result, ChangesSelectFileOperation, proc() = vm.selectFile(path))
+
+proc stepPress(vm: ChangesVM; step: int): proc() =
+  ## Previous's or Next's press: a proc of its own so each closure owns its
+  ## step (a closure made in a Nim loop body shares the body's variables
+  ## with every other iteration's: Previous stepped forward).
+  result = proc() = discard vm.stepFile(step)
 
 proc drawFileDiff(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: ChangesVM;
                   path: string): GpuiElement =
@@ -619,7 +635,6 @@ proc drawFileDiff(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: Chan
   r.appendChild(nav, pos)
   for (arrow, title, delta) in [(PreviousArrow, PreviousFileLabel, -1),
                                 (NextArrow, NextFileLabel, 1)]:
-    let step = delta
     let b = r.box(pairs = [("height", $ControlPx & "px"), ("min-width", $ControlPx & "px"),
                            ("items", "center"), ("justify", "center"),
                            ("border-width", "1px"), ("border-color", p.borderSecondary),
@@ -627,17 +642,18 @@ proc drawFileDiff(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: Chan
                            ("flex-shrink", "0"), ("cursor", cursorOf(hkControl))])
     r.appendChild(b, r.text(arrow, BodyPx, p.textLabel, shrink = false))
     r.tag(b, "file-step", title)
-    r.addEventListener(b, "click", proc() = discard vm.stepFile(step))
+    r.pressable(b, ChangesStepFileOperation, vm.stepPress(delta))
     r.appendChild(nav, b)
   # `.ah-file-open`: pushed to the row's end (`margin-left: auto`).
   r.appendChild(nav, r.box(pairs = [("flex-grow", "1")]))
-  r.appendChild(nav, r.actionButton(p, ink, OpenInEditorLabel, false,
+  r.appendChild(nav, r.actionButton(p, ink, OpenInEditorLabel, false, ChangesOpenFileOperation,
                                     proc() = vm.openInEditor(path)))
   r.appendChild(result, nav)
   case view.state
   of fdNotLoaded:
     let row = r.box(pairs = [("flex-shrink", "0")])
-    r.appendChild(row, r.actionButton(p, ink, LoadDiffLabel, false, proc() = vm.loadFile(path)))
+    r.appendChild(row, r.actionButton(p, ink, LoadDiffLabel, false, ChangesLoadDiffOperation,
+                                      proc() = vm.loadFile(path)))
     r.appendChild(result, row)
   of fdLoading:
     r.appendChild(result, r.text(LoadingFileText, CaptionPx, p.textCaption))
@@ -774,14 +790,16 @@ proc changesHeaderPx(source, rollUp: string; widthPx: int): int =
   let lines = flowLineCount(items, max(1, widthPx - 2 * InsetPx), 8)
   8 + lines * 24 + (lines - 1) * 2 + 1
 
-proc drawChangesPanel*(r: GpuiRenderer; host: GpuiElement; vm: ChangesVM; p: AhPalette;
-                       widthPx: int; context = AgentHarborChangesContext(); heightPx = 0;
-                       scroll: P3Scroll = nil) =
-  ## The Changes panel over `vm`, `widthPx` wide, the session `context`
-  ## names; redrawn whole on each call. Given its `heightPx`, the tab's
-  ## content scrolls as a region (`ChangesRegionKey`, its first pixel kept
-  ## by `scroll`), the keyboard's card or file brought into view when it
-  ## changes; without, it is clipped at the panel's foot.
+proc changesPresses*(vm: ChangesVM; keymap = UserKeymap()): PanelPress =
+  ## The route for a press on the Changes panel over `vm`: resolved in the
+  ## `changes` scope under `keymap`'s rows over the base keymap's; a user's
+  ## row that names one of the panel's key operations runs it on `vm`.
+  panelPresses(ChangesPanelScope, keymap,
+               proc(operation: string): bool = vm.runChangesOperation(operation))
+
+proc drawChangesPanelParts(r: GpuiRenderer; host: GpuiElement; vm: ChangesVM; p: AhPalette;
+                           widthPx: int; context: AgentHarborChangesContext; heightPx: int;
+                           scroll: P3Scroll) =
   scroll.beginDraw()
   r.clearChildren(host)
   r.styles(host, [("display", "flex"), ("flex-direction", "column"),
@@ -802,8 +820,8 @@ proc drawChangesPanel*(r: GpuiRenderer; host: GpuiElement; vm: ChangesVM; p: AhP
     r.appendChild(host, r.notice(p, ChangesLoadingNotice, "loading"))
   of asError:
     let target = vm
-    r.appendChild(host, r.errorBlock(p, ChangesErrorTitle, vm.error.val,
-                                     proc() = target.restart()))
+    r.appendChild(host, r.routedErrorBlock(p, ChangesErrorTitle, vm.error.val,
+                                           ChangesRetryOperation, proc() = target.restart()))
   of asReady:
     r.appendChild(host, r.drawTabBar(p, vm, widthPx))
     var used = changesHeaderPx(source, rollUp, widthPx) + TabBarPx
@@ -842,11 +860,26 @@ proc drawChangesPanel*(r: GpuiRenderer; host: GpuiElement; vm: ChangesVM; p: AhP
         if tab == rtCode and vm.filesNotice.len > 0: r.setStyle(list, "flex-grow", "1")
     r.appendChild(host, list)
 
+proc drawChangesPanel*(r: GpuiRenderer; host: GpuiElement; vm: ChangesVM; p: AhPalette;
+                       widthPx: int; context = AgentHarborChangesContext(); heightPx = 0;
+                       scroll: P3Scroll = nil; press: PanelPress = nil) =
+  ## The Changes panel over `vm`, `widthPx` wide, the session `context`
+  ## names; redrawn whole on each call. Given its `heightPx`, the tab's
+  ## content scrolls as a region (`ChangesRegionKey`, its first pixel kept
+  ## by `scroll`), the keyboard's card or file brought into view when it
+  ## changes; without, it is clipped at the panel's foot. Its presses go
+  ## through `press` (the base keymap's `changesPresses` when nil).
+  drawingWith(if press.isNil: changesPresses(vm) else: press):
+    drawChangesPanelParts(r, host, vm, p, widthPx, context, heightPx, scroll)
+
 proc mountChangesPanel*(r: GpuiRenderer; host: GpuiElement; vm: ChangesVM; p: AhPalette;
                         widthPx: int; context = AgentHarborChangesContext(); heightPx = 0;
-                        scroll: P3Scroll = nil; redraw: Signal[int] = nil) =
+                        scroll: P3Scroll = nil; redraw: Signal[int] = nil;
+                        press: PanelPress = nil) =
   ## Draws the panel and redraws it whenever what it reads changes (or the
-  ## host moves `redraw`, after a scroll).
+  ## host moves `redraw`, after a scroll). Its presses go through `press`
+  ## (the base keymap's `changesPresses` when nil).
+  let route = if press.isNil: changesPresses(vm) else: press
   createRenderEffect proc() =
     if redraw != nil: discard redraw.val
-    drawChangesPanel(r, host, vm, p, widthPx, context, heightPx, scroll)
+    drawChangesPanel(r, host, vm, p, widthPx, context, heightPx, scroll, route)

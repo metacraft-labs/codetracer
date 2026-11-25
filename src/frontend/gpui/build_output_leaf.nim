@@ -1,7 +1,7 @@
 ## gpui/build_output_leaf.nim — PLAT-56. The GPUI window's **Build Output**
 ## pane, drawn natively from the window's `BuildVM` (the model the desktop's
 ## BUILD panel and the terminal's pane draw), which the window's builds feed
-## (`tui/host/build_problems`). Until PLAT-56 the window drew this pane as a
+## (`host/build_problems`). Until PLAT-56 the window drew this pane as a
 ## report ("an edit-mode pane; a replay session does not build the working
 ## tree").
 ##

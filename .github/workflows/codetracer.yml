@@ -789,7 +789,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}\ct-diy
-          key: windows-diy-origin-dap-v1-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}
+          key: windows-diy-origin-dap-v2-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}
           lookup-only: true
 
       - name: Bootstrap the toolchain through env.ps1
@@ -806,13 +806,29 @@ jobs:
           $started = Get-Date
           . ./env.ps1
           Write-Host "env.ps1 bootstrap of $env:WINDOWS_DIY_ONLY into $env:WINDOWS_DIY_INSTALL_ROOT took $([int]((Get-Date) - $started).TotalMinutes) min"
+          # Hard links become plain copies before the cache is saved. Rustup's
+          # proxies in cargo\bin are hard links to one rustup.exe; tar stores
+          # them as links, and Windows tar cannot recreate a link whose target
+          # runs through `..`, which every path here does (the root is outside
+          # the workspace): the v1 cache failed to restore with "Can't create
+          # '\\?\...\..\..\_temp\ct-diy\cargo\bin\cargo.exe': Invalid argument"
+          # (run 45471393785). Rustup's proxies work as copies.
+          $linked = @(Get-ChildItem -LiteralPath $env:WINDOWS_DIY_INSTALL_ROOT -Recurse -File |
+            Where-Object { $_.LinkType -eq "HardLink" })
+          foreach ($f in $linked) {
+            $copy = "$($f.FullName).unlinked"
+            Copy-Item -LiteralPath $f.FullName -Destination $copy
+            Remove-Item -LiteralPath $f.FullName -Force
+            Move-Item -LiteralPath $copy -Destination $f.FullName
+          }
+          Write-Host "Replaced $($linked.Count) hard-linked file(s) with copies"
 
       - name: Save the toolchain cache
         if: steps.lookup.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}\ct-diy
-          key: windows-diy-origin-dap-v1-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}
+          key: windows-diy-origin-dap-v2-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}
 
   origin-dap-windows-nightly:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
@@ -898,7 +914,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}\ct-diy
-          key: windows-diy-origin-dap-v1-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}
+          key: windows-diy-origin-dap-v2-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}
           fail-on-cache-miss: true
 
       - name: Setup db-backend siblings
@@ -2831,6 +2847,15 @@ jobs:
         # read.
         run: nix develop .#devShells.x86_64-linux.default --command just test-css-token-resolution
 
+      - name: No :has() selector restyles the whole document on every write
+        # A `:has()` naming the `style` attribute is re-evaluated on every
+        # inline-style write, and one anchored at `:root`/`html` on every
+        # inserted element; each re-evaluation restyled the whole document.
+        # The caption bar's switch had both and made a 300-row panel take
+        # 45-100 s to mount. Runs its own planted fixtures first, then reads
+        # the compiled stylesheets, so it needs the dev shell's `stylus`.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-css-has-invalidation
+
       - name: The light theme paints its panels and editor ground from the light palette
         # The light stylesheet once carried every design-token surface in its
         # DARK value (#282828 behind codetracerWhite's text, 1.56:1) and
@@ -3558,9 +3583,11 @@ jobs:
   viewmodel-tests-wasm:
     runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
     # The same setup as `viewmodel-tests` (provisioning siblings 27-31 minutes
-    # in the two runs measured) and the steps that never ran there, so no
-    # duration of its own has been measured yet: 120 minutes until one has,
-    # then 1.3x the slowest measured run, as the job above.
+    # in the two runs measured). The PLAT-17 parity gate, which compiles the
+    # suites twice, has a job of its own below: here it took the whole budget
+    # (run 45292632494: setup 37 minutes, the gate 84 minutes and still short
+    # of its last suites at the 120-minute cancel), so nothing after it, the
+    # browser steps included, ever ran.
     timeout-minutes: 120
     name: ViewModel headless tests (WASM, slice, browser)
     steps:
@@ -3674,6 +3701,22 @@ jobs:
           gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
 
+      - name: Clone codetracer-pm sibling
+        # Four suites of the WASM lane (`test_editor_collab_examples`,
+        # `test_editor_vim_import`, `test_editor_vocabulary_oracle`,
+        # `test_plat68_cua_oracle`) read the specification checkout
+        # (`$CT_SPECS_DIR`, else `../codetracer-pm`), and the lane refuses to
+        # run without it (run 45292632494). Not a build input and not in
+        # `repro.lock`, so cloned at its mainline `latest`, as the lint job
+        # does. Up here with the other clones, inside the token's hour.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-pm
+          ref: latest
+          path: ${{ github.workspace }}/../codetracer-pm
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
       - name: Install Nix
         uses: ./.github/actions/setup-nix
         with:
@@ -3741,22 +3784,6 @@ jobs:
         # and fails when the lane's list of unshipped suites disagrees with
         # them in either direction.
         run: nix develop .#devShells.x86_64-linux.default --command bash -c 'source scripts/detect-siblings.sh && just test-vm-unit-js-scope'
-
-      - name: PLAT-17 gate — the WASM lane's counts EQUAL native's
-        if: ${{ !cancelled() }}
-        # The step above only says the wasm lane is green, and
-        # Uniform-WASM-Core.md §2.1.4 is explicit that green is the weaker
-        # claim: the same case count and the same assertion count as native,
-        # per file, as an EQUALITY.  This runs both lanes and compares them,
-        # and also asserts that the six files the wasm lane does not run are
-        # EXACTLY the six documented in ci/lib/test-lane-files.sh — so a
-        # seventh that stops building reddens by name rather than shrinking
-        # the set quietly.
-        #
-        # It is slow by construction (two compiles of ~70 ViewModel suites).
-        # That is the price of the claim; a cheaper check would be a check
-        # of something else.
-        run: nix develop .#devShells.x86_64-linux.default --command just test-vm-unit-wasm-parity
 
       - name: PLAT-17 — ViewModel-core footprint under --mm:orc on wasm32
         if: ${{ !cancelled() }}
@@ -4104,6 +4131,78 @@ jobs:
           path: test-logs/
           retention-days: 30
 
+
+  viewmodel-tests-wasm-parity:
+    runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
+    # PLAT-17's parity gate, alone: both lanes compile every ViewModel suite.
+    # Measured in run 45292632494 inside the WASM job: setup 37 minutes, the
+    # gate 84 minutes and not finished (it had reached test_plat70h of the
+    # alphabetical list) when the job's 120 minutes ran out. 37 + ~100 for
+    # the whole gate, and 1.1x for a slower runner: 150. Its setup is the WASM
+    # job's (comments there).
+    timeout-minutes: 150
+    name: ViewModel headless tests (WASM parity gate)
+    steps:
+      - name: Generate CI token
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Clone codetracer-trace-format-nim sibling
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-trace-format-nim
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-trace-format-nim
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Clone runquota sibling
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/runquota
+          ref: dev
+          path: ${{ github.workspace }}/../runquota
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Clone codetracer-pm sibling
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-pm
+          ref: latest
+          path: ${{ github.workspace }}/../codetracer-pm
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Provision dependency siblings from repro.lock
+        uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      - name: PLAT-17 gate — the WASM lane's counts EQUAL native's
+        # Uniform-WASM-Core.md §2.1.4: per file, the wasm lane's case and
+        # assertion counts EQUAL native's, and the files it does not run are
+        # exactly the ones ci/lib/test-lane-files.sh documents.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-vm-unit-wasm-parity
 
   ct-build:
     # The job is in ct-build.yml: build-once and the windowed shim, once per
@@ -8957,6 +9056,8 @@ jobs:
       - cross-process-linux
       - ct-host-container-gate
       - viewmodel-tests
+      - viewmodel-tests-wasm
+      - viewmodel-tests-wasm-parity
       - tui-tests
       - isonim-editor-smoke
       - visual-replay-regression-gate

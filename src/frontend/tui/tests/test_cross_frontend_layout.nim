@@ -62,10 +62,12 @@ import ../app/layout/binding
 
 import gpui/app/dock_projection
 import gpui/app/shell
+import gpui/window_geometry
+from gpui/chrome import ChromeGapPx
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as a RUNTIME assertion count.
-const ExpectedAssertions = 73
+const ExpectedAssertions = 95
 
 var countedAssertions = 0
 
@@ -74,7 +76,7 @@ template ck(condition: untyped) =
   check condition
 
 const
-  Viewport = DockViewport(width: 1200, height: 800, dockExtent: 300)
+  Viewport = DockViewport(width: 1200, height: 800)
   Body = CellArea(col: 0, row: 0, width: 120, height: 40)
 
 # ---------------------------------------------------------------------------
@@ -370,6 +372,102 @@ suite "PLAT-20: a layout saved by one front-end restores in the other":
     # half-restore.
     ck shell.windows.windows[0].layout.visiblePanes().len ==
        startingLayout().visiblePanes().len
+
+suite "PLAT-20: the dock's size is the model's, and every medium draws it":
+  # Residue 3: `DockViewport.dockExtent` was the GPUI host's, and the
+  # terminal and the window each cut an open dock's band from a constant of
+  # their own. The size now lives on the docked pane (`openShare`), so ONE
+  # command sizes the band in the terminal, the window and the dock
+  # document, and the size survives a save and a restore.
+
+  proc bottomDocked(share: int): Layout =
+    ## The editor and the state pane, with the event log docked at the
+    ## bottom and shown open; `share` 0 leaves the size unset.
+    var layout = initLayout(row([pane(paneEditor), pane(paneState),
+                                 pane(paneEventLog)]))
+    layout = layout.apply(cmdDock(paneEventLog, leBottom)).layout
+    layout = layout.apply(cmdOpenDocked(paneEventLog)).layout
+    if share > 0:
+      layout = layout.apply(cmdSetDockShare(paneEventLog, share)).layout
+    layout
+
+  proc terminalBand(layout: Layout): tuple[band, axis: int] =
+    ## The terminal's open band, and the extent it was cut from.
+    let g = geometryOf(layout, Body)
+    (g.openDock.height, g.inner.height + g.openDock.height)
+
+  proc windowBand(layout: Layout): tuple[band, axis: int] =
+    ## The GPUI window's open band, and the extent it was cut from (the tree
+    ## gives the band its height and a gap).
+    let proj = projectDock(layout, Viewport)
+    let g = windowGeometryOf(layout, proj.state, Viewport.width,
+                             Viewport.height)
+    (g.openDock.h, g.inner.h + g.openDock.h + ChromeGapPx)
+
+  test "one command sizes the open dock in the terminal, the window and the document":
+    let layout = bottomDocked(40)
+    ck layout.docked[0].openShare == 40
+    let t = terminalBand(layout)
+    let w = windowBand(layout)
+    checkpoint("terminal " & $t & " window " & $w)
+    # Each medium against a number written here, not against the model's
+    # own arithmetic: 40 % of the axis each cut its band from.
+    ck t.band == t.axis * 40 div 100
+    ck w.band == w.axis * 40 div 100
+    let doc = projectDock(layout, Viewport).state
+    ck doc["bottom_dock"]["size"].getFloat ==
+       float(Viewport.height * 40 div 100)
+    # The positive twin: with no size set, every medium draws a DIFFERENT
+    # band — the default — so the three assertions above are not satisfied
+    # by a band that ignores the model.
+    let unset = bottomDocked(0)
+    ck terminalBand(unset).band != t.band
+    ck windowBand(unset).band != w.band
+    ck terminalBand(unset).band ==
+       terminalBand(unset).axis * DefaultDockOpenSharePercent div 100
+
+  test "the size survives a save and a restore, and an old document has none":
+    let layout = bottomDocked(40)
+    let saved = saveLayout(layout)
+    ck saved["docked"][0]{"openShare"}.getInt == 40
+    let back = restoreLayoutDocument(saved)
+    ck back.docked[0].openShare == 40
+    # `open` is not persisted (the desktop does not persist it either), so
+    # the restored pane is opened again before its band is compared.
+    let reopened = back.apply(cmdOpenDocked(paneEventLog)).layout
+    ck terminalBand(reopened) == terminalBand(layout)
+    # An unset size is not written, so a v11 document is still the same
+    # document; a v11 document migrates and takes the default.
+    ck not saveLayout(bottomDocked(0))["docked"][0].hasKey("openShare")
+    var old = saveLayout(bottomDocked(0))
+    old["version"] = %11
+    ck restoreLayoutDocument(old).docked[0].openSharePercent ==
+       DefaultDockOpenSharePercent
+
+  test "the terminal's `:resize` sizes a focused docked pane, and the window draws that size":
+    var b = newLayoutBinding(bottomDocked(0), selectProfile(120, 40),
+                             focus = paneEventLog)
+    let act = b.runLayoutCommand(geometryOf(b.layout, Body), ":resize 40")
+    checkpoint($act.status & " " & act.message)
+    ck act.status == lasApplied
+    ck b.layout.docked[0].openShare == 40
+    ck windowBand(b.layout) == windowBand(bottomDocked(40))
+
+  test "the size is clamped, refused for a pane that is not docked, and a no-op when unchanged":
+    let big = bottomDocked(0).apply(cmdSetDockShare(paneEventLog, 99))
+    ck big.kind == loApplied
+    ck big.layout.docked[0].openShare == MaxDockSharePercent
+    let small = bottomDocked(0).apply(cmdSetDockShare(paneEventLog, 1))
+    ck small.layout.docked[0].openShare == MinDockSharePercent
+    let placed = bottomDocked(0).apply(cmdSetDockShare(paneEditor, 40))
+    ck placed.kind == loRefused
+    ck placed.problem.kind == lpPaneNotDocked
+    ck bottomDocked(40).apply(cmdSetDockShare(paneEventLog, 40)).kind == loNoOp
+    # A hand-edited document cannot hand a front-end a band it has no room
+    # for: the decoder clamps as the command does.
+    var forged = saveLayout(bottomDocked(40))
+    forged["docked"][0]["openShare"] = %500
+    ck restoreLayoutDocument(forged).docked[0].openShare == MaxDockSharePercent
 
 suite "PLAT-20: the assertion count":
   test "every case ran":

@@ -146,18 +146,13 @@ proc createTestsStoryVM*(fixture: string; playback: AhPlayback = nil): TestRunsV
     result.setFilter(tfFailing)
     result.setQuery("metric")
   of "long-keyboard":
-    # The keyboard far down the long catalog: on its last test (the last
-    # row of the last file's group, so far past the list's foot at every
-    # size), then `Right` once onto its first platform's cell. The row is
-    # put under the keyboard with `select` and the selection taken off
-    # again, which leaves exactly the keyboard's row: pressing `Down` the
-    # whole way rebuilds every row per press (`focusables`), which does not
-    # finish inside the render check's time limit (codetracer-pm issue
-    # 2026-11-23, the Tests viewmodel's rows).
-    let tests = result.feed.tests
-    if tests.len > 0:
-      result.select(tests[^1].id)
-      result.selected.val = ""
+    # The keyboard far down the long catalog: `Down` pressed from the top
+    # until it is on the last test (the last row of the last file's group,
+    # so far past the list's foot at every size), then `Right` once onto
+    # its first platform's cell. A press reads the viewmodel's memoized
+    # rows, so the whole way costs no rebuild of the matrix.
+    for _ in 0 ..< result.focusables.len:
+      discard result.runTestsOperation(TestsFocusNextOperation)
     discard result.runTestsOperation(TestsNextCellOperation)
   of "selected":
     result.select(relayTestId(SelectedTestName))

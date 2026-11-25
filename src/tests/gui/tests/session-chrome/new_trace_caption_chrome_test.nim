@@ -362,6 +362,49 @@ else:
         "proc invalidPath(")
       check noTraceBody.contains("hideWelcomeScreenSurface()")
 
+    test "the welcome host marks itself shown for the caption bar's height":
+      ## The caption bar is 38px over a welcome screen and 34px over panels,
+      ## and the stylesheet tells the two apart by `data-welcome-shown` on
+      ## `#welcomeScreen` (`shared_widgets.styl`). It used to read the host's
+      ## inline `style` from a `:root:has()`, which re-evaluated on every
+      ## inline-style write in the document and restyled all of it each time.
+      ## The attribute is only as good as the two procs that keep it: set once
+      ## the view is in the host, on both of `mountWelcomeScreen`'s paths, and
+      ## removed where the host is hidden and emptied. That the selector then
+      ## switches the height is RUN, not grepped, by
+      ## `storybook/scripts/check-style-invalidation.mjs` (the caption arm).
+      let source = readFile(WelcomeScreenUiPath)
+      check source.contains(
+        "const WelcomeShownAttribute = cstring\"data-welcome-shown\"")
+      let mountBody = sectionBetween(source,
+        "proc mountWelcomeScreen*() =",
+        "proc clearIsoNimWelcomeScreen*() =")
+      let setMarker =
+        "isonim_dom.setAttribute(container, WelcomeShownAttribute, cstring\"\")"
+      let earlyReturnIndex = indexOfRequired(mountBody,
+        "welcomeScreenMountedComponentRef == welcomeScreenComponentRef:")
+      let earlySetIndex = indexOfRequired(mountBody, setMarker)
+      let returnIndex =
+        indexOfRequired(mountBody, "      return\n    container.innerHTML")
+      check earlyReturnIndex < earlySetIndex
+      check earlySetIndex < returnIndex
+      let mountIndex =
+        indexOfRequired(mountBody, "mountIsoNimWelcomeScreen(container,")
+      check mountBody.find(setMarker, mountIndex) > mountIndex
+
+      let clearBody = sectionBetween(source,
+        "proc clearIsoNimWelcomeScreen*() =",
+        "when not defined(js):")
+      let emptyIndex =
+        indexOfRequired(clearBody, "container.innerHTML = cstring\"\"")
+      let removeIndex = indexOfRequired(clearBody,
+        "isonim_dom.removeAttribute(container, WelcomeShownAttribute)")
+      check emptyIndex < removeIndex
+
+      let styles =
+        readFile("src/frontend/styles/components/shared_widgets.styl")
+      check styles.contains("body:has(> #welcomeScreen[data-welcome-shown])")
+
     test "switchSession fills the debug toolbar host for the target tab":
       ## These two cases replace the ones that asserted
       ## `debug.rewireDebugControlsBridgeForActiveSession`, deleted with

@@ -166,7 +166,7 @@ suite "PLAT-20: the shell is renderer-free":
         if "gpui" in line.toLowerAscii or "isonim" in line.toLowerAscii or
            "tui" in line.toLowerAscii:
           inc importers
-    ck scanned == 19  # headless_app, layout_model, layout_interaction,
+    ck scanned == 20  # headless_app, layout_model, layout_interaction,
                       # window_set, extent_distribution — PLAT-45's
                       # desktop_panes, arrangement_relation and
                       # generate_default_layout — and PLAT-48's
@@ -177,7 +177,9 @@ suite "PLAT-20: the shell is renderer-free":
                       # request_menu (2026-10-27); the Low Level Code
                       # pane's low_level_menu (2026-10-29); the
                       # Verification pane's verification_menu; the
-                      # Constraints pane's constraint_menu (PLAT-62)
+                      # Constraints pane's constraint_menu (PLAT-62);
+                      # build_session, a build's state, moved here from
+                      # the terminal's app/ (2026-11-23)
     ck importers == 0
     # The positive twin over the same reader (§4a): the scanner really is
     # reading import lines, so `importers == 0` is not an empty scan.
@@ -275,7 +277,7 @@ suite "PLAT-20: the leaves are GPUI, through the real shim":
     # A viewport that cannot give every sibling a pixel (`dppViewportTooSmall`)
     # — since PLAT-48 a top-docked pane is projected, so it no longer serves
     # as this case's refusal.
-    var sh = newGpuiShell(DockViewport(width: 1, height: 1, dockExtent: 0))
+    var sh = newGpuiShell(DockViewport(width: 1, height: 1))
     let id = WindowId(0)
     let layout = defaultReplayLayoutValue()
     let docked = (kind: loApplied, layout: layout)

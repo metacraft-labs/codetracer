@@ -43,7 +43,7 @@ import viewmodels/search_results_vm
 import viewmodels/scratchpad_vm
 import viewmodels/shell_vm
 import viewmodels/filesystem_vm
-import ../host/native_host   # `recordingFileTree`, the replay file tree's producer
+import ../../host/native_host   # `recordingFileTree`, the replay file tree's producer
 import ./fixtures/fixture_provider
 import isonim/viewmodel as isonim_viewmodel
 import backend/mock_backend

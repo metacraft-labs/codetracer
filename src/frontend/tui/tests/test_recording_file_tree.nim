@@ -38,7 +38,7 @@ import ../app/theme/capabilities
 import ../app/views/shell
 import ../app/layout/binding
 import ../app/layout/cells
-import ../host/native_host
+import ../../host/native_host
 import ../host/tui_session
 import ./fixtures/fixture_provider
 import isonim/viewmodel as isonim_viewmodel   # `ViewModel`, the view's input

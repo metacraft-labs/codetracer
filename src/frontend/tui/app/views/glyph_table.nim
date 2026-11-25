@@ -102,6 +102,9 @@ type
       ## A recorded command whose recording a press opens.
     grShellError = "shell action failed"
     grShellRange = "shell action range"
+    grPluginMarker = "plugin marker"
+      ## A plugin's source marker that names no glyph of its own (the
+      ## extension's `markers` contribution), drawn in the gutter.
       ## An action's later lines.
 
   GlyphColumn* = enum
@@ -187,7 +190,8 @@ const
     grShellWorking:        ["◌",      "○",    "~",   "~"],
     grShellOk:             ["●",      "●",    "*",   "*"],
     grShellError:          ["✕",      "x",    "x",   "✕"],
-    grShellRange:          ["│",      "│",    "|",   "|"]]
+    grShellRange:          ["│",      "│",    "|",   "|"],
+    grPluginMarker:        ["▶",      "►",    ">",   "▸"]]
 
   DefaultGlyphs* = GlyphProfile()
     ## Extended, narrow, classic: the screen before profiles.

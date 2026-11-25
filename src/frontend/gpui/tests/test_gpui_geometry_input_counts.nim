@@ -6,7 +6,12 @@
 ## pointer event the compositor delivered late: under load the plat47 capture
 ## read a lost Esc as handled, never sent it again, and the drag it should have
 ## ended stayed active (`ci/test/plat47_gpui_window.py`, `key_handled`).
-## `input.keys` moves for a key and only for a key.
+## `input.keys` moves for a key and only for a key. And `input.frames`, the
+## shim's drawn-frame count, with `input.changedAt`, that count when the
+## window's state last changed: a capture waits for `frames > changedAt`, a
+## frame drawn after its input, since under load a still screen can be the old
+## frame. Only a window asked for the report writes it (per drawn frame, from
+## the shim's `gpui_on_frame_drawn`); one not asked writes nothing.
 ##
 ## Read off the SHIPPED binary's window plan (`codetracer-gpui
 ## --report-window-plan --window-ops=…`: the window's own pointer and key
@@ -22,7 +27,7 @@
 
 import replay_prerequisite
 import ../../tui/tests/fixtures/fixture_provider
-import std/[json, os, osproc, streams, strtabs, tempfiles, unittest]
+import std/[json, os, osproc, sequtils, streams, strtabs, strutils, tempfiles, unittest]
 import ./gpui_child_env
 
 var CHECKS = 0
@@ -41,7 +46,7 @@ let shimDir = getEnv("ISONIM_GPUI_SHIM_DIR",
                    repo.parentDir / "isonim-gpui/rust/target/debug")
 let calc = requireFixture(fixtureSpec("calc"))
 
-proc inputAfter(ops: string): JsonNode =
+proc inputAfter(ops: string; geometry = true): JsonNode =
   ## The geometry report's `input` object after `ops`, as the shipped binary
   ## writes it.
   if not fileExists(bin):
@@ -57,7 +62,10 @@ proc inputAfter(ops: string): JsonNode =
   env["XDG_STATE_HOME"] = state
   env["CODETRACER_HOME"] = state / "ct-home"
   let geomFile = state / "geometry.json"
-  env["CODETRACER_GPUI_GEOMETRY_OUT"] = geomFile
+  if geometry:
+    env["CODETRACER_GPUI_GEOMETRY_OUT"] = geomFile
+  else:
+    env.del("CODETRACER_GPUI_GEOMETRY_OUT")
   let args = @["--report-window-plan", "--width=" & $W, "--height=" & $H,
                "--window-ops=" & ops, calc]
   let errFile = genTempPath("gpui-input-counts-", ".err")
@@ -72,6 +80,11 @@ proc inputAfter(ops: string): JsonNode =
   if rc != 0:
     checkpoint("codetracer-gpui " & gpuiExitText(rc) & ": " & err)
     raise newException(IOError, "the window plan run failed (" & ops & ")")
+  if not geometry:
+    # Asked for no report: nothing may be written, per frame or otherwise.
+    return %*{"written": fileExists(geomFile) or
+                         walkDirRec(state).toSeq.anyIt(it.endsWith(".json") and
+                                                      "geometry" in it)}
   if not fileExists(geomFile):
     raise newException(IOError, "the window wrote no geometry report (" &
                        ops & ")")
@@ -101,6 +114,21 @@ suite "the geometry report counts keys apart from pointer events":
     ck input.count("handled") == 4
     ck input.count("keys") == 1
 
+  test "the report carries the drawn-frame count and the count at the last change":
+    # A window plan draws no frame: the count the report carries is the one
+    # at its last change, and a capture waiting for a frame AFTER that change
+    # (`frames > changedAt`) waits, as it must, for a frame that is drawn.
+    let input = inputAfter("move:600:400,key:escape")
+    checkpoint($input)
+    ck input.count("frames") >= 0
+    ck input.count("changedAt") >= 0
+    ck input.count("frames") == input.count("changedAt")
+
+  test "a window asked for no geometry report writes none":
+    let r = inputAfter("move:600:400,key:escape", geometry = false)
+    checkpoint($r)
+    ck not r["written"].getBool
+
   test "CHECKS":
     echo "CHECKS: ", CHECKS
-    check CHECKS == 6
+    check CHECKS == 10

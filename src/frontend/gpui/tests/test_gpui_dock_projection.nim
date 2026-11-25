@@ -60,7 +60,7 @@ template expectCount(expected: int) =
 template resetCount() =
   asserted = 0
 
-const Viewport = DockViewport(width: 1200, height: 800, dockExtent: 300)
+const Viewport = DockViewport(width: 1200, height: 800)
 
 proc fixtureDir(): string =
   currentSourcePath().parentDir / "gpui_kit_fixtures"
@@ -156,7 +156,9 @@ suite "PLAT-20: the dock projection writes gpui-kit's persisted schema":
     ck not doc.hasKey("bottom_dock")
     let dock = doc["left_dock"]
     ck dock["placement"].getStr == "left"
-    ck dock["size"].getFloat == float(Viewport.dockExtent)
+    # The size is the MODEL's share of the axis (no share set: the default).
+    ck dock["size"].getFloat ==
+      float(Viewport.width * DefaultDockOpenSharePercent div 100)
     # `Layout` is the COMMITTED arrangement and `revealed` is not in it
     # (Layout-ViewModel §3.2), so nothing here could make this true and a
     # projection that invented `true` would reopen an overlay on restore.
@@ -277,7 +279,7 @@ suite "PLAT-20: the dock projection writes gpui-kit's persisted schema":
     resetCount()
     let layout = initLayout(row([pane(paneEditor), pane(paneState),
                                  pane(paneEventLog)]))
-    let tiny = DockViewport(width: 2, height: 800, dockExtent: 1)
+    let tiny = DockViewport(width: 2, height: 800)
     let tinyProjection = projectDock(layout, tiny)
     ck tinyProjection.status == dpsRefused
     ck problemsOf(tinyProjection)[0].kind == dppViewportTooSmall

@@ -86,9 +86,9 @@ const
   ## system's `type=arrows-expand-vertical-diamond, theme=dark`.  Rows are
   ## reordered by dragging; it replaced the move-left / move-right arrows.
   EventLogColumnHandleClass* = "eventLog-column-handle"
-  EventLogColumnDraggingClass = "dragging"
-  EventLogColumnDropBeforeClass = "drop-before"
-  EventLogColumnDropAfterClass = "drop-after"
+  EventLogColumnDraggingClass* = "dragging"
+  EventLogColumnDropBeforeClass* = "drop-before"
+  EventLogColumnDropAfterClass* = "drop-after"
   EventLogColumnGripClass* = "eventLog-column-grip"
     ## A header cell's separator grip, at its right edge (Horizontal-
     ## Overflow.md §5.2): a drag on it resizes the column (`ui/event_log`).

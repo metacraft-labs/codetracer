@@ -557,7 +557,7 @@ proc shortcutReference*(router: KeymapRouter; facts: SessionFacts;
   ## that shadows it.
   result = @[]
   for layer in router.layersFor(facts, path, navMode):
-    for b in layer.trie.bindings:
+    for b in layer.trie.rows:
       var by = ""
       if layer.source == lsBase:
         for s in router.shadows:

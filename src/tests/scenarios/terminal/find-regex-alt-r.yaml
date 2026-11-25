@@ -1,0 +1,49 @@
+scenario: 1
+name: terminal/find-regex-alt-r
+pack: codetracer
+summary: >-
+  In Edit mode under CUA, with the in-document find open on `a1\d*`:
+  literally it finds nothing; Alt+R reads the field as a regular expression,
+  the status line marks it `[.*]`, and exactly the expression's matches are
+  painted (`a1` on line 1, `a1` and `a12` on line 3, `a1` on line 4), the
+  first one current. Alt+R again reads it literally (nothing painted), and an
+  expression that does not compile says why and paints nothing.
+stage:
+  - use: write-project
+    with:
+      files:
+        find.txt: "let a1 = 10\nlet b22 = 200\n# a1 and a12\ntotal = a1 + b22\n"
+  - use: select-keymap
+    with: { preset: cua }
+  - use: open-project
+    with: { folder: $project, file: find.txt, width: 160, height: 40 }
+steps:
+  - wait: { until: ready, timeout: 60s }
+  - wait: { until: { at: 'editor[file="find.txt"]/line[number="1"]', present: true }, timeout: 30s }
+  - click: { at: 'editor[file="find.txt"]/line[number="1"]', anchor: text-start }
+  - chord: Ctrl+F
+  - wait: { until: { at: status-line, assert: 'says("let")' }, timeout: 30s }
+  - type: 'a1\d*'
+  - wait: { until: { at: status-line, assert: 'says("no matches")' }, timeout: 30s }
+  - expect: { at: status-line, assert: 'lacks("[.*]")' }
+  # the field as a regular expression: exactly its matches are painted
+  - chord: Alt+r
+  - wait: { until: { at: status-line, assert: ['says("[.*]")', 'says("1 of 4")'] }, timeout: 30s }
+  - wait: { until: { at: 'editor[file="find.txt"]/line[number="3"]', find-matches: "2:a1 9:a12" }, timeout: 30s }
+  - expect: { at: 'editor[file="find.txt"]/line[number="1"]', find-matches: "4:a1" }
+  - expect: { at: 'editor[file="find.txt"]/line[number="1"]', find-current: "a1" }
+  - expect: { at: 'editor[file="find.txt"]/line[number="2"]', find-matches: "" }
+  - expect: { at: 'editor[file="find.txt"]/line[number="4"]', find-matches: "8:a1" }
+  # literally again: nothing matches, nothing is painted
+  - chord: Alt+r
+  - wait: { until: { at: status-line, assert: ['lacks("[.*]")', 'says("no matches")'] }, timeout: 30s }
+  - wait: { until: { at: 'editor[file="find.txt"]/line[number="3"]', find-matches: "" }, timeout: 30s }
+  - expect: { at: 'editor[file="find.txt"]/line[number="1"]', find-current: "" }
+  # an expression that does not compile says why, and paints nothing
+  - chord: Alt+r
+  - wait: { until: { at: status-line, assert: 'says("[.*]")' }, timeout: 30s }
+  - type: "("
+  - wait: { until: { at: status-line, assert: 'says("invalid regular expression")' }, timeout: 30s }
+  - expect: { at: 'editor[file="find.txt"]/line[number="1"]', find-matches: "" }
+  - expect: { at: 'editor[file="find.txt"]/line[number="3"]', find-matches: "" }
+  - expect: { at: 'editor[file="find.txt"]/line[number="4"]', find-matches: "" }

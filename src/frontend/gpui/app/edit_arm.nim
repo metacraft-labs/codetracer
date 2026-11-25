@@ -20,7 +20,7 @@
 ## (`operations.HostIntentKind.hiSave`); every base binds it (`Ctrl+S` under
 ## CUA, `C-x C-s` under Emacs, `Ctrl+s` under Vim and Kakoune). The WRITE is
 ## this module's, through the same project writer the terminal's `:w` uses
-## (`tui/host/edit_host.writeProjectFile` — a filesystem helper with no
+## (`host/edit_host.writeProjectFile` — a filesystem helper with no
 ## terminal in it).
 ##
 ## ## READ-ONLY IS STILL REFUSED
@@ -35,7 +35,7 @@ import codetracer_embed
 
 import ../../view_vocabulary/editor_surface
 import ./leaves   # `GpuiMedium`
-import ../../tui/host/edit_host
+import ../../host/edit_host
 import ./gpui_keys
 
 export gpui_keys

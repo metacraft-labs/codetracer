@@ -458,18 +458,22 @@ proc revealAreaFor(inner: CellArea; edge: LayoutEdge): CellArea =
              width: inner.width, height: h)
 
 const
-  DockedOpenSharePercent* = 21
+  DockedOpenSharePercent* = DefaultDockOpenSharePercent
+    ## The DEFAULT share only: a docked pane's own size is the model's
+    ## (`DockedPane.openSharePercent`), and the band is cut from that.
     ## PLAT-49 part B: how much of the arrangement's extent a docked pane
     ## shown OPEN takes on its axis — the desktop's, measured: its docked
     ## bottom panel is 280 px of a 1334 px layout (21%,
     ## `plat49-panes-capture.spec.ts`; `auto_hide.styl`'s default height).
 
-proc openDockAreaFor(inner: CellArea; edge: LayoutEdge): CellArea =
-  ## The band a docked pane shown open takes against its edge.
+proc openDockAreaFor(inner: CellArea; edge: LayoutEdge;
+                     sharePercent: int): CellArea =
+  ## The band a docked pane shown open takes against its edge: the model's
+  ## share of that axis (`DockedPane.openSharePercent`).
   if inner.isEmptyArea:
     return CellArea()
-  let h = max(2, inner.height * DockedOpenSharePercent div 100)
-  let w = max(2, inner.width * DockedOpenSharePercent div 100)
+  let h = max(2, inner.height * sharePercent div 100)
+  let w = max(2, inner.width * sharePercent div 100)
   case edge
   of leLeft: CellArea(col: inner.col, row: inner.row, width: w,
                       height: inner.height)
@@ -549,7 +553,8 @@ proc geometryOf*(layout: Layout; body: CellArea;
   # projected into what is left — tiled, never over it.
   let opened = layout.openDocked
   if opened.isSome:
-    let band = openDockAreaFor(result.inner, opened.get.edge)
+    let band = openDockAreaFor(result.inner, opened.get.edge,
+                               opened.get.openSharePercent)
     if not band.isEmptyArea and
        (if opened.get.edge in {leTop, leBottom}: band.height < result.inner.height
         else: band.width < result.inner.width):
@@ -2314,6 +2319,12 @@ proc movePaneTo(b: LayoutBinding; geom: LayoutGeometry;
 proc resizeFocusTo(b: LayoutBinding; percent: int): LayoutAction =
   ## `:resize <percent>` — the keyboard's divider drag, through exactly the
   ## machine the mouse would use: `beginResize`, `proposeShare`, `commit`.
+  ##
+  ## A DOCKED pane has no divider: `:resize` sets how much of its axis it
+  ## takes when shown open (`cmdSetDockShare`), the size every front-end
+  ## draws it at.
+  if b.layout.dockedIndex(b.focusRef) >= 0:
+    return b.dispatch(cmdSetDockShare(b.focusRef, percent))
   let started = beginResize(b.layout, b.focusRef)
   if started.isNone:
     return action(lasRefused,

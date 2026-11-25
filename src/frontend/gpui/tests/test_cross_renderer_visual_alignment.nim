@@ -245,8 +245,7 @@ let operationKinds = scenarioDoc["operationKinds"].mapIt(it.getStr)
 
 proc viewportOf(name: string): DockViewport =
   let v = scenarioDoc["viewports"][name]
-  DockViewport(width: v["width"].getInt, height: v["height"].getInt,
-               dockExtent: DefaultGpuiViewport.dockExtent)
+  DockViewport(width: v["width"].getInt, height: v["height"].getInt)
 
 # ---------------------------------------------------------------------------
 # The GPUI arm — LIVE, through the shipped binary's own derivation

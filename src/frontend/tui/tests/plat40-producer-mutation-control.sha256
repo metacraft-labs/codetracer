@@ -4,7 +4,7 @@
 # scan (§39a).
 2d07cc4c1938a04a1d0f643dc42c6ae85b34d8f9dbd3ecabfaf0cc545e2dec05  src/frontend/viewmodel/headless_session.nim
 47927cc31560ae8b18b51f86c3e8e25a126a1bfab7c2da237f055dbeebf9646e  src/frontend/viewmodel/store/replay_data_store.nim
-98285e6ce60c1fcf909c121beae19e8c6010d1ca84e2e42e8b169e0d0c111ea9  src/frontend/tui/host/native_host.nim
+98285e6ce60c1fcf909c121beae19e8c6010d1ca84e2e42e8b169e0d0c111ea9  src/frontend/host/native_host.nim
 c3ab9d8e8dfb14383bbf88164461651480d3dee255c14f7ea4d619b5ce701365  src/frontend/tui/host/tui_session.nim
 df5ac6b9934a2c537ba95bde700e1484fd5193a037a88c60135c5bb0982933ea  src/frontend/tui/app/views/shell.nim
 fdb065e1c5b34db8e9a9d384d157c03dc2a35cd5bfd5f0baed938b793ebf0469  src/frontend/viewmodel/viewmodels/point_list_vm.nim

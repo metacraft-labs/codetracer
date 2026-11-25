@@ -34,7 +34,7 @@ LENS = "src/plugins/ct-lens/ct_lens_plugins.nim"
 WATCH = "src/plugins/ct-lens/lens_watch.nim"
 SDK = "src/plugin_sdk/codetracer_plugin_sdk.nim"
 
-PROCS = "src/frontend/tui/host/plugin_processes.nim"
+PROCS = "src/frontend/host/plugin_processes.nim"
 RUNTIME = "src/frontend/tui/app/runtime.nim"
 
 SUITE = "src/frontend/viewmodel/tests/unit/test_ct_lens_plugins.nim"

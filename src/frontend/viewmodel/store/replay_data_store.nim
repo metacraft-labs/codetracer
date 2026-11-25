@@ -2387,6 +2387,18 @@ proc applyVerifiedBreakpoints*(store: ReplayDataStore; path: string;
   for l in disabledLines: disabled.add (l, 0)
   store.applyVerifiedBreakpoints(path, verified, disabled)
 
+const TracepointRunRefused* = "the replay refused to run the tracepoint"
+  ## What every front-end says when the engine refused a tracepoint sweep:
+  ## the VS Code host on the tracepoint's row, the terminal and GPUI on their
+  ## status lines. One sentence, here beside the request it answers, so the
+  ## front-ends cannot drift into three different wordings of one fact.
+
+proc tracepointRefusalText*(engineMessage: string): string =
+  ## ``TracepointRunRefused`` followed by the engine's own sentence, when it
+  ## gave one.
+  if engineMessage.len == 0: TracepointRunRefused
+  else: TracepointRunRefused & ": " & engineMessage
+
 proc tracepointSweepRequest*(specs: openArray[TracepointSweepSpec];
                              stopAfter = -1; withLocals = false;
                              sweepId = 0): JsonNode =

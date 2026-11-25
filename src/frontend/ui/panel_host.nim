@@ -26,7 +26,7 @@
 ## The panes reached this way are `PanelHostKinds`; the others still mount
 ## through `ui/layout.mountPaneForState` until their views are converted.
 
-import std/[options, sequtils]
+import std/[options, sequtils, json, jsffi]
 
 import isonim/core/[owner, signals, computation]
 import isonim/web/web_renderer
@@ -41,6 +41,7 @@ import ../viewmodel/session_vm
 from ../viewmodel/viewmodels/calltrace_vm import followDebuggerCall
 from ../viewmodel/viewmodels/low_level_code_vm import setShown
 from ../viewmodel/store/replay_data_store import nil
+from ../viewmodel/store/types as vm_types import nil
 import ../viewmodel/views/[isonim_calltrace_view, isonim_state_view,
                             isonim_low_level_code_view,
                             isonim_point_list_view, isonim_step_list_view,
@@ -50,8 +51,10 @@ import ../viewmodel/views/[isonim_calltrace_view, isonim_state_view,
                             isonim_command_palette_view]
 import ../viewmodel/views/[isonim_search_results_view, isonim_trace_log_view,
                             isonim_terminal_output_view, isonim_event_log_view]
-from ../viewmodel/viewmodels/event_log_vm import followStop
+from ../viewmodel/viewmodels/event_log_vm import followStop, EventLogVM,
+  columnsToJson, columnsFromJson
 import ../viewmodel/views/pane_measure_dom
+from ../viewmodel/viewport import Viewport
 
 const
   PanelHostKinds* = {Content.Calltrace, Content.State, Content.LowLevelCode,
@@ -139,12 +142,43 @@ proc measuredPaneOf(kind: Content): Option[MeasuredPane] =
   of Content.RequestPanel: some(mpRequestPanel)
   else: none(MeasuredPane)
 
+when defined(ctWasmPanes):
+  proc ctwMeasured(host: dom_api.Element; pane: cstring; rows, cols, firstRow: int;
+                   rowPx: float) {.importjs: "globalThis.ctwPanels.measured(#, #, #, #, #, #)".}
+  proc ctwEventLogExtent(host: dom_api.Element): JsObject
+    {.importjs: "globalThis.ctwPanels.eventLogExtent(#)".}
+  proc paneClientHeight(el: dom_api.Element): float {.importjs: "(#.clientHeight || 0)".}
+  proc devicePixelScale(): float {.importjs: "(window.devicePixelRatio || 1)".}
+  proc setScrollExtent(el: dom_api.Element; pixels: float)
+    {.importjs: "#.parentElement.style.setProperty('--ct-event-log-scroll-height', # + 'px')".}
+
 proc startMeasuring(m: PanelMount; session: SessionViewModel) =
   ## Attach the pane's one observer and one scroll listener
   ## (`startMeasuringPane`).
   let pane = measuredPaneOf(m.kind)
-  if pane.isSome:
-    m.stopMeasuring = startMeasuringPane(m.host, pane.get, session)
+  if pane.isNone:
+    return
+  when defined(ctWasmPanes):
+    if drawnByWasmCore(m.kind):
+      # The WebAssembly core's pane, measured here as the shell measures its
+      # own and reported to the core (`ctwPanels.measured`); the event log's
+      # scroll extent from the core's length and pitch.
+      let host = m.host
+      let name = cstring(wasmPaneName(m.kind))
+      let project =
+        if m.kind == Content.EventLog:
+          proc(scroller: dom_api.Element) =
+            let e = ctwEventLogExtent(host)
+            let content = e[0].to(float) * e[1].to(float)
+            scroller.setScrollExtent(physicalScrollExtent(
+              content, scroller.paneClientHeight, devicePixelScale()))
+        else: nil
+      m.stopMeasuring = startMeasuringPaneFor(host, pane.get, session,
+        proc(v: Viewport; rowPx: float) =
+          ctwMeasured(host, name, v.rows, v.cols, v.firstRow, rowPx),
+        project)
+      return
+  m.stopMeasuring = startMeasuringPane(m.host, pane.get, session)
 
 proc unrender(m: PanelMount) =
   ## Stop `m`'s measuring and dispose its reactive root, keeping the mount.
@@ -156,6 +190,33 @@ proc unrender(m: PanelMount) =
     m.disposeRoot = nil
 
 when defined(ctWasmPanes):
+  proc ctwShellMirror(session: SessionViewModel; json: cstring)
+      {.importjs: "globalThis.ctwPanels.shellMirror(#, #)".}
+
+  proc mirrorEventLog(session: SessionViewModel) =
+    ## The tab's EventLogVM is the one the shell's Event Log integrations act
+    ## on (`ui/event_log`: the filter drop-down, the header grips and the
+    ## widths remembered across sessions, the Columns menu's drag, the
+    ## reload after a tracepoint run); its filter, columns and reloads are
+    ## mirrored into the core that draws the pane. Inside the mount's root,
+    ## so they stop with it.
+    let vm = session.eventLogVM
+    if vm.isNil:
+      return
+    createEffect proc() =
+      let kinds = vm.selectedKinds.val
+      ctwShellMirror(session, cstring($(%*{"kinds": kinds})))
+    createEffect proc() =
+      let columns = vm.columns.val
+      ctwShellMirror(session, cstring($(%*{"columns": columnsToJson(columns)})))
+    var first = true
+    createEffect proc() =
+      discard vm.reloadToken.val
+      if first:
+        first = false
+        return
+      ctwShellMirror(session, cstring($(%*{"reload": true})))
+
   proc ctwMount(pane: cstring; host: dom_api.Element; session: SessionViewModel)
       {.importjs: "globalThis.ctwPanels.mount(#, #, #)".}
     ## `-d:ctWasmPanes`: the engine-fed panes this host mounts
@@ -189,6 +250,16 @@ proc render(m: PanelMount; session: SessionViewModel) =
         # the engine; the shell draws the panes it feeds
         # (`ui/wasm_pane_split.nim`).
         ctwMount(cstring(wasmPaneName(mount.kind)), host, session)
+        if mount.kind == Content.EventLog and not session.isNil:
+          mirrorEventLog(session)
+        if mount.kind == Content.State and not session.isNil and
+            not session.store.isNil:
+          # The code line above the variables is the page's editor's
+          # (`ui/editor.syncCodeStateLine`), written into the tab's store.
+          let store = session.store
+          createEffect proc() =
+            let line = store.locals.codeStateLine.val
+            ctwShellMirror(session, cstring($(%*{"codeStateLine": line})))
     else:
       case mount.kind
       of Content.Calltrace:
@@ -294,11 +365,23 @@ proc prepare(session: SessionViewModel) =
     return
   # The desktop and the web mark the call the debugger is in after every
   # move, as the Call Trace component did before it was mounted here.
-  if not session.calltraceVM.isNil:
+  #
+  # A pane the WebAssembly core draws follows the debugger in the core
+  # (`web_core.mountPanes`): the tab's own ViewModel following it as well
+  # would ask the engine for every move's call-trace section and event a
+  # second time, for a pane nobody sees, and the engine answers one request
+  # at a time — the editor's flow waited behind them.
+  when defined(ctWasmPanes):
+    let calltraceHere = not drawnByWasmCore(Content.Calltrace)
+    let eventLogHere = not drawnByWasmCore(Content.EventLog)
+  else:
+    const calltraceHere = true
+    const eventLogHere = true
+  if calltraceHere and not session.calltraceVM.isNil:
     session.calltraceVM.followDebuggerCall()
   # The Event Log marks the current event, and asks for it after a move, as
   # the terminal's and GPUI's do (HSF-D6).
-  if not session.eventLogVM.isNil:
+  if eventLogHere and not session.eventLogVM.isNil:
     session.eventLogVM.followStop()
 
 proc panelHostComponentId*(host: dom_api.Element): int {.importjs:
@@ -391,6 +474,44 @@ addToScratchpadHook = proc(name, text: string) =
     InternalAddToScratchpad,
     ValueWithExpression(expression: cstring(name),
                         value: rawScratchpadValue(text)))
+
+when defined(ctWasmPanes):
+  proc shellAction(json: cstring; sessionObj: JsObject) =
+    ## What a tab's WebAssembly core asks of the page
+    ## (`web_core/web_core_panels.js`'s `onAction`): the parts of a pane's
+    ## feature the shell draws.
+    ##   `showOrigin` — the value-origin side panel, opened through that
+    ##     tab's StateVM bridge (`ui/state.createSessionOriginChainVM`);
+    ##   `scratchpad` — a value for the Scratchpad, as the shell's own panes
+    ##     send one (`addToScratchpadHook`);
+    ##   `eventLogColumns` — the columns the core's Event Log pane changed.
+    let j = try: parseJson($json) except CatchableError: newJObject()
+    let session =
+      if sessionObj.isNil or sessionObj.isUndefined: shownSession
+      else: cast[SessionViewModel](sessionObj)
+    if j.hasKey("showOrigin") and not session.isNil and
+        not session.stateVM.isNil and
+        not session.stateVM.onShowOriginProc.isNil:
+      let o = j["showOrigin"]
+      session.stateVM.onShowOriginProc(o{"expression"}.getStr,
+        vm_types.Location(file: o{"file"}.getStr, line: o{"line"}.getInt,
+                          column: o{"column"}.getInt))
+    if j.hasKey("scratchpad"):
+      let v = j["scratchpad"]
+      addToScratchpadHook(v{"name"}.getStr, v{"text"}.getStr)
+    if j.hasKey("eventLogColumns") and not session.isNil and
+        not session.eventLogVM.isNil:
+      # The core's pane changed its columns (a column shown or hidden from
+      # its menu): the tab's EventLogVM takes them, so the shell's grips and
+      # remembered widths start from them.
+      let vm = session.eventLogVM
+      let columns = columnsFromJson(j["eventLogColumns"], vm.columns.val)
+      if columns != vm.columns.val:
+        vm.columns.val = columns
+
+  proc installShellAction(f: proc(json: cstring; sessionObj: JsObject))
+      {.importjs: "globalThis.ctwShellAction = #".}
+  installShellAction(shellAction)
 
 proc setPanelSession*(session: SessionViewModel) =
   ## Install the session of the tab on screen, and mount or re-render every

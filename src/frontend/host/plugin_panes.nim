@@ -15,9 +15,9 @@
 
 import std/[json, os, strutils, tables]
 
-import ../../viewmodel/plugin_host/supervisor
-import ../../../common/plugin_model
-import ../../../common/view_vocabulary/[vocabulary, behaviour]
+import ../viewmodel/plugin_host/supervisor
+import ../../common/plugin_model
+import ../../common/view_vocabulary/[vocabulary, behaviour]
 import ./plugin_processes
 
 type

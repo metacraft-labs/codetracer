@@ -132,6 +132,54 @@ proc decorateEventLog(p: JsObject; core: JsObject) =
     paneId = "eventLog")
   p.mark()
 
+proc terminalWindow(core: JsObject): seq[int] {.importjs:
+  "String(#.terminalWindow()).split(',').map(Number)".}
+proc setStyle(el: JsObject; name, value: cstring) {.importjs:
+  "#.style.setProperty(#, #)".}
+proc parentOf(el: JsObject): JsObject {.importjs: "#.parentElement".}
+proc firstLinePx(el: JsObject): float {.importjs:
+  "(function(e){const l=e.querySelector('.terminal-line');return l ? l.getBoundingClientRect().height : 0;})(#)".}
+
+proc decorateTerminalOutput(p: JsObject; core: JsObject) =
+  ## The Terminal Output's line view as `decorateTerminalOutput`
+  ## (`isonim_terminal_output_view`) lays it out in process: a column whose
+  ## `pre` scrolls, its scrollbar a scrubber over every line, the lines
+  ## outside the held window as the `pre`'s spacers, and the overflow-only
+  ## horizontal bar under the lines. The counts are the core's
+  ## (`ctwTerminalWindow`: total, current, first held, held, windowed).
+  let pre = p.q(cstring"pre")
+  if pre.isNull: return
+  let panel = pre.parentOf
+  panel.setStyle("display", "flex")
+  panel.setStyle("flex-direction", "column")
+  pre.setStyle("flex", "1 1 auto")
+  pre.setStyle("min-height", "0")
+  pre.setStyle("overflow-y", "auto")
+  let lineHeight = proc(): float =
+    let h = pre.firstLinePx
+    if h > 0.0: h else: 18.0
+  discard attachListScrubber(pre, panel,
+    total = proc(): int = core.terminalWindow()[0],
+    current = proc(): int = core.terminalWindow()[1],
+    rowHeight = lineHeight,
+    paneId = "terminalOutput")
+  let spacers = proc() =
+    let w = core.terminalWindow()
+    if w.len < 5: return
+    let h = lineHeight()
+    if w[4] != 0:
+      pre.setStyle("--ct-terminal-lines-above", cstring($(float(w[2]) * h) & "px"))
+      pre.setStyle("--ct-terminal-lines-below",
+                   cstring($(float(max(0, w[0] - w[2] - w[3])) * h) & "px"))
+    else:
+      pre.setStyle("--ct-terminal-lines-above", "0px")
+      pre.setStyle("--ct-terminal-lines-below", "0px")
+  pre.observe(true, cstring"", spacers)
+  spacers()
+  discard attachHorizontalScrubber(pre, panel, paneId = "terminalOutput",
+                                   verticalTrack = true)
+  p.mark()
+
 proc ctwDecoratePanes(mount: JsObject; core: JsObject) {.exportc.} =
   ## Decorate every pane that exists and is not decorated yet. Called by the
   ## host after each frame until all three are done; cheap once they are.
@@ -142,5 +190,8 @@ proc ctwDecoratePanes(mount: JsObject; core: JsObject) {.exportc.} =
     of "calltrace": decorateCalltrace(p, core)
     of "state": decorateState(p, core)
     else: decorateEventLog(p, core)
+  let terminal = mount.pane(cstring"terminal-output")
+  if not terminal.isNull and not terminal.hasMark:
+    decorateTerminalOutput(terminal, core)
 
 {.emit: "globalThis.ctwDecoratePanes = ctwDecoratePanes;".}

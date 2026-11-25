@@ -986,7 +986,7 @@ proc paintSourceMarkers*(g: var StyledGrid; under: CellArea;
       if entry[0] == m.line: taken = true
     if taken:
       continue
-    let glyph = if m.glyph.len > 0: m.glyph else: "▶"
+    let glyph = if m.glyph.len > 0: m.glyph else: g.glyphs.glyph(grPluginMarker)
     g.paint(under.row + 1 + i, under.col, fitCells(glyph, 1),
             CellStyle(role: srSourceVerified, bold: true))
 

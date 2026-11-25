@@ -139,6 +139,11 @@ pkgs.mkShell {
     findutils
     git
 
+    # `ci/test/envrc-flake-overrides-plugin-test.sh` runs the committed .envrc
+    # under the real direnv and its stdlib, to prove a plugin that fails to
+    # load stops .envrc instead of loading the shell without sibling overrides.
+    direnv
+
     # `ci/test/reachability-prose-guard-test.sh` mutates its fixtures with
     # `perl -0777 -pi` -- slurp mode, deliberately, because the sentence it
     # rewrites is WRAPPED across comment lines and a line-at-a-time substitution

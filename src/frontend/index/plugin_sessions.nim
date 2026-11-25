@@ -3,7 +3,7 @@
 ## §11.2.1: "on the server, beside the primary session … one plugin-host
 ## process per primary session").
 ##
-## A session's plugins are `tui/host/plugin_processes.SessionPlugins` — the
+## A session's plugins are `host/plugin_processes.SessionPlugins` — the
 ## same discovery (`loadPluginPackages`), grant ledger and consent, settings
 ## and `Supervisor` the terminal runs, compiled for Node. What differs is
 ## where the session is and where its state goes:
@@ -36,8 +36,8 @@ import std/[asyncjs, json, jsffi, strutils, tables]
 
 import ../../common/[ct_logging, plugin_model]
 import ../../ct/extension_selection
-import ../tui/host/plugin_processes
-import ../tui/host/plugin_panes as host_panes
+import ../host/plugin_processes
+import ../host/plugin_panes as host_panes
 import ../viewmodel/plugin_host/[protocol, supervisor, key_snapshot]
 import ../viewmodel/session_vm
 import isonim/core/signals   # the session store's `val`

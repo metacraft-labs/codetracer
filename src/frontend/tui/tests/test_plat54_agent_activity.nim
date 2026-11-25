@@ -67,7 +67,7 @@ import ../app/views/shell
 import ../app/views/agent_activity_pane
 import ../host/tui_session
 import ../host/vcs_source
-from ../host/native_host import traceFolderProblem
+from ../../host/native_host import traceFolderProblem
 import ../../viewmodel/host/native_agent_host
 import ../../viewmodel/viewmodels/trace_open
 import ../../headless_app/session_tabs

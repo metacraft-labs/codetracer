@@ -190,9 +190,8 @@ proc renderRow[R](r: R; vm: FleetSnapshotVM;
          title = row.id,
          onclick = proc() = vm.invokeSelect(callbacks, sessionId)):
       # The row's progress pie (CTF-P1d): its state's role and its plan's
-      # share, read from the viewmodel (`FleetRow.pie`), on the panel's
-      # ground; on the selected row it keeps that ground as a plate
-      # (`.ah-fleet-row-selected .ah-fleet-pie`).
+      # share, read from the viewmodel (`FleetRow.pie`), in the inks
+      # resolved for the row's ground: the panel's, or the selected row's.
       span(ref = pieHost, class = "ah-fleet-pie"):
         discard
       tdiv(class = "ah-fleet-row-main"):
@@ -232,7 +231,7 @@ proc renderRow[R](r: R; vm: FleetSnapshotVM;
       span(class = "ah-fleet-row-age"):
         text row.ageLabel
   r.appendRendered(pieHost, pieIndicator[R, typeof(r.createElement("span"))](
-    r, row.pie, pgPanel, PieLinePx))
+    r, row.pie, (if row.selected: pgSelectedRow else: pgPanel), PieLinePx))
   # A column with nothing to say shows the shared placeholder.
   for (cell, value) in [(agentCell, agentText), (hostCell, row.host),
                         (initiativeCell, row.initiative), (durationCell, row.durationLabel)]:

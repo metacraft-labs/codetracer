@@ -214,7 +214,8 @@ suite "a docked contributed pane persists, and an unknown one keeps its slot":
     let docked = applied(base().apply(cmdDock(m(), leRight, title = "METRICS")))
     let doc = saveLayout(docked)
     ck doc["version"].getInt == LayoutSchemaVersion
-    ck LayoutSchemaVersion == 11
+    # 12 since a docked entry may carry its open size (`openShare`).
+    ck LayoutSchemaVersion == 12
     let entry = doc["docked"][0]
     ck entry["contributedPane"].getStr == Metrics
     ck not entry.hasKey("pane")
@@ -264,7 +265,8 @@ suite "a docked contributed pane persists, and an unknown one keeps its slot":
     var doc = saveLayout(base())
     doc["version"] = %10
     let back = restoreLayoutDocument(doc)
-    ck back.version == 11
+    # Through v11 to the current version, 12.
+    ck back.version == 12
     ck equalTrees(back.tree, base().tree)
 
   test "an unknown contributed pane decodes to a typed slot, placed or docked":

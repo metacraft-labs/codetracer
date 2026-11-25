@@ -244,8 +244,7 @@ proc defaultGeometry(): WindowGeometry =
   ## over the shared default it opens with).
   let layout = initLayout(sharedDefaultLayout().tree,
                           sharedDefaultLayout().docked)
-  let proj = projectDock(layout, DockViewport(width: W, height: H,
-                                              dockExtent: 300))
+  let proj = projectDock(layout, DockViewport(width: W, height: H))
   doAssert proj.status == dpsProjected
   windowGeometryOf(layout, proj.state, W, H, GpuiTopBandPx)
 

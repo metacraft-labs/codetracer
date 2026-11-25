@@ -1,4 +1,4 @@
-## tui/host/build_problems.nim — PLAT-55. **A native window's builds, read into
+## host/build_problems.nim — PLAT-55. **A native window's builds, read into
 ## its Problems pane's ViewModel.**
 ##
 ## The terminal and the GPUI window run a build with `host/build_runner`
@@ -37,11 +37,11 @@ import std/os
 
 import isonim/core/[owner, computation, signals]
 
-import ../app/build_session
-import ../../viewmodel/viewmodels/errors_vm
-import ../../viewmodel/viewmodels/build_diagnostics
-import ../../viewmodel/viewmodels/build_vm
-import ../../viewmodel/store/types
+import ../headless_app/build_session
+import ../viewmodel/viewmodels/errors_vm
+import ../viewmodel/viewmodels/build_diagnostics
+import ../viewmodel/viewmodels/build_vm
+import ../viewmodel/store/types
 
 export errors_vm, build_diagnostics, build_vm
 

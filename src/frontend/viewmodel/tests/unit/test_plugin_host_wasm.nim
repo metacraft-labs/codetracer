@@ -60,7 +60,7 @@ import codetracer_embed
 import backend/mock_backend
 import ../../../../common/plugin_model
 import ../../../../ct/launch/component_roots
-import ../../../tui/host/plugin_processes
+import ../../../host/plugin_processes
 import plugin_host/supervisor
 import wasm_host_fixture
 

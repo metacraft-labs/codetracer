@@ -83,12 +83,19 @@ proc referenceChordFor(router: KeymapRouter; operation, argument: string;
                        facts: SessionFacts; path: ScopePath;
                        navMode: NavigationMode): string =
   ## The definition, through `route` on a copy of the router per row.
+  ##
+  ## The rows naming the operation are read with `bindingsFor`, which copies
+  ## only them. `bindings` copies a whole table, and asked for every operation
+  ## that made this suite's time grow with the table's size times the number
+  ## of operations: under node at load 90 it ran close to, and past, the
+  ## lane's 30-minute bound.
   var candidates: seq[tuple[b: EditingBinding, user: bool]] = @[]
-  for i in countdown(router.user.bindings.len - 1, 0):
-    candidates.add (router.user.bindings[i], true)
-  for b in router.effective.bindings: candidates.add (b, false)
+  let userRows = router.user.bindingsFor(operation, argument)
+  for i in countdown(userRows.len - 1, 0):
+    candidates.add (userRows[i], true)
+  for b in router.effective.bindingsFor(operation, argument):
+    candidates.add (b, false)
   for (b, user) in candidates:
-    if b.operation != operation or b.argument != argument: continue
     var probe = router
     probe.cancelPending()
     var res: EditingResolution

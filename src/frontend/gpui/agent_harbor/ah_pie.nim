@@ -36,14 +36,12 @@ proc pieFractionFact*(pie: ProgressPie): string =
   if pie.known: pie.pieStopPercent else: "unknown"
 
 proc drawPie*(r: GpuiRenderer; p: AhPalette; pie: ProgressPie; ground: string;
-              sizePx = PieStorySizePx; plate = false): GpuiElement =
+              sizePx = PieStorySizePx): GpuiElement =
   ## One pie on `ground` (`#rrggbb`), `sizePx` across, in its shape
   ## (`pieShapeOf`): a ring (the gradient on a disc inset inside the ring,
   ## the ground between, the rest the ground) or unknown (the ring and a
   ## centred dot). The edge ring is drawn over both, as the web's inset
-  ## box-shadow. With `plate`, the pie sits on a disc of `ground`
-  ## `PiePlatePx` wider all round, drawn outside its box (the web's outer
-  ## box-shadow), for a surface its inks were not resolved for.
+  ## box-shadow.
   let inks = p.pieInks(pie.role, ground)
   let shape = pie.pieShapeOf
   result = r.createElement("div")
@@ -60,12 +58,6 @@ proc drawPie*(r: GpuiRenderer; p: AhPalette; pie: ProgressPie; ground: string;
     r.styles(result, [("position", "absolute"), ("top", pxOf(inset)),
                       ("left", pxOf(inset)), ("width", pxOf(side)),
                       ("height", pxOf(side)), ("border-radius", "50%")])
-  if plate:
-    let side = sizePx + 2 * PiePlatePx
-    let disc = r.layer(-PiePlatePx.float, side.float)
-    r.styles(disc, [("border-radius", $(side div 2) & "px"), ("background", ground)])
-    r.tag(disc, "pie-plate", ground)
-    r.appendChild(result, disc)
   case shape
   of psRing:
     let inset = pieWedgeInsetPx(sizePx).float

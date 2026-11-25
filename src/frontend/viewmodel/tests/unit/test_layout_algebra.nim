@@ -1146,8 +1146,10 @@ suite "Layout algebra — floating panels are not expressible (§3A.2)":
     # so the docked pane's arity is 9. Docked contributed panes added
     # `DockedPane.contributedPane` and `DockedPane.besideContributed` (the
     # second namespace of `pane` and `beside` — identities, not extents), so
-    # it is 11.
-    check checkedFields == 7 + 11 + 3
+    # it is 11. `DockedPane.openShare` (PLAT-20 residue 3) is the share of its
+    # axis the pane takes when open — a SHARE, like `weight`, never a pixel or
+    # a coordinate; the medium derives the band — so it is 12.
+    check checkedFields == 7 + 12 + 3
 
   test "every visible pane occupies a distinct region of the split tree":
     # The model's half of the projection's total-and-disjoint invariant: each

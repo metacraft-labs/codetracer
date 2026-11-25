@@ -34,7 +34,7 @@ import ../app/views/low_level_code_pane
 from ../host/edit_services import EditHostState
 from ../host/tui_session import TuiSession
 import viewmodels/low_level_code_vm
-from ../host/native_host import traceFolderProblem
+from ../../host/native_host import traceFolderProblem
 from backend/stdio_backend import DapStdioBackend
 
 proc activeRuntime(srv: PaneServer): TuiRuntime =

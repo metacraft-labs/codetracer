@@ -11,7 +11,7 @@
 ##
 ## `test_gpui_shell_split.nim` reads import LINES of the shell's own modules,
 ## and so cannot see a TRANSITIVE edge. One existed: `gpui/main.nim` imports
-## `tui/host/session_driver`, which took one string constant from
+## `host/session_driver`, which took one string constant from
 ## `tui/app/origin_binding`. That module re-exports `views/styled_row`, which
 ## imports all of `isonim_tui`, and `isonim_tui/syntax/treesitter_ffi.nim`
 ## names `isonim-tui/build/grammars/libisonim_tui_grammars.a` in a

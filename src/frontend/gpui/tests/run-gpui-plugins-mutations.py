@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Installed plugins in the GPUI window (Extensibility-Model.md §11) — the
 mutation harness for the window's door to its plugins (`host/gpui_plugins`),
-the shared session-plugins module it uses (`tui/host/plugin_processes`) and a
+the shared session-plugins module it uses (`host/plugin_processes`) and a
 contributed leaf's drawing (`app/leaves`).
 
 Each arm plants ONE defect and must be killed by the case that asserts it in
@@ -29,10 +29,10 @@ sys.path.insert(0, str(HERE.parents[1] / "tui" / "tests"))
 from plat71_mutation_engine import Harness  # noqa: E402
 
 DOOR = "src/frontend/gpui/host/gpui_plugins.nim"
-SHARED = "src/frontend/tui/host/plugin_processes.nim"
+SHARED = "src/frontend/host/plugin_processes.nim"
 LEAVES = "src/frontend/gpui/app/leaves.nim"
 CLICKS = "src/frontend/gpui/window_clicks.nim"
-PANES = "src/frontend/tui/host/plugin_panes.nim"
+PANES = "src/frontend/host/plugin_panes.nim"
 
 SUITE = "src/frontend/gpui/tests/test_gpui_plugins_host.nim"
 

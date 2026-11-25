@@ -38,6 +38,9 @@
       attach: c('ctwAttach', null, ['string']),
       mountPane: c('ctwMountPane', null, ['string']),
       press: c('ctwPress', 'number', ['string', 'string']),
+      menu: c('ctwMenu', 'string', ['string', 'string']),
+      measured: c('ctwMeasured', null, ['string', 'number', 'number', 'number', 'number']),
+      menuChoose: c('ctwMenuChoose', 'string', ['number']),
       expire: c('ctwExpire', 'number', ['number']),
       phase: c('ctwPhase', 'number'),
       failure: c('ctwFailure', 'string'),
@@ -54,6 +57,8 @@
       eventLogTotal: c('ctwEventLogTotal', 'number'),
       eventLogCurrent: c('ctwEventLogCurrent', 'number'),
       eventLogRowPx: c('ctwEventLogRowPx', 'number'),
+      shellMirror: c('ctwShellMirror', null, ['string']),
+      terminalWindow: c('ctwTerminalWindow', 'string'),
       calltraceMeasured: c('ctwCalltraceMeasured', null, ['number', 'number', 'number']),
       frameOps: c('isonimFrameOps', 'number'),
       frameReset: c('isonimFrameReset', null),
@@ -77,10 +82,33 @@
    *   mount      the element the panes are drawn into
    *   transport  {send(text), onMessage(cb)}
    */
-  function startWebCore({ core: raw, mount, transport, pumpMs, rowPx, paneRoot, requestTimeoutMs }) {
+  function startWebCore({ core: raw, mount, transport, pumpMs, rowPx, paneRoot, requestTimeoutMs, onAction, pageMeasures }) {
     // Where the panes are looked up: the mount, or the whole document for a
     // host that moves each pane into a place of its own.
     const panesIn = paneRoot || mount;
+    // THIS core's pane elements, held once found. A pane the page has moved
+    // is looked for in the whole document, where another tab's core draws a
+    // pane of the same name, and a pane the page took out of the document
+    // (its old place re-rendered before the new one asked for it) is in
+    // none: so a pane is found where the core draws it, the mount, and kept.
+    const paneEls = new Map();
+    const paneEl = (name) => {
+      let p = paneEls.get(name);
+      if (!p) {
+        p = mount.querySelector(`[data-pane="${name}"]`) ||
+          (panesIn !== mount ? panesIn.querySelector(`[data-pane="${name}"]`) : null);
+        if (p) paneEls.set(name, p);
+      }
+      return p;
+    };
+    // The scope the decoration looks panes up in (`ctwDecoratePanes`): this
+    // core's own.
+    const paneScope = {
+      querySelector: (sel) => {
+        const m = /data-pane="([^"]+)"/.exec(sel);
+        return m ? paneEl(m[1]) : mount.querySelector(sel);
+      },
+    };
     const core = raw && raw.cwrap ? bindWasm(raw) : raw;
     if (!core) throw new Error('web core host: no core');
     let applier = null;
@@ -102,10 +130,18 @@
     // timeout, 30 s, by default) the core settles one as failed.
     const waiting = new Map();
     const timeoutMs = requestTimeoutMs || 30000;
-    root.ctwHostPost = (json) => {
+    const post = (json) => {
       try { const m = JSON.parse(json); if (m.type === 'request') waiting.set(m.seq, Date.now()); } catch (e) {}
       transport.send(json);
     };
+    // What the core asks the page to do beyond its own panes (show a value's
+    // origin in the shell's side panel, add a value to the shell's
+    // Scratchpad): handed to `onAction` as JSON.
+    const act = (json) => { if (onAction) onAction(json); };
+    // On the Module when it is one (one core per tab keeps its own), and on
+    // the page for the `nim js` build, which has no Module.
+    if (raw && raw.cwrap) { raw.ctwHostPost = post; raw.ctwHostAction = act; }
+    else { root.ctwHostPost = post; root.ctwHostAction = act; }
     const expireStale = () => {
       const now = Date.now();
       for (const [seq, at] of waiting) {
@@ -134,9 +170,12 @@
     const PANES = ['state', 'calltrace', 'event-log'];
     const measured = {};
     const measure = () => {
-      if (!core.mounted()) return;
+      // A page that measures the panes itself (the desktop's panel host,
+      // `ui/panel_host`, through `measured`) reports them as it measures its
+      // own; this coarse measure is for a page that does not.
+      if (pageMeasures || !core.mounted()) return;
       PANES.forEach((name, i) => {
-        const el = panesIn.querySelector(`[data-pane="${name}"]`);
+        const el = paneEl(name);
         if (!el) return;
         const rows = Math.max(1, Math.floor(el.clientHeight / (rowPx || 18)));
         const cols = Math.max(1, Math.floor(el.clientWidth / 8));
@@ -160,9 +199,10 @@
       eventLogCurrent: () => core.eventLogCurrent(),
       eventLogRowPx: () => core.eventLogRowPx(),
       calltraceMeasured: call(core.calltraceMeasured),
+      terminalWindow: () => core.terminalWindow(),
     };
     const decorate = () => {
-      if (core.mounted() && root.ctwDecoratePanes) root.ctwDecoratePanes(panesIn, decorationApi);
+      if (core.mounted() && root.ctwDecoratePanes) root.ctwDecoratePanes(paneScope, decorationApi);
     };
     const timer = setInterval(() => { call(core.pump)(); measure(); decorate(); expireStale(); }, pumpMs || 16);
     root.addEventListener && root.addEventListener('resize', measure);
@@ -182,9 +222,31 @@
         }
         return call(core.press)(operation, JSON.stringify(attrs)) !== 0;
       },
+      // The right-click menu of an element in `pane` (the shell's pane
+      // name), as `[{label, hint, enabled}]`; `menuChoose(i)` performs entry
+      // `i` and answers what the host must still do (JSON, or "").
+      menu: (pane, el) => {
+        const attrs = {};
+        for (let n = el; n && n.nodeType === 1; n = n.parentElement) {
+          for (const a of n.attributes) if (!(a.name in attrs)) attrs[a.name] = a.value;
+          if (n.classList && n.classList.contains('ct-web-core-pane')) break;
+        }
+        try { return JSON.parse(call(core.menu)(pane, JSON.stringify(attrs)) || '[]'); }
+        catch (e) { return []; }
+      },
+      menuChoose: (index) => call(core.menuChoose)(index) || '',
+      // The page's measurement of pane `pane` (`ctwMeasured`).
+      measured: (pane, rows, cols, firstRow, rowPx) =>
+        call(core.measured)(pane, rows, cols, firstRow, rowPx),
+      // What the shell keeps of the panes' state (the Event Log's filter,
+      // columns and reloads, the Variables pane's code line), mirrored into
+      // the core's (`ctwShellMirror`).
+      shellMirror: (json) => call(core.shellMirror)(json),
+      eventLogTotal: () => core.eventLogTotal(),
+      eventLogRowPx: () => core.eventLogRowPx(),
       // A pane's container, for a host that places panes itself (moving it
       // keeps every handle valid: the applier holds the nodes, not paths).
-      paneElement: (name) => panesIn.querySelector(`[data-pane="${name}"]`),
+      paneElement: paneEl,
       step: call(core.step),
       pump: call(core.pump),
       node: applier.node,

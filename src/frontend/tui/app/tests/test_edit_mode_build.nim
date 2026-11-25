@@ -44,7 +44,7 @@ import std/[strutils, unittest]
 # which is the same door the modules under test use.
 import codetracer_embed
 
-import ../build_session
+import ../../../headless_app/build_session
 import ../edit_binding
 import ../runtime
 import ../theme/capabilities

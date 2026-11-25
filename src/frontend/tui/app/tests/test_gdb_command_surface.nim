@@ -163,6 +163,10 @@ const
   ]
 
   ExpectedAppModules = 134
+    ## 2026-11-23: 135 → 134. `app/build_session.nim` moved to
+    ## `src/frontend/headless_app/` (the native host modules the terminal and
+    ## the GPUI window share), and `tests/test_contributed_pane_layout.nim`
+    ## had landed without re-counting, so the constant reads 134 again.
     ## 2026-11-20: 133 → 134, `views/tooltip.nim` (the tooltip moved out of
     ## `views/shell.nim` into a module of its own).
     ## 2026-11-20: 132 → 133, `capability_note.nim` (`538fb3072`, a
@@ -324,7 +328,10 @@ const
     ## parse, requested and reconciled off the render path). Their threads are
     ## `host/`'s, so nothing else under `app/` moved.
 
-  ExpectedStyleLiterals = 400
+  ExpectedStyleLiterals = 403
+    ## 2026-11-24: 400 → 403, measured — the docked plugin panes' two
+    ## (`a1589993144`) and the plugin source markers' one (`14cff691a07`),
+    ## which landed without re-counting.
     ## 2026-11-18: 394 → 400, measured — the six in the new
     ## `views/macro_expansion_pane.nim` (`ac499b2cead`).
     ## 2026-11-09: 384 → 394, measured — nine in the new

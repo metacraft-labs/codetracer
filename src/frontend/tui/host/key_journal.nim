@@ -49,7 +49,7 @@ when defined(js):
 
 import std/[os, strutils]
 
-import ./native_host
+import ../../host/native_host
 
 type
   KeyJournal* = ref object

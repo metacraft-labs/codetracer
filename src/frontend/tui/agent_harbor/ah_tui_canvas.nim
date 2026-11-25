@@ -176,10 +176,12 @@ type
       ## first choice of ground (`dropGround` steps off it where it is too
       ## near what the surface covers)
     chip*: string    ## a control's own ground (+, +N, a badge, Retry)
-    chipOnAction*: string
-      ## A control's ground on the action surface (the `+N` chip of the
-      ## selected fleet row): surface/action/primary-hover, a step off the
-      ## selection in both modes, where the web draws the chip's outline.
+    chipOnSelected*: string
+      ## A control's ground on the selected-row ground (the `+N` chip of the
+      ## selected fleet row), where the web draws the chip's outline: the
+      ## panel's, a step off the selection in both modes (#282828 against
+      ## #3c3c3c, #e6e2db against #c8c2b5). `chip` is not: in Dark it is the
+      ## selected row's own grey.
     chosen*: string  ## the active filter chip
     milestoneBand*: string
       ## Every other milestone of Initiative Progress at its wide width: the
@@ -238,7 +240,7 @@ proc tone*(p: AhPalette): AhTone =
          # Dark's tertiary is its stripe's ground: a chip on a stripe takes
          # the next grey up.
          chip: (if dark: p.activeTab else: p.tertiary),
-         chipOnAction: tokenHexOf(dtColorsUiSurfaceActionPrimaryHover, p.mode),
+         chipOnSelected: p.panel,
          chosen: p.activeTab,
          milestoneBand: (if dark: p.hover else: p.menu),
          playbackBar: (if dark: tokenHexOf(dtColorsUiSurfaceBaseRaised, p.mode)
@@ -284,7 +286,8 @@ proc dropGround*(p: AhPalette; covered: openArray[string]): string =
   candidates[^1]
 
 proc selectedGround*(p: AhPalette): string =
-  ## The selected initiative's ground: the palette's tint over the panel.
+  ## The palette's selection tint over the panel (the changes inbox's active
+  ## tab and current item).
   blendOver(p.selectedTint, p.panel)
 
 # ---------------------------------------------------------------------------

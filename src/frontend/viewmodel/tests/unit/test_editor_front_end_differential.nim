@@ -722,7 +722,7 @@ suite "PLAT-34: DIFF-1 — one editing core, two front-ends":
   # a quoted figure from its stated decomposition before believing it). The
   # milestone says *"two references outside `edit_binding.nim`, one a comment
   # and one a test helper"*. Measured with comments stripped, on the tree this
-  # suite runs against: the comment is in `tui/host/edit_host.nim` and is
+  # suite runs against: the comment is in `host/edit_host.nim` and is
   # **not a reference in code at all**, and there are **two** test files that
   # name the type in code, not one. Two references stands; its composition
   # does not, and the cases below enumerate the files rather than restating

@@ -1681,6 +1681,24 @@ export const plays = {
   "agent-harbor-fleet-selected": fleetCheck(async (el) => {
     await waitFor(el, ".ah-fleet-row-selected");
     expect(el.querySelectorAll(".ah-fleet-row-selected").length).toBe(1);
+    // The selected row is drawn on the selected-row ground every list
+    // shares, and its pie in the inks resolved for that ground, with
+    // nothing drawn between the pie and the row.
+    const sel = el.querySelector(".ah-fleet-row-selected");
+    // The ground, as the palette's generated pie stylesheet paints it for
+    // its selected-row band (`.ah-pie-band-selected-row`).
+    const ground = document.createElement("div");
+    ground.className = "ah-pie-band-selected-row";
+    el.appendChild(ground);
+    try {
+      expect(getComputedStyle(sel).backgroundColor).toBe(getComputedStyle(ground).backgroundColor);
+    } finally {
+      ground.remove();
+    }
+    expect(sel.querySelector(".ah-fleet-pie .ah-pie-on-selected-row")).toBeTruthy();
+    const holder = getComputedStyle(sel.querySelector(".ah-fleet-pie"));
+    expect(holder.boxShadow).toBe("none");
+    expect(holder.backgroundColor).toBe("rgba(0, 0, 0, 0)");
   }),
   "agent-harbor-fleet-loading": fleetCheck(async (el) => {
     expect(el.querySelector(".ah-fleet-loading")?.textContent).toContain("Loading sessions");
@@ -1885,6 +1903,18 @@ export const plays = {
     await waitFor(el, ".ah-initiative-row-selected");
     expect(el.querySelectorAll(".ah-initiative-row-selected").length).toBe(1);
     expect(el.querySelector(".ah-initiative-row-selected .ah-initiative-session")).toBeTruthy();
+    // The selected initiative is drawn on the selected-row ground every list
+    // shares, as the palette's generated pie stylesheet paints it for its
+    // selected-row band (`.ah-pie-band-selected-row`).
+    const sel = el.querySelector(".ah-initiative-row-selected");
+    const ground = document.createElement("div");
+    ground.className = "ah-pie-band-selected-row";
+    el.appendChild(ground);
+    try {
+      expect(getComputedStyle(sel).backgroundColor).toBe(getComputedStyle(ground).backgroundColor);
+    } finally {
+      ground.remove();
+    }
   }),
   "agent-harbor-initiatives-empty": initiativesCheck(async (el) => {
     expect(el.querySelector(".ah-fleet-overlay")?.textContent).toContain("No initiative");
@@ -2032,6 +2062,28 @@ export const plays = {
     expect(activeTab()).not.toBe(start.tab);
     expect(await pressKey(panel, "ArrowLeft")).toBe(true);
     expect(activeTab()).toBe(start.tab);
+    // The same parts, pressed: each carries its operation
+    // (`data-ct-operation`) and the page's one pointer listener runs the
+    // procedure bound to it, so a press that reached no procedure leaves the
+    // drawing as it was. A card's head opens and closes it; a tab shows it.
+    const head = (key) => panel.querySelector(`.ah-spec-card[data-ah-card="${key}"] .ah-spec-card-head`);
+    const key = panel.querySelector(".ah-spec-card").getAttribute("data-ah-card");
+    expect(head(key).getAttribute("data-ct-operation")).toBe("changes.toggle-card");
+    head(key).click();
+    await twoFrames();
+    expect(openCards()).not.toEqual(start.open);
+    head(key).click();
+    await twoFrames();
+    expect(openCards()).toEqual(start.open);
+    const tabs = () => [...panel.querySelectorAll(".ah-changes-tab")];
+    const other = tabs().find((t) => !t.classList.contains("ah-changes-tab-active"));
+    expect(other.getAttribute("data-ct-operation")).toBe("changes.select-tab");
+    other.click();
+    await twoFrames();
+    expect(activeTab()).not.toBe(start.tab);
+    tabs().find((t) => t.textContent === start.tab).click();
+    await twoFrames();
+    expect(activeTab()).toBe(start.tab);
     // A tab step leaves the keyboard on no card; Down twice puts it back on
     // the second, as the story's constructor did.
     await pressKey(panel, "ArrowDown");
@@ -2114,7 +2166,17 @@ export const plays = {
     expect(position()).not.toBe("3 of 5");
     expect(await pressKey(panel, "[", "BracketLeft")).toBe(true);
     stepperIs(panel, "3 of 5", { prev: true, next: true });
-    const field = panel.querySelector(".ah-item-page textarea, .ah-item-page input[type=password]");
+    // Previous and Next, pressed: each carries the operation its key runs
+    // and the page's one pointer listener runs the procedure bound to it.
+    const step = (which) => panel.querySelector(`.ah-inbox-stepper .ah-step-${which}`);
+    expect(step("next").getAttribute("data-ct-operation")).toBe("inbox.next");
+    expect(step("prev").getAttribute("data-ct-operation")).toBe("inbox.previous");
+    step("next").click();
+    await waitUntil(() => position() !== "3 of 5", "Next, pressed");
+    step("prev").click();
+    await waitUntil(() => position() === "3 of 5", "Previous, pressed");
+    stepperIs(panel, "3 of 5", { prev: true, next: true });
+    const field =panel.querySelector(".ah-item-page textarea, .ah-item-page input[type=password]");
     expect(field).toBeTruthy();
     expect(await pressKey(field, "]", "BracketRight")).toBe(false);
     expect(await pressKey(field, "1", "Digit1")).toBe(false);

@@ -4,7 +4,7 @@
 # needle scan (§39a).
 b45a13aaf0d241491dcdfec3799d95a048816ff859f95d8bf526c407a8d8a29d  src/frontend/viewmodel/viewmodels/errors_vm.nim
 e476eb410d61905d23bdb2aea4a25553d88e595b9969725628c69b81dfa56eca  src/frontend/viewmodel/viewmodels/build_diagnostics.nim
-f07d44b9221f998dd8a7e8adaa6ba9684368e9a949b86ab19a5a79eca8bd5cbe  src/frontend/tui/host/build_problems.nim
+f07d44b9221f998dd8a7e8adaa6ba9684368e9a949b86ab19a5a79eca8bd5cbe  src/frontend/host/build_problems.nim
 4e7b596a4242572e5cf79d8b902569dc708a18dc6f6108903839dcc665591467  src/frontend/tui/host/problems_source.nim
 97e9140ffe8c624556c6f35bcafdfd28666f0e42a8ebaa237a4a2a0d4e74a8e2  src/frontend/tui/app/views/problems_pane.nim
 53320025781afb2fe860cce22059b942cbec3679f513c1b66a06f6ac1fc61570  src/frontend/tui/app/runtime.nim

@@ -13,7 +13,7 @@
 # where a reviewer sees it; wiring one up means editing it downward, which the
 # both-directions rule already forces in the same commit.
 #
-# RECORDED-DARK-CEILING: 48
+# RECORDED-DARK-CEILING: 49
 #
 # TWO KINDS OF DARK, AND ONLY ONE OF THEM MAY BE ADDED HERE.
 #
@@ -778,3 +778,11 @@ ci/test/plat37-macos-electron-capture.sh
 #
 # Issue: codetracer-pm issues/2026-10-30-lint-and-vm-unit-reds-on-clean-agents-grep-q-site-image-diff-use-ledger-and-a-tally.md
 ci/test/build-siblings-noir-fresh-checkout-test.sh
+
+# BLOCKED: no CI image provides the `runquota` and `runquotad` binaries the
+# gate runs a private daemon with (a lane clones the runquota sibling for its
+# Nim sources only). It checks that the heavy commands of test-rust and the
+# Playwright recipes keep their RunQuota prefix. Once a lane has both binaries
+# on PATH, give it a recipe call (`just test-runquota-bridge`) and delete this
+# line and lower the ceiling by one.
+ci/test/runquota-bridge-test.sh

@@ -484,11 +484,42 @@ body
 // 6px below it (Nikolay, 2026-09-14).
 //
 // One switch drives both: the two custom properties below change when
-// `#welcomeScreen` is displayed with content in it — it is hidden with an
-// inline `display: none` and emptied otherwise — and everything that sits flush
-// under the bar reads CAPTION_BAR_HEIGHT: #root-container here, the auto-hide
-// overlays, the welcome screen's top, the command-results and tab-overflow
-// menus.  Defined in this file because it is imported before all of them.
+// `#welcomeScreen` is displayed with content in it, and everything that sits
+// flush under the bar reads CAPTION_BAR_HEIGHT: #root-container here, the
+// auto-hide overlays, the welcome screen's top, the command-results and
+// tab-overflow menus.  Defined in this file because it is imported before all
+// of them.
+//
+// "Displayed with content" is the `data-welcome-shown` attribute, which
+// ui/welcome_screen.nim sets on `#welcomeScreen` once the welcome view is in it
+// (`mountWelcomeScreen`) and removes when it hides and empties the host
+// (`clearIsoNimWelcomeScreen`).  It used to be read from the host's inline
+// style, `:not([style*="display: none"]) > *`, and that must not come back.
+// A `:has()` (https://drafts.csswg.org/selectors-4/#relational) is matched
+// against its anchor's subtree, so the engine must re-check it whenever
+// anything its argument names changes there; Chromium does that by the
+// features (ids, classes, attributes) the argument names.  An argument naming
+// `style` is therefore re-evaluated on EVERY inline-style write anywhere under
+// the anchor, and anchored at `:root` each re-evaluation restyled the whole
+// document (measured with Chromium's UpdateLayoutTree element counts).  The
+// Changes panel's middle path cut (ah_cut_text.nim) writes inline style for
+// every row it cuts, so the 300-file Code tab paid ~2500 whole-document
+// restyles — 86 s of style recalculation — to mount at 360px, against 0.8 s
+// without them (StoryBook `ChangesCodeLongKeyboard`, 2026-11-24).  The same
+// tax fell on every inline-style write in the app: layout drags, positioned
+// popups, tooltips.  An attribute nothing else writes is invalidated only when
+// it changes.
+//
+// The switch is anchored at `body`, not `:root`, for a second measured reason:
+// Chromium re-evaluates a `:root`-anchored `:has()` on every element inserted
+// anywhere in the document, whatever its argument names, and each time
+// restyles the whole document (3094 of 3493 elements per inserted `<span>`,
+// against 8 for the same rule on `body`).  Every element that reads the two
+// properties is in `body`, so they are set there.
+//
+// `just test-css-has-invalidation` refuses a `:has()` that names `style` or is
+// anchored at `:root`/`html`; `just storybook-check-style-invalidation`
+// measures the restyles a path cut costs in the browser.
 CAPTION_BAR_HEIGHT_WORKSPACE = 2.125rem
 CAPTION_BAR_HEIGHT_WELCOME = 2.375rem
 
@@ -496,7 +527,7 @@ CAPTION_BAR_HEIGHT_WELCOME = 2.375rem
   --caption-bar-height: CAPTION_BAR_HEIGHT_WORKSPACE
   --caption-bar-padding-bottom: 0.125rem
 
-:root:has(> body > #welcomeScreen:not([style*="display: none"]):not([style*="display:none"]) > *)
+body:has(> #welcomeScreen[data-welcome-shown])
   --caption-bar-height: CAPTION_BAR_HEIGHT_WELCOME
   --caption-bar-padding-bottom: 0.375rem
 

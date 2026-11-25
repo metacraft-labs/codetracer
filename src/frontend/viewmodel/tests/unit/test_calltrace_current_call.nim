@@ -4,7 +4,7 @@
 ## `calltrace_vm.currentCallOf` names the call the debugger is in among the
 ## LOADED call-trace lines, from the stop's tick and call stack. The terminal
 ## marks that row (`tui/app/views/call_trace.initCallTraceModel`) and both
-## native front ends select it (`tui/host/native_host.selectCurrentCall`).
+## native front ends select it (`host/native_host.selectCurrentCall`).
 ##
 ## The reported defect: at a stop inside `apply_op #12`, collapsing the
 ## `evaluate` call that contains it hid `apply_op #12`, and the pane then

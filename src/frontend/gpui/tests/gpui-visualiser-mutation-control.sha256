@@ -4,5 +4,5 @@
 # scan (§39a).
 0f037c56269e3ad51c084fc0e545fcd851102cfa91ce32ed2507b9995f372f42  src/frontend/gpui/app/leaves.nim
 93e0d62046619caab3c26eb7d894941ff23c8d044e139302cc93481b87bc8f5b  src/frontend/gpui/main.nim
-e7a67d52653920a3ee3befc5de46f447c863ba2712acf458b63750c0dc1f5609  src/frontend/tui/host/project_definitions_host.nim
+e7a67d52653920a3ee3befc5de46f447c863ba2712acf458b63750c0dc1f5609  src/frontend/host/project_definitions_host.nim
 23c060d288d9b532951fb6a8ee6801af466f5db483ad3b724a6fbb87b164799e  src/frontend/gpui/tests/test_gpui_project_visualisers.nim

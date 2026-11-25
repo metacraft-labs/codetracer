@@ -38,7 +38,7 @@ import ../viewmodel/session_vm
 import ../viewmodel/store/types
 import ../viewmodel/sync/[transport, sync_host]
 import ../viewmodel/plugin_host/[supervisor, key_snapshot, protocol]
-import ../tui/host/plugin_processes
+import ../host/plugin_processes
 import ../index/plugin_sessions
 import ../viewmodel/tests/unit/plugin_process_fixture
 import ../../common/node_os

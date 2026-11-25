@@ -10455,7 +10455,9 @@ proc handleTokenUnwatched(rt: TuiRuntime; token: string;
   if rt.keyCheck.active:
     if endsKeyCheck(name):
       var bound: seq[string] = @[]
-      for b in rt.router.effective.bindings & rt.router.user.bindings:
+      for b in rt.router.effective.rows:
+        if b.chords.len == 1: bound.add b.chords[0]
+      for b in rt.router.user.rows:
         if b.chords.len == 1: bound.add b.chords[0]
       rt.note(rt.keyCheck.report(bound))
       rt.keyCheck = KeyCheck()
@@ -10491,7 +10493,7 @@ proc handleTokenUnwatched(rt: TuiRuntime; token: string;
       var route = rt.plugins.routeLayerKey(name)
       if not route.consumed:
         var userBound = false
-        for b in rt.router.user.bindings:
+        for b in rt.router.user.rows:
           if b.chords.len == 1 and b.chords[0] == name:
             userBound = true
         if not userBound:

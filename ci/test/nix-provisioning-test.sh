@@ -310,7 +310,11 @@ done
 # 53 -> 54: darwin-lock-resolve.yml's `resolve` (eafa5b227), which re-solves
 # the Apple Silicon lock on a macOS runner. It installs Nix through
 # ./.github/actions/setup-nix before its first `nix`.
-readonly EXPECTED_NIX_JOBS=54
+#
+# 54 -> 55: codetracer.yml's `viewmodel-tests-wasm-parity`, PLAT-17's parity
+# gate split off `viewmodel-tests-wasm`, which it ran out of time in. It
+# installs Nix with the same step as the job it came from.
+readonly EXPECTED_NIX_JOBS=55
 
 if [ "${#nix_jobs[@]}" -eq "$EXPECTED_NIX_JOBS" ]; then
 	ok "the scanner still classifies the nix-using jobs (${#nix_jobs[@]})"

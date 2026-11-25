@@ -58,7 +58,7 @@ import ../app/views/shell
 import ../app/views/test_results_pane
 import ../host/test_results_source
 import ../../viewmodel/host/native_test_host   # `running`, the job's pid
-from ../host/native_host import recordingFolderOf, traceFolderProblem
+from ../../host/native_host import recordingFolderOf, traceFolderProblem
 import ./fixtures/fixture_provider
 import ./fixtures/plat53_noir_project
 import ../../../common/view_vocabulary

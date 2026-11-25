@@ -48,7 +48,9 @@ import ./fixtures/fixture_provider
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 211
+const ExpectedAssertions = 213
+  ## 211 -> 213, measured: `grPluginMarker` (a plugin's source marker with no
+  ## glyph of its own) is a role that keeps its glyph, so it adds two.
   ## Measured: the quiet column checks each of the 47 glyph roles (one for a
   ## decorative role, two for one that keeps its glyph), the full screen
   ## nine per pane over four panes.
