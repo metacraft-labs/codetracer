@@ -1,17 +1,17 @@
- ◌ Replace the…   CLI
- ◌ Cap the telemetry…  CT ✕
+ ○ Replace the…   CLI
+ ○ Cap the telemetry…  CT ✕
  ◌ Fix the flaky…  Tg
- ◌ Add search t…  TUI
- ◌ Benchmark rou…  CT
+ ● Add search t…  TUI
+ ◑ Benchmark rou…  CT
  ◌ Add jitter t…  Web
- ◌ Cache the de…  CLI
+ ◔ Cache the de…  CLI
  ◌ Profile the i…  CT
  ◌ Migrate cache…  Tg
- ◌ Persist the…   TUI
- ◌ Migrate the C…  CT
+ ● Persist the…   TUI
+ ◑ Migrate the C…  CT
  ◌ Split the se…  Web
- ◌ Port the rou…  CLI
- ◌ Retry telemet…  CT   +
+ ○ Port the rou…  CLI
+ ◔ Retry telemet…  CT   +
                                              
                                              
                                              
