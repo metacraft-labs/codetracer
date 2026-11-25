@@ -406,3 +406,208 @@ WHAT WOULD CHANGE THIS. If the publish tail were moved out of this workflow
 into a separate workflow keyed on a successful run of this one, reason 1
 would stop applying and `true` would become arguable. Until then, do not
 flip line 182 to a constant.
+
+## The codetracer workflow: sibling refs and the Windows bootstrap
+
+Moved from the comment above `windows-bootstrap-smoke` in `.github/workflows/codetracer.yml`.
+GitHub refuses a workflow file over 512,000 bytes: every run, pushed or dispatched, ends as a
+startup failure with no jobs and "This run likely failed because of a workflow file issue".
+The file crossed it at 10deaa18de6 (512,978 bytes); its parent, at 511,737, still started.
+Long explanations belong here, with a pointer in the workflow.
+
+```text
+WHY EVERY `siblings:` ENTRY CARRIES AN EXPLICIT `=dev` REF.
+
+`metacraft-github-actions/setup-dev-env` clones cross-repo siblings via its
+`clone-siblings` sub-action. A bare entry (`codetracer-trace-format`) asks
+that action to resolve the revision from a *workspace lock*. An entry of the
+form `name=ref` skips that lookup and clones `ref` directly.
+
+WHICH lock answers a bare entry changed on 2026-09-30. Since
+reprobuild-specs Unified-Locking-And-Hooks.md §14.5 it is the triggering
+commit's own committed `repro.lock` (`lock-store: committed`, the default;
+no manifests repo is contacted). The history below is about the lock it
+read BEFORE that: a per-commit record published to
+`metacraft-labs/metacraft-manifests@latest` by the workspace tooling's
+pre-push hook.
+
+Record publication for this repo stopped on 2026-08-02 (last entry:
+`locks/dev/codetracer/784c9bda…​.xml`). `clone-siblings` probed the pushed
+commit and its parent only (`--no-walk`), so `dev` stayed resolvable for
+exactly one more commit and then broke: 8d587343 (parent 784c9bda) was the
+last green `Setup dev env`; 3583cd6b (run 30951549711, 2026-08-04) was the
+first red one, and every push after it failed the same way:
+
+  ##[error]No workspace lock for codetracer (candidates: <sha> <parent>).
+  Neither a repo-workspaces locks/<project>/codetracer/<sha>.xml nor a
+  reprobuild locks/<project>/codetracer/<sha>.toml exists in
+  metacraft-labs/metacraft-manifests@latest.
+
+That took out `lint-rust`, `test-non-gui`, `test-ui-tests` (both legs),
+`test-ui-tests-rr`, `visual-replay-regression-gate` and `ct-test-providers`
+in their first real step, which in turn left nine jobs declaring `needs:` on
+them `skipped` — the exact "the tests never ran" state `ci-verdict` exists
+to name.
+
+The fix at the time was to stop depending on that record: siblings were
+pinned to the branch the lock itself recorded for every one of them
+(`upstream="dev"` in 784c9bda's lock), which is also what the lock-free
+paths in this file already do — the `clone-repo` steps in
+`viewmodel-tests` / `test-non-gui` all clone `ref: dev`.
+
+ONE FAMILY OF SIBLINGS NO LONGER PARTICIPATES IN ANY OF THIS. codetracer's
+from-source dependencies — isonim and the four nim-* libraries — are
+provisioned by `.github/actions/provision-repro-lock-siblings` from the
+`repro.lock` COMMITTED IN THIS REPO, at exact SHAs, with no manifest repo
+in the path at all. A lock that lives next to the source it describes
+cannot lapse, and does not have to be told which repos a developer happened
+to have checked out. Since §14 that is also the lock a bare entry resolves
+from.
+
+This changes WHERE a revision comes from, not WHICH repos are provisioned
+or what any job asserts. Dropping an `=dev` suffix now restores per-commit
+pinning for that sibling once this repo's committed `repro.lock` pins it
+(`clone-siblings` refuses a bare entry the lock does not pin, and the
+`workspace-lock-freshness` job checks every bare-declared sibling against
+that lock). `ci/test/sibling-provisioning-test.sh` treats a bare entry as
+the good shape and holds the remaining branch-tip entries under a
+shrink-only ceiling (`BRANCH_TIP_CEILING`); lower it when one is converted.
+
+NOTE (CIP-5 Wave 4): the whole Windows platform was migrated as a single
+unit (honoring the prior "move the whole platform or none of it" rule) from
+the GitHub-hosted `windows-latest` onto the self-hosted `eph-win-x64`
+class, now that it is provisioned. These jobs keep their DIY env.ps1
+(`windows-diy`) toolchain path unchanged — only the runner label moved;
+`eph-win-x64` is the DIY-Windows runner. `eph-win-arm64` is intentionally NOT
+added here (env.ps1 ARM support is unverified in CI and that class still
+queues); revisit once eph-win-arm64 is live.
+
+WHY EVERY eph-win-x64 JOB STARTS WITH "Ensure Git and Git Bash":
+the migration above moved the runner label but inherited the GitHub-hosted
+`windows-latest` *image contract*, and `eph-win-x64` does not honour it.
+The garm-provisioned image ships neither `git` nor `bash` on PATH, which
+took out three of the four Windows jobs in three different places:
+
+  windows-bootstrap-smoke   "Validate env.sh syntax"   -> bash: command not found
+  windows-named-pipe-tests  "Install Rust toolchain"   -> bash: command not found
+                            (dtolnay/rust-toolchain's own step is shell: bash)
+  windows-rust-components   "Checkout"                 -> Input 'submodules' not
+                            supported when falling back to the GitHub REST API
+
+All three logs also carry actions/checkout's tell: "The repository will be
+downloaded using the GitHub REST API / To create a local Git repository
+instead, add Git 2.18 or higher to the PATH." Runs 30726348404, 31180327493
+and 31385899773 fail identically, so this is the steady state of the lane,
+not a one-off.
+
+`ci/ensure-git-for-checkout.ps1` already solved exactly this — it finds or
+provisions a pinned, digest-verified PortableGit and puts BOTH `cmd/`
+(git.exe) and `bin/` (bash.exe) on GITHUB_PATH. It was wired into
+`origin-dap-windows` only, where its step is the one Windows step that has
+been passing throughout. Every eph-win-x64 job now runs it, first, before
+checkout: the jobs that check out submodules need git *for* the checkout,
+and the jobs whose first real step is `shell: bash` need bash before it.
+It is fetched over HTTPS at the immutable `github.sha` rather than run from
+the tree because at that point there is no tree — the checkout is the step
+it is making possible.
+
+`ci/test/windows-runner-bootstrap-test.sh` pins this: it fails if any
+eph-win-x64 job stops opening with the bootstrap.
+```
+
+## The codetracer workflow: how each timeout-minutes was arrived at
+
+Moved from the head of `.github/workflows/codetracer.yml` for the same 512,000-byte limit.
+
+```text
+EVERY JOB BELOW CARRIES AN EXPLICIT `timeout-minutes`, AND HOW EACH ONE WAS
+ARRIVED AT.
+
+Before 2026-09-06 twelve of this file's forty-two jobs were bounded and
+THIRTY were not. An unbounded job inherits GitHub's 360-minute default, which
+on `ubuntu-latest` costs a slow queue and on a self-hosted runner costs the
+runner: the org GARM pool was measured at fourteen runners total, twelve busy,
+two offline. Twenty-five of the thirty unbounded jobs ran on self-hosted
+runners -- including every build-artefact job and all four lint lanes -- so a
+hung job did not idle, it stranded a scarce machine for six hours.
+
+THE RULE THE NUMBERS FOLLOW. Each bound is derived from that job's OWN
+measured green duration over a 200-run window (2026-09-03 to 2026-09-05,
+2356 job records), and the measurement is quoted in a comment on the job. No
+single number is copied across jobs: a uniform bound is a guess wearing a
+measurement's clothes, and the next reader cannot tell which bounds were
+reasoned about. Where a job's greens are tightly clustered the bound is a
+multiple of the MAX green, not the median -- for `dmg-build` the max green is
+3.7x the median, and that spread is a cold Nix cache, which is a normal green,
+not an anomaly. 15 minutes is used as a floor for jobs whose whole body is
+seconds of work, because below that the bound would be measuring runner setup.
+
+ERRING GENEROUS, DELIBERATELY. A timeout that fires on healthy work is worse
+than no timeout: it converts a slow green into a red and teaches people to
+ignore reds. Every bound here is at least ~2x the slowest green ever observed
+for that job and most are 3-5x. The intent is to catch a HUNG job, not a slow
+one.
+
+THE TWO TRAPS IN READING `gh run view --json jobs`, both of which caught an
+earlier pass at this and both of which are why several bounds below are much
+wider than a naive reading would give:
+
+  * A `cancelled` duration is NOT a duration. It says only that the job was
+    still running at that instant, which is a LOWER bound. In this window
+    every reading over 60 minutes was a cancellation, and the largest of them
+    came in pairs -- `test-ui-tests-rr` and `test-ui-tests (nixos)` both stop
+    at exactly 128.7m in run 33732534675 -- which is the signature of a whole
+    run being cancelled, not of two jobs finishing.
+
+  * A `failure` duration is not a green duration either, and usually is not
+    even close. These jobs fail EARLY and skip the rest: `viewmodel-tests`
+    stops at step 15 of 31, `cross-process-linux` at step 7 of 9,
+    `ct-test-providers` at step 6 of 11. The green path runs everything they
+    skipped, so a failure duration is a lower bound on green. Failure
+    durations are used below only to check that a bound clears them by a wide
+    margin, never as the duration itself.
+
+TEN JOBS HAVE NO GREEN SAMPLE AT ALL in this window, which is a finding in its
+own right and is recorded on each of them rather than papered over:
+`origin-dap-macos-nightly`, `cross-process-linux`, `viewmodel-tests`,
+`dmg-lib-check`, `test-non-gui` (both legs), `test-ui-tests` (both legs),
+`ct-test-providers`, `push-to-attic`, `create-release`, `ci-verdict`. Of
+these, `push-to-attic` and `create-release` have no sample of ANY kind -- only
+zero-length cancellations, meaning they never started. (`push-to-attic` has
+since moved to its own workflow, cache-push.yml, 2026-11-16.) Their bounds are
+structural, not measured, and say so. Nine of the twelve ALREADY-bounded jobs
+have no green sample either; the whole Windows family is red.
+
+AN EXISTING BOUND THIS MEASUREMENT CALLS INTO QUESTION. `test-ui-tests-rr`
+carries `timeout-minutes: 120`, but that job was observed still EXECUTING at
+128.7m (run 33732534675) and at 120.3m (run 33733277454) before its run was
+cancelled. Those are lower bounds, so it is not proven that a healthy
+`test-ui-tests-rr` exceeds 120m -- but it is not proven that it does not, and
+120 is below a length this job has demonstrably reached. The new bound on its
+sibling `test-ui-tests` is set to 150 for exactly this reason. `-rr`'s 120 is
+left as-is here rather than changed on lower-bound evidence alone; the first
+time it times out at 120 with the suite still progressing, raise it to 150 to
+match.
+
+THIS IS NOT WHAT `queue-watchdog` DOES, DESPITE THE NAME. Read that job before
+assuming otherwise -- an earlier attempt to reason about it went wrong exactly
+here. `queue-watchdog` runs only on `pull_request` and asks a WITHIN-RUN
+question: is anything servicing THIS run, or are all its jobs `queued` with
+none `in_progress`? It watches for a runner-provisioning outage, not for a job
+that holds a runner and will not give it back. It never looks at another run
+and never looks at a concurrency group, so it cannot see the condition these
+bounds address. Its own 300-minute bound is likewise not a duration: it polls
+until the run is fully scheduled, which is why its greens run 77-122 minutes.
+
+The bounds above are the structural answer to "how long can one run hold this
+group", and they answer it WITHOUT a watchdog. With every job bounded and
+`ci/verdict/job-timeouts.py` keeping them bounded, the worst case is the
+longest path through `needs:`, computable from this file alone. For a push
+that is test-ui-tests (150) -> push-to-attic (60) = 210 minutes. (Since
+2026-11-16 the cache push is cache-push.yml, outside this graph, so the
+longest path is now test-ui-tests alone.) A watchdog
+would report the same fact later, and only after a runner had already been
+stranded for the afternoon.
+```
+
+`test-ui-tests` has been bounded at 210 minutes since the Firefox scenario lane joined it.
