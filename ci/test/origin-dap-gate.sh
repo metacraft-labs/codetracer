@@ -12,6 +12,9 @@ readonly SCRIPT_DIR
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
 readonly REPO_ROOT
 readonly GATE="$REPO_ROOT/scripts/test-origin-dap.sh"
+# The workflow these Windows-YAML assertions read. Overridden only by this
+# script's own whole-gate cases below, which feed it a mutated copy.
+readonly WORKFLOW="${ORIGIN_DAP_GATE_WORKFLOW:-$REPO_ROOT/.github/workflows/codetracer.yml}"
 
 fail() {
 	echo "origin-DAP shell contract test failed: $*" >&2
@@ -81,7 +84,7 @@ workflow_job() {
     $0 == "  " job ":" { active = 1; print; next }
     active && $0 ~ /^  [A-Za-z0-9_-]+:$/ { exit }
     active { print }
-  ' "$REPO_ROOT/.github/workflows/codetracer.yml"
+  ' "$WORKFLOW"
 }
 
 workflow_step() {
@@ -491,6 +494,51 @@ if [ "${ORIGIN_DAP_AMBIENT_REQUIRED_CHILD:-0}" != "1" ]; then
 	printf '%s\n' "$ambient_required_self_test" |
 		grep -Fq "origin-DAP shell contract tests passed" ||
 		fail "ambient-required shell contract self-test omitted its success marker"
+fi
+
+# (c) on the WHOLE gate, not only on the contract function: a copy of the real
+# workflow whose only defect is the missing .git check must be refused with the
+# (c) message. Two ways to have that one defect while keeping every other
+# assertion -- including the eleven-step Windows PowerShell count -- intact:
+# the step stays but checks nothing, or it checks but no longer comes right
+# after checkout. The child sentinel prevents recursion.
+if [ "${ORIGIN_DAP_GATE_MUTATION_CHILD:-0}" != "1" ]; then
+	mutation_dir="$(mktemp -d "${TMPDIR:-/tmp}/codetracer-origin-dap-gate-mutation.XXXXXX")"
+	expect_whole_gate_refuses_c() { # label, mutated workflow file
+		local out
+		if out="$(ORIGIN_DAP_GATE_MUTATION_CHILD=1 ORIGIN_DAP_AMBIENT_REQUIRED_CHILD=1 \
+			ORIGIN_DAP_GATE_WORKFLOW="$2" bash "$REPO_ROOT/ci/test/origin-dap-gate.sh" 2>&1)"; then
+			rm -rf "$mutation_dir"
+			fail "the whole gate accepted a workflow $1"
+		fi
+		grep -Fq "(c) the step right after checkout must fail the job when there is no .git" <<<"$out" || {
+			rm -rf "$mutation_dir"
+			fail "the whole gate refused a workflow $1, but not for (c): $(tail -n1 <<<"$out")"
+		}
+	}
+	# The .git check's body replaced by a step that checks nothing.
+	awk '
+		/^  origin-dap-windows:$/ { job = 1 }
+		job && /^  [A-Za-z0-9_-]+:$/ && !/^  origin-dap-windows:$/ { job = 0 }
+		job && $0 == "      - name: Verify the checkout is a Git repository" { step = 1; print; next }
+		step && /^      - name: / { step = 0 }
+		step && /^        run: \|$/ { print; print "          Write-Host \"no check\""; skip = 1; next }
+		step && skip && /^          / { next }
+		{ print }
+	' "$WORKFLOW" >"$mutation_dir/neutered.yml"
+	expect_whole_gate_refuses_c "whose .git check checks nothing" "$mutation_dir/neutered.yml"
+	# The .git check moved after the submodule fetch.
+	awk '
+		/^  origin-dap-windows:$/ { job = 1 }
+		job && /^  [A-Za-z0-9_-]+:$/ && !/^  origin-dap-windows:$/ { job = 0 }
+		job && $0 == "      - name: Verify the checkout is a Git repository" { held = 1 }
+		held && $0 == "      - name: Fetch the submodules this job uses" { held = 0; moving = 1 }
+		moving && $0 == "      - name: Restore the toolchain cache" { printf "%s", block; moving = 0 }
+		held { block = block $0 "\n"; next }
+		{ print }
+	' "$WORKFLOW" >"$mutation_dir/moved.yml"
+	expect_whole_gate_refuses_c "whose .git check is not right after checkout" "$mutation_dir/moved.yml"
+	rm -rf "$mutation_dir"
 fi
 
 echo "origin-DAP shell contract tests passed"
