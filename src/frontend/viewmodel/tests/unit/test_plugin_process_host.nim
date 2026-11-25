@@ -455,6 +455,28 @@ suite "§11.6, §11.8: faults are attributed, and siblings survive":
       r.sup.renderSurface("acme-tools.metrics/overview").allText.contains("main.nim"))
     r.sup.shutdown()
 
+  test "a flooding plugin's relayed action and its answer still arrive":
+    # The bucket drops what a plugin pushes past the limit, never its replies
+    # or its actions: `flame.refresh` floods, then relays a watch and answers,
+    # so both reach the host behind its own pushes with the bucket empty.
+    var r = newRig("flood-relay")
+    r.sup.setRateLimit(50, 100)
+    r.sup.floodStrikeAfterMs = 60_000   # the drops are the subject, not the strike
+    var taken: seq[string]
+    r.sup.actionHook = proc(msg: JsonNode; refusal: var string): bool =
+      taken.add msg{"vm"}.getStr("") & "." & msg{"action"}.getStr("") & " " &
+        msg{"args"}{"expression"}.getStr("")
+      true
+    r.both()
+    check r.sup.waitUntil("active", proc(): bool = r.active("acme-tools.flame"))
+    let id = r.sup.invoke("acme-tools.flame", "flame.refresh")
+    check r.sup.waitUntil("answered", proc(): bool =
+      r.sup.answers.anyIt(it.id == id and it.kind == "done"))
+    check r.sup.slot("acme-tools.flame").droppedMessages > 0
+    check taken == @["state.addWatch after-flood"]
+    check r.sup.slot("acme-tools.flame").actionsApplied == 1
+    r.sup.shutdown()
+
   test "a handler error is that plugin's, and the process keeps running":
     var r = newRig("raise")
     r.both()

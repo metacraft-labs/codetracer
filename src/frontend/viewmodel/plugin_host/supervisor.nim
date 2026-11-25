@@ -1268,11 +1268,16 @@ proc handleMessage(sup: Supervisor; inst: Instance; msg: JsonNode) =
       sup.strike(s, fkProtocol, "a '" & t & "' message while not active",
                  false)
     return
-  # The bucket counts what a plugin PUSHES. Its lifecycle replies and its
-  # acknowledgements are never dropped: a flood that swallowed its own
-  # `activated` would leave the plugin starting for ever, and a dropped `ack`
-  # would turn a flood into missed input deadlines it did not miss.
-  if t notin ["activated", "activation-failed", "ack"] and
+  # The bucket counts what a plugin PUSHES. Its lifecycle replies, its
+  # acknowledgements, its answers and its relayed actions are never dropped:
+  # a flood that swallowed its own `activated` would leave the plugin starting
+  # for ever, a dropped `ack` or answer would turn a flood into missed input
+  # deadlines it did not miss, and a dropped action is a command the user
+  # gave that silently never ran. Under load a plugin's pushes reach the host
+  # in bursts, so the reply to a key could land behind its own pushes with
+  # the bucket empty.
+  if t notin ["activated", "activation-failed", "ack", "answer", "rows",
+              "done", "error", "action"] and
      not sup.takeToken(s):
     return
   case t
