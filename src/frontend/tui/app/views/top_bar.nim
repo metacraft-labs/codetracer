@@ -101,6 +101,10 @@ type
     controlsEnabled*: seq[bool]
       ## Per `TransportControls`, from the ViewModel's `transportAvailable`.
       ## Empty means "no session": every control is drawn disabled.
+    hideControls*: bool
+      ## When true the transport controls and Stop are omitted from the layout
+      ## entirely — used while the Welcome screen is shown so the bar does not
+      ## carry controls that belong to a previously opened trace (issue #833).
     hoveredControl*: int
       ## The control under the pointer (or keyboard-focused), -1 for none.
     stopEnabled*: bool
@@ -361,10 +365,11 @@ proc topBarLayout*(m: TopBarModel; width: int): TopBarLayout =
   if headerBudget >= 10:
     headerW = min(textCells(headerText), headerBudget)
     discard take(headerW + 1)
-  # 4. The controls.
+  # 4. The controls — omitted while the Welcome screen is shown (issue #833).
   let controlBudget = avail - used - 1
-  result.shownControls = controlsSubset(result.effectiveIcons,
-                                        max(0, controlBudget))
+  if not m.hideControls:
+    result.shownControls = controlsSubset(result.effectiveIcons,
+                                          max(0, controlBudget))
   let controlsW = controlsWidth(result.effectiveIcons, result.shownControls)
   if controlsW > 0:
     discard take(controlsW + 1)
@@ -373,7 +378,8 @@ proc topBarLayout*(m: TopBarModel; width: int): TopBarLayout =
   # exactly what it was; on a row too narrow for it, Stop stays the menu's
   # and the chord's.
   var stopW = 0
-  if controlsW > 0 and take(stopCells(result.effectiveIcons) + 1):
+  if not m.hideControls and controlsW > 0 and
+     take(stopCells(result.effectiveIcons) + 1):
     stopW = stopCells(result.effectiveIcons)
   # 5. The omnibar field.
   if not omnibarOpen and omniW > 0:

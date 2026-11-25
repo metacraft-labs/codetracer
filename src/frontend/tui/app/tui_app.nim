@@ -766,6 +766,7 @@ proc shellModel*(app: TuiApp; width, height: int): ShellModel =
     topBar: TopBarModel(menu: app.menu, omnibar: app.omnibar,
                         icons: app.icons, graphicsDrawn: app.graphicsDrawn,
                         controlsEnabled: app.controlsEnabledOf(),
+                        hideControls: not app.shownWelcome().isNil,
                         hoveredControl: app.hoveredControl,
                         stopEnabled: app.hasDebugSession,
                         hoveredStop: app.hoveredStop,
