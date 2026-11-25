@@ -1998,8 +1998,10 @@ stages:
       have one). `panes` (comma-separated pane roles: call-trace, event-log,
       variables, scratchpad, requests) are opened with it, for a front-end
       that opens its panels one by one (VS Code); a front-end whose layout
-      already shows them ignores it.
-    params: { recording: text, tick: int, width: int, height: int, deployment: text, panes: text }
+      already shows them ignores it. `layout: split` puts each of those panes
+      in view at once, as the desktop shows its panes (VS Code: a group of
+      its own each), rather than as tabs of one group.
+    params: { recording: text, tick: int, width: int, height: int, deployment: text, panes: text, layout: text }
   open-project:
     summary: >-
       Start the front-end in Edit mode on a project folder (a path under

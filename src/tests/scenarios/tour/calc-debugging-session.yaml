@@ -1,0 +1,190 @@
+scenario: 1
+name: tour/calc-debugging-session
+pack: codetracer
+summary: >-
+  A debugging session on a recording of a small calculator: step through the
+  module, jump to a line of output in the event log, step back to the call
+  that computed it, step into the evaluator and down to the multiplication,
+  read the arguments and the call trace, step out, go back to the start of
+  main() from the call trace and step over its first expression. The same
+  session on every front-end.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 200, height: 50, panes: "call-trace,event-log,variables", layout: split }
+
+# Every input is followed by a wait on what it does (the line the replay
+# stops on), so no input waits for the window to go quiet first (`settle:
+# false`): on a loaded host a front-end read through its webviews or by OCR
+# takes longer to read three times alike than the move takes to land.
+steps:
+  - beat: open
+    caption: { text: "Open a recording of calc.py" }
+    steps:
+      - wait: { until: replay-idle, timeout: 120s }
+      - wait: { until: editor.loaded, timeout: 60s }
+      - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }
+      - wait: { until: event-log.loaded, timeout: 60s }
+      - wait: { until: call-trace.loaded, timeout: 60s }
+      - capture: { name: recording-open }
+
+  - beat: step-over
+    caption: { text: "Step over the module's definitions" }
+    steps:
+      - chord: { bound: debugger.step-over }
+        settle: false
+      - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(2)" }, timeout: 60s }
+        dwell: 700ms
+      - chord: { bound: debugger.step-over }
+        settle: false
+      - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(29)" }, timeout: 60s }
+        dwell: 700ms
+      - chord: { bound: debugger.step-over }
+        settle: false
+      - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(34)" }, timeout: 60s }
+        dwell: 700ms
+      - chord: { bound: debugger.step-over }
+        settle: false
+      - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(39)" }, timeout: 60s }
+        dwell: 700ms
+
+  - beat: jump-to-output
+    caption: { text: "Jump to the line that printed 6 * 7 = 42" }
+    steps:
+      - wait: { until: { at: event-log, assert: 'has-output("checksum")' }, timeout: 30s }
+      # the third line of output; its text is drawn with its channel on some
+      # front-ends (`stdout: 6 * 7 = 42`), so the row is named by its place
+      - click: { at: 'event-log/event[#3]', pace: thoughtful }
+        settle: false
+      - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(111)" }, timeout: 60s }
+        dwell: 700ms
+
+  - beat: step-back
+    caption: { text: "Step back to the call that computed it" }
+    steps:
+      - chord: { bound: debugger.reverse-step-over }
+        settle: false
+      - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(110)" }, timeout: 60s }
+        dwell: 700ms
+      - chord: { bound: debugger.reverse-step-over }
+        settle: false
+      - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(109)" }, timeout: 60s }
+        dwell: 700ms
+
+  - beat: step-into
+    caption: { text: "Step into evaluate()" }
+    steps:
+      - chord: { bound: debugger.step-into }
+        settle: false
+      - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(72)" }, timeout: 60s }
+        dwell: 700ms
+      - chord: { bound: debugger.step-over }
+        settle: false
+      - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(79)" }, timeout: 60s }
+        dwell: 700ms
+      - chord: { bound: debugger.step-over }
+        settle: false
+      - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(80)" }, timeout: 60s }
+        dwell: 700ms
+      - chord: { bound: debugger.step-over }
+        settle: false
+      - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(81)" }, timeout: 60s }
+        dwell: 700ms
+      - chord: { bound: debugger.step-over }
+        settle: false
+      - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(82)" }, timeout: 60s }
+        dwell: 700ms
+      - chord: { bound: debugger.step-over }
+        settle: false
+      - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(83)" }, timeout: 60s }
+        dwell: 700ms
+      - chord: { bound: debugger.step-over }
+        settle: false
+      - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(84)" }, timeout: 60s }
+        dwell: 700ms
+      - chord: { bound: debugger.step-over }
+        settle: false
+      - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(85)" }, timeout: 60s }
+        dwell: 700ms
+
+  - beat: down-to-mul
+    caption: { text: "Step into apply_op() and on into mul()" }
+    steps:
+      - chord: { bound: debugger.step-into }
+        settle: false
+      - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(61)" }, timeout: 60s }
+        dwell: 700ms
+      - chord: { bound: debugger.step-over }
+        settle: false
+      - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(68)" }, timeout: 60s }
+        dwell: 700ms
+      - chord: { bound: debugger.step-over }
+        settle: false
+      - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(69)" }, timeout: 60s }
+        dwell: 700ms
+      - chord: { bound: debugger.step-into }
+        settle: false
+      - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(39)" }, timeout: 60s }
+        dwell: 700ms
+      - chord: { bound: debugger.step-over }
+        settle: false
+      - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(41)" }, timeout: 60s }
+        dwell: 700ms
+
+  - beat: inspect
+    caption: { text: "mul() has its arguments; the call trace shows the path to it" }
+    steps:
+      # the values themselves (left=6, right=7) are on screen; what is checked
+      # is what every front-end reads reliably (a vision-read single digit is not)
+      - wait: { until: { at: variables, assert: 'has-variable("left")' }, timeout: 60s }
+        dwell: 1500ms
+      - wait: { until: { at: call-trace, assert: 'has-call("mul")' }, timeout: 30s }
+        dwell: 1500ms
+
+  - beat: step-out
+    caption: { text: "Step out: apply_op() returns the product into evaluate()" }
+    steps:
+      - chord: { bound: debugger.step-out }
+        settle: false
+      - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(86)" }, timeout: 60s }
+        dwell: 700ms
+
+  - beat: call-trace-jump
+    caption: { text: "Back to the start of main() from the call trace" }
+    steps:
+      - click: { at: 'call-trace/call[name="main"]', anchor: name, pace: thoughtful }
+        settle: false
+      - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(99)" }, timeout: 60s }
+        dwell: 700ms
+      - chord: { bound: debugger.step-over }
+        settle: false
+      - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(107)" }, timeout: 60s }
+        dwell: 700ms
+      - capture: { name: main-start }
+
+  - beat: first-iteration
+    caption: { text: "Step over the first expression: 2 + 3 = 5" }
+    steps:
+      - chord: { bound: debugger.step-over }
+        settle: false
+      - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(108)" }, timeout: 60s }
+        dwell: 700ms
+      - chord: { bound: debugger.step-over }
+        settle: false
+      - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(109)" }, timeout: 60s }
+        dwell: 700ms
+      - chord: { bound: debugger.step-over }
+        settle: false
+      - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(110)" }, timeout: 60s }
+        dwell: 700ms
+      - chord: { bound: debugger.step-over }
+        settle: false
+      - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(111)" }, timeout: 60s }
+        dwell: 700ms
+      - chord: { bound: debugger.step-over }
+        settle: false
+      - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(108)" }, timeout: 60s }
+        dwell: 1500ms
+      - capture: { name: first-iteration }

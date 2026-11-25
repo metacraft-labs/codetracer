@@ -216,7 +216,7 @@ src/frontend/tui/tests/plat59-visual-replay-mutation-control.sha256	src/tests/gu
 # plat47: graded at 39e4112f69; b9396a9502  moved
 # src/frontend/tui/app/runtime.nim after the grade. Re-grade the arms whose
 # needles sit in them.
-src/tests/scenarios/plat66-pack-mutation-control.sha256	ci/test/scenarios.sh	4edebac246b9c375f8b5e181b3fb621774088543476bea5c556b0e1d642c0e77	7d98af7b45bf778493d101884934bf59e17454d427bb35aad0dd9691ee30e792
+src/tests/scenarios/plat66-pack-mutation-control.sha256	ci/test/scenarios.sh	4edebac246b9c375f8b5e181b3fb621774088543476bea5c556b0e1d642c0e77	1a81cc8f2eb296ee3be4d618715db9a038bdf0da46f68f4b61c74e99041c76ec
 
 # The shared editor on every editor surface (ui/editor_surface: the macro
 # expansions, low-level views, a recording-with-diff's removed lines, the
@@ -321,7 +321,7 @@ src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/tui/te
 src/frontend/tui/tests/plat52-terminal-mutation-control.sha256	src/tests/gui/tests/views/isonim_views_test.nim	9eaf8754a0eade9bc628c1532aa3f4045c1d21e1021313d5bd9378c5e8816281	a61d87c74a222b2ee626aa2e190a4f71781ea8dc0b0a313ddd630666688fb40a
 src/frontend/tui/tests/plat61-shell-mutation-control.sha256	scripts/plat61-capture-electron.sh	ddf8eb29ee05d8338a6ae75d6b760fd8e97e93b9d305e91b23edec85ebc78f31	29ffb9b9c2b989f03e4c56fdcc77ede40448ee3c85ed688dcab66897d59a93c6
 src/frontend/viewmodel/tests/unit/plat29-async-mutation-control.sha256	src/frontend/tests/dap_session_routing_test.nim	23f78b7c75cf637296b0c6f87a1cfe695fb20ace8b7642f04df618a2b88cd56d	62e57ece0d63f73d0c2a18e98f4f3600ee96785701286b8250698fcaf25a06c4
-src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/playwright/codetracer-binding.ts	dac9e35953b0d93636c2284d9c9a858c2bba982b92e9311b0f41fb666e6879c0	df274e868521ea794ff014ccd254d178f0764c69861cbf9505bc9cabf520be1a
+src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/playwright/codetracer-binding.ts	dac9e35953b0d93636c2284d9c9a858c2bba982b92e9311b0f41fb666e6879c0	bc25d8e73250e58bc0e58c997a3288bc9820465bce06a16bf45dbcbec519cd02
 src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/ui/pointer_stamp.nim	a24171a98e4d55680be64a05b433b8c9596affba2307f0b3e868115059164c2f	61994fe2248bf5273ec52d5586190e22892f4ac10b52f8b9d51fed2c04206ecc
 # The Agent Harbor session timeline's story hosts (`feat(agent-harbor): the session activity timeline in every story host`)
 # moved test_plat64_reachability.nim: the timeline's four press operations count as offered.
