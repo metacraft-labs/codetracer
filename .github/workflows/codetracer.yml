@@ -391,11 +391,53 @@ jobs:
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           owner: metacraft-labs
 
+      # Not `submodules: recursive`: on an ephemeral runner that cloned all 37
+      # submodules one after another, 13 of a 20-minute Checkout (run
+      # 45134129306). The Git bootstrap above keeps checkout off the REST
+      # fallback, the next step proves it, and the step after fetches only the
+      # submodules this job uses. ci/test/origin-dap-gate.sh holds all three.
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          submodules: recursive
+          submodules: false
           token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Verify the checkout is a Git repository
+        # actions/checkout falls back to downloading a tarball over the REST
+        # API when it finds no usable Git, and that tree has no .git, so the
+        # explicit submodule fetch below could not run. The Git bootstrap
+        # above is what prevents the fallback; this makes a fallback fail here.
+        shell: powershell
+        run: |
+          if (-not (Test-Path -LiteralPath (Join-Path $env:GITHUB_WORKSPACE ".git"))) {
+            throw "actions/checkout left no .git in $env:GITHUB_WORKSPACE: it fell back to the REST API"
+          }
+
+      - name: Fetch the submodules this job uses
+        # db-backend's Cargo.toml names every tree-sitter grammar as a path
+        # dependency (cargo reads optional ones' manifests too); the Nim side
+        # needs nim-stew and nim-result (CT_EMULATOR_EXTRA_NIM_PATHS).
+        shell: powershell
+        run: |
+          $paths = @(
+            "libs/nim-stew", "libs/nim-result",
+            "libs/tree-sitter-nim", "libs/tree-sitter-cairo", "libs/tree-sitter-aiken",
+            "libs/tree-sitter-move-on-aptos", "libs/tree-sitter-sway", "libs/tree-sitter-circom",
+            "libs/tree-sitter-leo", "libs/tree-sitter-tolk", "libs/tree-sitter-masm",
+            "libs/tree-sitter-cadence")
+          # git reports progress on stderr; the exit code decides.
+          $ErrorActionPreference = "Continue"
+          git -c protocol.version=2 submodule update --init --recursive --depth=1 --jobs 8 -- @paths
+          if ($LASTEXITCODE -ne 0) { throw "git submodule update exited $LASTEXITCODE" }
+
+      - name: Restore the toolchain cache
+        # Written by origin-dap-windows-toolchain on scheduled and dispatched
+        # runs. A miss is not an error here: env.ps1 then installs the
+        # components itself.
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}\ct-diy
+          key: windows-diy-origin-dap-v3-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}
 
       - name: Setup db-backend siblings
         # This job needs exactly one thing from this action: the three
@@ -423,8 +465,11 @@ jobs:
         # origin_python_dap_test), and nothing in it touches TTD or WinDbg. The
         # check made it fail setup on a runner without the WinDbg package in
         # run 45069526428. The nightly matrix below keeps TTD required.
+        # The nightly job's cached root and component list, so the two share one
+        # cache. TTD is in the list only for that, and stays unchecked here.
         env:
-          WINDOWS_DIY_SKIP_NARGO: "1"
+          WINDOWS_DIY_INSTALL_ROOT: ${{ runner.temp }}\ct-diy
+          WINDOWS_DIY_ONLY: "GCC,ZSTD,ZLIB,RUST,NIM,CAPNP,UV,NODE,JUST,TTD"
           WINDOWS_DIY_ENSURE_TTD: "false"
         uses: ./.github/actions/setup-db-backend-siblings
         with:
@@ -727,6 +772,17 @@ jobs:
         with:
           submodules: false
           token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Verify the checkout is a Git repository
+        # actions/checkout falls back to downloading a tarball over the REST
+        # API when it finds no usable Git, and that tree has no .git, so the
+        # explicit submodule fetch below could not run. The Git bootstrap
+        # above is what prevents the fallback; this makes a fallback fail here.
+        shell: pwsh
+        run: |
+          if (-not (Test-Path -LiteralPath (Join-Path $env:GITHUB_WORKSPACE ".git"))) {
+            throw "actions/checkout left no .git in $env:GITHUB_WORKSPACE: it fell back to the REST API"
+          }
 
       - name: Fetch the submodules this job uses
         shell: pwsh

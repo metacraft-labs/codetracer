@@ -103,8 +103,8 @@ windows_nightly="$(workflow_job origin-dap-windows-nightly)"
 if grep -Fq 'shell: pwsh' <<<"$windows_per_pr"; then
 	fail "Windows per-PR origin-DAP job must not require unavailable PowerShell Core"
 fi
-[ "$(printf '%s\n' "$windows_per_pr" | grep -c 'shell: powershell$')" -eq 9 ] ||
-	fail "Windows per-PR origin-DAP job must run all nine PowerShell steps with Windows PowerShell"
+[ "$(printf '%s\n' "$windows_per_pr" | grep -c 'shell: powershell$')" -eq 11 ] ||
+	fail "Windows per-PR origin-DAP job must run all eleven PowerShell steps with Windows PowerShell"
 
 [ "$(printf '%s\n' "$windows_per_pr" | grep -c 'CT_TEST_LANGS: python$')" -eq 1 ] ||
 	fail "Windows per-PR origin-DAP job must select Python exactly once"
@@ -282,8 +282,98 @@ for required_companion in capnpc-c++.exe capnpc-capnp.exe nimble.exe; do
 		fail "Windows origin-DAP toolchain omitted $required_companion"
 done
 
-[ "$(printf '%s\n' "$checkout_step" | grep -c 'submodules: recursive$')" -eq 1 ] ||
-	fail "Windows checkout must retain recursive submodules"
+# The job checks out WITHOUT submodules and fetches the ones it uses itself
+# (a recursive checkout cloned all 37 one by one, 13 of a 20-minute Checkout
+# on an ephemeral runner). What `submodules: recursive` used to protect
+# against is actions/checkout's REST-API fallback, which cannot fetch
+# submodules and leaves no .git. Three things together keep that protection:
+#   (a) Git is installed before actions/checkout, so there is no fallback;
+#   (b) exactly the listed submodules are fetched explicitly after checkout;
+#   (c) the step right after checkout fails the job when there is no .git.
+# check_windows_checkout_contract prints the first one a job lacks and
+# returns 1; the cases below prove it refuses each missing piece.
+readonly WINDOWS_PER_PR_SUBMODULES="libs/nim-result
+libs/nim-stew
+libs/tree-sitter-aiken
+libs/tree-sitter-cadence
+libs/tree-sitter-cairo
+libs/tree-sitter-circom
+libs/tree-sitter-leo
+libs/tree-sitter-masm
+libs/tree-sitter-move-on-aptos
+libs/tree-sitter-nim
+libs/tree-sitter-sway
+libs/tree-sitter-tolk"
+
+check_windows_checkout_contract() {
+	local job="$1" names git_n co_n verify_n fetch_n co_text verify_text fetch_text fetched
+	names="$(printf '%s\n' "$job" | sed -n 's/^      - name: //p')"
+	git_n="$({ grep -nFx 'Ensure Git and Git Bash are on PATH' <<<"$names" || true; } | head -n1 | cut -d: -f1)"
+	co_n="$({ grep -nFx 'Checkout' <<<"$names" || true; } | head -n1 | cut -d: -f1)"
+	verify_n="$({ grep -nFx 'Verify the checkout is a Git repository' <<<"$names" || true; } | head -n1 | cut -d: -f1)"
+	fetch_n="$({ grep -nFx 'Fetch the submodules this job uses' <<<"$names" || true; } | head -n1 | cut -d: -f1)"
+	if [ -z "$git_n" ] || [ -z "$co_n" ] || [ "$git_n" -ge "$co_n" ]; then
+		echo "(a) Git must be installed before actions/checkout"
+		return 1
+	fi
+	co_text="$(printf '%s\n' "$job" | workflow_step 'Checkout')"
+	if ! grep -q '^          submodules: false$' <<<"$co_text"; then
+		echo "(b) actions/checkout must not fetch submodules itself (submodules: false)"
+		return 1
+	fi
+	if [ -z "$fetch_n" ] || [ "$fetch_n" -le "$co_n" ]; then
+		echo "(b) the submodules must be fetched explicitly after checkout"
+		return 1
+	fi
+	fetch_text="$(printf '%s\n' "$job" | workflow_step 'Fetch the submodules this job uses')"
+	fetched="$({ grep -oE '"libs/[A-Za-z0-9_.-]+"' <<<"$fetch_text" || true; } | tr -d '"' | sort -u)"
+	if ! grep -q 'submodule update --init' <<<"$fetch_text" ||
+		[ "$fetched" != "$WINDOWS_PER_PR_SUBMODULES" ]; then
+		echo "(b) the explicit fetch must fetch exactly the listed submodules"
+		return 1
+	fi
+	verify_text="$(printf '%s\n' "$job" | workflow_step 'Verify the checkout is a Git repository')"
+	if [ -z "$verify_n" ] || [ "$verify_n" -ne $((co_n + 1)) ] ||
+		! grep -Fq '".git"' <<<"$verify_text" || ! grep -q 'throw' <<<"$verify_text"; then
+		echo "(c) the step right after checkout must fail the job when there is no .git"
+		return 1
+	fi
+	return 0
+}
+
+# Drop the step named $2 from job text $1.
+without_step() {
+	printf '%s\n' "$1" | awk -v step="$2" '
+    $0 == "      - name: " step { skip = 1; next }
+    skip && $0 ~ /^      - name: / { skip = 0 }
+    !skip { print }
+  '
+}
+
+expect_checkout_refused() { # label, expected reason prefix, job text
+	local reason
+	if reason="$(check_windows_checkout_contract "$3")"; then
+		fail "the Windows checkout contract accepted a job $1"
+	fi
+	[[ "$reason" == "$2"* ]] ||
+		fail "the Windows checkout contract refused a job $1 for the wrong reason: $reason"
+}
+
+if ! checkout_reason="$(check_windows_checkout_contract "$windows_per_pr")"; then
+	fail "Windows per-PR origin-DAP checkout: $checkout_reason"
+fi
+expect_checkout_refused "without the Git bootstrap" "(a)" \
+	"$(without_step "$windows_per_pr" 'Ensure Git and Git Bash are on PATH')"
+expect_checkout_refused "whose checkout fetches submodules recursively" "(b)" \
+	"${windows_per_pr//          submodules: false/          submodules: recursive}"
+expect_checkout_refused "without the explicit submodule fetch" "(b)" \
+	"$(without_step "$windows_per_pr" 'Fetch the submodules this job uses')"
+expect_checkout_refused "that fetches a submodule too few" "(b)" \
+	"$(grep -v '"libs/nim-stew", ' <<<"$windows_per_pr" || true)"
+expect_checkout_refused "that fetches an unlisted submodule" "(b)" \
+	"${windows_per_pr//\"libs\/tree-sitter-cadence\")/\"libs/tree-sitter-cadence\", \"libs/zip\")}"
+expect_checkout_refused "without the .git check" "(c)" \
+	"$(without_step "$windows_per_pr" 'Verify the checkout is a Git repository')"
 # Matched by SHAPE, not by the mint step's id of the day. The id moved from
 # `app-token` to `ci_token` when the workflows were consolidated onto a single
 # mint step per job, and an id-literal assertion would have started failing on
