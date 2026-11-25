@@ -15,7 +15,7 @@
 
 import std/os
 
-import ../viewmodels/table_overflow
+import ../viewmodels/[table_overflow, event_log_vm]
 import ./native_state
 
 type
@@ -56,3 +56,43 @@ proc saveColumnWidths*(table: string;
   let failure = writeStaged(tableColumnsPath(), encodeColumnWidths(merged))
   if failure.len == 0: ""
   else: "the column widths could not be saved: " & failure
+
+proc eventLogColumnsPath*(): string =
+  nativeStateRoot() / EventLogColumnsFileName
+
+type
+  EventLogColumnsLoad* = object
+    ok*: bool
+      ## True when a valid file was found and decoded; false uses defaults.
+    c*: EventLogColumns
+    path*: string
+    message*: string
+
+proc loadEventLogColumns*(): EventLogColumnsLoad =
+  ## Read the persisted event log column layout (order + hidden). An absent
+  ## file is the defaults; a malformed file is refused by name.
+  let path = eventLogColumnsPath()
+  result = EventLogColumnsLoad(ok: false, c: defaultEventLogColumns(), path: path)
+  if not fileExists(path):
+    return
+  var text = ""
+  try:
+    text = readFile(path)
+  except CatchableError as e:
+    result.message = "the stored event-log column layout could not be read: " &
+                     path & ": " & e.msg
+    return
+  let decoded = decodeEventLogColumns(text)
+  if decoded.ok:
+    result.ok = true
+    result.c = decoded.c
+  else:
+    result.message = "the stored event-log column layout was ignored: " &
+                     decoded.message & " (in " & path & ")"
+
+proc saveEventLogColumns*(c: EventLogColumns): string =
+  ## Persist the event log column layout. "" on success, else the reason.
+  let path = eventLogColumnsPath()
+  let failure = writeStaged(path, encodeEventLogColumns(c))
+  if failure.len == 0: ""
+  else: "the event-log column layout could not be saved: " & failure

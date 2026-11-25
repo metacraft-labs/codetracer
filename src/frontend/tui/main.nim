@@ -311,6 +311,17 @@ proc wireColumnWidths(rt: TuiRuntime) =
   rt.saveColumnWidths = proc(table: string;
                              entries: seq[ColumnWidthEntry]): string =
     saveColumnWidths(table, entries)
+  # Issue #854: load persisted event log column layout (order + hidden).
+  let storedLayout = loadEventLogColumns()
+  if storedLayout.message.len > 0:
+    rt.app.notification = storedLayout.message
+  if storedLayout.ok:
+    var c = rt.app.eventLog.columns
+    c.order = storedLayout.c.order
+    c.hidden = storedLayout.c.hidden
+    rt.app.eventLog.columns = c
+  rt.saveEventLogLayout = proc(): string =
+    saveEventLogColumns(rt.app.eventLog.columns)
 
 proc adoptMouseMetrics(driver: TerminalDriver; n: StartupNegotiation) =
   ## PLAT-51 (Layout-ViewModel §4.2.2): what the start-up round said about
