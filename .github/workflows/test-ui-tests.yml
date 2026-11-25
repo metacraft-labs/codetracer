@@ -106,7 +106,7 @@ jobs:
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=2f01e602e70f69a04675293f3fa0d5bad9f196a1
             codetracer-trace-format-nim=3e50ca3f2bf6316e8f764952a84078cf59b11023
-            codetracer-native-recorder=95da3c1397cd62b9940ca91ce9109b7a61b228a9
+            codetracer-native-recorder=2a1a1c4e4e796008c077d90b79773f79258dcf5c
             # codetracer-native-backend and codetracer-visual-replay BY COMMIT as well: both are
             # `/agents` inputs in flake.nix (7ab073a22), so `=dev` cloned a different tree than the
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
