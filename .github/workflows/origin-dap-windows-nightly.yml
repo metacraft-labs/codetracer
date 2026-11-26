@@ -346,6 +346,11 @@ jobs:
           CARGO_INCREMENTAL: "0"
           CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
           CT_TEST_LANGS: all
+          # The gate's own shell contract tests (ci/test/origin-dap-gate.sh)
+          # took 28 of this job's 75 minutes on a Windows GARM runner (run
+          # 45775567755). They test the script, not the languages, and the
+          # Python origin-DAP job runs them on Windows for every change.
+          ORIGIN_DAP_SKIP_GATE_SELF_TESTS: "1"
         run: just test-origin-dap
 
       - name: Report and flush db-backend's compiler cache
