@@ -142,7 +142,7 @@ def hold_keyboard():
     global _HOLDER
     if _HOLDER is not None and _HOLDER.poll() is None:
         return
-    _HOLDER = subprocess.Popen(["wtype", "-s", "3600000"])
+    _HOLDER = subprocess.Popen(["bash", WTYPE_KEYS, "--hold", "3600000"])
     time.sleep(1.0)
 
 

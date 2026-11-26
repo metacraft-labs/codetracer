@@ -55,13 +55,15 @@ printf 'bash -c "sleep 1; wtype -k F12"\n' >"${scratch}/direct.sh"
 printf 'subprocess.run(["wtype", "-k", "F12"])\n' >"${scratch}/direct.py"
 printf '# wtype x in a comment\nfor tool in sway wtype grim; do command -v wtype; done\n' >"${scratch}/checks.sh"
 printf 'bash -c "sleep 1; bash ci/test/wtype-keys.sh -k F12"\n' >"${scratch}/helper.sh"
-for f in direct.sh direct.py; do
+printf 'subprocess.Popen(["wtype", "-s", "3600000"])\n' >"${scratch}/holder.py"
+printf 'subprocess.Popen(["bash", WTYPE_KEYS, "--hold", "3600000"])\n' >"${scratch}/helper-hold.py"
+for f in direct.sh direct.py holder.py; do
 	if scan "${scratch}/${f}" >/dev/null; then
 		echo "FAIL: the guard did not refuse a direct wtype call (${f})"
 		exit 1
 	fi
 done
-for f in checks.sh helper.sh; do
+for f in checks.sh helper.sh helper-hold.py; do
 	if ! scan "${scratch}/${f}" >/dev/null; then
 		echo "FAIL: the guard refused a line that does not run wtype (${f})"
 		exit 1
