@@ -1348,6 +1348,21 @@ jobs:
     uses: ./.github/workflows/gpui-window-captures.yml
     secrets: inherit
 
+  gpui-shell:
+    # The job is in gpui-shell.yml: the `gpui-shell` lane over the featureless
+    # isonim-gpui shim. It takes ct and replay-server from ct-build, and
+    # ct_gfx_player and the shim from visual-replay-tools' artifact, which it
+    # waits for itself as the GPUI window shards do. On `agents` pushes,
+    # gpui-shell-agents.yml runs it.
+    needs: [ct-build]
+    if: ${{ !cancelled() && needs.ct-build.result == 'success' }}
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+    uses: ./.github/workflows/gpui-shell.yml
+    secrets: inherit
+
   push-gpg-public-key:
     runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-002
     # 200-run window: 42 green, median 1.4m, max 5.7m. 15m is ~2.6x the slowest

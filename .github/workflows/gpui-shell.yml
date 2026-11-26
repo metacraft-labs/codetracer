@@ -179,6 +179,7 @@ jobs:
       - name: Build ct and replay-server
         # Standalone only; ct-build's step, verbatim.
         if: ${{ inputs.standalone }}
+        id: ct_built
         env:
           CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
           CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
@@ -187,7 +188,7 @@ jobs:
 
       - name: Restore ct and replay-server from the ct-build job
         if: ${{ !inputs.standalone }}
-        id: ct
+        id: ct_restored
         uses: actions/download-artifact@v4
         with:
           name: ct-build-products
@@ -212,13 +213,20 @@ jobs:
         if: ${{ steps.unpack.outcome == 'failure' }}
         run: bash ci/unpack-ct-build-products.sh "${RUNNER_TEMP}/ct-build-retry"
 
+      - name: ct is here, built or restored
+        # The one `steps.ct` the steps that run past a failure wait on
+        # (ci/test/ct-build-gate-test.sh).
+        if: ${{ steps.ct_built.outcome == 'success' || steps.ct_restored.outcome == 'success' }}
+        id: ct
+        run: test -x src/build-debug-repro/bin/ct || test -x build/bin/ct || { ls src/build-debug-repro/bin build/bin 2>&1; exit 1; }
+
       - name: Provide ct_gfx_player and the visual replay tools
         # From this run's visual-replay-tools artifact under codetracer.yml,
         # built here when standalone: the one entry point the TUI and GPUI
         # shards use too.
         uses: ./.github/actions/provide-visual-replay-tools
         with:
-          from-run-artifact: ${{ inputs.standalone && 'false' || 'true' }}
+          wait-for-artifact: ${{ inputs.standalone && 'false' || 'true' }}
 
       - name: Restore the headless shim from the cache
         # isonim-gpui's `--features gpui-headless` shim, staged with its build
@@ -283,8 +291,9 @@ jobs:
 
       - name: PLAT-35's GPUI pixel capture, through the headless shim
         # `gpui_render_to_pixels`, no compositor; each scenario is graded on
-        # the census the binary writes (ci/test/plat35-gpui-capture.sh).
-        if: ${{ !cancelled() }}
+        # the census the binary writes (ci/test/plat35-gpui-capture.sh). Not
+        # when there is no ct.
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         run: nix develop .#devShells.x86_64-linux.default --command just plat35-capture-gpui
 
       - name: Upload the lane's log

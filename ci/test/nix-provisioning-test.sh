@@ -341,7 +341,12 @@ done
 # FLIP library against a library change. It installs Nix through
 # metacraft-github-actions/setup-dev-env (env-flavor nix) before its first
 # `nix`, as php-recorder-downstream does.
-readonly EXPECTED_NIX_JOBS=60
+#
+# 60 -> 61: gpui-shell.yml's `gpui-shell`, the `gpui-shell` lane and PLAT-35's
+# headless capture, called from codetracer.yml and gpui-shell-agents.yml. It
+# provisions Nix through setup-db-backend-siblings, env-flavor nix, as the
+# GPUI window shards do.
+readonly EXPECTED_NIX_JOBS=61
 
 if [ "${#nix_jobs[@]}" -eq "$EXPECTED_NIX_JOBS" ]; then
 	ok "the scanner still classifies the nix-using jobs (${#nix_jobs[@]})"
