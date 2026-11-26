@@ -45,6 +45,7 @@ new_cred_dir() {
 	mkdir -p "$d/cred" "$d/home"
 	printf 'access-tokens = github.com=tok0\n' >"$d/cred/nix-access-tokens.conf"
 	printf 'machine github.com login x-access-token password tok0\n' >"$d/cred/netrc"
+	printf 'tok0\n' >"$d/cred/git-token"
 	echo "$d"
 }
 
@@ -92,6 +93,17 @@ start_refresher "$d" 0 3
 if wait_for_token "$d" 5 tok1; then ok "minted at start (tok1)"; else fail "no mint at start: $(cat "$d/cred/netrc")"; fi
 check "the mint time is recorded" "refresh.sh recorded no github-token-minted-at" \
 	test -s "$d/cred/github-token-minted-at"
+# setup-dev-env's helper reads git-token, and git asks it first.
+git_token_renewed() {
+	local i
+	for i in $(seq 1 20); do
+		grep -qx 'tok[1-9][0-9]*' "$1/cred/git-token" && return 0
+		sleep 0.25
+	done
+	return 1
+}
+check "the git credential helper's token is renewed" \
+	"git-token still holds '$(cat "$d/cred/git-token")'" git_token_renewed "$d"
 if wait_for_token "$d" 8 tok2; then ok "minted again at REFRESH_AFTER (tok2)"; else fail "no renewal after REFRESH_AFTER: $(cat "$d/cred/netrc")"; fi
 stop_refresher
 
