@@ -32,9 +32,19 @@ on:
       - 'src/tests/visual/story-parity-floors.json'
   workflow_dispatch:
 
+# On `agents`, a newer push must not cancel the running run: several agents
+# land there every few minutes, so a cancelling group never let this lane
+# finish on the mainline (run 45690347094 was cancelled that way). With
+# cancel-in-progress off, GitHub keeps the running run plus ONE waiting run
+# per branch, and each newer push replaces the waiting one, so the queue
+# never grows past one and the run that starts next is always the newest
+# commit that touched these paths. That is already the "skip a superseded
+# run" behaviour; an in-job check could not do better, because a later push
+# outside these paths starts no run of its own. The `zgui-ci-*` proof
+# branches keep cancelling.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref_name != 'agents' }}
 
 jobs:
   linux:

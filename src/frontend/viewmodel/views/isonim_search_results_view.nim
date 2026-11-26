@@ -135,6 +135,7 @@ proc searchAgainHandler(vm: SearchResultsVM; query: string): proc() =
 proc matchRow[R, N](r: R; vm: SearchResultsVM; index: int;
                     row: SearchResultLine): N =
   ## One match row: ":line  text", the runner's match highlighted.
+  mixin appendChild
   var textSpan: N
   result = ui(r):
     tdiv(role = "button", tabindex = "0", class = matchRowClass(vm, index),
@@ -161,6 +162,7 @@ proc matchRow[R, N](r: R; vm: SearchResultsVM; index: int;
 
 proc fileGroup[R, N](r: R; vm: SearchResultsVM;
                      group: SearchResultGroup): N =
+  mixin appendChild
   result = ui(r):
     tdiv(class = "fif-file-group"):
       tdiv(class = "fif-file-header", title = group.path):
@@ -240,6 +242,7 @@ proc clearSearchHandler(vm: SearchResultsVM): proc() =
 
 proc renderSearchResultsPanel*[R, N](r: R; vm: SearchResultsVM): N =
   ## The Find in Files panel (see the module header for its structure).
+  mixin setAttribute, clearChildren, appendChild
   var bodyContainer, inputEl, clearBtnEl, optionsEl: N
   var optionEls: array[SearchOption, N]
 

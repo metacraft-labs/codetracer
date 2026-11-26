@@ -1,0 +1,940 @@
+name: ViewModel headless tests (native + JS)
+# Called from codetracer.yml (job `viewmodel-tests`), which keeps the triggers, the
+# concurrency group, the job's `needs:` and ci-verdict's view of it. Split
+# out to keep codetracer.yml well under GitHub's 512,000-byte workflow limit
+# (ci/test/workflow-file-size-test.sh).
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  viewmodel-tests:
+    runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
+    # MEASURED 2026-11-22/23 (runs 45069526428, 45118976975): the steps that
+    # stay in this job took 56 and 68 minutes (provisioning siblings alone 31
+    # and 27), and the old 75-minute limit then ran out in the steps that are
+    # now `viewmodel-tests-wasm`'s. 90 minutes is 1.3x the slower run.
+    timeout-minutes: 90
+    name: ViewModel headless tests (native + JS)
+    steps:
+      - name: Generate CI token
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Clone codetracer-trace-format-nim sibling
+        # Nine ViewModel suites -- the eight request-panel ones plus
+        # request_span_conformance_test -- ``import codetracer_ctfs/container``
+        # to read a real CTFS container. ``config.nims`` resolves that module
+        # from ``$CODETRACER_TRACE_FORMAT_NIM_SRC`` or from the workspace
+        # sibling ``../codetracer-trace-format-nim/src``, and this job set up
+        # neither, so all nine failed to compile with
+        #
+        #   Error: cannot open file: codetracer_ctfs/container
+        #
+        # in every run (30726348404, 31180327493, 31385899773). They compile
+        # and pass in a normal workspace, which is why the gap survived: the
+        # only environment that lacked the sibling was the one nobody was
+        # reading. Cloned here with ``clone-repo``, the same way this job
+        # already gets ``codetracer-js-recorder``, rather than through
+        # ``setup-dev-env`` -- that route additionally requires a published
+        # workspace lock, which is a separate unresolved problem and
+        # would make this job depend on it for no benefit.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-trace-format-nim
+          # That repo's default branch is `dev` (confirmed against the API);
+          # `main` is not where its work lands.
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-trace-format-nim
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      # THE THREE SIBLING CLONES ABOVE AND BELOW ARE DELIBERATELY ADJACENT.
+      #
+      # A GitHub App installation token expires 60 MINUTES after it is minted.
+      # `Generate CI token` above is this job's ONLY mint -- `ci/test/
+      # sibling-provisioning-test.sh` asserts that "no job mints more than one
+      # installation token", so refreshing it mid-job is not available here --
+      # and this job's `timeout-minutes` is 75. Every authenticated git
+      # operation must therefore happen near the TOP of the job.
+      #
+      # `codetracer-js-recorder` and `runquota` used to be cloned next to the
+      # steps that consume them, ~64 minutes in. In run 34219352454 /
+      # job 102038547352 the token was minted at 12:28:05, the
+      # `codetracer-trace-format-nim` clone at 12:29:32 succeeded, and those
+      # two clones -- reached at 13:32:28 and 13:32:34 -- both died with
+      #
+      #   fatal: could not read Username for 'https://github.com':
+      #   terminal prompts disabled
+      #
+      # taking the four steps that depend on those siblings down with them.
+      # Nothing about the clones changed; the job simply grew past an hour and
+      # started reaching an expiry that had always been there.
+      #
+      # Neither clone has an ordering dependency on anything between here and
+      # where it used to sit: `clone-repo` runs plain git, the recorder gate in
+      # src/frontend/viewmodel/tests/unit/recorder_gate.nim keys on the BUILT
+      # recorder binary rather than on the checkout existing, and
+      # `provision-repro-lock-siblings` only reconciles the five repos named in
+      # repro.lock's `depends`, which include neither of these.
+      #
+      # Keep new clone steps in this block. A clone added further down is a
+      # clone that works only until the job gets slower.
+      # (`codetracer-js-recorder` is cloned by `viewmodel-tests-wasm`, whose
+      # recorder-gated suites and browser test build and drive it; no step
+      # left in this job uses it.)
+
+      - name: Clone runquota sibling
+        # The `just build-once` step below compiles `ct`, whose import chain
+        # (src/ct/codetracer.nim -> ../ct_test/ct_test ->
+        # src/ct_test/process_exec.nim) starts with `import runquota_process`.
+        # The checkout is where those modules resolve from --
+        # `config.nims` points at `../runquota/...` (issue #641).
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/runquota
+          ref: dev
+          path: ${{ github.workspace }}/../runquota
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Clone codetracer-pm sibling
+        # `just editor-model-case-floors` reads the platform milestones file
+        # (../codetracer-pm/milestones/CodeTracer-Platform.milestones.org) and
+        # fails without it, as in run 45590873552. Not a build input and not in
+        # `repro.lock`, so cloned at its mainline `latest`, as the WASM jobs
+        # do. Up here with the other clones, inside the token's hour.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-pm
+          ref: latest
+          path: ${{ github.workspace }}/../codetracer-pm
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Provision dependency siblings from repro.lock
+        # The ViewModel suites compile against ``../isonim/src`` et al. via
+        # codetracer's top-level ``config.nims``. After ``Install Nix``, not
+        # before it: the action reaches ``repro`` through this repo's dev
+        # shell, which is also where the suites below run.
+        uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      - name: Assert the JS ViewModel lane can observe its own failures (full suite)
+        # The same contract suite `ci-verdict` runs, but here it runs INSIDE the
+        # dev shell, where `nim` and `node` exist. That difference is the whole
+        # point of this step.
+        #
+        # `ci-verdict` sits on stock ubuntu-latest, so its copy takes the skip
+        # branch for the three dynamic contracts -- the ones that compile a
+        # deliberately-failing suite with and without `-d:nodejs` and compare
+        # node's exit code. Those three are the only thing standing between
+        # "the recipe contains the string -d:nodejs" and "-d:nodejs actually
+        # makes a failing suite fail", and for a day they ran nowhere at all.
+        #
+        # It runs BEFORE `test-vm` below on purpose: if the lane has lost the
+        # ability to report failures, that is worth knowing before reading the
+        # lane's report.
+        run: nix develop .#devShells.x86_64-linux.default --command bash ci/test/vm-js-lane-test.sh
+
+      - name: Assert a crashed test binary cannot be reported as a partial run
+        # ci/lib/test-lane-report.sh is the shared verdict all six
+        # compile-and-run lanes report through. Its contract suite feeds it
+        # fixture processes that print plausible `[OK]` lines and then die by
+        # signal, and fails if the exit status is ever scored behind the
+        # [OK]/[FAILED] tally again.
+        #
+        # That ordering is not hypothetical: `isonim_views_test` SEGV-ed at
+        # case 216 of 461 and the lane printed `PARTIAL (212 OK, 4 FAILED)`,
+        # which is indistinguishable from an ordinary partial run. 245 cases
+        # went unrun for as long as nobody read the exit code.
+        #
+        # Pure bash, no toolchain, sub-second -- so like the step above it runs
+        # BEFORE `test-vm`: if the lane cannot report a crash, that is worth
+        # knowing before reading the lane's report.
+        run: bash ci/test/test-lane-report-test.sh
+
+      - name: Assert the style-variable guard can observe its own failures
+        # Same reasoning as the two steps above, for a guard whose entire
+        # claim is that it sees something no human and no compiler sees. Its
+        # ten arms feed it defects it must report and legal CSS it must
+        # not, and include the two instrument checks that stop an empty
+        # stylesheet or an unreadable entry-point list scoring as a pass — which is not
+        # hypothetical, `default_white_theme.styl` compiles to zero bytes.
+        #
+        # Hermetic and sub-second on synthetic fixtures, so it runs BEFORE the
+        # guard itself: if the guard has lost the ability to report, that is
+        # worth knowing before reading its verdict.
+        # In the dev shell for its python3: the runners on gpu-server-002 have
+        # none on the host PATH ("python3: command not found", run
+        # 45590873552), and the style steps after it then never ran.
+        run: nix develop .#devShells.x86_64-linux.default --command bash ci/test/css-token-resolution-test.sh
+
+      - name: Every style variable in every shipped stylesheet resolves
+        # Stylus emits an unresolved identifier verbatim rather than failing,
+        # so `color: colors-ui-text-accent` compiles clean and reaches the
+        # browser as an invalid value the browser drops. Three shipped
+        # defects have had that cause and all three were found by a person
+        # looking at the screen.
+        #
+        # In the dev shell because it compiles the shipped stylesheets with
+        # `stylus` and reads the OUTPUT — the failure mode is source and
+        # output disagreeing silently, so the source is the wrong thing to
+        # read.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-css-token-resolution
+
+      - name: No :has() selector restyles the whole document on every write
+        # A `:has()` naming the `style` attribute is re-evaluated on every
+        # inline-style write, and one anchored at `:root`/`html` on every
+        # inserted element; each re-evaluation restyled the whole document.
+        # The caption bar's switch had both and made a 300-row panel take
+        # 45-100 s to mount. Runs its own planted fixtures first, then reads
+        # the compiled stylesheets, so it needs the dev shell's `stylus`.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-css-has-invalidation
+
+      - name: Every url() in every shipped stylesheet names a file that exists
+        # A missing file compiles clean and paints nothing; two toolbar icons
+        # and a font fallback shipped that way and were found only by a
+        # renderer that reports what it cannot load. Runs its planted fixtures
+        # first, then resolves each url() in the compiled stylesheets against
+        # where the sheet ships. Needs the dev shell's `stylus` and the
+        # design-system submodule (checked out above).
+        run: nix develop .#devShells.x86_64-linux.default --command just test-css-url-resolution
+
+      - name: The light theme paints its panels and editor ground from the light palette
+        # The light stylesheet once carried every design-token surface in its
+        # DARK value (#282828 behind codetracerWhite's text, 1.56:1) and
+        # compiled clean, so only the compiled output shows it. Same
+        # dependencies as the step above: the dev shell's `stylus`.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-css-light-theme-grounds
+
+      - name: Plugins' TLS connections against a real TLS server
+        # PLAT-8's TLS row with evidence (`test_plugin_tls.nim`): a plugin's
+        # `connectTcp(tls = true)` against a python TLS server whose
+        # certificates are minted per run; the chain and the name are checked.
+        # `openssl` (to mint them) comes from this flake's own nixpkgs: the
+        # dev shell carries OpenSSL's libraries, not its command.
+        run: |
+          export OPENSSL_BIN="$(nix build --no-link --print-out-paths --inputs-from . nixpkgs#openssl.bin)/bin/openssl"
+          nix develop .#devShells.x86_64-linux.default --command just test-plugin-tls
+
+      - name: WebAssembly plugins in one ct-plugin-host
+        # Extensibility-Model.md §11.9 (`test_plugin_host_wasm.nim`): plugins
+        # from several packages in one real host process, faulted one instance
+        # at a time, the read import refused and granted, the host killed
+        # mid-call; and ct-lens.watch run from its .wasm
+        # (`test_ct_lens_plugins.nim -d:ctLensWasm`). The macOS leg and the
+        # engine measurement are plugin-host-wasm.yml's.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-plugin-host-wasm
+
+      - name: Enforce the platform facade's host-free build (NS1)
+        # Noir-Studio.milestones.org NS1: "A build configuration that **does
+        # not link the host modules**, so a direct call fails to compile" and
+        # "That configuration runs in CI, so the property cannot decay
+        # quietly." This step is the second half of that sentence.
+        #
+        # It runs BEFORE `test-vm` deliberately. A `readFile` that has crept
+        # into a ViewModel does not fail any suite — the desktop build links
+        # `std/os` and the call works — so the only signal that the facade has
+        # been bypassed is this gate. Reading it after a green suite would be
+        # reading it too late.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-hostfree
+
+      - name: Compile the platform facade's host instantiations
+        # Noir-Studio.milestones.org NS2. The sibling of the gate above, and
+        # for a hole the gate above cannot see: `test-hostfree` proves that
+        # front-end code does not REACH the host, and this proves that the two
+        # modules whose whole job is reaching the host still BUILD.
+        #
+        # Nothing compiled them. `host/web_browser.nim` and
+        # `host/desktop_electron.nim` are `{.error.}` on the C backend so
+        # `test-vm` cannot, and no JS suite imports either, because
+        # `platform/web_platform.nim` was built to need neither. Both facts are
+        # correct; together they left these two uncompiled by any lane, and
+        # `web_browser.nim` duly reached `dev` in a state that does not compile
+        # at all while every suite stayed green.
+        #
+        # Placed before `test-vm` for the same reason `test-hostfree` is: this
+        # takes seconds and answers "does it build for anyone", which is not
+        # worth learning after twenty minutes of suites.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-host-instantiations
+
+      - name: Build and boot the web bundle
+        # NS2's second build. The lane above proves the web instantiation's
+        # modules compile; this proves they LINK into a bundle that contains no
+        # node module loader and that `boot()` actually completes — the
+        # sequence §4.2 and §4.5 specify, which until now nothing executed
+        # because nothing called it.
+        #
+        # Runs under node rather than a browser deliberately: with no OPFS the
+        # boot takes the in-memory path, which is a real product state (a user
+        # with storage disabled) and is asserted to announce the coming loss
+        # before editing is possible.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-web-bundle
+
+      - name: Compile the renderer for a browser (both arms)
+        # THE THING NOTHING IN CI COMPILED. The two steps above cover the web
+        # instantiation's modules and its bundle; neither touches the renderer,
+        # and until now nothing else did either. `ci/lib/test-lane-files.sh`
+        # recorded why: every JS lane passes `-d:nodejs`, and the renderer does
+        # not compile under it — `kdom`'s `createElementNS` is a browser
+        # binding. The only gate was the product build, at package time.
+        #
+        # `dev` duly carried a renderer entry point that did not compile.
+        # Commit 333ec709 removed `ui_imports`' `electron_lib` re-export after
+        # auditing its symbols for uses "anywhere under `ui/`"; `ui_js.nim` is
+        # not under `ui/` and read `inElectron` from it. Every suite stayed
+        # green — the `web_browser.nim` shape again, one directory over.
+        #
+        # This step runs both arms on the `js-browser` backend (`nim js`, no
+        # `-d:nodejs`, compile-only) and then the property gate, which proves
+        # the arms are genuinely different builds and that the web one links no
+        # Electron. It needs the isonim tailwind placeholder this job's
+        # `provision-repro-lock-siblings` step already seeds.
+        #
+        # Before `test-vm` for the same reason the two steps above are: it
+        # answers "does the product's front end build at all", which nobody
+        # wants to learn after twenty minutes of suites.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-renderer-browser
+
+      - name: Run renderer suites over a DOM (renderer-dom lane)
+        # The step above COMPILES the renderer; this one RUNS renderer modules.
+        # Its suites are built for the browser target — `ui/state.nim` does not
+        # compile under `-d:nodejs` — and executed under node over jsdom, which
+        # the dev shell links into `node_modules` on entry. The runner fails
+        # when jsdom is absent rather than skipping.
+        #
+        # `locals_answer_identity_test.nim` drives the web renderer's
+        # `ct/load-locals` senders through the real response fan-out and
+        # asserts one request per stop, in the stopped-in file's language,
+        # and that each answer is judged against the stop its own request was
+        # sent at — after a fast move, the previous stop's values must never be
+        # drawn beside the new stop. `!cancelled()` so a red renderer build
+        # above does not hide this lane's verdict as "skipped".
+        if: ${{ !cancelled() }}
+        run: nix develop .#devShells.x86_64-linux.default --command just test-renderer-dom
+
+      - name: Run browser suites in headless Chromium (renderer-chromium lane)
+        # jsdom (the step above) is a DOM; this lane needs a BROWSER. Its
+        # suites load into a real page in Playwright's Chromium, which the dev
+        # shell provides, and ask for keys that Chromium's own input pipeline
+        # delivers — so focus, trusted key events, the browser's default
+        # actions and `showModal()`'s inert page are all real.
+        #
+        # `view_vocabulary_chromium_test.nim` renders the view vocabulary's
+        # sixteen entries into a document, holds them to the same scripted
+        # expectations the terminal suite holds isonim-tui's widgets to, and
+        # measures what the browser's own elements do on their own — the
+        # evidence the web column of the vocabulary's mapping is graded on.
+        if: ${{ !cancelled() }}
+        run: nix develop .#devShells.x86_64-linux.default --command just test-renderer-chromium
+
+      - name: Run the Electron main process's suites (main-process lane)
+        # The main process's DAP router, RUN under node with the
+        # `server_index.js` defines: two sessions whose requests share a
+        # `seq` must each be answered to the session that asked.
+        if: ${{ !cancelled() }}
+        run: nix develop .#devShells.x86_64-linux.default --command just test-main-process
+
+      - name: Compile the renderer the way a developer builds it
+        # Also builds the VS Code extension's panel and host bundles and
+        # asserts the panel bundle carries none of the renderer (HSF-X2).
+        #
+        # THE STEP ABOVE COMPILES WHAT SHIPS, AND THAT IS NOT WHAT ANYONE TYPES.
+        # `just build-ui-js` adds `-d:ctInExtension` and
+        # `--hotCodeReloading:on`; nothing ran it, and `cloud` carried it broken
+        # two ways at once — an internal Nim JS codegen error in `ui/trace.nim`
+        # (an `{.exportc.}` routine generated at its own line, reaching a `var`
+        # declared 800 lines later) and an identifier M49 added to only one of
+        # dap.nim's two arms. Both are compile errors; the whole check takes
+        # about ten seconds.
+        #
+        # It asserts the BYTES — over 1 MB, `node --check` parses them, and four
+        # symbols that vanish under the wrong configuration — not the recipe's
+        # exit status, and it re-reads `justfile` so the gate cannot be made
+        # green by deleting the defines that make the build hard.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-renderer-extension-build
+
+      - name: Assemble the web bundle's runtime assets (NS3 delivery)
+        # NS3 was never short of a LOADER. `host/web_browser.nim` carries the
+        # registry, the worker transport and `newBrowserWasmHost`, all tested,
+        # and its own doc comment says nothing calls them because "the worker
+        # script that instantiates the Noir modules ... is not in the bundle".
+        # The gap was delivery, and this step is what closes it: the renderer
+        # (newly buildable, see the step above), the web entry point and the
+        # browser worker script are assembled and checked.
+        #
+        # The asset list is NOT in the shell script. `webRuntimeAssets()` in
+        # `platform/web_deployment.nim` is the one declaration, compiled on both
+        # backends and asserted by `test_platform_web.nim`; the gate reads it
+        # through a small Nim program so a third hand-written copy cannot drift.
+        #
+        # The two Noir wasm modules are ~16 MB and ~4.6 MB and are not in the
+        # repo, so their placement SKIPS LOUDLY here — printing the deployment
+        # consequence the manifest declares for each — rather than passing
+        # silently. Everything else is assembled and asserted.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-web-bundle-assets
+
+      - name: The web bundle mounts a product
+        # THE CHECK THIS REPOSITORY DID NOT HAVE, and the reason a blank page
+        # reached production with a green pipeline.
+        #
+        # Every gate above asserts a STEP: the renderer compiled, the manifest
+        # named it, the assembly placed it, the guard matched the document to
+        # the tree, the loop arm booted. All five were true of
+        # `ide.codetracer.com` on 2026-08-31, which served a boot diagnostic
+        # and an empty `#dom-root` and nothing else. `ui.js` was throwing
+        # `ReferenceError: monaco is not defined` during module init and no
+        # check in the repository was listening for an uncaught exception.
+        #
+        # Verification-Harness-Traps.md trap 2 names the shape — "a chain of
+        # `success: true` is not a result; assert the artefact" — and the
+        # artefact is a DOM. This step loads the assembled bundle in headless
+        # Chromium and asserts what a user would see.
+        #
+        # It carries its own mutation proof: three arms beside the control,
+        # each verified to redden the assertion written for it, and a counted
+        # assertion total so an arm that silently did not run is a failure
+        # rather than a shorter green summary.
+        #
+        # Placed here, immediately after the assembly step, so the two read the
+        # same bundle and a delivery regression and a rendering regression are
+        # attributable to different steps.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-web-renderer-mounts
+
+      - name: A test row's two controls, and only one of them re-runs
+        # The TESTS pane's per-row ⟳ and ⏵, driven in a real browser.
+        #
+        # The step above asserts that the product MOUNTS. This asserts that one
+        # of its controls does the specific thing it promises and not the
+        # neighbouring thing that looks identical from outside: ⏵ must ENTER the
+        # recording a row already has, executing nothing, where ⟳ and ⇧⏵ must
+        # produce a new one. "The pane has buttons" cannot fail for its own
+        # reason; "pressing ⏵ left the recording's id and timestamp unchanged"
+        # can fail for exactly one.
+        #
+        # WHAT THIS LANE CAN AND CANNOT MEASURE, stated because a green here is
+        # not the whole gate. The Noir compiler and the replay engine are
+        # OPTIONAL bundle assets and this job does not build them, so no
+        # recording can be made and the id/clock discriminator has nothing to
+        # move. The gate detects that from the pane's own words and SKIPS those
+        # arms loudly rather than reddening — a permanently red lane stops being
+        # read, which is the failure `shell-gate-coverage.known-dark.txt` exists
+        # to prevent.
+        #
+        # What it does assert here is real and was previously unasserted: both
+        # controls exist on every row, are painted with a non-zero box, are
+        # never labelled "open the recording" when there is none, do not claim
+        # Shift changed something on a row where it changed nothing, and — in
+        # exactly this configuration and no other — that a control disabled
+        # because the deployment cannot compile STATES THAT REASON instead of
+        # rendering inert.
+        #
+        # The recording arms run in `deploy-web-codetracer.yml`, which builds
+        # the wasm modules and the replay engine and therefore can perform the
+        # three gestures. That step is where the deciding assertion lives.
+        #
+        # Placed immediately after the mount step so the two read the same
+        # bundle and a rendering regression and a behavioural one are
+        # attributable to different steps.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-tests-pane-row-controls
+
+      - name: A Low Level Code row click, on the render arm the bundle ships
+        # THE DIVERGENT-ARMS HAZARD, closed for one gesture.
+        #
+        # `isonim_low_level_code_view.nim` has TWO row renderers. The headless
+        # ViewModel suites above drive `renderInstructionRowMock`, which binds
+        # `onclick = handler`; the shipped bundle renders
+        # `renderInstructionRowWeb`, which binds through
+        # `isonim_dom.addEventListener`. They are different procs reaching the
+        # same closure, so every suite in this job can be green against a
+        # binding no user ever touches — the same shape as a lane compiled with
+        # a different define than the bundle that ships.
+        #
+        # `ci/test/low_level_code_row_click_probe.mjs` clicks the row's CENTRE
+        # in real Chromium, with a real hit test (Playwright refuses the click
+        # if another element would receive it), and asserts the COMMAND, the
+        # PATH and the LINE the click put on the wire. The line is the
+        # discriminator: the target row is line 43 where row 1 is 42 and the
+        # active row is a third offset, so the payload can only have come from
+        # the row actually clicked.
+        #
+        # WHY IT IS ONLY BEING RUN NOW. It was never blocked. Its only mention
+        # anywhere in the tree was a COMMENT in `ci/test/web-bundle-assets.sh`
+        # describing, in the present tense, what it "can assert" — and
+        # `shell-gate-coverage.known-dark.txt` recorded it among the three
+        # gates nothing referenced. It needs `storybook/dist/components.js` and
+        # a Playwright Chromium, both of which this job already has; it needed
+        # the recipe and this step.
+        #
+        # NO SKIP ARMS. Unlike the two steps above, every input is built from
+        # source in the same invocation, so all ten checks are load-bearing on
+        # every run and a shorter green summary is a failure rather than a
+        # smaller measurement. The probe also carries a staleness gate on
+        # CONTENT (not mtime — `nim js` does not rewrite a byte-identical
+        # output, so an mtime gate goes permanently red): it compares the
+        # command `low_level_code_vm.nim` currently sends against the bundle's
+        # bytes and exits 2 rather than reporting on a tree nobody edited.
+        #
+        # Measured locally at 10/10, and proved able to fail BOTH ways: sending
+        # `highLevelLine - 1` reddened exactly the line assertion, naming
+        # `{"path":"src/combat.nr","line":42}`; renaming the command without
+        # rebuilding tripped the staleness gate with exit 2.
+        #
+        # Seconds: ~2s for the `nim js` and ~5s for the browser leg.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-low-level-code-row-click
+
+      - name: One layout per mode, and it survives a reload
+        # THE SECOND OF THE THREE GATES NOTHING REFERENCED, and the one whose
+        # description in `shell-gate-coverage.known-dark.txt` was half wrong in
+        # the useful direction: `ci/test/mode_layout_probe.mjs` DOES measure
+        # rendered `.lm_title` geometry — the exact quantity that went to zero
+        # in the defect it covers — at its lines 96-116 and 338-343. It was
+        # pointed at the right thing and had simply never been run.
+        #
+        # It could not be wired as it stood, because it is an INSTRUMENT and not
+        # a gate: eleven legs of measurement written to a JSON report, and exit
+        # 0 whether it measured everything or timed out on its first selector.
+        # `ci/test/mode-layout-in-browser.sh` is the missing half — it assembles
+        # a bundle, serves it, drives the probe at the `/noir` route, and counts
+        # seventeen assertions over what came back.
+        #
+        # WHY THE MODEL TEST DOES NOT COVER THIS.
+        # `src/tests/gui/tests/layout/mode_layout_test.nim` exercises the layout
+        # MODEL — the per-mode tables and the placement engine. Every assertion
+        # in it can hold of a product whose workspace looks wrong, because a
+        # layout config is not a workspace: GoldenLayout still has to accept it,
+        # build the stacks and give each pane a box. So nothing here reads a
+        # config. It asks whether a mode switch CHANGES the strips (it did not,
+        # before this work — the previous mode's arrangement was carried
+        # across), whether TESTS and CONSTRAINTS are tabs OF the stacks the
+        # request named, whether the third round trip reproduces the first
+        # (`Mode-Transitions.md` §6: the failure mode is a slot that is right
+        # once and empty afterwards), whether a splitter drag SURVIVES A RELOAD,
+        # and whether a layout store filled with rubbish degrades to a populated
+        # workspace rather than an empty window.
+        #
+        # ONE ARM SKIPS HERE, AND THE SKIP IS COUNTED SEPARATELY FROM THE
+        # PASSES. This job builds no replay engine and no Noir toolchain, so
+        # debug mode reaches no session and opens no source file, and the
+        # debug-mode editor has nothing to be. Measured: 1600x0 with zero
+        # `.view-line`s. Asserting "the editor is never empty" there would be a
+        # permanently red lane on a correct product. The gate reads the absence
+        # from the product itself — the edit legs carry a source tab, the debug
+        # legs carry none — and says UNMEASURED.
+        #
+        # THAT BRANCH WAS VERIFIED IN BOTH DIRECTIONS WITH SYNTHETIC INPUT
+        # (`CT_MODE_LAYOUT_REPORT` reads a report the script did not produce): a
+        # report whose debug legs carry a source tab AND a 1600x0 editor makes
+        # the arm RUN and FAIL, naming the box; the same report with a painted
+        # editor makes it RUN and PASS. 17 checks + 1 skip becomes 18 checks.
+        #
+        # PROVED ABLE TO FAIL AGAINST THE REAL PRODUCT before landing: caption
+        # `TestResults` back to `TEST RESULTS` in `ui/layout.nim`'s
+        # `convertTabTitle` and rebuild, and two named assertions redden — "no
+        # TESTS tab at all" in both modes, and "the old caption TEST RESULTS is
+        # on screen in" all eleven legs. Exit 1.
+        #
+        # NOT WIRED INTO THE DEPLOY LANE HERE, deliberately. That lane's
+        # `studio-bundle/` has the engine and the toolchain, so the skipped arm
+        # would run there — but whether it PASSES there has not been measured,
+        # and wiring a step on the strength of an expectation is how a lane
+        # becomes permanently red. That step belongs to whoever runs it first.
+        #
+        # ~80s to assemble the bundle, ~20s in the browser.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-mode-layout-in-browser
+
+      - name: A typed watch expression, in a browser, showing a correct value
+        # The STATE pane's Watches tab, opened by a click on the product's own
+        # tab button and filled by keystrokes into its own `#watch-0`.
+        #
+        # The two steps above assert that the product mounts and that a control
+        # does what it promises. This asserts the third thing neither can: that
+        # a pane a user must NAVIGATE TO is navigable. Every headless suite over
+        # this pane drove the MockRenderer, whose tab strip the WebRenderer — the
+        # one browsers run — did not have; `stWatches` was reachable from
+        # `vm.selectTab` and from no gesture in any shipping product, and every
+        # one of those suites was green over it. A probe that switches tabs by
+        # calling the ViewModel cannot fail for that reason, so this one does not
+        # call it.
+        #
+        # WHY IT CAN RUN HERE, unlike its two neighbours. There is no engine on
+        # this page and it needs none: the rows come from
+        # `ci/test/watch-expressions-probe/backend-response.json`, which is the
+        # `ct/load-locals` body captured verbatim from
+        # `watch_expressions_dap_test.rs` under `CT_WRITE_WATCH_FIXTURE`, and
+        # they enter through the product's own `applyLocalsResponse`. So the
+        # Noir compiler, the tracer and the replay engine — the OPTIONAL bundle
+        # assets that force the row-controls gate to skip its recording arms
+        # here — are not on this gate's path at all. Its dependencies are `nim
+        # js`, stylus and Chromium, and this lane already proves it has all
+        # three: `test-css-token-resolution` compiles the stylesheets above and
+        # `test-web-renderer-mounts` drives Playwright's Chromium. Measured on
+        # this branch before it was wired: 24 of 24, no skips.
+        #
+        # It EXITS 2 when any of those three is missing rather than passing, and
+        # in THIS lane that must be red: a shell that has stopped providing
+        # Chromium is a lane defect, not an absent optional capability, and the
+        # loud-skip branch exists for developer machines outside the dev shell.
+        #
+        # The transport half is `watch_expressions_dap_test.rs`'s and stays
+        # there; because this page renders that suite's own captured body, the
+        # two cannot drift apart without it noticing.
+        #
+        # Placed immediately after the two browser steps so all three read the
+        # same bundle and a mount, a behaviour and a navigation regression are
+        # attributable to different steps.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-watch-expressions-in-browser
+
+      - name: A recorded value reaches the State pane and is shown as the value it is
+        # The sibling of the step above, and it runs here for the same reasons:
+        # same captured `ct/load-locals` body, same three dependencies (`nim
+        # js`, stylus, Chromium), no engine on the page and none needed.
+        #
+        # WHAT IT ADDS THAT THE STEP ABOVE CANNOT SEE. That gate's probe builds
+        # its rows BY HAND out of the wire's JSON, so it reported the refusal's
+        # `msg` correctly while the product's own mapping turned the same row
+        # into the bare word "Error" — 24 green checks over a string the pane
+        # does not paint. This probe calls `ui/state.nim:localsToStoreRows`,
+        # the product's mapping, precisely so a wrong mapping is visible.
+        #
+        # It carries two mutation arms, each reproducing one half of the
+        # pre-fix product in the harness and reddening only its own half:
+        # arm V fills the value cell with `$v` (a four-line dump for a
+        # sequence, "<error>" for a record, "Error" for a refusal), arm O
+        # removes the tracker reset (the pane never asks and sits on
+        # "Loading..."). Measured on this branch before it was wired: 32 of
+        # 32, no skips.
+        #
+        # Like its neighbour it EXITS 2 when a dependency is missing, and in
+        # THIS lane that must be red: a shell that has stopped providing
+        # Chromium is a lane defect, not an absent optional capability.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-state-values-in-browser
+
+      - name: Every call-trace row is its row box, at every zoom
+        # The Call Trace pane's rows, measured in a real layout: the real view
+        # (`renderCalltracePanel`), the compiled shipped theme
+        # (`default_dark_theme_electron.styl`), and the SpaceMono / SpaceGrotesk
+        # faces actually loaded (an instrument control refuses the reading
+        # otherwise). Every row's height and every row-to-row advance must
+        # equal the toggle's 1.5625em box at 16, 20, 13 and 12 px roots, and a
+        # return value's arrow and value must sit on the call name's baseline.
+        #
+        # WHAT IT ADDS. A row showing a return value laid out ~0.8 px taller
+        # than the rest, because its arrow and value are two typefaces on one
+        # baseline-aligned line; the pane's advance was the data-dependent mean
+        # of the two heights. `calltrace_guides_chromium_test.nim` restates the
+        # row CSS and has no fonts, so it cannot see this. Its mutation arms
+        # strip the fix (whole, and each declaration alone) from the compiled
+        # sheet and require the assertion to redden for exactly the rows with a
+        # return value.
+        #
+        # Runs here for the same reasons as the two steps above: `nim js`,
+        # stylus and Chromium, no engine on the page. It EXITS 2 when one is
+        # missing, which in this lane must be red.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-calltrace-row-box-in-browser
+
+      - name: A registered known failure signals when it goes green
+        # The ledger `just test-vm` now consults, gated in both directions.
+        #
+        # Making `MockBackendService` strict turned eleven silently-wrong
+        # dispatches into honest reds, and there was nowhere to put them: this
+        # repo had no known-failure mechanism at all — no registry, no
+        # annotation, no allow-list — so "registered as a known failure" meant a
+        # row in a Markdown table and `just test-vm` exited 1 on every push. A
+        # permanently red suite is one nobody reads, which is the condition
+        # underneath this campaign's worst findings.
+        #
+        # A suppression mechanism observed only suppressing is
+        # indistinguishable from one that suppresses everything, so this asserts
+        # the other direction too: a registered test that starts PASSING reddens
+        # the lane by name, and one failing for an UNREGISTERED reason is not
+        # absorbed. Eight arms, counted, with the count asserted.
+        #
+        # Before `just test-vm` deliberately, so a broken ledger is reported as
+        # a broken ledger rather than as whatever the lane does when it reads
+        # one.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-known-failures
+
+      - name: One press, one action; one pane id, one node
+        # Two latent defects that were doing no harm by luck. The pane half is
+        # a fixed duplicate-id fall-through in `ui/layout.nim`, with an arm
+        # that reddens on the pre-fix bundle. The chord half is a standing
+        # hazard: every whitelisted chord is bound twice onto the same action,
+        # and only Monaco's `stopPropagation` keeps the two paths from both
+        # delivering — so a chord Monaco also binds natively doubles, as
+        # ALT+F8 was measured doing.
+        #
+        # Placed beside the mounts gate so both read the same assembled
+        # bundle, and carrying the same shape: counted assertions with the
+        # count asserted, a control arm, and an instrument arm that plants a
+        # real duplicate so "exactly one" cannot pass vacuously.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-chord-and-pane-uniqueness
+
+      - name: A submenu you can click, a bar that does not flicker, one menu on right-click
+        # Three defects one user reported against the deployed site on
+        # 2026-09-02, and the reason none of them was caught here: every
+        # existing check asserts markup or a model, and all three defects are
+        # invisible to both.
+        #
+        # The submenus were in the DOM with the right rows at the right
+        # coordinates, clipped out of existence by an `overflow: hidden` the
+        # `dropdown-surface()` mixin carried onto `#menu-main` at 09bc09b7; the
+        # same mixin's reveal animation replayed from `opacity: 0` on every
+        # rebuild of the shell, which is the flicker. So this gate hit-tests the
+        # submenu row at its own painted centre and samples the menu's opacity
+        # every animation frame — a screenshot before and after the sweep shows
+        # a good menu both times.
+        #
+        # The context-menu half reads `defaultPrevented` from a document-level
+        # bubble listener, because the native menu is browser chrome and is
+        # suppressed under automation in every engine, so "two menus" cannot be
+        # counted directly and the gate declines to pretend otherwise.
+        #
+        # Placed beside the other two browser gates so all three read the same
+        # assembled bundle, and carrying the same shape: counted assertions with
+        # the count asserted, and five mutation arms each verified to redden
+        # exactly its own check.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-menu-and-context-menu
+
+      - name: Editor context menu is the mode's
+        # The CONTENT of the editor's right-click menu, entry by entry, per
+        # mode. The gate above asserts that exactly one menu appears and that
+        # its hint row is inert -- and passes unchanged on a menu whose whole
+        # content is replay commands offered in Edit mode, which is what was
+        # reported against noirstudio.dev. It never reads an entry name.
+        #
+        # So this one names each entry and asserts both directions: the
+        # commands of the mode are present, and the commands of the other mode
+        # are ABSENT rather than greyed out. "The menu differs between the
+        # modes" cannot fail for its own reason and is not what is asked.
+        #
+        # Placed beside the other browser gates so all of them read the same
+        # assembled bundle. The Debug half is NOT measured here and the gate
+        # says so in its result rather than passing over it: switching /noir to
+        # Debug mode currently leaves the workspace with no editor pane, so
+        # there is nothing to right-click. That half is asserted on the desktop
+        # by src/tests/gui/tests/editor/editor_context_menu_is_mode_dependent.spec.ts.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-editor-context-menu-modes
+
+      - name: Renderer host-reach budget (NS1 residual 1)
+        # The migration that stands between the web bundle and a rendered pane,
+        # as a ratchet rather than a plan. Fails when a module gains a host
+        # call, and equally when one loses a host call without the budget being
+        # lowered — an unrecorded migration is one that can be silently undone.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-renderer-host-budget
+
+      - name: Renderer pane parity (NS2's second half)
+        # "A pane added to one platform appears in the other" — the half of
+        # `test_one_codebase_two_platforms` that had no gate, because comparing
+        # two pane sets needs two bundles and until this week there was one.
+        # The registry is read from `makeComponent`, presence is measured in the
+        # two BUILT bundles, and the kinds are a budget that fails both ways: a
+        # new pane nobody decided about, and a budget entry the product no
+        # longer dispatches.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-renderer-pane-parity
+
+      - name: Identity layer — credentials, escape hatch, WebCrypto seam, mutation proofs (ID1/ID2)
+        # `viewmodel/identity/token.nim` is the verification library ID1 asks
+        # every product to link, and `test_identity_token.nim` runs in
+        # `vm-unit` and `vm-unit-js` by the directory glob — this step is the
+        # evidence that its ten cases can go red: seventeen mutations, each
+        # verified to redden the case written for it.
+        #
+        # M17 is why it runs here rather than on one backend. It narrows the
+        # JSON guard to `except CatchableError` and requires the C backend to
+        # stay GREEN while the JS backend goes RED — CONTRIBUTING.md's
+        # portability rule, as a check. Both backends are needed for that arm
+        # to prove anything, so this step must never be reduced to one.
+        #
+        # Also runs `identity-no-escape-hatch.sh`, ID2's hard requirement: the
+        # licensing binding ships `CT_LICENSE_DEV_NO_FFI`, a RUNTIME env var
+        # that disables enforcement entirely. Survivable for a licence; for an
+        # identity token it is an authentication bypass, so its absence is
+        # asserted rather than left to habit — with two positive controls, one
+        # synthetic and one over the real binding that has the hatch.
+        #
+        # And `identity-desktop-no-credential.sh`, ID2's
+        # `test_desktop_never_handles_a_credential`. Its verification asks for
+        # "a build-time surface check asserting no credential field exists in
+        # the application", and that sentence is false as written: 50 files
+        # hold a credential-shaped field, none of them ours — a replayed
+        # program's sudo prompt, an LLM provider key, a share-artifact
+        # passphrase. So the check is that every one is CLASSIFIED and none is
+        # an identity credential, with the classification written down rather
+        # than implied by which words a pattern happens to match.
+        #
+        # And `identity-webcrypto.sh`, which drives the browser signature seam
+        # under Node against REAL Ed25519. That path cannot be a `vm-unit-js`
+        # suite: `crypto.subtle` is a V8 microtask and `drainPlatformCallbacks`
+        # drains nim-everywhere's queue, not V8's.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-identity
+
+      - name: Noir Studio signed out (NS7a / Identity ID3)
+        # `test_development_loop_needs_no_account`, as a property of the built
+        # product: the arm that carries write, compile, run, record and export
+        # reaches NO network primitive, so there is no request for a token to
+        # ride on. The renderer arm's egress is budgeted per surface — lsp,
+        # visual-replay, agentic, collab, session-allocation — and fails in both
+        # directions, which is what catches ID3's named erosion ("one
+        # personalisation, one counter"; a counter is a fetch).
+        #
+        # This step runs the gate AND its mutation proof: sixteen mutations,
+        # each verified to redden the assertion written for it. It lives in
+        # `viewmodel-tests`, which ci/verdict/required-jobs.txt already
+        # requires, rather than in a new job that file does not know about.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-noir-studio-signed-out
+
+      - name: WD7 — the Noir Studio arm carries no allocation call
+        # `Hosted-Session-Allocation.md` §3.2's first prohibition, as a
+        # property of the built bundle: *"it does not own the container"*, and
+        # the narrower statement that the Noir Studio arm cannot even ASK. Two
+        # arms, so the zero is a measurement: the tree as committed must have
+        # 0 egress sites, and a planted import of the allocation client must
+        # give the SAME scanner a non-zero. A run in which both arms report 0
+        # is a broken observer and the gate says so.
+        #
+        # A separate step from the one above because it builds the loop arm
+        # twice and the second build IS the control; folding it in would make
+        # that step's single build serve two purposes and lose the arm.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-wd7-loop-arm-allocates-nothing
+
+      - name: WD7 — the allocation call's mutation proof
+        # Eight arms over `viewmodel/platform/session_allocation.nim`, each
+        # planting the defect that would satisfy a weaker version of one of
+        # §3.2's prohibitions — a flavour allow-list, a lease counter, a
+        # refusal-reason allow-list, a caller-supplied `product_id` — and each
+        # naming in advance the `test_session_allocation.nim` case that must
+        # redden. Two behaviour-preserving controls, so a red arm is not merely
+        # a touched file.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-wd7-session-allocation-mutations
+
+      - name: Run ViewModel headless tests (native + JS backends)
+        run: nix develop .#devShells.x86_64-linux.default --command just test-vm
+
+      - name: Editor-model conformance — every milestone's published case floor
+        if: ${{ !cancelled() }}
+        # THE GATE THIS STEP RUNS HAD NO CALLER FOR SIX MILESTONES.
+        #
+        # `ci/test/editor-model-case-floor.sh` reads each milestone's `FLOOR: <n>
+        # cases` line out of the sibling codetracer-specs checkout, runs that
+        # milestone's suites, counts `[OK]` blocks, and for five of the seven
+        # also performs §7.1's two-way count over the published `LAW-*` table
+        # with the cardinality asserted. It had SEVEN `just` recipes and no
+        # workflow step, so `ci/test/shell-gate-coverage.sh` reported it as an
+        # UNRECORDED DARK GATE on every run — correctly, and for months.
+        #
+        # Every argument this campaign makes about unreachable capability
+        # applies to it unchanged, which is why it is wired rather than
+        # recorded: "nobody wired it yet" is not a reason, it is the defect.
+        #
+        # THE RUNTIME, MEASURED BEFORE IT WAS ACCEPTED: 1m51s for all seven
+        # milestones on one host with the Nim caches deleted first — 92s of gate
+        # plus `just`'s start-up per invocation (per-milestone figures are in the
+        # `editor-model-case-floors` recipe). These suites
+        # also compile in `test-vm` above, so this is a second compile of most of
+        # them; the price is a minute and a half and the thing bought is that six
+        # milestones' counted targets stop being claims.
+        #
+        # **RE-TAKEN 2026-09-20 (PLAT-34), BECAUSE THE FIGURE ABOVE IS ABOUT
+        # SEVEN MILESTONES AND THERE ARE ELEVEN.** Same host, same method —
+        # `~/.cache/nim/test_editor_*` deleted first, timed through this recipe:
+        # **2m12s**. Four more milestones for twenty-one more seconds, which is
+        # what it costs when most of the added suites are small; the argument
+        # above is unchanged and the number it rests on is no longer stale.
+        # §36b: a figure nothing re-takes is free to be wrong, and the tell here
+        # would have been the word "seven" beside a loop over eleven.
+        #
+        # It lives in `viewmodel-tests`, which `ci/verdict/required-jobs.txt`
+        # already requires, rather than in a new job that file does not know
+        # about — and it carries `!cancelled()` like the lane steps below, so a
+        # failure in `test-vm` above cannot hide the floors' status.
+        run: nix develop .#devShells.x86_64-linux.default --command just editor-model-case-floors
+
+      - name: PLAT-39 — the screen oracle's recorded readings (portable half)
+        if: ${{ !cancelled() }}
+        # THE STEP ABOVE CANNOT ASSERT PLAT-39 HERE, AND THIS ONE CAN.
+        #
+        # PLAT-39's pixel-reading suite consumes the frames under
+        # `src/tests/visual/captures/`, which are gitignored on purpose —
+        # PLAT-35 measured that five of six differ between runs, so a committed
+        # frame would pin whichever run produced it. The step that WRITES them
+        # (`plat35-capture-electron`, through `test-e2e`) is wired into no
+        # workflow at all, so in CI those frames are never created and the
+        # floors recipe above declares PLAT-39 deferred.
+        #
+        # A deferral is honest but it is not an assertion. This step is the
+        # assertion that survives the absence: it compares the RECORDED
+        # pixel-derived readings against the committed DOM-derived answers, and
+        # those two came from paths sharing no code — OCR of a photograph on one
+        # side, Playwright and the DOM on the other. A record that disagreed
+        # with the answers reddens here.
+        #
+        # WHAT IT CANNOT DO, so that a green here is not over-read: it does not
+        # execute the reader, so it cannot notice the reader breaking. Only the
+        # live suite does that, and only where the corpus exists.
+        #
+        # It reads two JSON files and needs no image toolchain — no GuiAssert,
+        # no ffmpeg, no tesseract — which is what makes it runnable here at all.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat39-record-gate
+
+      # ----------------------------------------------------------------
+      # PLAT-33: THE TWO COLLABORATION LANES, WHICH NO WORKFLOW NAMED.
+      # ----------------------------------------------------------------
+      #
+      # `vm-collab-units` and `vm-collab-integration` were declared in
+      # `ci/lib/test-lane-files.sh`, given recipes in the justfile, listed by
+      # the lane classifier — and named by NO workflow. Fourteen suites and
+      # 4,688 lines of collaboration tests were graded by nothing, and had
+      # been since they were written.
+      #
+      # That is why PLAT-33 makes this its FIRST deliverable rather than a
+      # note: a milestone that adds tests to a lane no pipeline executes has
+      # added nothing, and the milestone adds tests to exactly these two.
+      #
+      # Both were red when they were first run, for reasons that had nothing
+      # to do with the lanes and everything to do with nobody running them:
+      # a signal registry 32 classifications behind the ViewModels, a repo-root
+      # probe looking for a `nim.cfg` this repository does not have, and a
+      # Chromium lookup that searched `PATH` while the dev shell's Chromium
+      # sat under `$PLAYWRIGHT_BROWSERS_PATH` — where four shell gates in this
+      # same repository already knew to look, and twelve more non-shell files
+      # besides. All three are fixed; none of them was the reason the justfile
+      # recorded.
+      #
+      # `!cancelled()` for the same reason every lane step below carries it:
+      # the job short-circuits on the first red otherwise, and these two would
+      # report as skipped — which reads as "not broken".
+      - name: Run the collaboration ViewModel unit suites
+        if: ${{ !cancelled() }}
+        run: nix develop .#devShells.x86_64-linux.default --command just test-vm-collab-units
+
+      - name: Run the collaboration integration and soak suites
+        if: ${{ !cancelled() }}
+        # Needs more than Nim: real localhost sockets, the GPUI Rust shim, a
+        # Chromium for the WebRTC DataChannel cases and `replay-server` with
+        # its emulator library for the cross-front-end DAP case.
+        run: nix develop .#devShells.x86_64-linux.default --command just test-vm-collab-integration

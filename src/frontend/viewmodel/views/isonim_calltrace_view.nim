@@ -911,4 +911,15 @@ proc renderCalltracePanel*[R, N](r: R; vm: CalltraceVM;
     when N is FrameNode:
       decorateCalltraceFrame(r, formEl, inputEl, scrollContainer,
                              linesContainer, vm)
+  when not defined(js):
+    # A native renderer whose host draws the scrubber the browser draws
+    # (`views/list_scrubber_native`, e.g. `zgui_view_support`). The browser's
+    # current-call tracking stays its own; a native view opens at the stop.
+    mixin attachNativeListScrubber
+    when compiles(attachNativeListScrubber(r, scrollContainer, panel,
+        proc(): int = 0, proc(): int = 0, proc(): float = 1.0, "")):
+      attachNativeListScrubber(r, scrollContainer, panel,
+        proc(): int = int(vm.store.calltrace.totalCallsCount.val),
+        proc(): int = -1,
+        proc(): float = vm.rowHeightPx.val, "calltrace")
   panel

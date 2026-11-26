@@ -308,6 +308,33 @@ func svgMarkup*(m: ControlMark): string =
   parts.add "</svg>"
   parts.join("")
 
+proc renderControlMark*[R, N](r: R; m: ControlMark): N =
+  ## The mark as SVG elements, through any IsoNim renderer: the same element
+  ## and attribute set the browser's `buildMark` writes, for a native
+  ## renderer that draws the toolbar (a zgui story host). The browser keeps
+  ## its own builder because SVG elements need a namespace there.
+  mixin createElement, setAttribute, appendChild
+  result = r.createElement("svg")
+  r.setAttribute(result, "class", MarkClass)
+  r.setAttribute(result, "viewBox", m.viewBox)
+  r.setAttribute(result, "aria-hidden", "true")
+  r.setAttribute(result, "focusable", "false")
+  r.setAttribute(result, "data-mark", m.action)
+  for s in m.shapes:
+    let p = r.createElement("path")
+    r.setAttribute(p, "d", s.d)
+    if s.stroked:
+      r.setAttribute(p, "fill", "none")
+      r.setAttribute(p, "stroke", "currentColor")
+      r.setAttribute(p, "stroke-width", s.strokeWidth)
+      r.setAttribute(p, "stroke-linecap", s.linecap)
+      r.setAttribute(p, "stroke-linejoin", s.linejoin)
+      if s.linejoin == "miter":
+        r.setAttribute(p, "stroke-miterlimit", "10")
+    else:
+      r.setAttribute(p, "fill", "currentColor")
+    r.appendChild(result, p)
+
 # ---------------------------------------------------------------------------
 # Attaching the marks to a rendered toolbar
 # ---------------------------------------------------------------------------

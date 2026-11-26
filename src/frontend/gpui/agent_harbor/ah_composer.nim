@@ -469,14 +469,17 @@ proc fieldEl(r: GpuiRenderer; p: AhPalette; label, value, problem: string;
   # hairline (border/secondary, as every input of the composer), and its
   # text on a line as tall as the box (`line-height: 1.5rem`), set from
   # inside the top hairline as the browser sets it.
-  let v = r.box(pairs = [("height", $ControlPx & "px"), ("items", "start"),
-                         ("padding-left", if locked: "0px" else: "8px"),
-                         ("padding-right", "8px"),
-                         ("rounded", $ControlRadiusPx & "px"), ("border-width", "1px"),
-                         ("border-color", if problem.len > 0: p.textError
-                                          elif locked: p.panel else: p.borderSecondary),
-                         ("background", if locked: p.panel else: p.ground),
-                         ("overflow", "hidden")])
+  # It is not an `input` (`span.ah-composer-field-value`), so the app's
+  # input rule never fills it, a value or none (`ikValueBox`).
+  let look = inputLook(p, value, placeholder,
+                       if problem.len > 0: p.textError
+                       elif locked: p.panel else: p.borderSecondary,
+                       if locked: p.panel else: p.ground, kind = ikValueBox)
+  let v = r.inputBox(look, pairs = [("height", $ControlPx & "px"), ("items", "start"),
+                                    ("padding-left", if locked: "0px" else: "8px"),
+                                    ("padding-right", "8px"),
+                                    ("rounded", $ControlRadiusPx & "px"),
+                                    ("overflow", "hidden")])
   # Locked (the control center's launch in flight): no field's fill,
   # outline or inset, a value's words in the label role (above the options
   # not chosen, in the disabled role; study D74), as the web's
@@ -855,13 +858,16 @@ proc drawComposer*(r: GpuiRenderer; host: GpuiElement; vm: OmniboxComposerVM;
   # While the sheet is open the field has the sheet's edges (P2c study D36):
   # `sheetWidthFor`, centred, the sheet's own.
   let fieldW = vm.sheetWidthFor(widthPx)
-  let field = r.box(pairs = [("width", $fieldW & "px"), ("height", $FieldHeightPx & "px"),
-                             ("margin-top", $FieldTopPx & "px"),
-                             ("items", "center"), ("padding-left", "12px"),
-                             ("padding-right", "12px"), ("gap", "8px"),
-                             ("rounded", $ControlRadiusPx & "px"), ("border-width", "1px"),
-                             ("border-color", p.borderSecondary), ("background", p.ground)])
   let fieldText = ComposerPrefix & vm.fieldText
+  # The palette's field (`ikCommandField`): the app's input rule leaves it
+  # on its row's rest look whatever it holds (command-palette.styl).
+  let look = inputLook(p, fieldText, "", p.borderSecondary, p.ground, kind = ikCommandField)
+  let field = r.inputBox(look, pairs = [("width", $fieldW & "px"),
+                                        ("height", $FieldHeightPx & "px"),
+                                        ("margin-top", $FieldTopPx & "px"),
+                                        ("items", "center"), ("padding-left", "12px"),
+                                        ("padding-right", "12px"), ("gap", "8px"),
+                                        ("rounded", $ControlRadiusPx & "px")])
   # Never cut by an ellipsis (P2c D32), and its end, where the caret is, in
   # view (D36): the field shows the longest end of the text that fits, as
   # an input scrolled to its end does, clipped inside its padding (the web's

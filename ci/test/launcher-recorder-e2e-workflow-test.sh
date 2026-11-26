@@ -2003,7 +2003,9 @@ fi
 # three arms prove the rule is not vacuous: a recipe with no such import and a
 # file with no such call site are refused, and a further import in the recipe
 # is demanded, so the required set really is derived.
-cp "$REPO_ROOT/.github/workflows/codetracer.yml" "$MUT/m14.yml" 2>/dev/null || true
+# codetracer.yml with its called workflows inlined: the repro-lock call sites
+# live in jobs it keeps in reusable workflows of their own.
+python3 "$REPO_ROOT/ci/lib/inline-codetracer-workflow.py" >"$MUT/m14.yml" 2>/dev/null || rm -f "$MUT/m14.yml"
 m14_victim="$(repro_nim_sibling_sources "$REPRO_RECIPE" | head -n 1)"
 if [ ! -f "$MUT/m14.yml" ] || [ -z "$m14_victim" ]; then
 	mut_bad+=("M14 could not be built: no codetracer.yml copy, or repro.nim imports no sibling source")

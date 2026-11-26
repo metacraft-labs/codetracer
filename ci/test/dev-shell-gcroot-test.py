@@ -28,7 +28,11 @@ import sys
 import yaml
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-WORKFLOWS = ["codetracer.yml", "tui-tests.yml", "gpui-window-captures.yml", "ct-build.yml"]
+# codetracer.yml and every workflow it calls (`uses: ./.github/workflows/X`),
+# read from the file so a job split out of it later is still checked.
+WORKFLOWS = ["codetracer.yml"] + list(dict.fromkeys(re.findall(
+    r"^    uses: \./\.github/workflows/(\S+)$",
+    (ROOT / ".github/workflows/codetracer.yml").read_text(), re.M)))
 ACTION = ROOT / ".github/actions/provision-repro-lock-siblings/action.yml"
 
 failures = 0

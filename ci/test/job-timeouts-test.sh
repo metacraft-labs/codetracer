@@ -83,7 +83,10 @@ trap 'rm -rf "$tmp_root"' EXIT
 # ---------------------------------------------------------------------------
 printf 'codetracer.yml carries a bound on every job\n'
 
-out="$(cd "$REPO_ROOT" && python3 "$GUARD" "$WORKFLOW" 2>&1)"
+# No argument: the guard reads codetracer.yml and every workflow it calls,
+# where most of its jobs live (it was split to stay under GitHub's
+# 512,000-byte limit).
+out="$(cd "$REPO_ROOT" && python3 "$GUARD" 2>&1)"
 status=$?
 if [ "$status" -eq 0 ]; then
 	ok "every job in $WORKFLOW declares timeout-minutes"
@@ -116,9 +119,11 @@ printf 'the same workflow with its bounds stripped is rejected, by name\n'
 
 stripped_dir="$tmp_root/stripped/.github/workflows"
 mkdir -p "$stripped_dir"
-grep -v '^[[:space:]]*timeout-minutes:' "$REPO_ROOT/$WORKFLOW" >"$stripped_dir/codetracer.yml"
+for wf in "$REPO_ROOT"/.github/workflows/*.yml; do
+	grep -v '^[[:space:]]*timeout-minutes:' "$wf" >"$stripped_dir/$(basename "$wf")"
+done
 
-neg_out="$(cd "$tmp_root/stripped" && python3 "$GUARD" "$WORKFLOW" 2>&1)"
+neg_out="$(cd "$tmp_root/stripped" && python3 "$GUARD" 2>&1)"
 neg_status=$?
 if [ "$neg_status" -eq 1 ]; then
 	ok "stripping every bound makes the checker exit 1"

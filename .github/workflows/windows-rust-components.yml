@@ -1,0 +1,277 @@
+name: windows-rust-components
+# Called from codetracer.yml (job `windows-rust-components`), which keeps the triggers, the
+# concurrency group, the job's `needs:` and ci-verdict's view of it. Split
+# out to keep codetracer.yml well under GitHub's 512,000-byte workflow limit
+# (ci/test/workflow-file-size-test.sh).
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  windows-rust-components:
+    runs-on: [self-hosted, windows, x64]  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
+    # WHY EVERY eph-win-x64 JOB NOW CARRIES AN EXPLICIT timeout-minutes.
+    #
+    # Omitting it does not mean "no limit", it means GitHub's DEFAULT limit,
+    # which is 360 minutes. That default is the six-hour figure observed on
+    # this lane, and it is worth being exact about what it cost: in run
+    # 33880354195 this job entered `Setup dev env` at 14:37:32 and was still in
+    # it at 20:05:35, and `origin-DAP (materialized Python, Windows)` entered
+    # `Setup db-backend siblings` at 14:20:59 and was still in it at 20:05:50.
+    # Neither FAILED -- both were terminated by the 360-minute default, six
+    # hours after starting, having produced no verdict. `windows-bootstrap-smoke`
+    # (8 min) and `windows-named-pipe-tests` (8 min) on the same runner class in
+    # the same run were unaffected, because neither calls `setup-dev-env`.
+    #
+    # The damage is not the wasted runner. `concurrency.group` for this workflow
+    # is per-branch, so for those six hours the `Codetracer CI-dev` group stayed
+    # `in_progress` and every later push to `dev` queued behind a job that was
+    # never going to report. A bounded failure is strictly better than an
+    # unbounded non-answer: it frees the group, and it names the step that hung.
+    #
+    # 75 minutes is chosen against measurement, not taste. The cold-cache cost of
+    # this step is real -- `eph-win-x64` is EPHEMERAL (every job gets a fresh
+    # `garm-*` VM, so `Get-DefaultInstallRoot`'s "persists across jobs" cache
+    # never hits) and env.ps1 provisions ~22 toolchains from scratch, the largest
+    # being a ~767 MB WinDbg msixbundle. This must not turn a slow-but-working
+    # bootstrap red, so it sits well above that and well under 360: 75 minutes
+    # for the bootstrap, plus 25 for the cold ct-native-replay cargo build the
+    # TTD tests need.
+    timeout-minutes: 100
+    defaults:
+      run:
+        working-directory: wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer
+    env:
+      REPRO_TOOL_PROVISIONING: tarball
+    steps:
+      # See the eph-win-x64 note at the top of this file. This job checks out
+      # with `submodules: recursive`, which actions/checkout can only honour
+      # through a real git; without one it falls back to the REST API and
+      # fails outright with "Input 'submodules' not supported".
+      - name: Ensure Git and Git Bash are on PATH
+        working-directory: ${{ github.workspace }}
+        shell: powershell
+        env:
+          CODETRACER_GIT_BOOTSTRAP_REVISION: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $revision = $env:CODETRACER_GIT_BOOTSTRAP_REVISION
+          if ($revision -cnotmatch '^[0-9a-f]{40}$') {
+            throw "The workflow did not supply an immutable bootstrap revision."
+          }
+          $bootstrapUrl =
+            "https://raw.githubusercontent.com/metacraft-labs/codetracer/" +
+            "$revision/ci/ensure-git-for-checkout.ps1"
+          $bootstrapScript = Join-Path $env:RUNNER_TEMP `
+            "codetracer-ensure-git-$revision-$([Guid]::NewGuid().ToString('N')).ps1"
+          [Net.ServicePointManager]::SecurityProtocol =
+            [Net.ServicePointManager]::SecurityProtocol -bor
+            [Net.SecurityProtocolType]::Tls12
+          try {
+            Invoke-WebRequest `
+              -Uri $bootstrapUrl `
+              -OutFile $bootstrapScript `
+              -UseBasicParsing
+            & $bootstrapScript
+          }
+          finally {
+            Remove-Item -LiteralPath $bootstrapScript -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Generate CI token
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          path: wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Setup dev env
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@ae97e0e42475bdcad85d94871d4a7ec543d5aa16
+        with:
+          env-flavor: reprobuild
+          consumer-directory: wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer
+          workspace-directory: wr3-${{ github.run_id }}-${{ github.run_attempt }}
+          sibling-strategy: repro-lock
+          # Built from the reprobuild revision repro.lock pins, not a release.
+          # The pinned repro.nim (2f7cb5db5) calls `nim.c(..., binary = ...,
+          # noNimblePath = ...)`; no published Windows release has that API:
+          # v0.2.28 stopped the provider compile with "unknown named
+          # parameter: binary / noNimblePath" (run 45068892139), and the
+          # v0.2.31 release is cut from 7618e3cb2, before af8bf966a added
+          # noNimblePath. Earlier, v0.2.26 derived another interface digest
+          # for the catalog's tree-sitter (run 44577379303). Keep this SHA
+          # equal to repro.lock's reprobuild revision; a release published
+          # from it or later can replace the source build.
+          repro-from-source: true
+          repro-build-pin: 2f7cb5db5289fa1e9e060281ebe8c095bf9669e9
+          repro-version: v0.2.31
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          # THIS LIST HOLDS ONLY WHAT THE LOCK PATH WILL NOT CLONE. `repro develop
+          # --all` materialises what repro.lock pins, but it skips a row a recipe
+          # pins (flake.nix names it by commit), and repro.nim imports its Windows
+          # contributions from `../reprobuild-packages` when the environment
+          # activates. Naming that one source hands it to clone-siblings at the
+          # committed lock revision. Naming a row the bulk develop does clone gains
+          # nothing: it is dropped as redundant, with a warning. It stays a `|`
+          # block because ci/verdict/workspace-lock-freshness.sh reads the declared
+          # set from block entries, and an inline value would drop this name from
+          # it.
+          siblings: |
+            reprobuild-packages
+
+      - name: Upload env.ps1 component decomposition
+        # env.ps1 writes a per-component breakdown of the bootstrap -- wall
+        # clock, install size and relocatability class per component, plus the
+        # install-root total -- to `.tmp/windows-diy/`. This runner is
+        # EPHEMERAL: without this step the file is destroyed with the VM and
+        # the measurement may as well not have been taken.
+        #
+        # `if: always()` is the whole point. env.ps1 emits the report from a
+        # `finally`, so a run that dies mid-bootstrap still publishes a partial
+        # table naming the component it died in and what everything before it
+        # cost -- which is the more useful artifact while the lane is red. A
+        # success-only upload would collect the report exactly when it is least
+        # needed.
+        #
+        # `if-no-files-found: ignore` because this also runs when the bootstrap
+        # never got far enough to write anything, and a missing report must not
+        # become a second, misleading failure.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-env-decomposition
+          include-hidden-files: true
+          path: |
+            wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/.tmp/windows-diy/windows-env-decomposition.json
+            wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/.repro/dev-env/**/*tool-identities.inspect.json
+            wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/.repro/build/**/*tool-identities.inspect.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Generate tree-sitter-nim parser
+        shell: pwsh
+        # The committed tree-sitter 0.25 runtime accepts parser ABI 13–15.
+        # Activate the declared generator and Node without a global npm install.
+        run: dev-exec tree-sitter generate --abi 15 --output libs/tree-sitter-nim/src libs/tree-sitter-nim/grammar.js
+
+      - name: Build db-backend
+        working-directory: wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/src/db-backend
+        shell: bash
+        # The emulator's ``syscall_replay.nim`` imports
+        # ``stew/endians2`` but ``ct_emulator.nimble`` doesn't list
+        # ``stew`` as a dep, so on a fresh Windows runner Nim cannot
+        # resolve the module.  The Nix derivation sets
+        # ``CT_EMULATOR_EXTRA_NIM_PATHS`` to inject codetracer's
+        # vendored ``libs/nim-stew``; mirror that here so
+        # build_native_api.sh's ``--path:`` flags pick it up.
+        env:
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/libs/nim-stew/stew:${{ github.workspace }}/wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/libs/nim-stew:${{ github.workspace }}/wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/libs/nim-result
+        run: dev-exec cargo build
+
+      # ct-native-replay, for the Windows recorder tests: TTD (which env.ps1
+      # installs on this lane) records and ct-native-replay replays.
+      - name: Build ct-native-replay (codetracer-native-backend sibling)
+        shell: bash
+        env:
+          # The backend's lockfile names a private git dependency; the git CLI
+          # transport presents the credential setup-dev-env installed.
+          CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+        run: |
+          set -euo pipefail
+          backend="${{ github.workspace }}/wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer-native-backend"
+          cd "$backend"
+          # The tests look for it under the sibling's own target/, not under a
+          # runner-wide CARGO_TARGET_DIR.
+          CARGO_TARGET_DIR="$backend/target" dev-exec just build
+          if [ ! -f "$backend/target/debug/ct-native-replay.exe" ]; then
+            echo "::error::just build succeeded but target/debug/ct-native-replay.exe is missing; the TTD tests cannot replay."
+            exit 1
+          fi
+
+      - name: Test db-backend
+        working-directory: wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/src/db-backend
+        shell: bash
+        # build_native_api.sh has already produced the C files in
+        # the Build step above; this env var only matters when
+        # regeneration is required, but we leave it set so a stale
+        # cache doesn't trigger a re-run that then fails for the
+        # same path-resolution reason.
+        env:
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/libs/nim-stew/stew:${{ github.workspace }}/wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/libs/nim-stew:${{ github.workspace }}/wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/libs/nim-result
+          # ``ctfs_trace_reader::tests::bench_new_format_startup_time``
+          # asserts new-format trace startup is under 200ms.  That
+          # number is calibrated for a developer workstation; GitHub-
+          # hosted ``windows-latest`` is consistently 2-3x slower
+          # (we've observed 322ms cleanly).  Let CI assert against a
+          # roomier threshold without weakening the dev-machine SLA.
+          CT_BENCH_STARTUP_MS_THRESHOLD: "1000"
+          CODETRACER_TEST_SKIP_REPORT: ${{ runner.temp }}/db-backend-test-skips.txt
+        # Graceful skipping is OFF (the script sets it). The integration tests
+        # needing recorders or runtimes this lane does not provide -- the
+        # interpreted-language, WebAssembly and blockchain recorders, which are
+        # not supported on Windows, and MCR -- are excluded by name through
+        # ci/test/rust-components-not-provided.windows.txt, which names the
+        # lane that runs each; the Windows recorder (TTD) tests run here.
+        run: dev-exec bash ../../ci/test/windows-rust-components-tests.sh
+
+
+      - name: Report db-backend tests that skipped (not verified)
+        if: always()
+        shell: bash
+        env:
+          CODETRACER_TEST_SKIP_REPORT: ${{ runner.temp }}/db-backend-test-skips.txt
+        run: |
+          if [ -s "$CODETRACER_TEST_SKIP_REPORT" ]; then
+            echo "SKIPPED (NOT VERIFIED): $(sort -u "$CODETRACER_TEST_SKIP_REPORT" | wc -l | tr -d ' ') test(s) asserted nothing in this lane:"
+            sort -u "$CODETRACER_TEST_SKIP_REPORT" | while IFS= read -r line; do
+              echo "  $line"
+              echo "::warning title=Test skipped (not verified)::$line"
+            done
+          else
+            echo "No db-backend test skipped."
+          fi
+      - name: Build backend-manager
+        working-directory: wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/src/backend-manager
+        shell: bash
+        run: dev-exec cargo build
+
+      - name: Build tui
+        working-directory: wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/src/tui
+        shell: bash
+        run: dev-exec cargo build
+
+      - name: Clippy db-backend
+        working-directory: wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/src/db-backend
+        shell: bash
+        # Same rationale as Build db-backend above: keep the path
+        # variable set so any cached-state-invalidation triggers
+        # a regeneration with stew on the import path.
+        env:
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/libs/nim-stew/stew:${{ github.workspace }}/wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/libs/nim-stew:${{ github.workspace }}/wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/libs/nim-result
+        run: dev-exec cargo clippy --all-targets -- -D warnings
+
+      - name: Clippy backend-manager
+        working-directory: wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/src/backend-manager
+        shell: bash
+        run: dev-exec cargo clippy --all-targets -- -D warnings
+
+      - name: Clippy tui
+        working-directory: wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/src/tui
+        shell: bash
+        run: dev-exec cargo clippy --all-targets -- -D warnings
+
+      - name: Test tui named pipe
+        working-directory: wr3-${{ github.run_id }}-${{ github.run_attempt }}/codetracer/src/tui
+        shell: bash
+        run: dev-exec cargo test --bin simple-tui windows_named_pipe

@@ -1,0 +1,397 @@
+name: origin-DAP (nightly routed materialized matrix, Windows)
+# Called from codetracer.yml (job `origin-dap-windows-nightly`), which keeps the triggers, the
+# concurrency group, the job's `needs:` and ci-verdict's view of it. Split
+# out to keep codetracer.yml well under GitHub's 512,000-byte workflow limit
+# (ci/test/workflow-file-size-test.sh).
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  origin-dap-windows-nightly:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, windows, x64]  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
+    name: origin-DAP (nightly routed materialized matrix, Windows)
+    # See the timeout-minutes rationale on windows-rust-components. This job is
+    # schedule/dispatch-gated so it has never run on this runner class, but it
+    # reaches setup-dev-env exactly as its non-nightly sibling does and would
+    # hang identically; it gets the same budget rather than the 360-minute
+    # default it would otherwise inherit the first time it is triggered.
+    timeout-minutes: 75
+    steps:
+      # See the eph-win-x64 note at the top of this file. This job is
+      # schedule/dispatch-gated, so it has never run on the migrated runner
+      # class; it checks out with `submodules: recursive` and would hit the
+      # same REST-API fallback the moment it is triggered.
+      - name: Ensure Git and Git Bash are on PATH
+        shell: powershell
+        env:
+          CODETRACER_GIT_BOOTSTRAP_REVISION: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $revision = $env:CODETRACER_GIT_BOOTSTRAP_REVISION
+          if ($revision -cnotmatch '^[0-9a-f]{40}$') {
+            throw "The workflow did not supply an immutable bootstrap revision."
+          }
+          $bootstrapUrl =
+            "https://raw.githubusercontent.com/metacraft-labs/codetracer/" +
+            "$revision/ci/ensure-git-for-checkout.ps1"
+          $bootstrapScript = Join-Path $env:RUNNER_TEMP `
+            "codetracer-ensure-git-$revision-$([Guid]::NewGuid().ToString('N')).ps1"
+          [Net.ServicePointManager]::SecurityProtocol =
+            [Net.ServicePointManager]::SecurityProtocol -bor
+            [Net.SecurityProtocolType]::Tls12
+          try {
+            Invoke-WebRequest `
+              -Uri $bootstrapUrl `
+              -OutFile $bootstrapScript `
+              -UseBasicParsing
+            & $bootstrapScript
+          }
+          finally {
+            Remove-Item -LiteralPath $bootstrapScript -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Generate CI token
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      # Not `submodules: recursive`: on an ephemeral runner that cloned and
+      # checked out all 37 submodules one after another, 13 of the Checkout
+      # step's 20 minutes (run 45134129306), and this job uses a handful.
+      # db-backend's Cargo.toml names every tree-sitter grammar as a path
+      # dependency (cargo reads optional ones' manifests too), and the Nim
+      # side needs nim-stew and nim-result (CT_EMULATOR_EXTRA_NIM_PATHS).
+      # All of them are public repositories.
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: false
+          token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Verify the checkout is a Git repository
+        # actions/checkout falls back to downloading a tarball over the REST
+        # API when it finds no usable Git, and that tree has no .git, so the
+        # explicit submodule fetch below could not run. The Git bootstrap
+        # above is what prevents the fallback; this makes a fallback fail here.
+        shell: pwsh
+        run: |
+          if (-not (Test-Path -LiteralPath (Join-Path $env:GITHUB_WORKSPACE ".git"))) {
+            throw "actions/checkout left no .git in $env:GITHUB_WORKSPACE: it fell back to the REST API"
+          }
+
+      - name: Fetch the submodules this job uses
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $paths = @(
+            "libs/nim-stew", "libs/nim-result",
+            "libs/tree-sitter-nim", "libs/tree-sitter-cairo", "libs/tree-sitter-aiken",
+            "libs/tree-sitter-move-on-aptos", "libs/tree-sitter-sway", "libs/tree-sitter-circom",
+            "libs/tree-sitter-leo", "libs/tree-sitter-tolk", "libs/tree-sitter-masm",
+            "libs/tree-sitter-cadence")
+          git -c protocol.version=2 submodule update --init --recursive --depth=1 --jobs 8 -- @paths
+          if ($LASTEXITCODE -ne 0) { throw "git submodule update exited $LASTEXITCODE" }
+
+      - name: Restore the toolchain cache
+        # Written by origin-dap-windows-toolchain, above.
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}\ct-diy
+          key: windows-diy-origin-dap-v3-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}
+          fail-on-cache-miss: true
+
+      - name: Restore db-backend's compiler cache
+        # sccache's local store, not db-backend's target directory: the test
+        # compile of db-backend and its dependencies took 36m53s of the Python
+        # job's 75 minutes on a clean-start runner (run 45718096371). Keyed on
+        # the toolchain and Cargo.lock; a dependency change restores the
+        # nearest older store, and sccache recompiles only what changed.
+        # SCCACHE_CACHE_SIZE on the test step bounds what is saved.
+        id: sccache_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}\sccache
+          key: sccache-db-backend-windows-v1-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}-${{ hashFiles('src/db-backend/Cargo.lock') }}
+          restore-keys: |
+            sccache-db-backend-windows-v1-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}-
+
+      - name: Setup db-backend siblings
+        # `windows-diy`, for the reason spelled out in the per-PR job above:
+        # the `nix` flavor cannot install Nix on a Windows runner, and this
+        # job wants the sibling checkouts, not a Nix shell. Keep the two in
+        # step.
+        # No nargo: neither origin-DAP job records Noir (Python here; Python,
+        # Ruby and JS in the nightly matrix), and env.ps1's from-source nargo
+        # build alone took both jobs past their 75-minute bound in run
+        # 44940608244.
+        # Only the components this job uses, at the cached root restored
+        # above; env.ps1 finds them installed and skips them. NARGO stays out.
+        env:
+          WINDOWS_DIY_INSTALL_ROOT: ${{ runner.temp }}\ct-diy
+          WINDOWS_DIY_ONLY: "GCC,ZSTD,ZLIB,RUST,NIM,CAPNP,UV,NODE,JUST,TTD,SCCACHE"
+        uses: ./.github/actions/setup-db-backend-siblings
+        with:
+          env-flavor: windows-diy
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Use the pinned Cap'n Proto from env.ps1
+        # env.ps1 (windows-diy, above) already provisions the pinned Cap'n
+        # Proto at CAPNP_DIR. This used to `choco install capnproto`, which
+        # failed on win-ci-bare-001 ("The term 'choco' is not recognized",
+        # run 45236060796) and would install an unpinned version where it
+        # did run.
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $capnp = Get-Command capnp.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $capnp) {
+            if (-not $env:CAPNP_DIR) { throw "env.ps1 set no CAPNP_DIR and no capnp.exe is on PATH" }
+            $bin = @($env:CAPNP_DIR, (Join-Path $env:CAPNP_DIR "bin")) |
+              Where-Object { Test-Path -LiteralPath (Join-Path $_ "capnp.exe") -PathType Leaf } | Select-Object -First 1
+            if (-not $bin) { throw "no capnp.exe under CAPNP_DIR=$env:CAPNP_DIR" }
+            Add-Content -LiteralPath $env:GITHUB_PATH -Value $bin
+            $capnp = Get-Item -LiteralPath (Join-Path $bin "capnp.exe")
+          }
+          $exe = if ($capnp.Source) { $capnp.Source } else { $capnp.FullName }
+          & $exe --version
+          if ($LASTEXITCODE -ne 0) { throw "capnp --version exited $LASTEXITCODE" }
+
+      - name: Install Python 3.12
+        # From uv (env.ps1 puts it on PATH), not actions/setup-python: on a
+        # runner whose service runs as NetworkService (win-ci-bare-001),
+        # setup-python's installer fails with "Error happened during Python
+        # installation" (run 45118976975). uv's managed Pythons are plain
+        # archives and need no installer. They are marked externally managed,
+        # so the recorder is pip-installed into a seeded venv, which is what
+        # `python` resolves to from here on.
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          # uv.exe itself: env.ps1's extensionless `uv` shim is for Git Bash.
+          $uv = if ($env:UV_DIR) { Join-Path $env:UV_DIR "uv.exe" } else { (Get-Command uv.exe -ErrorAction Stop).Source }
+          if (-not (Test-Path -LiteralPath $uv -PathType Leaf)) { throw "no uv.exe at $uv" }
+          $venv = Join-Path $env:RUNNER_TEMP "origin-dap-python"
+          & $uv venv --seed --python 3.12 --python-preference only-managed $venv
+          if ($LASTEXITCODE -ne 0) { throw "uv could not create a Python 3.12 venv (exit $LASTEXITCODE)" }
+          $scripts = Join-Path $venv "Scripts"
+          & (Join-Path $scripts "python.exe") -m pip --version
+          if ($LASTEXITCODE -ne 0) { throw "the Python 3.12 venv has no pip" }
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $scripts
+
+      - name: Read locked Python recorder revision
+        id: python-recorder-lock
+        shell: pwsh
+        run: |
+          $lock = Get-Content -Raw flake.lock | ConvertFrom-Json
+          $revision = $lock.nodes.'codetracer-python-recorder'.locked.rev
+          if ($revision -notmatch '^[0-9a-f]{40}$') {
+            throw "flake.lock does not contain a valid codetracer-python-recorder revision"
+          }
+          "revision=$revision" >> $env:GITHUB_OUTPUT
+
+      - name: Verify private recorder checkout authentication contract
+        shell: pwsh
+        run: ./ci/test/checkout-locked-python-recorder.ps1
+
+      - name: Checkout locked Python recorder adjacent to CodeTracer
+        shell: pwsh
+        env:
+          RECORDER_REVISION: ${{ steps.python-recorder-lock.outputs.revision }}
+          SIBLING_TOKEN: ${{ steps.ci_token.outputs.token }}
+        run: |
+          $destination = Join-Path $env:GITHUB_WORKSPACE "..\codetracer-python-recorder"
+          ./ci/checkout-locked-python-recorder.ps1 `
+            -Revision $env:RECORDER_REVISION `
+            -Destination $destination
+
+      - name: Use the pinned Nim from env.ps1
+        # Not `choco install nim`: win-ci-bare-001 has no Chocolatey, and choco
+        # installs whatever Nim is current. env.ps1 provisions the pinned one.
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          # setup-dev-env exports env.ps1's PATH but not NIM_DIR (run
+          # 45683516828), so find nim.exe on PATH, else under the cached root.
+          $nim = Get-Command nim.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          $nimExe = if ($nim) { $nim.Source } else {
+            Get-ChildItem -Path "${{ runner.temp }}\ct-diy\nim\*\prebuilt\*\bin\nim.exe" -ErrorAction SilentlyContinue |
+              Select-Object -First 1 -ExpandProperty FullName
+          }
+          if (-not $nimExe) { throw "no nim.exe on PATH or under ${{ runner.temp }}\ct-diy\nim" }
+          $nimBin = Split-Path -Parent $nimExe
+          Add-Content -Path $env:GITHUB_PATH -Value $nimBin
+          Add-Content -Path $env:GITHUB_PATH -Value "$env:USERPROFILE\.nimble\bin"
+          & (Join-Path $nimBin "nim.exe") --version
+
+      - name: Key the locked Python recorder's wheel
+        # Building the recorder (maturin, Rust and the Nim trace writer) took
+        # 34 of the nightly job's 78 minutes on win-ci-vm-001 (run 45686408279).
+        # The wheel is cached, keyed on everything it is built from: the
+        # recorder at its lock, the trace-format pair it compiles against, the
+        # Nim libraries on its path, the Python it targets, and the toolchain.
+        id: recorder_wheel
+        shell: pwsh
+        run: |
+          $ws = $env:GITHUB_WORKSPACE
+          $inputs = @(
+            (git -C (Join-Path $ws "..\codetracer-python-recorder") rev-parse HEAD),
+            (git -C (Join-Path $ws "..\codetracer-trace-format") rev-parse HEAD),
+            (git -C (Join-Path $ws "..\codetracer-trace-format-nim") rev-parse HEAD),
+            (git -C $ws rev-parse HEAD:libs/nim-stew),
+            (git -C $ws rev-parse HEAD:libs/nim-result),
+            (& python -c "import sys; print(sys.version)")
+          )
+          if ($LASTEXITCODE -ne 0 -or @($inputs | Where-Object { -not $_ }).Count -gt 0) { throw "could not read the recorder wheel's inputs" }
+          $sha = [System.Security.Cryptography.SHA256]::Create()
+          $digest = [BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes(($inputs -join "`n")))).Replace("-", "").Substring(0, 16).ToLowerInvariant()
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "key=py-recorder-wheel-v1-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}-$digest"
+
+      - name: Restore the locked Python recorder's wheel
+        id: recorder_wheel_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}\py-recorder-wheel
+          key: ${{ steps.recorder_wheel.outputs.key }}
+
+      - name: Install and verify locked Rust-backed Python recorder
+        shell: pwsh
+        run: |
+          $python = (Get-Command python -ErrorAction Stop).Source
+          $recorder = Join-Path $env:GITHUB_WORKSPACE `
+            "..\codetracer-python-recorder\codetracer-python-recorder"
+          $stewRoot = (Resolve-Path "$env:GITHUB_WORKSPACE\libs\nim-stew").Path.Replace('\', '/')
+          $resultRoot = (Resolve-Path "$env:GITHUB_WORKSPACE\libs\nim-result").Path.Replace('\', '/')
+          # libs/nim-result LAST: Nim gives the last --path precedence, and
+          # without it the trace writer's `import results` finds
+          # libs/nim-stew/stew's legacy copy ("'mapErr' can have side effects",
+          # run 45683516828), as in the Linux recorder jobs.
+          $nimPathConfig = @(
+            "--path:`"$stewRoot/stew`""
+            "--path:`"$stewRoot`""
+            "--path:`"$resultRoot`""
+          )
+          foreach ($nimConfigDir in @(
+            (Join-Path $env:APPDATA "nim"),
+            (Join-Path $env:USERPROFILE ".config\nim")
+          )) {
+            New-Item -ItemType Directory -Force -Path $nimConfigDir | Out-Null
+            $nimPathConfig | Add-Content -Path (Join-Path $nimConfigDir "nim.cfg")
+          }
+          $env:CODETRACER_TRACE_FORMAT_NIM_SKIP_NIMBLE_INSTALL = "1"
+          # From the cached wheel when there is one; otherwise build it into
+          # the cache directory first.
+          $wheelDir = "${{ runner.temp }}\py-recorder-wheel"
+          $wheel = Get-ChildItem -Path $wheelDir -Filter "*.whl" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $wheel) {
+            & $python -m pip wheel --disable-pip-version-check --no-deps -w $wheelDir $recorder
+            if ($LASTEXITCODE -ne 0) { throw "failed to build the locked Python recorder" }
+            $wheel = Get-ChildItem -Path $wheelDir -Filter "*.whl" | Select-Object -First 1
+            if (-not $wheel) { throw "pip wheel left no wheel in $wheelDir" }
+          } else {
+            Write-Host "Using the cached recorder wheel $($wheel.Name)"
+          }
+          & $python -m pip install --disable-pip-version-check $wheel.FullName
+          if ($LASTEXITCODE -ne 0) { throw "failed to install the locked Python recorder" }
+          & $python -c "import codetracer_python_recorder"
+          if ($LASTEXITCODE -ne 0) { throw "the locked Python recorder is not importable" }
+          "CODETRACER_PYTHON_CMD=$python" >> $env:GITHUB_ENV
+
+      - name: Save the locked Python recorder's wheel
+        if: steps.recorder_wheel_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}\py-recorder-wheel
+          key: ${{ steps.recorder_wheel.outputs.key }}
+
+      - name: Generate tree-sitter-nim parser
+        shell: pwsh
+        run: |
+          npm install -g tree-sitter-cli
+          cd libs/tree-sitter-nim
+          tree-sitter generate
+
+      - name: Use the pinned just from env.ps1
+        # Not `choco install just`, for the same reason as Nim above.
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $just = Join-Path $env:CARGO_HOME "bin\just.exe"
+          if (-not (Test-Path -LiteralPath $just -PathType Leaf)) { throw "env.ps1 put no just.exe at $just" }
+          Add-Content -Path $env:GITHUB_PATH -Value (Split-Path -Parent $just)
+          & $just --version
+
+      - name: Run routed materialized origin-DAP matrix
+        shell: bash
+        env:
+          RUSTC_WRAPPER: ${{ runner.temp }}\ct-diy\cargo\bin\sccache.exe
+          SCCACHE_DIR: ${{ runner.temp }}\sccache
+          SCCACHE_CACHE_SIZE: "2500M"
+          # sccache cannot cache an incrementally compiled crate, and the dev
+          # profile compiles db-backend's own crates incrementally.
+          CARGO_INCREMENTAL: "0"
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
+          CT_TEST_LANGS: all
+        run: just test-origin-dap
+
+      - name: Report and flush db-backend's compiler cache
+        if: always()
+        shell: bash
+        env:
+          RUSTC_WRAPPER: ${{ runner.temp }}\ct-diy\cargo\bin\sccache.exe
+        run: |
+          sccache=$(cygpath -u "$RUSTC_WRAPPER")
+          if [ ! -f "$sccache" ]; then echo "no sccache at $RUSTC_WRAPPER"; exit 0; fi
+          "$sccache" --show-stats || true
+          "$sccache" --stop-server || true
+
+      - name: Save db-backend's compiler cache
+        if: always() && steps.sccache_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}\sccache
+          key: sccache-db-backend-windows-v1-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}-${{ hashFiles('src/db-backend/Cargo.lock') }}
+
+      - name: Verify test-reprobuild-hcr-mcr-dap fails loudly unsupported on Windows
+        shell: bash
+        run: |
+          set +e
+          output=$(just test-reprobuild-hcr-mcr-dap 2>&1)
+          exit_code=$?
+          set -e
+          echo "$output"
+          if [ "$exit_code" -ne 2 ]; then
+            echo "Expected exit code 2 (unsupported), got $exit_code" >&2
+            exit 1
+          fi
+          if ! grep -q "UNSUPPORTED: test-reprobuild-hcr-mcr-dap requires macOS arm64.*covered by macOS arm64 CI on aarch64-darwin" <<<"$output"; then
+            echo "Output did not report expected unsupported diagnostic naming macOS arm64 on aarch64-darwin" >&2
+            exit 1
+          fi
+
+      - name: Verify test-reprobuild-hcr-in-codetracer fails loudly unsupported on Windows
+        shell: bash
+        run: |
+          set +e
+          output=$(just test-reprobuild-hcr-in-codetracer 2>&1)
+          exit_code=$?
+          set -e
+          echo "$output"
+          if [ "$exit_code" -ne 2 ]; then
+            echo "Expected exit code 2 (unsupported), got $exit_code" >&2
+            exit 1
+          fi
+          if ! grep -q "UNSUPPORTED: test-reprobuild-hcr-in-codetracer requires macOS arm64.*covered by macOS arm64 CI on aarch64-darwin" <<<"$output"; then
+            echo "Output did not report expected unsupported diagnostic naming macOS arm64 on aarch64-darwin" >&2
+            exit 1
+          fi

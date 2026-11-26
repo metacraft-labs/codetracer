@@ -54,6 +54,12 @@ cd "$REPO_ROOT" || exit 1
 
 FLAKE=flake.nix
 WORKFLOW=.github/workflows/codetracer.yml
+# codetracer.yml and the workflows it calls: most of its jobs, and their
+# `siblings:` lists, live in reusable workflows of their own.
+WORKFLOW_FILES=("$WORKFLOW")
+while read -r called; do
+	WORKFLOW_FILES+=(".github/workflows/$called")
+done < <(sed -n 's|^    uses: \./\.github/workflows/\([^ ]*\)$|\1|p' "$WORKFLOW" | sort -u)
 
 PASS=0
 FAIL=0
@@ -113,7 +119,8 @@ flake_refs() {
 # a bare flake URL is.
 # ---------------------------------------------------------------------------
 workflow_refs() {
-	grep -oE '^[[:space:]]+[A-Za-z0-9._-]+=[A-Za-z0-9._/-]+[[:space:]]*$' "$WORKFLOW" |
+	cat "${WORKFLOW_FILES[@]}" |
+		grep -oE '^[[:space:]]+[A-Za-z0-9._-]+=[A-Za-z0-9._/-]+[[:space:]]*$' |
 		tr -d '[:blank:]' |
 		awk -F= '{ print $1 "\t" $2 }' |
 		sort -u

@@ -142,7 +142,8 @@ job_timeout() {
 for spec in \
 	".github/workflows/tui-tests.yml|Push the dev shells this shard realised to the cache|1" \
 	".github/workflows/visual-replay-tools.yml|Push the dev shells this job realised to the cache|1" \
-	".github/workflows/codetracer.yml|Push the build to the cache|2"; do
+	".github/workflows/test-ui-tests.yml|Push the build to the cache|1" \
+	".github/workflows/test-ui-tests-rr.yml|Push the build to the cache|1"; do
 	IFS='|' read -r f name want <<<"$spec"
 	n="$(grep -c "name: ${name}\$" "$f")"
 	check "$f has ${want} '${name}' step(s)" "$f has ${n}" test "$n" = "$want"

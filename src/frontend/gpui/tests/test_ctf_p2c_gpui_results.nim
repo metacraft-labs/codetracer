@@ -24,17 +24,40 @@
 ##   the `data-ah-selected` the fleet's `selected-row` region reads, so the
 ##   selected result was "drawn only on gpui".
 ##
+## * **A line of program text keeps the web's gap from where it is**: at the
+##   laptop size, every code row's drawn line -- its characters at Space
+##   Mono's own advances, read from the design system's font files, its
+##   matches at the Bold face's -- ends at
+##   least the web's 16px (`.ah-results-row-line`'s 0.5rem gap and
+##   `.ah-results-title-code`'s 0.5rem margin) before its location, and at
+##   least the margin before the line's end where nothing stands there. The
+##   line's width is the web's geometry (the sheet's hairlines, the row's
+##   1px margins and 12px paddings), not the view's own constants, and the
+##   location's is the interface face's measure the view lays it out by.
+## * **The sheet draws every part whose words fit above `More below ↓`**:
+##   where a body holds more than its room, the ground left above the
+##   line's hairline is less than the next part needs for what it
+##   shows, and no drawn part shows anything under the hairline (only a
+##   row's 5px bottom padding and its last line's leading may stand there,
+##   as the web's rows scroll under that sticky line).
+## * **A notice breaks between words only** (an API path is
+##   never broken at a slash): each drawn line of `Agent Harbor is not
+##   reachable: GET /api/v1/input-commands …` holds whole words.
+##
 ## No mocks: the real isonim-gpui shadow tree (the shim loaded in process, no
 ## window) and the results stories' own viewmodels over their scripted
 ## providers and Agent Harbor source.
 
 import std/[json, os, sequtils, strutils, unittest]
+from std/unicode import runeLen
 
 import isonim_gpui/renderer
 from isonim_gpui/bindings import gpui_reset_tree
 
 import ../agent_harbor/ah_stories
 from ../chrome import MonoFontFamily
+from ../agent_harbor/ah_theme import textPx, CaptionPx, BodyPx
+from ../agent_harbor/ah_changes_inbox_parts import MonoAdvance, MonoBoldAdvance
 from ../../viewmodel/input/element_press import OperationAttribute
 import ../../stories/codetracer_stories
 import ../../../../tools/stories/emit_storybook_stories
@@ -276,3 +299,155 @@ suite "CTF-P1b: a results story's sheet is as tall as the web's":
     for p in problems: checkpoint p
     check compared == 36
     check problems.len == 0
+
+# ---------------------------------------------------------------------------
+# A line of program text and where it is
+# ---------------------------------------------------------------------------
+
+proc fontAdvanceEm(file: string): float =
+  ## Space Mono's one advance, in ems, read from the design system's font
+  ## file itself (the OpenType `head`, `hhea` and `hmtx` tables,
+  ## https://learn.microsoft.com/typography/opentype/spec/hmtx): the widest
+  ## advance (`hhea.advanceWidthMax`) over the units per em, after checking
+  ## that every glyph that advances advances by exactly that (a monospaced
+  ## face). 0.0 when the file is not such a face.
+  let d = readFile(repoRoot / "libs" / "codetracer-design-system" / "SpaceGrotesk_Complete" /
+                   "Fonts" / "Space_Mono" / file)
+  proc u16(o: int): int = (ord(d[o]) shl 8) or ord(d[o + 1])
+  proc u32(o: int): int = (u16(o) shl 16) or u16(o + 2)
+  var head, hhea, hmtx = -1
+  for i in 0 ..< u16(4):
+    let rec = 12 + 16 * i
+    case d[rec ..< rec + 4]
+    of "head": head = u32(rec + 8)
+    of "hhea": hhea = u32(rec + 8)
+    of "hmtx": hmtx = u32(rec + 8)
+    else: discard
+  if head < 0 or hhea < 0 or hmtx < 0: return 0.0
+  let advance = u16(hhea + 10)
+  for g in 0 ..< u16(hhea + 34):
+    let a = u16(hmtx + 4 * g)
+    if a != 0 and a != advance: return 0.0
+  advance / u16(head + 18)
+
+const
+  WebCodeGapPx = 8 + 8
+    ## The web's room between a line of program text and where it is:
+    ## `.ah-results-row-line { gap: 0.5rem }` and `.ah-results-title-code
+    ## { margin-right: 0.5rem }` (agent_harbor_results.styl).
+  WebCodeMarginPx = 8
+    ## The code title's own margin, kept where nothing stands after it.
+  WebRowEdgesPx = 2 + 2 + 2 * 12
+    ## A row's line is the sheet less its two hairlines, the row's 1px
+    ## margins and its 12px paddings (`.ah-results-row`).
+
+proc drawnCodePx(title: GpuiElement; regular, bold: float): float =
+  ## How wide `title` (a code row's line, `data-ah-face="code"`) draws: every
+  ## run at Space Mono's advance at the body size, the matches (`data-ah-match`)
+  ## at the Bold face's.
+  var matched: seq[GpuiElement]
+  collect(title, "data-ah-match", matched)
+  var boldChars = 0
+  for m in matched: boldChars += getAttribute(m, "data-ah-match").runeLen
+  let all = getAttribute(title, "data-ah-title-shown").runeLen
+  float(BodyPx) * (float(all - boldChars) * regular + float(boldChars) * bold)
+
+suite "CTF-P2c: a line of program text keeps the web's gap from where it is":
+  test "the views measure Space Mono at the font files' own advances":
+    let regular = fontAdvanceEm("SpaceMono-Regular.ttf")
+    let bold = fontAdvanceEm("SpaceMono-Bold.ttf")
+    checkpoint "Regular " & $regular & ", Bold " & $bold
+    check regular > 0.0 and bold > 0.0
+    check abs(MonoAdvance - regular) < 1e-9
+    check abs(MonoBoldAdvance - bold) < 1e-9
+
+  test "every code row's drawn line ends the web's gap before its location":
+    let regular = fontAdvanceEm("SpaceMono-Regular.ttf")
+    let bold = fontAdvanceEm("SpaceMono-Bold.ttf")
+    var rowsSeen, besideLocation = 0
+    var problems: seq[string]
+    for story in agentHarborSection().stories:
+      if story.surface != "agent-harbor-results": continue
+      for (w, h) in [(1440, 900), (1440, 2000), (360, 900)]:
+        for mode in [dmDark, dmLight]:
+          gpui_reset_tree()
+          let m = r.mountAgentHarborStoryGpui(story.surface, story.fixture, w, h, mode)
+          let lineW = float(m.results.sheetWidthFor(w) - WebRowEdgesPx)
+          var rows: seq[GpuiElement]
+          collect(m.view, "data-ah-row", rows)
+          for row in rows:
+            var titles, locations, tags: seq[GpuiElement]
+            collect(row, "data-ah-title-shown", titles)
+            if titles.len == 0: continue
+            inc rowsSeen
+            collect(row, "data-ah-location", locations)
+            collect(row, "data-ah-tag", tags)
+            let drawn = drawnCodePx(titles[0], regular, bold)
+            # Where the line's right-hand parts start, from its end: the
+            # tag, the row's gap and the location (`margin-left: auto`
+            # pushes them to the end; the view lays the location out at the
+            # interface face's measure). Only beside the title: at the
+            # sidebar size they are on the line under it.
+            let beside = not m.results.isNarrow(w) and (locations.len > 0 or tags.len > 0)
+            var rightPx = 0.0
+            if beside:
+              inc besideLocation
+              if locations.len > 0:
+                rightPx += float(textPx(getAttribute(locations[0], "data-ah-location"), CaptionPx))
+              if tags.len > 0:
+                rightPx += float(textPx(getAttribute(tags[0], "data-ah-tag"), CaptionPx))
+                if locations.len > 0: rightPx += 8.0
+            let room = lineW - rightPx - (if beside: float(WebCodeGapPx) else: float(WebCodeMarginPx))
+            if drawn > room:
+              problems.add story.fixture & " " & $w & "x" & $h & " " & $mode & ": `" &
+                getAttribute(titles[0], "data-ah-title-shown") & "` draws " & $drawn &
+                "px where " & $room & "px leave the web's gap"
+          m.dispose()
+    for p in problems: checkpoint p
+    check rowsSeen > 0
+    check besideLocation > 0
+    check problems.len == 0
+
+suite "CTF-P2c: the sheet draws every part whose words fit above More below":
+  test "the ground above More below is less than the next part shows":
+    var sheets = 0
+    var problems: seq[string]
+    for story in agentHarborSection().stories:
+      if story.surface != "agent-harbor-results": continue
+      for (w, h) in [(1440, 900), (360, 900)]:
+        gpui_reset_tree()
+        let m = r.mountAgentHarborStoryGpui(story.surface, story.fixture, w, h, dmDark)
+        let sheet = m.view.firstWith("data-ah-more-room")
+        if not sheet.isNil:
+          inc sheets
+          let free = parseInt(getAttribute(sheet, "data-ah-more-room"))
+          let next = parseInt(getAttribute(sheet, "data-ah-more-next"))
+          let id = story.fixture & " " & $w & "x" & $h
+          # Nothing a drawn part shows stands under the hairline: only a
+          # row's 5px bottom padding and its last line's leading may (at
+          # most 4px: a caption on the sheet's 24px line).
+          if free < -(5 + 4): problems.add id & ": a drawn part runs " & $(-free) & "px under the line"
+          # And the next part would not fit: what it shows is taller than
+          # the ground left.
+          if next > 0 and next <= free:
+            problems.add id & ": " & $free & "px left above the line, where the next part needs " &
+              $next & "px"
+        m.dispose()
+    for p in problems: checkpoint p
+    check sheets > 0
+    check problems.len == 0
+
+suite "CTF-P2c: a notice breaks between words only":
+  test "the unreachable notice keeps its API path whole":
+    for (w, h) in [(1440, 900), (360, 900)]:
+      let m = mount("ah-unreachable", w, h)
+      let lines = m.view.facts("notice-lines")
+      check lines.len == 1
+      let text = m.view.facts("notice-line")[0]
+      let drawn = lines[0].split("\n")
+      checkpoint $w & ": " & $drawn
+      # Every drawn line is whole words of the notice, and together they are
+      # the notice.
+      check drawn.join(" ") == text.splitWhitespace.join(" ")
+      check drawn.anyIt("/api/v1/input-commands" in it)
+      m.dispose()

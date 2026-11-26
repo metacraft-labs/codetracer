@@ -124,7 +124,7 @@ BUILD_SIBLINGS="${SUITE_ROOT}/scripts/build-siblings.sh"
 # Every contract this suite claims to check. A suite that silently runs fewer
 # assertions than it advertises is a suite that stops protecting anything, so
 # the count is asserted at the end and has to be changed deliberately.
-EXPECTED_ASSERTIONS=177
+EXPECTED_ASSERTIONS=181
 
 ASSERTIONS=0
 FAILURES=0
@@ -2196,6 +2196,51 @@ assert_contains "${STALE_CSS}" "just build-once" \
 touch -t 202001050000 "${CSSTREE}/src/build-debug-repro/frontend/styles/theme.css"
 assert_contains "$(resolve_css)" "build-debug-repro/frontend/styles/theme.css" \
 	"a stylesheet rebuilt after the .styl edit is accepted again"
+
+# A STYLESHEET WHOSE MTIME MEANS NOTHING. A nix-built stylesheet carries the
+# store's mtime, 1970-01-01T00:00:01Z, so by mtime it is older than every
+# checked-out .styl: CI's desktop job refused the nix-built app's CSS on every
+# contrast spec (run 45618872592). Such a stylesheet is judged by the stamp the
+# nix build writes beside it, `styl-sources.sha256`, the digest of the .styl
+# sources it was compiled from. The stamp is computed here exactly as
+# nix/packages/default.nix computes it, so these contracts also hold the
+# resolver's digest to the build's.
+STAMPTREE="${TEST_ROOT}/stamptree"
+STAMP_STYLES="${STAMPTREE}/src/build-debug-repro/frontend/styles"
+mkdir -p "${STAMPTREE}/src/frontend/styles/components" "${STAMP_STYLES}"
+printf '.x { color: red }\n' >"${STAMPTREE}/src/frontend/styles/components/status_bar.styl"
+printf '@import "components/*"\n' >"${STAMPTREE}/src/frontend/styles/theme.styl"
+printf '.x{color:red}\n' >"${STAMP_STYLES}/theme.css"
+touch -d @1 "${STAMP_STYLES}/theme.css"
+nix_stamp() {
+	(cd "${STAMPTREE}/src/frontend/styles" && find . -type f -name '*.styl' | LC_ALL=C sort | xargs sha256sum) |
+		sha256sum | cut -d' ' -f1
+}
+resolve_stamped_css() {
+	env -u CODETRACER_BUILD_DIR -u CODETRACER_E2E_CT_PATH node -e '
+		const { resolveBuiltThemeCss } = require(process.argv[1]);
+		try {
+			process.stdout.write(resolveBuiltThemeCss(process.argv[2], process.argv[3]));
+		} catch (e) {
+			process.stdout.write("REFUSED: " + e.message);
+		}
+	' "${CSS_LIB}" "${STAMPTREE}" theme.css 2>&1
+}
+
+NO_STAMP_CSS="$(resolve_stamped_css)"
+assert_contains "${NO_STAMP_CSS}" "cannot be judged current" \
+	"a stylesheet with the store's epoch mtime and no source stamp is refused"
+
+nix_stamp >"${STAMP_STYLES}/styl-sources.sha256"
+assert_contains "$(resolve_stamped_css)" "build-debug-repro/frontend/styles/theme.css" \
+	"an epoch-mtime stylesheet whose stamp matches the checkout's .styl sources is accepted"
+
+printf '.x { color: blue }\n' >"${STAMPTREE}/src/frontend/styles/components/status_bar.styl"
+STAMP_STALE_CSS="$(resolve_stamped_css)"
+assert_contains "${STAMP_STALE_CSS}" "is STALE" \
+	"...and refused once a .styl it was not compiled from is in the checkout"
+assert_contains "${STAMP_STALE_CSS}" "other .styl sources" \
+	"...with a refusal that says the sources differ, not that a file is older"
 
 # Absence still fails loudly and says where it looked. A resolver answering ""
 # would reach `page.addStyleTag({ path: "" })`, which does not obviously fail —

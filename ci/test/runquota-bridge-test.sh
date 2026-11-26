@@ -99,7 +99,7 @@ done
 # `runquota` must have both verbs, or every bridged call would silently run bare.
 [ "$(runquota jobserver 2>&1 </dev/null | grep -c 'runquota jobserver: missing command')" -ge 1 ] ||
 	die "the installed runquota has no jobserver verb"
-runquota run --adapter list 2>/dev/null | grep -q '^adapters' || die "the installed runquota has no run verb"
+grep -q '^adapters' <<<"$(runquota run --adapter list 2>/dev/null)" || die "the installed runquota has no run verb"
 
 # A Unix socket path is limited to ~100 bytes: keep the scratch directory under a short parent.
 S="$(mktemp -d /tmp/rqb.XXXXXX)" || die "mktemp failed"
@@ -107,7 +107,7 @@ DAEMON_PID=""
 cleanup() {
 	[ -n "${RQB_KEEP:-}" ] && { echo "kept ${S}" >&2; return; }
 	# Stop only the daemon this run started, after checking the pid still is it.
-	if [ -n "${DAEMON_PID}" ] && ps -o args= -p "${DAEMON_PID}" 2>/dev/null | grep -q -- "--socket ${S}/rq.sock"; then
+	if [ -n "${DAEMON_PID}" ] && grep -q -- "--socket ${S}/rq.sock" <<<"$(ps -o args= -p "${DAEMON_PID}" 2>/dev/null)"; then
 		kill "${DAEMON_PID}" 2>/dev/null
 		sleep 0.3
 	fi
@@ -289,7 +289,7 @@ assert_eq "playwright sites carrying {{rq1}}" 2 "$(printf '%s\n' "${body}" | gre
 assert_eq "the prefix follows VAR=value words, never precedes them" "" \
 	"$(printf '%s\n' "${body}" | grep -E '\{\{rq[1j]?\}\} [A-Za-z_]+=' || true)"
 assert_eq "test-gui-prebuilt and test-gui-visible each reach test-e2e, the one bridged playwright line" "1 1" \
-	"$(for r in test-gui-prebuilt test-gui-visible; do recipe_body "${r}" | grep -q 'just test-e2e' && printf 1 || printf 0; done | sed 's/./& /;s/ $//')"
+	"$(for r in test-gui-prebuilt test-gui-visible; do grep -q 'just test-e2e' <<<"$(recipe_body "${r}")" && printf 1 || printf 0; done | sed 's/./& /;s/ $//')"
 assert_eq "the three prefixes are defined once, naming the bridge script" 3 \
 	"$(grep -cE "^(rq|rq1|rqj) := '\"' \\+ justfile_directory\\(\\) \\+ '/scripts/runquota-bridge.sh\" (run|jobserver) " "${REPO_ROOT}/justfile")"
 

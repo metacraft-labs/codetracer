@@ -383,6 +383,30 @@ suite "Extensibility-Model §11 on a real terminal":
     sess.close()
     removeDir(home)
 
+  test "three Escapes in ONE write recover the keyboard, however they are framed":
+    # A user hammering Escape at a busy window, or a paste: the TUI reads the
+    # three bytes together, and `ESC ESC` is one `Esc` key to every keymap.
+    # The recovery chord counts PRESSES (`terminal_driver.dekEscapePress`),
+    # so the three are still three; counting keys, it saw two and never
+    # fired. One write, rather than a stopped terminal, so the framing is the
+    # same on every run.
+    var doc = packageManifest()
+    doc["plugins"][1]["capturesWindowInput"] = %*{"reason": "a modal layer"}
+    let home = newHome($doc, %*{"plugins": {"acme-tools.flame":
+      {"settings": {"mode": "swallow-input"}}}})
+    var sess = spawnTui(home)
+    settleOnDebugger(sess, Cols, Rows)
+    sess.command("plugins grant acme-tools.metrics")
+    sess.command("plugins grant acme-tools.flame")
+    check sess.screenHas("FLAME MODE (acme-tools.flame)")
+    sess.send("\e\e\e")
+    check sess.screenHas("RECOVER INPUT")
+    check sess.screenHas("acme-tools.flame")
+    sess.send(":quit\r")
+    discard sess.waitExit(initDuration(seconds = 30))
+    sess.close()
+    removeDir(home)
+
   test "a plugin that swallows keys loses the keyboard; three Escapes recover":
     var doc = packageManifest()
     doc["plugins"][1]["capturesWindowInput"] = %*{"reason": "a modal layer"}

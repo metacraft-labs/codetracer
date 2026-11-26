@@ -1075,6 +1075,7 @@ foreach ($guard in (Assert-NonInteractiveDebugger)) {
 . "$windowsDir/ensure-rust.ps1"
 . "$windowsDir/ensure-just.ps1"
 . "$windowsDir/ensure-nextest.ps1"
+. "$windowsDir/ensure-sccache.ps1"
 . "$windowsDir/ensure-node.ps1"
 . "$windowsDir/ensure-uv.ps1"
 . "$windowsDir/ensure-nim.ps1"
@@ -1227,6 +1228,7 @@ if ($doSync) {
   # Phase 3: Depends on Rust/cargo
   Invoke-BootstrapStep -Step "JUST"    -Relocatability relocatable -Root $installRoot -Action { Ensure-Just    -Root $installRoot -Toolchain $toolchain }
   Invoke-BootstrapStep -Step "NEXTEST" -Relocatability relocatable -Root $installRoot -Action { Ensure-Nextest -Root $installRoot -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "SCCACHE" -Relocatability relocatable -Root $installRoot -Action { Ensure-Sccache -Root $installRoot -Toolchain $toolchain }
 
   # Phase 4: May need MSYS2 for source builds
   Invoke-BootstrapStep -Step "NIM"   -Relocatability relocatable -Root $installRoot -Action { Ensure-Nim   -Root $installRoot -Arch $arch -Toolchain $toolchain }
@@ -1660,6 +1662,16 @@ if ([string]::IsNullOrWhiteSpace($clExe)) {
   }
 }
 [Environment]::SetEnvironmentVariable("WINDOWS_DIY_CL_EXE", $clExe, "Process")
+# Cargo's x64 MSVC linker as an ABSOLUTE path, from beside the x64 cl.exe.
+# The bare "link.exe" set above resolves to Git Bash's coreutils `link` when
+# cargo runs under bash, as the origin-DAP gates do, and every build script
+# then fails with "link: extra operand" (run 45686408279).
+if (-not [string]::IsNullOrWhiteSpace($clExe) -and $clExe -match '\\x64\\cl\.exe$') {
+  $msvcLink = Join-Path (Split-Path -Parent $clExe) "link.exe"
+  if (Test-Path -LiteralPath $msvcLink -PathType Leaf) {
+    [Environment]::SetEnvironmentVariable("CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER", $msvcLink, "Process")
+  }
+}
 # The toolset-version assertion reads the version out of the resolved cl.exe,
 # so it is only meaningful when one was found.
 if (-not [string]::IsNullOrWhiteSpace($msvcToolsetPinnedVersion) -and

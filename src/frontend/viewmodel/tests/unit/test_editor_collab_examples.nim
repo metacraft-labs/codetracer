@@ -47,6 +47,16 @@ template counted(condition: untyped) =
 
 const ExpectedAssertions = 138
 
+proc withCalledWorkflows(dir, name: static string): string {.compileTime.} =
+  ## `dir & name` followed by each `./.github/workflows/<file>` it calls.
+  const caller = staticRead(dir & name)
+  result = caller
+  for line in caller.splitLines:
+    let t = line.strip
+    const prefix = "uses: ./.github/workflows/"
+    if t.startsWith(prefix) and (t.endsWith(".yml") or t.endsWith(".yaml")):
+      result.add staticRead(dir & t[prefix.len .. ^1])
+
 const
   SpecDocName = "Architecture/Editor-ViewModel.md"
     ## Named from the specification tree's root; `test_support/spec_documents`
@@ -60,8 +70,13 @@ const
   SectionStart = "### 12.1a The normative merge table"
   SectionEnd = "### 12.2 The algorithm"
 
-  WorkflowSource = staticRead(
-    "../../../../../.github/workflows/codetracer.yml")
+  WorkflowSource = withCalledWorkflows(
+    "../../../../../.github/workflows/", "codetracer.yml")
+    ## `codetracer.yml` and every local workflow its `uses:` lines call:
+    ## `5bfdeb5ae64` moved `viewmodel-tests`, the job that runs both
+    ## collaboration lanes, into `viewmodel-tests.yml`, and a called job
+    ## still runs as part of the caller. `ci/lib/mutation_views.py` reads
+    ## the same text for the `plat33-collab-lanes` view.
   JustfileSource = staticRead("../../../../../justfile")
   LaneFilesSource = staticRead("../../../../../ci/lib/test-lane-files.sh")
 

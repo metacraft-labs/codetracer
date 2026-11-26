@@ -181,6 +181,7 @@ when defined(js):
 proc renderLowLevelRow*[R, N](r: R; vm: LowLevelCodeVM;
                               row: LowLevelRowView): N =
   ## One row of the listing (see the structure above).
+  mixin appendChild
   case row.kind
   of lrkSource:
     result = ui(r):

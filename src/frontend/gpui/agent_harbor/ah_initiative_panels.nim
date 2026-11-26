@@ -216,16 +216,6 @@ proc drawCurrent*(r: GpuiRenderer; p: AhPalette; text: string; colour = ""): Gpu
   r.appendChild(result, r.text(text, CaptionPx,
                                if colour.len > 0: colour else: p.textBody, pairs = [lh]))
 
-proc sessionStatusColour(p: AhPalette; attention: SessionAttention): string =
-  ## A session line's status word (`.ah-initiative-session-status`): the
-  ## label role, or the status's own text role for needs input, running and
-  ## failed -- so "completed", "idle" and "queued" read in the label role.
-  case attention
-  of saNeedsInput: p.textWarning
-  of saRunning: p.textSuccess
-  of saFailed: p.textError
-  else: p.textLabel
-
 proc drawSessionLine*(r: GpuiRenderer; p: AhPalette; item: SessionItem;
                       onAction = false): GpuiElement =
   ## A session under an initiative (the Initiatives panel and the hover
@@ -243,7 +233,7 @@ proc drawSessionLine*(r: GpuiRenderer; p: AhPalette; item: SessionItem;
   r.tag(title, "title", item.title)
   r.appendChild(result, title)
   let status = r.text(item.statusLabel, CaptionPx,
-                      if onAction: p.onAction else: p.sessionStatusColour(item.attention),
+                      if onAction: p.onAction else: p.initiativeSessionWordColour(item.attention),
                       shrink = false, pairs = [("line-height", $LinePx & "px")])
   r.tag(status, "status", item.statusLabel)
   r.appendChild(result, status)

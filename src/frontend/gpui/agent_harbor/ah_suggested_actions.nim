@@ -12,7 +12,7 @@
 ##
 ## The block (study D23, D54-D59), on the ground one step off the panel
 ## (`surface/primary/secondary-hover`, D56), 8px in, 6px between its parts:
-## the label `SUGGESTED UI ACTIONS` (12px, the label ink, capitals); the
+## the label `SUGGESTED UI ACTIONS` (12px on 24px, the label ink, capitals); the
 ## agent's reason (14px on 20px, the body ink, wrapped); one row per action
 ## -- a 14px check box (checked: the action border with a ✓ in it;
 ## unchecked: the caption role; disabled: the caption-subtle role, a step
@@ -50,6 +50,13 @@ const
   BoxPx* = 14         ## the check box
   BoxGapPx* = 8       ## between the box and the words
   ReasonLinePx = 20   ## the reason's and an action's lines (14px on 20px)
+  LabelLinePx = 24
+    ## The label's line. `.ah-suggested-label` sets no line-height and
+    ## inherits the panel's 24px (measured in the web captures: its capitals
+    ## 4px lower, and the reason 8px lower, than on a 16px line).
+  RowPadPx = 2        ## an action row's padding above and below (`.ah-suggested-row`: 0.125rem 0)
+  RowGapPx = 2        ## between action rows (`.ah-suggested-rows`: gap 0.125rem)
+  ButtonsTopPx = 2    ## over the buttons (`.ah-suggested-actions`: padding-top 0.125rem)
 
 proc blockGround*(p: AhPalette): string =
   ## A step off the panel in both modes (D56), as the web's: Dark's
@@ -60,7 +67,10 @@ proc blockGround*(p: AhPalette): string =
 proc rowTextPx(widthPx: int): int = max(1, widthPx - 2 * PadPx - BoxPx - BoxGapPx)
 
 proc rowHeightPx(row: SuggestedActionRow; widthPx: int): int =
-  result = ReasonLinePx * wrappedRows(row.description, BodyPx, rowTextPx(widthPx))
+  ## One action row: its padding, what it does and that action's reason. A
+  ## one-line row is 24px, 26px apart, as the web's (they
+  ## were 22px apart).
+  result = 2 * RowPadPx + ReasonLinePx * wrappedRows(row.description, BodyPx, rowTextPx(widthPx))
   if row.reason.len > 0:
     result += CaptionLinePx * wrappedRows(row.reason, CaptionPx, rowTextPx(widthPx))
 
@@ -68,12 +78,12 @@ proc blockHeightPx*(vm: SuggestedActionsVM; widthPx: int): int =
   ## The block's height at `widthPx`: its inset, the label, the reason, each
   ## action, the buttons, and the gaps between them.
   let rows = vm.rows
-  result = 2 * PadPx + CaptionLinePx + GapPx +
+  result = 2 * PadPx + LabelLinePx + GapPx +
            ReasonLinePx * wrappedRows(vm.reasonText, BodyPx, widthPx - 2 * PadPx) + GapPx
   for i, row in rows:
     result += rowHeightPx(row, widthPx)
-    if i < rows.high: result += 2
-  result += GapPx + ControlPx
+    if i < rows.high: result += RowGapPx
+  result += GapPx + ButtonsTopPx + ControlPx
 
 proc acts(r: GpuiRenderer; el: GpuiElement; operation, target: string;
           press: ActivityPress) =
@@ -91,7 +101,8 @@ proc wrapped(r: GpuiRenderer; s: string; sizePx, linePx: int; ink: string): Gpui
 proc drawRow(r: GpuiRenderer; p: AhPalette; row: SuggestedActionRow; widthPx: int;
              press: ActivityPress): GpuiElement =
   result = r.box(pairs = [("gap", $BoxGapPx & "px"), ("items", "flex-start"),
-                          ("flex-shrink", "0")])
+                          ("padding-top", $RowPadPx & "px"),
+                          ("padding-bottom", $RowPadPx & "px"), ("flex-shrink", "0")])
   for (k, v) in row.rowFacts: r.tag(result, k, v)
   let box = r.box(pairs = [("width", $BoxPx & "px"), ("height", $BoxPx & "px"),
                            ("min-width", $BoxPx & "px"), ("margin-top", "3px"),
@@ -137,13 +148,15 @@ proc drawSuggestedActions*(r: GpuiRenderer; p: AhPalette; vm: SuggestedActionsVM
   r.tag(result, "ground", blockGround(p))
   r.appendChild(result, r.text(SuggestedActionsLabel, CaptionPx, p.textLabel,
                                bold = true, pairs = [("letter-spacing", LabelTracking),
-                                                     ("line-height", $CaptionLinePx & "px")]))
+                                                     ("height", $LabelLinePx & "px"),
+                                                     ("line-height", $LabelLinePx & "px")]))
   r.appendChild(result, r.wrapped(vm.reasonText, BodyPx, ReasonLinePx, p.textBody))
-  let rows = r.box(column = true, pairs = [("gap", "2px"), ("flex-shrink", "0")])
+  let rows = r.box(column = true, pairs = [("gap", $RowGapPx & "px"), ("flex-shrink", "0")])
   for row in vm.rows: r.appendChild(rows, r.drawRow(p, row, widthPx, press))
   r.appendChild(result, rows)
   let buttons = r.box(pairs = [("gap", "8px"), ("items", "center"), ("flex-shrink", "0"),
-                               ("height", $ControlPx & "px")])
+                               ("padding-top", $ButtonsTopPx & "px"),
+                               ("height", $(ButtonsTopPx + ControlPx) & "px")])
   let approve = r.box(pairs = [("height", $ControlPx & "px"), ("items", "center"),
                                ("padding-left", "12px"), ("padding-right", "12px"),
                                ("flex-shrink", "0"), ("rounded", $ControlRadiusPx & "px"),

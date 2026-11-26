@@ -200,6 +200,23 @@ separate step.
 
 On NixOS, you can install our Nix package by running `just build-nix`.
 
+#### Building the Nix package from a remote revision
+
+CodeTracer's source tree includes Git submodules (`libs/tree-sitter-nim` and
+others under `libs/`), and a `github:` flake reference fetches GitHub's tarball,
+which carries no submodules. So
+`nix build github:metacraft-labs/codetracer/<rev>#codetracer` fails with files
+missing from those directories. Name the revision with a `git+https` reference
+that asks for the submodules instead:
+
+```bash
+nix build 'git+https://github.com/metacraft-labs/codetracer?rev=<rev>&submodules=1#codetracer'
+```
+
+From a local checkout, use `nix build '.?submodules=1#codetracer'`.
+(Declaring `inputs.self.submodules = true` in `flake.nix` does not cover this:
+with Nix 2.34 a `github:` reference still came back without the submodules.)
+
 ### macOS
 
 On macOS, we do not yet have support for Nix, instead we compile by using the non-nix-build scripts:

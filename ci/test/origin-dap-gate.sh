@@ -14,7 +14,23 @@ readonly REPO_ROOT
 readonly GATE="$REPO_ROOT/scripts/test-origin-dap.sh"
 # The workflow these Windows-YAML assertions read. Overridden only by this
 # script's own whole-gate cases below, which feed it a mutated copy.
-readonly WORKFLOW="${ORIGIN_DAP_GATE_WORKFLOW:-$REPO_ROOT/.github/workflows/codetracer.yml}"
+# Without the override: codetracer.yml with the jobs it calls inlined (both
+# origin-DAP Windows jobs live in reusable workflows of their own).
+if [ -n "${ORIGIN_DAP_GATE_WORKFLOW:-}" ]; then
+	WORKFLOW="$ORIGIN_DAP_GATE_WORKFLOW"
+else
+	WORKFLOW="$(mktemp "${TMPDIR:-/tmp}/codetracer-inlined.XXXXXX.yml")"
+	trap 'rm -f "$WORKFLOW"' EXIT
+	# python3, else python: a Windows runner's gate (`just test-origin-dap`
+	# under Git Bash) has only the job's venv `python`.
+	inline_python="$(command -v python3 || command -v python || true)"
+	if [ -z "$inline_python" ] ||
+		! "$inline_python" "$REPO_ROOT/ci/lib/inline-codetracer-workflow.py" >"$WORKFLOW"; then
+		echo "origin-DAP shell contract test failed: could not inline codetracer.yml's called workflows" >&2
+		exit 1
+	fi
+fi
+readonly WORKFLOW
 
 fail() {
 	echo "origin-DAP shell contract test failed: $*" >&2
@@ -106,8 +122,8 @@ windows_nightly="$(workflow_job origin-dap-windows-nightly)"
 if grep -Fq 'shell: pwsh' <<<"$windows_per_pr"; then
 	fail "Windows per-PR origin-DAP job must not require unavailable PowerShell Core"
 fi
-[ "$(printf '%s\n' "$windows_per_pr" | grep -c 'shell: powershell$')" -eq 11 ] ||
-	fail "Windows per-PR origin-DAP job must run all eleven PowerShell steps with Windows PowerShell"
+[ "$(printf '%s\n' "$windows_per_pr" | grep -c 'shell: powershell$')" -eq 12 ] ||
+	fail "Windows per-PR origin-DAP job must run all twelve PowerShell steps with Windows PowerShell"
 
 [ "$(printf '%s\n' "$windows_per_pr" | grep -c 'CT_TEST_LANGS: python$')" -eq 1 ] ||
 	fail "Windows per-PR origin-DAP job must select Python exactly once"
@@ -489,7 +505,7 @@ fi
 # (c) on the WHOLE gate, not only on the contract function: a copy of the real
 # workflow whose only defect is the missing .git check must be refused with the
 # (c) message. Two ways to have that one defect while keeping every other
-# assertion -- including the eleven-step Windows PowerShell count -- intact:
+# assertion -- including the twelve-step Windows PowerShell count -- intact:
 # the step stays but checks nothing, or it checks but no longer comes right
 # after checkout. The child sentinel prevents recursion.
 if [ "${ORIGIN_DAP_GATE_MUTATION_CHILD:-0}" != "1" ]; then

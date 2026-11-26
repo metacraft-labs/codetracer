@@ -1,0 +1,126 @@
+name: origin-DAP Windows toolchain cache
+# Called from codetracer.yml (job `origin-dap-windows-toolchain`), which keeps the triggers, the
+# concurrency group, the job's `needs:` and ci-verdict's view of it. Split
+# out to keep codetracer.yml well under GitHub's 512,000-byte workflow limit
+# (ci/test/workflow-file-size-test.sh).
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  # M13: Definition of the eventual Windows nightly routed matrix. In this
+  # target, `all` means only Python, Ruby and JavaScript, matching
+  # test-origin-dap's strict router. It does not include or claim Rust TTD,
+  # other languages, or MCP/CLI. This workflow currently has only push and PR
+  # triggers, so the guarded job remains inactive until a scheduled or manual
+  # trigger is added deliberately.
+  # The nightly Windows origin-DAP job restores its env.ps1 toolchain from
+  # actions/cache instead of bootstrapping it on every run: on an ephemeral
+  # runner the full bootstrap alone took 55 min (run 45292632494), so the job
+  # could never finish inside its 75-minute bound. This job is the one that
+  # WRITES that cache. It looks the key up first and stops in a minute or two
+  # when the cache is there; only a cold key (a changed toolchain pin) runs
+  # the bootstrap, which is why this job, and only this job, gets a longer
+  # budget than the 75-minute one the test job keeps.
+  #
+  # The root is a path every Windows runner has, under RUNNER_TEMP
+  # (C:\actions-runner\_work\_temp), so the cached paths are identical on the
+  # ephemeral runners and on win-ci-bare-001; env.ps1's default root differs
+  # between them (D:\metacraft-dev-deps vs the account's LOCALAPPDATA), which
+  # would make each runner class miss the other's cache.
+  origin-dap-windows-toolchain:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, windows, x64]
+    name: origin-DAP Windows toolchain cache
+    # A cold bootstrap of the components below: GCC 244 s, NIM 283 s, RUST
+    # 137 s, TTD 425 s, ZLIB 106 s on an ephemeral runner (run 45134129306),
+    # plus NODE, UV, CAPNP and JUST, and the cache upload. 120 min leaves
+    # margin for a slow download; a warm key exits after the lookup.
+    timeout-minutes: 120
+    steps:
+      - name: Ensure Git and Git Bash are on PATH
+        shell: powershell
+        env:
+          CODETRACER_GIT_BOOTSTRAP_REVISION: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $revision = $env:CODETRACER_GIT_BOOTSTRAP_REVISION
+          if ($revision -cnotmatch '^[0-9a-f]{40}$') {
+            throw "The workflow did not supply an immutable bootstrap revision."
+          }
+          $bootstrapUrl =
+            "https://raw.githubusercontent.com/metacraft-labs/codetracer/" +
+            "$revision/ci/ensure-git-for-checkout.ps1"
+          $bootstrapScript = Join-Path $env:RUNNER_TEMP `
+            "codetracer-ensure-git-$revision-$([Guid]::NewGuid().ToString('N')).ps1"
+          [Net.ServicePointManager]::SecurityProtocol =
+            [Net.ServicePointManager]::SecurityProtocol -bor
+            [Net.SecurityProtocolType]::Tls12
+          try {
+            Invoke-WebRequest `
+              -Uri $bootstrapUrl `
+              -OutFile $bootstrapScript `
+              -UseBasicParsing
+            & $bootstrapScript
+          }
+          finally {
+            Remove-Item -LiteralPath $bootstrapScript -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: false
+
+      - name: Look up the toolchain cache
+        id: lookup
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}\ct-diy
+          key: windows-diy-origin-dap-v3-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}
+          lookup-only: true
+
+      - name: Bootstrap the toolchain through env.ps1
+        if: steps.lookup.outputs.cache-hit != 'true'
+        shell: pwsh
+        env:
+          WINDOWS_DIY_INSTALL_ROOT: ${{ runner.temp }}\ct-diy
+          # The components the nightly origin-DAP job uses (see its setup
+          # step); keep the two lists identical.
+          WINDOWS_DIY_ONLY: "GCC,ZSTD,ZLIB,RUST,NIM,CAPNP,UV,NODE,JUST,TTD,SCCACHE"
+          WINDOWS_DIY_ENSURE_TTD: "true"
+        run: |
+          $ErrorActionPreference = "Stop"
+          $started = Get-Date
+          . ./env.ps1
+          Write-Host "env.ps1 bootstrap of $env:WINDOWS_DIY_ONLY into $env:WINDOWS_DIY_INSTALL_ROOT took $([int]((Get-Date) - $started).TotalMinutes) min"
+          # Hard links become plain copies before the cache is saved. Rustup's
+          # proxies in cargo\bin are hard links to one rustup.exe; tar stores
+          # them as links, and Windows tar cannot recreate a link whose target
+          # runs through `..`, which every path here does (the root is outside
+          # the workspace): the first cache failed to restore with "Can't create
+          # '\\?\...\..\..\_temp\ct-diy\cargo\bin\cargo.exe': Invalid argument"
+          # (run 45471393785). Rustup's proxies work as copies.
+          # Every file in cargo\bin is rewritten, not only those LinkType calls
+          # a hard link: on win-ci-bare-001 LinkType reported none, and the v2
+          # cache still failed the same way (run 45590873552).
+          $linked = @(Get-ChildItem -LiteralPath (Join-Path $env:WINDOWS_DIY_INSTALL_ROOT "cargo\bin") -File) +
+            @(Get-ChildItem -LiteralPath $env:WINDOWS_DIY_INSTALL_ROOT -Recurse -File |
+              Where-Object { $_.LinkType -eq "HardLink" -and $_.DirectoryName -notlike "*\cargo\bin" })
+          foreach ($f in $linked) {
+            $copy = "$($f.FullName).unlinked"
+            Copy-Item -LiteralPath $f.FullName -Destination $copy
+            Remove-Item -LiteralPath $f.FullName -Force
+            Move-Item -LiteralPath $copy -Destination $f.FullName
+          }
+          Write-Host "Replaced $($linked.Count) hard-linked file(s) with copies"
+
+      - name: Save the toolchain cache
+        if: steps.lookup.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}\ct-diy
+          key: windows-diy-origin-dap-v3-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}

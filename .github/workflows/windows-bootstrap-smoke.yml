@@ -1,0 +1,322 @@
+name: windows-bootstrap-smoke
+# Called from codetracer.yml (job `windows-bootstrap-smoke`), which keeps the triggers, the
+# concurrency group, the job's `needs:` and ci-verdict's view of it. Split
+# out to keep codetracer.yml well under GitHub's 512,000-byte workflow limit
+# (ci/test/workflow-file-size-test.sh).
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  # Why every `siblings:` entry carries an explicit ref, and why every eph-win-x64
+  # job starts with "Ensure Git and Git Bash": docs/ci-server.md, "The codetracer
+  # workflow: sibling refs and the Windows bootstrap" (moved there: GitHub refuses
+  # a workflow file over 512,000 bytes, as a startup failure with no jobs).
+  windows-bootstrap-smoke:
+    runs-on: [self-hosted, windows, x64]  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
+    # See the timeout-minutes rationale on windows-rust-components: an omitted
+    # value is GitHub's 360-minute default, and any eph-win-x64 job that reaches
+    # it holds this workflow's per-branch concurrency group for six hours. This
+    # job does static validation only (no setup-dev-env, no toolchain download)
+    # and has been completing in ~8 minutes, so its budget is much tighter.
+    timeout-minutes: 30
+    steps:
+      - name: Ensure Git and Git Bash are on PATH
+        shell: powershell
+        env:
+          CODETRACER_GIT_BOOTSTRAP_REVISION: ${{ github.sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $revision = $env:CODETRACER_GIT_BOOTSTRAP_REVISION
+          if ($revision -cnotmatch '^[0-9a-f]{40}$') {
+            throw "The workflow did not supply an immutable bootstrap revision."
+          }
+          $bootstrapUrl =
+            "https://raw.githubusercontent.com/metacraft-labs/codetracer/" +
+            "$revision/ci/ensure-git-for-checkout.ps1"
+          $bootstrapScript = Join-Path $env:RUNNER_TEMP `
+            "codetracer-ensure-git-$revision-$([Guid]::NewGuid().ToString('N')).ps1"
+          [Net.ServicePointManager]::SecurityProtocol =
+            [Net.ServicePointManager]::SecurityProtocol -bor
+            [Net.SecurityProtocolType]::Tls12
+          try {
+            Invoke-WebRequest `
+              -Uri $bootstrapUrl `
+              -OutFile $bootstrapScript `
+              -UseBasicParsing
+            & $bootstrapScript
+          }
+          finally {
+            Remove-Item -LiteralPath $bootstrapScript -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Validate env.sh syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f env.sh
+          bash -n env.sh
+
+      - name: Validate PowerShell parser
+        shell: pwsh
+        run: |
+          $scriptPaths = @(
+            "env.ps1",
+            "non-nix-build/windows/toolchain-utils.ps1",
+            "non-nix-build/windows/ensure-rust.ps1",
+            "non-nix-build/windows/ensure-just.ps1",
+            "non-nix-build/windows/ensure-nextest.ps1",
+            "non-nix-build/windows/ensure-node.ps1",
+            "non-nix-build/windows/ensure-uv.ps1",
+            "non-nix-build/windows/ensure-nim.ps1",
+            "non-nix-build/windows/ensure-capnp.ps1",
+            "non-nix-build/windows/ensure-ct-remote.ps1",
+            "non-nix-build/windows/ensure-nargo.ps1",
+            "non-nix-build/windows/ensure-ttd.ps1",
+            # The three components whose junction arms were converted to
+            # relocatable installs. They were absent from this list, so a
+            # syntax error in any of them reached a real provisioning run
+            # before anything noticed.
+            "non-nix-build/windows/ensure-gcc.ps1",
+            "non-nix-build/windows/ensure-llvm.ps1",
+            "non-nix-build/windows/ensure-zstd.ps1",
+            "non-nix-build/windows/validate-toolchain-versions.ps1",
+            "non-nix-build/windows/validate-env-path-entries.ps1",
+            "non-nix-build/windows/validate-install-root.ps1"
+          )
+
+          foreach ($scriptPath in $scriptPaths) {
+            if (-not (Test-Path -LiteralPath $scriptPath)) {
+              throw "Missing required file: $scriptPath"
+            }
+
+            $parseErrors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              $scriptPath,
+              [ref]$null,
+              [ref]$parseErrors
+            )
+
+            if ($parseErrors.Count -gt 0) {
+              $parseErrors | ForEach-Object { Write-Error "${scriptPath}: $($_.Message)" }
+              throw "PowerShell parser reported one or more errors."
+            }
+          }
+
+      - name: Validate env.ps1 component decomposition
+        shell: pwsh
+        # Asserts every gated component in env.ps1's dispatch block is
+        # accounted for in the per-component decomposition, and that the
+        # accounting helpers record what they claim. The coverage check is
+        # mechanical (an AST parse of env.ps1) rather than by eye, so a
+        # component added or removed later cannot fall out unnoticed. Hermetic and cheap:
+        # it parses env.ps1 and exercises the helpers against a temp
+        # directory. It installs no toolchain and downloads nothing, so it
+        # belongs in this smoke job rather than behind a real provision.
+        run: |
+          pwsh -File ci/test/bootstrap-decomposition.ps1
+
+      - name: Validate Windows store relocatability and the store-root delete guard
+        shell: pwsh
+        # The gate for the toolchain store's relocatability. A component tree
+        # is published from one machine and materialised on another, so a
+        # baked absolute path does not produce a broken install -- it produces
+        # a working-looking one that resolves against the publisher's
+        # directories and is inherited silently by every later consumer.
+        #
+        # The check is therefore a real round trip and not a string
+        # comparison: component trees are materialised at one root, moved to a
+        # second, the FIRST ROOT IS DESTROYED, and the tools are then resolved
+        # and EXECUTED at the second. It also covers the store-root delete
+        # guard (both arms), the junction conversions (by walking the tree,
+        # never by reading the scripts), the rustup settings.toml repair, and
+        # the FPC/MSVC exclusion list cross-checked against env.ps1's own
+        # dispatch block.
+        #
+        # Hermetic and cheap: temp directories, two-line executables, no
+        # downloads, no toolchain. It runs on this Windows job because that is
+        # where junctions are real; the file is deliberately pwsh-portable so
+        # the same suite can be run on a Linux host during development.
+        run: |
+          pwsh -File ci/test/windows-store-relocation.ps1
+
+      - name: Validate bootstrap download and native-command bounds
+        shell: pwsh
+        # Asserts that a stalled toolchain download fails fast with a real
+        # error instead of blocking until the job timeout, and likewise for
+        # the native commands the MSYS2 leg shells out to. The checks are
+        # NEGATIVE: each bound is driven against a loopback server or a child
+        # process that genuinely never finishes, because a timeout that has
+        # only run on the happy path has not been tested. Hermetic -- the
+        # server is a loopback socket in a background job, nothing leaves the
+        # machine and no toolchain is installed -- so it belongs in this
+        # smoke job rather than behind a real provision.
+        timeout-minutes: 10
+        run: |
+          pwsh -File ci/test/download-stall-bound.ps1
+
+      - name: Validate toolchain-versions.env
+        shell: pwsh
+        run: |
+          pwsh -File non-nix-build/windows/validate-toolchain-versions.ps1
+
+      - name: Validate env.ps1 PATH helper
+        shell: pwsh
+        run: |
+          pwsh -File non-nix-build/windows/validate-env-path-entries.ps1
+
+      - name: Validate env.ps1 install-root resolution
+        # Extracts Get-DefaultInstallRoot and Test-DirectoryWritable from
+        # env.ps1 by AST and exercises them in isolation, including the case
+        # the fleet actually hit: a directory that EXISTS and still refuses
+        # every create. That is D: on an eph-win-x64 guest -- the read-only
+        # cloudbase-init config drive -- and it took out every Windows job at
+        # the first Ensure-* step.
+        shell: pwsh
+        run: |
+          pwsh -File non-nix-build/windows/validate-install-root.ps1
+
+      - name: Validate arm64 mode routing smoke checks
+        shell: pwsh
+        run: |
+          $windowsDir = "non-nix-build/windows"
+
+          function Invoke-BootstrapProbe {
+            param(
+              [Parameter(Mandatory = $true)][string]$Name,
+              [Parameter(Mandatory = $true)][hashtable]$Env,
+              [Parameter(Mandatory = $true)][scriptblock]$Action,
+              [Parameter(Mandatory = $true)][string[]]$RequiredPatterns,
+              [string[]]$ForbiddenPatterns = @()
+            )
+
+            $installRoot = Join-Path $env:RUNNER_TEMP ("codetracer-bootstrap-routing-" + $Name)
+            if (Test-Path -LiteralPath $installRoot) {
+              Remove-Item -LiteralPath $installRoot -Recurse -Force
+            }
+            New-Item -ItemType Directory -Path $installRoot -Force | Out-Null
+
+            $savedPath = $env:PATH
+            $savedArchOverride = $env:WINDOWS_DIY_ARCH_OVERRIDE
+            $savedEnv = @{}
+            foreach ($envKey in $Env.Keys) {
+              $savedEnv[$envKey] = [Environment]::GetEnvironmentVariable($envKey)
+              [Environment]::SetEnvironmentVariable($envKey, [string]$Env[$envKey])
+            }
+
+            [Environment]::SetEnvironmentVariable("WINDOWS_DIY_ARCH_OVERRIDE", "arm64")
+            $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+            $probeOutput = @()
+            try {
+              $probeSucceeded = $true
+              $probeOutput = & $Action $installRoot 2>&1
+            } catch {
+              $probeSucceeded = $false
+              $probeOutput = @($probeOutput) + $_.Exception.Message + ($_ | Out-String -Width 10000)
+            } finally {
+              $env:PATH = $savedPath
+              [Environment]::SetEnvironmentVariable("WINDOWS_DIY_ARCH_OVERRIDE", $savedArchOverride)
+              foreach ($envKey in $Env.Keys) {
+                [Environment]::SetEnvironmentVariable($envKey, $savedEnv[$envKey])
+              }
+            }
+
+            $probeText = ($probeOutput | Out-String -Width 10000)
+            if ($probeSucceeded) {
+              throw "Probe '$Name' unexpectedly succeeded. Expected a fast-fail source-route assertion."
+            }
+
+            foreach ($pattern in $RequiredPatterns) {
+              if ($probeText -notmatch $pattern) {
+                throw "Probe '$Name' output is missing required pattern '$pattern'."
+              }
+            }
+
+            foreach ($pattern in $ForbiddenPatterns) {
+              if ($probeText -match $pattern) {
+                throw "Probe '$Name' output matched forbidden pattern '$pattern'."
+              }
+            }
+          }
+
+          # Load shared modules
+          . "$windowsDir/toolchain-utils.ps1"
+          . "$windowsDir/ensure-nim.ps1"
+          . "$windowsDir/ensure-capnp.ps1"
+          . "$windowsDir/ensure-ct-remote.ps1"
+
+          # Parse toolchain versions
+          $toolchainPath = Join-Path $windowsDir "toolchain-versions.env"
+          $toolchain = @{}
+          foreach ($line in Get-Content -LiteralPath $toolchainPath) {
+            if ($line -match '^\s*#' -or [string]::IsNullOrWhiteSpace($line)) { continue }
+            if ($line -notmatch '^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)$') { continue }
+            $name = $matches[1]
+            $value = $matches[2].Trim()
+            if ($value.StartsWith('"') -and $value.EndsWith('"') -and $value.Length -ge 2) {
+              $value = $value.Substring(1, $value.Length - 2)
+            }
+            $toolchain[$name] = $value
+          }
+
+          Invoke-BootstrapProbe `
+            -Name "nim-auto-arm64-source-first" `
+            -Env @{
+              "NIM_WINDOWS_SOURCE_MODE" = "auto"
+            } `
+            -Action {
+              param($installRoot)
+              $arch = Get-WindowsArch
+              Ensure-Nim -Root $installRoot -Arch $arch -Toolchain $toolchain
+            } `
+            -RequiredPatterns @(
+              "NIM_WINDOWS_SOURCE_MODE=auto attempted Nim source bootstrap on 'arm64' and failed:",
+              "Prebuilt fallback is x64-only"
+            ) `
+            -ForbiddenPatterns @(
+              "Falling back to pinned prebuilt asset",
+              "NIM_WINDOWS_SOURCE_MODE=prebuilt"
+            )
+
+          Invoke-BootstrapProbe `
+            -Name "capnp-auto-arm64-source-route" `
+            -Env @{
+              "CAPNP_WINDOWS_SOURCE_MODE" = "auto"
+            } `
+            -Action {
+              param($installRoot)
+              $arch = Get-WindowsArch
+              Ensure-Capnp -Root $installRoot -Arch $arch -Toolchain $toolchain
+            } `
+            -RequiredPatterns @(
+              "git is required for source bootstrap but was not found on PATH"
+            ) `
+            -ForbiddenPatterns @(
+              "capnproto-c\\+\\+-win32-"
+            )
+
+          Invoke-BootstrapProbe `
+            -Name "ct-remote-auto-arm64-local-route" `
+            -Env @{
+              "CT_REMOTE_WINDOWS_SOURCE_MODE" = "auto"
+              "CT_REMOTE_WINDOWS_SOURCE_REPO" = (Join-Path $env:RUNNER_TEMP "codetracer-ci-missing-routes")
+            } `
+            -Action {
+              param($installRoot)
+              $arch = Get-WindowsArch
+              Ensure-CtRemote -Root $installRoot -Arch $arch -Toolchain $toolchain -WindowsDir $windowsDir
+            } `
+            -RequiredPatterns @(
+              "CT_REMOTE_WINDOWS_SOURCE_MODE=auto on 'arm64' requires local source project",
+              "Pinned download is x64-only"
+            ) `
+            -ForbiddenPatterns @(
+              "Installing ct-remote from pinned download",
+              "Falling back to pinned download"
+            )

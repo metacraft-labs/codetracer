@@ -231,7 +231,7 @@ jobs:
           # A reused host may still hold the self-including link an earlier
           # version of this step made; that one is not the host's own.
           if [ -L /etc/dbus-1/session.conf ] &&
-            readlink /etc/dbus-1/session.conf | grep -q '^/nix/store/[^/]*-dbus-[^/]*/share/dbus-1/session.conf$'; then
+            grep -q '^/nix/store/[^/]*-dbus-[^/]*/share/dbus-1/session.conf$' <<<"$(readlink /etc/dbus-1/session.conf)"; then
             sudo rm /etc/dbus-1/session.conf
           fi
           if [ -e /etc/dbus-1/session.conf ]; then
