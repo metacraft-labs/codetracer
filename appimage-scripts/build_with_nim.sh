@@ -115,6 +115,15 @@ nim \
 	-d:nodejs --out:"${APP_DIR}/server_index.js" js src/frontend/index.nim
 cp "${APP_DIR}/server_index.js" "${APP_DIR}/src/server_index.js"
 
+# content_id_worker.js: the main process's content-id worker thread
+# (`src/frontend/index/content_id_worker.nim`), found beside index.js.
+nim \
+	--hints:on --warnings:off \
+	-d:nimNoLentIterators \
+	-d:ctIndex -d:chronicles_sinks=json \
+	-d:nodejs --out:"${APP_DIR}/content_id_worker.js" js src/frontend/index/content_id_worker.nim
+cp "${APP_DIR}/content_id_worker.js" "${APP_DIR}/src/content_id_worker.js"
+
 # ui.js
 nim \
 	--hints:off --warnings:off \

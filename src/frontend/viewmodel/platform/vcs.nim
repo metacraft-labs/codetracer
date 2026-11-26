@@ -35,12 +35,14 @@
 ## `ct_test/certificate_content_id` implements through each host's own way of
 ## running git (`contentIdOver` below). No instantiation restates the recipe.
 ##
-## A host whose thread must not wait for git — the Electron renderer, whose
-## main thread is the UI — answers through `contentIdOverAsync`, which runs
-## the SAME `contentIdOver` (the `git --version` probe included) under
-## `certificate_content_id.runResumable` over an asynchronous git, and settles
-## its future when the last git call has answered (Status-Bar.md, "A refresh
-## never stalls the window").
+## A host whose thread must not wait for git — the container endpoint, whose
+## event loop carries every client's IPC — answers through
+## `contentIdOverAsync`, which runs the SAME `contentIdOver` (the `git
+## --version` probe included) under `certificate_content_id.runResumable` over
+## an asynchronous git, and settles its future when the last git call has
+## answered (Status-Bar.md, "A refresh never stalls the window"). The
+## Electron desktop instead runs `contentIdOver` itself on a thread that may
+## wait: the main process's content-id worker (`index/content_id_worker.nim`).
 
 import std/[algorithm, strutils]
 
@@ -595,8 +597,8 @@ proc declaredScopesOverAsync*(host: AsyncContentIdHost;
                               profile: PlatformProfile; repository: string
                              ): PlatformFuture[PlatformOutcome[VcsDeclaredScopes]] =
   ## `declaredScopesOver` over a host whose git answers later — the
-  ## Electron renderer's — through the same `runResumable` driver
-  ## `contentIdOverAsync` uses, so the renderer never waits for git.
+  ## container endpoint's — through the same `runResumable` driver
+  ## `contentIdOverAsync` uses, so its event loop never waits for git.
   settledLater(proc(settle: proc(value: PlatformOutcome[VcsDeclaredScopes])) =
     runResumable(host,
       proc(sync: ContentIdHost): PlatformOutcome[VcsDeclaredScopes] =

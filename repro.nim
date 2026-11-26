@@ -1308,6 +1308,24 @@ package codeTracer:
       sourcemapOnValue = true)
     target("frontend-server-index-js", frontendServerIndexJs)
 
+    # The main process's content-id worker (`index/content_id_worker.nim`): a
+    # `worker_thread` that computes the certificate indicator's content ids
+    # so neither the renderer nor main's event loop waits for git. Built with
+    # the main process's defines into its own bundle, beside `index.js` and
+    # `server_index.js` — `content_id_service.defaultWorkerScript` looks for
+    # it beside whichever of them is running, in `<prefix>/` or
+    # `<prefix>/src/`, so it is shipped in both.
+    let frontendContentIdWorkerJs = ctNimJs(
+      definesValue = CommonNimDefines & @["ctIndex", "nodejs"],
+      outputPath = buildDebugPath("content_id_worker.js"),
+      sourcePath = "src/frontend/index/content_id_worker.nim")
+    target("frontend-content-id-worker-js", frontendContentIdWorkerJs)
+
+    let frontendSrcContentIdWorkerJs = fs.copyFile(
+      source = buildDebugPath("content_id_worker.js"),
+      output = buildDebugPath("src/content_id_worker.js"))
+    target("frontend-src-content-id-worker-js", frontendSrcContentIdWorkerJs)
+
     let frontendSubwindowJs = ctNimJs(
       definesValue = CommonNimDefines & RendererDefines,
       outputPath = buildDebugPath("subwindow.js"),
@@ -1429,6 +1447,8 @@ package codeTracer:
       frontendIndexJs,
       frontendSrcIndexJs,
       frontendServerIndexJs,
+      frontendContentIdWorkerJs,
+      frontendSrcContentIdWorkerJs,
       frontendSubwindowJs,
       frontendSrcSubwindowJs,
       frontendIndexHtml,

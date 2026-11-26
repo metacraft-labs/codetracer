@@ -27,11 +27,17 @@ const electronDesktopCapabilities*: CapabilitySet =
     # exist to prevent.
     capProcessSignal, capProcessGracefulSignal,
     capProcessInteractiveStdin, capProcessTerminal,
-    capSecretStore, capFilesystemWatch}
+    capSecretStore}
     ## `capProcessGracefulSignal` goes with `capProcessSignal` and not on its
     ## own: a renderer that cannot stop a child at all certainly cannot ask it
     ## politely, and a profile claiming the second without the first would
     ## describe a platform that does not exist.
+    ##
+    ## `capFilesystemWatch` IS claimed, although the renderer registers no
+    ## watch of its own: the desktop's watchers live in the main process, and
+    ## the renderer's `fs.watch` asks main to run one for it and forward its
+    ## events (`desktop_electron.electronFileSystem`,
+    ## `index/renderer_fs_watch.nim`).
 
 proc electronDesktopProfile*(onMacOS: bool): PlatformProfile =
   ## The profile `newDesktopElectronPlatform` installs, given the window system
@@ -60,10 +66,6 @@ proc electronDesktopProfile*(onMacOS: bool): PlatformProfile =
     DegradationRule(capability: capSecretStore, behaviour:
       "no keychain binding exists in this tree yet, so nothing is stored " &
       "rather than something being stored badly"),
-    DegradationRule(capability: capFilesystemWatch, behaviour:
-      "the tree watcher runs in the Electron main process and reaches the " &
-      "renderer as an IPC message, so the renderer registers no watch of " &
-      "its own"),
     DegradationRule(capability: capShareLink, behaviour:
       "a desktop project is a directory; the equivalent is an archive export"),
   ]
