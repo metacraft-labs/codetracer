@@ -71,7 +71,7 @@ export flow_line_rule.FlowStyledLine, flow_line_rule.FlowLineStyleKind
 import ../../../common/flow_mode_wire
 # The step values arrive with their default-valued fields elided.
 import ../../../common/flow_wire
-# PLAT-2's value pipeline, for the flow pane's values (`flowValueText`).
+# PLAT-2's value pipeline, for the flow pane's values (`presentFlowValue`).
 import ../../../common/value_presentation
 import ../../../common/value_presentation/json_adapter
 export flow_mode_wire
@@ -526,54 +526,21 @@ proc flowLineFacts*(view: JsonNode): seq[FlowStyledLine] =
     return @[]
   flowLineFactsOf(flowLayoutWindowOf(view))
 
-proc flowValueText(value: JsonNode): string =
-  ## One recorded value as the flow pane prints it: PLAT-2's pipeline at the
-  ## flow surface's budget, so it reads as every other surface reads it.
-  if value.isNil or value.kind == JNull: ""
-  else: present(json_adapter.toPValue(value), FlowBudget).root.text
+var flowValuePresentations*: int
+  ## How many recorded values this module has rendered to text: a work
+  ## counter, read by `test_flow_value_presentations.nim`. A window's values
+  ## are presented once, when it is decoded (`flowLayoutWindowOf`); the flow
+  ## pane's rows reuse those texts. They were presented a second time for the
+  ## rows, which put two passes of PLAT-2's presenter over every value of the
+  ## window on the renderer's thread before the editor could mount (560 ms of
+  ## the second pass alone on a loaded host, for a Noir loop's window).
 
-proc flowStepEntriesOf*(view: JsonNode): seq[FlowStepEntry] =
-  ## The window's steps as the flow pane's rows: one row per step and
-  ## expression, in the order the engine evaluated them (`exprOrder`), with the
-  ## value before and after the step.
-  if view.isNil or view.kind != JObject: return
-  let steps = view{"steps"}
-  if steps.isNil or steps.kind != JArray: return
-  var file = ""
-  let loc = view{"location"}
-  if not loc.isNil and loc.kind == JObject:
-    file = loc{"highLevelPath"}.getStr("")
-    if file.len == 0: file = loc{"path"}.getStr("")
-  let base = file[file.rfind('/') + 1 .. ^1]
-  for st in steps:
-    if st.kind != JObject: continue
-    let line = jsonInt(st{"position"}, 0)
-    let count = jsonInt(st{"stepCount"}, 0)
-    let before = st{"beforeValues"}
-    let after = st{"afterValues"}
-    var order: seq[string] = @[]
-    let orderNode = st{"exprOrder"}
-    if not orderNode.isNil and orderNode.kind == JArray:
-      for e in orderNode: order.add e.getStr("")
-    if order.len == 0 and not after.isNil and after.kind == JObject:
-      for k, _ in after: order.add k
-      order.sort()
-    for expr in order:
-      if expr.len == 0: continue
-      let b = if before.isNil: nil else: before{expr}
-      let a = if after.isNil: nil else: after{expr}
-      result.add FlowStepEntry(
-        step: count,
-        location: base & ":" & $line,
-        expression: expr,
-        beforeValue: flowValueText(b),
-        afterValue: flowValueText(a),
-        beforeRecorded: (if b.isNil or b.kind == JNull: nil
-                         else: json_adapter.toPValue(b)),
-        afterRecorded: (if a.isNil or a.kind == JNull: nil
-                        else: json_adapter.toPValue(a)),
-        loop: jsonInt(st{"loop"}, 0),
-        iteration: jsonInt(st{"iteration"}, 0))
+proc presentFlowValue(value: JsonNode): tuple[text: string; truncated: bool] =
+  ## One recorded value at the flow surface's budget: PLAT-2's pipeline, so it
+  ## reads as every other surface reads it.
+  inc flowValuePresentations
+  let presented = present(json_adapter.toPValue(value), FlowBudget)
+  (presented.root.text, presented.truncated)
 
 const FlowReturnExpression = "return"
   ## The pseudo-expression a step records its return value under.
@@ -584,9 +551,7 @@ proc flowValueOf(name: string; value: JsonNode): FlowValueText =
   result = FlowValueText(expression: name)
   if value.isNil or value.kind == JNull:
     return
-  let presented = present(json_adapter.toPValue(value), FlowBudget)
-  result.text = presented.root.text
-  result.truncated = presented.truncated
+  (result.text, result.truncated) = presentFlowValue(value)
   result.value = value
 
 proc flowValueList(node: JsonNode): seq[FlowValueText] =
@@ -726,6 +691,57 @@ proc flowLayoutWindowOf*(view: JsonNode; envelope: JsonNode = nil):
       events: flowEventsOf(st{"events"}),
       originSummaries: st{"originSummaries"})
 
+proc flowStepFileOf(view: JsonNode): string =
+  ## The base name of the file a view's steps are in, for the rows' location.
+  if view.isNil or view.kind != JObject: return
+  let loc = view{"location"}
+  var file = ""
+  if not loc.isNil and loc.kind == JObject:
+    file = loc{"highLevelPath"}.getStr("")
+    if file.len == 0: file = loc{"path"}.getStr("")
+  file[file.rfind('/') + 1 .. ^1]
+
+proc flowStepEntriesOf*(window: FlowLayoutWindow; file: string):
+    seq[FlowStepEntry] =
+  ## The window's steps as the flow pane's rows: one row per step and
+  ## expression, in the order the engine evaluated them (`exprOrder`), with the
+  ## value before and after the step. The texts are the ones the window's
+  ## decoding already presented: a row costs no presenter pass of its own.
+  proc find(values: seq[FlowValueText]; ret: FlowValueText;
+            expr: string): FlowValueText =
+    if expr == FlowReturnExpression:
+      return ret
+    for v in values:
+      if v.expression == expr:
+        return v
+  for st in window.steps:
+    var order = st.exprOrder
+    if order.len == 0:
+      for v in st.afterValues: order.add v.expression
+      if not st.afterReturn.value.isNil: order.add FlowReturnExpression
+      order.sort()
+    for expr in order:
+      if expr.len == 0: continue
+      let b = find(st.beforeValues, st.beforeReturn, expr)
+      let a = find(st.afterValues, st.afterReturn, expr)
+      result.add FlowStepEntry(
+        step: st.stepCount,
+        location: file & ":" & $st.line,
+        expression: expr,
+        beforeValue: b.text,
+        afterValue: a.text,
+        beforeRecorded: (if b.value.isNil or b.value.kind == JNull: nil
+                         else: json_adapter.toPValue(b.value)),
+        afterRecorded: (if a.value.isNil or a.value.kind == JNull: nil
+                        else: json_adapter.toPValue(a.value)),
+        loop: st.loopIndex,
+        iteration: st.iteration)
+
+proc flowStepEntriesOf*(view: JsonNode): seq[FlowStepEntry] =
+  ## `flowStepEntriesOf` over one wire view, decoded once.
+  if view.isNil or view.kind != JObject: return
+  flowStepEntriesOf(flowLayoutWindowOf(view), flowStepFileOf(view))
+
 proc flowWindowReturnsOf*(view: JsonNode): seq[FlowWindowReturn] =
   ## The values the window's steps returned. A `None` return (no value) is not
   ## one.
@@ -742,7 +758,7 @@ proc flowWindowReturnsOf*(view: JsonNode): seq[FlowWindowReturn] =
       let value = map{FlowReturnExpression}
       if value.isNil or value.kind != JObject: continue
       if value{"kind"}.getInt(-1) == NoneValueKind: continue
-      text = flowValueText(value)
+      text = presentFlowValue(value).text
       if text.len > 0: break
     if text.len > 0:
       result.add FlowWindowReturn(line: jsonInt(st{"position"}, 0),
@@ -865,7 +881,7 @@ proc applyFlowUpdate*(vm: FlowVM; response: JsonNode) =
   # steps, and until 2026-09-23 this function adopted the loops and the line
   # facts and dropped the steps on the floor, so the pane said "no flow steps
   # have been loaded" beside an editor drawing the same window's overlay.
-  vm.steps.val = flowStepEntriesOf(view)
+  vm.steps.val = flowStepEntriesOf(windows[0], flowStepFileOf(view))
   vm.events.val = flowStepEventsOf(view)
   vm.layoutWindows.val = windows
   vm.layoutWindow.val = windows[0]

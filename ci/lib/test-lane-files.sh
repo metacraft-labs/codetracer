@@ -1321,6 +1321,21 @@ test_lane_files() {
 		# the suite above. Needs `git` and `sh` on PATH; writes only under one
 		# `mkdtemp` directory, which it removes.
 		echo src/frontend/tests/git_cli_refresh_snapshot_test.nim
+		# `desktop_main_process_requests_dom_test.nim`: the Electron renderer's
+		# facade asks the MAIN process for the certificate indicator's content
+		# ids and declared scopes (`CODETRACER::content-id`,
+		# `CODETRACER::declared-scopes`) and starts no child process for them.
+		# The IPC is a recorder at the facade's seam and `child_process` is
+		# counted; the header says why.
+		echo src/frontend/tests/desktop_main_process_requests_dom_test.nim
+		# `certificate_indicator_watch_dom_test.nim`: the renderer's `fs.watch`
+		# asks the main process (`CODETRACER::fs-watch`), and on the desktop
+		# profile the status bar's certificate indicator arms its `.git`, root and
+		# store watches, and a watch event refreshes it at once with the
+		# trigger it names (`citIndexChanged` for an index write), not only on
+		# its 15 s timer. Needs `git` on PATH; writes only under one `mkdtemp`
+		# directory, which it removes.
+		echo src/frontend/tests/certificate_indicator_watch_dom_test.nim
 		# `vcs_panel_reload_test.nim`: the VCS panel's reload
 		# (`ui/vcs_reload.readPanelReload`, `panelStateOf`, `applyPanelState`,
 		# `requestPanelReload`) through the Electron process facade's
@@ -1442,6 +1457,23 @@ test_lane_files() {
 		# compile for a browser and cannot spawn git. Needs `git` and `sh` on
 		# PATH; writes only under one `mkdtemp` directory, which it removes.
 		echo src/frontend/tests/electron_vcs_content_id_async_test.nim
+		# `content_id_worker_test.nim` drives the main process's content-id
+		# service (`index/content_id_service.nim`) and its worker thread
+		# (`index/content_id_worker.nim`) over real git repositories: W, H, S
+		# and the declared scopes are the synchronous recipe's, main's event
+		# loop keeps turning while the worker computes, a worker that cannot
+		# start answers with a failure, and the IPC handlers answer with the
+		# request's id. Needs `git` and `sh` on PATH; writes only under one
+		# `mkdtemp` directory, which it removes.
+		echo src/frontend/tests/content_id_worker_test.nim
+		# `renderer_fs_watch_test.nim` drives the main process's relay for the
+		# renderer's `fs.watch` (`index/renderer_fs_watch.nim`) with node's real
+		# `fs.watch`: `git add` and `git commit` under a watched `.git` produce
+		# the events the certificate indicator reads as staging and a commit,
+		# a file created at a watched root is reported, and an unwatch stops
+		# the events. Needs `git` on PATH; writes only under one `mkdtemp`
+		# directory, which it removes.
+		echo src/frontend/tests/renderer_fs_watch_test.nim
 		# `electron_vcs_refresh_async_test.nim` drives the same facade's
 		# `status` and `log` — the two reads the VCS pane's auto-refresh makes
 		# every 5 s and on focus — over real repositories (clean, modified,

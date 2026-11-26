@@ -791,6 +791,16 @@
               -d:nimNoLentIterators \
               -d:ctIndex -d:server -d:chronicles_sinks=json \
               -d:nodejs --out:./server_index.js js src/frontend/index.nim
+
+            # The main process's content-id worker thread
+            # (`src/frontend/index/content_id_worker.nim`); shipped beside
+            # index.js and server_index.js, where the main process looks.
+            ${nim-codetracer.out}/bin/nim2 \
+              --warnings:off \
+              ${isonimNimPaths} \
+              -d:nimNoLentIterators \
+              -d:ctIndex -d:chronicles_sinks=json \
+              -d:nodejs --out:./content_id_worker.js js src/frontend/index/content_id_worker.nim
           '';
 
           installPhase = ''
@@ -798,6 +808,7 @@
 
             cp ./server_index.js $out/bin/
             cp ./index.js $out/bin/
+            cp ./content_id_worker.js $out/bin/
           '';
         };
 
@@ -1768,6 +1779,7 @@
             mkdir -p $out/src
 
             cp -L ${indexJavascript}/bin/server_index.js $out/src/
+            cp -L ${indexJavascript}/bin/content_id_worker.js $out/src/
             ln -sf ${node-modules-derivation.out}/bin/node_modules $out/node_modules
             cp -L ${uiJavascript}/bin/ui.js $out/
             # The renderer's WebAssembly panes, which ui.js loads from beside itself.
@@ -1818,6 +1830,7 @@
             # Copy over electron entrypoint files
             cp -L ${indexJavascript}/bin/index.js $out/src/
             cp -L ${indexJavascript}/bin/server_index.js $out/src/
+            cp -L ${indexJavascript}/bin/content_id_worker.js $out/src/
 
             cp -L ${subwindowJavascript}/bin/subwindow.js $out/src/
 
@@ -2295,6 +2308,8 @@
             cp -L ${indexJavascript}/bin/server_index.js $out/server_index.js
             cp -L ${indexJavascript}/bin/index.js $out/index.js
             cp -L ${indexJavascript}/bin/index.js $out/src/index.js
+            cp -L ${indexJavascript}/bin/content_id_worker.js $out/content_id_worker.js
+            cp -L ${indexJavascript}/bin/content_id_worker.js $out/src/content_id_worker.js
 
             cp -L ${codetracer-electron}/src/helpers.js $out/
 

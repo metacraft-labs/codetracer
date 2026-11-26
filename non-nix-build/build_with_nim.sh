@@ -103,6 +103,15 @@ $NIM \
 	-d:nodejs --out:"$DIST_DIR/index.js" js src/frontend/index.nim
 cp "$DIST_DIR/index.js" "$DIST_DIR/src/index.js"
 
+# content_id_worker.js: the main process's content-id worker thread
+# (`src/frontend/index/content_id_worker.nim`), found beside index.js.
+$NIM \
+	--hints:on --warnings:off \
+	-d:ctIndex -d:chronicles_sinks=json \
+	-d:ctmacos \
+	-d:nodejs --out:"$DIST_DIR/content_id_worker.js" js src/frontend/index/content_id_worker.nim
+cp "$DIST_DIR/content_id_worker.js" "$DIST_DIR/src/content_id_worker.js"
+
 # ui.js
 $NIM \
 	--hints:off --warnings:off \

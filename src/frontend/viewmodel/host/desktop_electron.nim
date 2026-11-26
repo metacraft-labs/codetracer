@@ -43,6 +43,7 @@ import ../platform/shell
 import ../platform/platform
 import ../platform/paths
 import ./node_certificate_host
+import ./main_process_wire
 
 # ---------------------------------------------------------------------------
 # Node and Electron bindings
@@ -125,6 +126,122 @@ proc nodePlatform(): cstring =
   value
 
 # ---------------------------------------------------------------------------
+# The main process, over IPC
+# ---------------------------------------------------------------------------
+#
+# Two facade operations are served by the Electron main process rather than in
+# this renderer: the content ids and declared scopes the certificate indicator
+# reads (`index/content_id_service.nim`, which computes them in a worker
+# thread so neither this thread nor main's event loop waits for git), and
+# `fs.watch` (`index/renderer_fs_watch.nim`: the desktop's watchers live in
+# main). Both go through `rendererIpc`.
+
+type
+  RendererIpc* = ref object
+    ## The renderer's half of Electron's IPC, reduced to what this facade
+    ## uses: send on a channel, and listen on one. `ipcRenderer`'s listener
+    ## receives `(event, payload)`; `listen`'s handler receives the payload.
+    send*: proc(channel: cstring; payload: JsObject)
+    listen*: proc(channel: cstring; handler: proc(payload: JsObject))
+
+var rendererIpc*: RendererIpc = nil
+  ## The IPC this facade talks to the main process over. Nil until first
+  ## used, when it becomes Electron's `ipcRenderer`; a suite installs its own
+  ## before the first call (a recorder, or a loopback to the main process's
+  ## modules running in the same node process).
+
+proc electronIpcSend(channel: cstring; payload: JsObject)
+  {.importjs: "require('electron').ipcRenderer.send(#, #)".}
+proc electronIpcListen(channel: cstring; handler: proc(payload: JsObject))
+  {.importjs: "require('electron').ipcRenderer.on(#, function (event, payload) { (#)(payload); })".}
+
+proc mainProcessIpc(): RendererIpc =
+  if rendererIpc.isNil:
+    rendererIpc = RendererIpc(
+      send: proc(channel: cstring; payload: JsObject) =
+        electronIpcSend(channel, payload),
+      listen: proc(channel: cstring; handler: proc(payload: JsObject)) =
+        electronIpcListen(channel, handler))
+  rendererIpc
+
+type
+  MainRequests = ref object
+    ## The requests on one channel pair that are waiting for main's answer,
+    ## by the id each carried.
+    channel: cstring
+    answered: cstring
+    listening: RendererIpc
+      ## The IPC the answer listener was installed on; a suite that installs
+      ## another IPC gets a listener on it too.
+    nextId: int
+    waiting: seq[tuple[id: int; settle: proc(answer: cstring)]]
+
+type
+  MainWatches = ref object
+    ## The watches main runs for this renderer, by the handle minted here.
+    listening: RendererIpc
+    nextId: int
+    callbacks: seq[tuple[handle: string; onEvent: proc(event: FsWatchEvent)]]
+
+var mainWatches = MainWatches()
+
+proc eventKindOf(name: string): FsWatchEventKind =
+  case name
+  of "fwkCreated": fwkCreated
+  of "fwkDeleted": fwkDeleted
+  of "fwkRenamed": fwkRenamed
+  else: fwkModified
+
+proc add(watches: MainWatches; onEvent: proc(event: FsWatchEvent)): string =
+  let ipc = mainProcessIpc()
+  if watches.listening != ipc:
+    watches.listening = ipc
+    ipc.listen(cstring(FsWatchEventChannel), proc(payload: JsObject) =
+      if payload.isNil or payload.isUndefined:
+        return
+      let handle = $payload[cstring"handle"].to(cstring)
+      let event = FsWatchEvent(
+        kind: eventKindOf($payload[cstring"kind"].to(cstring)),
+        path: $payload[cstring"path"].to(cstring))
+      for entry in watches.callbacks:
+        if entry.handle == handle:
+          entry.onEvent(event)
+          return)
+  inc watches.nextId
+  result = "renderer-watch-" & $watches.nextId
+  watches.callbacks.add (handle: result, onEvent: onEvent)
+
+proc remove(watches: MainWatches; handle: string) =
+  for i, entry in watches.callbacks:
+    if entry.handle == handle:
+      watches.callbacks.delete(i)
+      return
+
+proc newMainRequests(channel, answered: string): MainRequests =
+  MainRequests(channel: cstring(channel), answered: cstring(answered))
+
+proc ask(requests: MainRequests; request: string;
+         settle: proc(answer: cstring)) =
+  ## Send `request` (its JSON text) to main; `settle` receives the answer's
+  ## outcome text when it arrives. Never inline: main answers on a later turn.
+  let ipc = mainProcessIpc()
+  if requests.listening != ipc:
+    requests.listening = ipc
+    ipc.listen(requests.answered, proc(payload: JsObject) =
+      if payload.isNil or payload.isUndefined:
+        return
+      let id = payload[cstring"id"].to(int)
+      for i, entry in requests.waiting:
+        if entry.id == id:
+          requests.waiting.delete(i)
+          entry.settle(payload[cstring"outcome"].to(cstring))
+          return)
+  inc requests.nextId
+  requests.waiting.add (id: requests.nextId, settle: settle)
+  ipc.send(requests.channel, JsObject{id: requests.nextId,
+                                      request: cstring(request)})
+
+# ---------------------------------------------------------------------------
 # Small helpers
 # ---------------------------------------------------------------------------
 
@@ -193,7 +310,11 @@ proc errorText(): string = lastErrorText
 # Filesystem
 # ---------------------------------------------------------------------------
 
-proc electronFileSystem(profile: PlatformProfile): FileSystemFacade =
+proc electronFileSystem*(profile: PlatformProfile): FileSystemFacade =
+  ## The Electron renderer's filesystem facade. Exported for the suite that
+  ## installs it under node (`tests/certificate_indicator_watch_dom_test.nim`),
+  ## for the reason `electronVcs` is: `newDesktopElectronPlatform` finds no
+  ## Electron there.
   result = unavailableFileSystem(profile)
 
   result.readText = proc(path: string): PlatformFuture[PlatformOutcome[string]] =
@@ -312,6 +433,35 @@ proc electronFileSystem(profile: PlatformProfile): FileSystemFacade =
       resolvedOk($nodeMkdtemp(prefix.cstring))
     do:
       resolvedErr[string](pkFailed, "cannot create a temporary directory", errorText())
+
+  # `watch` through the main process, which owns the desktop's watchers
+  # (`index/renderer_fs_watch.nim`): main runs node's `fs.watch` for this
+  # window and sends each change back on `CODETRACER::fs-watch-event`. The
+  # handle is minted here, so the call answers at once; a path that does not
+  # exist is `pkNotFound` without a round trip, which is what a caller asking
+  # again later (the certificate indicator's store directories) needs.
+  result.watch = proc(path: string; recursive: bool;
+                      onEvent: proc(event: FsWatchEvent)
+                     ): PlatformFuture[PlatformOutcome[FsWatchHandle]] =
+    if path.len == 0 or not nodeExistsSync(path.cstring):
+      return resolvedErr[FsWatchHandle](pkNotFound, "cannot watch " & path &
+        ": no such file or directory")
+    jsGuard:
+      let handle = mainWatches.add(onEvent)
+      mainProcessIpc().send(cstring(FsWatchChannel), JsObject{
+        handle: cstring(handle), path: cstring(path), recursive: recursive})
+      resolvedOk(FsWatchHandle(handle))
+    do:
+      resolvedErr[FsWatchHandle](pkFailed, "cannot watch " & path, errorText())
+
+  result.unwatch = proc(handle: FsWatchHandle): PlatformFuture[PlatformOutcome[Nothing]] =
+    mainWatches.remove(string(handle))
+    jsGuard:
+      mainProcessIpc().send(cstring(FsUnwatchChannel), JsObject{
+        handle: cstring(string(handle))})
+      resolvedOk()
+    do:
+      resolvedErr[Nothing](pkFailed, "cannot stop watching", errorText())
 
   result.certificateStoreRoots = proc(
       ): PlatformFuture[PlatformOutcome[CertificateStoreRoots]] =
@@ -496,8 +646,11 @@ proc electronVcs*(profile: PlatformProfile): VcsFacade =
   ##
   ## ## The reads a periodic refresh makes do not block
   ##
-  ## `contentId`, `repositoryRoot`, `status` and `log` run git through
-  ## `child_process.spawn` and settle their futures when it answers. The
+  ## `repositoryRoot`, `status` and `log` run git through
+  ## `child_process.spawn` and settle their futures when it answers;
+  ## `contentId` and `declaredScopes` are asked of the main process, which
+  ## computes them in its content-id worker thread
+  ## (`index/content_id_service.nim`), and settle when it answers. The
   ## certificate indicator gathers W, H, S and the root on every refresh, and
   ## the VCS pane reads the status and the last 30 commit ids every 5 s and on
   ## focus (`ui/git_cli.readRefreshSnapshot`). Through `execFileSync` /
@@ -591,26 +744,42 @@ proc electronVcs*(profile: PlatformProfile): VcsFacade =
     let res = git(repository, args)
     if res.ok: resolvedOk(res.value) else: resolved(failed[string](res.error))
 
-  # The content-id recipe through node's `child_process.spawn`, its temporary
-  # index under the OS temporary directory, settling when the last git call
-  # answers (`contentIdOverAsync`). `node_certificate_host` returns every
-  # failure as a value; `jsGuard` is the facade's own contract on top, so even
-  # a lapse there — a throw before the first git call is launched — arrives
-  # as an outcome rather than on `window.onerror`.
-  let contentHost = nodeAsyncContentIdHost()
+  # The content ids and the declared scopes are computed by the MAIN process,
+  # in its content-id worker thread (`index/content_id_service.nim`), and
+  # this facade only asks for them. Computed here, through
+  # `contentIdOverAsync`, they cost the renderer seconds of work per refresh
+  # on a large repository even with git in child processes: `runResumable`
+  # replays the whole recipe once per git answer, re-reading the full index
+  # listing each time, on this thread. The capability check stays here, so a
+  # profile without `capVcsRead` is refused without a round trip.
+  let contentIds = newMainRequests(ContentIdChannel, ContentIdReceivedChannel)
+  let scopeReads = newMainRequests(DeclaredScopesChannel,
+                                   DeclaredScopesReceivedChannel)
   result.contentId = proc(repository: string; state: VcsBlobSource;
                           algorithm: string; scope: seq[string]
                          ): PlatformFuture[PlatformOutcome[VcsContentId]] =
+    if not profile.hasAll(ContentIdRequires):
+      return resolved(contentIdRefusal(profile))
+    let request = requestText(ContentIdRequest(
+      op: OpContentId, repository: repository, state: state,
+      algorithm: algorithm, scope: scope))
     jsGuard:
-      contentIdOverAsync(contentHost, profile, repository, state, algorithm,
-                         scope)
+      settledLater(proc(settle: proc(value: PlatformOutcome[VcsContentId])) =
+        contentIds.ask(request, proc(answer: cstring) =
+          settle(decodeContentIdOutcome($answer))))
     do:
       resolvedErr[VcsContentId](pkFailed, "computing a content id failed",
                                 errorText())
   result.declaredScopes = proc(repository: string
                               ): PlatformFuture[PlatformOutcome[VcsDeclaredScopes]] =
+    if not profile.hasAll(DeclaredScopesRequires):
+      return resolved(declaredScopesRefusal(profile))
+    let request = requestText(ContentIdRequest(
+      op: OpDeclaredScopes, repository: repository))
     jsGuard:
-      declaredScopesOverAsync(contentHost, profile, repository)
+      settledLater(proc(settle: proc(value: PlatformOutcome[VcsDeclaredScopes])) =
+        scopeReads.ask(request, proc(answer: cstring) =
+          settle(decodeDeclaredScopesOutcome($answer))))
     do:
       resolvedErr[VcsDeclaredScopes](pkFailed,
         "reading the declared certificate scopes failed", errorText())
