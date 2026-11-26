@@ -85,6 +85,18 @@ if [ -n "$cred_dir" ] && [ -f "$cred_dir/nix-access-tokens.conf" ]; then
 		mv -f "$tmp" "$job_netrc"
 		echo "refreshed github.com in the job netrc"
 	fi
+	# The token git reads through setup-dev-env's credential helper
+	# (metacraft-github-actions git-auth/git-credential-job-token.sh), which
+	# git asks before ci/git-credential-job-netrc.sh. Left at the first mint, a
+	# git fetch an hour into the job sends an expired token ("Invalid username
+	# or token" from cargo's fetch of lldb-sys.rs, run 45755922336).
+	if [ -f "$cred_dir/git-token" ]; then
+		tmp="$(mktemp "$cred_dir/git-token.tmp.XXXXXXXX")"
+		printf '%s\n' "$NEW_TOKEN" >"$tmp"
+		chmod 600 "$tmp"
+		mv -f "$tmp" "$cred_dir/git-token"
+		echo "refreshed the git credential helper's token"
+	fi
 	# When this token was minted, for keep-refreshing.sh and the git credential
 	# helper (ci/git-credential-job-netrc.sh), which renew a token by its age.
 	date +%s >"$cred_dir/github-token-minted-at"
