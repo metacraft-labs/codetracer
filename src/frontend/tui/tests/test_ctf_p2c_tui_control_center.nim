@@ -16,6 +16,12 @@
 ##   chip and on a waiting row does what it carries; `Down` and `Enter` walk
 ##   and open the waiting rows.
 ## * **Every ground and ink is a design-system role** the palette resolves.
+## * **The Initiatives panel's session status words hold 3:1** on the
+##   panel ground and the stripe in both modes (`running`, `needs input`
+##   and `failed` take their role's text hover step in Light), in the
+##   control center and in the panel's own story, while the dot beside each
+##   keeps its icon colour (codetracer-pm issue
+##   2026-11-24-tui-light-running-status-word-falls-under-3-to-1-on-the-initiatives-panel.md).
 ## * **The gaze mark**: off draws nothing; tracking and paused draw the eye
 ##   (struck when paused) and the words at the status line's end; the pause
 ##   key (`Ctrl+Alt+Y`, ESC then ^Y as a terminal sends it) and a click
@@ -24,7 +30,7 @@
 ## No mocks: the stories' own viewmodels over the scripted router and action
 ## source, drawn by the real views onto the real canvas.
 
-import std/[sequtils, strutils, unittest]
+import std/[os, sequtils, strutils, unittest]
 
 import ../agent_harbor/ah_tui_stories
 import ../../stories/agent_harbor_control_center_stories
@@ -389,6 +395,110 @@ suite "CTF-P2c: the terminal control center":
       check ask == warningInk(m.canvas.p)
       check idle == m.canvas.p.textCaption
       m.dispose()
+
+  test "the Initiatives panel's session status words hold 3:1; their dots keep the icon colour":
+    # The status word is a session line's only word for its state, beside a
+    # dot of the same hue, so it is text (WCAG 2.2 SC 1.4.3) and at least the
+    # state's non-colour cue (SC 1.4.11): 3:1 against every ground the panel
+    # draws it on. Light's raw status text roles fell under that on the
+    # panel (#e6e2db) and the stripe (#f8f6f2): `running` #16a34a 2.55:1 and
+    # 3.05:1, `needs input` #ea580c 2.76:1 and 3.30:1.
+    #
+    # The selected initiative's ground (`activeRow`, #c8c2b5 in Light) is
+    # left out: it is the subject of codetracer-pm issue
+    # 2026-11-24-light-status-colours-fall-to-1-9-to-2-9-to-1-on-the-selected-row-ground.md,
+    # fixed separately.
+    var problems: seq[string]
+    var seen: seq[string]   # "<mode> <attention> <ground>", each word checked
+    for (surface, fixture) in [("agent-harbor-control-center", "populated"),
+                               ("agent-harbor-initiatives", "populated")]:
+      for (cols, rows) in [(95, 40), (45, 56), (180, 56)]:
+        for mode in [dmDark, dmLight]:
+          let m = mountAgentHarborStoryTui(surface, fixture, cols, rows, mode)
+          let p = m.canvas.p
+          let panels = m.canvas.root.all("surface").filterIt(
+            it.attr("surface") == "agent-harbor-initiatives")
+          check panels.len == 1
+          for panel in panels:
+            for s in panel.all("session"):
+              let where = $mode & " " & surface & " " & $cols & "x" & $rows & " " &
+                          s.attr("session")
+              let attention = parseEnum[SessionAttention](s.attr("attention"))
+              let mark = s.first("mark")
+              let word = s.first("status")
+              if mark.isNil or word.isNil:
+                problems.add where & ": no mark or no status word"
+                continue
+              # A line laid out past the screen's last row is not drawn.
+              if word.row >= m.rows or mark.row >= m.rows: continue
+              # The dot keeps its icon colour.
+              let dot = m.canvas.grid.styleAt(mark.row, mark.col)
+              if dot.fg != p.markOf(attention).colour:
+                problems.add where & ": the dot is " & dot.fg & ", its icon colour " &
+                  p.markOf(attention).colour
+              let st = m.canvas.grid.styleAt(word.row, word.col)
+              if st.fg.len == 0 or st.bg.len == 0:
+                problems.add where & ": the status word's cell has no colours"
+                continue
+              # One resolution for every front end, on every ground: the palette's.
+              if st.fg != p.initiativeSessionWordColour(attention):
+                problems.add where & ": the word is " & st.fg & ", the palette's " &
+                  p.initiativeSessionWordColour(attention)
+              if st.bg == p.activeRow: continue
+              let ground = if st.bg == m.canvas.tone.body: "panel"
+                           elif st.bg == m.canvas.tone.band: "stripe"
+                           else: st.bg
+              seen.add $mode & " " & $attention & " " & ground
+              let ratio = contrastOf(st.fg, st.bg)
+              if ratio < 3.0:
+                problems.add where & ": '" & word.attr("status") & "' " & st.fg & " on " &
+                  ground & " " & st.bg & " is " & formatFloat(ratio, ffDecimal, 2) & ":1"
+          m.dispose()
+    for problem in problems: echo "  ", problem
+    check problems.len == 0
+    # A check that ran on no word proves nothing: the fixtures must put a
+    # running and a waiting session on the panel ground and on the stripe,
+    # in each mode.
+    for mode in [dmDark, dmLight]:
+      for attention in [saRunning, saNeedsInput]:
+        for ground in ["panel", "stripe"]:
+          let key = $mode & " " & $attention & " " & ground
+          if key notin seen: echo "  never checked: ", key
+          check key in seen
+
+  test "the web's session status rules resolve to the palette's words":
+    # The web does not read the palette: `.ah-initiative-session-status`
+    # takes its colour from `agent_harbor.styl`. Each of the three state
+    # rules must resolve, in each mode, to the ink the case above holds to
+    # 3:1, so the web cannot keep Light's raw status roles while the native
+    # hosts move to their hover steps.
+    let styl = readFile(currentSourcePath().parentDir.parentDir.parentDir /
+                        "styles" / "components" / "agent_harbor.styl").splitLines
+    proc colourOf(selector: string): string =
+      for i, line in styl:
+        if line == selector and i + 1 < styl.len:
+          let d = styl[i + 1].strip
+          if d.startsWith("color:"): return d["color:".len .. ^1].strip
+    var resolved = 0
+    for (selector, attention) in [
+        (".ah-att-needs-input .ah-initiative-session-status", saNeedsInput),
+        (".ah-att-running .ah-initiative-session-status", saRunning),
+        (".ah-att-failed .ah-initiative-session-status", saFailed)]:
+      let value = colourOf(selector)
+      check value.startsWith("by-mode(") and value.endsWith(")")
+      if not (value.startsWith("by-mode(") and value.endsWith(")")): continue
+      let names = value["by-mode(".len ..< value.high].split(',').mapIt(it.strip)
+      check names.len == 2
+      if names.len != 2: continue
+      for k, mode in [dmDark, dmLight]:
+        var hex = ""              # the token the name spells (`colors-ui-…`)
+        for t in DesignToken:
+          if ($t).replace('/', '-') == names[k]: hex = DesignTokenHex[t][mode]
+        check hex.len > 0
+        check hex == ahPalette(mode).initiativeSessionWordColour(attention)
+        if hex.len > 0 and hex == ahPalette(mode).initiativeSessionWordColour(attention):
+          inc resolved
+    check resolved == 6
 
 suite "CTF-P2c: the terminal gaze mark":
   test "off draws nothing; tracking and paused draw the eye and the words at the end":
