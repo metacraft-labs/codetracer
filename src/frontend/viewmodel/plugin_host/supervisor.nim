@@ -494,6 +494,47 @@ proc note(sup: Supervisor; line: string) =
       except CatchableError:
         discard
 
+
+const
+  TestThresholdsEnv* = "CODETRACER_PLUGIN_TEST_THRESHOLDS"
+    ## A TEST-ONLY input, never set by the product: a JSON object that
+    ## replaces some of the defences' thresholds, so a suite can walk a
+    ## breaker through half-open and latch in minutes, or give a loaded test
+    ## host more time where the case is about something else
+    ## (Extensibility-Model §11.7.7). Unset, every threshold is the spec's.
+  TestThresholdKeys* = ["helloDeadlineMs", "inputDeadlineMs", "strikesToOpen",
+                        "breakerBackoffMs", "breakerBackoffCapMs",
+                        "openingsToLatch", "strikeWindowMs",
+                        "halfOpenProbationMs"]
+
+proc applyTestThresholds*(sup: Supervisor; text: string) =
+  ## Applies a `TestThresholdsEnv` value; an empty one changes nothing. A
+  ## value that is not an object of known keys with positive integers raises
+  ## `ValueError` and changes nothing, so a misspelt key is said rather than
+  ## leaving the spec's threshold silently in force.
+  if text.len == 0: return
+  let t = parseJson(text)
+  if t.kind != JObject:
+    raise newException(ValueError, "not a JSON object")
+  for key, v in t.pairs:
+    if key notin TestThresholdKeys:
+      raise newException(ValueError, "unknown threshold '" & key & "'")
+    if v.kind != JInt or v.getInt <= 0:
+      raise newException(ValueError, "'" & key & "' is not a positive integer")
+  for key, v in t.pairs:
+    let n = v.getInt
+    case key
+    of "helloDeadlineMs": sup.helloDeadlineMs = n
+    of "inputDeadlineMs": sup.inputDeadlineMs = n
+    of "strikesToOpen": sup.strikesToOpen = n
+    of "breakerBackoffMs": sup.breakerBackoffMs = n
+    of "breakerBackoffCapMs": sup.breakerBackoffCapMs = n
+    of "openingsToLatch": sup.openingsToLatch = n
+    of "strikeWindowMs": sup.strikeWindowMs = n
+    of "halfOpenProbationMs": sup.halfOpenProbationMs = n
+    else: discard
+  sup.note("test thresholds " & $t)
+
 proc clearSuspect(s: PluginSlot) =
   ## Every place that ends a suspicion ends both its halves, so a later
   ## suspicion never inherits a stale reason.

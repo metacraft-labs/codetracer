@@ -454,6 +454,10 @@ proc drawInitiativesPanel*(r: GpuiRenderer; host: GpuiElement; vm: InitiativesVM
       let list = r.box(column = true, pairs = [("flex-grow", "1"), ("flex-shrink", "1"),
                                                ("min-height", "0px"), ("overflow", "hidden")])
       r.tag(list, "rows", "list")
+      # How many initiatives the list has, drawn or counted on its `+N more`
+      # line: a reader (the layout judge's held-overview check) checks that the rows
+      # drawn and the count agree with it.
+      r.tag(list, "initiatives-total", $rows.len)
       let listPx = if heightPx < 0: -1
                    else: max(0, heightPx - initiativesHeadPx(vm, widthPx, linePx))
       let shown = initiativesShown(rows, widthPx, listPx, headLinePx = linePx)
