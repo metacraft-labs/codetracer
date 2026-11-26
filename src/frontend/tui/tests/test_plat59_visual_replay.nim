@@ -33,6 +33,9 @@
 ##   * PIXEL HISTORY: the committed pixel's rows are the draw calls of that
 ##     frame that wrote it, the last one the quad's colour; a press on a row
 ##     shows that draw call in the Video Player;
+##   * A ROW'S MENU (K76): a right press (or the Menu key) offers "Show value
+##     origin"; on this recording, which maps no CPU-side value to a draw,
+##     choosing it says so by name and asks for no chain;
 ##   * SHADER DEBUG: the fragment's context and the shader's source;
 ##   * THE DESKTOP'S KEYS, scoped to the pane: Space plays and pauses, `l`
 ##     cycles the rate, Home / End, Left / Right a frame, Shift+Right a draw.
@@ -60,6 +63,8 @@ import ../app/views/visual_replay_panes
 import ../host/tui_session
 import ../host/frame_image
 import ../../viewmodel/host/native_visual_replay_host
+from ../../viewmodel/viewmodels/origin_chain_types import PixelOriginQuery,
+  pixelOriginRefusalText
 import view_vocabulary/pane_views
 import ../../../common/view_vocabulary
 import ./fixtures/fixture_provider
@@ -67,7 +72,7 @@ import ./fixtures/visual_fixture
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads exactly this
 # spelling as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 131
+const ExpectedAssertions = 144
 
 var countedAssertions = 0
 
@@ -396,6 +401,48 @@ suite "PLAT-59: the Visual Replay panes on the terminal":
       # Its fragment's shader was asked for.
       ck panes.shader.selectedContext.val.isSome
       ck panes.shader.selectedContext.val.get.drawCallIndex == some(target)
+
+    test "a history row's menu offers Show value origin, and refuses by name":
+      # No back end traces a pixel's colour back to the program's values, so
+      # choosing the entry asks the session's Origin Chain model (as the
+      # desktop does) and its refusal, by name, is the status line: no chain
+      # is asked for, and none opens empty.
+      rt.showVisualPane(panePixelHistory)
+      discard rt.shellScreenOf()
+      let (_, hs) = rt.pixelHistoryScreen()
+      let n = panes.history.entries.val.len
+      ck n >= 1
+      let col = rt.regionOf(panePixelHistory).col + 2
+      # A RIGHT PRESS on the first row: selected, its menu open.
+      s.send(rt, sgr(2, hs.listTop, col))
+      s.send(rt, sgr(2, hs.listTop, col, release = true))
+      ck rt.app.contextMenu.open
+      ck rt.app.contextMenu.menu.kind == cmkPixelHistoryEntry
+      ck rt.app.contextMenu.menu.labels == @["Show value origin"]
+      ck rt.app.contextMenu.menu.target.index == 0
+      ck panes.history.selectedEntry.val == some(0)
+      let pixel = panes.pickedPixel.get
+      let first = panes.history.entries.val[0]
+      let want = pixelOriginRefusalText(PixelOriginQuery(
+        x: pixel.x, y: pixel.y, frame: pixel.frame,
+        drawCallIndex: first.drawCallIndex, geid: first.geid))
+      # Enter chooses it.
+      let chosen = rt.handleToken("\r", 0)
+      ck chosen.paneClick.kind != pcValueOrigin
+      s.applyOutcome(rt, chosen)
+      ck not rt.app.contextMenu.open
+      ck rt.app.notification == want
+      # FROM THE KEYBOARD: the Menu key on the focused pane opens the
+      # selected row's menu, beside it.
+      rt.app.notification = ""
+      discard rt.focus.focusPaneKind(panePixelHistory)
+      rt.app.layoutBinding.focus = panePixelHistory
+      s.send(rt, "\x1b[29~")
+      ck rt.app.contextMenu.open
+      ck rt.app.contextMenu.menu.kind == cmkPixelHistoryEntry
+      ck rt.app.contextMenu.menu.target.index == 0
+      s.send(rt, "\r")
+      ck rt.app.notification == want
 
     test "shader debug shows the fragment and the shader's source":
       rt.showVisualPane(paneShaderDebug)

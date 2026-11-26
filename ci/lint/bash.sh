@@ -362,6 +362,12 @@ lint_step "Nim test lane shards cover their lane exactly" \
 lint_step "a visual-recording scenario lands on a shard that builds the player" \
 	bash ci/test/scenario-slice-uses-stage-test.sh
 
+# So does the shard whose Nim slice holds a Visual Replay suite (one importing
+# fixtures/visual_fixture), and before its Nim lanes run: without the player
+# those suites skipped every case in CI (shards 2/8 and 8/8, run 45471393785).
+lint_step "a Visual Replay Nim suite runs on a shard that has the player first" \
+	bash ci/test/nim-shard-uses-visual-fixture-test.sh
+
 # A git fetch late in a job gets a recently minted token: the refresher renews
 # by age and on request, and the credential helper asks before handing out an
 # old one.

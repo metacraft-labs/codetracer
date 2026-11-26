@@ -43,7 +43,8 @@ import viewmodels/event_log_vm
 # 260 -> 262 (PLAT-62): K67-K68, the Constraints rows (+2).
 # 262 -> 268 (PLAT-59): K69-K74, the Visual Replay panes' rows (+6).
 # 268 -> 273: K75, the line numbers; the inline menu entry's action and hints.
-const ExpectedAssertions = 273
+# 273 -> 283: K76, a Pixel History entry's menu (+10).
+const ExpectedAssertions = 283
 
 var countedAssertions = 0
 
@@ -59,13 +60,13 @@ func rowsWith(state: NativeState; gpui = false): seq[string] =
 
 suite "PLAT-50: the click inventory":
 
-  test "every row K1..K74, once, complete":
+  test "every row K1..K76, once, complete":
     var ids = initHashSet[string]()
     for i, b in ClickInventory:
       ck b.id == "K" & $(i + 1)
       ids.incl b.id
     ck ids.len == ClickInventory.len
-    ck ClickInventory.len == 75
+    ck ClickInventory.len == 76
     for b in ClickInventory:
       if b.target.len == 0 or b.gestures.card == 0 or b.desktop.len == 0:
         checkpoint("incomplete row " & b.id)
@@ -231,6 +232,22 @@ suite "PLAT-50: the context menus are the desktop's":
       @[("left", "2"), ("right", "3")]
     ck f.target.scratchpadSamplesOf(caAddValueToScratchpad) == @[("left", "2")]
     ck f.target.scratchpadSamplesOf(caCopy).len == 0
+
+  test "a Pixel History entry's menu: Show value origin (K76)":
+    let m = pixelHistoryEntryContextMenu(2)
+    ck m.kind == cmkPixelHistoryEntry
+    ck m.labels == @["Show value origin"]
+    # Enabled: a draw with no CPU-side origin answers with its refusal when
+    # chosen, rather than greying out the question.
+    ck m.entries[0].enabled
+    ck m.entries[0].action == caPixelShowValueOrigin
+    ck m.target.pane == panePixelHistory and m.target.index == 2
+    ck ContextActionOperations[caPixelShowValueOrigin] ==
+      "pixel-history.show-value-origin"
+    let b = behaviour("K76")
+    ck b.target == "Pixel History: row" and cgRightClick in b.gestures
+    ck b.terminal == nsDone and b.gpui == nsDone
+    ck clickOperationOf("K76") == "context-menu.open"
 
 suite "PLAT-50: an open menu":
 

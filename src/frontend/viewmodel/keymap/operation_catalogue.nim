@@ -526,6 +526,8 @@ const
     op("video-player.select-pixel", GlobalTable, "Video: Select Pixel", oaTarget),
     op("pixel-history.activate", GlobalTable, "Pixel History: Go to Draw Call",
        oaTarget),
+    op("pixel-history.show-value-origin", GlobalTable,
+       "Pixel History: Show Value Origin", oaTarget),
     op("shader-debug.step", GlobalTable, "Shader Debug: Step", oaTarget),
     op("point-list.select", PaneTablePrefix & "pointList", "Select this point",
        oaTarget),

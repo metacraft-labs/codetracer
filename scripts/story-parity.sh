@@ -185,11 +185,9 @@ while IFS= read -r line || [ -n "$line" ]; do
 			[ "$arm" = dom ] && continue
 			case "$arm" in
 			zgui)
-				# Text coverage as the DOM arm's Chromium draws it on this display:
-				# one coverage per pixel when the display states no subpixel
-				# layout. zgui's own default for an unknown layout is per-channel
-				# coverage, which no Electron window on the same display shows.
-				ZGUI_TEXT_AA=gray "$out/bin/codetracer-zgui-story" --story="$story" --title="$title" \
+				# No ZGUI_TEXT_AA override: on a display that states no subpixel
+				# layout zgui now draws grayscale text by default, as Chromium does.
+				"$out/bin/codetracer-zgui-story" --story="$story" --title="$title" \
 					--width="$w" --height="$h" --scale="$scale" \
 					--build-root="$build_tree" --out="$dir/zgui.png" >"$dir/zgui.log" 2>&1 || {
 					echo "   the zgui arm failed (log: $dir/zgui.log)" >&2

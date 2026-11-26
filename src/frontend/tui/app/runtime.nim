@@ -4053,14 +4053,22 @@ proc selectPixelAtCell(rt: TuiRuntime; col, row: int;
 
 proc pressPixelHistory(rt: TuiRuntime; event: MouseEvent;
                        outcome: var RuntimeOutcome): bool =
-  ## A press on a history row navigates (the desktop's click).
-  if event.button != mbLeft or not rt.app.pixelHistory.loaded:
+  ## A press on a history row navigates (the desktop's click); a right press
+  ## opens its menu (K76).
+  if event.button notin {mbLeft, mbRight} or not rt.app.pixelHistory.loaded:
     return false
   rt.app.layoutBinding.focus = panePixelHistory
   discard rt.focus.focusPaneKind(panePixelHistory)
   let (_, screen) = rt.pixelHistoryScreen()
   let t = screen.historyTargetAt(rt.app.pixelHistory, event.row)
   if t.kind != vtHistoryRow:
+    return true
+  if event.button == mbRight:
+    # K76: the row selected, its menu opened, as a Constraints row's is.
+    discard rt.actOnVisual(VisualAct(kind: vaHistorySelect, index: t.index),
+                           outcome)
+    rt.openContextMenu(pixelHistoryEntryContextMenu(t.index), event.row,
+                       event.col, outcome)
     return true
   # K73: a row's press is the pointer keymap's (`pixel-history.activate`).
   discard rt.pressElement(event, panePixelHistory, ekRow, "",
@@ -4119,9 +4127,22 @@ proc runVisualKeyOperation(rt: TuiRuntime; pane: PaneKind; operation: string;
       of "list.focus-page-down": min(max(at, 0) + page, m.rows.len - 1)
       of "list.focus-page-up": max(max(at, 0) - page, 0)
       of "list.activate": -2
+      of "context-menu.open": -4
       else: -3
     if target == -3:
       return false
+    if target == -4:
+      # K76 from the keyboard: the selected row's menu, beside it.
+      if at < 0:
+        rt.note("no row of the Pixel History is selected")
+        outcome.repaint = true
+        return true
+      let row = if screen.listTop >= 0: screen.listTop + at - screen.top
+                else: 1
+      let area = rt.visualContentArea(panePixelHistory)
+      rt.openContextMenu(pixelHistoryEntryContextMenu(at), row,
+                         area.col + 2, outcome)
+      return true
     if target == -2:
       if at >= 0:
         discard rt.actOnVisual(VisualAct(kind: vaHistoryActivate, index: at),
@@ -6430,6 +6451,11 @@ proc runContextAction(rt: TuiRuntime; action: ContextAction;
     discard rt.actOnConstraints(ConstraintsAct(kind: cakMenuChoice,
                                                action: action,
                                                target: target), outcome)
+  of caPixelShowValueOrigin:
+    # K76: the pixel's origin question; its answer (today the refusal by
+    # name) on the status line.
+    discard rt.actOnVisual(VisualAct(kind: vaHistoryValueOrigin,
+                                     index: int(target.index)), outcome)
 
 proc routeOverlayMouse(rt: TuiRuntime; event: MouseEvent;
                        outcome: var RuntimeOutcome): bool =
@@ -9668,9 +9694,17 @@ proc buildOperationTables(rt: TuiRuntime) =
     proc(): bool = focusedOn(panePixelHistory) or focusedOn(paneShaderDebug))
   visual.onEach(["list.focus-next", "list.focus-previous", "list.focus-first",
                  "list.focus-last", "list.focus-page-down", "list.focus-page-up",
-                 "list.activate"], ask do:
+                 "list.activate", "context-menu.open"], ask do:
     let (_, focused) = rt.focus.focusedPane()
     rt.runVisualKeyOperation(focused, c.name, outcome))
+  visual.bindOp("pixel-history.show-value-origin", act do:
+    # K76 by name (the palette, a user's key): the pressed row, else the
+    # selected one.
+    let at = if c.pointer: int(c.target.index)
+             else: rt.app.pixelHistory.selected
+    rt.runContextAction(caPixelShowValueOrigin,
+                        ContextTarget(pane: panePixelHistory,
+                                      index: int64(at)), outcome))
   visual.bindOp("pixel-history.activate", act do:
     if not c.pointer:
       return false

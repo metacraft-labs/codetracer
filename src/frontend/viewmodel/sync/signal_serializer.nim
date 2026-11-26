@@ -317,6 +317,9 @@ proc applySignalUpdate*(session: SessionViewModel, update: JsonNode) =
     case field
     of "lines":
       session.store.calltrace.lines.val = parseCallLineSeq(value)
+      # Rows from the primary answer no request of this store's
+      # (`ReplayDataStore.holdsCalltraceRows`).
+      session.store.calltrace.heldQuery = ""
     of "startLineIndex":
       session.store.calltrace.startLineIndex.val = value.getBiggestInt.int64
     of "totalCallsCount":
