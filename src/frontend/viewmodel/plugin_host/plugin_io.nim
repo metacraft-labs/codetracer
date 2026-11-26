@@ -586,6 +586,33 @@ func pathIsRecorded*(io: PluginIoContext; path: string): bool =
     if pathIsUnder(path, root): return true
   false
 
+when not defined(js):
+  from std/os import findExe
+
+  proc resolveExecutable*(name: string): string =
+    ## §8.1.1's "the host resolves it against a declared set and its own PATH
+    ## policy". `findExe` is the host's PATH policy: the process environment
+    ## CodeTracer itself was started with, not one the plugin supplied.
+    ##
+    ## `followSymlinks = false`, AND THAT WAS MEASURED RATHER THAN CHOSEN.
+    ## `findExe`'s default resolves the link, and on a multi-call binary that
+    ## changes which program runs: on this workspace's nixpkgs coreutils,
+    ## `findExe("printf")` returns `…/bin/coreutils`, whose `argv[0]` is then
+    ## `coreutils` and which exits 1 having printed nothing, because a
+    ## multi-call binary dispatches on its own name. The plugin declared
+    ## `printf`; resolving the declaration to a different program is the
+    ## opposite of what §8.1.1 hands the host resolution for.
+    ##
+    ## Outside the process primitives below, because it needs a filesystem
+    ## and an environment, not a process. So the wasm32 build of the ViewModel
+    ## core resolves exactly as native: the `vm-unit-wasm` lane's Emscripten
+    ## module (`-sNODERAWFS=1`) has node's real filesystem and its own `PATH`.
+    ## A browser-hosted module has neither and answers "not on the PATH". The
+    ## WASM plugins' SDK does not import this module
+    ## (`codetracer_plugin_sdk`), so no plugin reaches it.
+    if not isBareExecutableName(name): return ""
+    findExe(name, followSymlinks = false)
+
 when defined(js) or defined(wasm32):
   # A WebAssembly plugin (wasm32) reaches these primitives only through
   # `ct-plugin-host`'s imports (`plugin_sdk/wasm_io.nim`): the types and the
@@ -1087,21 +1114,6 @@ else:
       "'" & p.name & "' (pid " & $p.pid & ") was sent SIGKILL and had not " &
       "exited after " & $KillReapDeadlineMs & " ms; it is left unreaped")
 
-  proc resolveExecutable*(name: string): string =
-    ## §8.1.1's "the host resolves it against a declared set and its own PATH
-    ## policy". `findExe` is the host's PATH policy: the process environment
-    ## CodeTracer itself was started with, not one the plugin supplied.
-    ##
-    ## `followSymlinks = false`, AND THAT WAS MEASURED RATHER THAN CHOSEN.
-    ## `findExe`'s default resolves the link, and on a multi-call binary that
-    ## changes which program runs: on this workspace's nixpkgs coreutils,
-    ## `findExe("printf")` returns `…/bin/coreutils`, whose `argv[0]` is then
-    ## `coreutils` and which exits 1 having printed nothing, because a
-    ## multi-call binary dispatches on its own name. The plugin declared
-    ## `printf`; resolving the declaration to a different program is the
-    ## opposite of what §8.1.1 hands the host resolution for.
-    if not isBareExecutableName(name): return ""
-    findExe(name, followSymlinks = false)
 
   proc setNonBlocking(fd: int) =
     when defined(posix):

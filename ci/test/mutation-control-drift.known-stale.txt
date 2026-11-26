@@ -933,8 +933,8 @@ src/frontend/tui/tests/plat83-ct-lens-mutation-control.sha256	src/frontend/tui/t
 # the harnesses that digest them owe a re-grade of the arms that sit in them.
 src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/viewmodel/plugin_host/process_link.nim	67a0095978446fcf0f5c4b2ab6e769482b685d4041d552431b9bad3e9362de98	e1bea68ce26419dac6a0b580c0585dad027d0b1be26cde03e8a9b2f083135e75
 src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/process_link.nim	67a0095978446fcf0f5c4b2ab6e769482b685d4041d552431b9bad3e9362de98	e1bea68ce26419dac6a0b580c0585dad027d0b1be26cde03e8a9b2f083135e75
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/plugin_io.nim	d5de198bc351a80da5aa4c73b99ed7c6fd48d90d8a9a55ad3a59df7e1e664b26	b3e909347e32bd99c041e68ab80f841755487199c62388c1ffc61ae3b73fde98
-src/frontend/viewmodel/tests/unit/plat8-io-mutation-control.sha256	src/frontend/viewmodel/plugin_host/plugin_io.nim	d5de198bc351a80da5aa4c73b99ed7c6fd48d90d8a9a55ad3a59df7e1e664b26	b3e909347e32bd99c041e68ab80f841755487199c62388c1ffc61ae3b73fde98
+src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/plugin_io.nim	d5de198bc351a80da5aa4c73b99ed7c6fd48d90d8a9a55ad3a59df7e1e664b26	932254616a1caa7a41c1c83c8d30a78b8588bb5933ca6fde9f8220552b4d2931
+src/frontend/viewmodel/tests/unit/plat8-io-mutation-control.sha256	src/frontend/viewmodel/plugin_host/plugin_io.nim	d5de198bc351a80da5aa4c73b99ed7c6fd48d90d8a9a55ad3a59df7e1e664b26	932254616a1caa7a41c1c83c8d30a78b8588bb5933ca6fde9f8220552b4d2931
 
 # 2026-11-25: the pointer harness was re-graded at dcb44215427, on the pointer-stamp fix
 # (every arm as required, every control green, N1 the declared equivalent mutant). The
@@ -983,3 +983,5 @@ src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/styl
 # Re-grades owed for subjects moved by 0a4f1da4d53 without ledger lines;
 # the harnesses that digest them owe a re-grade of the arms that sit in them.
 src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	ci/lib/test-lane-files.sh	a7a0360b1bf2ceb0286af1ecfb5d43f5f40d3bc5b306fd21b7b8667af77edf92	404e881a7c8307ee667db825de21b8f924d5bf95bc94ea036d275cd7b19c1998
+
+src/frontend/viewmodel/tests/unit/plat9-surface-mutation-control.sha256	src/frontend/viewmodel/plugin_host/surface_host.nim	3fddebc1d5a1d4df6d8846db8374b95600bb0b09dd3d28b102283f41a0d3bbec	1f7e9eb0d6529b821484d8abcc91f100ce56471507377a2fc92004cc46172bc1
