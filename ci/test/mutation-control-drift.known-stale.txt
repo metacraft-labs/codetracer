@@ -1016,3 +1016,8 @@ src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	src/fronte
 # 2026-11-26: the desktop's certificate content ids moved to a main-process worker thread
 # (vcs.nim's docs, ipc_utils.nim's handler list, the lane list); these re-grades are owed.
 src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/viewmodel/platform/vcs.nim	4081198df3df8ecc4e1710ea30a4b6fc33a515c5fe9d292cb4b3bc520f54e72c	ece57ae8774d14a50cf1795289e5414cf2a0e430cd110c021159a564685ac78b
+
+# Re-grades owed for subjects moved by aa75ead0407 cc304d4b682 without ledger lines;
+# the harnesses that digest them owe a re-grade of the arms that sit in them.
+src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/viewmodel/viewmodels/agent_activity_text.nim	c7506cecd14c044eea0a632be20e56162d1ae19b0d014449abf70cbdc07b3a88	15c7ebd515471ad913198e2173a8740bd85e1bdf7e57fa69a5349fbd63695f63
+src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/viewmodel/viewmodels/agent_prompt_context.nim	06b4662611704d45c1ebeb976561cad9392c889913645371b948e28e7d8a8bbe	dc751cdb4328dbb7bbf7946067da2b879ea5746c7a9bb6f2d2ba3e400c727406
