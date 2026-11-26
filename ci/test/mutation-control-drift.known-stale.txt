@@ -1015,4 +1015,4 @@ src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/db-backend/sr
 src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_sdk_facade.nim	f868eb5b9644a11e21b73e5026a5d31988685c8943e4476b38eb619dcc94f877	6cc01b92d3df398f5ce5ce5a9fb610ac008da271cf62bd1a398f246529440f22
 # 2026-11-26: the desktop's certificate content ids moved to a main-process worker thread
 # (vcs.nim's docs, ipc_utils.nim's handler list, the lane list); these re-grades are owed.
-src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/viewmodel/platform/vcs.nim	4081198df3df8ecc4e1710ea30a4b6fc33a515c5fe9d292cb4b3bc520f54e72c	9089f80e619320823e73a77392f576490f6ecdf23d823b176cb2127cfdd2607d
+src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/viewmodel/platform/vcs.nim	4081198df3df8ecc4e1710ea30a4b6fc33a515c5fe9d292cb4b3bc520f54e72c	ece57ae8774d14a50cf1795289e5414cf2a0e430cd110c021159a564685ac78b

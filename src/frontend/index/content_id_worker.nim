@@ -41,7 +41,7 @@
 when not defined(js):
   {.error: "content_id_worker.nim is a node worker (JS backend)".}
 
-import std/[json, jsffi]
+import std/[json, jsffi, tables]
 
 import ../viewmodel/platform/outcome
 import ../viewmodel/platform/vcs
@@ -61,9 +61,12 @@ proc failureText(message, detail: string): string =
   $encodeOutcome(failed[Nothing](pkFailed, message, detail),
                  proc(value: Nothing): JsonNode = newJNull())
 
-proc answerRequest*(host: ContentIdHost; requestText: string): string =
+proc answerRequest*(hostFor: proc(tempRoot: string): ContentIdHost;
+                    requestText: string): string =
   ## The outcome's JSON text for one request. Synchronous: git runs through
-  ## `spawnSync`, so this returns when the last git call has.
+  ## `spawnSync`, so this returns when the last git call has. `hostFor`
+  ## gives the host whose temporary indexes go under the request's
+  ## `tempRoot`.
   var request: ContentIdRequest
   try:
     request = decodeRequest(parseJson(requestText))
@@ -73,6 +76,7 @@ proc answerRequest*(host: ContentIdHost; requestText: string): string =
     return failureText("the content-id request could not be read",
                        getCurrentExceptionMsg())
   let profile = workerProfile()
+  let host = hostFor(request.tempRoot)
   case request.op
   of OpContentId:
     var outcome: PlatformOutcome[VcsContentId]
@@ -102,12 +106,16 @@ proc parentPortPost(id: JsObject; outcome: cstring)
 
 proc serveContentIdRequests*() =
   ## Answer the parent's requests until it terminates this worker.
-  let host = nodeContentIdHost()
+  var hosts = initTable[string, ContentIdHost]()
+  let hostFor = proc(tempRoot: string): ContentIdHost =
+    if tempRoot notin hosts:
+      hosts[tempRoot] = nodeContentIdHost(tempRoot)
+    hosts[tempRoot]
   parentPortOn(proc(message: JsObject) =
     let id = message[cstring"id"]
     var answer = ""
     try:
-      answer = answerRequest(host, $message[cstring"request"].to(cstring))
+      answer = answerRequest(hostFor, $message[cstring"request"].to(cstring))
     except:
       answer = failureText("the content-id worker failed", getCurrentExceptionMsg())
     parentPortPost(id, cstring(answer)))

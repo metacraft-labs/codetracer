@@ -63,6 +63,15 @@
 ## one substitution, it is an environment variable the product already reads,
 ## and the endpoint is constructed from it by the product's own code.
 ##
+## THE CONTENT-ID WORKER runs this suite's own bundle. The server computes
+## `vcs.contentId` in the content-id service's worker thread
+## (`index/content_id_service.nim`), whose shipped script
+## (`content_id_worker.js`) does not sit beside a suite the lane compiled on
+## its own. Started as that worker, this bundle serves content-id requests
+## (`content_id_worker.serveContentIdRequests`, the shipped worker's whole
+## body) and runs none of the suite: its statements are behind
+## `isMainThread()`, because the worker shares this process's environment.
+##
 ## Lane: `main-process` — `nim js -d:nodejs -d:ctIndex -d:server`.
 
 import std/[json, jsffi, strutils]
@@ -70,6 +79,8 @@ import std/[json, jsffi, strutils]
 import lib/src_relative_require
 import ../index/config
 import ../index/server_config
+import ../index/content_id_service
+import ../index/content_id_worker
 import ../index/facade_endpoint
 import ../viewmodel/platform/capabilities
 import ../viewmodel/platform/outcome
@@ -312,21 +323,29 @@ proc start(httpPort, socketPort: int) =
         $reason & ")"
       finish(checks))
 
-echo "facade_endpoint_over_socket_test"
+proc isMainThread(): bool {.importjs: "require('worker_threads').isMainThread".}
+proc thisBundle(): cstring {.importjs: "(__filename)@".}
 
-scratch = $makeTempDir(cstring"ct-facade-socket-")
-# Before `setupServer`, because the endpoint reads it when it is constructed.
-# `CODETRACER_HOME` outranks `XDG_CONFIG_HOME` for the settings root
-# (`$CODETRACER_HOME/config/endpoint`, common/ct_home), and a lane exports one,
-# so naming only XDG would not keep this suite's settings in `scratch`.
-setEnv(cstring"CODETRACER_HOME", (scratch & "/ct-home").cstring)
-setEnv(cstring"XDG_CONFIG_HOME", (scratch & "/config").cstring)
-# The session secret a supervisor would give `ct host`: the server admits the
-# client only with it (`index/host_session_guard.nim`). `setupServer` removes
-# the variable it reads, so the client reads its own copy.
-setEnv(cstring"CODETRACER_HOST_SESSION_SECRET", TestSessionSecret.cstring)
-setEnv(cstring"CT_TEST_SESSION_SECRET", TestSessionSecret.cstring)
+if isMainThread():
+  # The server's content-id worker runs this bundle (header).
+  processWorkerScript = $thisBundle()
+  echo "facade_endpoint_over_socket_test"
 
-freePort(proc(p1: int) =
-  freePort(proc(p2: int) =
-    start(p1, p2)))
+  scratch = $makeTempDir(cstring"ct-facade-socket-")
+  # Before `setupServer`, because the endpoint reads it when it is constructed.
+  # `CODETRACER_HOME` outranks `XDG_CONFIG_HOME` for the settings root
+  # (`$CODETRACER_HOME/config/endpoint`, common/ct_home), and a lane exports one,
+  # so naming only XDG would not keep this suite's settings in `scratch`.
+  setEnv(cstring"CODETRACER_HOME", (scratch & "/ct-home").cstring)
+  setEnv(cstring"XDG_CONFIG_HOME", (scratch & "/config").cstring)
+  # The session secret a supervisor would give `ct host`: the server admits the
+  # client only with it (`index/host_session_guard.nim`). `setupServer` removes
+  # the variable it reads, so the client reads its own copy.
+  setEnv(cstring"CODETRACER_HOST_SESSION_SECRET", TestSessionSecret.cstring)
+  setEnv(cstring"CT_TEST_SESSION_SECRET", TestSessionSecret.cstring)
+
+  freePort(proc(p1: int) =
+    freePort(proc(p2: int) =
+      start(p1, p2)))
+else:
+  serveContentIdRequests()

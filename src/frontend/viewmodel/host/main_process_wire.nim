@@ -64,9 +64,14 @@ type
     state*: VcsBlobSource
     algorithm*: string
     scope*: seq[string]
+    tempRoot*: string
+      ## Where the recipe's temporary index directories go; empty for the
+      ## worker's `os.tmpdir()`. `ct host`'s endpoint passes its own.
 
 proc encodeRequest*(request: ContentIdRequest): JsonNode =
   result = %*{"op": request.op, "repository": request.repository}
+  if request.tempRoot.len > 0:
+    result["tempRoot"] = %request.tempRoot
   if request.op == OpContentId:
     result["state"] = encodeVcsBlobSource(request.state)
     result["algorithm"] = %request.algorithm
@@ -81,6 +86,7 @@ proc decodeRequest*(node: JsonNode): ContentIdRequest =
   ## worker answers that as a failure for the request's `id`.
   result.op = jstr(node, "op")
   result.repository = jstr(node, "repository")
+  result.tempRoot = jstr(node, "tempRoot")
   if result.op == OpContentId:
     result.state = decodeVcsBlobSource(jrequire(node, "state"))
     result.algorithm = jstr(node, "algorithm")

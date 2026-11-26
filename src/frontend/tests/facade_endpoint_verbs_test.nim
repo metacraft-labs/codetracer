@@ -44,6 +44,16 @@
 ## every verb with a fake and no network at all"), and removing the socket is
 ## what makes a per-verb assertion affordable.
 ##
+## THE CONTENT-ID WORKER runs this suite's own bundle. `vcs.contentId` and
+## `vcs.declaredScopes` are computed in the content-id service's worker
+## thread (`index/content_id_service.nim`), whose shipped script
+## (`content_id_worker.js`) does not sit beside a suite the lane compiled on
+## its own. Started as that worker, this bundle serves content-id requests
+## (`content_id_worker.serveContentIdRequests`, the shipped worker's whole
+## body) and runs none of the suite: every statement with an effect is
+## behind `isMainThread()`, because the worker shares this process's
+## environment.
+##
 ## EVERY ANSWER IS AWAITED. `handleFrame` returns a future: settled at once for
 ## a refusal and for a verb that runs no child process, and when the child has
 ## closed for `process.run` and every `vcs.*` verb, which run `git`
@@ -75,8 +85,10 @@ import ../viewmodel/platform/platform
 import ../viewmodel/platform/browser_facades
 import ../viewmodel/host/container_platform
 import ../index/facade_endpoint
+import ../index/content_id_service
+import ../index/content_id_worker
 
-const ExpectedAssertions = 1030
+const ExpectedAssertions = 1031
 var counted = 0
 var failedChecks = 0
 
@@ -146,6 +158,10 @@ template ck(cond: untyped) =
 proc nodeRequire(module: cstring): JsObject {.importjs: "require(#)".}
 proc setEnv(name, value: cstring) {.importjs: "process.env[#] = #".}
 
+proc unsetEnv(name: cstring) {.importjs: "delete process.env[#]".}
+proc isMainThread(): bool {.importjs: "require('worker_threads').isMainThread".}
+proc thisBundle(): cstring {.importjs: "(__filename)@".}
+
 let nodeFs = nodeRequire("fs")
 let nodeOs = nodeRequire("os")
 
@@ -155,20 +171,27 @@ let nodeOs = nodeRequire("os")
 # nothing to do with the endpoint, on one machine and not another. Pointing
 # both at a path that does not exist is git's own documented way to say "no
 # configuration but the repository's".
-let workspace = $(nodeFs.mkdtempSync(
-  cstring($(nodeOs.tmpdir().to(cstring)) & "/ct-facade-endpoint-")).to(cstring))
-setEnv(cstring"GIT_CONFIG_GLOBAL", cstring(workspace & "/absent-gitconfig"))
-setEnv(cstring"GIT_CONFIG_SYSTEM", cstring(workspace & "/absent-gitconfig"))
-setEnv(cstring"GIT_CONFIG_NOSYSTEM", cstring"1")
-proc unsetEnv(name: cstring) {.importjs: "delete process.env[#]".}
+let workspace =
+  if isMainThread():
+    $(nodeFs.mkdtempSync(
+      cstring($(nodeOs.tmpdir().to(cstring)) & "/ct-facade-endpoint-")).to(cstring))
+  else: ""
+if isMainThread():
+  setEnv(cstring"GIT_CONFIG_GLOBAL", cstring(workspace & "/absent-gitconfig"))
+  setEnv(cstring"GIT_CONFIG_SYSTEM", cstring(workspace & "/absent-gitconfig"))
+  setEnv(cstring"GIT_CONFIG_NOSYSTEM", cstring"1")
 # NOT INHERITED: GIT_OPTIONAL_LOCKS. A caller that exports
 # GIT_OPTIONAL_LOCKS=0 (agent shells and some CI runners do) turns off
 # the index refresh in EVERY git this process starts, the control's
 # plain `git status` included, so the control would fail and the reads
 # would pass for the caller's reason rather than their own. The suite
 # starts without it; the code under test must avoid the lock by itself.
-unsetEnv(cstring"GIT_OPTIONAL_LOCKS")
-setEnv(cstring"CT_FACADE_ENDPOINT_PROBE", cstring"present")
+if isMainThread():
+  unsetEnv(cstring"GIT_OPTIONAL_LOCKS")
+  setEnv(cstring"CT_FACADE_ENDPOINT_PROBE", cstring"present")
+  # Every endpoint below computes content ids in the process's worker, and
+  # that worker runs this bundle (header).
+  processWorkerScript = $thisBundle()
 
 let endpoint = newFacadeEndpoint(
   settingsRoot = workspace & "/settings",
@@ -950,6 +973,8 @@ proc main() {.async.} =
         "git -c user.name=x -c user.email=x@x.invalid commit -q -a -m w && " &
         "git rev-parse 'HEAD^{tree}' && cd .. && rm -rf w-clone"))
       ck w.id != s.id
+      # Computed in the content-id worker, not on this event loop.
+      ck processContentIdService().started == 1
       ck s.id != h.id
       ck (await repoSnapshot()) == before
 
@@ -1643,4 +1668,7 @@ proc reportRejection(reason: JsObject) {.importjs:
 proc failRun(reason: JsObject) = reportRejection(reason)
 proc catchRejection(future: Future[void]; onRejected: proc(reason: JsObject))
   {.importjs: "#.catch(#)".}
-catchRejection(main(), failRun)
+if isMainThread():
+  catchRejection(main(), failRun)
+else:
+  serveContentIdRequests()
