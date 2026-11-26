@@ -29,7 +29,7 @@
 ## subject keeps its value, and the test waits for the consequence, not for the
 ## clock.
 
-import std/[algorithm, json, net, os, posix, sequtils, strutils, tables, times, unittest]
+import std/[algorithm, json, net, os, posix, sequtils, strutils, tables, tempfiles, times, unittest]
 
 import isonim/core/[computation, owner, signals]
 
@@ -41,6 +41,7 @@ import backend/mock_backend
 import ../../../../common/plugin_model
 import plugin_host/[host, process_link, protocol, supervisor, surface_host]
 import plugin_process_fixture
+import ../../../host/plugin_processes
 
 const Ceiling = 120_000
 
@@ -1377,3 +1378,84 @@ suite "§11.7: an invoke's ack does not wait for the main thread":
     echo "MEASURE ack of an invoke behind a 1,500 ms handler, 10 keys: p50 ",
          sortedL[sortedL.len div 2], " ms, max ", sortedL[^1], " ms, load ", load
     check sortedL[^1] < 1500
+
+suite "the test-only thresholds (Extensibility-Model §11.7.7)":
+
+  # The session plugins every front-end opens (`openSessionPlugins`: the
+  # terminal's, the GPUI window's and the desktop's), with no package
+  # installed: the thresholds are read before any package is.
+  proc openWith(value: string; dir: string): SessionPlugins =
+    let prior = getEnv(TestThresholdsEnv, "")
+    let priorState = getEnv("XDG_STATE_HOME", "")
+    if value.len > 0: putEnv(TestThresholdsEnv, value)
+    else: delEnv(TestThresholdsEnv)
+    putEnv("XDG_STATE_HOME", dir / "state")
+    defer:
+      if prior.len > 0: putEnv(TestThresholdsEnv, prior)
+      else: delEnv(TestThresholdsEnv)
+      if priorState.len > 0: putEnv("XDG_STATE_HOME", priorState)
+      else: delEnv("XDG_STATE_HOME")
+    let mock = newMockBackendService(autoRespond = true)
+    var session: SessionViewModel
+    createRoot proc(dispose: proc()) =
+      session = createSessionVM(mock.toBackendService())
+    createDir(dir / "work")
+    openSessionPlugins(session, "s1", true, startDir = dir / "work",
+                       launcherRoot = dir / "launcher")
+
+  proc checkSpecDefaults(sup: Supervisor; relaxed: openArray[string] = []) =
+    # The spec's numbers, written out rather than read from the constants
+    # the supervisor starts from, so a changed constant fails here too.
+    let spec = {"helloDeadlineMs": 5_000, "inputDeadlineMs": 500,
+                "strikesToOpen": 3, "strikeWindowMs": 60_000,
+                "breakerBackoffMs": 30_000, "breakerBackoffCapMs": 30 * 60_000,
+                "openingsToLatch": 3, "halfOpenProbationMs": 60_000}
+    let actual = {"helloDeadlineMs": sup.helloDeadlineMs,
+                  "inputDeadlineMs": sup.inputDeadlineMs,
+                  "strikesToOpen": sup.strikesToOpen,
+                  "strikeWindowMs": sup.strikeWindowMs,
+                  "breakerBackoffMs": sup.breakerBackoffMs,
+                  "breakerBackoffCapMs": sup.breakerBackoffCapMs,
+                  "openingsToLatch": sup.openingsToLatch,
+                  "halfOpenProbationMs": sup.halfOpenProbationMs}.toTable
+    check actual.len == TestThresholdKeys.len
+    for (key, want) in spec:
+      if key notin relaxed:
+        checkpoint key
+        check actual[key] == want
+
+  test "unset, a session's plugins run at the spec's thresholds":
+    let dir = createTempDir("ct-thresholds-", "")
+    defer: removeDir(dir)
+    let p = openWith("", dir)
+    defer: p.close()
+    checkSpecDefaults(p.sup)
+    check not p.problems.anyIt(TestThresholdsEnv in it)
+    check not p.sup.events.anyIt(it.startsWith("test thresholds"))
+
+  test "set, it replaces exactly the thresholds it names, and says so in the log":
+    let dir = createTempDir("ct-thresholds-", "")
+    defer: removeDir(dir)
+    let p = openWith("""{"helloDeadlineMs": 30000, "inputDeadlineMs": 4000}""", dir)
+    defer: p.close()
+    check p.sup.helloDeadlineMs == 30_000
+    check p.sup.inputDeadlineMs == 4_000
+    checkSpecDefaults(p.sup, relaxed = ["helloDeadlineMs", "inputDeadlineMs"])
+    check p.sup.events.anyIt(it.startsWith("test thresholds") and "30000" in it)
+    check not p.problems.anyIt(TestThresholdsEnv in it)
+
+  test "a misspelt key, a non-positive value or a non-object changes nothing, and is reported":
+    for (value, said) in [
+        ("""{"helloDeadline": 30000}""", "unknown threshold 'helloDeadline'"),
+        ("""{"helloDeadlineMs": 30000, "inputDeadlineMs": 0}""",
+         "'inputDeadlineMs' is not a positive integer"),
+        ("""{"inputDeadlineMs": "4000"}""", "'inputDeadlineMs' is not a positive integer"),
+        ("[1]", "not a JSON object"),
+        ("{", "")]:
+      checkpoint value
+      let dir = createTempDir("ct-thresholds-", "")
+      let p = openWith(value, dir)
+      checkSpecDefaults(p.sup)
+      check p.problems.anyIt(it.startsWith(TestThresholdsEnv & " ignored: ") and said in it)
+      p.close()
+      removeDir(dir)

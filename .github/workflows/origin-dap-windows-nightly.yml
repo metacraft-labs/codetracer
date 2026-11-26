@@ -349,6 +349,9 @@ jobs:
         shell: bash
         env:
           RUSTC_WRAPPER: ${{ runner.temp }}\ct-diy\cargo\bin\sccache.exe
+          # The test step's store: when that step never started a server,
+          # this one starts it, and it must report the store that is saved.
+          SCCACHE_DIR: ${{ runner.temp }}\sccache
         run: |
           sccache=$(cygpath -u "$RUSTC_WRAPPER")
           if [ ! -f "$sccache" ]; then echo "no sccache at $RUSTC_WRAPPER"; exit 0; fi
