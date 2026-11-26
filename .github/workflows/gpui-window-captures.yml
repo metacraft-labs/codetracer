@@ -297,54 +297,23 @@ jobs:
           echo "$result" | tee -a "$GITHUB_OUTPUT"
           if [ "${{ matrix.shard }}" = 1 ]; then echo "tools=true"; else echo "tools=${result#needed=}"; fi | tee -a "$GITHUB_OUTPUT"
 
-      - name: Wait for the visual replay tools
-        # The tools job runs beside ct-build and is not a `needs` of this
-        # job, so that the shards that do not use its tools start when
-        # ct-build ends. This one waits for its artifact here, after its own
-        # provisioning, which normally outlasts the tools job; when the job
-        # failed, or the bound passes, it does not wait and the restore below
-        # is skipped, so ci/test/visual-replay-tools.sh builds the tools here.
-        if: ${{ !cancelled() && steps.ct.outcome == 'success' && steps.player.outputs.tools == 'true' }}
-        id: vr_wait
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: nix develop .#ci --command bash ci/wait-for-run-artifact.sh visual-replay-tools "visual-replay-tools /" 3600
-
-      - name: Restore the visual replay tools from the visual-replay-tools job
+      - name: Provide the visual replay tools
         # ct-native-replay, ct_gfx_player and ct-mcr, built once per run in
         # parallel with ct-build (visual-replay-tools.yml), rather than in this
         # job (about 22 minutes for ct-mcr alone in GPUI shard 1 of run
-        # 44269676398). Best effort: when the artifact is missing or short,
-        # ci/test/visual-replay-tools.sh builds them here as before.
-        if: ${{ !cancelled() && steps.ct.outcome == 'success' && steps.player.outputs.tools == 'true' && steps.vr_wait.outcome == 'success' }}
-        id: vr_tools
-        continue-on-error: true
-        uses: actions/download-artifact@v4
+        # 44269676398): the action waits for that job's artifact, which is
+        # not a `needs` of this job so that the shards without a visual
+        # scenario start when ct-build ends, restores it, and exports the
+        # variables the stage reads (CODETRACER_CT_GFX_PLAYER_CMD and the test
+        # licence). When the artifact is missing or short it builds the tools
+        # here. Shard 1 takes them for its window captures as well (and the
+        # featureless shim the artifact carries), so the gate is the helper's
+        # `tools`, which includes every shard where
+        # steps.player.outputs.needed == 'true'.
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && (steps.player.outputs.tools == 'true' || steps.player.outputs.needed == 'true') }}
+        uses: ./.github/actions/provide-visual-replay-tools
         with:
-          name: visual-replay-tools
-          path: ${{ runner.temp }}/visual-replay-tools
-
-      - name: Unpack the visual replay tools
-        if: ${{ !cancelled() && steps.ct.outcome == 'success' && steps.player.outputs.tools == 'true' && steps.vr_tools.outcome == 'success' }}
-        continue-on-error: true
-        run: |
-          bash ci/unpack-ct-build-products.sh "${RUNNER_TEMP}/visual-replay-tools" visual-replay-tools.tar.gz
-          echo "CT_VISUAL_REPLAY_TOOLS_PREBUILT=1" >>"$GITHUB_ENV"
-          # plat45's featureless shim, when the tools job packed it.
-          if [ -e ../isonim-gpui/rust/target/debug/libgpui_nim_shim.so ]; then
-            echo "CT_GPUI_FEATURELESS_SHIM_PREBUILT=1" >>"$GITHUB_ENV"
-          fi
-
-      - name: Build the visual replay player for this shard's visual-recording scenarios
-        # The stage reads CODETRACER_CT_GFX_PLAYER_CMD and the test licence
-        # helper from this env file; with the tools restored above it reuses
-        # them, else it builds them.
-        if: ${{ !cancelled() && steps.ct.outcome == 'success' && steps.player.outputs.needed == 'true' }}
-        run: |
-          nix develop .#devShells.x86_64-linux.default --command bash ci/test/visual-replay-tools.sh "$RUNNER_TEMP/visual-replay.env"
-          # shellcheck disable=SC1091
-          ( . "$RUNNER_TEMP/visual-replay.env"; env | grep -E '^(CODETRACER_|CT_)' ) >> "$GITHUB_ENV"
+          wait-for-artifact: 'true'
 
       - name: Build the windowed GPUI front-end the scenario lane opens
         # Linked here, against the restored shim, because the front-end pins
