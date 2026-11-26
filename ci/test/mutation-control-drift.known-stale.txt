@@ -505,7 +505,7 @@ src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/fro
 # 2026-11-21, the browser's two keyboard oracles: test_cross_renderer_panes.nim
 # exports the four keyboard panes for the Chromium suite, and the renderer-chromium
 # lane lists that suite. Each harness below owes a re-grade for those bytes.
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/test-lane-files.sh	b463de41f09e76644ec644ddfe51bd166d7e2c033699c98ecca5083540215051	a7a0360b1bf2ceb0286af1ecfb5d43f5f40d3bc5b306fd21b7b8667af77edf92
+src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/test-lane-files.sh	b463de41f09e76644ec644ddfe51bd166d7e2c033699c98ecca5083540215051	404e881a7c8307ee667db825de21b8f924d5bf95bc94ea036d275cd7b19c1998
 # 2026-11-21: a docked plugin pane previews on hover (auto_hide_hover, runtime); these harnesses digest those subjects and owe a re-grade.
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/headless_app/auto_hide_hover.nim	c2395cd53d7292e511d36c714f483d8f6ac8d8bf1f35c2c78237bebd54c73c62	0b4958cca008fcb95abaa5f2a2157cb461ed0b361fe1e0b702efc004cbbcf46f
 
@@ -855,7 +855,7 @@ src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/plugin_
 # does not run (test-lane-files.sh); these harnesses digest those subjects and
 # owe a re-grade.
 src/frontend/gpui/tests/plat20-mutation-control.sha256	src/frontend/gpui/window_geometry.nim	8595f1669201ae3addab9f7134adf5c0ce306855acc4726ccfe1d41fb0e79ed7	fade42f842eab416a16e489917dd21c36d0577f86ed04910d418f212d1b9f4c2
-src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	ci/lib/test-lane-files.sh	8723f13449df6da6d5acdf55932cab0382378d8cb62d41cd89503d948c776663	a7a0360b1bf2ceb0286af1ecfb5d43f5f40d3bc5b306fd21b7b8667af77edf92
+src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	ci/lib/test-lane-files.sh	8723f13449df6da6d5acdf55932cab0382378d8cb62d41cd89503d948c776663	404e881a7c8307ee667db825de21b8f924d5bf95bc94ea036d275cd7b19c1998
 ci/test/plat70-find-decisions-mutation-control.sha256	src/frontend/gpui/main.nim	74d1b4cb7c6794d7176211fc032aec567fa8d23bc4cc2a44907913bc6f089cbc	e7008c3a965527413534da1ebed1cc29dda1066d519194c91ea3edd04e6788cd
 ci/test/plat70c-find-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	e7008c3a965527413534da1ebed1cc29dda1066d519194c91ea3edd04e6788cd
 ci/test/plat70i-fit-mutation-control.sha256	src/frontend/gpui/main.nim	220d8170c7218709d5ae77691e7cfbfce2954ae359429ba9554c046b0b637053	e7008c3a965527413534da1ebed1cc29dda1066d519194c91ea3edd04e6788cd
@@ -923,7 +923,7 @@ src/frontend/viewmodel/tests/unit/plat36-vim-import-mutation-control.sha256	src/
 src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/frontend/viewmodel/editing_core.nim	523e410249726163c1fcb2f1117c70346130e56c3b84fd3bb3e5105d15a9fc86	05304883fb5e13c5090ddfc902dd8c3dd79841c109816a693bf20cb57274bfc6
 
 src/frontend/tui/tests/plat81-plugin-panes-mutation-control.sha256	src/frontend/tui/tests/real_terminal/test_plat81_plugin_panes_pty.nim	0822d4743a479f2dd3c1aeb07f5c3d69c5d48a72dd748c40eb1801ed8b91c5f9	b31b0d2f24d2c62d476e71ae2ceae23a84ee91dde66dfa10d92c8239268f3188
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/tui/tests/real_terminal/test_plat81_plugin_processes_pty.nim	c749e75d8ec3e5c6204ea252f66eb94ea466498c2e48449cf6fba9818c95522e	7613ffb2adf98ecac53ed5cbd9bb77570b56f7749d24122131ceb2618a7cdd0b
+src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/tui/tests/real_terminal/test_plat81_plugin_processes_pty.nim	c749e75d8ec3e5c6204ea252f66eb94ea466498c2e48449cf6fba9818c95522e	923b6cde87ca811dcc0db964289c00bfb06c7594dcf32de8f7350f8ee4830873
 src/frontend/tui/tests/plat83-ct-lens-mutation-control.sha256	src/frontend/tui/tests/real_terminal/test_ct_lens_plugins_pty.nim	93aa03391dcd9a7aaf2bdbea8659e867ee96f93975eb2e619a440f5fc36da382	524683c3874e6bbfc91c008ef072303e7b85de043430c3af1f26ca9f422b32db
 
 # 2026-11-25, the plugin wire appends frames, frame queues and pipe chunks with
@@ -933,8 +933,8 @@ src/frontend/tui/tests/plat83-ct-lens-mutation-control.sha256	src/frontend/tui/t
 # the harnesses that digest them owe a re-grade of the arms that sit in them.
 src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/viewmodel/plugin_host/process_link.nim	67a0095978446fcf0f5c4b2ab6e769482b685d4041d552431b9bad3e9362de98	e1bea68ce26419dac6a0b580c0585dad027d0b1be26cde03e8a9b2f083135e75
 src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/process_link.nim	67a0095978446fcf0f5c4b2ab6e769482b685d4041d552431b9bad3e9362de98	e1bea68ce26419dac6a0b580c0585dad027d0b1be26cde03e8a9b2f083135e75
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/plugin_io.nim	d5de198bc351a80da5aa4c73b99ed7c6fd48d90d8a9a55ad3a59df7e1e664b26	b3e909347e32bd99c041e68ab80f841755487199c62388c1ffc61ae3b73fde98
-src/frontend/viewmodel/tests/unit/plat8-io-mutation-control.sha256	src/frontend/viewmodel/plugin_host/plugin_io.nim	d5de198bc351a80da5aa4c73b99ed7c6fd48d90d8a9a55ad3a59df7e1e664b26	b3e909347e32bd99c041e68ab80f841755487199c62388c1ffc61ae3b73fde98
+src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/plugin_io.nim	d5de198bc351a80da5aa4c73b99ed7c6fd48d90d8a9a55ad3a59df7e1e664b26	932254616a1caa7a41c1c83c8d30a78b8588bb5933ca6fde9f8220552b4d2931
+src/frontend/viewmodel/tests/unit/plat8-io-mutation-control.sha256	src/frontend/viewmodel/plugin_host/plugin_io.nim	d5de198bc351a80da5aa4c73b99ed7c6fd48d90d8a9a55ad3a59df7e1e664b26	932254616a1caa7a41c1c83c8d30a78b8588bb5933ca6fde9f8220552b4d2931
 
 # 2026-11-25: the pointer harness was re-graded at dcb44215427, on the pointer-stamp fix
 # (every arm as required, every control green, N1 the declared equivalent mutant). The
@@ -965,7 +965,6 @@ src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	src/f
 src/frontend/viewmodel/tests/unit/plat36-vim-import-mutation-control.sha256	src/frontend/tui/app/runtime.nim	a8f6c18817375c1435f4e1aabef5026a12730813e635a3ee159f497cd5a30c5d	77b210ac200087f47ed1abe9df9ffa818bc1599029b0cbdd409b177ce170c2b6
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/viewmodel/views/isonim_command_palette_view.nim	ace05a1c226ce9eb49b26c0d812420b13d7be09ea08c8ad361666127f14661ed	8b38b5318b1edebe3eabf5aa86aa4dc9a1e172383b91df04368434cf9fa93cb6
 src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/viewmodel/views/isonim_agent_activity_view.nim	7ec8761f6a0ce7efd11398c30cd70dffc44c62bf3309573f21a6622fb05cf619	4805976531f6d5bd354440fc459b66ecbd7d62e31010e5ce617a7a5c807eb344
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	8bda0738c9719a3f394aa9ee384bc2c920800d78e38e9b540d58ff8a018e0cc0	45861601d924d06eb06ccff5863428caad370c895a21b723c835fa09b7a568ad
 src/frontend/tui/tests/plat52-terminal-mutation-control.sha256	src/frontend/viewmodel/views/isonim_terminal_output_view.nim	a0cefbc87feb909e990970968e69f06cbdcad37ceb53420628727d68e6dc9158	6000d4614d77638810efaff5a860360c0acda83d026e05fbf16acfe0e717db24
 src/frontend/tui/tests/plat57-find-in-files-mutation-control.sha256	src/frontend/viewmodel/views/isonim_search_results_view.nim	f46ce588770cdc9b283d2d8cd33333962f15391bc9343b3207b3f55f243c531d	f4a1895deb9ba53fb412013c335fd2559e2239a5e56f7a6c34728c5ff41bd6a1
 src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/viewmodel/views/isonim_low_level_code_view.nim	efdc4537b69d3f243da39f93f2ac218aab72ec4af8e61bd94990fad61fe178b2	79db397eca5b2087f2519af99bc1003ced3222fa5e3de256f207d0afe63704bc
@@ -978,3 +977,11 @@ src/frontend/viewmodel/tests/unit/plat18-marshalling-mutation-control.sha256	src
 # 5bfdeb5ae64 moved the collaboration lanes into viewmodel-tests.yml; the examples
 # suite now reads codetracer.yml with the workflows it calls, so plat33-collab owes a re-grade.
 src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_editor_collab_examples.nim	9d5c50c7146301ed8a5552b668b51672db8f91af7473503a90334ad987228cbb	5ed19dba8795a97e566e7aeb6ac94d3d237a6d2f2eb22709eb852e8bcf2912b5
+src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	8bda0738c9719a3f394aa9ee384bc2c920800d78e38e9b540d58ff8a018e0cc0	e44604281deb6d86c792a7105b5daf910c31e43f438fe2b78ca7c112e88c8d7b
+src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/styles/components/button.styl	daf83b8c3ee1848282d0edf04ac63a2b3813fb69f642154ad83248320f8b65aa	801731f5a002841ed30761c4409e972bf365dde4603ae29c5b974479dd8ce924
+
+# Re-grades owed for subjects moved by 0a4f1da4d53 without ledger lines;
+# the harnesses that digest them owe a re-grade of the arms that sit in them.
+src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	ci/lib/test-lane-files.sh	a7a0360b1bf2ceb0286af1ecfb5d43f5f40d3bc5b306fd21b7b8667af77edf92	404e881a7c8307ee667db825de21b8f924d5bf95bc94ea036d275cd7b19c1998
+
+src/frontend/viewmodel/tests/unit/plat9-surface-mutation-control.sha256	src/frontend/viewmodel/plugin_host/surface_host.nim	3fddebc1d5a1d4df6d8846db8374b95600bb0b09dd3d28b102283f41a0d3bbec	1f7e9eb0d6529b821484d8abcc91f100ce56471507377a2fc92004cc46172bc1

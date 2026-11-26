@@ -1075,6 +1075,7 @@ foreach ($guard in (Assert-NonInteractiveDebugger)) {
 . "$windowsDir/ensure-rust.ps1"
 . "$windowsDir/ensure-just.ps1"
 . "$windowsDir/ensure-nextest.ps1"
+. "$windowsDir/ensure-sccache.ps1"
 . "$windowsDir/ensure-node.ps1"
 . "$windowsDir/ensure-uv.ps1"
 . "$windowsDir/ensure-nim.ps1"
@@ -1227,6 +1228,7 @@ if ($doSync) {
   # Phase 3: Depends on Rust/cargo
   Invoke-BootstrapStep -Step "JUST"    -Relocatability relocatable -Root $installRoot -Action { Ensure-Just    -Root $installRoot -Toolchain $toolchain }
   Invoke-BootstrapStep -Step "NEXTEST" -Relocatability relocatable -Root $installRoot -Action { Ensure-Nextest -Root $installRoot -Toolchain $toolchain }
+  Invoke-BootstrapStep -Step "SCCACHE" -Relocatability relocatable -Root $installRoot -Action { Ensure-Sccache -Root $installRoot -Toolchain $toolchain }
 
   # Phase 4: May need MSYS2 for source builds
   Invoke-BootstrapStep -Step "NIM"   -Relocatability relocatable -Root $installRoot -Action { Ensure-Nim   -Root $installRoot -Arch $arch -Toolchain $toolchain }

@@ -46,7 +46,7 @@ def job_blocks(lines):
 
 
 def called_job(path, job):
-    lines = path.read_text().split("\n")
+    lines = path.read_text(encoding="utf-8").split("\n")
     blocks = job_blocks(lines)
     match = [b for b in blocks if b[0] == job] or (blocks if len(blocks) == 1 else [])
     if not match:
@@ -57,7 +57,7 @@ def called_job(path, job):
 
 def inline(path):
     path = Path(path)
-    lines = path.read_text().split("\n")
+    lines = path.read_text(encoding="utf-8").split("\n")
     out = list(lines)
     for job, first, end in reversed(job_blocks(lines)):
         body = lines[first + 1:end]
@@ -82,4 +82,7 @@ def inline(path):
 
 if __name__ == "__main__":
     default = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "codetracer.yml"
-    sys.stdout.write(inline(sys.argv[1] if len(sys.argv) > 1 else default))
+    # UTF-8 both ways: the workflows are UTF-8, and Windows' Python would
+    # otherwise read them, and write its stdout, in the ANSI code page
+    # ("'charmap' codec can't decode byte 0x8f", run 45709793170).
+    sys.stdout.buffer.write(inline(sys.argv[1] if len(sys.argv) > 1 else default).encode("utf-8"))

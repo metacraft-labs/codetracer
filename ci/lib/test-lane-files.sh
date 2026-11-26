@@ -364,6 +364,7 @@ ct-host-admission
 ct-host-manifest
 screen-oracle
 scenario-stages
+scenario-bindings
 EOF
 }
 
@@ -418,6 +419,7 @@ test_lane_description() {
 	ct-host-admission) echo 'ct host admission, session isolation and lifetime, end to end: the real ct host refuses a client without its session secret or from a foreign origin, gives every client its own replay and session, and leaves no process behind when it is signalled or killed; and it refuses a trace container it cannot read with one error line naming the reason' ;;
 	ct-host-manifest) echo 'ct host --manifest slice selection, end to end: the real ct host opens the mcr_slices slice the replay start (or CODETRACER_START_SLICE_KEY) names, refuses one it does not list' ;;
 	scenario-stages) echo "the scenario pack's stage tool: what a stage decides without a product build (which fixture-cache entries are whole)" ;;
+	scenario-bindings) echo "the scenario pack's GPUI binding: what it reads off committed frames of the window, through the real OCR engine (a code-face digit by its outlines)" ;;
 	screen-oracle) echo "PLAT-39 unprivileged screen oracle: the committed record's gate, and the live pixel suite over the six Electron captures (just plat35-capture-electron) and the two GPUI window frames (the plat37-capture recipe, a compositor lane no workflow runs)" ;;
 	*)
 		echo "unknown lane '$1'" >&2
@@ -535,6 +537,12 @@ test_lane_recipe() {
 		# tool's own modules beside it, which is also how every scenario lane
 		# runs them first; the runner has no such path.
 		echo "scenario-stage-test"
+		;;
+	scenario-bindings)
+		# `ci/test/scenarios.sh gui-binding-test` compiles each against the
+		# GPUI binding's own modules and GuiAssert / DemoVideoScript-GuiAssert
+		# beside them, and they need `tesseract`; the runner has no such path.
+		echo "scenario-gui-binding-test"
 		;;
 	*) ;;
 	esac
@@ -2567,6 +2575,14 @@ test_lane_files() {
 		# lint-nim's coverage check in run 44612896066; discovery over the
 		# directory keeps the next one in this lane.
 		_tlf_glob src/tests/scenarios/stages '*_test.nim'
+		;;
+
+	scenario-bindings)
+		# The GPUI binding's own suites, over committed frames of the window.
+		# The first, `code_digits_test.nim` (fb2e27b09ad), sat in NO lane and
+		# failed test-lane-coverage; discovery over the directory keeps the
+		# next one in this lane.
+		_tlf_glob src/tests/scenarios/bindings/guiassert '*_test.nim'
 		;;
 
 	ui-selection)

@@ -66,6 +66,24 @@
  * removes the other, so both are routinely present and one is routinely old. Ordering them and taking the first is a preference
  * for whichever happens to be staler. Candidates are still passed in preference
  * order, and `>` rather than `>=` keeps the earlier one winning a tie.
+
+ *
+ * WHEN THE MTIME MEANS NOTHING: A STAMP OF THE SOURCES
+ * ----------------------------------------------------
+ * A stylesheet in the Nix store carries the store's normalised mtime
+ * (1970-01-01T00:00:01Z), so against a checked-out `.styl` it is always
+ * "older". CI's desktop job tests the nix-built app (`result/`), and every
+ * contrast spec there refused it as STALE (codetracer run 45618872592,
+ * a12fb869c0f), whatever it had been built from. For such a stylesheet the
+ * question is asked of content instead. The nix build writes
+ * `styl-sources.sha256` beside the CSS: the SHA-256 of `sha256sum` over every
+ * `.styl` under `src/frontend/styles`, sorted by path
+ * (`nix/packages/default.nix`, beside the stylus calls). The resolver
+ * recomputes that digest over the checkout and accepts the stylesheet only
+ * if the two agree, so a nix build of other sources is still refused. A
+ * stylesheet whose mtime means nothing and that carries no stamp is refused
+ * too: nothing can say whether it is current. Any build that writes the
+ * stamp is judged by it rather than by mtime.
  */
 
 const fs = require("fs");
@@ -127,6 +145,51 @@ function newestStylSource(repoRoot) {
   return newest;
 }
 
+/** The stamp the nix build writes beside the stylesheets it compiles. */
+const STAMP_NAME = "styl-sources.sha256";
+
+/**
+ * The digest the nix build records in `styl-sources.sha256`, computed over the
+ * checkout: `(cd src/frontend/styles && find . -type f -name '*.styl' |
+ * LC_ALL=C sort | xargs sha256sum) | sha256sum`. Paths keep find's `./`
+ * prefix and sort bytewise, and each line is `sha256sum`'s `<hex>  <path>`.
+ */
+function stylSourcesDigest(repoRoot) {
+  const crypto = require("crypto");
+  const root = path.join(repoRoot, "src", "frontend", "styles");
+  const files = [];
+  const walk = (dir, rel) => {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      const relPath = rel + "/" + entry.name;
+      if (entry.isDirectory()) walk(full, relPath);
+      else if (entry.isFile() && entry.name.endsWith(".styl")) files.push([relPath, full]);
+    }
+  };
+  walk(root, ".");
+  files.sort((a, b) => Buffer.compare(Buffer.from(a[0]), Buffer.from(b[0])));
+  const listing = files
+    .map(([rel, full]) => crypto.createHash("sha256").update(fs.readFileSync(full)).digest("hex") + "  " + rel + "\n")
+    .join("");
+  return crypto.createHash("sha256").update(listing).digest("hex");
+}
+
+/** True when a file's mtime says nothing about when it was built: the store's. */
+function mtimeIsMeaningless(file, mtimeMs) {
+  if (mtimeMs <= 1000) return true;
+  try {
+    return fs.realpathSync(file).startsWith("/nix/store/");
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Resolve a built theme stylesheet, or throw saying why.
  *
@@ -163,6 +226,35 @@ function resolveBuiltThemeCss(repoRoot, theme) {
     );
   }
 
+  const stampFile = path.join(path.dirname(best.file), STAMP_NAME);
+  if (fs.existsSync(stampFile)) {
+    const recorded = fs.readFileSync(stampFile, "utf8").trim();
+    const current = stylSourcesDigest(repoRoot);
+    if (recorded !== current) {
+      throw new Error(
+        `built theme stylesheet \`${theme}\` is STALE — it was compiled from other ` +
+          `.styl sources than this checkout's src/frontend/styles, so this spec ` +
+          `would measure a different build and report green on a change that ` +
+          `never reached a browser.\n` +
+          `  stylesheet: ${best.file}\n` +
+          `  its stamp:  ${recorded} (${stampFile})\n` +
+          `  checkout:   ${current}\n` +
+          `Rebuild it (\`nix build\`, or \`just build-once\` for the in-tree build).`,
+      );
+    }
+    return best.file;
+  }
+  if (mtimeIsMeaningless(best.file, best.mtimeMs)) {
+    throw new Error(
+      `built theme stylesheet \`${theme}\` cannot be judged current — its mtime ` +
+        `is the Nix store's (${new Date(best.mtimeMs).toISOString()}), which says ` +
+        `nothing about when it was built, and it carries no ${STAMP_NAME} ` +
+        `stamp of the sources it was compiled from.\n` +
+        `  stylesheet: ${best.file}\n` +
+        `Rebuild it with a build that writes the stamp (\`nix build\`).`,
+    );
+  }
+
   const newestSource = newestStylSource(repoRoot);
   if (newestSource !== null && newestSource.mtimeMs > best.mtimeMs) {
     throw new Error(
@@ -181,4 +273,4 @@ function resolveBuiltThemeCss(repoRoot, theme) {
   return best.file;
 }
 
-module.exports = { candidateStyleDirs, resolveBuiltThemeCss };
+module.exports = { candidateStyleDirs, resolveBuiltThemeCss, stylSourcesDigest };
