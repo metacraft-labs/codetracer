@@ -1,0 +1,46 @@
+name: GPUI shell lane (agents)
+# The GPUI shell lane (gpui-shell.yml) on pushes to `agents` that touch the
+# GPUI front-end, where codetracer.yml does not run. It brings its own
+# ct-build and visual-replay-tools jobs, which are what codetracer.yml gives
+# the lane on pull requests; the `ci/gpui-shell` branch is for proving changes
+# to the lane's job.
+
+on:
+  push:
+    branches: [agents, 'ci/gpui-shell']
+    paths:
+      - 'src/frontend/gpui/**'
+      - 'src/frontend/viewmodel/**'
+      - 'ci/lib/test-lane-files.sh'
+      - 'ci/lib/run-nim-test-lane.sh'
+      - 'flake.lock'
+      - '.github/workflows/gpui-shell.yml'
+      - '.github/workflows/gpui-shell-agents.yml'
+  workflow_dispatch:
+
+# On `agents`, a newer push must not cancel the running run (see zgui.yml):
+# GitHub keeps the running run plus one waiting run, and each newer push
+# replaces the waiting one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_name != 'agents' }}
+
+permissions:
+  contents: read
+  id-token: write
+  actions: read
+
+jobs:
+  ct-build:
+    uses: ./.github/workflows/ct-build.yml
+    secrets: inherit
+
+  visual-replay-tools:
+    uses: ./.github/workflows/visual-replay-tools.yml
+    secrets: inherit
+
+  gpui-shell:
+    needs: [ct-build]
+    if: ${{ !cancelled() && needs.ct-build.result == 'success' }}
+    uses: ./.github/workflows/gpui-shell.yml
+    secrets: inherit
