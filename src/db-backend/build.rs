@@ -275,14 +275,15 @@ fn build_windows(private_build: &PrivateEmulatorBuild) {
     let native_c_dir = private_build.native_c_dir.clone();
 
     track_nim_inputs(emulator_dir);
-    println!("cargo:rerun-if-changed={}", native_c_dir.display());
 
     // Windows: if Nim-generated C files are stale or missing, invoke the
     // recorder's build script.  `regenerate_c` has a Windows branch that
     // runs bash directly (no direnv).
-    if needs_regeneration(emulator_dir, &native_c_dir) {
+    let regenerated = needs_regeneration(emulator_dir, &native_c_dir);
+    if regenerated {
         regenerate_c(emulator_dir, &private_build.native_build_script, &native_c_dir);
     }
+    track_generated_c(&native_c_dir, regenerated);
 
     let nim_lib = read_nim_lib_path(&native_c_dir);
 
@@ -587,11 +588,12 @@ fn build_native(private_build: &PrivateEmulatorBuild, target_arch: &str) {
     let native_c_dir = private_build.native_c_dir.clone();
 
     track_nim_inputs(emulator_dir);
-    println!("cargo:rerun-if-changed={}", native_c_dir.display());
 
-    if needs_regeneration(emulator_dir, &native_c_dir) {
+    let regenerated = needs_regeneration(emulator_dir, &native_c_dir);
+    if regenerated {
         regenerate_c(emulator_dir, &private_build.native_build_script, &native_c_dir);
     }
+    track_generated_c(&native_c_dir, regenerated);
 
     let nim_lib = read_nim_lib_path(&native_c_dir);
 
@@ -826,11 +828,12 @@ fn build_wasm32(private_build: &PrivateEmulatorBuild) {
 
     track_nim_inputs(emulator_dir);
     println!("cargo:rerun-if-changed={}", private_build.wasm_build_script.display());
-    println!("cargo:rerun-if-changed={}", wasm_c_dir.display());
 
-    if needs_regeneration(emulator_dir, &wasm_c_dir) {
+    let regenerated = needs_regeneration(emulator_dir, &wasm_c_dir);
+    if regenerated {
         regenerate_c(emulator_dir, &private_build.wasm_build_script, &wasm_c_dir);
     }
+    track_generated_c(&wasm_c_dir, regenerated);
 
     let nim_lib = read_nim_lib_path(&wasm_c_dir);
 
@@ -1408,6 +1411,25 @@ fn track_nim_inputs(emulator_dir: &Path) {
         "cargo:rerun-if-changed={}",
         emulator_dir.join("build_native_api.sh").display()
     );
+}
+
+/// Watch the generated C directory, unless this run generated it.
+///
+/// Cargo marks a build script stale when a path it named is newer than the
+/// script's last start, so naming a directory the script itself has just
+/// written makes the NEXT cargo invocation rerun it, relink the emulator and
+/// recompile the crate, although nothing changed. In a fresh checkout every
+/// first build generates the C, so the second `cargo test` of a CI job paid
+/// that rebuild in full: 447 s of 453 locally, about 8 minutes on Windows
+/// (run 45736854050). After a generating run the C is an output of inputs
+/// `track_nim_inputs` already names (the Nim sources and the generator
+/// script), and those are what decide when it is stale; a run that found it
+/// up to date watches it as before, so an edit to the C by hand still
+/// reruns the script.
+fn track_generated_c(c_dir: &Path, regenerated: bool) {
+    if !regenerated {
+        println!("cargo:rerun-if-changed={}", c_dir.display());
+    }
 }
 
 /// Returns true iff the cached C is missing or older than any tracked
