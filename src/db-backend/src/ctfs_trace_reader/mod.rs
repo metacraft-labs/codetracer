@@ -264,6 +264,16 @@ pub struct CTFSTraceReader {
     /// whole-table build — which is already on-demand — is affected; opening the
     /// trace and point lookups stay lazy/bounded.
     step_build_strategy: step_value_stream_source::StepBuildStrategy,
+    /// The resident per-step suffix-maximum line index `load_location` asks
+    /// for a function's last line when the M0/3 indices cannot answer (see
+    /// [`crate::trace_reader::CallRunLineIndex`]). Built on first demand, once
+    /// (8 bytes per step). Never built on a reader that does not need it: one
+    /// carrying `step-map.ns` answers from that.
+    ///
+    /// Reset by [`refresh`](Self::refresh), whose appended steps it would not
+    /// describe; a query also refuses an index whose length is not the step
+    /// count.
+    call_run_line_index: std::sync::OnceLock<crate::trace_reader::CallRunLineIndex>,
     /// M26 — the prepopulated `step-map.ns` breakpoint index, when the `.ct`
     /// carries one. `Some` ONLY when [`open`](Self::open) found a parseable
     /// `step-map.ns` (container-internal file or sidecar). When present, the
@@ -459,6 +469,52 @@ impl CTFSTraceReader {
         self.lazy_steps_full.as_ref().map(|c| c.get().is_some())
     }
 
+    /// Build the [`crate::trace_reader::CallRunLineIndex`] over every step,
+    /// reading each once.
+    ///
+    /// On the lazy path the steps are replayed through the SAME engine the
+    /// per-slot fill uses, into a sink that keeps only each step's call key and
+    /// line: the slots are not filled, so this does not materialize the step
+    /// table (it inflates each `steps.dat` chunk once). A step id the engine
+    /// produces no step for stays a hole, exactly as `step()` answers `None`
+    /// for it. On the eager path it reads `db.steps`.
+    fn build_call_run_line_index(&self) -> crate::trace_reader::CallRunLineIndex {
+        use crate::trace_reader::CallRunLineIndex;
+        let Some(lazy) = self.lazy_steps.as_ref() else {
+            let len = self.db.steps.len();
+            return CallRunLineIndex::build(
+                len,
+                (0..len).map(|i| self.db.steps.get(StepId(i as i64)).map(|s| (s.call_key, s.line.0))),
+            );
+        };
+
+        struct LineAndKeySink<'a> {
+            lines: &'a mut [i64],
+            keys: &'a mut [CallKey],
+        }
+        impl step_value_stream_source::StepReplaySink for LineAndKeySink<'_> {
+            fn accept_step(&mut self, index: usize, step: &DbStep) {
+                if let (Some(line), Some(key)) = (self.lines.get_mut(index), self.keys.get_mut(index)) {
+                    *line = step.line.0;
+                    *key = step.call_key;
+                }
+            }
+        }
+
+        let len = lazy.len();
+        let mut lines = vec![CallRunLineIndex::HOLE; len];
+        let mut keys = vec![codetracer_trace_types::NO_KEY; len];
+        {
+            let mut sink = LineAndKeySink {
+                lines: &mut lines,
+                keys: &mut keys,
+            };
+            lazy.replay_range(0..len, &mut [&mut sink]);
+        }
+        crate::trace_reader::count_function_last_step_reads(len as u64);
+        CallRunLineIndex::from_lines(lines, &keys)
+    }
+
     /// M26 — `true` when the reader attached a prepopulated `step-map.ns`
     /// breakpoint index at open. Lets a test prove that (a) a table-bearing
     /// bundle routes breakpoint resolution through the index and (b) a
@@ -509,6 +565,8 @@ impl CTFSTraceReader {
             self.refresh_follow_calls_from_nim()?;
         }
         self.refresh_lazy_follow_caches();
+        // The steps may have grown; the index describes the old ones.
+        self.call_run_line_index = std::sync::OnceLock::new();
         Ok(())
     }
 
@@ -700,6 +758,7 @@ impl CTFSTraceReader {
             lazy_steps: None,
             lazy_steps_full: None,
             step_build_strategy: step_value_stream_source::StepBuildStrategy::default(),
+            call_run_line_index: std::sync::OnceLock::new(),
             // No `.ct` path here (events come from an in-memory stream), so no
             // `step-map.ns` to attach. `open()` attaches it on the path-bearing
             // constructors.
@@ -1580,6 +1639,7 @@ impl CTFSTraceReader {
                 // point is that it may be running there; the strategy's own
                 // wasm32 arm resolves to a single-threaded (sequential) build.
                 step_build_strategy: step_value_stream_source::StepBuildStrategy::default(),
+                call_run_line_index: std::sync::OnceLock::new(),
                 step_map: None,
                 linehits_db: None,
                 follow_ctfs: None,
@@ -1920,6 +1980,7 @@ impl CTFSTraceReader {
             lazy_steps: None,
             lazy_steps_full: None,
             step_build_strategy: step_value_stream_source::StepBuildStrategy::default(),
+            call_run_line_index: std::sync::OnceLock::new(),
             // BEAM sidecar bundles do not carry a `step-map.ns`; `open()` would
             // attach one if present, but these traces are fully materialized so
             // the whole-table path serves breakpoints.
@@ -2894,6 +2955,7 @@ impl CTFSTraceReader {
             // active strategy for the (filesystem-backed) production split bundle
             // this path opens.
             step_build_strategy: step_value_stream_source::StepBuildStrategy::default(),
+            call_run_line_index: std::sync::OnceLock::new(),
             // M26 — the prepopulated `step-map.ns` (if any) is attached centrally
             // by `open()`, which has the `.ct` path. Left `None` here so a
             // path-less reconstruction of this struct stays on the whole-table
@@ -2983,6 +3045,7 @@ impl CTFSTraceReader {
             lazy_steps: None,
             lazy_steps_full: None,
             step_build_strategy: step_value_stream_source::StepBuildStrategy::default(),
+            call_run_line_index: std::sync::OnceLock::new(),
             // M26 — attached centrally by `open()` (which has the `.ct` path).
             step_map: None,
             linehits_db: None,
@@ -3452,6 +3515,20 @@ impl TraceReader for CTFSTraceReader {
             return None;
         }
         Some(step_map.max_line_in_step_range(start, end) as i64)
+    }
+
+    fn max_line_over_call_run(&self, start: StepId, call_key: CallKey) -> Option<Option<i64>> {
+        // The M0/3 pair first: a lazy reader over a container that carries
+        // `step-map.ns` answers without reading a single step.
+        if let Some(answer) = crate::trace_reader::max_line_over_call_run_from_line_map(self, start, call_key) {
+            return Some(answer);
+        }
+        // Otherwise — a column-aware trace has no `step-map.ns`, and the
+        // native reader keeps a column-aware trace's steps eager, so it has no
+        // call-key array either — the resident suffix-maximum index, built once.
+        self.call_run_line_index
+            .get_or_init(|| self.build_call_run_line_index())
+            .max_line_over_call_run(self, start, call_key)
     }
 
     // ── Iteration helpers ────────────────────────────────────────────
