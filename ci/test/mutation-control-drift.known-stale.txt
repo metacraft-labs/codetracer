@@ -1008,3 +1008,8 @@ src/frontend/tui/tests/plat83-ct-lens-mutation-control.sha256	src/frontend/host/
 src/frontend/tui/tests/plat41-pane-mutation-control.sha256	src/frontend/viewmodel/viewmodels/flow_vm.nim	20bd8e27ae57706b72c20908cd24b30511871f474bac980fa21dfeb4ec8384d4	32de153acb3979afe1b72f85835434f87730a0b0c065aaaa74b6569145f37867
 src/frontend/tui/tests/plat42-surface-mutation-control.sha256	src/frontend/viewmodel/viewmodels/flow_vm.nim	20bd8e27ae57706b72c20908cd24b30511871f474bac980fa21dfeb4ec8384d4	32de153acb3979afe1b72f85835434f87730a0b0c065aaaa74b6569145f37867
 src/frontend/viewmodel/tests/unit/hsf-sdk-mutation-control.sha256	src/frontend/viewmodel/viewmodels/flow_vm.nim	20bd8e27ae57706b72c20908cd24b30511871f474bac980fa21dfeb4ec8384d4	32de153acb3979afe1b72f85835434f87730a0b0c065aaaa74b6569145f37867
+# 2026-11-26: 94065cdb745 (linear-time loading of long single-call browser traces) moved these
+# subjects; these re-grades are owed.
+src/frontend/tui/tests/plat50-stop-path-mutation-control.sha256	src/db-backend/src/expr_loader.rs	ead979b896269620b974d62c3eb01dac7d10338251cee6e83b56b5d3e3bb231d	c10017caf68e99a97d4a650f13dc1b3ccf9b374f6941ca0c4750458b3cba7237
+src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/db-backend/src/db.rs	8051651f4a8174b46e971cbbd295ffc02eba5a22c2276479f075faec9d9ad9f5	362fa4d42e8342493b35812a6383a79578112ba51f77922e9f68d02690349d4b
+src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_sdk_facade.nim	f868eb5b9644a11e21b73e5026a5d31988685c8943e4476b38eb619dcc94f877	6cc01b92d3df398f5ce5ce5a9fb610ac008da271cf62bd1a398f246529440f22
