@@ -57,24 +57,11 @@ type
     activeTabId*: Memo[string]
     activeCaption*: Memo[string]
 
-proc findSession*(state: AgentSessionsState; tabId: string):
-    AgentServiceSessionEntry =
-  for session in state.sessions:
-    if session.tabId == tabId:
-      return session
-  AgentServiceSessionEntry()
+# `findSession` and `captionForSession` live in `nim_agents/agent_tabs`
+# (CTF-M1 slice 7), reached through `store/types`.
 
 proc activeSession*(vm: AgenticSessionVM): AgentServiceSessionEntry =
   vm.store.agentSessions.val.findSession(vm.store.agentSessions.val.activeTabId)
-
-proc captionForSession*(session: AgentServiceSessionEntry): string =
-  result =
-    if session.title.len > 0: session.title
-    elif session.tabId.len > 0: session.tabId
-    else: "Agent task"
-  if session.milestonesTotal > 0:
-    result.add " " & $session.milestonesCompleted & "/" &
-      $session.milestonesTotal
 
 proc agentTabCaptions*(vm: AgenticSessionVM): seq[string] =
   for session in vm.store.agentSessions.val.sessions:

@@ -71,9 +71,8 @@ proc loadingProcesses(): seq[ProcessEntry] =
     process("envelope-worker", "worker", 4190, "/srv/envelope/bin/worker", rsMissing,
             "not in the recording's bundle")]
 
-proc createProcessSwitcherStoryVM*(fixture: string): ProcessSwitcherVM =
-  ## The switcher the fixture names, showing the front end (process 1). An
-  ## unknown fixture raises rather than showing some other state.
+proc createProcessSwitcherStoryVMAtRest(fixture: string): ProcessSwitcherVM =
+  ## The fixture's switcher, its focus not yet set.
   case fixture
   of "three":
     newProcessSwitcherVM(EnvelopeFlowTitle, threeProcesses(), "envelope-frontend")
@@ -96,6 +95,21 @@ proc createProcessSwitcherStoryVM*(fixture: string): ProcessSwitcherVM =
     newProcessSwitcherVM(EnvelopeFlowTitle, loadingProcesses(), "envelope-frontend")
   else:
     raise newException(ValueError, "no process switcher story fixture named " & fixture)
+
+proc storyHasFocus*(fixture: string): bool =
+  ## Whether the fixture's switcher has the focus (`ProcessSwitcherVM.focused`):
+  ## `three` shows the tab at rest, the focus elsewhere in the window; every
+  ## other story shows the switcher while the reader works it, so a host
+  ## that draws no tooltip shows the focused button's in its status line
+  ## (the terminal).
+  fixture != "three"
+
+proc createProcessSwitcherStoryVM*(fixture: string): ProcessSwitcherVM =
+  ## The switcher the fixture names, showing the front end (process 1),
+  ## focused as `storyHasFocus` says. An unknown fixture raises rather than
+  ## showing some other state.
+  result = createProcessSwitcherStoryVMAtRest(fixture)
+  result.focused.val = storyHasFocus(fixture)
 
 proc slotsFor*(compact: bool): int =
   ## The buttons a tab draws before `+N`.

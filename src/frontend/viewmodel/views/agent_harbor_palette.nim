@@ -121,6 +121,12 @@ type
     ## A status mark: a filled dot, or a hollow ring (idle, planned).
     colour*: string
     ring*: bool
+    role*: PieRole
+      ## The status role the mark draws (`markOf`), so a view can resolve
+      ## its ink for the ground under it (`markOn`); read only when `roled`.
+    roled*: bool
+      ## Whether `role` is set: false for a mark with no status role (the
+      ## auto-switch dot, a milestone's planned or other mark).
 
 proc ahPalette*(mode: DesignMode): AhPalette =
   template t(token: DesignToken): string = DesignTokenHex[token][mode]
@@ -197,27 +203,27 @@ proc inboxStepInk*(p: AhPalette; disabled: bool): string =
 
 proc markOf*(p: AhPalette; attention: SessionAttention): MarkStyle =
   case attention
-  of saNeedsInput: MarkStyle(colour: p.iconWarning)
-  of saRunning: MarkStyle(colour: p.iconSuccess)
-  of saQueued: MarkStyle(colour: p.iconInfo)
-  of saFailed: MarkStyle(colour: p.iconError)
-  of saIdle: MarkStyle(colour: p.iconDefault, ring: true)
-  of saEnded: MarkStyle(colour: p.endedMark)
+  of saNeedsInput: MarkStyle(colour: p.iconWarning, role: prWarning, roled: true)
+  of saRunning: MarkStyle(colour: p.iconSuccess, role: prSuccess, roled: true)
+  of saQueued: MarkStyle(colour: p.iconInfo, role: prInfo, roled: true)
+  of saFailed: MarkStyle(colour: p.iconError, role: prError, roled: true)
+  of saIdle: MarkStyle(colour: p.iconDefault, ring: true, role: prIdle, roled: true)
+  of saEnded: MarkStyle(colour: p.endedMark, role: prEnded, roled: true)
 
 proc markOf*(p: AhPalette; state: InitiativeState): MarkStyle =
   case state
-  of isNeedsInput: MarkStyle(colour: p.iconWarning)
-  of isWorking: MarkStyle(colour: p.iconSuccess)
-  of isBlocked: MarkStyle(colour: p.iconError)
-  of isIdle: MarkStyle(colour: p.iconDefault, ring: true)
-  of isEnded: MarkStyle(colour: p.endedMark)
+  of isNeedsInput: MarkStyle(colour: p.iconWarning, role: prWarning, roled: true)
+  of isWorking: MarkStyle(colour: p.iconSuccess, role: prSuccess, roled: true)
+  of isBlocked: MarkStyle(colour: p.iconError, role: prError, roled: true)
+  of isIdle: MarkStyle(colour: p.iconDefault, ring: true, role: prIdle, roled: true)
+  of isEnded: MarkStyle(colour: p.endedMark, role: prEnded, roled: true)
 
 proc markOf*(p: AhPalette; status: MilestoneStatusClass): MarkStyle =
   case status
-  of mscCompleted: MarkStyle(colour: p.iconSuccess)
-  of mscInProgress: MarkStyle(colour: p.iconInfo)
-  of mscPartial: MarkStyle(colour: p.iconWarning)
-  of mscBlocked: MarkStyle(colour: p.iconError)
+  of mscCompleted: MarkStyle(colour: p.iconSuccess, role: prSuccess, roled: true)
+  of mscInProgress: MarkStyle(colour: p.iconInfo, role: prInfo, roled: true)
+  of mscPartial: MarkStyle(colour: p.iconWarning, role: prWarning, roled: true)
+  of mscBlocked: MarkStyle(colour: p.iconError, role: prError, roled: true)
   of mscPlanned: MarkStyle(colour: p.trackPlanned)
   of mscOther: MarkStyle(colour: p.iconSubtle)
 
@@ -232,37 +238,6 @@ proc statusWordColour*(p: AhPalette; attention: SessionAttention): string =
   of saRunning: p.textSuccess
   of saFailed: p.textError
   of saEnded: p.endedWord
-  else: p.textLabel
-
-proc initiativeSessionWordColour*(p: AhPalette; attention: SessionAttention): string =
-  ## An Initiatives session line's status word (`.ah-att-*
-  ## .ah-initiative-session-status`), in the terminal, GPUI and the web
-  ## alike, the session lines of the initiative popup included. It is the
-  ## line's only word for its state, beside a dot of the same hue, so it is
-  ## text (WCAG 2.2 SC 1.4.3) and at the least the state's non-colour cue,
-  ## held to 3:1 (SC 1.4.11) on every ground the panel draws it on.
-  ##
-  ## Light's raw status text roles fall under that on the panel (#e6e2db)
-  ## and the stripe (#f8f6f2): `running` #16a34a 2.55:1 and 3.05:1, `needs
-  ## input` #ea580c 2.76:1 and 3.30:1 (`failed` #dc2626 3.74:1 and 4.47:1).
-  ## So in Light the word takes its role's text hover step, the darker
-  ## design-system step, as the timeline's `timelineAdded` and
-  ## `timelineWarning` do: `needs input` text/warning/primary-hover #c2410c
-  ## (4.01:1 panel, 4.80:1 stripe), `running` text/success/primary-hover
-  ## #15803d (3.88:1, 4.65:1), `failed` text/error/primary-hover #b91c1c
-  ## (5.01:1, 5.99:1). Dark keeps each role. Every other state is in the
-  ## label role. The dot keeps its icon colour (`markOf`). The selected
-  ## initiative's ground (`activeRow`) is outside this rule (codetracer-pm
-  ## issue 2026-11-24-light-status-colours-fall-to-1-9-to-2-9-to-1-on-the-selected-row-ground.md).
-  template t(token: DesignToken): string = DesignTokenHex[token][p.mode]
-  let light = p.mode != dmDark
-  case attention
-  of saNeedsInput:
-    if light: t(dtColorsUiTextWarningPrimaryHover) else: p.textWarning
-  of saRunning:
-    if light: t(dtColorsUiTextSuccessPrimaryHover) else: p.textSuccess
-  of saFailed:
-    if light: t(dtColorsUiTextErrorPrimaryHover) else: p.textError
   else: p.textLabel
 
 proc stateWordColour*(p: AhPalette; state: InitiativeState): string =
@@ -698,6 +673,136 @@ proc readableInk*(p: AhPalette; ground: string; floor = StoryTextFloor): string 
 
 proc pieInks*(p: AhPalette; role: PieRole; ground: PieGround): PieInks =
   p.pieInks(role, p.pieGroundColour(ground))
+
+# ---------------------------------------------------------------------------
+# Status inks on a ground: a status word, a status count and a status mark
+# readable on the ground they are drawn on
+# ---------------------------------------------------------------------------
+#
+# The design system's status roles (`colors-ui-text-<status>-primary`,
+# `colors-ui-icon-<status>-primary`) are measured against its own surfaces;
+# on Light's warm grounds they fall under the floors (the terminal review of
+# the initiative tab bar, 2026-11-26: the warning dot 1.61:1 on the open
+# `+N` chip's #b5ae9f, the error banner 3.34:1 and the menus' status words
+# and dots 2.0-2.5:1 on the card #dbd6cc and on #c8c2b5). Each is resolved
+# here, per ground, by one rule for every view that draws on such a ground:
+#
+# - a status WORD or COUNT is text: WCAG 2.2 SC 1.4.3, 4.5:1
+#   (https://www.w3.org/TR/WCAG22/#contrast-minimum). It takes the role's
+#   text step where that holds, else its hover step (the 700 step), else
+#   that step taken `StatusInkStepPercent` at a time toward the body text
+#   (`statusTextInk`): only tokens, mixed in code, as `buttonStateInk` mixes
+#   orange/700 toward the body for orange/800. An Initiatives session's
+#   status word has a rule of its own that starts at the 800 step
+#   (`initiativeSessionWordColour`);
+# - a status MARK (the one-cell dot) is a graphical object: SC 1.4.11, 3:1
+#   (https://www.w3.org/TR/WCAG22/#non-text-contrast). It keeps the role's
+#   icon ink where that holds, else it takes the pie's ink for its role on
+#   that ground (`roleInks`, 3.3:1 and 20 CIEDE2000 from every other role),
+#   so a pie and a dot of one role on one ground are one ink (`markOn`).
+#
+# Dark's roles hold both floors on every Dark ground the views use, so Dark
+# draws the roles themselves.
+
+const
+  StatusTextFloor* = 4.5
+    ## A status word's or count's least contrast on its ground (SC 1.4.3).
+  StatusMarkFloor* = 3.0
+    ## A status mark's least contrast on its ground (SC 1.4.11).
+  StatusInkStepPercent* = 25
+    ## The step a status role's hover ink is taken toward the body text by.
+
+proc statusTextSteps(p: AhPalette; role: PieRole): (string, string) =
+  ## A status role's text step and its hover (700) step; a role with no
+  ## status text (idle, ended) has the label role for both.
+  template t(token: DesignToken): string = DesignTokenHex[token][p.mode]
+  case role
+  of prWarning: (t(dtColorsUiTextWarningPrimary), t(dtColorsUiTextWarningPrimaryHover))
+  of prSuccess: (t(dtColorsUiTextSuccessPrimary), t(dtColorsUiTextSuccessPrimaryHover))
+  of prInfo: (t(dtColorsUiTextInformationPrimary), t(dtColorsUiTextInformationPrimaryHover))
+  of prError: (t(dtColorsUiTextErrorPrimary), t(dtColorsUiTextErrorPrimaryHover))
+  of prIdle, prEnded: (p.textLabel, p.textLabel)
+
+proc inkTowardBody(p: AhPalette; start, ground: string; floor: float): string =
+  ## `start` where it holds `floor` on `ground`, else `start` taken toward
+  ## the body text a `StatusInkStepPercent` step at a time, the first that
+  ## holds; the body text when none does.
+  var step = 0
+  while step < 100:
+    let ink = mixInk(start, p.textBody, step)
+    if inkContrast(ink, ground) >= floor: return ink
+    step += StatusInkStepPercent
+  p.textBody
+
+proc statusTextInk*(p: AhPalette; role: PieRole; ground: string;
+                    floor = StatusTextFloor): string =
+  ## A status word or count of `role` readable on `ground` (see the
+  ## section's header): the role's text step, else its hover step, else the
+  ## hover step taken toward the body text a `StatusInkStepPercent` step at
+  ## a time, the first that holds `floor`; the body text when none does.
+  let (primary, hover) = p.statusTextSteps(role)
+  if inkContrast(primary, ground) >= floor: return primary
+  p.inkTowardBody(hover, ground, floor)
+
+proc markOn*(p: AhPalette; m: MarkStyle; ground: string): MarkStyle =
+  ## `m` readable on `ground` (see the section's header): as it is when its
+  ## ink holds `StatusMarkFloor` there or it has no status role, else in the
+  ## pie's ink for its role on that ground.
+  result = m
+  if m.roled and inkContrast(m.colour, ground) < StatusMarkFloor:
+    result.colour = p.roleInks(ground)[m.role]
+
+proc statusStep800*(p: AhPalette; role: PieRole): string =
+  ## A status role's 800 step, the design system's `colors-<role>-800`
+  ## primitive (green, orange and red/800 for success, warning and error;
+  ## the Nim table carries it as `DesignPrimitive`); the label role for a
+  ## role it is not given for.
+  template t(step: DesignPrimitive): string = DesignPrimitiveHex[step][p.mode]
+  case role
+  of prSuccess: t(dpColorsSuccess800)
+  of prWarning: t(dpColorsWarning800)
+  of prError: t(dpColorsError800)
+  of prInfo, prIdle, prEnded: p.textLabel
+
+proc initiativeSessionWordColour*(p: AhPalette; attention: SessionAttention;
+                                  ground: string): string =
+  ## A session's status word on `ground`: an Initiatives session line's
+  ## (`.ah-att-* .ah-initiative-session-status`), the initiative popup's
+  ## session lines included, and the control center's `WAITING FOR YOU`
+  ## row's (`.ah-cc-waiting-state`), in the terminal, GPUI and the web alike,
+  ## so one word on one ground is one ink across the screen. It is the
+  ## line's only word for its state, so it is text: WCAG 2.2 SC 1.4.3,
+  ## `StatusTextFloor` (4.5:1) on the ground it is drawn on
+  ## (https://www.w3.org/TR/WCAG22/#contrast-minimum).
+  ##
+  ## Light: the role's 800 step (`statusStep800`: `needs input` #9a3412,
+  ## `running` #166534, `failed` #991b1b) wherever it holds 4.5:1, which is
+  ## every Light ground but the darkest; where it does not, the 800 step
+  ## taken `StatusInkStepPercent` at a time toward the body text, the first
+  ## that holds. On the panel (#e6e2db) the three are 5.66, 5.52 and
+  ## 6.44:1, on the card (#dbd6cc) 5.05, 4.92 and 5.74:1, on the default
+  ## surface (#f8f6f2) 6.77, 6.61 and 7.70:1. On
+  ## `surface/primary/secondary-hover` (#c8c2b5: a selected or hovered row,
+  ## and the popup where it drops over a panel) orange and green/800 fall to
+  ## 4.12 and 4.02:1, so they are taken a quarter toward the body there,
+  ## #7d3016 (5.13:1) and #1a5530 (4.96:1); red/800 holds (4.69:1). The web
+  ## names the same primitives (`colors-warning-800`, ...) and mixes the same
+  ## way (`mix-ink` in `defaults.styl`) on the grounds where this mixes.
+  ##
+  ## An unknown ground ("": a cell nothing was drawn under) is taken as
+  ## #c8c2b5, the darkest of them, so the ink holds on any of them.
+  ##
+  ## Dark keeps each role's text step on every ground. Every other state is
+  ## in the label role. The dot beside the word is a graphical object held
+  ## to 3:1 (SC 1.4.11) by its own rule (`markOf`, and `markOn` where a view
+  ## resolves it per ground).
+  case attention
+  of saNeedsInput, saRunning, saFailed:
+    let role = pieRoleOf(attention)
+    if p.mode == dmDark: p.statusTextSteps(role)[0]
+    else: p.inkTowardBody(p.statusStep800(role), (if ground.len > 0: ground else: p.hover),
+                          StatusTextFloor)
+  else: p.textLabel
 
 type
   PieShape* = enum

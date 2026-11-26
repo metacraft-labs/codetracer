@@ -356,14 +356,12 @@ AH_CC_GAP = 0.25rem          // between the columns: the layout's splitter
   line-height: 1rem
   color: colors-ui-text-primary-caption
 
+// Its state word: a session's status word (`agent_harbor.styl`, the
+// palette's `initiativeSessionWordColour`), the label role for a state with
+// no status role.
 .ah-cc-waiting-state
   flex: 0 0 auto
-
-  // Needs input: the warning role every sessions view gives it; Light's
-  // warning text step is pale at caption size, its hover step is the
-  // readable one (the composer's rule).
-  &.ah-role-warning
-    color: by-mode(colors-ui-text-warning-primary, colors-ui-text-warning-primary-hover)
+  color: colors-ui-text-primary-label
 
 // Why it waits: the agent's question, wrapped (it is what the operator
 // answers), at most two lines.

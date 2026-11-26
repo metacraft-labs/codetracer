@@ -22,7 +22,11 @@
 ##   a press, a key or the marker's own jump (`markCorrelation`, `select`);
 ## - `next` / `previous` step through the processes in order, wrapping, and
 ##   pass over a process whose trace is missing (nothing to show);
-## - with fewer than two processes there is no switcher (`shown`).
+## - with fewer than two processes there is no switcher (`shown`);
+## - while the switcher has the focus (`focused`), the focused button is
+##   the active process's (focus follows the selection, as a tab list's),
+##   and its tooltip is the switcher's hint (`focusHint`): a host that draws
+##   no tooltip shows it in its status line instead (the terminal).
 ##
 ## The process tree sidebar (`isonim_process_tree_view.nim`) stays the
 ## detail view; this viewmodel does not replace `SessionViewModel`'s
@@ -82,6 +86,11 @@ type
       ## for none.
     onSwitch*: proc(recordingId: string)
       ## Hears every change of the active process; nil for none.
+    focused*: Signal[bool]
+      ## The switcher has the keyboard focus: its digits pick a process,
+      ## and its focused button's tooltip is its hint (`focusHint`).
+      ## A press on a button gives it the focus
+      ## (`agent_harbor_process_switcher_words.runProcessSwitcherPress`).
 
 const
   MiddleDot = " \xC2\xB7 "
@@ -194,7 +203,7 @@ proc newProcessSwitcherVM*(title: string; entries: seq[ProcessEntry]; activeId =
     ProcessSwitcherVM(title: title, entries: createSignal(entries),
                       activeId: createSignal(active),
                       correlation: createSignal(CorrelationMark()),
-                      onSwitch: onSwitch)
+                      onSwitch: onSwitch, focused: createSignal(false))
 
 proc shown*(vm: ProcessSwitcherVM): bool =
   ## Tracked: the switcher is drawn.
@@ -208,6 +217,17 @@ proc buttons*(vm: ProcessSwitcherVM; maxShown = high(int)): RecordingButtons =
   ## Tracked: the buttons a host draws, `maxShown` the number that fit.
   if not vm.shown: return
   processButtons(vm.entries.val, vm.activeId.val, vm.correlation.val, maxShown)
+
+proc focusHint*(vm: ProcessSwitcherVM): string =
+  ## Tracked: the focused button's tooltip while the switcher has the focus
+  ## and is drawn, "" otherwise. The focused button is the active
+  ## process's (focus follows the selection), whether or not the window has
+  ## room for it before `+N`: the active one always has a slot
+  ## (`recordingButtons`).
+  if not vm.focused.val or not vm.shown: return ""
+  for b in vm.buttons().buttons:
+    if b.active: return b.tooltip
+  ""
 
 proc ringedNumber*(vm: ProcessSwitcherVM): int =
   ## Tracked: the ringed process's 1-based number (0 for none).

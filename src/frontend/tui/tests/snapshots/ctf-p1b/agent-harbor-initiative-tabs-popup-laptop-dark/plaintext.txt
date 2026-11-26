@@ -1,4 +1,4 @@
- ◔ Telemetry uploa…   1   2…  3✕  4?   ◔ Route cache on the new…   ◑ Settings rede…   ◑ CI runner migra…   +1   +     9  Agent Harbor sessions   ← 4 waiting  →   Auto-switch: off
+ ◔ Telemetry upl…   1   2…   3✕   4?    ◔ Route cache on the ne…   ◑ Settings rede…   ◑ CI runner migra…   +1   +     9  Agent Harbor sessions   ← 4 waiting  →   Auto-switch: off
                                                                                                                                                                                     
  ● Telemetry upload retries         needs input
  1 of 4 milestones · 25%

@@ -406,11 +406,11 @@ proc firstWaitingRowPx(vm: ControlCenterVM; innerPx: int): int =
   HeadPx + 2 * ListPadPx + waitingRowHeightPx(rows[0], innerPx) + MoreLinePx
 
 proc stateInk(p: AhPalette; attention: SessionAttention): string =
-  ## Needs input: the warning role, Light's readable hover step at caption
-  ## size (the web's and the composer's rule); an ended turn: the caption.
-  if attention != saNeedsInput: p.textCaption
-  elif p.mode == dmDark: p.textWarning
-  else: DesignTokenHex[dtColorsUiTextWarningPrimaryHover][p.mode]
+  ## A waiting row's state word, on the waiting section's panel ground: the
+  ## palette's one rule for a session's status word on its ground, the
+  ## Initiatives panel's below included, so one word on one ground is one
+  ## ink across the tab.
+  p.initiativeSessionWordColour(attention, p.panel)
 
 proc drawWaitingRow(r: GpuiRenderer; p: AhPalette; row: WaitingRow; innerPx: int;
                     focused: bool; press: ControlCenterPress): GpuiElement =

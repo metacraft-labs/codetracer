@@ -16,7 +16,9 @@
 #     every colour token of the `mapped` layer resolved through `alias` and
 #     `brand` to a `#rrggbb` hex in BOTH colour modes (Dark and Light). The
 #     terminal front-end paints from it, so the terminal and the desktop read
-#     one design-system revision through one resolver.
+#     one design-system revision through one resolver. It also carries the
+#     few `alias` primitive steps a native view names directly
+#     (`NIM_PRIMITIVES` below: `DesignPrimitive`, `DesignPrimitiveHex`).
 #
 #   * (with `--nim-out` and `--editor-theme DIR`, PLAT-47) the EDITOR THEME in
 #     the same Nim module, plus `editor-theme.styl` imported by `index.styl`:
@@ -420,6 +422,20 @@ NIM_MODES = ["Dark", "Light"]
   # The design system's two colour modes. A mode the design system stops
   # publishing is a loud failure below, not a silent fallback to $value.
 
+NIM_PRIMITIVES = [
+    # The `alias` layer's primitive colour steps a native view names
+    # directly, by token path. The `mapped` layer has no semantic token for
+    # them, so without this list the Nim table cannot carry them and a view
+    # would have to mix a stand-in; the stylesheets already have them as
+    # stylus variables (`colors-success-800`, ...). Each is resolved like a
+    # mapped token, in every mode, into `DesignPrimitive` /
+    # `DesignPrimitiveHex`. A path the design system stops defining fails
+    # the run.
+    ("colors", "success", "800"),
+    ("colors", "warning", "800"),
+    ("colors", "error", "800"),
+]
+
 def nim_ident(path_parts):
     words = []
     for part in path_parts:
@@ -496,6 +512,8 @@ def emit_nim(out_file):
         "## Every colour token of the `mapped` layer, resolved through `alias` and",
         "## `brand` to a `#rrggbb` hex, in each colour mode the design system",
         "## publishes. `$value` (what the desktop's stylus uses) equals the Dark mode.",
+        "## `DesignPrimitive` adds the few `alias` primitive steps a view names",
+        "## directly, resolved the same way.",
         "",
         "type",
         "  DesignMode* = enum",
@@ -551,6 +569,27 @@ def emit_nim(out_file):
         for i, (scope, ident) in enumerate(rule_rows):
             sep = "," if i + 1 < len(rule_rows) else "]"
             lines.append(f"    (scope: \"{scope}\", token: {ident}){sep}")
+    # The primitive steps (`NIM_PRIMITIVES`), after everything above so the
+    # mapped table keeps its shape: an enum of their paths and their hexes.
+    alias_paths = set(flats["alias"].keys())
+    for p in NIM_PRIMITIVES:
+        if tuple(p) not in alias_paths or flats["alias"][tuple(p)]["type"] != "color":
+            raise SystemExit(f"[ERROR] the alias layer defines no colour token {'/'.join(p)}")
+    lines += ["",
+              "type",
+              "  DesignPrimitive* = enum",
+              "    ## The `alias` layer's primitive colour steps a native view names",
+              "    ## directly (the generator's `NIM_PRIMITIVES`); the `mapped` layer has",
+              "    ## no semantic token for them."]
+    for p in NIM_PRIMITIVES:
+        lines.append(f"    {nim_ident(p).replace('dt', 'dp', 1)} = \"{'/'.join(p)}\"")
+    lines += ["", "const",
+              "  DesignPrimitiveHex*: array[DesignPrimitive, array[DesignMode, string]] = ["]
+    for i, p in enumerate(NIM_PRIMITIVES):
+        sep = "," if i + 1 < len(NIM_PRIMITIVES) else "]"
+        hexes = [resolve_hex(path_to_var(p), per_mode[m]) for m in NIM_MODES]
+        lines.append(f"    {nim_ident(p).replace('dt', 'dp', 1)}: [" +
+                     ", ".join(f'"{h}"' for h in hexes) + "]" + sep)
     lines.append("")
     Path(out_file).parent.mkdir(parents=True, exist_ok=True)
     Path(out_file).write_text("\n".join(lines), encoding="utf-8")

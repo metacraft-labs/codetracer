@@ -217,11 +217,12 @@ proc drawCurrent*(r: GpuiRenderer; p: AhPalette; text: string; colour = ""): Gpu
                                if colour.len > 0: colour else: p.textBody, pairs = [lh]))
 
 proc drawSessionLine*(r: GpuiRenderer; p: AhPalette; item: SessionItem;
-                      onAction = false): GpuiElement =
+                      ground: string; onAction = false): GpuiElement =
   ## A session under an initiative (the Initiatives panel and the hover
   ## popup alike): mark, title, its status at the right. The title at the
   ## session list's row-title size (`.ah-initiative-session`: 14px on a 16px
-  ## line, 1px above and below).
+  ## line, 1px above and below). `ground`: what the line is drawn on, which
+  ## its status word's ink is chosen for (`initiativeSessionWordColour`).
   result = r.box(pairs = [("gap", "8px"), ("items", "center"),
                           ("height", $SessionLinePx & "px"), ("flex-shrink", "0")])
   r.tag(result, "session", item.id)
@@ -233,7 +234,7 @@ proc drawSessionLine*(r: GpuiRenderer; p: AhPalette; item: SessionItem;
   r.tag(title, "title", item.title)
   r.appendChild(result, title)
   let status = r.text(item.statusLabel, CaptionPx,
-                      if onAction: p.onAction else: p.initiativeSessionWordColour(item.attention),
+                      if onAction: p.onAction else: p.initiativeSessionWordColour(item.attention, ground),
                       shrink = false, pairs = [("line-height", $LinePx & "px")])
   r.tag(status, "status", item.statusLabel)
   r.appendChild(result, status)
@@ -325,7 +326,7 @@ proc drawInitiativeRow(r: GpuiRenderer; p: AhPalette; vm: InitiativesVM;
     let shown = if row.expanded: row.sessions.len
                 else: min(row.sessions.len, InitiativeSessionLinesShown)
     for i in 0 ..< shown:
-      r.appendChild(sessions, r.drawSessionLine(p, row.sessions[i]))
+      r.appendChild(sessions, r.drawSessionLine(p, row.sessions[i], ground))
     let hidden = row.sessions.len - shown
     if hidden > 0 or row.expanded and row.sessions.len > InitiativeSessionLinesShown:
       let label = if row.expanded: "Show fewer" else: "+" & $hidden & " more"

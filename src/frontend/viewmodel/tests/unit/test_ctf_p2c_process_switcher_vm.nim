@@ -14,6 +14,9 @@
 ##   first slots and the active one, the rest behind `+N`, whose severity is
 ##   the worst hidden state; the ringed process behind `+N` is reported.
 ## * **`onSwitch`** hears each change once.
+## * **The focus hint** (for a host that draws no tooltip): while the
+##   switcher has the focus, the active button's tooltip, following the
+##   selection; nothing without the focus or without a switcher.
 ##
 ## No mocks: the viewmodel is the stories' own
 ## (`createProcessSwitcherStoryVM`) over plain values.
@@ -21,6 +24,7 @@
 import std/[sequtils, strutils, unittest]
 import isonim/core/owner
 import ../../process_switcher_vm
+import ../../views/agent_harbor_process_switcher_words
 import ../../../stories/agent_harbor_process_switcher_stories
 
 proc withVM(fixture: string; body: proc(vm: ProcessSwitcherVM)) =
@@ -168,5 +172,39 @@ suite "onSwitch":
       check not vm.select("b")
       check vm.next()
       check heard == @["b", "a"]
+      vm.dispose()
+      disposeRoot()
+
+suite "the focus hint":
+  test "the focused (active) button's tooltip, only while focused":
+    withVM("three", proc(vm: ProcessSwitcherVM) =
+      check not vm.focused.val          # the story at rest
+      check vm.focusHint == ""
+      vm.focused.val = true
+      check vm.focusHint == "frontend \xC2\xB7 pid 4180 \xC2\xB7 /srv/envelope/bin/frontend"
+      check vm.focusHint == vm.buttons.buttons.filterIt(it.active)[0].tooltip
+      check vm.next()
+      check vm.focusHint.startsWith("backend ")
+      vm.focused.val = false
+      check vm.focusHint == "")
+
+  test "the in-use stories are focused; the active button past the slots still has one":
+    for fixture in ["correlation", "many", "many-ringed", "loading-and-missing"]:
+      withVM(fixture, proc(vm: ProcessSwitcherVM) =
+        check vm.focused.val
+        check vm.focusHint.startsWith("frontend "))
+    withVM("many", proc(vm: ProcessSwitcherVM) =
+      check vm.selectNumber(8)
+      check vm.focusHint.startsWith("worker-6 "))
+
+  test "a press focuses the switcher; one process has no hint":
+    withVM("three", proc(vm: ProcessSwitcherVM) =
+      check vm.runProcessSwitcherPress(ProcessSelectOperation, "envelope-frontend")
+      check vm.focused.val
+      check vm.focusHint.startsWith("frontend "))
+    createRoot proc(disposeRoot: proc()) =
+      let vm = newProcessSwitcherVM("single", @[ProcessEntry(recordingId: "only", role: "only")])
+      vm.focused.val = true
+      check vm.focusHint == ""
       vm.dispose()
       disposeRoot()
