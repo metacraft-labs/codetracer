@@ -338,7 +338,8 @@ fi
 #
 # The sandbox's RunQuota relay (`ct_user_state_sandbox_enable`) ends with this
 # shell anyway; stopping it here removes its directory before the lane reports.
-trap 'rm -rf ${_ct_lane_state:+"${_ct_lane_state}"}
+_ct_pool_dir=""
+trap 'rm -rf ${_ct_lane_state:+"${_ct_lane_state}"} ${_ct_pool_dir:+"${_ct_pool_dir}"}
 if declare -F ct_user_state_sandbox_stop >/dev/null; then ct_user_state_sandbox_stop; fi
 if [ "${CT_KEEP_SCRATCH_HOME:-}" = 1 ] && [ -n "${_ct_lane_home_owned}" ]; then
 	echo "lane: CT_KEEP_SCRATCH_HOME=1: kept the per-file CODETRACER_HOMEs under ${_ct_lane_home_owned}" >&2
@@ -481,8 +482,79 @@ files=0
 platform_skipped=0
 host_platform="$(uname -s)"
 
-while read -r f; do
-	[ -n "${f}" ] || continue
+# THE POOL (ci/lib/job-pool.sh). A lane that declares itself parallel-safe
+# (`test_lane_parallel_safe`) runs several files at once, each in a subshell of
+# its own whose report goes to a file; the reports are printed, and the
+# tallies summed, in the lane's own file order, so the output reads the same
+# whatever order the files finish in. Without the user-state sandbox the guard
+# compares the user's state around each file, and a write could then not be
+# told apart from a neighbour's, so such a host runs one file at a time.
+# CT_LANE_JOBS sets the size for any lane; CT_LANE_JOBS=1 is serial.
+# shellcheck source=ci/lib/job-pool.sh
+# shellcheck disable=SC1091 # resolved at runtime from $repo_root
+source "${repo_root}/ci/lib/job-pool.sh"
+_ct_pool_size=1
+if [ -n "${CT_LANE_JOBS:-}" ] || { declare -F test_lane_parallel_safe >/dev/null &&
+	[ "$(test_lane_parallel_safe "${lane}")" = "1" ]; }; then
+	_ct_pool_size="$(ct_pool_size 2048)" || exit 2
+fi
+if [ "${_ct_pool_size}" -gt 1 ] && [ -z "${CT_LANE_JOBS:-}" ] && [ -z "${_ct_uss_enabled:-}" ]; then
+	_ct_pool_size=1
+fi
+if [ "${_ct_pool_size}" -gt 1 ]; then
+	extra_flags+=("--parallelBuild:$(ct_pool_parallel_build "${_ct_pool_size}")")
+fi
+_ct_caller_plugin_scratch="${CT_PLUGIN_TEST_SCRATCH:-}"
+_ct_pool_dir="$(mktemp -d "${TMPDIR:-/tmp}/ct-lane-pool.XXXXXX")"
+_ct_timings="test-logs/${lane}${NIM_TEST_LANE_SHARD:+.shard-${NIM_TEST_LANE_SHARD%%/*}-of-${NIM_TEST_LANE_SHARD##*/}}.timings.tsv"
+echo "    (${_ct_pool_size} file(s) at a time, from $(ct_pool_basis); per-file times in ${_ct_timings})"
+
+# Seconds, with a fraction where bash has one (EPOCHREALTIME is bash 5).
+_ct_now() {
+	if [ -n "${EPOCHREALTIME:-}" ]; then
+		printf '%s\n' "${EPOCHREALTIME}"
+	else
+		date +%s
+	fi
+}
+
+# A FAILING FILE'S WHOLE OUTPUT, after the excerpt its verdict prints. The
+# excerpt is what a reader scans; the whole output is what a reader who has to
+# find the cause needs, and with files running in parallel it is no longer
+# next to anything else that might show it. Folded on GitHub Actions.
+lane_full_output() {
+	local file="$1" what="$2" text="$3"
+	if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+		echo "::group::${file}: full ${what}"
+	else
+		echo "      --- ${file}: full ${what} ---"
+	fi
+	printf '%s\n' "${text}" | sed 's/^/      /'
+	if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+		echo "::endgroup::"
+	else
+		echo "      --- end of ${file} ---"
+	fi
+}
+
+# ONE FILE, in a subshell: its report goes to <i>.out and <i>.err, and its
+# tallies (and times) to <i>.res, written when the subshell exits, whichever
+# branch it leaves by -- each `exit 0` below is the old loop's `continue`.
+# `lane_one_file` runs `lane_file_body` in that subshell.
+lane_file_body() {
+	# Not `local`: the EXIT trap reads them after the function has returned.
+	idx="$1" f="$2"
+	files=0 failed=0 passed=0 total_oks=0 total_skips=0 total_checks=0
+	declared_files=0 undeclared_files=0 platform_skipped=0
+	_ct_started="$(_ct_now)"
+	_ct_compiled=""
+	_ct_ended=""
+	trap '_ct_ended="$(_ct_now)"
+printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
+	"${files}" "${passed}" "${failed}" "${total_oks}" "${total_skips}" \
+	"${total_checks}" "${declared_files}" "${undeclared_files}" "${platform_skipped}" \
+	"${_ct_started}" "${_ct_compiled:-${_ct_ended}}" "${_ct_ended}" \
+	>"${_ct_pool_dir}/${idx}.res.tmp" && mv -f "${_ct_pool_dir}/${idx}.res.tmp" "${_ct_pool_dir}/${idx}.res"' EXIT
 	files=$((files + 1))
 	# Reject only a declared platform mismatch, before invoking the compiler.
 	# The full discovered inventory remains intact for coverage accounting.
@@ -490,12 +562,18 @@ while read -r f; do
 	if [ -n "${skip_reason}" ]; then
 		printf '  %s ... SKIPPED (%s)\n' "${f}" "${skip_reason}"
 		platform_skipped=$((platform_skipped + 1))
-		continue
+		exit 0
 	fi
 	name="$(basename "${f}" .nim)"
 	cache="${cache_root}/${lane}-${name}"
 	mkdir -p "${_ct_lane_home}/${name}"
 	export CODETRACER_HOME="${_ct_lane_home}/${name}"
+	# The plugin fixtures' build scratch is shared by every file that uses
+	# them; files running at the same time get one each instead.
+	if [ "${_ct_pool_size}" -gt 1 ] && [ -z "${_ct_caller_plugin_scratch}" ]; then
+		mkdir -p "${_ct_lane_home}/${name}.plugin-scratch"
+		export CT_PLUGIN_TEST_SCRATCH="${_ct_lane_home}/${name}.plugin-scratch"
+	fi
 	# AND THE TWO OTHER XDG ROOTS, per file, beside it: `XDG_DATA_HOME` (the
 	# freedesktop trash, `ct install`'s launchers, and any tool under test that
 	# keeps data by the XDG rule) and `XDG_CONFIG_HOME` (config read or written
@@ -636,16 +714,19 @@ while read -r f; do
 	fi
 
 	if ! compile_output="$(timeout "${lane_timeout}" "${compile_cmd[@]}" 2>&1)"; then
+		_ct_compiled="$(_ct_now)"
 		echo "COMPILE ERROR"
 		printf '%s\n' "${compile_output}" | grep -E 'Error:' | head -3 | sed 's/^/      /'
+		lane_full_output "${f}" "compiler output" "${compile_output}"
 		failed=$((failed + 1))
-		continue
+		exit 0
 	fi
+	_ct_compiled="$(_ct_now)"
 
 	if [ "${compile_only}" -eq 1 ]; then
 		echo "COMPILES (not executed)"
 		passed=$((passed + 1))
-		continue
+		exit 0
 	fi
 
 	# THE GUARD, PER FILE: the user's state is read again around this file's
@@ -716,7 +797,7 @@ while read -r f; do
 			printf '%s\n' "${_ct_uss_found}" | sed 's/^/        /'
 		} >&2
 		failed=$((failed + 1))
-		continue
+		exit 0
 	fi
 	_ct_file_after="$(ct_user_state_snapshot)"
 	if [ "${_ct_file_after}" != "${_ct_file_before}" ]; then
@@ -731,7 +812,7 @@ while read -r f; do
 				sed 's/^</        before:/; s/^>/        after: /'
 		} >&2
 		failed=$((failed + 1))
-		continue
+		exit 0
 	fi
 
 	oks="$(printf '%s\n' "${output}" | grep -c '\[OK\]' || true)"
@@ -826,8 +907,9 @@ while read -r f; do
 		printf '%s\n' "${kf_out}" | sed 's/^/      /'
 	fi
 	if [ "${kf_rc}" -eq 1 ]; then
+		lane_full_output "${f}" "test output" "${output}"
 		failed=$((failed + 1))
-		continue
+		exit 0
 	fi
 	if [ "${kf_rc}" -eq 3 ]; then
 		# Settled: every red is registered and failed for its registered
@@ -835,7 +917,7 @@ while read -r f; do
 		# here is unaccounted for" — the count of registrations is printed
 		# above, so this is never silent.
 		passed=$((passed + 1))
-		continue
+		exit 0
 	fi
 
 	case "${verdict}" in
@@ -872,6 +954,7 @@ while read -r f; do
 		# there, and filtering is exactly what lost it last time (a
 		# `could not load: libsqlite3.so` line that matched no `Error:` grep).
 		printf '%s\n' "${output}" | head -20 | sed 's/^/      /'
+		lane_full_output "${f}" "test output" "${output}"
 		failed=$((failed + 1))
 		;;
 	crashed)
@@ -880,11 +963,13 @@ while read -r f; do
 		# case that crashed it".
 		printf '%s\n' "${output}" | grep '\[FAILED\]' | sed 's/^/      /'
 		printf '%s\n' "${output}" | tail -20 | sed 's/^/      /'
+		lane_full_output "${f}" "test output" "${output}"
 		failed=$((failed + 1))
 		;;
 	silent-failure)
 		printf '%s\n' "${output}" |
 			grep -E 'Check failed|Error|Exception|SIGSEGV' | head -20 | sed 's/^/      /'
+		lane_full_output "${f}" "test output" "${output}"
 		failed=$((failed + 1))
 		;;
 	*)
@@ -904,10 +989,77 @@ while read -r f; do
 		# recorded here rather than left to the reader of a diff.
 		printf '%s\n' "${output}" |
 			grep -B 25 -A 12 '\[FAILED\]' | head -120 | sed 's/^/      /'
+		lane_full_output "${f}" "test output" "${output}"
 		failed=$((failed + 1))
 		;;
 	esac
+}
+lane_one_file() {
+	(lane_file_body "$1" "$2") >"${_ct_pool_dir}/$1.out" 2>"${_ct_pool_dir}/$1.err"
+}
+
+# Print every finished report that is next in file order, and add its
+# tallies to the lane's.
+_ct_next=0
+lane_flush() {
+	local r res_files res_passed res_failed res_oks res_skips res_checks
+	local res_declared res_undeclared res_platform t0 t1 t2 outcome
+	while [ "${_ct_next}" -lt "${_ct_count}" ] && [ -f "${_ct_pool_dir}/${_ct_next}.res" ]; do
+		r="${_ct_pool_dir}/${_ct_next}"
+		cat "${r}.out"
+		cat "${r}.err" >&2
+		IFS=$'\t' read -r res_files res_passed res_failed res_oks res_skips res_checks \
+			res_declared res_undeclared res_platform t0 t1 t2 <"${r}.res"
+		files=$((files + res_files))
+		passed=$((passed + res_passed))
+		failed=$((failed + res_failed))
+		total_oks=$((total_oks + res_oks))
+		total_skips=$((total_skips + res_skips))
+		total_checks=$((total_checks + res_checks))
+		declared_files=$((declared_files + res_declared))
+		undeclared_files=$((undeclared_files + res_undeclared))
+		platform_skipped=$((platform_skipped + res_platform))
+		if [ "${res_failed}" -gt 0 ]; then
+			outcome=failed
+		elif [ "${res_platform}" -gt 0 ]; then
+			outcome=skipped
+		else
+			outcome=passed
+		fi
+		awk -v f="${_ct_files[${_ct_next}]}" -v o="${outcome}" -v a="${t0}" -v b="${t1}" -v c="${t2}" \
+			'BEGIN { printf "%s\t%s\t%.1f\t%.1f\n", f, o, b - a, c - b }' >>"${_ct_timings}"
+		rm -f "${r}.out" "${r}.err" "${r}.res"
+		_ct_next=$((_ct_next + 1))
+	done
+}
+
+_ct_files=()
+while read -r f; do
+	[ -n "${f}" ] && _ct_files+=("${f}")
 done < <(lane_run_files)
+_ct_count="${#_ct_files[@]}"
+printf 'file\toutcome\tcompile_s\trun_s\n' >"${_ct_timings}"
+_ct_pids=""
+_ct_i=0
+while [ "${_ct_i}" -lt "${_ct_count}" ]; do
+	if [ "${_ct_pool_size}" -le 1 ]; then
+		lane_one_file "${_ct_i}" "${_ct_files[${_ct_i}]}"
+	else
+		ct_pool_wait_for_slot "${_ct_pool_size}" "${_ct_pids}"
+		lane_one_file "${_ct_i}" "${_ct_files[${_ct_i}]}" &
+		_ct_pids="${_ct_pids} $!"
+	fi
+	lane_flush
+	_ct_i=$((_ct_i + 1))
+done
+wait
+lane_flush
+# A file whose subshell died before it could write its report (killed from
+# outside) has no verdict; that is a failure of the lane, never a gap in it.
+if [ "${_ct_next}" -lt "${_ct_count}" ]; then
+	echo "ERROR: lane '${lane}': no report for ${_ct_files[${_ct_next}]} (its run was killed?)" >&2
+	exit 1
+fi
 
 echo ""
 if [ "${total_skips}" -gt 0 ]; then
