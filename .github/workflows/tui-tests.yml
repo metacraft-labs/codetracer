@@ -233,30 +233,17 @@ jobs:
         # a launcher suite without cloning and building the launcher first.
         run: (cd ../codetracer-launcher && nix develop --profile "${CT_GCROOT_DIR:-$RUNNER_TEMP}/codetracer-launcher-shell" --command just build)
 
-      - name: TUI Tier 1 — the suites that need no terminal
-        # NOT the Tier-1 suites that open an rr recording of a native program
-        # (those importing `fixtures/native_recording`, PLAT-60's among them):
-        # they are the `tui-native` lane, which `test-ui-tests-rr` runs, because
-        # rr does not work on the hosts this job runs on and nothing here builds
-        # `ct-native-replay` -- in this lane they skipped every case and failed
-        # it (codetracer-pm issues/2026-11-09-tui-job-runs-plat60-and-plat65-
-        # without-their-prerequisites.md).
-        env:
-          NIM_TEST_LANE_SHARD: ${{ matrix.shard }}/8
-        run: nix develop .#devShells.x86_64-linux.default --command just test-tui
-
-      - name: TUI Tier 2 — the real binary in a real pty
-        # `!cancelled()`, so a Tier-1 failure does not hide whether Tier 2 holds.
-        # The recipe builds `build/bin/codetracer-tui` itself (`build-tui`).
-        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
-        env:
-          NIM_TEST_LANE_SHARD: ${{ matrix.shard }}/8
-        run: nix develop .#devShells.x86_64-linux.default --command just test-tui-real-terminal
-
-      - name: Does this shard's scenario slice need the visual replay player?
-        # Decided from the slice itself, not a shard number, so a rebalance of
-        # the shards moves the player with its scenarios
-        # (ci/test/scenario-slice-uses-stage-test.sh).
+      - name: Does this shard need the visual replay player?
+        # For its scenario slice (a scenario using `visual-recording`) or its
+        # Nim slice (a `tui` or `tui-real-terminal` suite importing
+        # `fixtures/visual_fixture`). Decided from the slices themselves, not a
+        # shard number, so a rebalance of the shards moves the player with them
+        # (ci/test/scenario-slice-uses-stage-test.sh,
+        # ci/test/nim-shard-uses-visual-fixture-test.sh). These steps come
+        # BEFORE the Nim lanes: after them, and for scenarios only, both
+        # PLAT-59 terminal suites skipped every case ("MISSING-PREREQ SKIP: the
+        # visual replay player (ct_gfx_player) is not installed", shards 2/8
+        # and 8/8 of run 45471393785).
         # Not `success()`: the scenario lane runs after an earlier step's
         # failure too (`!cancelled()`), and in run 44384977215 TUI shard 6's
         # launcher build was stopped by the host's disk guard, this step was
@@ -271,6 +258,10 @@ jobs:
         run: |
           result="$(nix develop .#devShells.x86_64-linux.default --command bash ci/test/scenario-slice-uses-stage.sh terminal "${{ matrix.shard }}/8" visual-recording | tail -n 1)"
           [[ $result =~ ^needed=(true|false)$ ]] || { echo "scenario-slice-uses-stage printed '${result}', not needed=true|false" >&2; exit 1; }
+          nim="$(nix develop .#devShells.x86_64-linux.default --command bash ci/test/nim-shard-uses-visual-fixture.sh "${{ matrix.shard }}/8" tui tui-real-terminal | tail -n 1)"
+          [[ $nim =~ ^needed=(true|false)$ ]] || { echo "nim-shard-uses-visual-fixture printed '${nim}', not needed=true|false" >&2; exit 1; }
+          echo "scenarios: ${result}; nim suites: ${nim}"
+          if [ "$result" = needed=true ] || [ "$nim" = needed=true ]; then result=needed=true; fi
           echo "$result" | tee -a "$GITHUB_OUTPUT"
 
       - name: Wait for the visual replay tools
@@ -308,7 +299,7 @@ jobs:
           bash ci/unpack-ct-build-products.sh "${RUNNER_TEMP}/visual-replay-tools" visual-replay-tools.tar.gz
           echo "CT_VISUAL_REPLAY_TOOLS_PREBUILT=1" >>"$GITHUB_ENV"
 
-      - name: Build the visual replay player for this shard's visual-recording scenarios
+      - name: Build the visual replay player for this shard's visual-recording scenarios and suites
         # terminal/visual-replay-video-player opens a visual recording, which
         # needs ct_gfx_player, ct-native-replay's test licence and ct-mcr; no
         # step built them and the scenario failed with "the visual replay
@@ -318,6 +309,29 @@ jobs:
           nix develop .#devShells.x86_64-linux.default --command bash ci/test/visual-replay-tools.sh "$RUNNER_TEMP/visual-replay.env"
           # shellcheck disable=SC1091
           ( . "$RUNNER_TEMP/visual-replay.env"; env | grep -E '^(CODETRACER_|CT_)' ) >> "$GITHUB_ENV"
+
+      - name: TUI Tier 1 — the suites that need no terminal
+        # NOT the Tier-1 suites that open an rr recording of a native program
+        # (those importing `fixtures/native_recording`, PLAT-60's among them):
+        # they are the `tui-native` lane, which `test-ui-tests-rr` runs, because
+        # rr does not work on the hosts this job runs on and nothing here builds
+        # `ct-native-replay` -- in this lane they skipped every case and failed
+        # it (codetracer-pm issues/2026-11-09-tui-job-runs-plat60-and-plat65-
+        # without-their-prerequisites.md).
+        # `!cancelled()`, as Tier 2: the player steps above now come first, and
+        # a failed player build must not skip the whole lane.
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        env:
+          NIM_TEST_LANE_SHARD: ${{ matrix.shard }}/8
+        run: nix develop .#devShells.x86_64-linux.default --command just test-tui
+
+      - name: TUI Tier 2 — the real binary in a real pty
+        # `!cancelled()`, so a Tier-1 failure does not hide whether Tier 2 holds.
+        # The recipe builds `build/bin/codetracer-tui` itself (`build-tui`).
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        env:
+          NIM_TEST_LANE_SHARD: ${{ matrix.shard }}/8
+        run: nix develop .#devShells.x86_64-linux.default --command just test-tui-real-terminal
 
       - name: Scenarios — the linter, the inventory and the terminal lane
         # CodeTracer's scenario pack (src/tests/scenarios): every scenario
