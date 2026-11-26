@@ -74,17 +74,6 @@ export signals, computation
 # Pure helpers
 # ---------------------------------------------------------------------------
 
-
-when defined(ctWasmCore):
-  # The command-frame renderer a WebAssembly core draws through
-  # (`web_core/web_core.nim`, built `-d:ctWasmCore`): the event its key
-  # listeners take and the key it carries, for the native-renderer branch of
-  # the screen's key handling below (`KeyEvent`, `eventKey`). Declared here,
-  # ahead of that branch, as `isonim_state_view` declares `BadgeEvent`.
-  import isonim/web/frame_renderer
-  template KeyEvent*(r: FrameRenderer): typedesc = FrameEvent
-  proc eventKey*(ev: FrameEvent): string = ev.key
-
 proc displayIf(cond: bool): string =
   if cond: "block" else: "none"
 
