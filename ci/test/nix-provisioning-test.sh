@@ -320,7 +320,11 @@ done
 # specs issues/2026-11-24-gpui-window-captures-shard-1-runs-out-of-its-150-
 # minute-bound-in-the-ctf-p1b-step.md). It provisions Nix through
 # setup-db-backend-siblings, env-flavor nix, as screen-oracle does.
-readonly EXPECTED_NIX_JOBS=56
+#
+# 56 -> 57: wasm-panes.yml's `wasm-panes`, which builds the renderer's
+# WebAssembly panes on Linux on every `agents` and `dev` push and on pull
+# requests. It installs Nix through ./.github/actions/setup-nix.
+readonly EXPECTED_NIX_JOBS=57
 
 if [ "${#nix_jobs[@]}" -eq "$EXPECTED_NIX_JOBS" ]; then
 	ok "the scanner still classifies the nix-using jobs (${#nix_jobs[@]})"
