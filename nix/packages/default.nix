@@ -1996,6 +1996,12 @@
             node $stylus src/frontend/styles/loader.styl
             node $stylus src/frontend/styles/subwindow.styl
 
+            # The stylesheet guards' stamp (src/tests/gui/lib/built-theme-css.cjs):
+            # a store path's mtime is the epoch, so the guards judge this CSS by
+            # the digest of the .styl sources it was compiled from instead.
+            (cd src/frontend/styles && find . -type f -name '*.styl' | LC_ALL=C sort | xargs sha256sum) \
+              | sha256sum | cut -d' ' -f1 > src/frontend/styles/styl-sources.sha256
+
             echo "Packaging frontend using webpack"
             node $webpack
           '';
@@ -2039,6 +2045,7 @@
 
             mkdir -p $out/styles
             mv src/frontend/styles/*.css $out/styles/
+            mv src/frontend/styles/styl-sources.sha256 $out/styles/
 
             mkdir -p $out/views
             mv views/* $out/views/
