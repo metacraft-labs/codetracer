@@ -60,7 +60,7 @@ fi
 # The player is decided and built before the Nim lanes that need it.
 line_of() { grep -n -F -- "$1" "${wf}" | head -1 | cut -d: -f1; }
 decide="$(line_of 'id: player')"
-build="$(line_of '- name: Build the visual replay player')"
+build="$(line_of '- name: Provide the visual replay player')"
 tier1="$(line_of '- name: TUI Tier 1')"
 tier2="$(line_of '- name: TUI Tier 2')"
 if [ -n "${decide}" ] && [ -n "${build}" ] && [ -n "${tier1}" ] && [ -n "${tier2}" ] &&
@@ -68,6 +68,16 @@ if [ -n "${decide}" ] && [ -n "${build}" ] && [ -n "${tier1}" ] && [ -n "${tier2
 	ok "${wf} decides on and builds the player before TUI Tier 1 and Tier 2"
 else
 	fail "${wf}: the player (decided at line ${decide:-?}, built at ${build:-?}) does not come before Tier 1 (${tier1:-?}) and Tier 2 (${tier2:-?})"
+fi
+
+# The player comes from the one action every visual-recording job uses, and
+# only where the helper said it is needed.
+provide="$(awk '/^      - name: Provide the visual replay player/{f=1; next} f && /^      - name: /{exit} f' "${wf}")"
+if grep -qF 'uses: ./.github/actions/provide-visual-replay-tools' <<<"${provide}" &&
+	grep -qF "steps.player.outputs.needed == 'true'" <<<"${provide}"; then
+	ok "${wf} provides the player through provide-visual-replay-tools, gated on the helper"
+else
+	fail "${wf}'s player step does not use provide-visual-replay-tools gated on steps.player.outputs.needed"
 fi
 
 # A lane that cannot be listed fails the helper; it does not read as needed=false.

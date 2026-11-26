@@ -8,7 +8,7 @@ description: >
   (CODETRACER_CT_GFX_PLAYER_CMD and the others visual-replay-tools.sh writes)
   are exported to the rest of the job. Every job that opens a visual
   recording is to provide the tools through this action (the gpui-shell lane
-  first; the TUI shards and GPUI window shards still inline the same three
+  and the TUI shards; the GPUI window shards still inline the same three
   steps). A job that builds the tools needs the
   sibling checkouts visual-replay-tools.yml clones (codetracer-native-backend
   with its submodules, codetracer-native-recorder, codetracer-visual-replay,

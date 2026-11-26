@@ -264,51 +264,19 @@ jobs:
           if [ "$result" = needed=true ] || [ "$nim" = needed=true ]; then result=needed=true; fi
           echo "$result" | tee -a "$GITHUB_OUTPUT"
 
-      - name: Wait for the visual replay tools
-        # The tools job runs beside ct-build and is not a `needs` of this
-        # job, so that the shards that do not use its tools start when
-        # ct-build ends. This one waits for its artifact here, after its own
-        # provisioning, which normally outlasts the tools job; when the job
-        # failed, or the bound passes, it does not wait and the restore below
-        # is skipped, so ci/test/visual-replay-tools.sh builds the tools here.
+      - name: Provide the visual replay player for this shard's visual-recording scenarios and suites
+        # ct_gfx_player, ct-native-replay with its test licence and ct-mcr,
+        # and the variables that name them (CODETRACER_CT_GFX_PLAYER_CMD and
+        # the rest), through the one action every job that opens a visual
+        # recording uses: this run's visual-replay-tools artifact when it is
+        # there, else built here. The tools job runs beside ct-build and is
+        # not a `needs` of this job, so the shards that do not use its tools
+        # start when ct-build ends; this one waits for the artifact here,
+        # after its own provisioning, which normally outlasts the tools job.
         if: ${{ !cancelled() && steps.ct.outcome == 'success' && steps.player.outputs.needed == 'true' }}
-        id: vr_wait
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: nix develop .#ci --command bash ci/wait-for-run-artifact.sh visual-replay-tools "visual-replay-tools /" 3600
-
-      - name: Restore the visual replay tools from the visual-replay-tools job
-        # ct-native-replay, ct_gfx_player and ct-mcr, built once per run in
-        # parallel with ct-build (visual-replay-tools.yml), rather than in this
-        # job (about 22 minutes for ct-mcr alone in GPUI shard 1 of run
-        # 44269676398). Best effort: when the artifact is missing or short,
-        # ci/test/visual-replay-tools.sh builds them here as before.
-        if: ${{ !cancelled() && steps.ct.outcome == 'success' && steps.player.outputs.needed == 'true' && steps.vr_wait.outcome == 'success' }}
-        id: vr_tools
-        continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: ./.github/actions/provide-visual-replay-tools
         with:
-          name: visual-replay-tools
-          path: ${{ runner.temp }}/visual-replay-tools
-
-      - name: Unpack the visual replay tools
-        if: ${{ !cancelled() && steps.ct.outcome == 'success' && steps.player.outputs.needed == 'true' && steps.vr_tools.outcome == 'success' }}
-        continue-on-error: true
-        run: |
-          bash ci/unpack-ct-build-products.sh "${RUNNER_TEMP}/visual-replay-tools" visual-replay-tools.tar.gz
-          echo "CT_VISUAL_REPLAY_TOOLS_PREBUILT=1" >>"$GITHUB_ENV"
-
-      - name: Build the visual replay player for this shard's visual-recording scenarios and suites
-        # terminal/visual-replay-video-player opens a visual recording, which
-        # needs ct_gfx_player, ct-native-replay's test licence and ct-mcr; no
-        # step built them and the scenario failed with "the visual replay
-        # player (ct_gfx_player) is not installed" (run 43996043232, shard 6).
-        if: ${{ !cancelled() && steps.ct.outcome == 'success' && steps.player.outputs.needed == 'true' }}
-        run: |
-          nix develop .#devShells.x86_64-linux.default --command bash ci/test/visual-replay-tools.sh "$RUNNER_TEMP/visual-replay.env"
-          # shellcheck disable=SC1091
-          ( . "$RUNNER_TEMP/visual-replay.env"; env | grep -E '^(CODETRACER_|CT_)' ) >> "$GITHUB_ENV"
+          wait-for-artifact: 'true'
 
       - name: TUI Tier 1 — the suites that need no terminal
         # NOT the Tier-1 suites that open an rr recording of a native program
