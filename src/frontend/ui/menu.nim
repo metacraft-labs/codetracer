@@ -429,9 +429,11 @@ when defined(js):
       mnemonic: (if node.mnemonic == '\0': "" else: $node.mnemonic),
       children: @[])
     if node.kind == MenuFolder:
+      # The widths are the folder's: once for all its children, not once per
+      # child (which looked up every sibling's chord again for each).
+      let childWidths = self.calculateMaxMenuElementWidth(node)
       for childIndex, child in menuNodeChildren(node):
         if child.shouldRenderMenuNode():
-          let childWidths = self.calculateMaxMenuElementWidth(node)
           result.children.add(self.menuRecord(
             child,
             path & @[childIndex],
@@ -475,7 +477,14 @@ when defined(js):
 
     fmt"top: {value * itemH + separators * itemH - 2 * itemH}px; left: calc({left}px + {2 * depth}px)"
 
+  proc buildMenuShellModelOnce(self: MenuComponent): MenuShellModel
+
   proc buildMenuShellModel(self: MenuComponent): MenuShellModel =
+    ## Every chord the model shows is looked up once (`holdingChords`).
+    holdingChords:
+      result = self.buildMenuShellModelOnce()
+
+  proc buildMenuShellModelOnce(self: MenuComponent): MenuShellModel =
     result.rootNodes = @[]
     result.searchResults = @[]
     result.nestedMenus = @[]

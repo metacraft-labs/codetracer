@@ -505,7 +505,7 @@ src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/fro
 # 2026-11-21, the browser's two keyboard oracles: test_cross_renderer_panes.nim
 # exports the four keyboard panes for the Chromium suite, and the renderer-chromium
 # lane lists that suite. Each harness below owes a re-grade for those bytes.
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/test-lane-files.sh	b463de41f09e76644ec644ddfe51bd166d7e2c033699c98ecca5083540215051	dac11ac15fa202b94a711ce73cdf84d50ceb98fef2c743b0886be8fccab53e04
+src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/test-lane-files.sh	b463de41f09e76644ec644ddfe51bd166d7e2c033699c98ecca5083540215051	3b276d54574366876797ae0b46838c73ec866afd6462148199f0cef3c5ffda4c
 # 2026-11-21: a docked plugin pane previews on hover (auto_hide_hover, runtime); these harnesses digest those subjects and owe a re-grade.
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/headless_app/auto_hide_hover.nim	c2395cd53d7292e511d36c714f483d8f6ac8d8bf1f35c2c78237bebd54c73c62	0b4958cca008fcb95abaa5f2a2157cb461ed0b361fe1e0b702efc004cbbcf46f
 
@@ -855,7 +855,7 @@ src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/plugin_
 # does not run (test-lane-files.sh); these harnesses digest those subjects and
 # owe a re-grade.
 src/frontend/gpui/tests/plat20-mutation-control.sha256	src/frontend/gpui/window_geometry.nim	8595f1669201ae3addab9f7134adf5c0ce306855acc4726ccfe1d41fb0e79ed7	fade42f842eab416a16e489917dd21c36d0577f86ed04910d418f212d1b9f4c2
-src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	ci/lib/test-lane-files.sh	8723f13449df6da6d5acdf55932cab0382378d8cb62d41cd89503d948c776663	dac11ac15fa202b94a711ce73cdf84d50ceb98fef2c743b0886be8fccab53e04
+src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	ci/lib/test-lane-files.sh	8723f13449df6da6d5acdf55932cab0382378d8cb62d41cd89503d948c776663	3b276d54574366876797ae0b46838c73ec866afd6462148199f0cef3c5ffda4c
 ci/test/plat70-find-decisions-mutation-control.sha256	src/frontend/gpui/main.nim	74d1b4cb7c6794d7176211fc032aec567fa8d23bc4cc2a44907913bc6f089cbc	e7008c3a965527413534da1ebed1cc29dda1066d519194c91ea3edd04e6788cd
 ci/test/plat70c-find-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	e7008c3a965527413534da1ebed1cc29dda1066d519194c91ea3edd04e6788cd
 ci/test/plat70i-fit-mutation-control.sha256	src/frontend/gpui/main.nim	220d8170c7218709d5ae77691e7cfbfce2954ae359429ba9554c046b0b637053	e7008c3a965527413534da1ebed1cc29dda1066d519194c91ea3edd04e6788cd
@@ -981,7 +981,10 @@ src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/styl
 
 # Re-grades owed for subjects moved by 0a4f1da4d53 without ledger lines;
 # the harnesses that digest them owe a re-grade of the arms that sit in them.
-src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	ci/lib/test-lane-files.sh	a7a0360b1bf2ceb0286af1ecfb5d43f5f40d3bc5b306fd21b7b8667af77edf92	dac11ac15fa202b94a711ce73cdf84d50ceb98fef2c743b0886be8fccab53e04
+src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	ci/lib/test-lane-files.sh	a7a0360b1bf2ceb0286af1ecfb5d43f5f40d3bc5b306fd21b7b8667af77edf92	3b276d54574366876797ae0b46838c73ec866afd6462148199f0cef3c5ffda4c
 
 src/frontend/viewmodel/tests/unit/plat9-surface-mutation-control.sha256	src/frontend/viewmodel/plugin_host/surface_host.nim	3fddebc1d5a1d4df6d8846db8374b95600bb0b09dd3d28b102283f41a0d3bbec	1f7e9eb0d6529b821484d8abcc91f100ce56471507377a2fc92004cc46172bc1
 src/frontend/tui/tests/plat52-terminal-mutation-control.sha256	src/frontend/viewmodel/views/isonim_terminal_output_view.nim	a0cefbc87feb909e990970968e69f06cbdcad37ceb53420628727d68e6dc9158	92146278d8c37c0ea2c9654796b5dacf04fea8fb6496d9d86cd440e8495321ed
+# 2026-11-26: the menu looks each chord up once per build (ui/menu.nim) and its test
+# joined the renderer-dom lane (ci/lib/test-lane-files.sh); these re-grades are owed.
+src/frontend/tui/tests/plat48-topbar-mutation-control.sha256	src/frontend/ui/menu.nim	a21de826c432989a02a66677c4652ab2e46b9691b8c91426e6fd266ac68fda6a	a926ca11ed4aaaa18356fcde161e2055de8729c9b436fcdf8f6508161e4e69fc

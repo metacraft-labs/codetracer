@@ -1218,6 +1218,10 @@ test_lane_files() {
 		# Entry and history jump reach the active tab's views mediator, not
 		# the one that was active when the toolbar's routes were built.
 		echo src/frontend/tests/debug_toolbar_follows_active_tab_test.nim
+		# `menu_chord_lookups_dom_test.nim` holds one menu build (every
+		# `data.redraw()` makes one) to asking the key router for each item's
+		# chord once, not once per item per sibling.
+		echo src/frontend/tests/menu_chord_lookups_dom_test.nim
 		echo src/frontend/tests/agent_editor_selection_dom_test.nim
 		echo src/frontend/tests/origin_chain_wiring_test.nim
 		# `wasm_pane_transport_test.nim` holds the WebAssembly panes' transport
