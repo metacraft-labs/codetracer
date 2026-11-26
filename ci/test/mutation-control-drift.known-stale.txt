@@ -900,8 +900,6 @@ src/frontend/tui/tests/plat52-terminal-mutation-control.sha256	src/frontend/view
 src/frontend/tui/tests/plat48-topbar-mutation-control.sha256	src/frontend/ui/menu.nim	a21de826c432989a02a66677c4652ab2e46b9691b8c91426e6fd266ac68fda6a	a926ca11ed4aaaa18356fcde161e2055de8729c9b436fcdf8f6508161e4e69fc
 # The last move answered to the asker only (middleware.nim) and its redelivery guard (editor.nim),
 # the shared editor's widgetid and its suite case, and complete_move_redelivery_test in renderer-dom.
-src/frontend/tests/plat67-large-file-mutation-control.sha256	src/frontend/ui/shared_editor.nim	612e69b073d1963a8510bf8fe63f7769b85a79c95616c47c39104aaf9ce88c62	03f633d93fb60b935cc0467ecef66af3605291d2c1e9d4dccf82fadb67c14456
-src/frontend/tests/plat67-large-file-mutation-control.sha256	src/frontend/tests/shared_editor_chromium_test.nim	ef0ac8389103e53a88e8c49575a5be1e969d49d41a4d65b483961ef3844d7b5b	c65262d1fe8437310098b0df98aab944f7039cd8beeb833dfcab0cbcb0eebd3f
 
 # 2026-11-26, "Show value origin" on a Pixel History entry (codetracer-pm issue
 # 2026-11-26, "Pixel History entries offer no value origin"): the Pixel History

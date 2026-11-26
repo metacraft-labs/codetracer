@@ -199,6 +199,10 @@ type
     scrollTop*, scrollLeft*: int
     width*, height*: int
     contentWidthPx: int
+    maxLineWidthPx: int
+      ## Monaco's `ViewLines._maxLineWidth`: the widest line drawn since the
+      ## editor was laid out, which decides whether its horizontal scrollbar
+      ## shows.
     zones: seq[ZoneRec]
     nextZoneId: int
     widgets: seq[WidgetRec]
@@ -331,14 +335,35 @@ proc listen(ed: SharedEditor; name: string; f: JsObject): JsObject =
       ed.listeners[name] = kept
   disposable
 
+proc monacoUnexpectedError(e: JsObject) {.importjs:
+  "((e) => setTimeout(() => { throw e; }, 0))(#)".}
+  ## Monaco's default `onUnexpectedError` (`ErrorHandler`): the error is
+  ## rethrown on a later task, where it reaches the page as uncaught.
+
+proc defaultUnexpectedError(e: JsObject) = monacoUnexpectedError(e)
+
+var unexpectedErrorHandler: proc(e: JsObject) = defaultUnexpectedError
+
+proc setUnexpectedErrorHandler*(handler: proc(e: JsObject)) =
+  ## Monaco's `errors.setUnexpectedErrorHandler`: where a listener's error
+  ## goes. `nil` restores the default.
+  unexpectedErrorHandler = if handler.isNil: defaultUnexpectedError else: handler
+
+proc tryCall(f, ev: JsObject): JsObject {.importjs:
+  "((f, ev) => { try { f(ev); return null; } catch (e) { return {error: e}; } })(#, #)".}
+
+proc deliverIsolated(f, ev: JsObject) =
+  ## One listener's call as Monaco's `Emitter._deliver` makes it: an exception
+  ## does not reach the code that fired the event, nor stop the listeners
+  ## after it; it goes to the unexpected-error handler.
+  let failed = tryCall(f, ev)
+  if not isNilOrUndef(failed): unexpectedErrorHandler(failed["error"])
+
 proc fire(ed: SharedEditor; name: string; ev: JsObject) =
   if not ed.listeners.hasKey(name): return
   let ls = ed.listeners[name]
   for l in ls:
-    try:
-      discard callFn(l.f, ev)
-    except CatchableError:
-      discard
+    deliverIsolated(l.f, ev)
 
 # ---------------------------------------------------------------------------
 # Tokens
@@ -510,20 +535,63 @@ proc layoutNow(ed: SharedEditor): VerticalLayout =
 proc topForLine*(ed: SharedEditor; line1: int): int =
   ed.layoutNow.topOfLine(line1)
 
-proc contentHeight*(ed: SharedEditor): int =
-  ed.layoutNow.contentHeight
-
 proc textViewportHeight(ed: SharedEditor): int = max(0, ed.height)
 proc textViewportWidth(ed: SharedEditor): int =
   max(0, ed.width - ed.gutterPx - ScrollbarPx)
 
+proc optionOr(ed: SharedEditor; group, key: cstring; default: JsObject): JsObject =
+  ## `options[group][key]` (or `options[key]` with an empty group), else
+  ## `default`.
+  if ed.options.isNil: return default
+  var o = ed.options
+  if group.len > 0:
+    o = ed.options[group]
+    if isNilOrUndef(o): return default
+  if isNilOrUndef(o[key]): default else: o[key]
+
+proc scrollBeyondLastLine(ed: SharedEditor): bool =
+  ed.optionOr("", "scrollBeyondLastLine", toJs(true)).to(bool)
+
+proc paddingBottomPx(ed: SharedEditor): int =
+  ## Monaco's `padding.bottom`, which `layoutNow` lays out as a zone.
+  if not ed.monacoGutter: return 0
+  max(0, int(jsNum(ed.optionOr("padding", "bottom", toJs(0)))))
+
+func visualColumns(s: string; tabSize = 4): int =
+  ## The columns a line draws in: one per code point, a tab to its next stop.
+  for c in s:
+    if c == '\t': result += tabSize - (result mod tabSize)
+    elif (ord(c) and 0xC0) != 0x80: inc result
+
+proc horizontalScrollbarPx(ed: SharedEditor): int =
+  ## Monaco's `ViewLayout._getHorizontalScrollbarHeight`: the horizontal
+  ## scrollbar's size while it shows, which is unless it is `hidden` and while
+  ## what scrolls (`_computeContentWidth`: the widest line drawn,
+  ## `scrollBeyondLastColumn` characters more and the vertical scrollbar) is
+  ## wider than the text area.
+  if $jsStr(ed.optionOr("scrollbar", "horizontal", toJs(cstring"auto"))) == "hidden":
+    return 0
+  let beyondColumns = jsNum(ed.optionOr("", "scrollBeyondLastColumn", toJs(4)))
+  let vertical = jsNum(ed.optionOr("scrollbar", "verticalScrollbarSize", toJs(14)))
+  let scrollWidth = float(ed.maxLineWidthPx) + beyondColumns * ed.charWidth + vertical
+  if float(max(0, ed.width - ed.gutterPx)) >= scrollWidth: return 0
+  int(jsNum(ed.optionOr("scrollbar", "horizontalScrollbarSize", toJs(12))))
+
+proc contentHeight*(ed: SharedEditor): int =
+  ## Monaco's `getContentHeight` (`ViewLayout._getContentHeight`): the lines
+  ## and zones, and then either the room `scrollBeyondLastLine` adds below the
+  ## last line or, without it, the horizontal scrollbar while it shows, so the
+  ## last line is not drawn under it.
+  result = ed.layoutNow.contentHeight
+  if ed.scrollBeyondLastLine:
+    result += max(0, ed.textViewportHeight - ed.lineHeight - ed.paddingBottomPx)
+  elif not ed.optionOr("scrollbar", "ignoreHorizontalScrollbarInContentHeight",
+                       toJs(false)).to(bool):
+    result += ed.horizontalScrollbarPx
+
 proc maxScrollTop(ed: SharedEditor): int =
-  ## Monaco's: with `scrollBeyondLastLine` (its default) the last line can
-  ## scroll up to the top of the view; without it, to the bottom.
-  let beyond = ed.options.isNil or isNilOrUndef(ed.options["scrollBeyondLastLine"]) or
-               ed.options["scrollBeyondLastLine"].to(bool)
-  if beyond: max(0, ed.contentHeight - ed.lineHeight)
-  else: max(0, ed.contentHeight - ed.textViewportHeight)
+  ## Monaco's: what scrolls (`max(view, content height)`) less the view.
+  max(0, ed.contentHeight - ed.textViewportHeight)
 
 proc scrollHeightPx*(ed: SharedEditor): int =
   ## Monaco's `getScrollHeight`: what the view can scroll through.
@@ -831,7 +899,7 @@ proc render*(ed: SharedEditor) =
   # middle, finds it over the drawn text: as wide as the view or the widest
   # line, and from the document's start to the end of the text or of the
   # view, whichever comes first.
-  let layerH = cstring($max(1, min(ed.contentHeight, ed.scrollTop + ed.height)) & "px")
+  let layerH = cstring($max(1, min(lay.contentHeight, ed.scrollTop + ed.height)) & "px")
   let layerW = cstring($max(max(1, ed.width - ed.gutterPx), ed.contentWidthPx) & "px")
   for layer in [ed.linesLayer, ed.overlays]:
     layer.setStyle("height", layerH)
@@ -849,7 +917,7 @@ proc render*(ed: SharedEditor) =
     let line0 = line1 - 1
     let top = lay.topOfLine(line1)
     let lt = ed.index.lineText(ed.doc.state.doc, line0)
-    widestChars = max(widestChars, lt.len)
+    widestChars = max(widestChars, visualColumns(lt))
     var deco = decoByLine.getOrDefault(line0)
     if ed.semanticVersion == ed.doc.timeline.version and
        ed.semanticSpans.hasKey(line0):
@@ -1062,9 +1130,16 @@ proc render*(ed: SharedEditor) =
       z.marginNode.setStyle("top", cstring($zt & "px"))
       z.marginNode.setStyle("height", cstring($z.heightPx & "px"))
   # Scrollbars.
-  let ch = max(1, lay.contentHeight)
   let vh = ed.textViewportHeight
   ed.contentWidthPx = int(float(widestChars + 2) * ed.charWidth)
+  # Monaco's `_updateLineWidths`: the widest drawn line only grows, unless
+  # every line was drawn, when it is known exactly.
+  let drawnWidth = max(1, int(ceil(float(widestChars) * ed.charWidth)))
+  if lines.len > 0 and lines[0] == 1 and lines[^1] == ed.index.lineCount:
+    ed.maxLineWidthPx = drawnWidth
+  else:
+    ed.maxLineWidthPx = max(ed.maxLineWidthPx, drawnWidth)
+  let ch = max(1, ed.contentHeight)
   if ch > vh and vh > 0:
     let sliderH = max(20.0, float(vh) * float(vh) / float(ch))
     let sliderTop = (float(vh) - sliderH) * float(ed.scrollTop) / float(max(1, ch - vh))
@@ -1073,7 +1148,7 @@ proc render*(ed: SharedEditor) =
     ed.vslider.setStyle("top", cstring($sliderTop & "px"))
   else:
     ed.vbar.setStyle("display", "none")
-  ed.linesContent.setStyle("height", cstring($ch & "px"))
+  ed.linesContent.setStyle("height", cstring($max(1, lay.contentHeight) & "px"))
   ed.updateTextarea()
   ed.root.setAttr("data-ct-caret", cstring($(caretLine0 + 1)))
   ed.root.setAttr("data-ct-lines", cstring($ed.index.lineCount))
@@ -1945,6 +2020,7 @@ proc measureHost(ed: SharedEditor) =
   if w > 0 and h > 0 and (w != ed.width or h != ed.height):
     ed.width = w
     ed.height = h
+    ed.maxLineWidthPx = 0
     ed.render()
     let ev = jsNew()
     ed.fire("layout", ev)

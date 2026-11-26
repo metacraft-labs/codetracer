@@ -140,7 +140,7 @@ proc endCase(name: string) =
 
 const
   Source = "def main():\n    x = 1\n    if x:\n        y = 2\n\n    return x\nprint(main())\n"
-  ExpectedChecks = 170
+  ExpectedChecks = 180
     ## Written from a run. See the end of `main`.
   HugeKeyRatio = 25.0
     ## `caseHugeFile`'s bound: a keystroke at 200,000 lines against one at
@@ -1069,6 +1069,76 @@ proc caseScrollRangeAndViewState() {.async.} =
      str(f.getModel().getValueInRange(sels[1])) == "ro", "with their text"
   endCase("Monaco's scroll range, and the view state carries every selection")
 
+
+proc throwingListener(): JsObject {.importjs:
+  "(() => { throw new Error('a listener that throws'); })@".}
+proc countingListener(box: JsObject): JsObject {.importjs:
+  "((box) => () => { box.calls += 1; })(#)".}
+
+proc caseContentHeightAsMonaco() {.async.} =
+  beginCase()
+  # The content height Monaco 0.54 reports and scrolls by
+  # (`ViewLayout._getContentHeight`): the lines and zones, then — with
+  # `scrollBeyondLastLine` — the view less a line below the last one, or —
+  # without it — the horizontal scrollbar while it shows, which is while the
+  # widest line DRAWN so far (`ViewLines._maxLineWidth`, which only grows),
+  # `scrollBeyondLastColumn` characters (4) and the vertical scrollbar (14 px)
+  # are wider than the text area. The scrollbar is 12 px
+  # (`horizontalScrollbarSize`). The desktop's source editors turn
+  # `scrollBeyondLastLine` off, so a jump to a stop near the end of a file
+  # with a long line rests where Monaco's does only with this term.
+  var lines: seq[string] = @[]
+  for i in 1 .. 100: lines.add "row_" & $i
+  lines[0] = "wide_" & repeat('x', 400)
+  let ed = fresh(lines.join("\n"))
+  let f = facadeOf(ed)
+  let vh = ed.height
+  let lh = ed.lineHeight
+  ck num(f.getContentHeight()) == float(100 * lh + vh - lh),
+    "scrollBeyondLastLine: the lines and the view less a line"
+  ed.options[cstring"scrollBeyondLastLine"] = false
+  ed.render()
+  await settle()
+  ck num(f.getContentHeight()) == float(100 * lh + 12),
+    "a drawn line wider than the view: the horizontal scrollbar below the last line"
+  discard f.setScrollTop(100_000)
+  await settle()
+  ck ed.scrollTop == 100 * lh + 12 - vh,
+    "the last line stops above the scrollbar (" & $ed.scrollTop & ")"
+  ck num(f.getContentHeight()) == float(100 * lh + 12),
+    "the wide line scrolled away still counts: the widest drawn line only grows"
+  ed.options[cstring"scrollbar"] = js{horizontal: cstring"hidden"}
+  ed.render()
+  ck num(f.getContentHeight()) == float(100 * lh), "a hidden horizontal scrollbar adds nothing"
+  ed.options[cstring"scrollbar"] = js{ignoreHorizontalScrollbarInContentHeight: true}
+  ed.render()
+  ck num(f.getContentHeight()) == float(100 * lh),
+    "ignoreHorizontalScrollbarInContentHeight adds nothing"
+  var short: seq[string] = @[]
+  for i in 1 .. 100: short.add "row_" & $i
+  let narrow = fresh(short.join("\n"))
+  narrow.options[cstring"scrollBeyondLastLine"] = false
+  narrow.render()
+  await settle()
+  ck num(facadeOf(narrow).getContentHeight()) == float(100 * lh),
+    "no line wider than the view: no scrollbar, the lines alone"
+  # A listener that throws, as Monaco's `Emitter._deliver` handles it: the
+  # code that fired the event goes on, so do the listeners after it, and the
+  # error goes to the unexpected-error handler (`onUnexpectedError`).
+  let box = js{calls: 0, errors: 0}
+  setUnexpectedErrorHandler(proc(e: JsObject) =
+    box["errors"] = num(box["errors"]) + 1.0)
+  discard facadeOf(narrow).onDidScrollChange(throwingListener())
+  discard facadeOf(narrow).onDidScrollChange(countingListener(box))
+  var returned = false
+  discard facadeOf(narrow).setScrollTop(5 * lh)
+  returned = true
+  ck returned and narrow.scrollTop == 5 * lh, "the scroll that fired the event completes"
+  ck num(box.calls) >= 1.0, "the listener after the throwing one is called"
+  ck num(box.errors) >= 1.0, "the listener's error goes to the unexpected-error handler"
+  setUnexpectedErrorHandler(nil)
+  endCase("the content height and listener errors are Monaco's")
+
 proc caseRevealsAsMonaco() {.async.} =
   beginCase()
   # The editor API's reveals put the view where Monaco 0.54's
@@ -1277,6 +1347,7 @@ proc main() {.async.} =
   await guarded(caseBracketsAndWheel, "caseBracketsAndWheel")
   await guarded(caseScrollRangeAndViewState, "caseScrollRangeAndViewState")
   await guarded(caseRevealsAsMonaco, "caseRevealsAsMonaco")
+  await guarded(caseContentHeightAsMonaco, "caseContentHeightAsMonaco")
   await guarded(caseHugeFile, "caseHugeFile")
   beginCase()
   inc checks
