@@ -6,7 +6,9 @@
 ## `design/agent-harbor-front-end/p2c-omnibox-and-control-center-study.md`
 ## §2.6, D25, D76-D83).
 ##
-## The story draws the caption bar's line of tabs (30px, the bar's ground):
+## The story draws the caption bar's line of tabs (34px, the bar's ground,
+## as GPUI's own top bar, `window_top_bar.TopBarPx`, and the web's `#menu`;
+## its 30px strip line 4px down, `StripTopPx`, so the tab is 6px down):
 ## the recording's tab, active (26px, the active tab's ground, 10px in), its
 ## name in the tab's 16px and, at its end, the recording switcher's numbered
 ## buttons for the processes; then a plain tab; an empty working area below.
@@ -26,6 +28,7 @@ import isonim/core/computation
 import ../../viewmodel/views/agent_harbor_process_switcher_words
 import ./ah_theme
 import ./ah_initiative_tab_bar
+from ./ah_session_views import StripTopPx
 import ../../styles/generated/design_tokens
 
 export agent_harbor_process_switcher_words
@@ -96,11 +99,17 @@ proc drawProcessSwitcherStory*(r: GpuiRenderer; host: GpuiElement; vm: ProcessSw
                   ("width", $widthPx & "px"), ("height", $heightPx & "px"),
                   ("background", DesignTokenHex[dtColorsUiSurfaceBaseCanvas][p.mode])])
   r.tag(host, "surface", ProcessSwitcherSurface)
+  # The bar the web's caption bar is (`#menu`, 34px): its strip line
+  # `StripTopPx` down, as the initiative bar's, so the tab sits 6px under the
+  # window's top and the bar ends 2px under it. It was the 30px line alone,
+  # the tab 2px under the top in a bar 4px shorter than the web's.
+  let bar = r.box(column = true, pairs = [("padding-top", $StripTopPx & "px"),
+                                          ("background", p.ground), ("flex-shrink", "0")])
+  r.tag(bar, "caption-bar", "")
   let line = r.box(pairs = [("height", $StripLinePx & "px"), ("items", "center"),
                             ("padding-left", "8px"), ("padding-right", "4px"),
-                            ("background", p.ground), ("flex-shrink", "0"),
-                            ("overflow", "hidden")])
-  r.tag(line, "caption-bar", "")
+                            ("flex-shrink", "0"), ("overflow", "hidden")])
+  r.appendChild(bar, line)
   let slots = slotsForPx(widthPx)
   let tab = r.box(pairs = [("height", $StripTabPx & "px"), ("items", "center"),
                            ("gap", $TabGapPx & "px"),
@@ -133,7 +142,7 @@ proc drawProcessSwitcherStory*(r: GpuiRenderer; host: GpuiElement; vm: ProcessSw
   r.tag(other, "ink", otherInk)
   r.appendChild(other, r.text(otherTab, BodyLargePx, otherInk, shrink = false))
   r.appendChild(line, other)
-  r.appendChild(host, line)
+  r.appendChild(host, bar)
   r.appendChild(host, r.box(pairs = [("flex-grow", "1")]))
 
 proc mountProcessSwitcherStory*(r: GpuiRenderer; host: GpuiElement; vm: ProcessSwitcherVM;
