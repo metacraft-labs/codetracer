@@ -932,6 +932,45 @@ jobs:
         if: ${{ !cancelled() }}
         run: nix develop .#devShells.x86_64-linux.default --command just test-vm-collab-units
 
+      - name: Read the isonim-gpui revision the collaboration suite builds against
+        # `test_collab_m8_cross_frontend` imports `isonim_gpui/bindings`, which
+        # bakes the path of isonim-gpui's shim into the binary when the shim
+        # is present at compile time, and otherwise asks the loader for a bare
+        # `libgpui_nim_shim.so`: nothing built it in this job, so the suite
+        # died with "could not load: libgpui_nim_shim.so" (run 45741486461).
+        # The checkout is the one `provision-repro-lock-siblings` made.
+        id: gpui_shim_rev
+        if: ${{ !cancelled() }}
+        run: echo "rev=$(git -C ../isonim-gpui rev-parse HEAD)" >>"$GITHUB_OUTPUT"
+
+      - name: Restore isonim-gpui's featureless shim
+        # The same key and path as gpui-shell.yml's, so the two jobs share one
+        # build per isonim-gpui revision.
+        id: gpui_shim_cache
+        if: ${{ !cancelled() && steps.gpui_shim_rev.outputs.rev != '' }}
+        uses: actions/cache/restore@v4
+        with:
+          path: ../isonim-gpui/rust/target/debug/libgpui_nim_shim.so
+          key: gpui-shim-featureless-v1-${{ steps.gpui_shim_rev.outputs.rev }}
+
+      - name: Build isonim-gpui's featureless shim
+        # In isonim-gpui's own dev shell, as tui-tests.yml and
+        # ci/test/gpui-window-captures.sh build it.
+        id: gpui_shim_build
+        if: ${{ !cancelled() && steps.gpui_shim_rev.outputs.rev != '' && steps.gpui_shim_cache.outputs.cache-hit != 'true' }}
+        run: |
+          set -euo pipefail
+          (cd ../isonim-gpui && nix develop --profile "${CT_GCROOT_DIR:-$RUNNER_TEMP}/isonim-gpui-shell" --command bash -c 'cd rust && cargo build')
+          ls -la ../isonim-gpui/rust/target/debug/libgpui_nim_shim.so
+
+      - name: Save isonim-gpui's featureless shim
+        if: ${{ !cancelled() && steps.gpui_shim_build.outcome == 'success' }}
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ../isonim-gpui/rust/target/debug/libgpui_nim_shim.so
+          key: gpui-shim-featureless-v1-${{ steps.gpui_shim_rev.outputs.rev }}
+
       - name: Run the collaboration integration and soak suites
         if: ${{ !cancelled() }}
         # Needs more than Nim: real localhost sockets, the GPUI Rust shim, a
