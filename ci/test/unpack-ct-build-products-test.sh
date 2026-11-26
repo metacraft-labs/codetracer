@@ -91,7 +91,7 @@ check "visual-replay-tools packs its closure list" "visual-replay-tools.yml does
 	grep -qF 'files+=(codetracer-visual-replay/nix-runtime-closure.txt)' .github/workflows/visual-replay-tools.yml
 
 # shellcheck disable=SC2016 # the workflow lines, literally
-for f in .github/workflows/gpui-window-captures.yml .github/workflows/tui-tests.yml; do
+for f in .github/workflows/gpui-window-captures.yml .github/workflows/tui-tests.yml .github/workflows/scenario-lanes.yml; do
 	check "$f unpacks through the script, and may fail into a retry" "$f: no checked unpack step" \
 		grep -q 'run: bash ci/unpack-ct-build-products.sh "${RUNNER_TEMP}/ct-build"$' "$f"
 	check "$f downloads again when the first unpack fails" "$f: no retry download" \

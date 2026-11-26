@@ -33,9 +33,9 @@ jobs:
     # executing at 128.7m when its whole run was cancelled. That is a hard lower
     # bound, so any bound at or below 120m is KNOWN to be too tight. 150m is the
     # next round number above it. See the note on `test-ui-tests-rr` below.
-    # Raised to 210m with the Firefox scenario lane (27 scenarios, fast mode
-    # only), added after the desktop lane and its Monaco run: a bound sized for
-    # the job before them would cut the new lane off rather than catch a hang.
+    # Raised to 210m with the scenario lanes, which have since moved to
+    # scenario-lanes.yml; kept, as the macOS leg's dev-shell build alone has
+    # run past 150 (run 45755922336).
     timeout-minutes: 210
     # macOS tests are new and may have pre-existing failures; don't block PRs
     continue-on-error: ${{ matrix.platform == 'macos' }}
@@ -256,9 +256,6 @@ jobs:
         with:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-          # From the test lock, ci/test/siblings/repro.lock: the scenario lane builds
-          # its runner and backend from these (ci/test/scenarios.sh).
-          test-siblings: DemoVideoScript,DemoVideoScript-Playwright
 
       # NOTE: codetracer-trace-format, codetracer-trace-format-nim,
       # codetracer-native-recorder, codetracer-visual-replay and
@@ -639,107 +636,6 @@ jobs:
       # failure it guards against, the pane emptying after a jump, is one a
       # reader hits immediately, so it should be reported even when an earlier
       # spec in the suite has already gone red.
-      - name: Native replay, the BEAM recorder and the GL recording for the desktop scenario lane
-        # What each piece is and where it lands: ci/test/scenario-lane-provision.sh.
-        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.platform == 'nixos' }}
-        run: bash ci/test/scenario-lane-provision.sh native
-
-      - name: Restore the patchable Godot engine for the HCR flame scenarios
-        # Byte-identical when rebuilt from the same tree (its build script), so
-        # its revision, reprobuild's and the flags are the whole key. Restore and
-        # save are separate: actions/cache saves only when the whole job passes.
-        id: hcr-godot
-        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.platform == 'nixos' }}
-        uses: actions/cache/restore@v4
-        with:
-          path: ${{ github.workspace }}/../codetracer-engine-godot/bin/godot.linuxbsd.template_debug.x86_64.hcrgpu
-          key: hcr-godot-c2b72fd205bcb509cca8513a2627ae18d9809562-reprobuild-37a109c4e1cf650e6eb79b11d9fadf6e49e64614-vulkan-hcrgpu
-
-      - name: The HCR flame demo for the desktop scenario lane
-        id: hcr-flame
-        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.platform == 'nixos' }}
-        env:
-          HCR_ENGINE_REV: c2b72fd205bcb509cca8513a2627ae18d9809562
-        run: bash ci/test/scenario-lane-provision.sh hcr
-
-      - name: Save the patchable Godot engine
-        if: ${{ !cancelled() && matrix.platform == 'nixos' && steps.hcr-flame.outcome == 'success' && steps.hcr-godot.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ github.workspace }}/../codetracer-engine-godot/bin/godot.linuxbsd.template_debug.x86_64.hcrgpu
-          key: ${{ steps.hcr-godot.outputs.cache-primary-key }}
-
-      - name: Scenarios — the desktop lane
-        # The real `ct` → Electron through DemoVideoScript-Playwright's arm
-        # with CodeTracer's Playwright binding, under Xvfb at 2560x1440, 96 dpi.
-        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.platform == 'nixos' }}
-        env: # Windows system files: the private CAS remote (ct_stages portableRecording)
-          CODETRACER_PRIVATE_RECORDINGS: ${{ github.workspace }}/../codetracer-private-recordings
-          CT_SYMBOL_SERVER: "off"
-        run: |
-          nix develop .#devShells.x86_64-linux.default --command bash -c '
-            set -e
-            just scenario-build dvs stage playwright
-            just scenario-lane-xvfb electron
-            . scripts/lib/own-xvfb.sh
-            trap own_xvfb_stop EXIT
-            own_xvfb_start -screen 0 2560x1440x24 -dpi 96 -nolisten tcp
-            bash ci/test/scenario-broken-run.sh electron'
-
-      - name: Upload the failed scenario runs (desktop)
-        if: ${{ failure() && matrix.platform == 'nixos' }}
-        uses: metacraft-labs/DemoVideoScript/.github/actions/upload-failed-runs@b2dd47d345794d53966102b7ee151e46f7d52daf
-        with:
-          build-dir: build
-          name: scenario-runs-electron
-
-      - name: Scenarios — the desktop lane with Monaco
-        # The same lane with the editor pane drawn by Monaco
-        # (`CODETRACER_SHARED_EDITOR=0`; the shared editor is the default, and
-        # Monaco stays behind the `sharedEditor` setting until it is dropped —
-        # docs/shared-editor-parity.md). Scenarios that pin an editor in their
-        # stage (`front-end-options`) keep it. The run before this one is the
-        # default, the shared editor.
-        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.platform == 'nixos' }}
-        env:
-          CODETRACER_PRIVATE_RECORDINGS: ${{ github.workspace }}/../codetracer-private-recordings
-          CT_SYMBOL_SERVER: "off"
-          CODETRACER_SHARED_EDITOR: "0"
-        run: |
-          nix develop .#devShells.x86_64-linux.default --command bash -c '
-            set -e
-            just scenario-lane-xvfb electron'
-
-      - name: Upload the failed scenario runs (desktop, Monaco)
-        if: ${{ failure() && matrix.platform == 'nixos' }}
-        uses: metacraft-labs/DemoVideoScript/.github/actions/upload-failed-runs@b2dd47d345794d53966102b7ee151e46f7d52daf
-        with:
-          build-dir: build
-          name: scenario-runs-electron-monaco
-
-      - name: Scenarios — the web deployment in Firefox
-        # The scenarios that serve the recording from `ct host` (`deployment:
-        # web`), the page opened in Playwright's Firefox: the desktop lane runs
-        # them in Chromium only. The dev shell's `playwright-driver.browsers`
-        # carries Firefox beside Chromium (ci/test/scenarios.sh, `browser_of`).
-        id: scenarios-firefox
-        if: ${{ !cancelled() && steps.ct.outcome == 'success' && matrix.platform == 'nixos' }}
-        env:
-          CODETRACER_PRIVATE_RECORDINGS: ${{ github.workspace }}/../codetracer-private-recordings
-          CT_SYMBOL_SERVER: "off"
-        run: |
-          nix develop .#devShells.x86_64-linux.default --command bash -c '
-            set -e
-            just scenario-build dvs stage playwright
-            just scenario-lane-xvfb firefox'
-
-      - name: Upload the failed scenario runs (Firefox)
-        if: ${{ failure() && matrix.platform == 'nixos' && steps.scenarios-firefox.outcome == 'failure' }}
-        uses: metacraft-labs/DemoVideoScript/.github/actions/upload-failed-runs@b2dd47d345794d53966102b7ee151e46f7d52daf
-        with:
-          build-dir: build
-          name: scenario-runs-firefox
-
       - name: Event Log stays static across a jump
         # Only with a ct, or an earlier failure resurfaces as `ct ENOENT`.
         if: ${{ !cancelled() && (steps.ct.outcome == 'success' || steps.ct-darwin.outcome == 'success') }}

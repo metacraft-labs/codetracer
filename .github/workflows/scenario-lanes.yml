@@ -1,0 +1,391 @@
+name: scenario-lanes
+# Called from codetracer.yml (job `scenario-lanes`), which keeps the triggers, the
+# concurrency group, the job's `needs:` (ct-build) and ci-verdict's view of it.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  id-token: write
+  actions: read
+
+jobs:
+  scenario-lanes:
+    # The scenario lanes, one leg per shard: the desktop lane run twice (the
+    # shared editor, the default, and Monaco) and the web deployment in Firefox.
+    # A leg builds no ct and no native tool: it restores ct from ct-build and
+    # ct-native-replay, ct_gfx_player and ct-mcr from visual-replay-tools, once
+    # per run. Seventeen legs that each built all of it filled the runner disk
+    # pool (the host's guard stopped six jobs of run 45755922336) and timed out
+    # the private Nix cache. Four shards per desktop run, balanced by the lane's
+    # measured times (src/tests/scenarios/lanes/electron.timings.tsv,
+    # ci/test/scenario-lane-shard.py): about 70 minutes of scenarios each, about
+    # 45 of setup. ci/test/scenario-lane-shard-test.sh fails unless these legs
+    # run every scenario of each lane exactly once.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {leg: electron-1-of-4, lane: electron, shard: 1/4}
+          - {leg: electron-2-of-4, lane: electron, shard: 2/4}
+          - {leg: electron-3-of-4, lane: electron, shard: 3/4}
+          - {leg: electron-4-of-4, lane: electron, shard: 4/4}
+          - {leg: electron-monaco-1-of-4, lane: electron, shard: 1/4, shared-editor: "0"}
+          - {leg: electron-monaco-2-of-4, lane: electron, shard: 2/4, shared-editor: "0"}
+          - {leg: electron-monaco-3-of-4, lane: electron, shard: 3/4, shared-editor: "0"}
+          - {leg: electron-monaco-4-of-4, lane: electron, shard: 4/4, shared-editor: "0"}
+          - {leg: firefox-1-of-1, lane: firefox, shard: ""}
+    name: scenario-lanes (${{ matrix.leg }})
+    runs-on: [self-hosted, linux, x64]
+    # About 45 minutes of setup (90 on a loaded host) and a shard of about 70
+    # (the Scenarios step's own bound is 120).
+    timeout-minutes: 210
+    steps:
+      - name: Record when the job started
+        # For the cache push, whose budget is capped at what the job's time
+        # limit leaves.
+        run: echo "CT_JOB_STARTED_AT=$(date +%s)" >>"$GITHUB_ENV"
+
+      - name: Mint installation token for cross-repo sibling access
+        # GitHub free plan restricts org-level secrets with visibility
+        # ALL from being readable inside private repos, so we mint
+        # per-run installation tokens from the repo-local
+        # CI_TOKEN_PROVIDER_APP_ID + CI_TOKEN_PROVIDER_PRIVATE_KEY
+        # secrets via the CI Token Provider GitHub App.
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Evict stale git credentials from this runner's persistent home
+        # Before any git operation: a stale owner-scoped extraHeader in this
+        # reused runner's ~/.gitconfig outranks checkout's fresh one. A remote
+        # action, so it needs no checkout; the rationale is in its action.yml.
+        uses: metacraft-labs/metacraft-github-actions/evict-stale-git-credentials@2c12f82a56d5000bd47c42ad8c25a3596820057c
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Setup dev env
+        # Nix, and the private siblings cloned beside this checkout at the
+        # revisions flake.lock pins (ci/test/sibling-provisioning-test.sh holds
+        # every copy of this list to it): native-backend, native-recorder and
+        # visual-replay for ci/test/visual-replay-tools.sh, the BEAM recorder,
+        # the flame demo and reprobuild for the HCR scenarios.
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
+        with:
+          env-flavor: nix
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          attic-cache: ${{ vars.ATTIC_CACHE }}
+          nix-develop-args: '.?submodules=1'
+          siblings: |
+            # codetracer-trace-format{,-nim} BY COMMIT, not `=dev`: the two halves of
+            # the FFI pair are `/agents` inputs in flake.nix, and trace-format's `dev`
+            # tip (051a298, 2026-09-30) predates the FileTable / PathTableKind API that
+            # src/db-backend's ctfs_trace_reader has called since 2026-10-03, so a
+            # sibling cloned at `dev` fails to compile. Full account and the refresh
+            # rule: .github/actions/setup-db-backend-siblings/action.yml.
+            codetracer-trace-format=2f01e602e70f69a04675293f3fa0d5bad9f196a1
+            codetracer-trace-format-nim=3e50ca3f2bf6316e8f764952a84078cf59b11023
+            codetracer-native-recorder=2a1a1c4e4e796008c077d90b79773f79258dcf5c
+            # codetracer-native-backend and codetracer-visual-replay BY COMMIT as well: both are
+            # `/agents` inputs in flake.nix (7ab073a22), so `=dev` cloned a different tree than the
+            # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
+            # the lock, as for the trace-format pair above.
+            codetracer-visual-replay=360a8131ec9fc81d0ebd1cdbd1743238218346af
+            codetracer-native-backend=367e7164f43453513681807eeadb8797b6d5bcde
+            # The desktop scenario lane's recorders and recordings: the BEAM
+            # recorder at repro.lock's pin, and the example recordings at the
+            # pin of the test lock (ci/test/siblings/repro.lock), the commit their
+            # scenarios were measured against.
+            codetracer-beam-recorder=e8ba8f7b77ac609faca152b7139b19ed4db7cffb
+            codetracer-example-recordings=b87d40d6b7b0a4d2e4d8306b16a8f9f778838013
+            # The Windows portable recording's system files (its CAS remote):
+            # ci/toolchain.pin's PRIVATE_SIBLING_CODETRACER_PRIVATE_RECORDINGS.
+            codetracer-private-recordings=c20937d81529a2d079676aa6755deb972bdacb64
+            # The HCR flame scenarios' demo, and reprobuild (repro.lock's pin) for the
+            # HCR coordinator driver, the patchable-profile emitter and the in-target
+            # agent the patchable Godot links.
+            codetracer-flame-demo=27425eebeb9ac79708cbde7a38c054f74b0c415f
+            # codetracer-visual-replay's config.nims puts both on its --path
+            # (ct_gfx_player's build); snapshot-codecs at visual-replay's
+            # repro.lock pin, image-diff at codetracer's.
+            codetracer-snapshot-codecs=3e503da83b73e805f30096d4baa45c18d138f6d3
+            codetracer-image-diff=982e669585a150ede87973db281df63188459328
+            reprobuild=37a109c4e1cf650e6eb79b11d9fadf6e49e64614
+            runquota=83d89e581d01c96eadb157bee48cecab6aba1866
+
+      - name: Stage codetracer-trace-format into libs/
+        # The nix flake build below overrides the codetracer-trace-format input
+        # with the in-repo path ./libs/codetracer-trace-format; mirror the
+        # sibling clone (placed at ../codetracer-trace-format by
+        # setup-dev-env) there.
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC="${{ github.workspace }}/../codetracer-trace-format"
+          DEST="${{ github.workspace }}/libs/codetracer-trace-format"
+          rm -rf "$DEST"
+          cp -a "$SRC" "$DEST"
+
+      # --- NixOS setup ---
+
+      - name: Stage codetracer-trace-format-nim into libs/
+        # codetracer-trace-format and codetracer-trace-format-nim are a MATCHED
+        # PAIR across an FFI boundary, and must move together or not at all.
+        # `codetracer-trace-format/codetracer_trace_writer_nim/src/lib.rs` is the
+        # Rust caller; `codetracer-trace-format-nim/src/codetracer_trace_writer_ffi.nim`
+        # is the Nim provider. Overriding only the first one links the newer
+        # caller against the older provider:
+        #
+        #   libcodetracer_trace_writer_nim...rcgu.o: in function
+        #     `codetracer_trace_writer_nim::NimTraceReaderHandle::event_metadata':
+        #     undefined reference to `ct_reader_event_metadata'
+        #   error: could not compile `replay-server` (bin "replay-server")
+        #
+        # `ct_reader_event_metadata` was added to the Nim side on 2026-08-07;
+        # flake.lock pins that repo at 839ed880 (2026-06-24), which does not
+        # define it.
+        #
+        # This is what the per-commit workspace lock was actually buying: not a
+        # pinned SHA, but COORDINATION across repos -- it moved both halves to
+        # one consistent revision. Pinning each sibling independently to `dev`
+        # keeps them current and loses that coordination, so the pair has to be
+        # overridden together, explicitly.
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC="${{ github.workspace }}/../codetracer-trace-format-nim"
+          DEST="${{ github.workspace }}/libs/codetracer-trace-format-nim"
+          rm -rf "$DEST"
+          cp -a "$SRC" "$DEST"
+
+      - name: Refresh the GitHub token
+        id: fresh_token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          keep-refreshing: "true"
+
+      - name: Provision dependency siblings from repro.lock
+        # The sources codetracer's ``config.nims`` puts on the Nim path
+        # (isonim and the nim-* siblings), which the scenario stage compiles
+        # against, and the two dev shells.
+        uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          # From the test lock, ci/test/siblings/repro.lock: the runner and the
+          # desktop arm (ci/test/scenarios.sh) and the three blockchain recorders
+          # the column-breakpoint scenarios record with. Nothing else is
+          # provisioned for the lanes: ct comes from ct-build and the native
+          # tools from visual-replay-tools (below).
+          test-siblings: DemoVideoScript,DemoVideoScript-Playwright,codetracer-solana-recorder,codetracer-polkavm-recorder,codetracer-evm-recorder
+
+      - name: Restore ct and replay-server from the ct-build job
+        # build-once's tree (src/build-debug-repro), where the lane's stages and
+        # the Playwright binding look for ct and replay-server first. This job
+        # `needs:` ct-build.
+        id: ct_download
+        uses: actions/download-artifact@v4
+        with:
+          name: ct-build-products
+          path: ${{ runner.temp }}/ct-build
+
+      - name: Unpack them beside the siblings
+        # Tested whole first; a short download exits 3 and is fetched again.
+        id: unpack
+        continue-on-error: true
+        run: bash ci/unpack-ct-build-products.sh "${RUNNER_TEMP}/ct-build"
+
+      - name: Restore the ct-build products again, the first download being incomplete
+        if: ${{ steps.unpack.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ct-build-products
+          path: ${{ runner.temp }}/ct-build-retry
+
+      - name: Unpack the second download
+        if: ${{ steps.unpack.outcome == 'failure' }}
+        run: bash ci/unpack-ct-build-products.sh "${RUNNER_TEMP}/ct-build-retry"
+
+      - name: ct is there
+        id: ct
+        run: test -x src/build-debug-repro/bin/ct
+
+      - name: Wait for the visual replay tools
+        # Built once per run by visual-replay-tools.yml, in parallel with
+        # ct-build. Best effort: without them, the step after the restore
+        # builds the tools here.
+        id: vr_wait
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: nix develop .#ci --command bash ci/wait-for-run-artifact.sh visual-replay-tools "visual-replay-tools /" 3600
+
+      - name: Restore the visual replay tools from the visual-replay-tools job
+        id: vr_tools
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && steps.vr_wait.outcome == 'success' }}
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: visual-replay-tools
+          path: ${{ runner.temp }}/visual-replay-tools
+
+      - name: Unpack the visual replay tools
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && steps.vr_tools.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          bash ci/unpack-ct-build-products.sh "${RUNNER_TEMP}/visual-replay-tools" visual-replay-tools.tar.gz
+          echo "CT_VISUAL_REPLAY_TOOLS_PREBUILT=1" >>"$GITHUB_ENV"
+
+      - name: ct-native-replay, ct_gfx_player, ct-mcr and the visual replay licence
+        # Takes the restored tools, or builds them when the restore did not
+        # happen (ci/test/visual-replay-tools.sh).
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        run: |
+          nix develop .#devShells.x86_64-linux.default --command bash ci/test/visual-replay-tools.sh "$RUNNER_TEMP/visual-replay.env"
+          # shellcheck disable=SC1091
+          ( . "$RUNNER_TEMP/visual-replay.env"; env | grep -E '^(CODETRACER_|CT_)' ) >> "$GITHUB_ENV"
+
+      - name: Mint a token for the clone below
+        # Late in the job: the clone's own token, freshly minted.
+        id: clone_token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      - name: Clone codetracer-js-recorder sibling
+        # The recorder the lane's JavaScript recordings are made with
+        # (scripts/materialize-recording.sh), at `dev`, its default branch.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-js-recorder
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-js-recorder
+          gh-token: ${{ steps.clone_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Build codetracer-js-recorder sibling
+        # dist/ is produced, never committed; materialize-recording.sh opens
+        # packages/cli/dist/index.js.
+        run: |
+          set -euo pipefail
+          cd "${{ github.workspace }}/../codetracer-js-recorder"
+          nix develop --profile "${CT_GCROOT_DIR:-$RUNNER_TEMP}/codetracer-js-recorder-shell" --no-write-lock-file --command just build
+
+          # The artefact materialize-recording.sh actually opens, asserted by
+          # the same name it uses. A built-looking tree with no dist/index.js
+          # fails later, inside a Playwright fixture, as a suite-wide timeout.
+          if [ ! -f packages/cli/dist/index.js ]; then
+            echo "::error::just build reported success but packages/cli/dist/index.js is missing; scripts/materialize-recording.sh will fail on every recording."
+            ls -la packages/cli/dist 2>/dev/null || echo "  (packages/cli/dist does not exist)"
+            exit 1
+          fi
+          echo "js recorder CLI: $(pwd)/packages/cli/dist/index.js"
+
+      - name: What this shard records with
+        # The HCR flame demo and the blockchain recorders are built only on the
+        # shards whose scenarios use them (ci/test/scenario-lane-needs.sh; its
+        # test holds every such scenario to a flagged shard).
+        id: needs
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        env:
+          LANE: ${{ matrix.lane }}
+          SHARD: ${{ matrix.shard }}
+        run: |
+          set -o pipefail
+          nix develop .#devShells.x86_64-linux.default --command bash ci/test/scenario-lane-needs.sh "$LANE" "${SHARD:-1/1}" | tee -a "$GITHUB_OUTPUT"
+
+      - name: The BEAM recorder and the GL recording for the desktop scenario lane
+        # What each piece is and where it lands: ci/test/scenario-lane-provision.sh.
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        run: bash ci/test/scenario-lane-provision.sh beam
+
+      - name: The blockchain recorders for the scenario lane
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && steps.needs.outputs.recorders != '' }}
+        env:
+          SCENARIO_LANE_RECORDERS: ${{ steps.needs.outputs.recorders }}
+        run: bash ci/test/scenario-lane-provision.sh recorders
+
+      - name: Restore the patchable Godot engine for the HCR flame scenarios
+        # Byte-identical when rebuilt from the same tree (its build script), so
+        # its revision, reprobuild's and the flags are the whole key. Restore and
+        # save are separate: actions/cache saves only when the whole job passes.
+        id: hcr-godot
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && steps.needs.outputs.hcr == 'true' }}
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/../codetracer-engine-godot/bin/godot.linuxbsd.template_debug.x86_64.hcrgpu
+          key: hcr-godot-c2b72fd205bcb509cca8513a2627ae18d9809562-reprobuild-37a109c4e1cf650e6eb79b11d9fadf6e49e64614-vulkan-hcrgpu
+
+      - name: The HCR flame demo for the desktop scenario lane
+        id: hcr-flame
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && steps.needs.outputs.hcr == 'true' }}
+        env:
+          HCR_ENGINE_REV: c2b72fd205bcb509cca8513a2627ae18d9809562
+        run: bash ci/test/scenario-lane-provision.sh hcr
+
+      - name: Save the patchable Godot engine
+        if: ${{ !cancelled() && steps.hcr-flame.outcome == 'success' && steps.hcr-godot.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/../codetracer-engine-godot/bin/godot.linuxbsd.template_debug.x86_64.hcrgpu
+          key: ${{ steps.hcr-godot.outputs.cache-primary-key }}
+
+      - name: Scenarios — ${{ matrix.leg }}
+        # One shard of a lane (SCENARIO_LANE_SHARD; none for an unsharded lane):
+        # the desktop lane is the real `ct` → Electron through
+        # DemoVideoScript-Playwright's arm with CodeTracer's Playwright binding;
+        # its `electron-monaco` legs draw the editor pane with Monaco
+        # (`CODETRACER_SHARED_EDITOR=0`: the shared editor is the default, and
+        # Monaco stays behind the `sharedEditor` setting until it is dropped,
+        # docs/shared-editor-parity.md; scenarios that pin an editor in their
+        # stage keep it). The firefox lane serves the recording from `ct host`
+        # and opens the page in Playwright's Firefox (ci/test/scenarios.sh,
+        # `browser_of`). Under Xvfb at 2560x1440, 96 dpi. The broken-run check
+        # runs once, on the desktop lane's first shard. The timeout is the
+        # shard's own bound: shards are balanced to about 70 minutes
+        # (ci/test/scenario-lane-shard.py --weights), so 120 leaves room for
+        # timings that run long and still ends a stuck leg inside the job's.
+        id: lane
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        timeout-minutes: 120
+        env: # Windows system files: the private CAS remote (ct_stages portableRecording)
+          CODETRACER_PRIVATE_RECORDINGS: ${{ github.workspace }}/../codetracer-private-recordings
+          CT_SYMBOL_SERVER: "off"
+          SCENARIO_LANE_SHARD: ${{ matrix.shard }}
+          LANE: ${{ matrix.lane }}
+          LEG: ${{ matrix.leg }}
+          EDITOR_OVERRIDE: ${{ matrix.shared-editor }}
+        run: |
+          nix develop .#devShells.x86_64-linux.default --command bash -c '
+            set -e
+            [ -n "$SCENARIO_LANE_SHARD" ] || unset SCENARIO_LANE_SHARD
+            [ -z "$EDITOR_OVERRIDE" ] || export CODETRACER_SHARED_EDITOR="$EDITOR_OVERRIDE"
+            just scenario-build dvs stage playwright
+            just scenario-lane-xvfb "$LANE"
+            if [ "$LEG" = electron-1-of-4 ]; then
+              . scripts/lib/own-xvfb.sh
+              trap own_xvfb_stop EXIT
+              own_xvfb_start -screen 0 2560x1440x24 -dpi 96 -nolisten tcp
+              bash ci/test/scenario-broken-run.sh electron
+            fi'
+
+      - name: Upload the failed scenario runs
+        if: ${{ failure() && steps.lane.outcome == 'failure' }}
+        uses: metacraft-labs/DemoVideoScript/.github/actions/upload-failed-runs@b2dd47d345794d53966102b7ee151e46f7d52daf
+        with:
+          build-dir: build
+          name: scenario-runs-${{ matrix.leg }}

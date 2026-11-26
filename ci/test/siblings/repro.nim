@@ -38,6 +38,7 @@ package codetracer_test_siblings:
     "codetracer-cairo-recorder"
     "codetracer-cardano-recorder"
     "codetracer-circom-recorder"
+    "codetracer-evm-recorder"
     "codetracer-flow-recorder"
     "codetracer-fuel-recorder"
     "codetracer-leo-recorder"

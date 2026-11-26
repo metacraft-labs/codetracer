@@ -374,6 +374,11 @@ lint_step "a visual-recording scenario lands on a shard that builds the player" 
 lint_step "a Visual Replay Nim suite runs on a shard that has the player first" \
 	bash ci/test/nim-shard-uses-visual-fixture-test.sh
 
+# A scenario-lanes leg builds the HCR demo and the blockchain recorders only
+# when its shard needs them; every scenario that needs one must be on such a shard.
+lint_step "an HCR or blockchain scenario lands on a shard that builds what it needs" \
+	bash ci/test/scenario-lane-needs-test.sh
+
 # A git fetch late in a job gets a recently minted token: the refresher renews
 # by age and on request, and the credential helper asks before handing out an
 # old one.

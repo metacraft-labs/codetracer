@@ -1187,6 +1187,19 @@ jobs:
     uses: ./.github/workflows/tui-tests.yml
     secrets: inherit
 
+  scenario-lanes:
+    # The job is in scenario-lanes.yml: the desktop and Firefox scenario lanes,
+    # in shards. It takes ct from ct-build; its legs wait for
+    # visual-replay-tools' artifact themselves (ci/wait-for-run-artifact.sh).
+    needs: [ct-build]
+    if: ${{ !cancelled() && needs.ct-build.result == 'success' }}
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+    uses: ./.github/workflows/scenario-lanes.yml
+    secrets: inherit
+
   isonim-editor-smoke:
     runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; same label as `viewmodel-tests` and `tui-tests`
     # NEW, NO CI SAMPLE YET, so the bound is the sum of two measured parts with
@@ -5030,6 +5043,7 @@ jobs:
       - viewmodel-tests-wasm
       - viewmodel-tests-wasm-parity
       - tui-tests
+      - scenario-lanes
       - isonim-editor-smoke
       - visual-replay-regression-gate
       - ct-test-release-gate

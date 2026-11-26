@@ -385,6 +385,7 @@ with pkgs;
     ourPkgs.cargo-stylus # M28 (Stylus three-way parity)
     ourPkgs.wazero # wasm + Stylus replay recorder (origin and flow tests)
     foundry # M28: cast / forge / anvil
+    solc # codetracer-evm-recorder compiles Solidity (the Solidity scenarios record with it)
 
     # Reprobuild MVP CLI — `just build-once`'s scripts/build-once.sh
     # invokes `repro` on Linux as a hard requirement. Sibling/public

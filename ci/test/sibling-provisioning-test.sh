@@ -834,8 +834,10 @@ fi
 # 2026-11-15-repro-lock-refreshes-drop-the-scenario-lanes-test-siblings).
 readonly TEST_LOCK="$REPO_ROOT/ci/test/siblings/repro.lock"
 # The scenario siblings, and the repositories a workflow clones at an explicit
-# ref that repro.nim does not declare (2026-11-17).
-readonly TEST_LOCK_DECLARED_DEPS='DemoVideoScript,DemoVideoScript-TermAssert,DemoVideoScript-GuiAssert,DemoVideoScript-Playwright,GuiAssert,TermAssert,TermAssertClient,nim-libvterm,nim-pty,codetracer-cairo-recorder,codetracer-cardano-recorder,codetracer-circom-recorder,codetracer-flow-recorder,codetracer-fuel-recorder,codetracer-leo-recorder,codetracer-miden-recorder,codetracer-move-recorder,codetracer-php-recorder,codetracer-polkavm-recorder,codetracer-solana-recorder,codetracer-ton-recorder,codetracer-flame-demo,codetracer-pm,test-certificates-spec,codetracer-example-recordings'
+# ref that repro.nim does not declare (2026-11-17). The trace-format pair is
+# the EVM recorder's own `uses:` (its recipe compiles against them), so the
+# test lock pins them at the revisions repro.lock does.
+readonly TEST_LOCK_DECLARED_DEPS='DemoVideoScript,DemoVideoScript-TermAssert,DemoVideoScript-GuiAssert,DemoVideoScript-Playwright,GuiAssert,TermAssert,TermAssertClient,nim-libvterm,nim-pty,codetracer-cairo-recorder,codetracer-cardano-recorder,codetracer-circom-recorder,codetracer-evm-recorder,codetracer-flow-recorder,codetracer-fuel-recorder,codetracer-leo-recorder,codetracer-miden-recorder,codetracer-move-recorder,codetracer-php-recorder,codetracer-polkavm-recorder,codetracer-solana-recorder,codetracer-ton-recorder,codetracer-flame-demo,codetracer-pm,test-certificates-spec,codetracer-example-recordings,codetracer-trace-format,codetracer-trace-format-nim'
 # The members that are ONLY test siblings. They must not come back into
 # repro.lock: two locks pinning one repository is two answers to "which
 # revision?", and the product lock's answer is the one a refresh deletes.

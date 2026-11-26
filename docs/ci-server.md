@@ -610,4 +610,4 @@ would report the same fact later, and only after a runner had already been
 stranded for the afternoon.
 ```
 
-`test-ui-tests` has been bounded at 210 minutes since the Firefox scenario lane joined it.
+`test-ui-tests` has been bounded at 210 minutes since the Firefox scenario lane joined it; the scenario lanes have since moved to `scenario-lanes` (210 minutes, after `ct-build`), and `test-ui-tests` keeps 210 for its macOS leg.

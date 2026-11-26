@@ -60,6 +60,9 @@ viewmodel-tests-wasm-parity
 # green. Listed for the reason ct-test's gates below are: a run in which the job
 # is skipped or missing is lost coverage, not a pass.
 tui-tests
+# The desktop and Firefox scenario lanes moved out of test-ui-tests into a
+# sharded job of their own; it stays required for the same reason.
+scenario-lanes
 # `scripts/isonim-editor-codetracer.sh --smoke` landed with no workflow step,
 # and only `ci/test/shell-gate-coverage.sh` said so. Listed for the same reason.
 isonim-editor-smoke
