@@ -174,28 +174,6 @@ jobs:
           CT_NIM_CACHE_ROOT: ${{ runner.temp }}/ct-nim-cache
         run: nix develop . --command just test-zgui
 
-      # The story-parity harness (scripts/story-parity.sh): every story in
-      # tools/story-parity/stories.txt drawn by the DOM arm (CodeTracer's
-      # Electron, on its own Xvfb) and by zgui, compared pixel by pixel. It
-      # reports for now; `--check` against src/tests/visual/story-parity-floors.json
-      # follows once the floors are taken from this lane's own captures.
-      - name: The story-parity harness
-        env:
-          CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
-          CT_NIM_CACHE_ROOT: ${{ runner.temp }}/ct-nim-cache
-        run: nix develop . --command just story-parity
-
-      - name: Upload the story-parity captures and report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: story-parity-x86_64-linux
-          path: |
-            build/story-parity/report.*
-            build/story-parity/*/*/*.png
-            build/story-parity/*/*/*.json
-          retention-days: 30
-
       - name: Hand the calc recording to the macOS job
         if: always()
         uses: actions/upload-artifact@v4
@@ -211,6 +189,121 @@ jobs:
         with:
           name: zgui-lane-x86_64-linux
           path: test-logs/test-zgui.log
+          retention-days: 30
+
+  # The story-parity harness in a job of its own. In the lane it came after
+  # `ct`, replay-server and the lane itself, which used 139 of the job's 150
+  # minutes (run 45704429248: provisioning 25, ct 59, replay-server 11, the
+  # lane 44), and was cancelled while it compiled. It needs none of them: it
+  # builds the stylesheets, StoryBook's components and the shim itself.
+  story-parity:
+    name: zgui story parity (x86_64-linux)
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 120
+    steps:
+      - name: Mint installation token for cross-repo sibling access
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      # The token minted at the start can be over an hour old by here: the
+      # checkout alone took 64 minutes on a macOS runner (run 44906061572), and
+      # the sibling clone below then failed on the expired token.
+      - name: Mint a token for the sibling setup
+        id: setup_token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      - name: Setup db-backend siblings
+        uses: ./.github/actions/setup-db-backend-siblings
+        with:
+          env-flavor: nix
+          gh-token: ${{ steps.setup_token.outputs.token }}
+          # The same cache settings as `Install Nix` above. This action
+          # installs and configures Nix again, and without them the
+          # configuration it writes names no Attic cache: on an ephemeral
+          # runner, whose store starts empty, the dev shell the next step
+          # realises is then built from source, which ran past the job's
+          # whole budget.
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+
+      - name: Provision dependency siblings from repro.lock
+        uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      - name: Mint a token for the clone below
+        id: late_token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      - name: Clone isonim-zgui
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/isonim-zgui
+          ref: agents
+          path: ${{ github.workspace }}/../isonim-zgui
+          gh-token: ${{ steps.late_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Check out the pinned isonim-zgui revision
+        run: |
+          set -euo pipefail
+          # Bash builtins only: the darwin runner has no sed before the dev shell.
+          ISONIM_ZGUI_REV=""
+          while IFS= read -r line; do
+            [[ "$line" =~ ^PRIVATE_SIBLING_ISONIM_ZGUI=([0-9a-f]{40})$ ]] && ISONIM_ZGUI_REV="${BASH_REMATCH[1]}"
+          done <ci/toolchain.pin
+          [ -n "$ISONIM_ZGUI_REV" ] || { echo "::error::ci/toolchain.pin has no 40-hex PRIVATE_SIBLING_ISONIM_ZGUI"; exit 1; }
+          git -C "${GITHUB_WORKSPACE}/../isonim-zgui" fetch --quiet origin "${ISONIM_ZGUI_REV}" || true
+          git -C "${GITHUB_WORKSPACE}/../isonim-zgui" checkout --quiet --detach "${ISONIM_ZGUI_REV}"
+          git -C "${GITHUB_WORKSPACE}/../isonim-zgui" log --oneline -1
+
+      # The story-parity harness (scripts/story-parity.sh): every story in
+      # tools/story-parity/stories.txt drawn by the DOM arm (CodeTracer's
+      # Electron, on its own Xvfb) and by zgui, compared pixel by pixel. It
+      # reports for now; `--check` against src/tests/visual/story-parity-floors.json
+      # follows once the floors are taken from this job's own captures.
+      - name: The story-parity harness
+        env:
+          CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
+          CT_NIM_CACHE_ROOT: ${{ runner.temp }}/ct-nim-cache
+        run: nix develop . --command just story-parity
+
+      - name: Upload the story-parity captures and report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: story-parity-x86_64-linux
+          path: |
+            build/story-parity/report.*
+            build/story-parity/*/*/*.png
+            build/story-parity/*/*/*.json
           retention-days: 30
 
   macos:
