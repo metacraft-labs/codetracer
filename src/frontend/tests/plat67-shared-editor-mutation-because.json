@@ -41,7 +41,7 @@
   "R19": "not isNull(ed.root.querySelector(cstring(",
   "R2": "ed.text.startsWith(\"\u65e5\u672cdef\")  -- the commit went into the document: `def main():",
   "R20": "not isNull(ed.root.querySelector(cstring\".find-widget.visible\"))  -- Monaco's open-widget class",
-  "R21": "ed.scrollTop == ed.topForLine(55) - (vh - lh) div 2  -- line 55 centred past the last screenful (740)",
+  "R21": "ed.scrollTop == int(float(ed.topForLine(55)) - float(vh) / 2.0)  -- line 55 centred past the last screenful (740)",
   "R22": "ed.doc.state.primaryHead == ed.offsetAt(3, 6)  -- a press on the middle of `i` puts the caret after it ((lineNumber: 3, column: 5))",
   "R23": "num(rectOf(nearNode).top) == num(rectOf(viewLine(3)).top)  -- an EXACT widget is on its line, not under it",
   "R24": "str(getComputed(far.getDomNode(), cstring\"visibility\")) == \"hidden\"  -- a widget whose line is not drawn is hidden",
