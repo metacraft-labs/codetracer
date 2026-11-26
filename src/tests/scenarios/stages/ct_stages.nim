@@ -245,6 +245,30 @@ proc recorderBinaries(): seq[string] =
         result.add name & "=" & path
   result.sort()
 
+proc rrRecorder*(): string =
+  ## The rr an rr recording is made with, found as ct-native-replay finds it
+  ## (`load_rr_path` in codetracer-native-backend): `$CT_RR_EXE`, else the
+  ## `rr` beside `ct-native-replay`, else the `rr` on PATH. "" when none.
+  ##
+  ## Part of an rr recording's provenance because the rr decides what the
+  ## recording holds: only CodeTracer's rr writes the program's output
+  ## (`rr/write_events.txt`, the Event Log's and the terminal's rows). A
+  ## recording a stock rr made replays, with an empty Event Log, and stayed
+  ## cached after the environment named CodeTracer's rr again.
+  let given = getEnv("CT_RR_EXE")
+  if given.len > 0: return given
+  let replay = findExe("ct-native-replay")
+  if replay.len > 0 and fileExists(replay.parentDir / "rr"):
+    return replay.parentDir / "rr"
+  findExe("rr")
+
+proc recordersFor*(backend: string): seq[string] =
+  ## The recorders a recording with `backend` may be made with
+  ## (`recorderBinaries`), and for an rr recording the rr (`rrRecorder`).
+  result = recorderBinaries()
+  if backend == "rr":
+    result.add "rr=" & rrRecorder()
+
 proc recordingProvenance*(program, backend, lang: string; recorders: seq[string];
                           ct: string): string =
   ## What a recording of `program` depends on besides the program's name:
@@ -425,7 +449,7 @@ proc recordProgram*(s: StageState; program, backend: string; lang = "";
         # directly and let `ct record` name what is missing.
         let dest = fixtureCacheRoot(repo()) / (name & "-scenario")
         let provenance = recordingProvenance(full, backend, lang & nimExe,
-                                             recorderBinaries(), findCtBinary())
+                                             recordersFor(backend), findCtBinary())
         if isWholeCachedRecording(dest) and cachedProvenanceMatches(dest, provenance):
           return recordedTraceIn(dest)
         removeFile(recordingProvenanceFile(dest))
