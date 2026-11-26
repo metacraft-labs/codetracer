@@ -67,9 +67,20 @@ const
     ## glyph: a GPUI window draws no SVG mask).
   TogglePadPx* = 8         ## `.ah-composer-toggle`: 0 0.5rem
   TextFieldRowsPx* = 62    ## a three-row `.ah-text-field`: 3 × 16 + 2 × 6 + 2 × 1
-  MonoAdvance* = 0.6
-    ## Space Mono's advance, a fixed 0.6em per character
-    ## (https://fonts.google.com/specimen/Space+Mono, a monospaced face).
+  MonoAdvance* = 0.612
+    ## Space Mono Regular's advance, a fixed 0.612em per character: 612 of
+    ## its 1000 units per em for every glyph that advances (`hmtx`, read
+    ## from the design system's
+    ## `SpaceGrotesk_Complete/Fonts/Space_Mono/SpaceMono-Regular.ttf`;
+    ## https://fonts.google.com/specimen/Space+Mono, a monospaced face).
+    ## It was 0.6, which under-measured a line by 0.168px a character at
+    ## 14px: a 61-character line of program text cut to fit before its
+    ## location drew 10px past where it was measured to end, and ran into
+    ## the location.
+  MonoBoldAdvance* = 0.612
+    ## Space Mono Bold's advance: also 612 units per em
+    ## (`SpaceMono-Bold.ttf`), so a bold run (the query's match in a line of
+    ## program text) sets exactly as wide as the regular one.
 
 type
   PanelPress* = proc(operation: string; run: proc()) {.closure.}
@@ -142,9 +153,11 @@ proc charCount(s: string): int =
   for c in s:
     if (ord(c) and 0xC0) != 0x80: inc result
 
-proc monoTextPx*(text: string; sizePx: int): int =
-  ## How wide Space Mono sets `text` at `sizePx`: one advance per character.
-  int(ceil(float(text.charCount) * float(sizePx) * MonoAdvance))
+proc monoTextPx*(text: string; sizePx: int; bold = false): int =
+  ## How wide Space Mono sets `text` at `sizePx`: one advance per character,
+  ## the Bold face's when `bold`.
+  int(ceil(float(text.charCount) * float(sizePx) *
+           (if bold: MonoBoldAdvance else: MonoAdvance)))
 
 proc mono*(r: GpuiRenderer; el: GpuiElement): GpuiElement =
   ## `el` set in Space Mono (`.ah-mono`). Returns `el`.
