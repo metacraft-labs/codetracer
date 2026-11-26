@@ -14,9 +14,10 @@
 ##     `index.html`, read from the built tree (`src/build-debug-repro`) in the
 ##     page's order, the theme's swapped as the IsoNim Editor swaps it, then
 ##     the surface sheet and the preview document's sizing rule;
-##   * the fonts: each `@font-face` rule in those sheets is registered from
-##     its font file under its family name, which is what a browser does with
-##     the rule (zgui's style engine keeps the rule but fetches nothing).
+##   * the resources: each sheet is installed with the directory it is read
+##     from, so its `@font-face` faces, `background-image` and `mask-image`
+##     pictures load from the files its relative `url()`s name, as a browser
+##     loads them relative to the sheet's own URL.
 ##
 ## Usage:
 ##   codetracer-zgui-story --story=<kind>/<surface>/<fixture> --out=<png>
@@ -103,45 +104,22 @@ proc onDisk(opts: HostOptions; served: string): string =
   else:
     ""
 
-proc resolveUrl(sheetServed, url: string): string =
-  let u = url.strip(chars = {'"', '\'', ' '})
-  if u.startsWith("/"): normalise(u)
-  else: normalise(sheetServed[0 .. sheetServed.rfind('/')] & u)
+type PageSheet = tuple[name, css, dir: string]
 
-proc fontFaces(css: string): seq[tuple[family: string; urls: seq[string]]] =
-  ## Each `@font-face` rule's family and its sources, in the rule's order.
-  var at = 0
-  while true:
-    let start = css.find("@font-face", at)
-    if start < 0: break
-    let open = css.find('{', start)
-    let close = css.find('}', open)
-    if open < 0 or close < 0: break
-    at = close + 1
-    let body = css[open + 1 ..< close]
-    var family = ""
-    var urls: seq[string]
-    for decl in body.split(';'):
-      let colon = decl.find(':')
-      if colon < 0: continue
-      let name = decl[0 ..< colon].strip.toLowerAscii
-      let value = decl[colon + 1 .. ^1].strip
-      if name == "font-family":
-        family = value.strip(chars = {'"', '\'', ' '})
-      elif name == "src":
-        var s = 0
-        while true:
-          let u = value.find("url(", s)
-          if u < 0: break
-          let e = value.find(')', u)
-          if e < 0: break
-          urls.add value[u + 4 ..< e].strip(chars = {'"', '\'', ' '})
-          s = e + 1
-    if family.len > 0 and urls.len > 0: result.add (family, urls)
+proc readRoot(opts: HostOptions): string =
+  ## The directory zgui may read a sheet's resources inside: the checkout the
+  ## built tree belongs to. It is found from where `frontend/` really is, so a
+  ## built tree reached through symlinks (a mirror sharing another checkout's
+  ## build) still contains the files its sheets name, such as the
+  ## design-system fonts at `../../../../libs`.
+  let frontend = opts.buildRoot / "frontend"
+  if not dirExists(frontend):
+    raise newException(IOError, "no built tree at " & opts.buildRoot &
+      " (build it with `just build-once`)")
+  expandFilename(frontend).parentDir.parentDir.parentDir
 
-proc appCss(opts: HostOptions): string =
-  ## The page's stylesheets in order, registering their fonts on the way.
-  var registered: seq[string] = @[]
+proc appSheets(opts: HostOptions): seq[PageSheet] =
+  ## The page's stylesheets in order, each with the directory it is read from.
   for link in appStylesheets(IndexHtml):
     var served = link.href
     if link.id == "theme":
@@ -151,36 +129,22 @@ proc appCss(opts: HostOptions): string =
     if path.len == 0 or not fileExists(path):
       raise newException(IOError, "the page's stylesheet " & served & " is not at " & path &
         " (build the tree with `just build-once`)")
-    let css = readFile(path)
-    for (family, urls) in fontFaces(css):
-      # The first source zgui's font system reads (TrueType or OpenType) that
-      # exists, as a browser takes the first source it can load. A rule whose
-      # only loadable source is WOFF is reported: the browser draws it and
-      # this arm cannot.
-      var chosen = ""
-      for url in urls:
-        let lower = url.toLowerAscii
-        if not (lower.endsWith(".ttf") or lower.endsWith(".otf")): continue
-        let file = onDisk(opts, resolveUrl(served, url))
-        if file.len > 0 and fileExists(file):
-          chosen = file
-          break
-      if chosen.len == 0:
-        stderr.writeLine "codetracer-zgui-story: no TrueType/OpenType source of `", family,
-          "` in ", served, " exists (", urls.join(", "), ")"
-      elif chosen notin registered:
-        registerFontFile(chosen, family)
-        registered.add chosen
-    result.add "/* " & served & " */\n" & css & "\n"
+    result.add (served, readFile(path), expandFilename(path).parentDir)
 
 # ---------------------------------------------------------------------------
 # The document
 # ---------------------------------------------------------------------------
 
 var gOpts: HostOptions
+var gSheets: seq[PageSheet]
+var gReadRoot: string
 var gDispose: StoryDispose
 var gSurface: ZguiNode
 var gLayout: DefaultDebugFrame[ZguiNode]
+var gBuildError: string
+  ## What the window's build raised. isonim-zgui reports a raising build and
+  ## keeps the window, which then draws an empty page; a capture of that is
+  ## not a measurement, so `main` fails instead of writing it.
 
 proc dumpBoxes(path: string) =
   ## Every element under the surface, in document order, with its border box
@@ -202,7 +166,17 @@ proc dumpBoxes(path: string) =
   walk(gSurface, 0)
   writeFile(path, "[\n" & lines.join(",\n") & "\n]\n")
 
-proc buildDocument(root: ZguiNode) =
+proc buildStory(root: ZguiNode) =
+  # The page's sheets before the first frame, in the page's order (installed
+  # sheets cascade in installation order), then the story's own sheet last.
+  for sheet in gSheets:
+    # A sheet that really lives outside the checkout (the third-party sheets
+    # the build links from the Nix store's node_modules) reads only beside
+    # itself: zgui resolves the sheet's directory through symlinks and refuses
+    # a root that does not contain it.
+    let root = if sheet.dir.startsWith(gReadRoot & DirSep): gReadRoot else: ""
+    installStylesheet(sheet.name, sheet.css, dir = sheet.dir, root = root)
+  installStylesheet("story", storySurfaceCss & "\n" & PreviewSizing & "\n")
   let r = ZguiRenderer()
   let html = r.createElement("html")
   r.setAttribute(html, "data-codetracer-theme", gOpts.theme)
@@ -279,11 +253,21 @@ proc parseOptions(): HostOptions =
   result.buildRoot = absolutePath(result.buildRoot)
   result.repoRoot = absolutePath(result.repoRoot)
 
+proc buildDocument(root: ZguiNode) =
+  try:
+    buildStory(root)
+  except CatchableError as e:
+    gBuildError = e.msg
+    raise
+
 proc main() =
   gOpts = parseOptions()
-  let css = appCss(gOpts) & "\n" & storySurfaceCss & "\n" & PreviewSizing & "\n"
-  openHeadless(float32(gOpts.width), float32(gOpts.height), css, zrOffscreen, buildDocument)
+  gReadRoot = readRoot(gOpts)
+  gSheets = appSheets(gOpts)
+  openHeadless(float32(gOpts.width), float32(gOpts.height), "", zrOffscreen, buildDocument)
   try:
+    if gBuildError.len > 0:
+      quit("codetracer-zgui-story: the story's build failed: " & gBuildError, 1)
     for _ in 0 ..< 8: discard settle(512)
     if not gLayout.root.isNil:
       finishDefaultDebugLayout()
