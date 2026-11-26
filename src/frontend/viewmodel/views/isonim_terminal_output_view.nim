@@ -186,7 +186,9 @@ proc wireStepKeys[R, N](r: R; node: N; vm: TerminalOutputVM) =
     else:
       r.addEventListener(node, KeyDownEvent, proc(ev: MockEvent) =
         if stepKey(vm, ev.key): ev.preventDefault())
-  elif N is MockNode:
+  elif N is MockNode or defined(ctWasmCore):
+    # MockRenderer, and the WebAssembly core's frame renderer, whose host
+    # event reaches a `MockEvent` handler through `frame_mock_events`.
     r.addEventListener(node, KeyDownEvent, proc(ev: MockEvent) =
       if stepKey(vm, ev.key): ev.preventDefault())
   else:
