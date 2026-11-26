@@ -26,13 +26,14 @@
 ## 3.5 s at a time; `CLI/ct/host.md`, "A facade verb never holds the server's
 ## event loop").
 ##
-## The desktop therefore runs the synchronous host on a thread of its own:
-## the main process's content-id worker (`index/content_id_worker.nim`),
-## where blocking is the point and the recipe runs once, start to finish. The
-## container endpoint uses `nodeAsyncContentIdHost`, which runs the same
-## commands through `child_process.spawn` and answers when the child closes,
-## with `certificate_content_id.runResumable` driving the one recipe over it —
-## which replays the recipe once per git answer, a cost that grows with the
+## Both therefore run the synchronous host on a thread of its own: the
+## content-id worker (`index/content_id_worker.nim`, started by
+## `index/content_id_service.nim` in the Electron main process and in `ct
+## host`), where blocking is the point and the recipe runs once, start to
+## finish. `nodeAsyncContentIdHost` runs the same commands through
+## `child_process.spawn` for `certificate_content_id.runResumable`; no
+## product host uses it any more, because `runResumable` replays the recipe
+## once per git answer — on the calling thread, at a cost that grows with the
 ## repository's index. Both runners fold node's outcomes into a `GitReply`
 ## through `replyOf`, so a launch error, a signal and an over-long output mean
 ## the same thing on both.
@@ -349,8 +350,9 @@ proc nodeAsyncContentIdHost*(tempRoot = "";
                              captureLimit = NodeContentIdCaptureLimit):
     AsyncContentIdHost =
   ## The same host with git through `child_process.spawn`, for
-  ## `certificate_content_id.runResumable` (via `vcs.contentIdOverAsync`):
-  ## the container endpoint's, whose event loop must not wait for git.
+  ## `certificate_content_id.runResumable` (via `vcs.contentIdOverAsync`).
+  ## No product host uses it (module header); the suites hold its answers
+  ## to the synchronous host's.
   asyncContentIdHost(nodeFileOperations(tempRoot), nodeAsyncGitRunner(captureLimit))
 
 # ---------------------------------------------------------------------------
