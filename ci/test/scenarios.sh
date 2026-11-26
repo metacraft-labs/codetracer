@@ -7,9 +7,14 @@
 #   ci/test/scenarios.sh lane <flavour>     one lane: terminal | gpui | zgui | electron | firefox
 #                                           (SCENARIO_LANE_SHARD=i/n: one shard of it)
 #   ci/test/scenarios.sh run <flavour> <scenario.yaml> [dvs run args…]
+#                                           (flavours also nvim, emacs: the terminal
+#                                           backend over Neovim + codetracer.nvim /
+#                                           Emacs + codetracer.el, ../codetracer.nvim
+#                                           and ../codetracer.el)
 #   ci/test/scenarios.sh binding-test       the bindings' own tests (bindings/*/*.test.ts)
 #   ci/test/scenarios.sh stage-test         the stage tool's own tests (stages/*_test.nim)
 #   ci/test/scenarios.sh gui-binding-test   the GPUI binding's own tests (bindings/guiassert/*_test.nim)
+#   ci/test/scenarios.sh term-binding-test  the terminal bindings' own tests (bindings/termassert/*_test.nim)
 #
 # The pack, its scenarios and its lanes are under src/tests/scenarios
 # (README.md there). The general-purpose runner and backends are siblings of
@@ -161,7 +166,7 @@ built_on_pin() {
 # parts_of <flavour>: the parts a flavour's runs use.
 parts_of() {
 	case "$1" in
-	terminal) echo "terminal" ;;
+	terminal | nvim | emacs) echo "terminal" ;;
 	gpui) echo "gpui" ;;
 	zgui) echo "zgui" ;;
 	electron | firefox) echo "dvs playwright" ;;
@@ -251,10 +256,11 @@ build_playwright() {
 backend_of() {
 	case "$1" in
 	terminal) echo "termassert" ;;
+	nvim | emacs) echo "termassert-$1" ;;
 	gpui | zgui) echo "guiassert" ;;
 	electron | firefox) echo "cmd:node ${build_dir}/scenario-arm/src/main.ts --binding ${root}/${S}/bindings/playwright/codetracer-binding.ts" ;;
 	*)
-		echo "scenarios: unknown flavour '$1' (terminal, gpui, zgui, electron, firefox)" >&2
+		echo "scenarios: unknown flavour '$1' (terminal, nvim, emacs, gpui, zgui, electron, firefox)" >&2
 		exit 64
 		;;
 	esac
@@ -262,7 +268,7 @@ backend_of() {
 
 runner_of() {
 	case "$1" in
-	terminal) echo "${bin}/dvs-termassert-codetracer" ;;
+	terminal | nvim | emacs) echo "${bin}/dvs-termassert-codetracer" ;;
 	gpui) echo "${bin}/dvs-guiassert-codetracer" ;;
 	zgui) echo "${bin}/dvs-guiassert-codetracer-zgui" ;;
 	electron | firefox) echo "${bin}/dvs" ;;
@@ -355,7 +361,7 @@ lint)
 	echo "scenarios: the Playwright bindings parse; a stray '}' is rejected as it must be"
 	;;
 lane)
-	flavour="${2:?usage: scenarios.sh lane <terminal|gpui|zgui|electron|firefox>}"
+	flavour="${2:?usage: scenarios.sh lane <terminal|nvim|emacs|gpui|zgui|electron|firefox>}"
 	runner="$(runner_of "${flavour}")"
 	browser_of "${flavour}"
 	[ -x "${runner}" ] || "$0" build
@@ -368,6 +374,10 @@ lane)
 	# (once per lane: in its first shard when it is sharded).
 	if [ "${flavour}" = gpui ] && [[ ${SCENARIO_LANE_SHARD:-1/1} == 1/* ]]; then
 		"$0" gui-binding-test || exit 1
+	fi
+	# The editor bindings' readers, before any editor is started.
+	if [ "${flavour}" = nvim ] || [ "${flavour}" = emacs ]; then
+		"$0" term-binding-test || exit 1
 	fi
 	"$0" stage-test || exit 1
 	lane_file="${S}/lanes/${flavour}.lane.yaml"
@@ -410,6 +420,22 @@ stage-test)
 	for t in "${root}/${S}"/stages/*_test.nim; do
 		echo "== ${t#"${root}/"}"
 		nim c -r "${nim_common[@]}" --nimcache:"${nimcache}/stage-test-$(basename "${t}" .nim)" \
+			-o:"${bin}/$(basename "${t}" .nim)" "${t}" || rc=1
+	done
+	exit "${rc}"
+	;;
+term-binding-test)
+	# The terminal bindings' own tests (bindings/termassert/*_test.nim): what the
+	# editor bindings read off an editor's screen and how they spell its keys,
+	# without an editor. Built like the binding (`build_terminal`).
+	require "DemoVideoScript-TermAssert" "${dta_src}/demo_video_script_termassert.nim"
+	check_siblings terminal
+	rc=0
+	for t in "${root}/${S}"/bindings/termassert/*_test.nim; do
+		echo "== ${t#"${root}/"}"
+		nim c -r "${nim_common[@]}" --path:"${ta_src}" --path:../TermAssertClient/src \
+			--path:../nim-libvterm/src --path:../nim-pty/src --path:"${dvs_src}" --path:"${dta_src}" \
+			--nimcache:"${nimcache}/term-binding-test-$(basename "${t}" .nim)" \
 			-o:"${bin}/$(basename "${t}" .nim)" "${t}" || rc=1
 	done
 	exit "${rc}"

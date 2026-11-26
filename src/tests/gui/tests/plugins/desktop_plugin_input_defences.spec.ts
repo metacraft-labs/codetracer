@@ -24,7 +24,8 @@
 // plugin SDK, `lib/plugin-processes.ts`), in its `swallow-input` and
 // `slow-ack` modes. The one test-only input is
 // `CODETRACER_PLUGIN_TEST_THRESHOLDS` in the half-open case, which shortens
-// the breaker's 30 s backoff (`index/plugin_sessions.applyTestThresholds`).
+// the breaker's 30 s backoff (`supervisor.applyTestThresholds`, read for every
+// front-end in `host/plugin_processes.openSessionPlugins`).
 
 import { test, expect } from "../../lib/fixtures";
 import { CommandPalette } from "../../page-objects/command-palette/command-palette";

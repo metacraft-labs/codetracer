@@ -852,6 +852,13 @@ lint_step "contract suite: lane not-provided lists name real tests and the lane 
 lint_step "contract suite: a test lane's user-state guard names the file that touched real state" \
 	bash ci/test/lane-user-state-guard-test.sh
 
+# No committed lock file names a path on the machine that wrote it (a
+# /home/ checkout or a /tmp/ worktree instead of a sibling's remote): one
+# landed on agents and was fixed in 44f2a89ac1e. Pure grep, with a planted
+# control.
+lint_step "contract suite: no lock file names a local path" \
+	bash ci/test/lock-local-paths-test.sh
+
 # The VS Code sources ci/test/cua-keymap-extractor.sh caches go under
 # $CODETRACER_HOME/cache when that is set, and exactly where they always went
 # when it is not; on 2026-11-02 the lint-nim stage left them in a developer's

@@ -5,6 +5,7 @@ import
   types,
   communication, dap,
   event_helpers
+from errors import NotImplementedError
 from isonim/core/batch as isoBatch import batch
 
 # The status bar is the renderer's. The VS Code extension host's middleware
@@ -462,11 +463,28 @@ proc setupMiddlewareApis*(dapApi: DapApi, viewsApi: MediatorWithSubscribers) {.e
       # redundant round-trips and re-renders per replay. The live path got
       # its `isoBatch.batch` wrapper and this one, which is the same event
       # by another door, did not.
+      #
+      # Only the pane that asked is answered. Every other pane already had
+      # this move when it happened; handing it to them again made each of
+      # them repeat its per-move work — an editor showing the stop reloaded
+      # its flow, so a jump that opened a new file built that file's flow
+      # three times. `sub` is the asker's own subscriber (a component's
+      # mediator sends with its `asSubscriber`); with no asker, or one that
+      # cannot be written to, the cached move is fanned out as before.
       let cached = MoveState()
       cached[] = lastCompleteMove[]
       cached.redelivered = true
       isoBatch.batch proc() =
-        viewsApi.emit(CtCompleteMove, cached.toJs)
+        var answered = false
+        if not sub.isNil:
+          try:
+            sub.emitRaw(CtCompleteMove, cached.toJs, viewsApi.asSubscriber)
+            answered = true
+          except NotImplementedError:
+            # A bare `Subscriber` (an asker that cannot be written to).
+            discard
+        if not answered:
+          viewsApi.emit(CtCompleteMove, cached.toJs)
   )
   viewsApi.subscribe(InternalTraceMapUpdate, proc(kind: CtEventKind, value: Tracepoint, sub: Subscriber) =
     updateTraceMap(value)

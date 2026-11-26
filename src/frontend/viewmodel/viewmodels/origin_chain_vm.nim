@@ -75,6 +75,12 @@ type
     activeChain*: Signal[Option[OriginChain]]
       ## The chain rendered in the dedicated side panel + the in-row
       ## expansion of the last-clicked badge.
+    refusal*: Signal[string]
+      ## Why the side panel's latest question has no chain, shown there in
+      ## place of one; "" when it is not refused. Today only a Visual Replay
+      ## pixel's question is refused (`onShowPixelOrigin`: no back end answers
+      ## it yet). An ordinary question (`onShowOrigin`, a host menu's
+      ## request, a chain arriving for the panel) clears it.
     loading*: Signal[bool]
       ## Spinner flag. Cleared when the matching response arrives or
       ## when `onCancelLoad` is called.
@@ -96,6 +102,11 @@ type
       ## saw there (`onSelectBreadcrumb`). An entry is `none` until its answer
       ## arrives; a stack set from elsewhere (a collab mirror) has no chains,
       ## and its breadcrumbs are asked again instead.
+    breadcrumbRefusals: seq[string]
+      ## The refusal each breadcrumb's question was answered with, by
+      ## position, "" for one that was not refused: going back to a refused
+      ## breadcrumb (a pixel's) shows its refusal again rather than asking the
+      ## engine about a variable that is not one.
     preferences*: Signal[OriginPreferences]
       ## User-mutable badge / chain preferences (spec §3.7).
     placeholderFillQueue*: Signal[seq[string]]
@@ -204,6 +215,21 @@ proc forgetRowRequest(vm: OriginChainVM; expression, stop: string)
 proc onCancelLoad*(vm: OriginChainVM)
 proc rememberBreadcrumbChain(vm: OriginChainVM; chain: OriginChain)
 
+proc refusalText*(vm: OriginChainVM): string =
+  ## The side panel's refusal (`refusal`), "" when there is none. Reactive.
+  ## A VM assembled field by field (a test's, a host's partial mirror) may
+  ## carry no `refusal` signal: it has none to show.
+  if vm.refusal.isNil: "" else: vm.refusal.val
+
+proc setRefusal(vm: OriginChainVM; text: string) =
+  ## Set the side panel's refusal; a VM built without the signal gets one
+  ## when there is a refusal to show, and needs none to clear it.
+  if vm.refusal.isNil:
+    if text.len > 0:
+      vm.refusal = createSignal(text)
+  else:
+    vm.refusal.val = text
+
 proc sendChainQuery(vm: OriginChainVM; expression: string; stepId: int64;
                     forSidePanel: bool) =
   ## Send one `ct/originChain` (spec §5.3) for `expression`, asked about
@@ -274,11 +300,49 @@ proc onShowOrigin*(vm: OriginChainVM; expression: string; location: Location;
   ## neither the side panel nor its breadcrumb trail.
   if vm.store.isNil or vm.store.directBackend.isNil:
     return
+  vm.setRefusal("")
   vm.sidePanelOpen.val = true
   var stack = vm.breadcrumbStack.val
   stack.add(BreadcrumbEntry(variableName: expression, stepId: stepId))
   vm.breadcrumbStack.val = stack
+  # A refusal left at this depth by a stack popped elsewhere is not this
+  # question's.
+  if vm.breadcrumbRefusals.len >= stack.len:
+    vm.breadcrumbRefusals.setLen(stack.len - 1)
   vm.sendChainQuery(expression, stepId, forSidePanel = true)
+
+proc refuseSidePanel(vm: OriginChainVM; reason: string) =
+  ## Answer the side panel's latest question (its top breadcrumb) with
+  ## `reason` instead of a chain: no chain is shown, and any chain request
+  ## still out is for an earlier question, so its late answer is dropped.
+  vm.onCancelLoad()
+  vm.activeChain.val = none(OriginChain)
+  vm.setRefusal(reason)
+  let depth = vm.breadcrumbStack.val.len
+  if depth > 0:
+    vm.breadcrumbRefusals.setLen(depth)
+    vm.breadcrumbRefusals[depth - 1] = reason
+
+proc onShowPixelOrigin*(vm: OriginChainVM; query: PixelOriginQuery) =
+  ## "Show value origin" on a Visual Replay pixel (a Pixel History entry,
+  ## `PixelHistoryVM.showValueOriginForEntry`): where the colour that draw
+  ## call wrote to the pixel came from in the recorded program's values.
+  ## Like `onShowOrigin`, it opens the side panel and pushes a breadcrumb —
+  ## naming the pixel — so the user sees which question was asked.
+  ##
+  ## The answer needs a bridge from the pixel back to the recorded program's
+  ## values, which no back end provides yet, so the panel REFUSES BY NAME
+  ## (`pixelOriginRefusalText`): this recording has no CPU-side origin for
+  ## the pixel. It never shows a made-up chain. THIS IS THE SEAM: when such a
+  ## back end exists, it answers here instead of `refuseSidePanel`, and only
+  ## a recording with no CPU-side origin for the pixel keeps the refusal.
+  vm.sidePanelOpen.val = true
+  var stack = vm.breadcrumbStack.val
+  stack.add(BreadcrumbEntry(variableName: pixelOriginLabel(query), stepId: -1))
+  vm.breadcrumbStack.val = stack
+  if vm.breadcrumbChains.len >= stack.len:
+    vm.breadcrumbChains.setLen(stack.len - 1)
+  vm.refuseSidePanel(pixelOriginRefusalText(query))
 
 proc recordRowChain(vm: OriginChainVM; expression, stop: string;
                     chain: OriginChain) =
@@ -452,6 +516,16 @@ proc openSidePanel*(vm: OriginChainVM) =
   ## shortcut paths that already have an ``activeChain`` populated).
   vm.sidePanelOpen.val = true
 
+proc sidePanelShown*(vm: OriginChainVM): bool =
+  ## Whether a host draws the side panel now: it is open and has something
+  ## to show — a chain, or the named refusal that stands in for one.
+  ## Reactive: reads `sidePanelOpen`, `activeChain` and `refusal`, so a
+  ## host's render effect follows all three.
+  let open = vm.sidePanelOpen.val
+  let chain = vm.activeChain.val
+  let refusal = vm.refusalText()
+  open and (chain.isSome or refusal.len > 0)
+
 proc closeSidePanel*(vm: OriginChainVM) =
   ## Dismiss the side panel without clearing ``activeChain`` (so the
   ## same chain can be re-opened without re-fetching). Wired to the
@@ -470,6 +544,9 @@ proc noteChainRequestSent*(vm: OriginChainVM; transportId: string) =
     return
   vm.latestTransportRequest = transportId
   vm.loading.val = true
+  # A new question for the side panel: the previous one's refusal no longer
+  # answers what it shows.
+  vm.setRefusal("")
 
 proc rejectChainAnswer*(vm: OriginChainVM; transportId: string): bool =
   ## A `ct/originChain` answer that arrived on the transport without a chain.
@@ -506,6 +583,7 @@ proc applyChainAnswer*(vm: OriginChainVM; chain: OriginChain;
   elif not vm.loading.val:
     return false
   vm.activeChain.val = some(chain)
+  vm.setRefusal("")
   vm.loading.val = false
   vm.latestTransportRequest = ""
   vm.rememberBreadcrumbChain(chain)
@@ -520,6 +598,7 @@ proc applyChainResponse*(vm: OriginChainVM; chain: OriginChain;
   if requestId >= 0 and requestId != vm.latestRequestId.val:
     return
   vm.activeChain.val = some(chain)
+  vm.setRefusal("")
   vm.loading.val = false
   vm.rememberBreadcrumbChain(chain)
 
@@ -618,12 +697,15 @@ proc onPopBreadcrumb*(vm: OriginChainVM): Option[BreadcrumbEntry] =
   vm.breadcrumbStack.val = stack
   if vm.breadcrumbChains.len > stack.len:
     vm.breadcrumbChains.setLen(stack.len)
+  if vm.breadcrumbRefusals.len > stack.len:
+    vm.breadcrumbRefusals.setLen(stack.len)
   some(last)
 
 proc onClearBreadcrumbs*(vm: OriginChainVM) =
   ## Clear the entire breadcrumb stack (called on session switch).
   vm.breadcrumbStack.val = @[]
   vm.breadcrumbChains.setLen(0)
+  vm.breadcrumbRefusals.setLen(0)
 
 proc onSelectBreadcrumb*(vm: OriginChainVM; index: int) =
   ## A press on the breadcrumb at `index` (spec §3.3: the breadcrumbs list
@@ -643,8 +725,17 @@ proc onSelectBreadcrumb*(vm: OriginChainVM; index: int) =
   vm.breadcrumbStack.val = kept
   if vm.breadcrumbChains.len > index + 1:
     vm.breadcrumbChains.setLen(index + 1)
+  if vm.breadcrumbRefusals.len > index + 1:
+    vm.breadcrumbRefusals.setLen(index + 1)
   vm.onCancelLoad()
   vm.sidePanelOpen.val = true
+  if index < vm.breadcrumbRefusals.len and
+      vm.breadcrumbRefusals[index].len > 0:
+    # A refused question (a pixel's) is refused again, not asked as a
+    # variable.
+    vm.refuseSidePanel(vm.breadcrumbRefusals[index])
+    return
+  vm.setRefusal("")
   if index < vm.breadcrumbChains.len and vm.breadcrumbChains[index].isSome:
     vm.activeChain.val = vm.breadcrumbChains[index]
   else:
@@ -808,6 +899,7 @@ proc createOriginChainVM*(store: ReplayDataStore): OriginChainVM =
     let vm = OriginChainVM(
       store: store,
       activeChain: createSignal(none(OriginChain)),
+      refusal: createSignal(""),
       loading: createSignal(false),
       pinnedChains: createSignal(newSeq[OriginChain]()),
       expandedOrigins: createSignal(initHashSet[VariableId]()),

@@ -75,7 +75,7 @@ const
   TitleLinePx = 20        ## a waiting row's title, a recent launch's text
   RowPadPx = 6            ## a waiting row's padding
   RecentPadPx = 4         ## a recent launch's padding
-  MoreLinePx = 20         ## the waiting list's `+N more` line
+  MoreLinePx* = 20        ## the waiting list's `+N more` line
   EmptyLinePx = 12 + 16   ## an empty fleet's `No initiatives yet.`, 12px down
 
 proc renameFact(r: GpuiRenderer; e: GpuiElement; name, to: string) =
@@ -291,14 +291,20 @@ proc launchColumn(r: GpuiRenderer; p: AhPalette; vm: ControlCenterVM;
                                 pairs = [("height", $FieldLabelPx & "px"),
                                          ("line-height", $FieldLabelPx & "px")]))
   # Locked: read-only and drawn as the form's values are (no fill, outline
-  # or inset; the words in the label role, study D74).
-  let box = r.box(pairs = [("height", $ControlPx & "px"), ("items", "start"),
-                           ("padding-left", if locked: "0px" else: "8px"),
-                           ("padding-right", "8px"),
-                           ("rounded", $ControlRadiusPx & "px"), ("border-width", "1px"),
-                           ("border-color", if locked: p.panel else: p.borderSecondary),
-                           ("background", if locked: p.panel else: p.ground),
-                           ("overflow", "hidden")])
+  # or inset; the words in the label role): the web's
+  # `input.ah-cc-input[aria-readonly="true"]` outranks the input rule.
+  # Otherwise it is an `input` (`input.ah-cc-input`), so the app's input
+  # rule draws it: holding a value, the action border on the input surface
+  # (`inputLook`); empty, its placeholder on the field's
+  # rest look (`.ah-composer-field-value`).
+  let look =
+    if locked: InputLook(border: p.panel, fill: p.panel)
+    else: inputLook(p, whole, vm.instructionPlaceholder, p.borderSecondary, p.ground)
+  let box = r.inputBox(look, pairs = [("height", $ControlPx & "px"), ("items", "start"),
+                                      ("padding-left", if locked: "0px" else: "8px"),
+                                      ("padding-right", "8px"),
+                                      ("rounded", $ControlRadiusPx & "px"),
+                                      ("overflow", "hidden")])
   let shown = if whole.len > 0: inputValueShown(whole, inner) else: vm.instructionPlaceholder
   let t = r.text(shown, BodyPx, if whole.len == 0: p.textCaption
                                 elif locked: p.textLabel else: p.textBody,
@@ -377,7 +383,7 @@ proc launchColumn(r: GpuiRenderer; p: AhPalette; vm: ControlCenterVM;
   h += PartGapPx * max(0, parts - 1)
   (col, h)
 
-proc waitingRowHeightPx(row: WaitingRow; innerPx: int): int =
+proc waitingRowHeightPx*(row: WaitingRow; innerPx: int): int =
   let why = row.waitingWhy
   result = 2 * RowPadPx + TitleLinePx + 1 + 16
   if why.len > 0: result += 1 + 16 * min(2, wrappedRows(why, CaptionPx, innerPx))

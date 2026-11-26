@@ -97,23 +97,32 @@ proc sizeOf(line: TimelineLine): int =
 proc lineHeightOf(line: TimelineLine): int =
   if line.kind in CaptionLines: DetailLinePx else: LinePx
 
-proc wrappedRows*(text: string; sizePx, availPx: int; faceGlyphs = false): int =
-  ## How many lines `text` wraps to at `availPx`: word by word at the
-  ## face's kerned widths, each of its own lines apart. `faceGlyphs`: the
-  ## non-ASCII glyphs the face carries at their own advances (`textWidth`).
+proc wrappedLines*(text: string; sizePx, availPx: int; faceGlyphs = false): seq[string] =
+  ## The lines `text` wraps to at `availPx`: word by word at the face's
+  ## kerned widths, each of its own lines apart, broken at spaces only (a
+  ## path such as `/api/v1/input-commands` is never split at its `/`), the
+  ## words of a line joined by one space. A word wider than the room is a
+  ## line of its own. `faceGlyphs`: the non-ASCII glyphs the face carries at
+  ## their own advances (`textWidth`).
   for para in text.splitLines:
-    var rows = 1
+    var line = ""
     var used = 0.0
     for word in para.splitWhitespace:
       let w = textWidth(word, sizePx, faceGlyphs = faceGlyphs)
       let space = if used > 0: textWidth(" ", sizePx) else: 0.0
       if used > 0 and used + space + w > float(availPx):
-        inc rows
+        result.add line
+        line = word
         used = w
       else:
+        line = if line.len > 0: line & " " & word else: word
         used += space + w
-    result += rows
-  result = max(1, result)
+    result.add line
+  if result.len == 0: result.add ""
+
+proc wrappedRows*(text: string; sizePx, availPx: int; faceGlyphs = false): int =
+  ## How many lines `text` wraps to at `availPx` (`wrappedLines`).
+  max(1, wrappedLines(text, sizePx, availPx, faceGlyphs).len)
 
 proc textStart(line: TimelineLine): int =
   InsetPx + line.indent * IndentPx + GlyphPx

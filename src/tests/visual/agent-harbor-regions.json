@@ -120,6 +120,29 @@
     "session's row, compared in pixels too, and the first recent launch; its",
     "Initiatives panel is the panel's own, so the initiative and session-line",
     "regions above match inside it. Its `surface` is the control center's root.",
+    "`cc-form-summary` is the one-line summary GPUI draws in place of the launch",
+    "form where it folds it at the sidebar size: the web never folds (its tab",
+    "scrolls), so no web element has the selector and the region is in GPUI's",
+    "capture exactly when GPUI drew the folded form. It is the fact the layout",
+    "judge keys its one allowance on, the sidebar fold of the control center",
+    "(`ctf_layout_judge.launchFoldOf`); anywhere else it is a region drawn on",
+    "one side only.",
+    "",
+    "The `gpuiOnly` regions are facts of GPUI's drawing that the web never",
+    "has (their `web` selectors match nothing): the layout judge reads them and",
+    "never compares them as regions, and does not hold them to the blank-region",
+    "check. `gpuiValue` names an attribute whose value GPUI reports beside the",
+    "box (`value`), `gpuiCount` asks for how many matches the window laid out",
+    "(`count`). They are the facts of the control center's held overview",
+    "at the sidebar size: GPUI's one-column root (`cc-root`), how much of the overview",
+    "the window shows (`cc-overview-held`), the waiting list's box and its",
+    "total (`cc-waiting-list`), the waiting rows drawn (`cc-waiting-rows`, and",
+    "the last of them, `cc-waiting-row-last-drawn`) and",
+    "its `+N more` line (`cc-waiting-more`), and the same for the Initiatives",
+    "panel (`cc-initiatives-list`, `cc-initiative-rows`, `cc-initiatives-more`),",
+    "with the panel's own box (`cc-initiatives-panel`, the host the control",
+    "center gives it) and its head band (`cc-initiatives-head`), to which the",
+    "judge anchors the panel's position.",
     "The status line's gaze mark (`gaze-mark`) is compared in pixels on its",
     "width and height: an eye and two words; its `surface` is the story's window",
     "(`.ah-gaze-story`).",
@@ -895,6 +918,110 @@
         "data-ah-recent-launch": ""
       },
       "pick": "first"
+    },
+    {
+      "name": "cc-form-summary",
+      "web": ".ah-cc-form-summary",
+      "gpui": {
+        "data-ah-form-summary": ""
+      }
+    },
+    {
+      "name": "cc-root",
+      "web": ".ah-cc-root-gpui-only",
+      "gpui": {
+        "data-ah-columns": "one"
+      },
+      "gpuiOnly": true,
+      "gpuiValue": "data-ah-columns"
+    },
+    {
+      "name": "cc-overview-held",
+      "web": ".ah-cc-overview-held-gpui-only",
+      "gpui": {
+        "data-ah-overview-visible-px": ""
+      },
+      "gpuiOnly": true,
+      "gpuiValue": "data-ah-overview-visible-px"
+    },
+    {
+      "name": "cc-waiting-list",
+      "web": ".ah-cc-waiting-list-gpui-only",
+      "gpui": {
+        "data-ah-waiting-section": ""
+      },
+      "gpuiOnly": true,
+      "gpuiValue": "data-ah-waiting-section"
+    },
+    {
+      "name": "cc-waiting-rows",
+      "web": ".ah-cc-waiting-rows-gpui-only",
+      "gpui": {
+        "data-ah-waiting-session": ""
+      },
+      "gpuiOnly": true,
+      "gpuiCount": true
+    },
+    {
+      "name": "cc-waiting-row-last-drawn",
+      "web": ".ah-cc-waiting-row-last-drawn-gpui-only",
+      "gpui": {
+        "data-ah-waiting-session": ""
+      },
+      "gpuiOnly": true,
+      "pick": "last-whole"
+    },
+    {
+      "name": "cc-waiting-more",
+      "web": ".ah-cc-waiting-more-gpui-only",
+      "gpui": {
+        "data-ah-waiting-more": ""
+      },
+      "gpuiOnly": true,
+      "gpuiValue": "data-ah-waiting-more"
+    },
+    {
+      "name": "cc-initiatives-list",
+      "web": ".ah-cc-initiatives-list-gpui-only",
+      "gpui": {
+        "data-ah-initiatives-total": ""
+      },
+      "gpuiOnly": true,
+      "gpuiValue": "data-ah-initiatives-total"
+    },
+    {
+      "name": "cc-initiative-rows",
+      "web": ".ah-cc-initiative-rows-gpui-only",
+      "gpui": {
+        "data-ah-initiative": ""
+      },
+      "gpuiOnly": true,
+      "gpuiCount": true
+    },
+    {
+      "name": "cc-initiatives-panel",
+      "web": ".ah-cc-initiatives-panel-gpui-only",
+      "gpui": {
+        "data-ah-panel-px": ""
+      },
+      "gpuiOnly": true
+    },
+    {
+      "name": "cc-initiatives-head",
+      "web": ".ah-cc-initiatives-head-gpui-only",
+      "gpui": {
+        "data-ah-head": "section header"
+      },
+      "gpuiOnly": true
+    },
+    {
+      "name": "cc-initiatives-more",
+      "web": ".ah-cc-initiatives-more-gpui-only",
+      "gpui": {
+        "data-ah-initiatives-more": ""
+      },
+      "gpuiOnly": true,
+      "gpuiValue": "data-ah-initiatives-more"
     },
     {
       "name": "gaze-mark",

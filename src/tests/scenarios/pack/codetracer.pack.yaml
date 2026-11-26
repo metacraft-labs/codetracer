@@ -1196,6 +1196,11 @@ roles:
       focused: bool
       # "Select a value to see its origin." is shown instead of a chain.
       empty: bool
+      # Why the question asked has no chain, shown instead of one ("" when
+      # it is not refused): a Visual Replay pixel's origin, which the
+      # recording has no CPU-side origin for ("The recording has no CPU-side
+      # origin for pixel 12, 34 in frame 2 (draw 5, GEID 220): …").
+      refusal: text
     children: { origin-hop: many, breadcrumb: many, panel-button: many }
     affordances: [click, focusable]
     assertions:
@@ -1387,10 +1392,13 @@ roles:
     # `last-entry`: the last row.
     anchors: [last-entry]
 
+  # A draw call that touched the pixel. A click goes to its source line; a
+  # right click opens its menu ("Show value origin": the colour it wrote,
+  # back to the program's values, in the origin panel).
   history-entry:
     keys: [geid]
     properties: { geid: int, draw: text, result: text, selected: bool, title: text }
-    affordances: [click]
+    affordances: [click, context-click]
 
   # The Shader Debug pane: the shader's source, the current step and its
   # values.

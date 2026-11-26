@@ -189,6 +189,19 @@ type
     variableName*: string
     stepId*: int64
 
+  PixelOriginQuery* = object
+    ## "Show value origin" asked of a Visual Replay pixel rather than of a
+    ## variable: the colour draw call `drawCallIndex` (event `geid`) wrote to
+    ## pixel (`x`, `y`) of frame `frame` (Visual-Replay.md § Pixel History
+    ## Tab). Answering it needs a bridge from the pixel back to the recorded
+    ## program's values; until one exists the side panel refuses it by name
+    ## (`OriginChainVM.onShowPixelOrigin`, `pixelOriginRefusalText`).
+    x*: int
+    y*: int
+    frame*: int
+    drawCallIndex*: int
+    geid*: uint64
+
   ScratchpadChainEntry* = object
     ## Sibling variant of `ScratchpadValueEntry` for pinned origin
     ## chains (M4 deliverable §3.5 + spec §8.1 "Scratchpad data
@@ -342,6 +355,27 @@ const
     ## user preference, see `OriginPreferences`.)
   DEFAULT_COLLAPSE_TRIVIAL_THRESHOLD* = 5
     ## Spec §3.7 default for `originChain.collapseTrivialChainsThreshold`.
+
+const
+  ShowValueOriginLabel* = "Show value origin"
+    ## The menu entry that asks where a value came from — on a State-pane
+    ## row, a value-history entry, a Pixel History entry — in every
+    ## front-end's words.
+
+proc pixelOriginLabel*(q: PixelOriginQuery): string =
+  ## The breadcrumb of a pixel's origin question: `pixel 12, 34 frame 2`
+  ## (the Pixel History header's words, `PixelHistoryVM.pixelText`).
+  "pixel " & $q.x & ", " & $q.y & " frame " & $q.frame
+
+proc pixelOriginRefusalText*(q: PixelOriginQuery): string =
+  ## What the side panel says, in place of a chain, when a pixel's origin is
+  ## asked and the recording holds none on the CPU side to walk back to: it
+  ## names the pixel, its frame and the draw call, so the refusal says which
+  ## question it refuses. Every front-end shows these words.
+  "The recording has no CPU-side origin for pixel " & $q.x & ", " & $q.y &
+    " in frame " & $q.frame & " (draw " & $q.drawCallIndex & ", GEID " &
+    $q.geid & "): the colour this draw wrote cannot be traced back to the " &
+    "program's values."
 
 proc defaultOriginPreferences*(): OriginPreferences =
   ## Defaults per the spec §3.2.3 V1 table + §3.7 preference rows.

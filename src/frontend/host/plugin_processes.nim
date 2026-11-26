@@ -146,6 +146,13 @@ proc openSessionPlugins*(session: SessionViewModel; sessionId: string;
   let stateHome = getEnv("XDG_STATE_HOME", getHomeDir() / ".local" / "state")
   p.sup.logDir = stateHome / "codetracer" / "plugin-logs" /
     (sessionId & "-" & $getCurrentProcessId())
+  # The one place any front-end reads the test-only thresholds (§11.7.7), so
+  # a suite relaxes a deadline the same way in the desktop, the terminal and
+  # the GPUI window. Unset in the product.
+  try:
+    p.sup.applyTestThresholds(getEnv(TestThresholdsEnv, ""))
+  except ValueError as e:
+    p.problems.add TestThresholdsEnv & " ignored: " & e.msg
   p.sup.onDisable = proc(id: string; enabled: bool) =
     p.entryFor(id)["enabled"] = %enabled
     p.writeSettings()

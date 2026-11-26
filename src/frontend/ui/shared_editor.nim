@@ -2394,6 +2394,13 @@ proc addWidget*(ed: SharedEditor; widget: JsObject; overlay: bool) =
   let node = callMethod0(widget, "getDomNode")
   if isNilOrUndef(node): return
   node.setAttr("data-ct-target", cstring(if overlay: "overlay-widget" else: "widget"))
+  # Monaco names each widget's node by the widget's id (`widgetid`, from
+  # `getId()`), and what finds a widget in the page reads it there: the
+  # flow's value chips are `[widgetid^='ct-flow-']`, line numbered.
+  if not isNilOrUndef(widget["getId"]):
+    let id = callMethod0(widget, "getId")
+    if not isNilOrUndef(id):
+      node.setAttr("widgetid", jsStr(id))
   if overlay: ed.overlayWidgetsLayer.appendChild(node)
   else: ed.widgetsLayer.appendChild(node)
   ed.widgets.add WidgetRec(widget: widget, node: node, overlay: overlay)

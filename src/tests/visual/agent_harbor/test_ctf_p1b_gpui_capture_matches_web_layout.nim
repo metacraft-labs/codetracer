@@ -69,6 +69,18 @@
 ##     pane-rectangle comparison cannot see this: two hundredths of the
 ##     laptop viewport would let a menu drift 29px off its chip.
 ##
+## ONE ACCEPTED DIFFERENCE, the sidebar fold. At the 360×900 sidebar size GPUI's control center folds the
+## launch form to its summary, because its window cannot scroll; the web
+## keeps the whole form and scrolls the tab. Where the capture is a
+## control-center story or playback moment, at the sidebar size, and GPUI's
+## capture records the summary it drew (`cc-form-summary`), the judge checks
+## the fold itself -- the send line right under the summary, the launch
+## column shorter than the web's by exactly what the fold frees, and, in the
+## frame, the column's ground ending at its foot (verdict `fold`) -- and
+## then judges the web record as laid out with the form folded
+## (`ctf_layout_judge.launchFoldOf`, `foldedWebRegions`). Nothing else
+## changes. The fold's own suite plants each way a fold can be wrong.
+##
 ## The verdicts, each region's rectangle on both sides and its deltas are
 ## written to `build/ctf-p1b/parity/report.json` and `report.md` (the
 ## parity-pairs report; `tools/visual-review/parity-pairs.sh --agent-harbor`
@@ -170,6 +182,190 @@ suite "CTF-P2b: a static timeline story's list cuts no line at its top edge":
     check cutTopLineProblems("web", regions).len == 0
     regions["timeline-line-first"] = Rect(x: 4, y: 84, w: 752, h: 16)
     check cutTopLineProblems("web", regions).len == 1
+
+suite "CTF-P2c: the judge allows the sidebar fold and nothing else (falsifying controls)":
+  # The one accepted difference:
+  # at the sidebar size GPUI folds the control center's launch form to its
+  # summary and the web scrolls. One real folded capture, copied and
+  # planted; each plant must fail by name, the untouched copy pass with the
+  # fold allowed. The CTF-P1c test runs the same plants on a playback
+  # moment.
+  let web = loadWebRecord()
+  const
+    Folded = "agent-harbor-control-center-playback-sidebar-dark"
+      ## A first frame whose fold the judge allows whole: a waiting row, the
+      ## Initiatives panel under it, and the story host's playback bar.
+    Laptop = "agent-harbor-control-center-playback-laptop-dark"
+    WholeForm = "agent-harbor-control-center-empty-sidebar-dark"
+      ## An empty fleet keeps the whole form at the sidebar size.
+  let scratch = getTempDir() / "ctf-p1b-fold-controls-" & $getCurrentProcessId()
+
+  proc planted(plant: FoldPlant): CaptureJudgement =
+    plantedFold(gpuiDir, scratch, Folded, web{Folded}, 360, 900, plant)
+
+  proc says(j: CaptureJudgement; words: string): bool = words in j.problems.join(" ")
+
+  test "the folded capture passes with the fold allowed, and records it":
+    check foldMayApply(Folded, 360, 900)
+    check not foldMayApply(Laptop, 1440, 900)
+    check not foldMayApply("agent-harbor-initiative-tabs-popup-sidebar-dark", 360, 900)
+    let j = planted(fpUntouched)
+    check j.verdict == vPass
+    check j.foldPx > 100.0
+    for p in j.problems: checkpoint p
+
+  test "a region the fold does not move, moved 20px, fails":
+    let j = planted(fpUnrelatedMoved)
+    check j.verdict == vLayout
+    check j.says("region head:")
+
+  test "a launch column folded to another height than the folded form's fails":
+    for plant in [fpLaunchShorter, fpLaunchTaller]:
+      let j = planted(plant)
+      check j.verdict == vFold
+      check j.says("the fold: GPUI's launch column is")
+
+  test "the fact present and the regions under it not moved up by the height it frees fails":
+    let j = planted(fpBelowNotMoved)
+    check j.verdict in {vLayout, vPixels}
+    check j.says("region cc-overview:")
+    let send = planted(fpSendNotMoved)
+    check send.verdict == vFold
+    check send.says("the fold: GPUI's send line starts at")
+    let row = planted(fpRowNotMoved)
+    check row.verdict == vPixels
+    check row.says("region cc-waiting-row-first: y is")
+
+  test "a fold at the laptop size fails":
+    let folded = regionsOf(parseJson(readFile(gpuiDir / (Folded & ".regions.json")))["regions"])
+    check FoldSummaryRegion in folded
+    if FoldSummaryRegion in folded:
+      let j = plantedFoldAt(gpuiDir, scratch, Laptop, web{Laptop}, 1440, 900,
+                            folded[FoldSummaryRegion])
+      check j.verdict != vPass
+      check j.says(FoldSummaryRegion)
+      check j.foldPx == 0.0
+
+  test "with no fold fact the capture fails as it did before the allowance":
+    let j = planted(fpNoFact)
+    check j.verdict == vLayout
+    check j.says("region cc-launch:")
+    check j.foldPx == 0.0
+
+  test "the fold recorded but the whole form drawn fails, on the frame":
+    # The allowance must rest on the pixels, not only on
+    # the recorded fact. The regions are planted to be a consistent fold
+    # over a capture that draws the whole form; only the frame tells.
+    let real = planted(fpUntouched)
+    let j = plantedFoldOnWholeForm(gpuiDir, scratch, WholeForm, web{WholeForm}, 360, 900,
+                                   real.foldPx)
+    check j.verdict == vFold
+    check j.says("runs on past its foot")
+    let ground = planted(fpGroundRunsOn)
+    check ground.verdict == vFold
+    check ground.says("runs on past its foot")
+
+  # The held overview: at the sidebar size GPUI also
+  # keeps the overview to the window, drawing whole rows and counting the
+  # rest on `+N more` lines, where the web's tab scrolls. The populated
+  # story holds both lists.
+  const Held = "agent-harbor-control-center-sidebar-dark"
+  const Gaze = "agent-harbor-status-gaze-off-sidebar-dark"
+
+  proc heldPlanted(plant: FoldPlant; id = Held): CaptureJudgement =
+    plantedFold(gpuiDir, scratch, id, web{id}, 360, 900, plant)
+
+  test "the held overview passes with both counts, and records the panel's shift":
+    let facts = regionsOf(parseJson(readFile(gpuiDir / (Held & ".regions.json")))["regions"])
+    check "cc-waiting-more" in facts and "cc-initiatives-more" in facts
+    let j = heldPlanted(fpUntouched)
+    check j.verdict == vPass
+    check j.heldShiftPx > 0.0
+    for p in j.problems: checkpoint p
+
+  test "the held overview shown past the window's foot fails":
+    let j = heldPlanted(fpHeldOverflow)
+    check j.verdict == vFold
+    check j.says("the held overview: GPUI shows its overview down to")
+
+  test "a missing +N more line under the waiting rows fails":
+    let j = heldPlanted(fpHeldNoMore)
+    check j.verdict == vFold
+    check j.says("the held overview: the waiting list draws")
+
+  test "a wrong count on the Initiatives panel's +N more line fails":
+    let j = heldPlanted(fpHeldWrongCount)
+    check j.verdict == vFold
+    check j.says("the held overview: the Initiatives panel draws")
+
+  test "the counts recorded but the whole waiting list drawn fails, on the frame":
+    let j = heldPlanted(fpHeldListRunsOn)
+    check j.verdict == vFold
+    check j.says("the held overview: in the frame the waiting list's ground")
+
+  test "the Initiatives panel drawn 40px lower fails, where it draws initiatives and where it counts them all":
+    # Regions, facts and frame moved together, all inside the window: only
+    # the panel's anchor to the waiting list it follows can tell. The
+    # launched and gaze stories draw no initiative (`+4 more`), so no row
+    # region of the panel is compared there at all.
+    for id in [Held, "agent-harbor-control-center-launched-sidebar-dark", Gaze]:
+      let j = heldPlanted(fpHeldPanelLower, id)
+      check j.verdict == vFold
+      check j.says("the held overview: the Initiatives panel starts at y")
+      checkpoint id
+
+  test "the Initiatives panel drawn 12px higher, over the +N more line, fails on its position":
+    let j = heldPlanted(fpHeldPanelHigher)
+    check j.verdict == vFold
+    check j.says("the held overview: the Initiatives panel starts at y")
+
+  test "the Initiatives panel's head 40px taller, its list 40px lower, fails on the head's height":
+    # Every link of the chain holds (the list starts under the taller head);
+    # the head's height is the view's for the story's data at this width
+    # (`ctf_held_expectation`), not the capture's.
+    for id in [Gaze, Held]:
+      let j = heldPlanted(fpHeldHeadTaller, id)
+      check j.verdict == vFold
+      check j.says("the held overview: the Initiatives panel's head is")
+      checkpoint id
+
+  test "two waiting rows claimed, the second stretched to absorb a 40px drop, fails":
+    let j = heldPlanted(fpHeldRowsStretched, Gaze)
+    check j.verdict == vFold
+    check j.says("the held overview: the last waiting row drawn is at y")
+
+  test "the waiting list's +N more line 40px taller, all under it 40px lower, fails on its height":
+    # Every other link holds (the list ends under the taller line, the
+    # panel under the list); the line's height is the view's, not the
+    # capture's.
+    for id in [Gaze, Held]:
+      let j = heldPlanted(fpHeldMoreTaller, id)
+      check j.verdict == vFold
+      check j.says("the held overview: the waiting list's `+N more` line is")
+      checkpoint id
+
+  test "two waiting rows drawn as the view draws them pass":
+    # No captured story draws two waiting rows at the sidebar size; this
+    # one is planted with the second row as tall as the view draws it, so
+    # the multi-row rule is shown to accept a correct layout.
+    let expect = heldExpectationOfCapture(Gaze, 360)
+    check expect.known and expect.waitingRowPx.len >= 2
+    let j = heldPlanted(fpHeldTwoRows, Gaze)
+    check j.verdict == vPass
+    for p in j.problems: checkpoint p
+
+  test "a gaze story's fold and held overview pass, and a wrong count there fails":
+    # The gaze stories draw the same control center over the status line;
+    # the status line's gaze mark is the story host's.
+    check foldMayApply(Gaze, 360, 900)
+    let j = heldPlanted(fpUntouched, Gaze)
+    check j.verdict == vPass
+    check j.foldPx > 100.0
+    for p in j.problems: checkpoint p
+    let wrong = heldPlanted(fpHeldWrongCount, Gaze)
+    check wrong.verdict == vFold
+    check wrong.says("the held overview: the Initiatives panel draws")
+    removeDir(scratch)
 
 suite "CTF-P1b: the layout judge fails what it must (negative controls)":
   # One real capture, copied into a scratch directory and planted with each

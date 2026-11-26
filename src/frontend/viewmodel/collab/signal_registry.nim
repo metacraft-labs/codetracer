@@ -321,6 +321,8 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
     ["pinnedChains", "breadcrumbStack", "preferences", "sidePanelOpen"],
     vscSharedSessionViewState,
     "User-pinned chains, breadcrumb navigation, badge/chain preferences, and side-panel visibility are shared logical view state.")
+  entries.addEntry("OriginChainVM", "refusal", vscSharedSessionViewState,
+    "The side panel's named refusal, shown in place of a chain (a Visual Replay pixel's origin, which no back end answers yet), follows the question the user asked: shared logical view state, like the breadcrumbs it answers.")
   entries.addMany("OriginChainVM",
     ["activeChain", "rowChains", "loading", "inFlightSummary",
      "lastResolvedSummaries"],

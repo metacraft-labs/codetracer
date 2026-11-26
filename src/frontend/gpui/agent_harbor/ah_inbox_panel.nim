@@ -341,11 +341,17 @@ proc drawApproval(r: GpuiRenderer; c: PageCtx; a: ApprovalRequest): GpuiElement 
     # The password field: what is typed is the viewmodel's to hold and is
     # never drawn back, so the field shows its placeholder, or that a
     # password was given.
-    let field = r.box(pairs = [("width", $PasswordPx & "px"), ("height", $ControlPx & "px"),
-                               ("items", "center"), ("padding-left", "8px"),
-                               ("padding-right", "8px"), ("border-width", "1px"),
-                               ("border-color", c.p.borderSecondary), ("rounded", "6px"),
-                               ("background", c.ink.inputSurface), ("flex-shrink", "0")])
+    # An `input` (`input.ah-text-field`): holding a password, the app's
+    # input rule draws it with the action border on the input surface
+    # (`inputLook`). Its value is never drawn back, so a
+    # password given stands for the value.
+    let look = inputLook(c.p, if page.passwordSet.val: "\xE2\x80\xA2" else: "",
+                         PasswordPlaceholder, c.p.borderSecondary, c.ink.inputSurface)
+    let field = r.inputBox(look, pairs = [("width", $PasswordPx & "px"),
+                                          ("height", $ControlPx & "px"),
+                                          ("items", "center"), ("padding-left", "8px"),
+                                          ("padding-right", "8px"), ("rounded", "6px"),
+                                          ("flex-shrink", "0")])
     r.tag(field, "password-field", $page.passwordSet.val)
     r.appendChild(field, r.text(if page.passwordSet.val: "\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2\xE2\x80\xA2"
                                 else: PasswordPlaceholder, BodyPx,

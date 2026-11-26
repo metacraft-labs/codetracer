@@ -1,0 +1,39 @@
+scenario: 1
+name: editor-hosted/generated-c-in-edit-mode
+pack: codetracer
+summary: >-
+  In an editor hosting CodeTracer, on a Nim project in Edit mode with no
+  recording, the plugin's command for View Generated C Source compiles the
+  saved file and shows the C of the line under the cursor in the Low Level
+  Code pane, beside the source.
+
+stage:
+  - use: write-project
+    with:
+      files:
+        main.nim: "proc twice(x: int): int =\n  result = x * 2\n\necho twice(21)\n"
+  - use: open-project
+    with: { folder: $project, file: main.nim, width: 200, height: 50 }
+
+steps:
+  - beat: open
+    narration: { text: "A small Nim project, open for editing. There is no recording yet.", voice: narrator }
+    caption: { text: "A Nim project in Edit mode" }
+    steps:
+      - wait: { until: { at: 'editor[file="main.nim"]/line[number="2"]', present: true }, timeout: 120s }
+
+  - beat: caret
+    narration: { text: "Put the cursor on the line to look at.", voice: narrator }
+    caption: { text: "The cursor on line 2" }
+    steps:
+      - click: { at: 'editor[file="main.nim"]/line[number="2"]', anchor: text-start, pace: thoughtful }
+      - wait: { until: { at: 'editor[file="main.nim"]', assert: "caret-at(2)" }, timeout: 10s }
+
+  - beat: generated-c
+    narration: { text: "View Generated C Source compiles the file, and shows the C that line became.", voice: narrator }
+    caption: { text: "The generated C of line 2" }
+    steps:
+      - chord: { bound: view.generated-c-source }
+        settle: false
+      - wait: { until: { at: 'pane[title="lowLevelCode"]', assert: 'has-row("nimlf_(2, ")' }, timeout: 180s }
+        dwell: 2500ms

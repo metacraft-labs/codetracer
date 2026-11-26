@@ -48,7 +48,12 @@
 ## facts count: the rows a scrolling list shows. A region with a
 ## `pick` also reports its `index` among the matches laid out with an area,
 ## as the web capture does, so the layout test can tell the same row from
-## another. Beside the regions, `drawnCuts` lists every text the window drew
+## another. A region with `gpuiValue` also reports that attribute's value on
+## the element measured (`value`: the N of a `+N more` line, a list's
+## total), and one with `gpuiCount` how many of its matches the window laid
+## out with an area (`count`: the rows a list drew); the layout judge reads
+## them as facts of GPUI's drawing (the control center's held overview). Beside
+## the regions, `drawnCuts` lists every text the window drew
 ## cut (isonim-gpui's `drawnText`, ending in "…"), for the layout check's
 ## rule on cut texts. The web capture writes
 ## the same file from the browser's own layout (`capture-storybook.mjs
@@ -113,6 +118,13 @@ type
       ## element carrying them (a scrolling list) count; empty: every match.
     container: seq[GpuiElement]
       ## The element(s) carrying `within`'s facts, in document order.
+    valueAttr: string
+      ## `"gpuiValue"`: a `data-ah-*` attribute whose value, on the element
+      ## measured, is reported beside its box (`"value"`): a count the view
+      ## drew, such as a `+N more` line's N. Empty: none.
+    count: bool
+      ## `"gpuiCount"`: also report how many matches the window laid out
+      ## with an area (`"count"`): the rows of a list the view drew.
 
   StoryWindow = object
     ## Everything the cdecl root builder and the tick need, which cannot be
@@ -198,6 +210,8 @@ proc readDeclaration(path: string): seq[RegionProbe] =
                                ": unknown pick " & region{"pick"}.getStr)
     if region.hasKey("within"):
       for k, v in region["within"]["gpui"].pairs: probe.within.add (k, v.getStr)
+    probe.valueAttr = region{"gpuiValue"}.getStr
+    probe.count = region{"gpuiCount"}.getBool
     if probe.name.len == 0 or probe.facts.len == 0:
       raise newException(ValueError, path & ": a region needs a name and gpui facts")
     result.add probe
@@ -246,7 +260,7 @@ proc readRegions(probes: seq[RegionProbe]; viewportHeight: int): JsonNode =
         continue
       if hasBox and (y < boxY - 0.5 or y + h > boxY + boxH + 0.5): continue
       if w > 0 and h > 0: shown.add (x, y, w, h, el)
-      if probe.pick == rpNone and shown.len > 0: break
+      if probe.pick == rpNone and not probe.count and shown.len > 0: break
     var chosen = if shown.len > 0: 0 else: -1
     if probe.pick == rpLastWhole:
       chosen = -1
@@ -256,6 +270,9 @@ proc readRegions(probes: seq[RegionProbe]; viewportHeight: int): JsonNode =
     let b = shown[chosen]
     result[probe.name] = %*{"x": b.x, "y": b.y, "w": b.w, "h": b.h}
     if probe.pick != rpNone: result[probe.name]["index"] = %chosen
+    if probe.valueAttr.len > 0:
+      result[probe.name]["value"] = %getAttribute(b.el, probe.valueAttr)
+    if probe.count: result[probe.name]["count"] = %shown.len
     # A line of text the view says needs `text-px` (`textWidth`, the face's
     # kerned advances, as GPUI sets them) is cut when laid out narrower: GPUI
     # elides it (`text-overflow: ellipsis`). The web side measures its text
@@ -350,7 +367,8 @@ proc buildStory(root: GpuiElement) {.cdecl.} =
     allMatches(gWindow.mount.root, probe.facts, probe.elements)
     # Only the first match is measured unless one of several is picked, or
     # the matches must lie inside a container (`within`).
-    if probe.pick == rpNone and probe.within.len == 0 and probe.elements.len > 1:
+    if probe.pick == rpNone and probe.within.len == 0 and not probe.count and
+       probe.elements.len > 1:
       probe.elements.setLen 1
     for el in probe.elements:
       r.setAttribute(el, LayoutProbeAttribute, probe.name)
