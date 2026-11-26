@@ -355,7 +355,7 @@ src/frontend/tui/tests/plat62-constraints-mutation-control.sha256	src/frontend/t
 # memory manager: ci/lib/run-nim-test-lane.sh's native arm and the parity gate's
 # native build pass --mm:orc, and vm-unit-wasm-lane-test.sh asserts both. Every
 # harness that digests those bytes owes a re-grade.
-src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	ci/lib/run-nim-test-lane.sh	d1a2a215a9f74c50d465925aaa14ad2fbc674db88c4dfa5e4a2e24ea222ef97e	18ea75fbdd4f4503736839b2f478ec0cae487276709a2aeeb3ced2cafb1ff652
+src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	ci/lib/run-nim-test-lane.sh	d1a2a215a9f74c50d465925aaa14ad2fbc674db88c4dfa5e4a2e24ea222ef97e	04c424b08d8e58312dae8d3d7aecfdc87e8b2e306fad2437e2b36cdf9b38d222
 src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/tui/app/views/shell.nim	31e3641a8736627d58edf1a36f0deb30fa58ac0ab6df58eac746ceffc37ba886	6a21298445ac4d112fa8dc906f943865ec39d4b42040fbfaf6d1b147778f2d8a
 src/frontend/tui/tests/plat58-requests-mutation-control.sha256	src/frontend/tui/app/views/shell.nim	31e3641a8736627d58edf1a36f0deb30fa58ac0ab6df58eac746ceffc37ba886	6a21298445ac4d112fa8dc906f943865ec39d4b42040fbfaf6d1b147778f2d8a
 src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/viewmodel/store/replay_data_store.nim	d13be1dd89481b28b8f77215445c36d1d26c3095a7783a06622fd9b41ee779eb	5ae3b32a7f7e2e0d7ebe7de7ff9a4e02f1cc5a8a9b44440fdd321fa6a47ea2db
@@ -945,7 +945,7 @@ src/frontend/viewmodel/tests/unit/plat18-marshalling-mutation-control.sha256	src
 # 5bfdeb5ae64 moved the collaboration lanes into viewmodel-tests.yml; the examples
 # suite now reads codetracer.yml with the workflows it calls, so plat33-collab owes a re-grade.
 src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_editor_collab_examples.nim	9d5c50c7146301ed8a5552b668b51672db8f91af7473503a90334ad987228cbb	5ed19dba8795a97e566e7aeb6ac94d3d237a6d2f2eb22709eb852e8bcf2912b5
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	8bda0738c9719a3f394aa9ee384bc2c920800d78e38e9b540d58ff8a018e0cc0	2d5def4d9dd24aec467014ed9dd87859ccdcdbafef9644659c4c6882a2fbf92f
+src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	8bda0738c9719a3f394aa9ee384bc2c920800d78e38e9b540d58ff8a018e0cc0	e304894122178c41e0b0d6a3e11c301ed1741e496fe0fce12d0850d512accdd1
 src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/styles/components/button.styl	daf83b8c3ee1848282d0edf04ac63a2b3813fb69f642154ad83248320f8b65aa	801731f5a002841ed30761c4409e972bf365dde4603ae29c5b974479dd8ce924
 
 # Re-grades owed for subjects moved by 0a4f1da4d53 without ledger lines;
@@ -989,7 +989,7 @@ src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/viewmo
 # Re-grades owed for subjects moved by aa75ead0407 cc304d4b682 without ledger lines;
 # the harnesses that digest them owe a re-grade of the arms that sit in them.
 # ci/lib/run-nim-test-lane.sh: --list-shard and sharded runs read the lane's files into a variable, so an unknown lane fails.
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/run-nim-test-lane.sh	3466f2374fa109b34c6326f47f0bccff13a5591911f251156bc5a4255f010916	18ea75fbdd4f4503736839b2f478ec0cae487276709a2aeeb3ced2cafb1ff652
+src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/run-nim-test-lane.sh	3466f2374fa109b34c6326f47f0bccff13a5591911f251156bc5a4255f010916	04c424b08d8e58312dae8d3d7aecfdc87e8b2e306fad2437e2b36cdf9b38d222
 # cc304d4b682 and aa75ead0407 (CTF-M1 slices 1 and 4) re-export nim_agents modules from two plat54 subjects; plat54 owes a re-grade.
 src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/viewmodel/viewmodels/agent_activity_text.nim	c7506cecd14c044eea0a632be20e56162d1ae19b0d014449abf70cbdc07b3a88	15c7ebd515471ad913198e2173a8740bd85e1bdf7e57fa69a5349fbd63695f63
 src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/viewmodel/viewmodels/agent_prompt_context.nim	06b4662611704d45c1ebeb976561cad9392c889913645371b948e28e7d8a8bbe	dc751cdb4328dbb7bbf7946067da2b879ea5746c7a9bb6f2d2ba3e400c727406

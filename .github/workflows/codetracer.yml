@@ -4767,6 +4767,15 @@ jobs:
         # sibling checkouts are present and says so when they are not.
         run: bash ci/test/launcher-recorder-e2e-workflow-test.sh
 
+      - name: Check the PHP recorder downstream lane's workflow wiring
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        # php-recorder-downstream.yml is called from codetracer-php-recorder
+        # and runs only there, so nothing in this repo's CI would execute it.
+        # This RUNS its plan step and its "predates this lane" refusal, checks
+        # its single required input against the caller when that checkout is
+        # present, and rejects mutations of the file. Stock bash, no network.
+        run: bash ci/test/php-recorder-downstream-workflow-test.sh
+
       - name: Check that a failed sibling build shows its cause
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         # scripts/build-siblings.sh and the launcher<->recorder driver used to

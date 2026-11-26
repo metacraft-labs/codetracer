@@ -1728,6 +1728,15 @@ test-launcher-recorder-e2e recorder="codetracer-python-recorder" lang="python":
 test-launcher-recorder-e2e-wiring:
   bash ci/test/launcher-recorder-e2e-workflow-test.sh
 
+# The PHP recorder's downstream lane: RUNS php-recorder-downstream.yml's plan
+# step under good and bad callers and revisions and its "predates this lane"
+# refusal against fixture checkouts, checks the caller's `with:` against the
+# declared inputs (when ../codetracer-php-recorder is present), and rejects a
+# set of mutations of the workflow, with a positive control. Stock bash.
+# See ci/test/php-recorder-downstream-workflow-test.sh.
+test-php-recorder-downstream-wiring:
+  bash ci/test/php-recorder-downstream-workflow-test.sh
+
 # Verify that a FAILED sibling build prints the tail of its own build log, both
 # in scripts/build-siblings.sh's summary and in the launcher<->recorder
 # driver's failure path, and still fails.  Stock bash; `repro` and `just` are
@@ -2689,6 +2698,19 @@ test-recorder-siblings:
     --test polkavm_flow_dap_test --test solana_flow_dap_test --test solidity_flow_dap_test \
     --test solidity_flow_integration --test sway_flow_dap_test --test tolk_flow_dap_test \
     -- --nocapture
+
+# CodeTracer's PHP consumers against a FRESH recording made with the
+# ../codetracer-php-recorder checkout: builds its extension in its own dev
+# shell, records one `php -S` request session with it, then runs the
+# db-backend's php_flow_dap_test (which records its own PHP program) and the
+# Request Panel ViewModel suite php_request_panel_vm_test.nim on that session
+# (CODETRACER_PHP_REQUEST_PANEL_FIXTURE; the checked-in fixture is untouched).
+# Ends with a `TEST-COUNTS:` line and fails on any failed or skipped test, or
+# none. This is the body of the PHP recorder's downstream lane
+# (.github/workflows/php-recorder-downstream.yml). See
+# ci/test/php-recorder-consumers.sh.
+test-php-recorder-consumers:
+  bash ci/test/php-recorder-consumers.sh
 
 # The WebAssembly boundary-recording checks: record each demo from this
 # tree and replay it.

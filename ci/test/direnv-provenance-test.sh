@@ -207,7 +207,12 @@ done
 # 17 -> 19: release.yml's `linux` job repeats appimage-build's two sites
 # (`direnv allow` and the ct_emulator `nimble install`), with the same
 # `.#devShells.x86_64-linux.default` shell.
-readonly EXPECTED_SITES=19
+# 19 -> 22: php-recorder-downstream.yml's job checks that direnv is on PATH in
+# the ci shell, runs `direnv allow` on the fresh sibling clones, and runs the
+# ct_emulator `nimble install` through `direnv exec`, as launcher-recorder-e2e
+# and cross-repo-tests do. All three name `.?submodules=1#ci`, this repo's
+# shell, so the foreign-shell rule below holds.
+readonly EXPECTED_SITES=22
 
 if [ "$sites" -eq "$EXPECTED_SITES" ]; then
 	ok "the scanner still matches the direnv call sites ($sites)"
