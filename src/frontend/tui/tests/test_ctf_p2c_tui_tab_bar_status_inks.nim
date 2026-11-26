@@ -15,7 +15,8 @@
 ##   status words, a failed `+N`'s count, the error notice) holds 4.5:1
 ##   (WCAG 2.2 SC 1.4.3) on the cell's own ground; the popup's session
 ##   status words are the Initiatives panel's one rule for them in every
-##   front end (`initiativeSessionWordColour`), not resolved per ground;
+##   front end (`initiativeSessionWordColour`) for the ground under them:
+##   in Light the role's 800 step where it holds, a darker ink where not;
 ## * a status mark and a milestone bar's status segment (graphical objects)
 ##   hold 3:1 (SC 1.4.11) on the cell's own ground; a neutral mark (idle,
 ##   ended, planned, other) has no status role and is not held here;
@@ -78,7 +79,7 @@ proc segmentProblems(m: AhTuiMount; parent: AhNode; what: string): seq[string] =
 suite "CTF-P2c: the tab bars' status inks on their grounds":
   test "the initiative popup's marks, segments, state word and status words":
     var problems: seq[string]
-    var seen, words = 0
+    var seen, words, on800, darker = 0
     for fixture in ["popup", "popup-over-panel"]:
       for (size, cols, rows) in Sizes:
         for mode in [dmDark, dmLight]:
@@ -95,15 +96,35 @@ suite "CTF-P2c: the tab bars' status inks on their grounds":
               let word = line.first("status")
               if word.isNil or word.row >= m.rows: continue
               let attention = parseEnum[SessionAttention](line.attr("attention"))
-              let fg = m.canvas.grid.styleAt(word.row, word.col).fg
+              let st = m.canvas.grid.styleAt(word.row, word.col)
+              let p = m.canvas.p
               if attention in {saNeedsInput, saRunning, saFailed}: inc words
-              if fg != m.canvas.p.initiativeSessionWordColour(attention):
-                problems.add where & "session status '" & word.attr("status") & "' is " & fg &
-                             ", not the panel's " & m.canvas.p.initiativeSessionWordColour(attention)
+              let wanted = p.initiativeSessionWordColour(attention, st.bg)
+              if st.fg != wanted:
+                problems.add where & "session status '" & word.attr("status") & "' is " & st.fg &
+                             " on " & st.bg & ", not the panel's " & wanted
+              # In Light, the role's 800 step wherever it holds 4.5:1 on the
+              # ground, and a darker ink only where it does not.
+              if mode == dmLight and attention in {saNeedsInput, saRunning, saFailed}:
+                let step = p.statusStep800(pieRoleOf(attention))
+                if contrastOf(step, st.bg) >= TextFloor:
+                  inc on800
+                  if st.fg != step:
+                    problems.add where & "session status '" & word.attr("status") & "' is " &
+                                 st.fg & " on " & st.bg & ", not the 800 step " & step
+                else:
+                  inc darker
+                  if inkLuminance(st.fg) >= inkLuminance(step):
+                    problems.add where & "session status '" & word.attr("status") & "' " &
+                                 st.fg & " on " & st.bg & " is not darker than " & step
           m.dispose()
     check seen == 8
     # Each popup draws running and waiting sessions (three of them).
     check words >= 8 * 3
+    # Light's popup draws its words on the card (the 800 steps hold) and,
+    # over a panel, on #c8c2b5 (orange and green/800 do not).
+    check on800 > 0
+    check darker > 0
     if problems.len > 0: echo problems.join("\n")
     check problems.len == 0
 
@@ -199,21 +220,43 @@ suite "CTF-P2c: the palette's status inks on a ground":
     check l.statusTextInk(prError, l.panel) == "#b91c1c"      # red/700
     check l.statusTextInk(prWarning, l.panel) == "#9b3a12"    # about orange/800
     # The error banner on the card: red/700 is 4.47:1 there, so a quarter
-    # toward the body (5.84:1; about red/800 #991b1b, which the Nim table
-    # lacks).
+    # toward the body (5.84:1; about red/800 #991b1b, which this rule does
+    # not name).
     check l.statusTextInk(prError, l.menu) == "#951e1e"
-    # An Initiatives session's status word, one ink per state on every
-    # ground. Dark keeps each role; Light takes this rule on the darkest
-    # ground it is drawn on, the popup's over a panel (#c8c2b5).
-    check d.initiativeSessionWordColour(saNeedsInput) == d.textWarning
-    check d.initiativeSessionWordColour(saRunning) == d.textSuccess
-    check d.initiativeSessionWordColour(saFailed) == d.textError
-    check l.initiativeSessionWordColour(saNeedsInput) == "#753317"   # about orange/900
-    check l.initiativeSessionWordColour(saRunning) == "#1e5330"      # about green/900
-    check l.initiativeSessionWordColour(saFailed) == "#951e1e"       # about red/800
+    # A session's status word on a ground. Dark keeps each role on every
+    # ground. Light takes the role's 800 step, the design system's
+    # `colors-<role>-800` primitive, wherever it holds 4.5:1: on the default
+    # surface (#f8f6f2), the panel (#e6e2db) and the card (#dbd6cc).
+    for ground in [d.ground, d.panel, d.menu, d.hover]:
+      check d.initiativeSessionWordColour(saNeedsInput, ground) == d.textWarning
+      check d.initiativeSessionWordColour(saRunning, ground) == d.textSuccess
+      check d.initiativeSessionWordColour(saFailed, ground) == d.textError
+    check l.statusStep800(prWarning) == "#9a3412"   # orange/800
+    check l.statusStep800(prSuccess) == "#166534"   # green/800
+    check l.statusStep800(prError) == "#991b1b"     # red/800
+    for att in [saNeedsInput, saRunning, saFailed]:
+      for ground in [l.ground, l.panel, l.menu]:
+        check l.initiativeSessionWordColour(att, ground) == l.statusStep800(pieRoleOf(att))
+    # On #c8c2b5 orange and green/800 fall under it (4.12 and 4.02:1), so
+    # they are taken a quarter toward the body text there; red/800 holds.
+    check contrastOf(l.statusStep800(prWarning), l.hover) < TextFloor
+    check contrastOf(l.statusStep800(prSuccess), l.hover) < TextFloor
+    check contrastOf(l.statusStep800(prError), l.hover) >= TextFloor
+    check l.initiativeSessionWordColour(saNeedsInput, l.hover) == "#7d3016"
+    check l.initiativeSessionWordColour(saRunning, l.hover) == "#1a5530"
+    check l.initiativeSessionWordColour(saFailed, l.hover) == "#991b1b"
+    check l.initiativeSessionWordColour(saNeedsInput, l.hover) ==
+      mixInk(l.statusStep800(prWarning), l.textBody, StatusInkStepPercent)
+    # A cell with no ground is taken as the darkest one.
+    check l.initiativeSessionWordColour(saRunning, "") == "#1a5530"
     for att in [saNeedsInput, saRunning, saFailed]:
       for ground in [l.panel, l.menu, l.ground, l.hover]:
-        check contrastOf(l.initiativeSessionWordColour(att), ground) >= TextFloor
+        check contrastOf(l.initiativeSessionWordColour(att, ground), ground) >= TextFloor
+    # Every other state is in the label role, on every ground.
+    for att in [saIdle, saQueued, saEnded]:
+      for ground in [l.panel, l.hover]:
+        check l.initiativeSessionWordColour(att, ground) == l.textLabel
+        check d.initiativeSessionWordColour(att, ground) == d.textLabel
     # The `+N` chip's failure on the bar: red/700, the recordings' red.
     check l.statusTextInk(prError, l.ground) == "#b91c1c"
     # The open chip's warning dot: the pie's warning ink on that fill.

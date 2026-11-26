@@ -230,9 +230,6 @@ proc waitingRows*(vm: ControlCenterVM; cells: int): int =
     result += 2 + whyLines(row, cells).len
     if i < rows.high: inc result
 
-proc stateInk(c: AhCanvas; attention: SessionAttention): string =
-  if attention == saNeedsInput: warningInk(c.p) else: c.p.textCaption
-
 const ClippedShift = 100_000
   ## How far a node below the control center's foot is moved: off every
   ## screen, so a reader of the tree finds it clipped (wholly below the
@@ -289,7 +286,11 @@ proc drawWaiting(c: var AhCanvas; host: AhNode; vm: ControlCenterVM;
         discard c.put(r + k, col, BarGlyph, c.p.borderAction)
     discard c.text(n, r, col + 1, inner, row.item.title, c.p.textBody)
     let word = row.stateWordOf
-    let wordW = c.text(n, r + 1, col + 1, inner, word, c.stateInk(row.item.attention),
+    # Its state word: the palette's one rule for a session's status word on
+    # its ground, the Initiatives panel's below included, so one word on one
+    # ground is one ink across the tab.
+    let wordW = c.text(n, r + 1, col + 1, inner, word,
+                       c.p.initiativeSessionWordColour(row.item.attention, c.bgAt(r + 1, col + 1)),
                        fact = "state-word")
     # Its initiative and age: where the line is too narrow the initiative is
     # cut and the age kept (TUI review of 2026-11-24: `· 9m` was lost).

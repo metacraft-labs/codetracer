@@ -16,12 +16,14 @@
 ##   chip and on a waiting row does what it carries; `Down` and `Enter` walk
 ##   and open the waiting rows.
 ## * **Every ground and ink is a design-system role** the palette resolves.
-## * **The Initiatives panel's session status words hold 4.5:1** (WCAG 2.2
-##   SC 1.4.3) on the panel ground and the stripe in both modes (`running`,
-##   `needs input` and `failed` take their role's hover step a quarter
-##   toward the body text in Light, about its 800 step), in the control
-##   center and in the panel's own story, while the dot beside each keeps
-##   its icon colour; the web's three state rules resolve to the same inks.
+## * **A session's status word holds 4.5:1** (WCAG 2.2 SC 1.4.3) on the
+##   ground it is drawn on, in both modes: the Initiatives panel's (the
+##   panel, the stripe and the selected initiative) and the waiting rows'.
+##   In Light `running`, `needs input` and `failed` take their role's 800
+##   step wherever it holds and a darker ink only where it does not; one
+##   word on one ground is one ink in both places; the dot beside a line
+##   keeps its icon colour; the web's rules resolve to the same inks on the
+##   grounds the web draws them on.
 ## * **The gaze mark**: off draws nothing; tracking and paused draw the eye
 ##   (struck when paused) and the words at the status line's end; the pause
 ##   key (`Ctrl+Alt+Y`, ESC then ^Y as a terminal sends it) and a click
@@ -46,6 +48,33 @@ proc click(m: AhTuiMount; n: AhNode): bool =
 
 proc waitingIds(m: AhTuiMount): seq[string] =
   m.view.all("waiting-session").mapIt(it.attr("waiting-session"))
+
+proc wordProblems(p: AhPalette; attention: SessionAttention; fg, bg, where: string): seq[string] =
+  ## A session's status word drawn in `fg` on `bg`, against the rule for it
+  ## (`initiativeSessionWordColour`) and what the rule must give: 4.5:1 on
+  ## that ground (WCAG 2.2 SC 1.4.3); in Light the role's 800 step wherever
+  ## it holds 4.5:1 there and a darker ink only where it does not; in Dark
+  ## the role's text step; the label role for a state with no status role.
+  let ratio = contrastOf(fg, bg)
+  if fg != p.initiativeSessionWordColour(attention, bg):
+    result.add where & ": " & fg & " on " & bg & ", the palette's " &
+               p.initiativeSessionWordColour(attention, bg)
+  if ratio < StatusTextFloor:
+    result.add where & ": " & fg & " on " & bg & " is " & formatFloat(ratio, ffDecimal, 2) & ":1"
+  if attention notin {saNeedsInput, saRunning, saFailed}:
+    if fg != p.textLabel: result.add where & ": " & fg & ", not the label role"
+  elif p.mode == dmDark:
+    let role = case attention
+               of saNeedsInput: p.textWarning
+               of saRunning: p.textSuccess
+               else: p.textError
+    if fg != role: result.add where & ": " & fg & ", not its role " & role
+  else:
+    let step = p.statusStep800(pieRoleOf(attention))
+    if contrastOf(step, bg) >= StatusTextFloor:
+      if fg != step: result.add where & ": " & fg & " on " & bg & ", not the 800 step " & step
+    elif fg == step or inkLuminance(fg) >= inkLuminance(step):
+      result.add where & ": " & fg & " on " & bg & " is not darker than the 800 step " & step
 
 suite "CTF-P2c: the terminal control center":
   test "two columns at laptop and wide, one column, launching first, at sidebar":
@@ -385,32 +414,42 @@ suite "CTF-P2c: the terminal control center":
     check m.center.requestedSession.val == m.waitingIds[0]
     m.dispose()
 
-  test "a needs-input state word is in the warning role, an ended turn's in the caption":
+  test "a waiting row's state word is a session's status word on its ground":
+    # The waiting list's state words and the Initiatives panel's status words
+    # are one rule (`initiativeSessionWordColour`): `needs input` in Light is
+    # orange/800 on the panel, not the warning role's 700 step it was
+    # (#c2410c, 4.01:1 there), and an ended turn's word is in the label role
+    # as the panel's are, not the caption (#7a756a, 3.55:1 on the panel).
     for mode in [dmDark, dmLight]:
       let m = mount("populated", mode = mode)
+      let p = m.canvas.p
       let words = m.view.all("state-word")
       check words.len == 3
-      let ask = m.canvas.grid.styleAt(words[0].row, words[0].col).fg
-      let idle = m.canvas.grid.styleAt(words[2].row, words[2].col).fg
-      check ask == warningInk(m.canvas.p)
-      check idle == m.canvas.p.textCaption
+      let ask = m.canvas.grid.styleAt(words[0].row, words[0].col)
+      let idle = m.canvas.grid.styleAt(words[2].row, words[2].col)
+      check ask.fg == p.initiativeSessionWordColour(saNeedsInput, ask.bg)
+      check idle.fg == p.textLabel
+      if mode == dmLight:
+        check ask.bg == p.panel
+        check ask.fg == "#9a3412"            # orange/800
+      else:
+        check ask.fg == p.textWarning
+      for w in words:
+        let st = m.canvas.grid.styleAt(w.row, w.col)
+        check contrastOf(st.fg, st.bg) >= StatusTextFloor
       m.dispose()
 
-  test "the Initiatives panel's session status words hold 4.5:1; their dots keep the icon colour":
+  test "the Initiatives panel's session status words hold 4.5:1 on every ground; their dots keep the icon colour":
     # The status word is a session line's only word for its state, beside a
     # dot of the same hue, so it is text (WCAG 2.2 SC 1.4.3): 4.5:1 against
-    # every ground the panel draws it on. Light's raw status text roles fell
-    # under that on the panel (#e6e2db) and the stripe (#f8f6f2): `running`
-    # #16a34a 2.55:1 and 3.05:1, `needs input` #ea580c 2.76:1 and 3.30:1;
-    # so did their hover steps on the panel, `running` #15803d 3.88:1 and
-    # `needs input` #c2410c 4.01:1.
-    #
-    # The selected initiative's ground (`activeRow`, #c8c2b5 in Light) is
-    # left out: it is a separate defect, fixed separately.
+    # the ground it is drawn on, the selected initiative's (#c8c2b5 in
+    # Light) included. Light takes the role's 800 step wherever that holds
+    # and a darker ink only where it does not (`wordProblems`).
     var problems: seq[string]
     var seen: seq[string]   # "<mode> <attention> <ground>", each word checked
     for (surface, fixture) in [("agent-harbor-control-center", "populated"),
-                               ("agent-harbor-initiatives", "populated")]:
+                               ("agent-harbor-initiatives", "populated"),
+                               ("agent-harbor-initiatives", "selected")]:
       for (cols, rows) in [(95, 40), (45, 56), (180, 56)]:
         for mode in [dmDark, dmLight]:
           let m = mountAgentHarborStoryTui(surface, fixture, cols, rows, mode)
@@ -439,51 +478,89 @@ suite "CTF-P2c: the terminal control center":
               if st.fg.len == 0 or st.bg.len == 0:
                 problems.add where & ": the status word's cell has no colours"
                 continue
-              # One resolution for every front end, on every ground: the palette's.
-              if st.fg != p.initiativeSessionWordColour(attention):
-                problems.add where & ": the word is " & st.fg & ", the palette's " &
-                  p.initiativeSessionWordColour(attention)
-              if st.bg == p.activeRow: continue
+              problems.add wordProblems(p, attention, st.fg, st.bg,
+                                        where & " '" & word.attr("status") & "'")
               let ground = if st.bg == m.canvas.tone.body: "panel"
                            elif st.bg == m.canvas.tone.band: "stripe"
+                           elif st.bg == p.activeRow: "selected"
                            else: st.bg
               seen.add $mode & " " & $attention & " " & ground
-              let ratio = contrastOf(st.fg, st.bg)
-              if ratio < StatusTextFloor:
-                problems.add where & ": '" & word.attr("status") & "' " & st.fg & " on " &
-                  ground & " " & st.bg & " is " & formatFloat(ratio, ffDecimal, 2) & ":1"
           m.dispose()
     for problem in problems: echo "  ", problem
     check problems.len == 0
     # A check that ran on no word proves nothing: the fixtures must put a
-    # running and a waiting session on the panel ground and on the stripe,
-    # in each mode.
+    # running and a waiting session on the panel ground, on the stripe and
+    # on the selected initiative, in each mode.
     for mode in [dmDark, dmLight]:
       for attention in [saRunning, saNeedsInput]:
-        for ground in ["panel", "stripe"]:
+        for ground in ["panel", "stripe", "selected"]:
           let key = $mode & " " & $attention & " " & ground
           if key notin seen: echo "  never checked: ", key
           check key in seen
 
-  test "the web's session status rules resolve to the palette's words":
-    # The web does not read the palette: `.ah-initiative-session-status`
-    # takes its colour from `agent_harbor.styl`. Each of the three state
-    # rules must resolve, in each mode, to the ink the case above holds to
-    # 4.5:1, so the web cannot keep a lighter step while the native hosts
-    # move to the darker one. A mode's value is a design token's name
-    # (`colors-ui-…`) or `mix-ink(<token>, <token>, <n>%)`, which
-    # `defaults.styl` defines as the palette's `mixInk`.
+  test "one ink per status word per ground across WAITING FOR YOU and the Initiatives panel":
+    # The tab draws a session's state in two places, its waiting row and its
+    # line under its initiative: a word on one ground must be one ink in
+    # both, and each must be the rule's ink for that ground.
+    var problems: seq[string]
+    var both = 0
+    for (cols, rows) in [(95, 40), (45, 56), (180, 56)]:
+      for mode in [dmDark, dmLight]:
+        let m = mount("populated", cols, rows, mode)
+        let p = m.canvas.p
+        var inks: seq[(string, string, string, string)]   # word, ground, ink, where
+        for w in m.view.all("waiting-session"):
+          let word = w.first("state-word")
+          if word.isNil or word.row >= m.rows: continue
+          let st = m.canvas.grid.styleAt(word.row, word.col)
+          let attention = parseEnum[SessionAttention](w.attr("waiting-state").replace(' ', '-'))
+          problems.add wordProblems(p, attention, st.fg, st.bg,
+                                    $mode & " waiting '" & word.attr("state-word") & "'")
+          inks.add (word.attr("state-word"), st.bg, st.fg, "waiting")
+        for s in m.canvas.root.all("session"):
+          let word = s.first("status")
+          if word.isNil or word.row >= m.rows: continue
+          let st = m.canvas.grid.styleAt(word.row, word.col)
+          inks.add (word.attr("status"), st.bg, st.fg, "initiatives")
+        for a in inks:
+          for b in inks:
+            if a[0] == b[0] and a[1] == b[1] and a[2] != b[2]:
+              problems.add $mode & " " & $cols & "x" & $rows & ": '" & a[0] & "' on " & a[1] &
+                           " is " & a[2] & " in " & a[3] & " and " & b[2] & " in " & b[3]
+            if a[3] == "waiting" and b[3] == "initiatives" and a[0] == b[0] and a[1] == b[1]:
+              inc both
+        m.dispose()
+    for problem in problems: echo "  ", problem
+    check problems.len == 0
+    # `needs input` is drawn on the panel ground in both places.
+    check both > 0
+
+  test "the web's session status rules resolve to the palette's words on their grounds":
+    # The web does not read the palette: a session's status word takes its
+    # colour from `agent_harbor.styl`. Each state's rule must resolve, in
+    # each mode, to the ink the palette gives on the grounds the web draws it
+    # on: the default rule on the panel, the card band and a popup's
+    # surface, the hover rule on `secondary-hover` (a hovered or selected
+    # initiative, a hovered waiting row). A mode's value is a design token's
+    # name (`colors-ui-…`, or a primitive step such as `colors-warning-800`)
+    # or `mix-ink(<token>, <token>, <n>%)`, which `defaults.styl` defines as
+    # the palette's `mixInk`.
     let styl = readFile(currentSourcePath().parentDir.parentDir.parentDir /
                         "styles" / "components" / "agent_harbor.styl").splitLines
     proc colourOf(selector: string): string =
+      ## The colour of the rule whose selector list holds `selector`.
       for i, line in styl:
-        if line == selector and i + 1 < styl.len:
-          let d = styl[i + 1].strip
-          if d.startsWith("color:"): return d["color:".len .. ^1].strip
+        if line.strip(leading = false, chars = {','}) == selector:
+          var k = i + 1
+          while k < styl.len and styl[k].len > 0 and styl[k][0] != ' ': inc k
+          if k < styl.len and styl[k].strip.startsWith("color:"):
+            return styl[k].strip["color:".len .. ^1].strip
     proc tokenHex(name: string; mode: DesignMode): string =
-      ## The hex of the design token `name` spells (`colors-ui-…`), or "".
+      ## The hex of the design token `name` spells, or "".
       for t in DesignToken:
         if ($t).replace('/', '-') == name: return DesignTokenHex[t][mode]
+      for t in DesignPrimitive:
+        if ($t).replace('/', '-') == name: return DesignPrimitiveHex[t][mode]
     proc modeArgs(args: string): seq[string] =
       ## `args` split at its top-level commas: a `mix-ink(…)` stays whole.
       var depth = 0
@@ -507,24 +584,52 @@ suite "CTF-P2c: the terminal control center":
         if a.len == 0 or b.len == 0: return ""
         return mixInk(a, b, parseInt(args[2][0 ..< args[2].high]))
       tokenHex(value, mode)
+    let initiativesHover = ".ah-initiative-row:hover "
+    let selected = ".ah-initiative-row-selected "
+    let waitingHover = ".ah-cc-waiting-row:hover "
     var resolvedRules = 0
-    for (selector, attention) in [
-        (".ah-att-needs-input .ah-initiative-session-status", saNeedsInput),
-        (".ah-att-running .ah-initiative-session-status", saRunning),
-        (".ah-att-failed .ah-initiative-session-status", saFailed)]:
-      let value = colourOf(selector)
-      check value.startsWith("by-mode(") and value.endsWith(")")
-      if not (value.startsWith("by-mode(") and value.endsWith(")")): continue
-      let names = modeArgs(value["by-mode(".len ..< value.high])
-      check names.len == 2
-      if names.len != 2: continue
-      for k, mode in [dmDark, dmLight]:
-        let hex = resolved(names[k], mode)
-        check hex.len > 0
-        check hex == ahPalette(mode).initiativeSessionWordColour(attention)
-        if hex.len > 0 and hex == ahPalette(mode).initiativeSessionWordColour(attention):
-          inc resolvedRules
-    check resolvedRules == 6
+    for (cls, attention) in [("needs-input", saNeedsInput), ("running", saRunning),
+                             ("failed", saFailed)]:
+      let line = ".ah-att-" & cls & " .ah-initiative-session-status"
+      let waiting = ".ah-cc-waiting-state.ah-att-" & cls
+      for mode in [dmDark, dmLight]:
+        let p = ahPalette(mode)
+        # (selector, the grounds the web draws it on)
+        var rules = @[(line, @[p.panel, p.menu, p.ground]), (waiting, @[p.panel])]
+        # The hover rules exist where the 800 step falls under the floor on
+        # `secondary-hover`; elsewhere the default rule stands there too.
+        let darker = colourOf(initiativesHover & line).len > 0
+        if darker:
+          rules.add @[(initiativesHover & line, @[p.hover]), (selected & line, @[p.hover]),
+                      (waitingHover & waiting, @[p.hover])]
+        else:
+          rules[0][1].add p.hover
+          rules[1][1].add p.hover
+        if mode == dmLight:
+          # The hover rules are there exactly where Light needs them.
+          check darker == (contrastOf(p.statusStep800(pieRoleOf(attention)), p.hover) <
+                           StatusTextFloor)
+        for (selector, grounds) in rules:
+          let value = colourOf(selector)
+          check value.startsWith("by-mode(") and value.endsWith(")")
+          if not (value.startsWith("by-mode(") and value.endsWith(")")):
+            echo "  no by-mode rule for ", selector
+            continue
+          let names = modeArgs(value["by-mode(".len ..< value.high])
+          check names.len == 2
+          if names.len != 2: continue
+          let hex = resolved(names[ord(mode)], mode)
+          check hex.len > 0
+          for ground in grounds:
+            let wanted = p.initiativeSessionWordColour(attention, ground)
+            if hex != wanted:
+              echo "  ", $mode, " ", selector, " on ", ground, " is ", hex, ", not ", wanted
+            check hex == wanted
+            if hex.len > 0 and hex == wanted: inc resolvedRules
+    # In each mode: needs input and running, the line's rule on 3 grounds,
+    # the waiting row's on 1 and 3 hover rules on 1; failed, the line's rule
+    # on 4 grounds and the waiting row's on 2.
+    check resolvedRules == 2 * 2 * (3 + 1 + 3) + 2 * (4 + 2)
 
 suite "CTF-P2c: the terminal gaze mark":
   test "off draws nothing; tracking and paused draw the eye and the words at the end":

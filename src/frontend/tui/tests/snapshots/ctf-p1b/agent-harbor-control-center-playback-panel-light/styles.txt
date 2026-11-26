@@ -7,7 +7,7 @@
 5 #272522/#b5ae9f+bold
 6 #272522/#b5ae9f+bold+underline:usSingle+ul:#6366f1
 7 #353430/#c8c2b5
-8 #c2410c/#e6e2db
+8 #9a3412/#e6e2db
 9 #7a756a/#e6e2db
 10 #353430/#e6e2db
 11 #272522/#f3f3f3
@@ -17,7 +17,7 @@
 15 #2563eb/#e6e2db
 16 #aca494/#e6e2db
 17 #353430/#e6e2db+bold
-18 #1e5330/#e6e2db
+18 #166534/#e6e2db
 19 #272522/#b5ae9f
 20 #727272/#c8c2b5
 21 #353430/#b5ae9f

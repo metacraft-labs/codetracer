@@ -692,8 +692,9 @@ proc pieInks*(p: AhPalette; role: PieRole; ground: PieGround): PieInks =
 #   text step where that holds, else its hover step (the 700 step), else
 #   that step taken `StatusInkStepPercent` at a time toward the body text
 #   (`statusTextInk`): only tokens, mixed in code, as `buttonStateInk` mixes
-#   orange/700 toward the body for orange/800 (the Nim design-token table
-#   carries no 800 step);
+#   orange/700 toward the body for orange/800. An Initiatives session's
+#   status word has a rule of its own that starts at the 800 step
+#   (`initiativeSessionWordColour`);
 # - a status MARK (the one-cell dot) is a graphical object: SC 1.4.11, 3:1
 #   (https://www.w3.org/TR/WCAG22/#non-text-contrast). It keeps the role's
 #   icon ink where that holds, else it takes the pie's ink for its role on
@@ -722,6 +723,17 @@ proc statusTextSteps(p: AhPalette; role: PieRole): (string, string) =
   of prError: (t(dtColorsUiTextErrorPrimary), t(dtColorsUiTextErrorPrimaryHover))
   of prIdle, prEnded: (p.textLabel, p.textLabel)
 
+proc inkTowardBody(p: AhPalette; start, ground: string; floor: float): string =
+  ## `start` where it holds `floor` on `ground`, else `start` taken toward
+  ## the body text a `StatusInkStepPercent` step at a time, the first that
+  ## holds; the body text when none does.
+  var step = 0
+  while step < 100:
+    let ink = mixInk(start, p.textBody, step)
+    if inkContrast(ink, ground) >= floor: return ink
+    step += StatusInkStepPercent
+  p.textBody
+
 proc statusTextInk*(p: AhPalette; role: PieRole; ground: string;
                     floor = StatusTextFloor): string =
   ## A status word or count of `role` readable on `ground` (see the
@@ -730,12 +742,7 @@ proc statusTextInk*(p: AhPalette; role: PieRole; ground: string;
   ## a time, the first that holds `floor`; the body text when none does.
   let (primary, hover) = p.statusTextSteps(role)
   if inkContrast(primary, ground) >= floor: return primary
-  var step = 0
-  while step < 100:
-    let ink = mixInk(hover, p.textBody, step)
-    if inkContrast(ink, ground) >= floor: return ink
-    step += StatusInkStepPercent
-  p.textBody
+  p.inkTowardBody(hover, ground, floor)
 
 proc markOn*(p: AhPalette; m: MarkStyle; ground: string): MarkStyle =
   ## `m` readable on `ground` (see the section's header): as it is when its
@@ -745,44 +752,56 @@ proc markOn*(p: AhPalette; m: MarkStyle; ground: string): MarkStyle =
   if m.roled and inkContrast(m.colour, ground) < StatusMarkFloor:
     result.colour = p.roleInks(ground)[m.role]
 
-proc initiativeSessionWordColour*(p: AhPalette; attention: SessionAttention): string =
-  ## An Initiatives session line's status word (`.ah-att-*
-  ## .ah-initiative-session-status`), in the terminal, GPUI and the web
-  ## alike, the session lines of the initiative popup included. It is the
-  ## line's only word for its state, beside a dot of the same hue, so it is
-  ## text: WCAG 2.2 SC 1.4.3, `StatusTextFloor` (4.5:1), on every ground the
-  ## panel and the popup draw it on
-  ## (https://www.w3.org/TR/WCAG22/#contrast-minimum). One ink per state,
-  ## whatever the ground, so the web's stylesheet draws the same one.
+proc statusStep800*(p: AhPalette; role: PieRole): string =
+  ## A status role's 800 step, the design system's `colors-<role>-800`
+  ## primitive (green, orange and red/800 for success, warning and error;
+  ## the Nim table carries it as `DesignPrimitive`); the label role for a
+  ## role it is not given for.
+  template t(step: DesignPrimitive): string = DesignPrimitiveHex[step][p.mode]
+  case role
+  of prSuccess: t(dpColorsSuccess800)
+  of prWarning: t(dpColorsWarning800)
+  of prError: t(dpColorsError800)
+  of prInfo, prIdle, prEnded: p.textLabel
+
+proc initiativeSessionWordColour*(p: AhPalette; attention: SessionAttention;
+                                  ground: string): string =
+  ## A session's status word on `ground`: an Initiatives session line's
+  ## (`.ah-att-* .ah-initiative-session-status`), the initiative popup's
+  ## session lines included, and the control center's `WAITING FOR YOU`
+  ## row's (`.ah-cc-waiting-state`), in the terminal, GPUI and the web alike,
+  ## so one word on one ground is one ink across the screen. It is the
+  ## line's only word for its state, so it is text: WCAG 2.2 SC 1.4.3,
+  ## `StatusTextFloor` (4.5:1) on the ground it is drawn on
+  ## (https://www.w3.org/TR/WCAG22/#contrast-minimum).
   ##
-  ## Light's grounds for it are the panel (#e6e2db), its stripe (#f8f6f2),
-  ## the popup's card (#dbd6cc) and, where the popup drops over a panel,
-  ## `surface/primary/secondary-hover` (`hover`, #c8c2b5), the darkest. The
-  ## text roles fall under the floor there, and so do their hover (700)
-  ## steps: `running` #15803d 2.83:1, `needs input` #c2410c 2.92:1, `failed`
-  ## #b91c1c 3.65:1 (on the panel 3.88, 4.01 and 5.01:1); the 800 steps,
-  ## green #166534 4.02:1 and orange #9a3412 4.12:1, would still fall under
-  ## it. So in Light the word is the palette's one rule for a status word,
-  ## `statusTextInk`, on that darkest ground, which then holds on every
-  ## lighter one: the hover step taken `StatusInkStepPercent` at a time
-  ## toward the body text until it holds. The Nim token table carries no
-  ## 800 or 900 step (only the Stylus alias layer does, with no semantic
-  ## token), so the step is derived from two tokens, and the web mixes the
-  ## same two tokens by the same weight (`mix-ink` in `defaults.styl`).
+  ## Light: the role's 800 step (`statusStep800`: `needs input` #9a3412,
+  ## `running` #166534, `failed` #991b1b) wherever it holds 4.5:1, which is
+  ## every Light ground but the darkest; where it does not, the 800 step
+  ## taken `StatusInkStepPercent` at a time toward the body text, the first
+  ## that holds. On the panel (#e6e2db) the three are 5.66, 5.52 and
+  ## 6.44:1, on the card (#dbd6cc) 5.05, 4.92 and 5.74:1, on the default
+  ## surface (#f8f6f2) 6.77, 6.61 and 7.70:1. On
+  ## `surface/primary/secondary-hover` (#c8c2b5: a selected or hovered row,
+  ## and the popup where it drops over a panel) orange and green/800 fall to
+  ## 4.12 and 4.02:1, so they are taken a quarter toward the body there,
+  ## #7d3016 (5.13:1) and #1a5530 (4.96:1); red/800 holds (4.69:1). The web
+  ## names the same primitives (`colors-warning-800`, ...) and mixes the same
+  ## way (`mix-ink` in `defaults.styl`) on the grounds where this mixes.
   ##
-  ## `needs input` #753317 (the hover step half toward the body, about
-  ## orange/900), `running` #1e5330 (half, about green/900), `failed`
-  ## #951e1e (a quarter, about red/800): on #c8c2b5 5.28, 5.07 and 4.77:1;
-  ## on the card 6.47, 6.21 and 5.84:1; on the panel 7.25, 6.97 and 6.55:1;
-  ## on the stripe 8.68, 8.33 and 7.84:1.
+  ## An unknown ground ("": a cell nothing was drawn under) is taken as
+  ## #c8c2b5, the darkest of them, so the ink holds on any of them.
   ##
-  ## Dark keeps each role. Every other state is in the label role. The dot
-  ## beside the word is a graphical object held to 3:1 (SC 1.4.11) by its
-  ## own rule (`markOf`, and `markOn` where a view resolves it per ground).
+  ## Dark keeps each role's text step on every ground. Every other state is
+  ## in the label role. The dot beside the word is a graphical object held
+  ## to 3:1 (SC 1.4.11) by its own rule (`markOf`, and `markOn` where a view
+  ## resolves it per ground).
   case attention
   of saNeedsInput, saRunning, saFailed:
-    if p.mode == dmDark: p.statusTextSteps(pieRoleOf(attention))[0]
-    else: p.statusTextInk(pieRoleOf(attention), p.hover)
+    let role = pieRoleOf(attention)
+    if p.mode == dmDark: p.statusTextSteps(role)[0]
+    else: p.inkTowardBody(p.statusStep800(role), (if ground.len > 0: ground else: p.hover),
+                          StatusTextFloor)
   else: p.textLabel
 
 type

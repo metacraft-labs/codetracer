@@ -13,6 +13,9 @@
 ## * **Presses are routed**: a press on a mode toggle, on a `For` toggle and
 ##   on a waiting row does what it carries; `Down` and `Enter` walk and open
 ##   the waiting rows.
+## * **A session's status word** (a waiting row's and an Initiatives line's)
+##   is the palette's ink for the ground under it, 4.5:1 there, one ink per
+##   word and ground across the tab.
 ## * **The gaze mark**: off draws nothing; tracking and paused draw the eye
 ##   and the words in the caption role, in the status line under the control
 ##   center; the pause key and a press pause it.
@@ -179,6 +182,71 @@ suite "CTF-P2c: the GPUI control center":
       check getAttribute(row, OperationAttribute) == ControlCenterOpenSessionOperation
       check row.tagged("mark").len == 0
     m.dispose()
+
+  test "a session's status word: the palette's ink for its ground, one per word and ground":
+    # The waiting rows' state words and the Initiatives panel's session
+    # status words are one rule (`initiativeSessionWordColour`) for the
+    # ground under them: 4.5:1 there (WCAG 2.2 SC 1.4.3); in Light the
+    # role's 800 step wherever it holds and a darker ink only where it does
+    # not (a selected initiative's #c8c2b5); one word on one ground one
+    # ink across the tab. Read off the render plan GPUI is handed: each
+    # word's text colour and the nearest ground drawn under it.
+    var problems: seq[string]
+    var waitingWords, lineWords = 0
+    for mode in [dmDark, dmLight]:
+      for (w, h) in [(1440, 900), (360, 900)]:
+        let m = mount("populated", w, h, mode)
+        let p = ahPalette(mode)
+        var inks: seq[(string, string, string)]   # word, ground, ink
+        proc check1(attention: SessionAttention; word, fg, bg, where: string) =
+          let ratio = contrastRatio(fg, bg)
+          if fg != p.initiativeSessionWordColour(attention, bg):
+            problems.add where & ": " & fg & " on " & bg & ", the palette's " &
+                         p.initiativeSessionWordColour(attention, bg)
+          if ratio < StatusTextFloor:
+            problems.add where & ": " & fg & " on " & bg & " is " &
+                         formatFloat(ratio, ffDecimal, 2) & ":1"
+          if mode == dmLight and attention in {saNeedsInput, saRunning, saFailed}:
+            let step = p.statusStep800(pieRoleOf(attention))
+            if contrastRatio(step, bg) >= StatusTextFloor:
+              if fg != step: problems.add where & ": " & fg & " on " & bg & ", not " & step
+            elif inkLuminance(fg) >= inkLuminance(step):
+              problems.add where & ": " & fg & " on " & bg & " is not darker than " & step
+          inks.add (word, bg, fg)
+        proc walk(n: JsonNode; ground: string; session: JsonNode; waiting: JsonNode) =
+          let a = n{"attributes"}
+          let bg = n{"styles"}{"bg"}.getStr
+          let here = if bg.len > 0: bg else: ground
+          var s = session
+          var wr = waiting
+          if a.kind == JObject:
+            if a.hasKey("data-ah-session"): s = a
+            if a.hasKey("data-ah-waiting-session"): wr = a
+            let fg = n{"styles"}{"text_color"}.getStr
+            if s != nil and a.hasKey("data-ah-status"):
+              inc lineWords
+              check1(parseEnum[SessionAttention](s{"data-ah-attention"}.getStr),
+                     a{"data-ah-status"}.getStr, fg, here,
+                     $mode & " line '" & a{"data-ah-status"}.getStr & "'")
+            if wr != nil and a.hasKey("data-ah-ink"):
+              inc waitingWords
+              let word = wr{"data-ah-waiting-state"}.getStr
+              check1(parseEnum[SessionAttention](word.replace(' ', '-')), word, fg, here,
+                     $mode & " waiting '" & word & "'")
+          for c in n{"children"}.getElems: walk(c, here, s, wr)
+        walk(parseJson(renderPlanJson(r, m.root)), p.ground, nil, nil)
+        for a in inks:
+          for b in inks:
+            if a[0] == b[0] and a[1] == b[1] and a[2] != b[2]:
+              problems.add $mode & " " & $w & "px: '" & a[0] & "' on " & a[1] & " is " &
+                           a[2] & " and " & b[2]
+        m.dispose()
+    for problem in problems: echo "  ", problem
+    check problems.len == 0
+    # A check that ran on no word proves nothing: every mount draws a
+    # waiting row (a short column keeps only its first row whole).
+    check waitingWords >= 2 * 2
+    check lineWords > 0
 
   test "the launch column is the composer's form and send line; recent launches":
     let m = mount("populated")

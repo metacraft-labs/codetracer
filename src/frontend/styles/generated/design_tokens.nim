@@ -6,6 +6,8 @@
 ## Every colour token of the `mapped` layer, resolved through `alias` and
 ## `brand` to a `#rrggbb` hex, in each colour mode the design system
 ## publishes. `$value` (what the desktop's stylus uses) equals the Dark mode.
+## `DesignPrimitive` adds the few `alias` primitive steps a view names
+## directly, resolved the same way.
 
 type
   DesignMode* = enum
@@ -451,3 +453,18 @@ const
     (scope: "variable.name", token: dtEditorThemeRuleVariableName),
     (scope: "variable.parameter", token: dtEditorThemeRuleVariableParameter),
     (scope: "variable.readOnly", token: dtEditorThemeRuleVariableReadonly)]
+
+type
+  DesignPrimitive* = enum
+    ## The `alias` layer's primitive colour steps a native view names
+    ## directly (the generator's `NIM_PRIMITIVES`); the `mapped` layer has
+    ## no semantic token for them.
+    dpColorsSuccess800 = "colors/success/800"
+    dpColorsWarning800 = "colors/warning/800"
+    dpColorsError800 = "colors/error/800"
+
+const
+  DesignPrimitiveHex*: array[DesignPrimitive, array[DesignMode, string]] = [
+    dpColorsSuccess800: ["#166534", "#166534"],
+    dpColorsWarning800: ["#9a3412", "#9a3412"],
+    dpColorsError800: ["#991b1b", "#991b1b"]]

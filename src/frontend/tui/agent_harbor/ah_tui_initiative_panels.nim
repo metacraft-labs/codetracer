@@ -238,11 +238,12 @@ proc drawSessionLine*(c: var AhCanvas; parent: AhNode; item: SessionItem;
   # before its origin (`StatusWordGap`).
   discard c.text(n, row, col + 2, max(1, width - 2 - sw - StatusWordGap), item.title,
                  c.p.textBody, fact = "title")
-  # The status word is the shared palette's one rule for it, on every ground
-  # and in every front end (`initiativeSessionWordColour`), so it is not
-  # resolved per ground here as the mark is.
-  discard c.text(n, row, col + width - sw, sw, item.statusLabel,
-                 c.p.initiativeSessionWordColour(item.attention), fact = "status")
+  # The status word is the shared palette's one rule for it in every front
+  # end (`initiativeSessionWordColour`), for the ground under the word.
+  let wordCol = col + width - sw
+  discard c.text(n, row, wordCol, sw, item.statusLabel,
+                 c.p.initiativeSessionWordColour(item.attention, c.bgAt(row, wordCol)),
+                 fact = "status")
 
 # ---------------------------------------------------------------------------
 # Initiatives
