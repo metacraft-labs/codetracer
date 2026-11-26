@@ -824,6 +824,16 @@ when defined(ctWasmCore):
         r.setAttribute(scrollContainer, "data-ctw-reveal",
                        $req.serial & ":" & $req.firstRow)
 
+proc placeholderHeight(vm: CalltraceVM; span: int): string =
+  ## The `span`-th loading placeholder's height: as tall as its rows.
+  $(int(float(vm.loadingRows()[span].count) * vm.rowHeightPx.val)) & "px"
+
+proc placeholderTransform(vm: CalltraceVM; span: int): string =
+  ## The `span`-th loading placeholder's place: at its first row, in the
+  ## scroll area as tall as the whole trace.
+  "translateY(" & $(int(float(vm.loadingRows()[span].first) *
+                        vm.rowHeightPx.val)) & "px)"
+
 proc renderCalltracePanel*[R, N](r: R; vm: CalltraceVM;
                                  links: RowLinks = nil): N =
   ## The Call Trace panel — the markup of the legacy Karax calltrace, which
@@ -836,6 +846,13 @@ proc renderCalltracePanel*[R, N](r: R; vm: CalltraceVM;
   ## The rows are the section the store holds, positioned by `translateY`
   ## inside a scroll area as tall as the whole trace (`totalCallsCount` rows),
   ## so a scrolled-to section sits where it belongs.
+  ##
+  ## THE VISIBLE ROWS THE STORE DOES NOT HOLD ARE DRAWN AS LOADING
+  ## (Viewport-Driven-Loading V4): `calltrace-placeholder`
+  ## stands at those rows (`CalltraceVM.loadingRows`), as tall as they are,
+  ## until the answer for them lands. Before, a scroll past the held section
+  ## showed an empty pane for as long as the engine took to answer — about
+  ## 10 s on a busy single-threaded worker.
   var
     formEl, inputEl, resultsHost: N
     scrollContainer, linesContainer: N
@@ -870,6 +887,25 @@ proc renderCalltracePanel*[R, N](r: R; vm: CalltraceVM;
                  $(int(vm.store.calltrace.startLineIndex.val.float *
                        vm.rowHeightPx.val)) & "px)"):
             discard
+          # Positioned absolutely (`calltrace.styl`), so they never displace
+          # the held rows. Two, because the held rows can sit inside the
+          # visible ones and leave a gap on each side.
+          tdiv(class = "calltrace-placeholder",
+               id = "calltrace-placeholder-0",
+               `data-first-row` = $vm.loadingRows()[0].first,
+               `data-rows` = $vm.loadingRows()[0].count,
+               display = displayIf(vm.loadingRows()[0].count > 0),
+               height = placeholderHeight(vm, 0),
+               transform = placeholderTransform(vm, 0)):
+            text "Loading calls…"
+          tdiv(class = "calltrace-placeholder",
+               id = "calltrace-placeholder-1",
+               `data-first-row` = $vm.loadingRows()[1].first,
+               `data-rows` = $vm.loadingRows()[1].count,
+               display = displayIf(vm.loadingRows()[1].count > 0),
+               height = placeholderHeight(vm, 1),
+               transform = placeholderTransform(vm, 1)):
+            text "Loading calls…"
       # The calltrace's loading state, drawn by `calltrace.styl` as a
       # hairline along the pane's top edge (the user asked for a discreet
       # indicator; the tab's busy mark is the other half).

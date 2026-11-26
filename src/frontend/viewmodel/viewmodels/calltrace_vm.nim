@@ -407,13 +407,82 @@ proc callWindowArgs(vm: CalltraceVM): tuple[ok: bool; start: int64;
   (true, w.start.int64, w.count,
    if v.cols > 0: v.cols else: DEFAULT_VIEWPORT_DEPTH)
 
-proc requestWindow(vm: CalltraceVM) =
+type
+  RowSpan* = tuple[first, count: int]
+    ## Rows `first ..< first + count`; empty when `count` is 0.
+
+func uncoveredRows*(viewport: Viewport; heldStart: int64; heldCount: int;
+                    total: uint64): array[2, RowSpan] =
+  ## The visible rows the held section does not hold — where a scrolled-to
+  ## window is still loading — as at most two spans in row order. The
+  ## visible rows are `viewport.firstRow ..< firstRow + rows`, clipped to the
+  ## trace's `total`; the held rows are `heldStart ..< heldStart +
+  ## heldCount`. `[0]` is the first uncovered span (`count` 0 when every
+  ## visible row is held, or none is visible); `[1]` is the span below the
+  ## held rows when they sit strictly inside the visible ones (a viewport
+  ## taller than the held section), and empty otherwise.
+  if not viewport.measured:
+    return
+  let first = max(0, viewport.firstRow).int64
+  let last = min(first + viewport.rows.int64, total.int64)    # exclusive
+  if last <= first:
+    return
+  let hs = heldStart
+  let he = heldStart + heldCount.int64
+  if heldCount <= 0 or he <= first or hs >= last:
+    result[0] = (first.int, int(last - first))
+    return
+  let above = max(0'i64, hs - first)       # rows first ..< hs
+  let below = max(0'i64, last - he)        # rows he ..< last
+  var n = 0
+  if above > 0:
+    result[n] = (first.int, above.int)
+    inc n
+  if below > 0:
+    result[n] = (he.int, below.int)
+
+proc loadingRows*(vm: CalltraceVM): array[2, RowSpan] =
+  ## The visible rows the view draws as loading (Viewport-Driven-Loading
+  ## V4): the ones the store does not hold (`uncoveredRows`), unless the
+  ## engine refused the window. Reactive: reads the viewport, the held
+  ## section and the loading state.
+  if vm.store.calltrace.loadingState.val == lsError:
+    return
+  uncoveredRows(vm.viewport.val, vm.store.calltrace.startLineIndex.val,
+                vm.store.calltrace.lines.val.len,
+                vm.store.calltrace.totalCallsCount.val)
+
+proc requestWindow(vm: CalltraceVM; force = false) =
   ## Ask for the window the viewport shows, at the debugger's position, with
   ## the pane's filter.
+  ##
+  ## A WINDOW THE STORE HOLDS IS NOT ASKED FOR AGAIN. When the held section
+  ## answers the same query (stop, location, depth, filter) for every visible
+  ## row, a scroll sends nothing, and any request still in flight is dropped
+  ## (`supersedeCalltraceRequests`): its answer is for a window the viewport
+  ## has left and must not replace the rows it shows now. Before, every
+  ## viewport change sent a request, so a scroll of a few rows on a slow
+  ## engine queued work behind the one the pane was waiting for. `force` asks
+  ## anyway, for an engine that changed the section under the same query (an
+  ## expansion, `reloadWindow`).
+  if force:
+    # The engine changed the section under the same query, so the rows the
+    # store holds no longer answer it: until this request's answer lands, a
+    # scroll inside them must ask again rather than drop this request and
+    # leave the old tree on screen for good.
+    vm.store.calltrace.heldQuery = ""
   let (ok, start, height, depth) = vm.callWindowArgs()
   if not ok:
     return
   let dbg = vm.store.debugger.val
+  if not force:
+    let v = vm.viewport.val
+    let query = vm.store.calltraceQueryKey(
+      depth, rrTicks = dbg.rrTicks, file = dbg.location.file,
+      line = dbg.location.line, rawIgnorePatterns = vm.rawIgnorePatterns.val)
+    if vm.store.holdsCalltraceRows(v.firstRow, v.rows, query):
+      vm.store.supersedeCalltraceRequests()
+      return
   vm.store.requestCalltraceSection(
     start, height, depth,
     rrTicks = dbg.rrTicks,
@@ -428,7 +497,7 @@ proc reloadWindow*(vm: CalltraceVM) =
   ## sent outside this ViewModel, e.g. by a host whose transport cannot send
   ## `ct/expand-calls` through `toggleExpandCallChildren`).
   vm.store.requestTracker.forget("load-calltrace")
-  vm.requestWindow()
+  vm.requestWindow(force = true)
 
 proc writeSelectedEntry(vm: CalltraceVM; lineIndex: Option[int64]) =
   ## Write `selectedEntry` (through the collaborative session when there is
@@ -592,7 +661,7 @@ proc toggleExpandCallChildren*(vm: CalltraceVM; lineIndex: int64) =
     # entry is cleared whatever it records — this is the one deliberate
     # re-ask of an identical request.
     vm.store.requestTracker.forget("load-calltrace")
-    vm.requestWindow()
+    vm.requestWindow(force = true)
 
 proc calltraceJumpArgs*(location: Location; rrTicks: uint64;
                         codeGeneration: int): JsonNode =

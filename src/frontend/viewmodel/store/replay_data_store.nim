@@ -135,6 +135,24 @@ type
       ## PREVIOUS stop's call for the new one.
     finished*: Signal[bool]
     loadingState*: Signal[LoadingState]
+    requestSerial*: int
+      ## The serial of the latest `ct/load-calltrace-section` request
+      ## (`requestCalltraceSection`), bumped by every send and by
+      ## `supersedeCalltraceRequests`. Only the answer carrying it is applied:
+      ## an answer for a window the viewport has since left never replaces
+      ## the rows of the one it now shows, in whatever order answers arrive
+      ## (Viewport-Driven-Loading V2). Not a signal: nothing
+      ## renders it.
+    heldQuery*: string
+      ## The query the held section answers (`calltraceQueryKey`: the stop,
+      ## the location, the depth, the filter and the collapse flags — every
+      ## argument but the window), "" when the rows came from anywhere but an
+      ## answer to `requestCalltraceSection` (a collab snapshot, a test's
+      ## `updateCalltraceSection`), and "" while a reload of a section the
+      ## engine changed under the same query is in flight
+      ## (`CalltraceVM.requestWindow` with `force`). `holdsCalltraceRows`
+      ## covers a viewport only for the same query, so rows of unknown
+      ## provenance, or stale ones, never stand in for an answer.
 
   LocalsStore* = object
     ## Reactive state for the locals / globals panel.
@@ -1284,6 +1302,49 @@ proc requestLocals*(store: ReplayDataStore; rrTicks: uint64;
 proc applyCalltraceResponse*(store: ReplayDataStore; body: JsonNode): int
   ## Forward-declared: `requestCalltraceSection` decodes its own answer.
 
+proc calltraceQueryKey*(store: ReplayDataStore;
+                        depth: int;
+                        rrTicks: uint64 = 0;
+                        file: string = "";
+                        line: int = 0;
+                        rawIgnorePatterns: string = "";
+                        optimizeCollapse: bool = true;
+                        autoCollapsing: bool = false): string =
+  ## What a call-trace section answers, apart from WHICH rows: the stop the
+  ## debugger is at (two stops can share a tick and a line), the location,
+  ## the pane's depth, its filter and the collapse flags. Two requests with
+  ## the same key answer the same rows for the same indices.
+  $rrTicks & "|" & stopIdentityOf(store.debugger.val) & "|" & file & "|" &
+    $line & "|" & $depth & "|" & rawIgnorePatterns & "|" &
+    $optimizeCollapse & "|" & $autoCollapsing
+
+proc holdsCalltraceRows*(store: ReplayDataStore; firstRow, rows: int;
+                         query: string): bool =
+  ## Whether the section the store holds already answers `query` for every
+  ## visible row `firstRow ..< firstRow + rows` (clipped to the trace's end).
+  ## A viewport past the trace's end, or rows of unknown provenance
+  ## (`heldQuery` empty), are never held.
+  if query.len == 0 or store.calltrace.heldQuery != query:
+    return false
+  let total = store.calltrace.totalCallsCount.val.int64
+  let first = max(0, firstRow).int64
+  if rows <= 0 or first >= total:
+    return false
+  let last = min(first + rows.int64, total)       # exclusive
+  let heldStart = store.calltrace.startLineIndex.val
+  let heldEnd = heldStart + store.calltrace.lines.val.len.int64
+  first >= heldStart and last <= heldEnd
+
+proc supersedeCalltraceRequests*(store: ReplayDataStore) =
+  ## Drop every call-trace section request in flight: their answers are for
+  ## windows the viewport has left, and the rows held already show where it
+  ## is. Their answers are ignored when they arrive (`requestSerial`), and
+  ## the pane stops showing itself as loading.
+  inc store.calltrace.requestSerial
+  store.requestTracker.forget("load-calltrace")
+  if store.calltrace.loadingState.val == lsLoading:
+    store.calltrace.loadingState.val = lsIdle
+
 proc requestCalltraceSection*(store: ReplayDataStore;
                               startIndex: int64;
                               height: int;
@@ -1297,6 +1358,14 @@ proc requestCalltraceSection*(store: ReplayDataStore;
                               renderCallLineIndex: int = 0) =
   ## Request a window of calltrace lines from the backend.
   ## Skipped if an identical request is already in flight.
+  ##
+  ## ONLY THE LATEST REQUEST'S ANSWER IS APPLIED. Each send takes a new
+  ## `requestSerial`; an answer whose serial is no longer the latest — a
+  ## window the viewport has since left, or one `supersedeCalltraceRequests`
+  ## dropped — is discarded without touching the held rows or the loading
+  ## state. A slow engine answers every request in turn, and applying the
+  ## old answers in between drew rows away from where the viewport is and
+  ## marked the pane idle while its window was still loading.
   ##
   ## The command name matches the legacy CtLoadCalltraceSection event
   ## ("ct/load-calltrace-section") so that the RealBackendService can
@@ -1328,6 +1397,11 @@ proc requestCalltraceSection*(store: ReplayDataStore;
     return
 
   store.requestTracker.markPending(key, argsStr)
+  inc store.calltrace.requestSerial
+  let serial = store.calltrace.requestSerial
+  let query = store.calltraceQueryKey(depth, rrTicks, file, line,
+                                      rawIgnorePatterns, optimizeCollapse,
+                                      autoCollapsing)
   store.calltrace.loadingState.val = lsLoading
   let fut = store.backend.send("ct/load-calltrace-section", args)
 
@@ -1335,6 +1409,8 @@ proc requestCalltraceSection*(store: ReplayDataStore;
   onComplete(fut,
     proc(response: JsonNode) =
       s.requestTracker.markComplete(key, argsStr)
+      if serial != s.calltrace.requestSerial:
+        return   # superseded: a window the viewport has left
       # THE STORE DECODES ITS OWN ANSWER, on every transport, through the one
       # section decoder (`applyCalltraceResponse`). The desktop used to read
       # it from the legacy call-trace component's event subscription instead,
@@ -1342,13 +1418,19 @@ proc requestCalltraceSection*(store: ReplayDataStore;
       # not a section (an older engine answering only with the event) leaves
       # the store as it was.
       if responseSucceeded(response):
-        discard s.applyCalltraceResponse(responseBody(response))
-        s.calltrace.loadingState.val = lsIdle
+        if s.applyCalltraceResponse(responseBody(response)) >= 0:
+          s.calltrace.heldQuery = query
+        # Applying the rows runs the pane's effects, and one of them can
+        # send the next request (a reveal that scrolls the pane): the pane
+        # is then still loading.
+        s.calltrace.loadingState.val =
+          if s.requestTracker.hasPending(key): lsLoading else: lsIdle
       else:
         s.calltrace.loadingState.val = lsError,
     proc(message: string) =
       s.requestTracker.markComplete(key, argsStr)
-      s.calltrace.loadingState.val = lsError)
+      if serial == s.calltrace.requestSerial:
+        s.calltrace.loadingState.val = lsError)
 
 # ---------------------------------------------------------------------------
 # Bridge procs — used by the legacy UI layer to feed data into the store
@@ -2681,6 +2763,9 @@ proc updateCalltraceSection*(store: ReplayDataStore;
       $store.calltrace.lines.val.len & "), startIndex=" & $startIndex &
       " totalCount=" & $totalCount
   store.calltrace.lines.val = lines
+  # Rows from here answer no known query until `requestCalltraceSection`
+  # says which one (`heldQuery`).
+  store.calltrace.heldQuery = ""
   # Replace args atomically with the new section's args.  If the caller
   # didn't supply any (the VM tests that only know about lines), the
   # existing args are cleared so stale entries from a prior section

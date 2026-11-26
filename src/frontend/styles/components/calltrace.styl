@@ -58,6 +58,26 @@
     flex-direction: column
     position: relative
 
+  // The scroll area anchors the loading placeholder below.
+  .local-calltrace
+    position: relative
+
+  // The visible rows a scrolled-to window has not delivered yet
+  // (`views/isonim_calltrace_view.nim` `calltrace-placeholder`): placed and
+  // sized by the view to those rows, over them rather than in the flow, so
+  // the held rows keep their place. Quiet, like the loading hairline.
+  .calltrace-placeholder
+    position: absolute
+    left: 0
+    top: 0
+    width: 100%
+    box-sizing: border-box
+    padding-left: 0.5em
+    pointer-events: none
+    color: colors-ui-text-primary-label
+    opacity: 0.6
+    white-space: nowrap
+
   .calltrace-child
     white-space: nowrap
     width: 100%
