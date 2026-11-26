@@ -129,11 +129,12 @@ proc nodePlatform(): cstring =
 # The main process, over IPC
 # ---------------------------------------------------------------------------
 #
-# The content ids and declared scopes the certificate indicator reads are
-# served by the Electron main process rather than in this renderer
-# (`index/content_id_service.nim`, which computes them in a worker thread so
-# neither this thread nor main's event loop waits for git), through
-# `rendererIpc`.
+# Two facade operations are served by the Electron main process rather than in
+# this renderer: the content ids and declared scopes the certificate indicator
+# reads (`index/content_id_service.nim`, which computes them in a worker
+# thread so neither this thread nor main's event loop waits for git), and
+# `fs.watch` (`index/renderer_fs_watch.nim`: the desktop's watchers live in
+# main). Both go through `rendererIpc`.
 
 type
   RendererIpc* = ref object
@@ -174,6 +175,47 @@ type
       ## another IPC gets a listener on it too.
     nextId: int
     waiting: seq[tuple[id: int; settle: proc(answer: cstring)]]
+
+type
+  MainWatches = ref object
+    ## The watches main runs for this renderer, by the handle minted here.
+    listening: RendererIpc
+    nextId: int
+    callbacks: seq[tuple[handle: string; onEvent: proc(event: FsWatchEvent)]]
+
+var mainWatches = MainWatches()
+
+proc eventKindOf(name: string): FsWatchEventKind =
+  case name
+  of "fwkCreated": fwkCreated
+  of "fwkDeleted": fwkDeleted
+  of "fwkRenamed": fwkRenamed
+  else: fwkModified
+
+proc add(watches: MainWatches; onEvent: proc(event: FsWatchEvent)): string =
+  let ipc = mainProcessIpc()
+  if watches.listening != ipc:
+    watches.listening = ipc
+    ipc.listen(cstring(FsWatchEventChannel), proc(payload: JsObject) =
+      if payload.isNil or payload.isUndefined:
+        return
+      let handle = $payload[cstring"handle"].to(cstring)
+      let event = FsWatchEvent(
+        kind: eventKindOf($payload[cstring"kind"].to(cstring)),
+        path: $payload[cstring"path"].to(cstring))
+      for entry in watches.callbacks:
+        if entry.handle == handle:
+          entry.onEvent(event)
+          return)
+  inc watches.nextId
+  result = "renderer-watch-" & $watches.nextId
+  watches.callbacks.add (handle: result, onEvent: onEvent)
+
+proc remove(watches: MainWatches; handle: string) =
+  for i, entry in watches.callbacks:
+    if entry.handle == handle:
+      watches.callbacks.delete(i)
+      return
 
 proc newMainRequests(channel, answered: string): MainRequests =
   MainRequests(channel: cstring(channel), answered: cstring(answered))
@@ -268,7 +310,11 @@ proc errorText(): string = lastErrorText
 # Filesystem
 # ---------------------------------------------------------------------------
 
-proc electronFileSystem(profile: PlatformProfile): FileSystemFacade =
+proc electronFileSystem*(profile: PlatformProfile): FileSystemFacade =
+  ## The Electron renderer's filesystem facade. Exported for the suite that
+  ## installs it under node (`tests/certificate_indicator_watch_dom_test.nim`),
+  ## for the reason `electronVcs` is: `newDesktopElectronPlatform` finds no
+  ## Electron there.
   result = unavailableFileSystem(profile)
 
   result.readText = proc(path: string): PlatformFuture[PlatformOutcome[string]] =
@@ -387,6 +433,35 @@ proc electronFileSystem(profile: PlatformProfile): FileSystemFacade =
       resolvedOk($nodeMkdtemp(prefix.cstring))
     do:
       resolvedErr[string](pkFailed, "cannot create a temporary directory", errorText())
+
+  # `watch` through the main process, which owns the desktop's watchers
+  # (`index/renderer_fs_watch.nim`): main runs node's `fs.watch` for this
+  # window and sends each change back on `CODETRACER::fs-watch-event`. The
+  # handle is minted here, so the call answers at once; a path that does not
+  # exist is `pkNotFound` without a round trip, which is what a caller asking
+  # again later (the certificate indicator's store directories) needs.
+  result.watch = proc(path: string; recursive: bool;
+                      onEvent: proc(event: FsWatchEvent)
+                     ): PlatformFuture[PlatformOutcome[FsWatchHandle]] =
+    if path.len == 0 or not nodeExistsSync(path.cstring):
+      return resolvedErr[FsWatchHandle](pkNotFound, "cannot watch " & path &
+        ": no such file or directory")
+    jsGuard:
+      let handle = mainWatches.add(onEvent)
+      mainProcessIpc().send(cstring(FsWatchChannel), JsObject{
+        handle: cstring(handle), path: cstring(path), recursive: recursive})
+      resolvedOk(FsWatchHandle(handle))
+    do:
+      resolvedErr[FsWatchHandle](pkFailed, "cannot watch " & path, errorText())
+
+  result.unwatch = proc(handle: FsWatchHandle): PlatformFuture[PlatformOutcome[Nothing]] =
+    mainWatches.remove(string(handle))
+    jsGuard:
+      mainProcessIpc().send(cstring(FsUnwatchChannel), JsObject{
+        handle: cstring(string(handle))})
+      resolvedOk()
+    do:
+      resolvedErr[Nothing](pkFailed, "cannot stop watching", errorText())
 
   result.certificateStoreRoots = proc(
       ): PlatformFuture[PlatformOutcome[CertificateStoreRoots]] =

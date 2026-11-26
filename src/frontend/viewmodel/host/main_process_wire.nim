@@ -1,9 +1,10 @@
 ## What the Electron renderer's facade asks the main process, on the wire.
 ##
-## The certificate facts (content ids and declared scopes) are served by the
-## main process. This module is the one spelling of their channels and
-## messages, shared by the renderer (`desktop_electron.nim`), the main process
-## (`index/content_id_service.nim`) and the content-id worker
+## Two facade operations are served by the main process: the certificate
+## facts (content ids and declared scopes) and `fs.watch`. This module is the
+## one spelling of their channels and messages, shared by the renderer
+## (`desktop_electron.nim`), the main process (`index/content_id_service.nim`,
+## `index/renderer_fs_watch.nim`) and the content-id worker
 ## (`index/content_id_worker.nim`), so the ends cannot disagree.
 ##
 ## ## The certificate facts
@@ -41,6 +42,14 @@ const
     ## Renderer -> main: `{id, request}`, for an `OpDeclaredScopes` request.
   DeclaredScopesReceivedChannel* = "CODETRACER::declared-scopes-received"
     ## Main -> the renderer that asked: `{id, outcome}`.
+
+  FsWatchChannel* = "CODETRACER::fs-watch"
+    ## Renderer -> main: `{handle, path, recursive}`.
+  FsUnwatchChannel* = "CODETRACER::fs-unwatch"
+    ## Renderer -> main: `{handle}`.
+  FsWatchEventChannel* = "CODETRACER::fs-watch-event"
+    ## Main -> the renderer that asked: `{handle, kind, path}`, `kind` an
+    ## `FsWatchEventKind` by name.
 
   OpContentId* = "content-id"
   OpDeclaredScopes* = "declared-scopes"

@@ -30,10 +30,13 @@
 ## | the user selecting the indicator | — | `selectCertificateIndicator` |
 ## | anything else, every `RevalidateIntervalMs` | W | a `setInterval` |
 ##
-## **Every watch row above needs `capFilesystemWatch`, which the Electron
-## desktop profile does not grant** (`host/electron_profile.nim`: its tree
-## watcher lives in the main process). There, none of them is armed and the
-## indicator refreshes at first render, on selection and on the timer only.
+## **Every watch row above needs `capFilesystemWatch`.** On the Electron
+## desktop the watches are run by the main process, which owns the desktop's
+## watchers: the renderer's `fs.watch` asks it to (`CODETRACER::fs-watch`,
+## `index/renderer_fs_watch.nim`) and receives each change back, so the rows
+## are armed there as on every other platform that grants the capability.
+## Until 2026-11 the desktop profile did not grant it, and there the
+## indicator refreshed at first render, on selection and on the timer only.
 ##
 ## The `.git` watch is not recursive, and it does not need to be: `HEAD`,
 ## `index`, `ORIG_HEAD` and `MERGE_HEAD` all sit directly in that directory, and
