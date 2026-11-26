@@ -9,7 +9,7 @@
 ## The story draws it where the web story does: in the window's status line
 ## (32px, `StatusBarPx`, the window frame's ground as the web status bar's,
 ## the language and the encoding at its start), at the start of its
-## right-hand zone, 12px in from the edge, under the control center as L7
+## right-hand zone, 8px in from the edge, under the control center as L7
 ## shows it. A press on it is routed: it carries `gaze.toggle-pause` and
 ## reports the press to the host's `GazePress`.
 ##
@@ -32,7 +32,10 @@ const
     ## status_bar.styl), measured 32px in the web captures. (It was drawn at
     ## the mark's 24px; GPUI review of 2026-11-24.)
   MarkGapPx* = 4         ## between the eye and the words (0.25rem)
-  EdgePx* = 12           ## the mark's margin from the right-hand zone's end
+  EdgePx* = InsetPx
+    ## The mark's margin from the right-hand zone's end: the web status
+    ## bar's right padding (`PANEL_INSET`, 0.5rem; its mark ends 8px from the
+    ## window's edge). It was 12px, 4px further in than the web's.
   EyePx* = 12            ## the eye's box: `.ah-gaze-glyph`'s 0.75rem
   StatusTextPx* = BodyPx
     ## The status bar's text: `STATUS_BAR_TEXT_SIZE` (0.875rem, 14px) in

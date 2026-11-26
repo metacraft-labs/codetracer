@@ -39,6 +39,7 @@ applicable:
   - ../visual-replay/keyboard-shortcuts.yaml
   - ../visual-replay/keymap-rows.yaml
   - ../visual-replay/pixel-history-entries.yaml
+  - ../visual-replay/pixel-history-value-origin.yaml
   - ../visual-replay/player-failure-shows-error.yaml
   - ../visual-replay/real-recording.yaml
   - ../visual-replay/shader-debug-source-and-values.yaml

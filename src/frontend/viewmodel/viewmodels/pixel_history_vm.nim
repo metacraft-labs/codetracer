@@ -7,6 +7,10 @@ import isonim/viewmodel
 
 import ../store/replay_data_store
 import visual_replay_client
+import origin_chain_types
+from origin_chain_vm import OriginChainVM, onShowPixelOrigin
+
+export ShowValueOriginLabel
 
 type
   PixelHistoryPixel* = object
@@ -151,6 +155,34 @@ proc selectEntry*(vm: PixelHistoryVM; index: int; seekSource = true) =
       vm.onEntryActivated(vm.entries.val[index])
   if not vm.onEntrySelected.isNil:
     vm.onEntrySelected(vm.entries.val[index])
+
+proc pixelOriginQueryFor*(vm: PixelHistoryVM;
+                          index: int): Option[PixelOriginQuery] =
+  ## The origin question of the entry at `index`: the colour its draw call
+  ## wrote to the picked pixel. `none` when `index` is outside the history or
+  ## no pixel is picked.
+  if index < 0 or index >= vm.entries.val.len or vm.selectedPixel.val.isNone:
+    return none(PixelOriginQuery)
+  let pixel = vm.selectedPixel.val.get
+  let entry = vm.entries.val[index]
+  some(PixelOriginQuery(x: pixel.x, y: pixel.y, frame: pixel.frame,
+                        drawCallIndex: entry.drawCallIndex, geid: entry.geid))
+
+proc showValueOriginForEntry*(vm: PixelHistoryVM; index: int;
+                              origin: OriginChainVM): bool =
+  ## "Show value origin" on the entry at `index` (its context menu, every
+  ## front-end's): open the Origin Chain side panel of `origin` on the
+  ## colour that draw wrote to the pixel (`OriginChainVM.onShowPixelOrigin`,
+  ## which today refuses by name: no back end answers a pixel's origin yet).
+  ## `false`, and nothing changes, when the entry or the pixel is not there
+  ## or the host has no Origin Chain model.
+  if origin.isNil:
+    return false
+  let query = vm.pixelOriginQueryFor(index)
+  if query.isNone:
+    return false
+  origin.onShowPixelOrigin(query.get)
+  true
 
 proc bindReplayStore*(vm: PixelHistoryVM; store: ReplayDataStore) =
   if store.isNil or vm.store == store:

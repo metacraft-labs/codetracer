@@ -250,6 +250,119 @@ proc button*(r: GpuiRenderer; p: AhPalette; label: string; onClick: proc();
   r.tag(result, "button", label)
   if onClick != nil: r.addEventListener(result, "click", onClick)
 
+# ---------------------------------------------------------------------------
+# Input fields: the app's one input rule
+# ---------------------------------------------------------------------------
+#
+# The `input` fields these views draw take their border and fill from
+# `inputLook`, so the web's shared input rule is decided in one place. The
+# rule is `input.styl`'s:
+#
+#     input:focus, input:focus-visible
+#       border-color: colors-ui-border-action !important
+#     input:not(:placeholder-shown):not(:disabled)
+#       border-color: colors-ui-border-action
+#       background: colors-ui-surface-input-secondary
+#     input:disabled
+#       border: 1px solid colors-ui-border-disabled
+#       background: colors-ui-surface-primary-disabled
+#
+# A field holding a value takes the action border and the input surface
+# (Dark #6366f1 on #282828, Light #6366f1 on #dbd6cc); an empty one, its
+# placeholder showing, keeps its own rest look; a disabled one is never
+# filled. The filled selector, `(0,2,1)`, outranks every field variant's
+# own `background` and `:hover` border (`.ct-input-panel`, `.ct-input-form`,
+# `(0,1,0)` and `(0,2,0)`), so a filled field keeps its look under the
+# pointer. Focus only ever sets the border, to the same action token: a
+# focused empty field has the action border on its rest fill, a focused
+# filled one is drawn as filled (the two agree on the border, and only the
+# value sets the fill). The rule styles `input` alone: no `textarea` carries
+# an equivalent, so a multi-line field (`.ah-text-field`, `textField`) keeps
+# its own look.
+
+type
+  InputKind* = enum
+    ikField
+      ## An `input` the shared rule styles: the control center's instruction
+      ## (`input.ah-cc-input`), the Changes panel's file search
+      ## (`.ct-input-panel.ct-input-search-image`), the inbox's password
+      ## (`input.ah-text-field`).
+    ikCommandField
+      ## The palette's field (`.command-input-field`, command-palette.styl),
+      ## which the composer's and the omnibox's searches are. The rule
+      ## matches it, but the palette keeps it transparent once it holds text
+      ## (`&:not(:placeholder-shown):not(:disabled) background: transparent`)
+      ## and gives it no border (`border: 0`): its row draws the control's
+      ## edge, which turns to the action border only while the field has
+      ## focus (`.command-input-row:focus-within`). A value changes nothing.
+    ikValueBox
+      ## A value drawn as a field but not an `input`: the composer's form
+      ## values (`span.ah-composer-field-value`, role `textbox`,
+      ## `aria-readonly`; Repository, Branch, Session name). The rule is a
+      ## selector on `input`, so it never reaches them: the web draws them
+      ## at rest with a value or without (measured on the web record:
+      ## `control-center-launch-failed`'s Repository is #1b1b1b inside
+      ## #3a3a3a in Dark).
+
+  InputLook* = object
+    ## A field's border and fill, as the web's input rule resolves them.
+    border*: string
+    fill*: string
+    filled*: bool
+      ## The has-value state applied (`:not(:placeholder-shown):not(:disabled)`).
+    disabled*: bool
+
+proc placeholderShown*(value, placeholder: string): bool =
+  ## CSS `:placeholder-shown`: the field shows its placeholder, so it is
+  ## empty AND has a placeholder to show. An empty field without one is not
+  ## placeholder-shown, and the filled rule matches it, as it does in the
+  ## browser (Selectors 4 §11.1.5,
+  ## https://drafts.csswg.org/selectors-4/#placeholder; Chromium shows no
+  ## placeholder for an empty `placeholder` attribute).
+  value.len == 0 and placeholder.len > 0
+
+proc inputLook*(p: AhPalette; value, placeholder: string;
+                restBorder, restFill: string; kind = ikField;
+                disabled = false; focused = false): InputLook =
+  ## The border and fill a field holding `value` (showing `placeholder` when
+  ## empty) is drawn with, its variant's own look at rest being
+  ## `restBorder` on `restFill`. The tokens are the design system's, from
+  ## codetracer's table (`DesignTokenHex`) in `p`'s mode.
+  template t(token: DesignToken): string = DesignTokenHex[token][p.mode]
+  result = InputLook(border: restBorder, fill: restFill)
+  case kind
+  of ikValueBox:
+    discard
+  of ikCommandField:
+    # Transparent on its row whatever it holds; the row's edge is the
+    # action border only while the field has focus.
+    if focused: result.border = p.borderAction
+  of ikField:
+    if disabled:
+      result.disabled = true
+      result.border = t(dtColorsUiBorderDisabled)
+      result.fill = t(dtColorsUiSurfacePrimaryDisabled)
+    else:
+      result.filled = not placeholderShown(value, placeholder)
+      if result.filled:
+        result.border = p.borderAction
+        result.fill = t(dtColorsUiSurfaceInputSecondary)
+      elif focused:
+        result.border = p.borderAction
+
+proc inputBox*(r: GpuiRenderer; look: InputLook;
+               pairs: openArray[(string, string)] = []): GpuiElement =
+  ## A field's box: a row with a 1px border and the fill of `look`, laid out
+  ## by `pairs` (its height, padding, corners; `pairs` must not set the
+  ## border colour or the background, which are the look's). It carries
+  ## `data-ah-input-filled` and `data-ah-input-disabled` for the render
+  ## plan's reader.
+  result = r.box(pairs = pairs)
+  r.styles(result, [("border-width", "1px"), ("border-color", look.border),
+                    ("background", look.fill)])
+  r.tag(result, "input-filled", $look.filled)
+  r.tag(result, "input-disabled", $look.disabled)
+
 proc underline*(r: GpuiRenderer; colour: string; insetPx, ofWidthPx: int): GpuiElement =
   ## A flat 2px line along the bottom of a `position: relative` element of
   ## `ofWidthPx`, `insetPx` in from either side (`.ah-tab-in-focus::after`).

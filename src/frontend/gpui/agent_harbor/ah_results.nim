@@ -34,7 +34,7 @@ import ../../viewmodel/views/agent_harbor_results_words
 from ../../viewmodel/views/cut_text_rules import cutAroundMatch
 import ./ah_theme
 import ./ah_composer
-from ./ah_session_activity import wrappedRows
+from ./ah_session_activity import wrappedRows, wrappedLines
 from ./ah_changes_inbox_parts import mono, monoTextPx
 from ../../viewmodel/input/element_press import OperationAttribute
 
@@ -44,6 +44,11 @@ type
   Block = object
     heightPx: int
     el: GpuiElement
+    tailPx: int
+      ## The part of `heightPx` at its foot that shows nothing (a row's
+      ## bottom padding and the leading under its last line's glyphs): it may
+      ## stand under `More below ↓` when the body is full, as the web's rows
+      ## scroll under that sticky line.
 
 const
   # The sheet's lines are the composer's (`LinePx`, 24px): every part of
@@ -60,9 +65,27 @@ const
     ## Between groups: 0.25rem, the hairline, 0.5rem (`& + .ah-results-group`).
   MoreLinePx = 1 + 4 + LinePx + 4
     ## `More below ↓`: the composer's (its hairline, a line padded 0.25rem).
+  BodyRoleLinePx = 20
+    ## The body role's own line (`type-ui-lineheight-body-md`): the 14px
+    ## title's glyphs stand within it, centred on the row's longer line.
   EndPx = 8
     ## The body's last part's bottom margin: a group's, the notice's and the
     ## empty providers' line's 0.5rem.
+  RowGapPx* = 8
+    ## Between a row's parts (`.ah-results-row-line`'s `gap: 0.5rem`).
+  CodeMarginPx* = 8
+    ## A line of program text's own `margin-right: 0.5rem`
+    ## (`.ah-results-title-code`), kept at its right whatever stands there.
+  RowEdgesPx* = 2 + 2
+    ## What a row's line is narrower than the sheet less its padding: the
+    ## sheet's two hairlines and the row's own 1px margins
+    ## (`.ah-results-row`'s `margin: 0 0.0625rem`).
+  CodeGapPx* = RowGapPx + CodeMarginPx
+    ## Between a line of program text and where it is, 16px: the row's gap
+    ## and the code title's margin, which the web keeps whatever the cut
+    ## leaves. The drawn line once ran within 5px of `src/shield.nr:11`:
+    ## the cut kept this room, but measured the line at 0.6em a character
+    ## where Space Mono draws 0.612em (`MonoAdvance`).
 
 proc mixedLinePx(): int = LinePx + 1
   ## A line holding the 14px title beside 12px words (what a row is, where
@@ -111,6 +134,18 @@ proc rightParts(r: GpuiRenderer; p: AhPalette; into: GpuiElement; row: ResultRow
     r.tag(t, "tag", tag)
     r.appendChild(into, t)
 
+proc codeLinePx*(shown, match: string): int =
+  ## How wide a line of program text draws: Space Mono at the body size, every
+  ## place `match` stands in it (`spansIn`, the runs drawn bold) at the Bold
+  ## face's advance and the rest at the Regular's, each run measured as the
+  ## text it is drawn as.
+  var at = 0
+  for (s0, n0) in (if match.len > 0: spansIn(shown, match) else: newSeq[(int, int)]()):
+    if s0 > at: result += monoTextPx(shown[at ..< s0], BodyPx)
+    result += monoTextPx(shown[s0 ..< s0 + n0], BodyPx, bold = true)
+    at = s0 + n0
+  if at < shown.len: result += monoTextPx(shown[at .. ^1], BodyPx)
+
 proc rowBlock(r: GpuiRenderer; p: AhPalette; vm: ResultCommandsVM; g: ShownGroup;
               index: int; query: string; widthPx: int; narrow: bool;
               press: ResultsPress): Block =
@@ -128,9 +163,11 @@ proc rowBlock(r: GpuiRenderer; p: AhPalette; vm: ResultCommandsVM; g: ShownGroup
   # A line of the program's text is one line, cut around the match that
   # put it in the list, which stays whole (`cutAroundMatch`, P2c study D62).
   let code = row.kind == rkLine
+  # What stands right of a wide row's line of program text: where it is and
+  # its tag, each with the row's gap before it.
   let rightPx0 = if narrow: 0
-                 else: min((if row.location.len > 0: textPx(row.location, CaptionPx) + 8 else: 0) +
-                           (if tag.len > 0: textPx(tag, CaptionPx) + 8 else: 0), widthPx * 45 div 100)
+                 else: min((if row.location.len > 0: textPx(row.location, CaptionPx) + RowGapPx else: 0) +
+                           (if tag.len > 0: textPx(tag, CaptionPx) + RowGapPx else: 0), widthPx * 45 div 100)
   # The row's line: the title on the sheet's 24px line, a pixel taller
   # where 12px words share it (`mixedLinePx`); a narrow row's title alone,
   # and what and where it is on a 24px line of their own under it, 2px down.
@@ -159,20 +196,26 @@ proc rowBlock(r: GpuiRenderer; p: AhPalette; vm: ResultCommandsVM; g: ShownGroup
   r.tag(el, "result-selected", $selected)
   r.tag(el, "kind", $row.kind)
   r.pressable(el, ResultsOpenOperation, $(g.first + index), press)
-  let line = r.box(pairs = [("items", "center"), ("gap", "8px"), ("min-width", "0px"),
+  let line = r.box(pairs = [("items", "center"), ("gap", $RowGapPx & "px"), ("min-width", "0px"),
                             ("height", $linePx & "px"), ("flex-shrink", "0")])
   if code:
     let (ms, me) = matchedSpan(row, query)
+    let mt = if me > ms: row.title[ms ..< me] else: ""
     # Set in the code face (Space Mono, `.ah-results-title-code`), as the
     # editor and the Changes panel set code (brief: "a line of the program's
-    # text is set in the code face"), so it is cut by Space Mono's advances.
-    let measure = proc(text: string): int = monoTextPx(text, BodyPx)
-    let shown = cutAroundMatch(row.title, ms, me, max(1, widthPx - rightPx0 - 8), measure,
-                               measure(Ellipsis))
-    let t = r.box(pairs = [("min-width", "0px"), ("flex-grow", "1"), ("items", "baseline")])
+    # text is set in the code face"), so it is cut by Space Mono's advances,
+    # each match in view at the Bold face's (`codeLinePx`).
+    let measure = proc(text: string): int = codeLinePx(text, mt)
+    # Its room ends `CodeGapPx` before where it is: the row's gap is in
+    # `rightPx0`, and the title's own margin is drawn on its box. The line
+    # is `RowEdgesPx` narrower than `widthPx`, which the cut once took whole.
+    let roomPx = widthPx - RowEdgesPx - rightPx0 - CodeMarginPx
+    let shown = cutAroundMatch(row.title, ms, me, max(1, roomPx), measure,
+                               monoTextPx(Ellipsis, BodyPx))
+    let t = r.box(pairs = [("min-width", "0px"), ("flex-grow", "1"), ("items", "baseline"),
+                           ("margin-right", $CodeMarginPx & "px")])
     r.tag(t, "face", "code")
     # Every match in view bold (D62), the rest in the body role.
-    let mt = if me > ms: row.title[ms ..< me] else: ""
     var from0 = 0
     for (s0, n0) in spansIn(shown, mt):
       if s0 > from0:
@@ -225,7 +268,15 @@ proc rowBlock(r: GpuiRenderer; p: AhPalette; vm: ResultCommandsVM; g: ShownGroup
                             ("min-width", "0px"), ("flex-shrink", "1")])
     r.tag(s, "second", second)
     r.appendChild(el, s)
-  r.padded(el, h)
+  result = r.padded(el, h)
+  # Under its last line's glyphs: the row's padding and that line's leading
+  # below its type's own line (none under a second line, set on its type's
+  # 16px; 4px under the caption words of a narrow row's 24px line; 2px under
+  # a wide row's title, 14px on 20px in a 25px line).
+  let lastLead = if secondLines > 0: 0
+                 elif underTitle: (LinePx - CaptionLinePx) div 2
+                 else: (linePx - BodyRoleLinePx) div 2
+  result.tailPx = RowPadPx + lastLead
 
 proc hairlineGap(r: GpuiRenderer; p: AhPalette; abovePx, belowPx: int): Block =
   ## A hairline `abovePx` under the last part and `belowPx` over the next:
@@ -259,13 +310,23 @@ proc bodyBlocks(r: GpuiRenderer; p: AhPalette; vm: ResultCommandsVM; widthPx: in
     # words on the sheet's lines, the hint beside the last line where it
     # fits there (`flex-wrap: wrap`, 0.75rem apart, on one baseline), else
     # on a line of its own.
+    # Each line its own one-line text, broken between words only
+    # (`wrappedLines`), as the web's line breaks: GPUI's text system, left to
+    # wrap the notice itself, split `GET /api/v1/input-commands` after
+    # `/api/v1`, where the web carries the whole path to the next line, and
+    # drew one line fewer than measured.
     let b = r.box(column = true, pairs = [("padding-top", "8px")])
-    let lines = max(1, wrappedRows(n.text, BodyPx, widthPx))
-    let t = r.text(n.text, BodyPx, if n.role == "error": p.textError else: p.textBody,
-                   shrink = false, pairs = [("white-space", "pre-wrap"),
-                                            ("line-height", $LinePx & "px"), ("min-width", "0px"),
-                                            ("flex-shrink", "1")])
+    let wrapped = wrappedLines(n.text, BodyPx, widthPx)
+    let lines = wrapped.len
+    let ink = if n.role == "error": p.textError else: p.textBody
+    let t = r.box(column = true, pairs = [("min-width", "0px"), ("flex-shrink", "0"),
+                                          ("height", $(LinePx * lines) & "px")])
+    for line in wrapped:
+      r.appendChild(t, r.text(line, BodyPx, ink,
+                              pairs = [("height", $LinePx & "px"),
+                                       ("line-height", $LinePx & "px"), ("min-width", "0px")]))
     r.tag(b, "notice-line", n.text)
+    r.tag(b, "notice-lines", wrapped.join("\n"))
     r.tag(b, "notice-role", n.role)
     r.appendChild(b, t)
     var h = 8 + LinePx * lines + 12
@@ -399,14 +460,31 @@ proc drawResults*(r: GpuiRenderer; host: GpuiElement; vm: ResultCommandsVM;
   let bodyRoom = max(16, maxH - 2 - topPx)
   var last = blocks.high
   var moreBelow = false
+  var moreRoom, moreNext = 0
   var bodyPx = total + EndPx
   if bodyPx > bodyRoom:
     moreBelow = true
+    # A part is drawn when what it shows ends above the line's hairline: a
+    # row's bottom padding and its last line's leading may stand under the
+    # line, as the web's last row does (its body scrolls under the sticky
+    # `More below ↓`; `Block.tailPx`).
+    # Held to the whole part, the sidebar's sheet left a row's height empty
+    # above the line where the web draws one more row. That last part is drawn as tall as the room
+    # over the line leaves it, so the line keeps its place.
+    let roomAbove = bodyRoom - MoreLinePx
     var used = 0
     last = -1
-    while last + 1 < blocks.len and used + blocks[last + 1].heightPx <= bodyRoom - MoreLinePx:
+    while last + 1 < blocks.len and
+          used + blocks[last + 1].heightPx - blocks[last + 1].tailPx <= roomAbove:
       inc last
       used += blocks[last].heightPx
+    if last >= 0 and used > roomAbove:
+      let b = blocks[last]
+      r.styles(b.el, [("height", $(b.heightPx - (used - roomAbove)) & "px"),
+                      ("overflow", "hidden")])
+    moreRoom = roomAbove - used
+    if last + 1 < blocks.len:
+      moreNext = blocks[last + 1].heightPx - blocks[last + 1].tailPx
     bodyPx = bodyRoom
   let sheetH = topPx + bodyPx + 2
   let sheet = r.box(column = true, pairs = [
@@ -417,6 +495,11 @@ proc drawResults*(r: GpuiRenderer; host: GpuiElement; vm: ResultCommandsVM;
     ("rounded", $SheetRadiusPx & "px"), ("overflow", "hidden")])
   r.tag(sheet, "sheet", $vm.kind)
   r.tag(sheet, "hidden-below", $(blocks.high - last))
+  if moreBelow:
+    # The ground left above `More below ↓`'s hairline (negative: a row's
+    # bottom padding under it), and what the first part not drawn shows.
+    r.tag(sheet, "more-room", $moreRoom)
+    r.tag(sheet, "more-next", $moreNext)
   # Where the sheet was laid out, for the layout suites (as the composer's).
   r.tag(sheet, "sheet-top", $SheetTopPx)
   r.tag(sheet, "sheet-height", $sheetH)

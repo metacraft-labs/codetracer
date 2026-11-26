@@ -374,7 +374,7 @@ proc readEditor(g: ScreenGrid; b: Box; t: var Tree; root: SurfaceNode) =
     ed.unreadable["caret-line"] = "the editor does not hold the focus, so no caret is drawn"
   ed.unreadable["read-only"] = "the terminal draws no read-only marker; the mode is on the status line"
 
-proc readList(g: ScreenGrid; b: Box; t: var Tree; root: SurfaceNode;
+proc readList*(g: ScreenGrid; b: Box; t: var Tree; root: SurfaceNode;
               role, childRole, key: string) =
   let pane = node(role, fl(b.left), fl(b.strip), fl(b.right - b.left), fl(b.bottom - b.strip))
   t.add(root, pane)
@@ -545,14 +545,14 @@ proc addPaneTab(t: var Tree; b: Box; l: tuple[label: string, col: int, active: b
 # debugger's transport controls and the footer's auto-hide labels.
 
 const
-  TransportGlyphs = [("↶", "Reverse next"), ("↷", "Next"), ("⇣", "Reverse step in"),
+  TransportGlyphs* = [("↶", "Reverse next"), ("↷", "Next"), ("⇣", "Reverse step in"),
                      ("↓", "Step in"), ("⇡", "Reverse step out"), ("↑", "Step out"),
                      ("⏴", "Reverse continue"), ("⏵", "Continue"), ("⏮", "Run to entry"),
                      ("■", "Stop")]
     ## The transport row's glyphs (`top_bar`, unicode tier), in the
     ## desktop toolbar's order, by the desktop's labels
     ## (`debug_controls_vm.TransportActions`).
-  TransportWords = [("Rev next", "Reverse next"), ("Next", "Next"),
+  TransportWords* = [("Rev next", "Reverse next"), ("Next", "Next"),
                     ("Rev in", "Reverse step in"), ("In", "Step in"),
                     ("Rev out", "Reverse step out"), ("Out", "Step out"),
                     ("Rev cont", "Reverse continue"), ("Continue", "Continue"),

@@ -29,7 +29,11 @@ steps:
     as: main
   - click: 'context-menu/menu-item[label="Open in New Window"]'
     as: main
+  # A new window builds its whole layout and replays the stop into it,
+  # which on a loaded host takes longer than the settle bound; the wait that
+  # follows names what the window must show.
   - open-client: { name: second, open: app-window }
+    settle: false
   - wait: { until: { at: 'editor[file="main.nr"]', present: true }, timeout: 120s }
     as: second
   - click: 'pane-tab[label="FILES"]'
@@ -40,9 +44,16 @@ steps:
     as: second
   - wait: { until: { at: 'editor[file="shield.nr"]', active: true }, timeout: 60s }
     as: second
+  # Back to the tab: the window builds its layout for it again, which on a
+  # loaded host takes longer than the settle bound. The wait that follows is
+  # the tab drawn; the absence below is read once the window is quiet, so a
+  # file opened late is still seen.
   - click: 'session-strip/session-tab[title="zk_shields"]'
     as: main
-  - wait: { until: { at: 'editor[file="main.nr"]', present: true }, timeout: 30s }
+    settle: false
+  - wait: { until: { at: 'editor[file="main.nr"]', present: true }, timeout: 60s }
+    as: main
+  - wait: { until: settled, timeout: 30s }
     as: main
   - expect: { at: 'editor[file="shield.nr"]', absent: true, holds: 2s }
     as: main

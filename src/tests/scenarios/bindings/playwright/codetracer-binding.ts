@@ -198,7 +198,7 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
   "origin-hop": { affordances: ["click"], properties: ["number", "text", "file", "classification", "confidence", "low-confidence",
                                                      "low-confidence-text", "badge", "line", "frame-transition", "operands",
                                                      "operands-shown", "operand-values", "pointer"] },
-  "origin-panel": { affordances: ["click", "focusable"], properties: ["count", "hops", "terminator", "crumbs", "focused", "empty"] },
+  "origin-panel": { affordances: ["click", "focusable"], properties: ["count", "hops", "terminator", "crumbs", "focused", "empty", "refusal"] },
   breadcrumb: { affordances: ["click"], properties: ["label", "current", "placeholder"] },
   scratchpad: { affordances: [], properties: ["count", "chains"] },
   "scratch-entry": { affordances: ["click", "context-click"], properties: ["expression", "value", "error", "kind"] },
@@ -228,7 +228,7 @@ const ROLES: Record<string, { affordances: string[]; properties: string[] }> = {
                                  "last-frame", "focused"] },
   "frame-image": { affordances: ["click"], properties: ["geid", "frame", "quads", "width", "height"] },
   "pixel-history": { affordances: ["click"], properties: ["count", "pixel", "draws", "last-draw"] },
-  "history-entry": { affordances: ["click"], properties: ["geid", "draw", "result", "selected", "title"] },
+  "history-entry": { affordances: ["click", "context-click"], properties: ["geid", "draw", "result", "selected", "title"] },
   "shader-debug": { affordances: [], properties: ["source", "current", "variables", "registers", "step"] },
   "flow-value": { affordances: ["click", "context-click"], properties: ["name", "side", "line", "value", "cut", "clipped", "single-line", "cap", "shown", "eye-shown"] },
   "loop-control": { affordances: ["click"], properties: ["iteration", "total", "slider-width"] },
@@ -1417,6 +1417,8 @@ function readSurfacePw8(root: any): void {
       crumbs: crumbs.map((c) => text(c)),
       focused: within(panel),
       empty: !!panel.querySelector(".ct-origin-side-empty"),
+      // the named refusal drawn instead of a chain (a pixel's origin)
+      refusal: text(panel.querySelector(".ct-origin-refusal")),
     });
     hops.forEach((h, i) => {
       const label = (h.getAttribute("aria-label") ?? "").replace(/^hop \d+:\s*/, "").replace(/\s+at step.*$/, "");

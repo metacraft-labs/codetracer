@@ -1,0 +1,39 @@
+scenario: 1
+name: editor-hosted/tests-from-the-source
+pack: codetracer
+summary: >-
+  In an editor hosting CodeTracer, on a Noir crate in Edit mode, the
+  plugin's command records the test under the cursor with `ct record-test`
+  and opens the recording in a session of its own, stopped inside the test.
+
+stage:
+  - use: fixture-project
+    with: { name: noir-tests }
+  - use: open-project
+    with: { folder: $project, file: src/main.nr, width: 200, height: 50 }
+
+steps:
+  - beat: open
+    narration: { text: "A Noir crate with two tests, open for editing.", voice: narrator }
+    caption: { text: "A crate with two tests" }
+    steps:
+      - wait: { until: { at: 'editor[file="main.nr"]/line[number="7"]', present: true }, timeout: 120s }
+      - expect: { at: session-strip, count: 1 }
+
+  - beat: caret
+    narration: { text: "Put the cursor in the test to debug.", voice: narrator }
+    caption: { text: "The cursor in test_passes" }
+    steps:
+      - click: { at: 'editor[file="main.nr"]/line[number="7"]', anchor: text-start, pace: thoughtful }
+      - wait: { until: { at: 'editor[file="main.nr"]', assert: "caret-at(7)" }, timeout: 10s }
+
+  - beat: record
+    narration: { text: "One command records that test and opens its recording, in a tab of its own.", voice: narrator }
+    caption: { text: "Record the test under the cursor" }
+    steps:
+      - chord: { bound: tests.record-at }
+        settle: false
+      - wait: { until: { at: session-strip, count: 2 }, timeout: 300s }
+      - wait: { until: replay-idle, timeout: 120s }
+      - expect: { at: 'editor[file="main.nr"]', assert: "stopped-within(1, 8)" }
+        dwell: 2500ms
