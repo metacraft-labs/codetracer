@@ -1,0 +1,70 @@
+name: Provide the visual replay tools
+description: >
+  The one way a job gets ct_gfx_player, ct-native-replay (with a test
+  licence) and ct-mcr: from this run's `visual-replay-tools` artifact when
+  there is one (visual-replay-tools.yml, built once per codetracer.yml run),
+  else built here by ci/test/visual-replay-tools.sh, which also reuses the
+  restored tools. Either way the variables that name them
+  (CODETRACER_CT_GFX_PLAYER_CMD and the others visual-replay-tools.sh writes)
+  are exported to the rest of the job. Every job that opens a visual
+  recording is to provide the tools through this action (the gpui-shell lane
+  first; the TUI shards and GPUI window shards still inline the same three
+  steps). A job that builds the tools needs the
+  sibling checkouts visual-replay-tools.yml clones (codetracer-native-backend
+  with its submodules, codetracer-native-recorder, codetracer-visual-replay,
+  codetracer-snapshot-codecs) and the default dev shell.
+inputs:
+  wait-for-artifact:
+    description: >
+      "true" to wait for and restore this run's `visual-replay-tools` artifact
+      first (a run that has a visual-replay-tools job); "false" to build.
+      A missing, failed or short artifact falls back to building.
+    required: false
+    default: "true"
+  wait-seconds:
+    description: How long to wait for the artifact before building instead.
+    required: false
+    default: "3600"
+  github-token:
+    description: Reads the run's artifacts while waiting.
+    required: false
+    default: ${{ github.token }}
+runs:
+  using: composite
+  steps:
+    - name: Wait for the visual replay tools
+      if: ${{ inputs.wait-for-artifact == 'true' }}
+      id: wait
+      continue-on-error: true
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: nix develop .#ci --command bash ci/wait-for-run-artifact.sh visual-replay-tools "visual-replay-tools /" "${{ inputs.wait-seconds }}"
+
+    - name: Restore the visual replay tools from the visual-replay-tools job
+      if: ${{ inputs.wait-for-artifact == 'true' && steps.wait.outcome == 'success' }}
+      id: download
+      continue-on-error: true
+      uses: actions/download-artifact@v4
+      with:
+        name: visual-replay-tools
+        path: ${{ runner.temp }}/visual-replay-tools
+
+    - name: Unpack them beside the siblings
+      if: ${{ inputs.wait-for-artifact == 'true' && steps.download.outcome == 'success' }}
+      continue-on-error: true
+      shell: bash
+      run: |
+        bash ci/unpack-ct-build-products.sh "${RUNNER_TEMP}/visual-replay-tools" visual-replay-tools.tar.gz
+        echo "CT_VISUAL_REPLAY_TOOLS_PREBUILT=1" >>"$GITHUB_ENV"
+        # The featureless isonim-gpui shim, when the tools job packed it.
+        if [ -e ../isonim-gpui/rust/target/debug/libgpui_nim_shim.so ]; then
+          echo "CT_GPUI_FEATURELESS_SHIM_PREBUILT=1" >>"$GITHUB_ENV"
+        fi
+
+    - name: Provide the tools, and export what names them
+      shell: bash
+      run: |
+        nix develop .#devShells.x86_64-linux.default --command bash ci/test/visual-replay-tools.sh "$RUNNER_TEMP/visual-replay.env"
+        # shellcheck disable=SC1091
+        ( . "$RUNNER_TEMP/visual-replay.env"; env | grep -E '^(CODETRACER_|CT_)' ) >> "$GITHUB_ENV"
