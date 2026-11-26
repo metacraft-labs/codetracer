@@ -291,14 +291,20 @@ proc launchColumn(r: GpuiRenderer; p: AhPalette; vm: ControlCenterVM;
                                 pairs = [("height", $FieldLabelPx & "px"),
                                          ("line-height", $FieldLabelPx & "px")]))
   # Locked: read-only and drawn as the form's values are (no fill, outline
-  # or inset; the words in the label role, study D74).
-  let box = r.box(pairs = [("height", $ControlPx & "px"), ("items", "start"),
-                           ("padding-left", if locked: "0px" else: "8px"),
-                           ("padding-right", "8px"),
-                           ("rounded", $ControlRadiusPx & "px"), ("border-width", "1px"),
-                           ("border-color", if locked: p.panel else: p.borderSecondary),
-                           ("background", if locked: p.panel else: p.ground),
-                           ("overflow", "hidden")])
+  # or inset; the words in the label role): the web's
+  # `input.ah-cc-input[aria-readonly="true"]` outranks the input rule.
+  # Otherwise it is an `input` (`input.ah-cc-input`), so the app's input
+  # rule draws it: holding a value, the action border on the input surface
+  # (`inputLook`); empty, its placeholder on the field's
+  # rest look (`.ah-composer-field-value`).
+  let look =
+    if locked: InputLook(border: p.panel, fill: p.panel)
+    else: inputLook(p, whole, vm.instructionPlaceholder, p.borderSecondary, p.ground)
+  let box = r.inputBox(look, pairs = [("height", $ControlPx & "px"), ("items", "start"),
+                                      ("padding-left", if locked: "0px" else: "8px"),
+                                      ("padding-right", "8px"),
+                                      ("rounded", $ControlRadiusPx & "px"),
+                                      ("overflow", "hidden")])
   let shown = if whole.len > 0: inputValueShown(whole, inner) else: vm.instructionPlaceholder
   let t = r.text(shown, BodyPx, if whole.len == 0: p.textCaption
                                 elif locked: p.textLabel else: p.textBody,

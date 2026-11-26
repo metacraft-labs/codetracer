@@ -69,6 +69,11 @@ const
   FoldPx = 14              ## `.ah-fold`: 0.875rem
   CodeRowPx = 30           ## a VCS changed-file row in the Code tab
   SearchPx = 26            ## the panel search input (`ct-input-panel`)
+  FilledSearchIconInk* = "#f3f3f3"
+    ## The magnifier of a search field holding a query: the fill of the
+    ## image the web swaps in (`input_default_search_icon_dark.svg`, which
+    ## `ct-images-default-search-icon` names in both themes; an asset's
+    ## colour, not a design-system role).
   BarPx = 2                ## the focus inset bar, 0.125rem
   GroupHeadPx = 35         ## `.ah-changes-group-head`
   GroupGapPx = 4           ## `.ah-changes-group + .ah-changes-group`: 0.25rem
@@ -730,16 +735,24 @@ proc codeParts(r: GpuiRenderer; p: AhPalette; ink: ChangesInboxInks; vm: Changes
                                ("padding-bottom", "6px"), ("flex-shrink", "0")])
   r.rule(toolbar, p.borderSecondary)
   let query = vm.query.val
-  let search = r.box(pairs = [("height", $SearchPx & "px"), ("items", "center"), ("gap", "7.25px"),
-                              ("padding-left", "8px"), ("padding-right", "8px"),
-                              ("border-width", "1px"), ("border-color", p.borderSecondary),
-                              ("rounded", "4px"), ("background", ink.inputSurface)])
+  # An `input` (`.ct-input-panel.ct-input-search-image`): holding a query,
+  # the app's input rule draws it with the action border on the input
+  # surface (`inputLook`).
+  let look = inputLook(p, query, SearchFilesPlaceholder, p.borderSecondary, ink.inputSurface)
+  let search = r.inputBox(look, pairs = [("height", $SearchPx & "px"), ("items", "center"),
+                                         ("gap", "7.25px"),
+                                         ("padding-left", "8px"), ("padding-right", "8px"),
+                                         ("rounded", "4px")])
   r.fillWidth(search)
   r.tag(search, "search", query)
   # The search field's magnifier (`ct-input-search-image`): a ring and its
-  # handle, drawn in the placeholder's colour.
+  # handle, drawn in the placeholder's colour; holding a query, in the
+  # filled field's icon colour (`ct-images-default-search-icon`, which the
+  # same has-value selector swaps in).
   let lens = r.box(pairs = [("width", "11px"), ("height", "11px"), ("rounded", "6px"),
-                            ("border-width", "1.5px"), ("border-color", ink.placeholder),
+                            ("border-width", "1.5px"),
+                            ("border-color", if look.filled: FilledSearchIconInk
+                                             else: ink.placeholder),
                             ("flex-shrink", "0")])
   r.appendChild(search, lens)
   r.appendChild(search, r.text(if query.len > 0: query else: SearchFilesPlaceholder, BodyPx,
