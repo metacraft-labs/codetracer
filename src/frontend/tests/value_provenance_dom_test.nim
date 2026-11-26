@@ -145,5 +145,9 @@ block sessionSwitch:
   removeTree(first)
 
 echo "CHECKS: ", checks
+# The lane runner (ci/lib/run-nim-test-lane.sh) counts `[OK]` and `[FAILED]`
+# lines; a suite that prints neither on success reads as one that ran nothing.
 if failedChecks > 0:
   {.emit: "process.exitCode = 1;".}
+else:
+  echo "[OK] value_provenance_dom_test: all ", checks, " checks"
