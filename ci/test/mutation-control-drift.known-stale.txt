@@ -505,7 +505,7 @@ src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/fro
 # 2026-11-21, the browser's two keyboard oracles: test_cross_renderer_panes.nim
 # exports the four keyboard panes for the Chromium suite, and the renderer-chromium
 # lane lists that suite. Each harness below owes a re-grade for those bytes.
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/test-lane-files.sh	b463de41f09e76644ec644ddfe51bd166d7e2c033699c98ecca5083540215051	984ce737de571eba3fbac9c301bbaa9a8915b633ccf0ac68fad7ff586b0d3576
+src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/test-lane-files.sh	b463de41f09e76644ec644ddfe51bd166d7e2c033699c98ecca5083540215051	ddd44b960c176a57faa13f18632ead902f6342a706e7ebf2b5df15a44b0d4791
 # 2026-11-21: a docked plugin pane previews on hover (auto_hide_hover, runtime); these harnesses digest those subjects and owe a re-grade.
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/headless_app/auto_hide_hover.nim	c2395cd53d7292e511d36c714f483d8f6ac8d8bf1f35c2c78237bebd54c73c62	0b4958cca008fcb95abaa5f2a2157cb461ed0b361fe1e0b702efc004cbbcf46f
 
@@ -676,7 +676,7 @@ ci/test/plat70i-fit-mutation-control.sha256	src/frontend/ui/key_router.nim	9994e
 # key named by the host (key_snapshot). plat81-node-plugin-host and plat56 owe re-grades.
 src/frontend/tui/tests/plat56-build-output-mutation-control.sha256	src/frontend/ui/status.nim	df43b16eb8c1ebbdb419f3fa3db0471c2e9c6f56853a672a76f614b0fa13f518	9ef6e34245835ce010a9301461f12e8226ae904622500fffe4ba19ac267919f6
 src/frontend/tui/tests/plat57-find-in-files-mutation-control.sha256	src/frontend/ui/command_interpreter.nim	474e6f0aa46ed3aaef8dacf0a087fff872b6cf10ea4bc7eec28feff66a7b04d6	f969fe5c195b17744265b646b0231791110852df800e7311e2467436dfc34cb4
-src/frontend/tui/tests/plat57-find-in-files-mutation-control.sha256	src/frontend/index/ipc_utils.nim	37ec4874982ea39f53a83cde32a3a8c66e1810b1bbf163accd715a28e1b1411d	bcf9f7467a4f6fb00e08db270464fc24208191e0dafe7099aa975085c6e70aa1
+src/frontend/tui/tests/plat57-find-in-files-mutation-control.sha256	src/frontend/index/ipc_utils.nim	37ec4874982ea39f53a83cde32a3a8c66e1810b1bbf163accd715a28e1b1411d	1673e5652625fba1fcbc7e8f7ddd7f4cf2b1ad8d4a5de56b872a15770986c828
 src/frontend/tui/tests/plat61-shell-mutation-control.sha256	src/frontend/ui/key_router.nim	9994e157d0760237fb047c3f49346530ce7a9bcb02d4741f9a56ed854d91203f	c2a070794422793c969a43b0307d325270ef8827042e778c55a7eb743a2f0050
 src/frontend/tui/tests/plat63-verification-mutation-control.sha256	src/frontend/headless_app/desktop_panes.nim	a468757a2e6189dc46ef094308864e18340ea93f28c84f41805bbe573ddf3b76	36b8305e6ab36df9d0f6bc0d1a36e209721fda6b3f87cf8c954331b816741634
 src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend/ui/key_router.nim	9994e157d0760237fb047c3f49346530ce7a9bcb02d4741f9a56ed854d91203f	c2a070794422793c969a43b0307d325270ef8827042e778c55a7eb743a2f0050
@@ -855,7 +855,7 @@ src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/plugin_
 # does not run (test-lane-files.sh); these harnesses digest those subjects and
 # owe a re-grade.
 src/frontend/gpui/tests/plat20-mutation-control.sha256	src/frontend/gpui/window_geometry.nim	8595f1669201ae3addab9f7134adf5c0ce306855acc4726ccfe1d41fb0e79ed7	fade42f842eab416a16e489917dd21c36d0577f86ed04910d418f212d1b9f4c2
-src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	ci/lib/test-lane-files.sh	8723f13449df6da6d5acdf55932cab0382378d8cb62d41cd89503d948c776663	984ce737de571eba3fbac9c301bbaa9a8915b633ccf0ac68fad7ff586b0d3576
+src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	ci/lib/test-lane-files.sh	8723f13449df6da6d5acdf55932cab0382378d8cb62d41cd89503d948c776663	ddd44b960c176a57faa13f18632ead902f6342a706e7ebf2b5df15a44b0d4791
 ci/test/plat70-find-decisions-mutation-control.sha256	src/frontend/gpui/main.nim	74d1b4cb7c6794d7176211fc032aec567fa8d23bc4cc2a44907913bc6f089cbc	e7008c3a965527413534da1ebed1cc29dda1066d519194c91ea3edd04e6788cd
 ci/test/plat70c-find-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	e7008c3a965527413534da1ebed1cc29dda1066d519194c91ea3edd04e6788cd
 ci/test/plat70i-fit-mutation-control.sha256	src/frontend/gpui/main.nim	220d8170c7218709d5ae77691e7cfbfce2954ae359429ba9554c046b0b637053	e7008c3a965527413534da1ebed1cc29dda1066d519194c91ea3edd04e6788cd
@@ -981,7 +981,7 @@ src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/styl
 
 # Re-grades owed for subjects moved by 0a4f1da4d53 without ledger lines;
 # the harnesses that digest them owe a re-grade of the arms that sit in them.
-src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	ci/lib/test-lane-files.sh	a7a0360b1bf2ceb0286af1ecfb5d43f5f40d3bc5b306fd21b7b8667af77edf92	984ce737de571eba3fbac9c301bbaa9a8915b633ccf0ac68fad7ff586b0d3576
+src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	ci/lib/test-lane-files.sh	a7a0360b1bf2ceb0286af1ecfb5d43f5f40d3bc5b306fd21b7b8667af77edf92	ddd44b960c176a57faa13f18632ead902f6342a706e7ebf2b5df15a44b0d4791
 
 src/frontend/viewmodel/tests/unit/plat9-surface-mutation-control.sha256	src/frontend/viewmodel/plugin_host/surface_host.nim	3fddebc1d5a1d4df6d8846db8374b95600bb0b09dd3d28b102283f41a0d3bbec	1f7e9eb0d6529b821484d8abcc91f100ce56471507377a2fc92004cc46172bc1
 src/frontend/tui/tests/plat52-terminal-mutation-control.sha256	src/frontend/viewmodel/views/isonim_terminal_output_view.nim	a0cefbc87feb909e990970968e69f06cbdcad37ceb53420628727d68e6dc9158	92146278d8c37c0ea2c9654796b5dacf04fea8fb6496d9d86cd440e8495321ed
@@ -1013,3 +1013,6 @@ src/frontend/viewmodel/tests/unit/hsf-sdk-mutation-control.sha256	src/frontend/v
 src/frontend/tui/tests/plat50-stop-path-mutation-control.sha256	src/db-backend/src/expr_loader.rs	ead979b896269620b974d62c3eb01dac7d10338251cee6e83b56b5d3e3bb231d	c10017caf68e99a97d4a650f13dc1b3ccf9b374f6941ca0c4750458b3cba7237
 src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/db-backend/src/db.rs	8051651f4a8174b46e971cbbd295ffc02eba5a22c2276479f075faec9d9ad9f5	362fa4d42e8342493b35812a6383a79578112ba51f77922e9f68d02690349d4b
 src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_sdk_facade.nim	f868eb5b9644a11e21b73e5026a5d31988685c8943e4476b38eb619dcc94f877	6cc01b92d3df398f5ce5ce5a9fb610ac008da271cf62bd1a398f246529440f22
+# 2026-11-26: the desktop's certificate content ids moved to a main-process worker thread
+# (vcs.nim's docs, ipc_utils.nim's handler list, the lane list); these re-grades are owed.
+src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/viewmodel/platform/vcs.nim	4081198df3df8ecc4e1710ea30a4b6fc33a515c5fe9d292cb4b3bc520f54e72c	9089f80e619320823e73a77392f576490f6ecdf23d823b176cb2127cfdd2607d

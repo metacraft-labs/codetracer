@@ -62,11 +62,18 @@
 ## algorithms — and it used to run them through node's `spawnSync` on this,
 ## the renderer's main thread: 170 ms to 1.2 s of frozen input and redraw per
 ## refresh, every `RevalidateIntervalMs`. The ViewModel is now built over
-## `platformCertificateFactsGatherer`, the Electron facade answers
-## `vcs.contentId` and `vcs.repositoryRoot` from child processes, and the
-## indicator updates when the gather completes (`onRefreshed`). Until then it
-## shows its previous answer; a trigger during a refresh queues exactly one
-## more.
+## `platformCertificateFactsGatherer` and the indicator updates when the
+## gather completes (`onRefreshed`). Until then it shows its previous answer;
+## a trigger during a refresh queues exactly one more.
+##
+## On the Electron desktop the facade answers `vcs.contentId` and
+## `vcs.declaredScopes` from the MAIN process, which computes them in a
+## worker thread (`index/content_id_service.nim`), and `vcs.repositoryRoot`
+## from a child process. Running git in child processes was not enough on its
+## own: the renderer drove the recipe through a resumable runner that replays
+## the whole computation once per git answer, re-reading the full index
+## listing each time — about 2.5 s of renderer work per refresh on a
+## 25,000-entry index, landing on whatever the user was doing.
 ##
 ## **A bare edit to a tracked file DEEP in the tree touches nothing in `.git`
 ## and nothing at the workspace root.** A recursive watch would catch it and
@@ -112,8 +119,9 @@ when defined(js):
     ## git processes (W reads every tracked file: `StatDistrustTime`), plus
     ## the store's directory listings — rather than against how fresh a fact
     ## could be: the precise triggers above carry the cases that matter, and
-    ## this is the backstop for the one they cannot see. The git work runs in
-    ## child processes and does not block this thread; the interval bounds the
+    ## this is the backstop for the one they cannot see. The git work runs
+    ## off this thread (on the desktop, in the main process's content-id
+    ## worker) and does not block it; the interval bounds the
     ## CPU and disk it spends, and a tick that lands while a refresh is still
     ## in flight queues one follow-up rather than a second concurrent one.
 
@@ -328,9 +336,9 @@ when defined(js):
   # losing its bare `except:` arm (SB-1's fix, which had no in-Electron test).
   #
   # `contentId` answers with a PROMISE of the JSON text: the facade computes
-  # content ids asynchronously (git in child processes, so the window never
-  # waits for it), and `ctAwaitSync` would report its `pkTimeout` for every
-  # one. `page.evaluate` awaits a returned promise, so the spec reads the same
+  # content ids asynchronously (on the desktop, in the main process's worker
+  # thread, so the window never waits for it), and `ctAwaitSync` would report
+  # its `pkTimeout` for every one. `page.evaluate` awaits a returned promise, so the spec reads the same
   # text; a throw inside an `async` proc rejects it, so the spec still sees
   # one.
 

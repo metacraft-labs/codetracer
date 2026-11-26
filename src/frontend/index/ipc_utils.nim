@@ -2,6 +2,7 @@ import
   std / [ async, jsffi, strutils, sequtils, jsconsole, sugar, json, os, strformat ],
   electron_vars, traces, files, startup, install, menu, online_sharing, window, logging, config, debugger, server_config, host_clients, base_handlers, bootstrap_cache, lsp_bridge,
   review_dataset, keybindings, table_columns, replay_open_in,
+  content_id_service,
   ns9_panes,
   shell_sessions,
   hcr_launch,
@@ -521,6 +522,11 @@ proc configureIpcMain* =
 
     # H4 — the in-app apply-edit -> HCR reload command.
     "hcr-apply-edit"
+
+    # The status bar's certificate facts, computed in the main process's
+    # content-id worker thread (`index/content_id_service`).
+    "content-id"
+    "declared-scopes"
 
     # H6 — launching a target UNDER hot code reload, which is the half of the
     # Scene-1 loop the product did not have: the session coordinator, the target
