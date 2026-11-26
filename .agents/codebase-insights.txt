@@ -8310,6 +8310,14 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   is a whole-recording draw index; `X-Frame-Draw-Start` / `-Count` give the
   frame's range; `?frame=F&draw=K` is K within frame F. `/shader-debug`
   ignores its request (always the last draw) — an open player defect.
+- A Pixel History entry's "Show value origin" (K76) is ONE question on every
+  front-end: `PixelHistoryVM.showValueOriginForEntry` → `OriginChainVM.
+  onShowPixelOrigin`, the seam a pixel-to-value back end answers. The desktop
+  draws its answer in the origin side panel; the terminal and GPUI draw no side
+  panel, so they call `valueOriginWordsForEntry` on the session's
+  `originChainVM` and put its words (today `pixelOriginRefusalText`) on the
+  status line. The native menu is `pane_clicks.pixelHistoryEntryContextMenu`
+  (`caPixelShowValueOrigin`, `pixel-history.show-value-origin`).
 - Scrubbing: `VideoPlayerVM.beginScrub/dragScrub/pumpScrub/releaseScrub`
   (coalesce 60 ms, release asks unless already asked, a drag while playing
   pauses and the release resumes). Hosts must call `pumpScrub` on their idle

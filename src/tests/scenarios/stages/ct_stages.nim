@@ -680,7 +680,7 @@ proc visualRecording*(s: StageState) =
   ## the real `ct_gfx_player`; a missing recording or player is a failed
   ## stage, named. The copy is the run's: opening a recording writes beside
   ## it, and the committed one is never changed.
-  let skip = visualFixtureSkip()
+  let skip = visualFixtureMissing()
   if skip.len > 0:
     raise newException(IOError, "visual-recording: " & skip)
   let dest = s.root / "visual-gl-scene"

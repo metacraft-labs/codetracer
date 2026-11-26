@@ -265,6 +265,7 @@ V_ROWS = "the rows this milestone implements, by front-end"
 V_WORD = "the word a column is in, or ends; none on a separator"
 V_RUST = "Rust widens over `::` and refuses an ambiguous path"
 V_HEADER = "a header click orders by its column; again reverses it"
+V_PIXEL = "a Pixel History entry's menu: Show value origin (K76)"
 COL_STOP = "it stops at the column; it replaces the line's; edits keep it"
 COL_OFF = "a disabled column breakpoint does not stop the replay"
 V_MOVE = "it opens on the first enabled entry; Up and Down skip disabled ones"
@@ -368,7 +369,7 @@ D_DESKTOP = "gate:" + DESKTOP_GATE
 CASE_SUITE = {
     V_TAB: VMU, V_PLAIN: VMU, V_BPLINE: VMU, V_CALL: VMU, V_VALUES: VMU,
     V_MOVE: VMU, V_CHOOSE: VMU, V_ROWS: VMU, V_WORD: VMU, V_RUST: VMU,
-    V_HEADER: VMU, COL_STOP: COLVM, COL_OFF: COLVM,
+    V_HEADER: VMU, V_PIXEL: VMU, COL_STOP: COLVM, COL_OFF: COLVM,
     R_BAR: REF, R_STRIP: REF, R_MENU: REF, R_OMNI: REF,
     S_TABMENU: T1, S_ESC: T1, S_RESIZE: T1, S_PRESS: T1, S_LONE: T1, S_POINT: T1, S_ASCII: T1,
     S_FLAG: T1,
@@ -793,6 +794,11 @@ ARMS = [
         "  of \"Esc\":\n    ffsCancelled\n",
         U_RENAME, "Escape leaves the name field open"),
     # --- 1. the sweep's other rows: the shared models ------------------------
+    Arm("PC15", PANECLICKS,
+        '    entries: @[entry("Show value origin", caPixelShowValueOrigin)])\n',
+        '    entries: @[entry("Show value origin", caShowValueOrigin)])\n',
+        V_PIXEL, "a Pixel History entry's Show value origin runs the "
+                 "Variables pane's action, on no variable"),
     Arm("PC8", PANECLICKS,
         "  result.entries.add entry(UnpinLabel, caUnpin)\n",
         "  discard\n",
