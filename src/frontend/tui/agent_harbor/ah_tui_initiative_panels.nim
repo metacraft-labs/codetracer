@@ -214,13 +214,6 @@ proc drawCurrent*(c: var AhCanvas; parent: AhNode; row, col, width: int; text: s
   let w = c.put(row, col, "CURRENT", c.p.textLabel, bold = true)
   discard c.text(n, row, col + w + 1, max(1, width - w - 1), text, c.p.textBody)
 
-proc sessionStatusColour(p: AhPalette; attention: SessionAttention): string =
-  case attention
-  of saNeedsInput: p.textWarning
-  of saRunning: p.textSuccess
-  of saFailed: p.textError
-  else: p.textLabel
-
 proc drawSessionLine*(c: var AhCanvas; parent: AhNode; item: SessionItem;
                       row, col, width: int) =
   ## One of an initiative's sessions: its mark, title and status word.
@@ -234,7 +227,7 @@ proc drawSessionLine*(c: var AhCanvas; parent: AhNode; item: SessionItem;
   discard c.text(n, row, col + 2, max(1, width - 2 - sw - StatusWordGap), item.title,
                  c.p.textBody, fact = "title")
   discard c.text(n, row, col + width - sw, sw, item.statusLabel,
-                 c.p.sessionStatusColour(item.attention), fact = "status")
+                 c.p.initiativeSessionWordColour(item.attention), fact = "status")
 
 # ---------------------------------------------------------------------------
 # Initiatives

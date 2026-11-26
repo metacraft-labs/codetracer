@@ -111,6 +111,20 @@ jobs:
           gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
 
+      - name: Clone codetracer-pm sibling
+        # `just editor-model-case-floors` reads the platform milestones file
+        # (../codetracer-pm/milestones/CodeTracer-Platform.milestones.org) and
+        # fails without it, as in run 45590873552. Not a build input and not in
+        # `repro.lock`, so cloned at its mainline `latest`, as the WASM jobs
+        # do. Up here with the other clones, inside the token's hour.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-pm
+          ref: latest
+          path: ${{ github.workspace }}/../codetracer-pm
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
       - name: Install Nix
         uses: ./.github/actions/setup-nix
         with:
@@ -174,7 +188,10 @@ jobs:
         # Hermetic and sub-second on synthetic fixtures, so it runs BEFORE the
         # guard itself: if the guard has lost the ability to report, that is
         # worth knowing before reading its verdict.
-        run: bash ci/test/css-token-resolution-test.sh
+        # In the dev shell for its python3: the runners on gpu-server-002 have
+        # none on the host PATH ("python3: command not found", run
+        # 45590873552), and the style steps after it then never ran.
+        run: nix develop .#devShells.x86_64-linux.default --command bash ci/test/css-token-resolution-test.sh
 
       - name: Every style variable in every shipped stylesheet resolves
         # Stylus emits an unresolved identifier verbatim rather than failing,

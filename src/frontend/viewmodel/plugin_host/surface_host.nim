@@ -292,10 +292,10 @@ proc probeTool*(name: string): DependencyProbe =
   ## eventually disagree about whether a tool "is there"
   ## (Verification-Harness-Traps §14).
   ##
-  ## Unsupported where `plugin_io` has no resolver: under JS, and under wasm32,
-  ## whose builds reach the host's process primitives only through
-  ## `ct-plugin-host`'s imports.
-  when defined(js) or defined(wasm32):
+  ## Unsupported under JS, which has no resolver (no filesystem to search).
+  ## Under wasm32 it resolves as natively, against the module's filesystem
+  ## and `PATH` (`plugin_io.resolveExecutable`).
+  when defined(js):
     dpUnsupported
   else:
     if resolveExecutable(name).len > 0: dpPresent else: dpAbsent
