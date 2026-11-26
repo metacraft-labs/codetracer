@@ -13,6 +13,7 @@
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Simple in-memory file store: maps virtual paths to byte contents.
 ///
@@ -34,10 +35,21 @@ fn store() -> std::sync::MutexGuard<'static, HashMap<String, Vec<u8>>> {
     VFS_STORE.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+/// Bumped by every [`vfs_write`], so a cache of "this path could not be read"
+/// can tell that the store has changed since it looked.
+static VFS_GENERATION: AtomicU64 = AtomicU64::new(0);
+
 /// Write a file into the in-memory VFS store.
 pub fn vfs_write(path: &str, data: Vec<u8>) {
     let mut store = store();
     store.insert(path.to_string(), data);
+    VFS_GENERATION.fetch_add(1, Ordering::SeqCst);
+}
+
+/// How many writes the store has seen. Two equal readings mean nothing was
+/// written in between, so a lookup that failed at the first still fails.
+pub fn vfs_generation() -> u64 {
+    VFS_GENERATION.load(Ordering::SeqCst)
 }
 
 /// Read file bytes from the in-memory VFS store.

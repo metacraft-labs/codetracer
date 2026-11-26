@@ -3,11 +3,11 @@
   "PLAT-59 — the desktop's Visual Replay panes on the gl_scene recording, read from the real Electron app.",
   "Produced by src/tests/gui/tests/frame-viewer/plat59-visual-replay-capture.spec.ts",
   "(`just plat59-capture-electron`).",
-  "Recording: examples/recordings/mcr/linux-x86_64/visual-gl-scene at codetracer-example-recordings 87d012fd190f0b37239988187a4b2e59fba1b40c."
+  "Recording: examples/recordings/mcr/linux-x86_64/visual-gl-scene at codetracer-example-recordings b87d40d6b7b0a4d2e4d8306b16a8f9f778838013 (the same gl_scene tree, 6f75cb222e27, as 87d012fd190f, which the answers were captured from before the recordings repository was re-recorded)."
  ],
  "fixture": {
   "path": "examples/recordings/mcr/linux-x86_64/visual-gl-scene",
-  "commit": "87d012fd190f0b37239988187a4b2e59fba1b40c"
+  "commit": "b87d40d6b7b0a4d2e4d8306b16a8f9f778838013"
  },
  "frames": [
   {

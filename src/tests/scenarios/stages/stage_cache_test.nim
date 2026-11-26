@@ -5,9 +5,10 @@
 ## So is an rr entry whose `trace_db_metadata.json` names its output folder
 ## under `.partial` or gone.
 ## An entry recorded with another recorder, another `ct` or other program
-## sources than the run's is absent too (`recordingProvenance`).
+## sources than the run's is absent too (`recordingProvenance`), and an rr
+## entry made with another rr than the run's (`recordersFor`, `rrRecorder`).
 ## Run by `ci/test/scenarios.sh stage-test`.
-import std/[json, os, unittest]
+import std/[json, os, strutils, unittest]
 import ./ct_stages
 
 suite "the fixture cache's whole entries":
@@ -108,3 +109,42 @@ suite "the fixture cache's whole entries":
     # an entry with no provenance at all (recorded before the key) is absent
     removeFile(recordingProvenanceFile(dest))
     check not cachedProvenanceMatches(dest, first)
+
+  test "an rr entry recorded with another rr is absent":
+    # The rr decides what an rr recording holds: only CodeTracer's rr writes
+    # the program's output (`rr/write_events.txt`), and an entry a stock rr
+    # made replayed with an empty Event Log after the environment named
+    # CodeTracer's rr again. The rr is found as ct-native-replay finds it.
+    let bin = root / "bin"
+    createDir(bin)
+    let replay = bin / "ct-native-replay"
+    writeFile(replay, "#!/bin/sh\n")
+    setFilePermissions(replay, {fpUserExec, fpUserRead, fpUserWrite})
+    let beside = bin / "rr"
+    writeFile(beside, "codetracer rr")
+    let given = root / "given-rr"
+    writeFile(given, "rr from CT_RR_EXE")
+    let savedPath = getEnv("PATH")
+    let savedRr = getEnv("CT_RR_EXE")
+    putEnv("PATH", bin)
+    delEnv("CT_RR_EXE")
+    check rrRecorder() == beside            # the rr beside ct-native-replay
+    putEnv("CT_RR_EXE", given)
+    check rrRecorder() == given             # $CT_RR_EXE first
+    check ("rr=" & given) in recordersFor("rr")
+    for r in recordersFor(""):
+      check not r.startsWith("rr=")         # another backend names no rr
+    let prog = root / "prog.pas"
+    writeFile(prog, "begin end.\n")
+    let ct = root / "ct"
+    writeFile(ct, "ct v1")
+    let dest = root / "prog_pas_rr-scenario"
+    writeFile(recordingProvenanceFile(dest),
+      recordingProvenance(prog, "rr", "", recordersFor("rr"), ct))
+    check cachedProvenanceMatches(dest,
+      recordingProvenance(prog, "rr", "", recordersFor("rr"), ct))
+    delEnv("CT_RR_EXE")                     # now the rr beside the replay
+    check not cachedProvenanceMatches(dest,
+      recordingProvenance(prog, "rr", "", recordersFor("rr"), ct))
+    putEnv("PATH", savedPath)
+    if savedRr.len > 0: putEnv("CT_RR_EXE", savedRr)

@@ -12,6 +12,9 @@ import isonim/core/[signals, computation, owner]
 import isonim/viewmodel
 
 import ../store/[replay_data_store, types]
+import nim_agents/workspace
+
+export workspace
 
 type
   AgentWorkspaceVM* = ref object of ViewModel
@@ -31,21 +34,8 @@ type
     selectedFile*: Memo[AgentWorkspaceFileEntry]
     selectedCoverageText*: Memo[string]
 
-proc clampSelectedIndex*(index, fileCount: int): int =
-  if fileCount <= 0:
-    0
-  elif index < 0:
-    0
-  elif index >= fileCount:
-    fileCount - 1
-  else:
-    index
-
-proc coverageBadgeText*(entry: AgentWorkspaceFileEntry): string =
-  if entry.totalLines == 0:
-    "--"
-  else:
-    $entry.coveredLines & "/" & $entry.totalLines
+# `clampSelectedIndex`, `coverageBadgeText`, `selectedFileOf` and
+# `hasWorkspaceOf` live in `nim_agents/workspace` (CTF-M1), re-exported above.
 
 proc setViewKind*(vm: AgentWorkspaceVM; kind: AgentWorkspaceViewKind) =
   vm.viewKind.val = kind
@@ -98,15 +88,11 @@ proc createAgentWorkspaceVM*(store: ReplayDataStore): AgentWorkspaceVM =
       files.val.len
 
     let hasWorkspace = createMemo[bool] proc(): bool =
-      files.val.len > 0 or sessionId.val.len > 0
+      hasWorkspaceOf(files.val.len, sessionId.val)
 
     let selectedFile = createMemo[AgentWorkspaceFileEntry] proc():
         AgentWorkspaceFileEntry =
-      let entries = files.val
-      if entries.len == 0:
-        AgentWorkspaceFileEntry()
-      else:
-        entries[clampSelectedIndex(selectedFileIndex.val, entries.len)]
+      selectedFileOf(files.val, selectedFileIndex.val)
 
     let selectedCoverageText = createMemo[string] proc(): string =
       coverageBadgeText(selectedFile.val)

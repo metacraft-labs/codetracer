@@ -13,6 +13,15 @@
 ## launched asynchronously and the indicator updates when the computation
 ## completes.
 ##
+## `contentId` and `declaredScopes` are now answered by the MAIN process,
+## which computes them in its content-id worker thread
+## (`index/content_id_service.nim`): computed in the renderer, even with git
+## in child processes, the resumable recipe replayed itself once per git
+## answer on the renderer's thread. This suite drives the facade through that
+## whole route — the facade's request, main's handler, the worker and the
+## answer back — and holds it to the same claims; `repositoryRoot` is still
+## the renderer's own asynchronous git read.
+##
 ## ## The claims
 ##
 ##   1. **Neither call settles synchronously.** The future each returns is
@@ -47,9 +56,17 @@
 ## ## What is real, and the one stand-in
 ##
 ## REAL: `git` itself over repositories this suite creates; node's
-## `child_process.spawn`; the content-id recipe; the facade.
+## `child_process.spawn` and `worker_threads`; the content-id recipe; the
+## facade; main's content-id handlers and service.
 ##
-## THE ONE STAND-IN is a `git` wrapper script used by claim 2 only: a
+## THE IPC between the facade and main is a loopback in this process
+## (`desktop_electron.rendererIpc` and `electron_vars.mainWindow`): Electron's
+## `ipcRenderer` / `webContents.send` pair does not exist under node. The
+## worker main starts runs this suite's own bundle, which serves requests and
+## nothing else when started as a worker (the last lines of this file): the
+## lane compiles one file, so no `content_id_worker.js` sits beside it.
+##
+## THE OTHER STAND-IN is a `git` wrapper script used by claim 2 only: a
 ## `/bin/sh` script that sleeps 0.2 s and then `exec`s the real git with the
 ## same arguments. A git that answers in two milliseconds makes "the event
 ## loop ran while git was running" a race between the loop and the child; a
@@ -70,6 +87,10 @@ import ../viewmodel/platform/vcs
 import ../viewmodel/host/electron_profile
 import ../viewmodel/host/node_certificate_host
 import ../viewmodel/host/desktop_electron
+import ../viewmodel/host/main_process_wire
+import ../index/electron_vars
+import ../index/content_id_worker
+import ../index/content_id_service
 
 var checks = 0
 var failedChecks = 0
@@ -110,26 +131,37 @@ proc indexBytes(path: cstring): cstring
 let nodeFs = nodeRequire("fs")
 let nodeOs = nodeRequire("os")
 
-let workspace = $(nodeFs.mkdtempSync(
-  cstring($(nodeOs.tmpdir().to(cstring)) & "/ct-electron-content-id-")).to(cstring))
+proc isMainThread(): bool {.importjs: "require('worker_threads').isMainThread".}
+proc thisBundle(): cstring {.importjs: "(__filename)@".}
+
+# Started as the content-id worker (below), this bundle only serves: none of
+# the suite's setup may run there, because the worker SHARES this process's
+# environment and would point it at a second workspace.
+let workspace =
+  if isMainThread():
+    $(nodeFs.mkdtempSync(
+      cstring($(nodeOs.tmpdir().to(cstring)) & "/ct-electron-content-id-")).to(cstring))
+  else: ""
 
 # A git that sees only this suite's repositories: no developer configuration
 # (an `autocrlf`, a default object format, commit signing) and no search
 # upwards past the workspace into whatever repository /tmp sits in.
-setEnv(cstring"GIT_CONFIG_GLOBAL", cstring(workspace & "/absent-gitconfig"))
-setEnv(cstring"GIT_CONFIG_SYSTEM", cstring(workspace & "/absent-gitconfig"))
-setEnv(cstring"GIT_CONFIG_NOSYSTEM", cstring"1")
-setEnv(cstring"GIT_CEILING_DIRECTORIES", cstring(workspace))
-for role in ["AUTHOR", "COMMITTER"]:
-  setEnv(cstring("GIT_" & role & "_NAME"), cstring"Electron Content Id Test")
-  setEnv(cstring("GIT_" & role & "_EMAIL"), cstring"content-id@test.invalid")
+if isMainThread():
+  setEnv(cstring"GIT_CONFIG_GLOBAL", cstring(workspace & "/absent-gitconfig"))
+  setEnv(cstring"GIT_CONFIG_SYSTEM", cstring(workspace & "/absent-gitconfig"))
+  setEnv(cstring"GIT_CONFIG_NOSYSTEM", cstring"1")
+  setEnv(cstring"GIT_CEILING_DIRECTORIES", cstring(workspace))
+  for role in ["AUTHOR", "COMMITTER"]:
+    setEnv(cstring("GIT_" & role & "_NAME"), cstring"Electron Content Id Test")
+    setEnv(cstring("GIT_" & role & "_EMAIL"), cstring"content-id@test.invalid")
 
 # Both hosts make their temporary indexes under `os.tmpdir()`, which reads
 # TMPDIR on every call. Pointing it at a directory of the suite's own is what
 # lets claim 4 say "nothing was left behind" rather than "nothing we can see".
 let hostTemp = workspace & "/host-tmp"
-discard nodeFs.mkdirSync(cstring(hostTemp))
-setEnv(cstring"TMPDIR", cstring(hostTemp))
+if isMainThread():
+  discard nodeFs.mkdirSync(cstring(hostTemp))
+  setEnv(cstring"TMPDIR", cstring(hostTemp))
 
 proc git(cwd: string; args: varargs[string]): string =
   var jsArgs: seq[cstring] = @[]
@@ -208,6 +240,28 @@ proc sameAnswer(a, b: PlatformOutcome[VcsContentId]): bool =
 proc describe(o: PlatformOutcome[VcsContentId]): string =
   if not o.ok: return "error " & $o.error
   $o.value.kind & " " & o.value.id & " " & o.value.reason
+
+# THE IPC BETWEEN THE FACADE AND THE MAIN PROCESS, looped back in this
+# process: what the facade sends goes to main's own handlers
+# (`content_id_service.onContentId` / `onDeclaredScopes`), and what they send
+# back (`electron_vars.mainWindow.webContents.send`) reaches the facade's
+# listeners. The worker they start runs this bundle (`processWorkerScript`).
+var loopbackListeners: seq[tuple[channel: cstring; handler: proc(payload: JsObject)]] = @[]
+if isMainThread():
+  processWorkerScript = $thisBundle()
+  mainWindow = JsObject{webContents: JsObject{}}
+  mainWindow.webContents.send = proc(channel: cstring; payload: JsObject) =
+    for entry in loopbackListeners:
+      if entry.channel == channel:
+        entry.handler(payload)
+  desktop_electron.rendererIpc = RendererIpc(
+    send: proc(channel: cstring; payload: JsObject) =
+      if $channel == ContentIdChannel:
+        discard onContentId(nil, payload)
+      elif $channel == DeclaredScopesChannel:
+        discard onDeclaredScopes(nil, payload),
+    listen: proc(channel: cstring; handler: proc(payload: JsObject)) =
+      loopbackListeners.add (channel: channel, handler: handler))
 
 let profile = electronDesktopProfile(false)
 let facade = electronVcs(profile)
@@ -430,4 +484,7 @@ proc main() {.async.} =
     echo "  [FAILED] expected ", ExpectedChecks, " checks, ran ", checks
   exitProcess(if failedChecks == 0 and checks == ExpectedChecks: 0 else: 1)
 
-discard main()
+if isMainThread():
+  discard main()
+else:
+  serveContentIdRequests()

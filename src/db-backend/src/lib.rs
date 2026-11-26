@@ -236,6 +236,7 @@ pub mod source_access;
 // `unwind` entry point that the `EmulatorReplaySession::load_callstack`
 // integration calls into. Kept separate from `dwarf_index` so the line
 // resolver stays focused on PC -> (file, line, function).
+pub mod call_run_line_index;
 pub mod stack_unwinder;
 pub mod step_lines_loader;
 pub mod task;

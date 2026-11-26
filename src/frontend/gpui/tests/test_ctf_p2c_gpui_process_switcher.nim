@@ -197,6 +197,100 @@ suite "CTF-P2c: the GPUI process switcher's presses and keys":
     m.dispose()
 
 # ---------------------------------------------------------------------------
+# Where the bar and the tab are, in pixels
+# ---------------------------------------------------------------------------
+
+const
+  WebCaptionTopPx = 6
+    ## `#menu`'s `padding-top`, `CAPTION_BAR_PADDING_TOP` (0.375rem,
+    ## src/frontend/styles/components/menu_bar.styl).
+  WebCaptionBarPx = 34
+    ## `#menu`'s height, `CAPTION_BAR_HEIGHT_WORKSPACE` (2.125rem,
+    ## src/frontend/styles/components/shared_widgets.styl), border-box, with
+    ## `--caption-bar-padding-bottom` (0.125rem) under the tabs.
+  WebSessionTabPx = 26
+    ## `.session-tab`'s `height: 1.625em` at the bar's 16px
+    ## (src/frontend/styles/components/session_tabs.styl). The tab bar is
+    ## `height: 100%; align-items: center` in the bar's 34 - 6 - 2 = 26px
+    ## content box, so the tab fills it from `WebCaptionTopPx` down.
+  RowTolerancePx = 1.0
+    ## Whole pixels: the layout judge's 2% of the window lets a 4px move
+    ## through, and this does not.
+
+proc planPx(n: JsonNode; style: string; absent = 0.0): float =
+  ## A render-plan node's `<n>px` style; `absent` when the node does not set
+  ## it (GPUI's 0 for a padding or a margin). NaN, never within a tolerance,
+  ## for a value that is not in pixels.
+  let s = n{"styles"}{style}.getStr
+  if s.len == 0: return absent
+  if not s.endsWith("px"):
+    checkpoint "not a px style: " & style & " = '" & s & "'"
+    return NaN
+  parseFloat(s[0 ..< ^2])
+
+suite "CTF-P2c: the GPUI process switcher's bar and tab are where the web's are":
+  test "the active tab spans rows 6-31 and the bar ends at row 33, both sizes and themes":
+    # The web's numbers are also the committed capture's: its `active-tab`
+    # region is 26px tall, 6px down, in every process switcher story.
+    let record = loadWebRecord(repoRoot / "src" / "tests" / "visual" /
+                               "agent-harbor-web-regions.json")
+    let tabTopWant = float(WebCaptionTopPx)
+    let tabLastWant = float(WebCaptionTopPx + WebSessionTabPx - 1)
+    let barLastWant = float(WebCaptionBarPx - 1)
+    var compared = 0
+    for fixture in ["three", "correlation", "many"]:
+      for (size, w, h) in Sizes:
+        for (mode, theme) in [(dmDark, "dark"), (dmLight, "light")]:
+          let where = fixture & " " & size & " " & theme
+          let webId = "agent-harbor-process-switcher" &
+                      (if fixture == "three": "" else: "-" & fixture) & "-" & size & "-" & theme
+          let webTab = record{webId}{"regions"}{"active-tab"}
+          check not webTab.isNil
+          if not webTab.isNil:
+            check webTab["y"].getFloat == tabTopWant
+            check webTab["y"].getFloat + webTab["h"].getFloat - 1 == tabLastWant
+          let m = mount(fixture, w, h, mode)
+          let root = m.planOf
+          m.dispose()
+          # The story's window is the plan's root, the bar its first child,
+          # the strip line the bar's, the active tab in the line.
+          check root{"attributes"}{"data-ah-surface"}.getStr == ProcessSwitcherSurface
+          let bar = root{"children"}{0}
+          check not bar.isNil
+          if bar.isNil: continue
+          check bar{"attributes"}.hasKey("data-ah-caption-bar")
+          let line = bar{"children"}{0}
+          check not line.isNil
+          if line.isNil: continue
+          var tab: JsonNode
+          for c in line{"children"}.getElems:
+            if c{"attributes"}{"data-ah-active"}.getStr == "true": tab = c
+          check not tab.isNil
+          if tab.isNil: continue
+          # Neither box sets the shorthand padding, which would hide from the
+          # side-by-side reads below.
+          check root{"styles"}{"p"}.isNil and bar{"styles"}{"p"}.isNil
+          # The line centres the tab (`items: center`), as the web's tab bar.
+          check line{"styles"}{"items"}.getStr == "center"
+          let barTop = root.planPx("padding_top") + bar.planPx("margin_top")
+          let lineTop = barTop + bar.planPx("padding_top") + line.planPx("margin_top")
+          let lineH = line.planPx("h", NaN)
+          let tabH = tab.planPx("h", NaN)
+          let tabTop = lineTop + (lineH - tabH) / 2 + tab.planPx("margin_top")
+          let barH =
+            if bar{"styles"}{"h"}.getStr.len > 0: bar.planPx("h")
+            else: bar.planPx("padding_top") + line.planPx("margin_top") + lineH +
+                  line.planPx("margin_bottom") + bar.planPx("padding_bottom")
+          let tabLast = tabTop + tabH - 1
+          let barLast = barTop + barH - 1
+          checkpoint where & ": tab rows " & $tabTop & "-" & $tabLast & ", bar to row " & $barLast
+          check abs(tabTop - tabTopWant) <= RowTolerancePx
+          check abs(tabLast - tabLastWant) <= RowTolerancePx
+          check abs(barLast - barLastWant) <= RowTolerancePx
+          inc compared
+    check compared == 3 * Sizes.len * 2
+
+# ---------------------------------------------------------------------------
 # The regions the window capture is judged on
 # ---------------------------------------------------------------------------
 

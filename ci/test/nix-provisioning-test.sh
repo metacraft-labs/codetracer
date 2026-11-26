@@ -324,7 +324,12 @@ done
 # 56 -> 57: wasm-panes.yml's `wasm-panes`, which builds the renderer's
 # WebAssembly panes on Linux on every `agents` and `dev` push and on pull
 # requests. It installs Nix through ./.github/actions/setup-nix.
-readonly EXPECTED_NIX_JOBS=57
+#
+# 57 -> 58: zgui.yml's `story-parity` (74cdfab01cf), the story-parity harness
+# moved out of the zgui lane so it fits a budget of its own. It runs the
+# harness in this repository's dev shell and installs Nix through
+# ./.github/actions/setup-nix first.
+readonly EXPECTED_NIX_JOBS=58
 
 if [ "${#nix_jobs[@]}" -eq "$EXPECTED_NIX_JOBS" ]; then
 	ok "the scanner still classifies the nix-using jobs (${#nix_jobs[@]})"

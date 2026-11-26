@@ -384,6 +384,15 @@ fn probes() -> Vec<Probe> {
             }
             out.join("|")
         }),
+        ("max_line_over_call_run", |r| {
+            let mut out = Vec::new();
+            for step in probe_steps(r) {
+                for key in probe_calls(r) {
+                    out.push(format!("{:?}", r.max_line_over_call_run(step, key)));
+                }
+            }
+            out.join("|")
+        }),
         ("max_line_over_steps", |r| {
             let steps = probe_steps(r);
             let mut out = Vec::new();

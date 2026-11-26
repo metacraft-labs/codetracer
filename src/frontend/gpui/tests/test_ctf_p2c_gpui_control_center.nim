@@ -590,3 +590,67 @@ suite "CTF-P2c: the GPUI gaze mark has the web's size":
     for p in problems: checkpoint p
     check compared == 8
     check problems.len == 0
+
+const
+  WebStatusRightInsetPx = 8
+    ## The web's mark is the first item of the status bar's right-hand zone
+    ## (`.status-right`, which the story prepends it to), and nothing follows
+    ## it there in the story: so it ends at that zone's `padding-right:
+    ## 0.5rem` (`#status #status-base .status-right`,
+    ## src/frontend/styles/components/status_bar.styl). That rule spells the
+    ## 0.5rem itself; it is the same 8px as `PANEL_INSET`
+    ## (src/frontend/styles/components/button.styl), which GPUI's `EdgePx`
+    ## takes.
+  EdgeTolerancePx = 1.0
+    ## Whole pixels: the layout judge's 2% of the window lets a 4px move
+    ## through, and this does not.
+
+proc side(n: JsonNode; style: string): float =
+  ## A padding or margin a render-plan node sets, 0 when it sets none.
+  if n{"styles"}{style}.isNil: 0.0 else: pxOf(n{"styles"}{style}.getStr)
+
+suite "CTF-P2c: the GPUI gaze mark ends where the web's does":
+  test "its right edge is 8px from the window's, at the sidebar and the laptop":
+    # The web's number is also the committed capture's: the `gaze-mark`
+    # region ends at 352 of 360 and 1432 of 1440.
+    let record = loadWebRecord(repoRoot / "src" / "tests" / "visual" /
+                               "agent-harbor-web-regions.json")
+    var compared = 0
+    for fixture in ["tracking", "paused"]:
+      for (size, w, h) in Sizes:
+        for (mode, theme) in [(dmDark, "dark"), (dmLight, "light")]:
+          let id = "agent-harbor-status-gaze-" & fixture & "-" & size & "-" & theme
+          let want = float(w - WebStatusRightInsetPx)
+          let web = record{id}{"regions"}{"gaze-mark"}
+          check not web.isNil
+          if not web.isNil:
+            check web["x"].getFloat + web["w"].getFloat == want
+          gpui_reset_tree()
+          let m = r.mountAgentHarborStoryGpui("agent-harbor-status-gaze", fixture, w, h, mode)
+          let root = parseJson(renderPlanJson(r, m.root))
+          m.dispose()
+          # The story's window is the plan's root, as wide as the window; the
+          # status line one of its children, spanning it (a column's
+          # stretch); the mark the line's last child, pushed to its end by
+          # the growing gap before it.
+          check root{"attributes"}{"data-ah-surface"}.getStr == GazeSurface
+          check pxOf(root{"styles"}{"w"}.getStr) == float(w)
+          var line: JsonNode
+          for c in root{"children"}.getElems:
+            if c{"attributes"}{"data-ah-status-line"}.getStr == "true": line = c
+          check not line.isNil
+          if line.isNil: continue
+          let parts = line{"children"}.getElems
+          check parts.len >= 2
+          if parts.len < 2: continue
+          let mark = parts[^1]
+          check mark{"attributes"}.hasKey("data-ah-gaze-mark")
+          check parts[^2]{"styles"}{"flex_grow"}.getStr == "1"
+          check line{"styles"}{"w"}.isNil and line{"styles"}{"p"}.isNil and
+                line{"styles"}{"m"}.isNil and root{"styles"}{"p"}.isNil
+          let right = float(w) - root.side("padding_right") - line.side("margin_right") -
+                      line.side("padding_right") - mark.side("margin_right")
+          checkpoint id & ": the mark ends at " & $right & ", the web's at " & $want
+          check abs(right - want) <= EdgeTolerancePx
+          inc compared
+    check compared == 2 * Sizes.len * 2

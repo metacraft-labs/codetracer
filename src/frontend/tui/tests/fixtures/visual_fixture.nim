@@ -72,9 +72,12 @@ proc visualFixtureFolder*(): string =
   addExitProc(proc () = removeDir(dest))
   dest
 
-proc visualFixtureSkip*(): string =
-  ## Why the Visual Replay suites cannot run here ("" when they can): the
-  ## recording or the player missing, in `fixture_provider`'s words.
+type MissingPrereqInCi* = object of CatchableError
+  ## A Visual Replay prerequisite is missing where it must not be: in CI.
+
+proc visualFixtureMissing*(): string =
+  ## What the Visual Replay suites lack here ("" when nothing): the recording
+  ## or the player, in `fixture_provider`'s words.
   if visualFixtureSource().len == 0:
     return MissingPrereqSkipPrefix & " the visual recording (gl_scene) is " &
       "not here: it is committed at " & VisualFixtureCommitted &
@@ -85,6 +88,19 @@ proc visualFixtureSkip*(): string =
       "(ct_gfx_player) is not installed: build codetracer-visual-replay and " &
       "set CODETRACER_CT_GFX_PLAYER_CMD"
   ""
+
+proc visualFixtureSkip*(): string =
+  ## Why the Visual Replay suites cannot run here ("" when they can), for a
+  ## suite to skip on. Under `CI=true` a missing prerequisite RAISES
+  ## (`MissingPrereqInCi`) instead: a skip there reads as a pass, and both
+  ## PLAT-59 terminal suites skipped every case in CI for want of the player
+  ## ("OK (1 tests, 1 SKIPPED)", shards 2/8 and 8/8 of agents run
+  ## 45471393785) with nothing to say so. A job that runs these suites
+  ## provides the player (`tui-tests.yml`, ci/test/nim-shard-uses-visual-
+  ## fixture.sh).
+  result = visualFixtureMissing()
+  if result.len > 0 and getEnv("CI") == "true":
+    raise newException(MissingPrereqInCi, "CI=true and " & result)
 
 func quadColour*(frame, quadrant: int): tuple[r, g, b: int] =
   ## `gl_scene.c`'s `color_for_quadrant`: the colour quad `quadrant` is drawn

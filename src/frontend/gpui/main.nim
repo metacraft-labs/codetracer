@@ -2625,6 +2625,7 @@ const VisualTickMs = 16
 
 proc pressVisual(r: GpuiRenderer; x, y: int): bool
   ## PLAT-59: forward-declared; defined beside the Visual Replay host.
+proc pressPixelHistoryMenu(r: GpuiRenderer; x, y: int): bool
 proc moveVisual(r: GpuiRenderer; x, y: int): bool
 proc releaseVisual(r: GpuiRenderer; x, y: int): bool
 proc visualKey(r: GpuiRenderer; key: string; mods: seq[string]): bool
@@ -3283,6 +3284,7 @@ proc runContextAction(r: GpuiRenderer; action: ContextAction;
 
 proc openContextMenuAt(r: GpuiRenderer; menu: ContextMenuModel; x, y: int)
   ## PLAT-50: forward-declared for the dock labels' right-click menu.
+
 
 # ---------------------------------------------------------------------------
 # PLAT-52: the Terminal Output pane — drawn natively from the shared model,
@@ -4543,6 +4545,9 @@ proc windowPointer(r0: GpuiRenderer; kind: GpuiEventKind; x, y: int;
       return
     # PLAT-62 (K68): a right press on a Constraints row opens its menu.
     if pressConstraints(r, x, y, right = true):
+      return
+    # K76: a right press on a Pixel History row opens its menu.
+    if pressPixelHistoryMenu(r, x, y):
       return
     # PLAT-50 (K42): a right-click on a docked pane's label opens the
     # desktop's strip menu (`ui/auto_hide`'s `onContextMenu`).
@@ -10408,6 +10413,42 @@ proc pressVisual(r: GpuiRenderer; x, y: int): bool =
     return true
   false
 
+proc pressPixelHistoryMenu(r: GpuiRenderer; x, y: int): bool =
+  ## K76: a right press on a Pixel History row selects it and opens its menu
+  ## ("Show value origin"), as a Constraints row's does. Every right press
+  ## on the pane is the pane's.
+  let panes = visualVM()
+  if panes.isNil:
+    return false
+  let history = visualBodyOf(panePixelHistory)
+  if not history.contains(x, y):
+    return false
+  if gFocusPane != $panePixelHistory:
+    focusWindowPane(r, $panePixelHistory)
+  let hit = historyHitAt(panes, gVisual, history, x, y)
+  if hit.kind == gvHistoryRow:
+    panes.selectHistoryEntry(hit.index)
+    visualAfterAct(r)
+    openContextMenuAt(r, pixelHistoryEntryContextMenu(hit.index), x, y)
+  true
+
+proc showPixelValueOrigin(r: GpuiRenderer; index: int) =
+  ## K76: a history entry's "Show value origin" — the pixel's origin
+  ## question, asked of the session's Origin Chain model as the desktop asks
+  ## it. The window draws no side panel, so the answer (today the refusal by
+  ## name) goes to the status line.
+  let panes = visualVM()
+  if panes.isNil:
+    sayStatus("this recording carries no graphics")
+    drawTopBar(r)
+    return
+  let origin =
+    if gSession.isNil or gSession.session.isNil: nil
+    else: gSession.session.originChainVM
+  let words = panes.history.valueOriginWordsForEntry(index, origin)
+  sayStatus(words)
+  drawTopBar(r)
+
 proc moveVisual(r: GpuiRenderer; x, y: int): bool =
   ## The pointer moved: a held scrubber follows it (the frame under it shown
   ## at once, the player asked at most every 60 ms); with the picker on, the
@@ -10531,6 +10572,19 @@ proc runVisualListOperation(r: GpuiRenderer; operation: string): bool =
     of "list.activate":
       if at < 0: return false
       discard panes.activateHistoryEntry(at)
+    of "context-menu.open":
+      # K76 from the keyboard: the selected row's menu, over its row.
+      if at < 0:
+        sayStatus("no row of the Pixel History is selected")
+        drawTopBar(r)
+        return true
+      let body = visualBodyOf(panePixelHistory)
+      let lay = historyLayout(panes, body)
+      let top = gVisual.visibleHistoryTop(n, lay.rows)
+      openContextMenuAt(r, pixelHistoryEntryContextMenu(at), lay.list.x + 16,
+                        lay.list.y + max(0, at - top) * VisualRowPx +
+                          VisualRowPx div 2)
+      return true
     else: return false
     gVisual.revealHistory(panes, visualBodyOf(panePixelHistory),
       (if panes.history.selectedEntry.val.isSome:
@@ -10564,7 +10618,8 @@ proc visualKey(r: GpuiRenderer; key: string; mods: seq[string]): bool =
   let visualPane = gFocusPane in [$paneVideoPlayer, $panePixelHistory,
                                   $paneShaderDebug]
   if not (res.operation.startsWith("video-player.") or
-          (visualPane and res.operation.startsWith("list."))):
+          (visualPane and (res.operation.startsWith("list.") or
+                           res.operation == "context-menu.open"))):
     return false
   routeWindowKey(r, key, mods)
   true
@@ -11971,7 +12026,9 @@ proc runContextAction(r: GpuiRenderer; action: ContextAction;
                    caConstraintCopySourceLocation,
                    # A Nim trace runs the compiler, not the replay.
                    caTraceMacro, caTraceStaticBlock, caTraceConstant,
-                   caTraceEval}:
+                   caTraceEval,
+                   # K76 answers (or refuses) from the graphics alone.
+                   caPixelShowValueOrigin}:
     return
   case action
   of caNone: discard
@@ -12098,6 +12155,8 @@ proc runContextAction(r: GpuiRenderer; action: ContextAction;
     showValueHistory(r, target.path)
   of caShowValueOrigin:
     showValueOrigin(r, target.path)
+  of caPixelShowValueOrigin:
+    showPixelValueOrigin(r, int(target.index))
   of caAddValueToScratchpad, caAddAllValuesToScratchpad:
     for (name, value) in target.scratchpadSamplesOf(action):
       gSession.addToScratchpad(name, value)
@@ -13389,10 +13448,22 @@ proc buildWindowOperationTables(r: GpuiRenderer) =
   let visualLists = newOperationTable[ContextTarget, WindowDispatch]("pane:visual",
     proc(): bool = gFocusPane in [$panePixelHistory, $paneShaderDebug])
   visualLists.onEach(["list.focus-next", "list.focus-previous", "list.focus-first",
-                      "list.focus-last", "list.activate"],
+                      "list.focus-last", "list.activate", "context-menu.open"],
                      ask(runVisualListOperation(r, c.name)))
   visualLists.bindOp("pixel-history.activate", ask do:
     c.pointer and activateHistoryRow(r, int(c.target.index)))
+  visualLists.bindOp("pixel-history.show-value-origin", ask do:
+    # K76 by name (the palette, a user's key): the pressed row, else the
+    # selected one.
+    let panes = visualVM()
+    if panes.isNil:
+      return false
+    let at = if c.pointer: int(c.target.index)
+             elif panes.history.selectedEntry.val.isSome:
+               panes.history.selectedEntry.val.get
+             else: -1
+    showPixelValueOrigin(r, at)
+    true)
   visualLists.bindOp("shader-debug.step", ask(stepShader(r, c.target.text)))
   hub.add visualLists
 
@@ -15119,8 +15190,14 @@ proc runWindowOp(r: GpuiRenderer; op: string; release = true): string =
                                             lay.rows)
         if i < top or i >= top + lay.rows:
           return "history row " & $i & " is not listed"
-        pressAt(lay.list.x + 8, lay.list.y + (i - top) * VisualRowPx +
-                                VisualRowPx div 2)
+        let (hx, hy) = (lay.list.x + 8, lay.list.y + (i - top) * VisualRowPx +
+                                        VisualRowPx div 2)
+        if parts.len > 3 and parts[3] == "menu":
+          # `history:<i>:menu` — a right-click on the row (K76): its press,
+          # then the `contextmenu` event the window sends after it.
+          windowPointer(r, gekContextMenu, hx, hy)
+        else:
+          pressAt(hx, hy)
       of "step":
         let body = visualBodyOf(paneShaderDebug)
         for (b, rect) in shaderLayout(panes, body).buttons:

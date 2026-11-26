@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use log::{info, warn};
+use log::{info, trace, warn};
 use num_bigint::BigInt;
 
 use codetracer_trace_types::{
@@ -16,6 +16,12 @@ use crate::expr_loader::ExprLoader;
 use crate::lang::Lang;
 use crate::task::{Call, CallArg, Location, RRTicks};
 use crate::value::{Type, Value};
+
+// The resident index `load_location` reads a function's last line from, and
+// the step-read counter that bounds its cost, live in `call_run_line_index`.
+// Re-exported so callers keep reaching them through the reader's module.
+pub(crate) use crate::call_run_line_index::count_function_last_step_reads;
+pub use crate::call_run_line_index::{CallRunLineIndex, max_line_over_call_run_from_line_map};
 
 /// Facade for reading trace data.
 ///
@@ -406,6 +412,21 @@ pub trait TraceReader: std::fmt::Debug + Send {
     fn max_line_over_steps(&self, start: StepId, end: StepId) -> Option<i64> {
         let _ = (start, end);
         None
+    }
+
+    /// The greatest source line over the maximal run of steps that begins at
+    /// `start` and carries `call_key`: what `load_location` needs for a
+    /// function's last line when the source's own boundaries are unavailable.
+    ///
+    /// `Some(None)` means the run is EMPTY (the step at `start` does not carry
+    /// `call_key`), `Some(Some(line))` gives the run's greatest line, and
+    /// `None` means "no index can answer; walk the steps". The default answers
+    /// from [`call_run_end`](Self::call_run_end) and
+    /// [`max_line_over_steps`](Self::max_line_over_steps) when the reader has
+    /// both. The CTFS reader falls back to a resident [`CallRunLineIndex`]
+    /// when it has not.
+    fn max_line_over_call_run(&self, start: StepId, call_key: CallKey) -> Option<Option<i64>> {
+        max_line_over_call_run_from_line_map(self, start, call_key)
     }
 
     // ── Iteration helpers ────────────────────────────────────────────
@@ -879,32 +900,36 @@ pub trait TraceReader: std::fmt::Debug + Send {
                     let mut last_line = function_record.line.0;
                     // M0/3 — the function's last line is the greatest line over
                     // the SUFFIX of this call's step run that begins at the
-                    // current step. Ask the reader's indices for it first: the
-                    // run's end from the resident call-key array, and the run's
-                    // greatest line from the prepopulated `step-map.ns`. Both
-                    // answers are exact — `max_line_over_steps` only answers at
-                    // all when its table covers every step — so this is the same
-                    // number the walk below produces.
+                    // current step. Ask the reader's indices for it first
+                    // (`max_line_over_call_run`): the M0/3 pair — the run's end
+                    // from the lazy cache's resident call-key array and its
+                    // greatest line from the prepopulated `step-map.ns` — or, on
+                    // a reader without them, a resident suffix-maximum index
+                    // built once (`CallRunLineIndex`). Every answer is exact, so
+                    // this is the number the walk below produces.
                     //
                     // This is the browser path's whole cost. The walk is O(run
-                    // length) point lookups into `steps.dat`, and on the browser
-                    // there is no filesystem, so `expr_loader.load_file` always
-                    // fails and EVERY `load_location` reached it; a trace that is
-                    // one long call therefore walked to the end of the trace
-                    // every time. Readers with neither index return `None` and
-                    // keep the walk, unchanged.
-                    let indexed = self
-                        .call_run_end(StepId(step_id_int), CallKey(call_key_int))
-                        .and_then(|run_end| self.max_line_over_steps(StepId(step_id_int), run_end));
-                    match indexed {
-                        Some(indexed_last) => {
-                            if indexed_last > last_line {
-                                last_line = indexed_last;
+                    // length) step reads, and on the browser there is no
+                    // filesystem, so `expr_loader.load_file` always fails and
+                    // EVERY `load_location` reached it; a trace that is one long
+                    // call walked to the end of the trace every time, and a call
+                    // flow, which loads a location after every move, walked
+                    // O(n^2) steps. A column-aware trace (every EVM recording)
+                    // has no `step-map.ns`, so it always walked: a 673,363-step
+                    // transaction never finished `launch`. Readers with no index
+                    // at all return `None` and keep the walk, unchanged.
+                    match self.max_line_over_call_run(StepId(step_id_int), CallKey(call_key_int)) {
+                        Some(run_max) => {
+                            if let Some(run_max) = run_max
+                                && run_max > last_line
+                            {
+                                last_line = run_max;
                             }
                         }
                         None => {
                             let steps_len = self.step_count() as i64;
                             for i in step_id_int..steps_len {
+                                count_function_last_step_reads(1);
                                 let Some(step) = self.step(StepId(i)) else { continue };
                                 if step.call_key == CallKey(call_key_int) {
                                     if step.line.0 > last_line {
@@ -933,10 +958,12 @@ pub trait TraceReader: std::fmt::Debug + Send {
                         use_trace_function_boundaries(&mut location);
                     }
                 }
-                Err(e) => {
-                    // No tree-sitter grammar for this language (Cairo, Circom, etc.).
-                    // Fall back to the trace's own function line data.
-                    warn!("expr loader load file error: {e:?} — using trace function boundaries");
+                Err(_) => {
+                    // The source cannot be read (no such file, no filesystem in a
+                    // browser, host reads refused). Fall back to the trace's own
+                    // function line data. Not logged here: this arm runs on every
+                    // step, and `ExprLoader::load_file` reports a path's failure
+                    // once (in a browser each log line is a worker message).
                     use_trace_function_boundaries(&mut location);
                 }
             }
@@ -1017,7 +1044,7 @@ pub trait TraceReader: std::fmt::Debug + Send {
                 return false;
             };
 
-            info!("for returned: {:?} with depth: {:?}", new_step, new_call.depth);
+            trace!("for returned: {:?} with depth: {:?}", new_step, new_call.depth);
 
             // depth - delta can be < 0: compare as i64 to avoid underflow.
             // Stop here when the step is at or above the target depth.
@@ -1177,7 +1204,7 @@ pub trait TraceReader: std::fmt::Debug + Send {
             }
         }
         if let Some(last_step) = self.step(last_step_id) {
-            info!("next step id: {:?}", last_step);
+            trace!("next step id: {:?}", last_step);
         }
         (last_step_id, step_id != last_step_id)
     }

@@ -121,11 +121,16 @@ lane_run_files() {
 		echo "run-nim-test-lane.sh: NIM_TEST_LANE_SHARD ${NIM_TEST_LANE_SHARD} is out of range" >&2
 		return 2
 	fi
+	# The lane's files into a variable first: read from a process
+	# substitution, an unknown lane's error was swallowed and its shard listed
+	# as empty, exit 0 (so a sharded run of it ran nothing and passed).
+	local all
+	all="$(test_lane_files "${lane}")" || return $?
 	while read -r f; do
 		[ -n "${f}" ] || continue
 		[ $((k % n)) -eq $((i - 1)) ] && printf '%s\n' "${f}"
 		k=$((k + 1))
-	done < <(test_lane_files "${lane}")
+	done <<<"${all}"
 }
 if [ "${list_shard}" -eq 1 ]; then
 	lane_run_files

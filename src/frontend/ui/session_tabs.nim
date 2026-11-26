@@ -22,6 +22,7 @@ import
 when defined(js):
   import isonim/web/web_renderer
   import isonim/web/dom_api as isonim_dom
+  import ./measured_width
   from ../lib/jslib import windowSetTimeout
   import std/[jsffi, jsconsole]
   import kdom except Location
@@ -46,6 +47,14 @@ when defined(js):
   proc addWindowResizeListener(handler: proc() {.closure.}) {.importjs: "window.addEventListener('resize', #)".}
 
   var resizeRenderInstalled = false
+  var tabBarWidth: MeasuredWidth
+    ## The bar's width, kept between renders (`ui/measured_width`): read again
+    ## only after a resize of the window or of the bar.
+  var observedTabBar: isonim_dom.Element
+  var observingTabBar = false
+    ## Whether a ResizeObserver watches `observedTabBar`.
+  proc observeResize(el: isonim_dom.Element; onResize: proc() {.closure.}): bool
+    {.importjs: "((el, cb) => { if (typeof ResizeObserver !== 'function') return false; new ResizeObserver(() => cb()).observe(el); return true; })(#, #)".}
   var resizeRenderPending = false
 
 # ---------------------------------------------------------------------------
@@ -92,7 +101,17 @@ when defined(js):
     if tabCount <= 0:
       return 0
 
-    let width = container.clientWidth
+    # Kept between renders: this runs on every redraw, and each read forces a
+    # layout (`ui/measured_width`). Without a ResizeObserver to say when the
+    # bar changed size, it is read every time, as before.
+    if not observingTabBar or observedTabBar != container:
+      observedTabBar = container
+      tabBarWidth.invalidate()
+      observingTabBar =
+        observeResize(container, proc() = tabBarWidth.invalidate())
+    if not observingTabBar:
+      tabBarWidth.invalidate()
+    let width = tabBarWidth.widthOf(proc(): int = container.clientWidth)
     if width <= 0:
       return tabCount
 
@@ -137,6 +156,7 @@ when defined(js):
       return
     resizeRenderInstalled = true
     addWindowResizeListener(proc() =
+      tabBarWidth.invalidate()
       if resizeRenderPending:
         return
       resizeRenderPending = true

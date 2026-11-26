@@ -24,6 +24,10 @@
 ##   * a chain asked for before the pixel cannot land on the refusal late;
 ##   * going back to the pixel's breadcrumb shows its refusal again, without
 ##     asking the engine about a "variable" that is a pixel.
+##   * a front-end that draws no side panel (the terminal, GPUI) asks the same
+##     question and gets the panel's words for its status line
+##     (`valueOriginWordsForEntry`), the same with no Origin Chain model, and
+##     an entry that is gone named as gone.
 ##
 ## THE STAND-INS, AND WHY: the Origin Chain model's store runs over the
 ## `MockBackendService` that `test_origin_chain_vm.nim` already uses — it
@@ -148,5 +152,22 @@ suite "Pixel History: Show value origin":
     drain()
     check origin.refusal.val == refusal
     check origin.activeChain.val.isNone
+    check origin.breadcrumbStack.val.len == 1
+    check mock.findCommand("ct/originChain").isNone
+
+  test "a front-end with no side panel gets the panel's words":
+    # The terminal and the GPUI window draw no Origin Chain side panel: they
+    # ask the same question of the same model and print its answer on their
+    # status line (`valueOriginWordsForEntry`).
+    let (history, origin, mock) = makeVMs()
+    let want = pixelOriginRefusalText(PixelOriginQuery(
+      x: 12, y: 34, frame: 2, drawCallIndex: 5, geid: 501'u64))
+    check history.valueOriginWordsForEntry(0, origin) == want
+    check origin.refusal.val == want
+    check origin.breadcrumbStack.val.len == 1
+    # A host with no Origin Chain model says the same words.
+    check history.valueOriginWordsForEntry(0, nil) == want
+    # An entry that is gone is named as gone, and nothing is asked.
+    check history.valueOriginWordsForEntry(2, origin) == NoHistoryEntryText
     check origin.breadcrumbStack.val.len == 1
     check mock.findCommand("ct/originChain").isNone
