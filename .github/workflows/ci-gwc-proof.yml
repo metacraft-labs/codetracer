@@ -1,0 +1,20 @@
+name: PROOF gpui-window-captures on the shared tools action
+on:
+  push:
+    branches: ['ci/gwc-action']
+permissions:
+  contents: read
+  id-token: write
+  actions: read
+jobs:
+  ct-build:
+    uses: ./.github/workflows/ct-build.yml
+    secrets: inherit
+  visual-replay-tools:
+    uses: ./.github/workflows/visual-replay-tools.yml
+    secrets: inherit
+  gpui-window-captures:
+    needs: [ct-build]
+    if: ${{ !cancelled() && needs.ct-build.result == 'success' }}
+    uses: ./.github/workflows/gpui-window-captures.yml
+    secrets: inherit
