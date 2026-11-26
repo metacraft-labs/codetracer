@@ -30,7 +30,9 @@ proc entryClass(vm: PixelHistoryVM; index: int): string =
 
 # An entry's press is the pointer row `pixel-history.activate`, performed by
 # the front-end on the entry's `data-pixel-history-index` (on the desktop
-# `ui/pixel_history.nim`'s procedure).
+# `ui/pixel_history.nim`'s procedure); its right press is the pointer row
+# `context-menu.open`, whose menu offers "Show value origin"
+# (`PixelHistoryVM.showValueOriginForEntry`).
 
 proc renderPixelHistoryEntry[R, N](r: R; vm: PixelHistoryVM;
                                    entry: proc(): VisualReplayPixelHistoryEntry;
@@ -40,13 +42,16 @@ proc renderPixelHistoryEntry[R, N](r: R; vm: PixelHistoryVM;
   ## ``jumpToSourceForEntry`` and, via the backend's ``ct/seek-to-geid`` →
   ## ``complete-move`` chain, opens the source file at the line that issued
   ## this draw call. The ``title`` is the discoverability cue the spec asks
-  ## for ("click an entry... to jump the editor"); entries with no source
-  ## mapping (``geid == 0``) are silently no-ops at the VM layer.
+  ## for ("click an entry... to jump the editor"), and names the entry's
+  ## right-click menu (`ShowValueOriginLabel`, the pointer row
+  ## `context-menu.open`); entries with no source mapping (``geid == 0``)
+  ## are silently no-ops at the VM layer.
   ui(r):
     button(class = entryClass(vm, index),
            `data-geid` = $entry().geid,
            title = "Click to jump to the source line that issued draw " &
-                    $entry().drawCallIndex,
+                    $entry().drawCallIndex & " (right-click: " &
+                    ShowValueOriginLabel & ")",
            `data-pixel-history-index` = $index):
       tdiv(class = "pixel-history-entry-main"):
         span(class = "pixel-history-draw"):

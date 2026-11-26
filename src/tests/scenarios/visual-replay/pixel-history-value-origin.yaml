@@ -1,0 +1,42 @@
+scenario: 1
+name: visual-replay/pixel-history-value-origin
+pack: codetracer
+summary: >-
+  A right click on a Pixel History entry offers "Show value origin". Choosing
+  it opens the origin panel on the pixel, which refuses by name: the
+  recording has no CPU-side origin for that pixel, so the colour the draw
+  wrote cannot be traced back to the program's values (codetracer-pm issue
+  2026-11-26, "Pixel History entries offer no value origin").
+
+stage:
+  - use: record-program
+    with: { program: py_console_logs/main.py }
+  - use: visual-replay-capable
+  - use: front-end-options
+    with: { env: { CODETRACER_VISUAL_REPLAY_FAKE_PLAYER: ready } }
+  - use: open-recording
+    with: { deployment: web }
+
+steps:
+  - wait: { until: replay-idle, timeout: 360s }
+  - wait: { until: editor.loaded, timeout: 300s }
+  - wait: { until: call-trace.loaded, timeout: 120s }
+  - wait: { until: { at: 'pane-tab[label="VIDEO PLAYER"]', present: true }, timeout: 60s }
+  - click: { at: 'pane-tab[label="VIDEO PLAYER"]', anchor: title }
+  - wait: { until: { at: video-player/frame-image, present: true }, timeout: 60s }
+  - click: { at: video-player, anchor: label }
+  - wait: { until: { at: video-player, focused: true }, timeout: 10s }
+  - key: Home
+  - key: Right
+  - key: Right
+  - wait: { until: { at: video-player/frame-image, frame: 2 }, timeout: 30s }
+  - click: video-player/frame-image
+  - click: { at: 'pane-tab[label="PIXEL HISTORY"]', anchor: title }
+  - wait: { until: { at: pixel-history, count: 2 }, timeout: 30s }
+  - click: { at: 'pixel-history/history-entry[geid="220"]', button: right }
+  - wait: { until: { at: context-menu, assert: 'offers("Show value origin")' }, timeout: 15s }
+  - click: 'context-menu/menu-item[label="Show value origin"]'
+  - wait: { until: { at: origin-panel, refusal: { contains: "no CPU-side origin for pixel" } }, timeout: 30s }
+  # The refusal names the question it refuses: the frame, and the draw call
+  # (index and GEID) whose colour was asked about.
+  - expect: { at: origin-panel, refusal: { contains: "in frame 2 (draw 2, GEID 220)" }, count: 0 }
