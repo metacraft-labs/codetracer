@@ -1,0 +1,29 @@
+scenario: 1
+name: editor-hosted/generated-c-of-a-native-recording
+pack: codetracer
+summary: >-
+  In an editor hosting CodeTracer, on a native recording of a Nim program
+  (replayed by the native backend), the plugin's command for View Generated
+  C Source opens the Low Level Code pane beside the source with the C the
+  stop's line compiled to.
+
+stage:
+  - use: open-recording
+    with: { recording: ../codetracer-example-recordings/nim/flow_test, width: 200, height: 50 }
+
+steps:
+  - beat: open
+    narration: { text: "A native recording of a Nim program, replayed by rr.", voice: narrator }
+    caption: { text: "A native Nim recording" }
+    steps:
+      - wait: { until: replay-idle, timeout: 300s }
+      - wait: { until: { at: 'editor[file="nim_flow_test.nim"]', assert: "stopped-within(1, 200)" }, timeout: 120s }
+
+  - beat: generated-c
+    narration: { text: "View Generated C Source shows the C this Nim line compiled to.", voice: narrator }
+    caption: { text: "The generated C of the stop's line" }
+    steps:
+      - chord: { bound: view.generated-c-source }
+        settle: false
+      - wait: { until: { at: 'pane[title="lowLevelCode"]', assert: 'has-row("#line")' }, timeout: 180s }
+        dwell: 2500ms
