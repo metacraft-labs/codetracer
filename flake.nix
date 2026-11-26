@@ -2,14 +2,6 @@
   description = "CodeTracer";
 
   inputs = {
-    # Fetch this flake's own git submodules (libs/tree-sitter-nim and the other
-    # libs/*) whatever URL it is reached by. Without it, a plain
-    # `nix build github:metacraft-labs/codetracer/<rev>#codetracer` gets a tree
-    # with empty submodule directories and the build fails; only
-    # `git+https://...?submodules=1` worked. Needs Nix 2.27 or later.
-    # ci/test/flake-self-submodules-test.sh.
-    self.submodules = true;
-
     # Multi-language toolchain management.
     # All CodeTracer repos share the same nixpkgs pin via this flake to ensure
     # ABI compatibility (same glibc, libstdc++, LLDB, etc.) across dev shells.

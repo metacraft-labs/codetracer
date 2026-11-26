@@ -75,8 +75,6 @@ lint_step "the prebuilt tree-sitter-nim parser is what the grammar generates" \
 lint_step "Nix Git hooks in fresh worktrees" bash ci/test/nix-git-hooks-test.sh
 lint_step "nix develop .#pre-commit leaves the Reprobuild hook dispatchers alone" \
 	bash ci/test/pre-commit-shell-keeps-dispatchers-test.sh
-lint_step "a plain github: flake ref fetches the flake's submodules" \
-	bash ci/test/flake-self-submodules-test.sh
 
 lint_step "nix flake check" flake_check
 
