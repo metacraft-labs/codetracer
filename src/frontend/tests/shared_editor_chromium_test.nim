@@ -140,7 +140,7 @@ proc endCase(name: string) =
 
 const
   Source = "def main():\n    x = 1\n    if x:\n        y = 2\n\n    return x\nprint(main())\n"
-  ExpectedChecks = 165
+  ExpectedChecks = 170
     ## Written from a run. See the end of `main`.
   HugeKeyRatio = 25.0
     ## `caseHugeFile`'s bound: a keystroke at 200,000 lines against one at
@@ -447,6 +447,45 @@ proc caseDecorationsAndZones() {.async.} =
   ck str(getComputed(far.getDomNode(), cstring"visibility")) == "hidden",
     "a widget whose line is not drawn is hidden"
   endCase("decorations and view zones through Monaco's API, following the text")
+
+proc caseWidgetIds() {.async.} =
+  ## Each widget's node carries its id as Monaco's `widgetid` (Monaco's
+  ## `ContentWidget` and overlay widget set it from `getId()`), which is how
+  ## the page finds a widget: the scenario binding reads the flow's value
+  ## chips as `.contentWidgets [widgetid^='ct-flow-']`, line numbered.
+  beginCase()
+  let ed = fresh()
+  await settle()
+  let f = facadeOf(ed)
+  proc widget(id: cstring; line: int; withId = true): JsObject =
+    let node = newDivEl()
+    node.textContent = cstring"0x64"
+    result = js{getDomNode: proc(): JsObject = node,
+                getPosition: proc(): JsObject =
+                  js{position: js{lineNumber: line, column: 1}, preference: toJs(@[0])}}
+    if withId:
+      result.getId = proc(): cstring = id
+  let chip = widget(cstring"ct-flow-7-1-2", 2)
+  let overlay = widget(cstring"ct-overlay-probe", 1)
+  let bare = widget(cstring"", 3, withId = false)
+  discard f.addContentWidget(chip)
+  discard f.addOverlayWidget(overlay)
+  var raised = false
+  try:
+    discard f.addContentWidget(bare)
+  except CatchableError:
+    raised = true
+  await settle()
+  let found = ed.root.querySelector(cstring".contentWidgets [widgetid^='ct-flow-']")
+  ck not isNull(found) and found == chip.getDomNode(),
+    "the flow chip is found the way the scenario binding finds it"
+  ck str(chip.getDomNode().getAttribute(cstring"widgetid")) == "ct-flow-7-1-2"
+  ck str(overlay.getDomNode().getAttribute(cstring"widgetid")) == "ct-overlay-probe",
+    "an overlay widget carries its id too"
+  ck not raised, "a widget without getId is added"
+  ck isNull(bare.getDomNode().getAttribute(cstring"widgetid")),
+    "a widget without getId has no widgetid"
+  endCase("a widget's node carries its id as Monaco's widgetid")
 
 proc caseFolding() {.async.} =
   beginCase()
@@ -1226,6 +1265,7 @@ proc main() {.async.} =
   await guarded(caseHighContrast, "caseHighContrast")
   await guarded(caseClicksAndDrags, "caseClicksAndDrags")
   await guarded(caseDecorationsAndZones, "caseDecorationsAndZones")
+  await guarded(caseWidgetIds, "caseWidgetIds")
   await guarded(caseFolding, "caseFolding")
   await guarded(caseMultipleCursorsAndClipboard, "caseMultipleCursorsAndClipboard")
   await guarded(caseFindAndReplace, "caseFindAndReplace")

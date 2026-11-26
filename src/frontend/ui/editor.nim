@@ -4513,8 +4513,21 @@ method onCompleteMove*(self: EditorViewComponent, response: MoveState) {.async.}
     # (``loop iteration slider tracks remaining shield`` and
     # ``simple loop iteration jump``) depend on after a calltrace jump
     # to ``iterate_asteroids``.  See /tmp/isonim-migration.txt §1.54.
+    #
+    # A move handed again (`redelivered`: the `InternalLastCompleteMove` an
+    # editor asks for when it registers and again once its Monaco is up) to
+    # an editor whose flow is already for this stop, loaded or still loading,
+    # asks for nothing new. It carries `resetFlow`, so without this check the
+    # second ask rebuilt the flow the first had built for the same stop
+    # (`tests/complete_move_redelivery_test.nim`).
+    let flowAlreadyForThisStop =
+      not self.flow.isNil and not self.flow.superseded and
+      self.flow.location.rrTicks == response.location.rrTicks and
+      self.flow.location.line == response.location.line and
+      sameSourceRevisionPath(self.flow.location.path, response.location.path)
     let needsFlowReload =
-      self.supportsFlow() and (
+      self.supportsFlow() and
+      not (response.redelivered and flowAlreadyForThisStop) and (
         response.resetFlow or
         self.flow.isNil or
         self.flow.location.rrTicks != response.location.rrTicks

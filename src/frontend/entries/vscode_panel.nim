@@ -109,9 +109,7 @@ proc mountOriginSidePanel(vm: OriginChainVM) =
   dom.document.body.appendChild(host)
   var panel = newOriginChainPanel()
   createEffect proc() =
-    let open = vm.sidePanelOpen.val
-    let chain = vm.activeChain.val
-    if open and chain.isSome:
+    if vm.sidePanelShown():
       host.style.display = cstring"block"
       renderPanelDom(host, vm, panel)
     else:
