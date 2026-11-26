@@ -216,7 +216,7 @@ src/frontend/tui/tests/plat59-visual-replay-mutation-control.sha256	src/tests/gu
 # plat47: graded at 39e4112f69; b9396a9502  moved
 # src/frontend/tui/app/runtime.nim after the grade. Re-grade the arms whose
 # needles sit in them.
-src/tests/scenarios/plat66-pack-mutation-control.sha256	ci/test/scenarios.sh	4edebac246b9c375f8b5e181b3fb621774088543476bea5c556b0e1d642c0e77	4e8a6f84c587bf2d0ffe70577696e2e1721d84180baaacad52f9cf73bbdc8102
+src/tests/scenarios/plat66-pack-mutation-control.sha256	ci/test/scenarios.sh	4edebac246b9c375f8b5e181b3fb621774088543476bea5c556b0e1d642c0e77	cdb78c3636e4239d3232803e6fa3595085b52b6333f2dd063bab3f0a46536bbd
 
 # The shared editor on every editor surface (ui/editor_surface: the macro
 # expansions, low-level views, a recording-with-diff's removed lines, the
@@ -594,7 +594,7 @@ src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend
 
 # 2026-11-21, the terminal binding's Variables reader reads the column layout
 # (a fold glyph, then name, type and value), for the project-definitions port.
-src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/termassert/ct_tui_screen.nim	255a2526134d381474f695d7fd979d939f84bcbce60d0cffb1893725869e1816	467e0b911964693dfb4b3599fbc601a4b32a76b334ce1ae9d801c4322bf8383b
+src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/termassert/ct_tui_screen.nim	255a2526134d381474f695d7fd979d939f84bcbce60d0cffb1893725869e1816	745dfe0f8cff3c4c94964aeb1ce3666bbb5d961e2fed6ce2cce2a802b90c1ada
 
 # CTF-P3 step 5 (the terminal Changes panel and Inbox) moved overlay_rows.nim and
 # scope_path.nim again (the `changes` and `inbox` scopes and their key rows; the
