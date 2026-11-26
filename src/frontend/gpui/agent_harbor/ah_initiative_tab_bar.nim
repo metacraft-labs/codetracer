@@ -428,7 +428,8 @@ proc drawPopup(r: GpuiRenderer; p: AhPalette; popup: InitiativePopup; widthPx: i
   # `.ah-popup-sessions`: under a hairline, 6px down, the lines 1px apart.
   let sessions = r.box(column = true, pairs = [("padding-top", "6px"), ("gap", "1px")])
   r.styles(sessions, [("border-top-width", "1px"), ("border-color", p.borderSecondary)])
-  for item in popup.sessions: r.appendChild(sessions, r.drawSessionLine(p, item))
+  # On the popup's own ground (`drawPopup`).
+  for item in popup.sessions: r.appendChild(sessions, r.drawSessionLine(p, item, p.ground))
   r.appendChild(result, sessions)
 
 proc autoLabel(vm: InitiativeTabStripVM): string =

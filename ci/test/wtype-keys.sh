@@ -28,9 +28,14 @@
 # 3600000` in the background, which creates its virtual keyboard and sleeps):
 # with one held, the same stalled window received its key 3 times of 3, because
 # the key waits in its socket. `ci/test/gpui_plugins_window.py` does that
-# (`hold_keyboard`). Not done here: a per-call script cannot hold one across
-# calls, and plat38's oracle counts the keyboard's own events.
+# (`hold_keyboard`), through `--hold` below. Not done for every call: a
+# per-call script cannot hold one across calls, and plat38's oracle counts the
+# keyboard's own events.
 #
+#   --hold MS      hold the seat's keyboard for MS milliseconds and type
+#                  nothing (`wtype -s MS`): run it in the background for the
+#                  length of a capture; the process is that `wtype`, so killing
+#                  it releases the keyboard
 #   WTYPE_LEAD_MS  the wait after the priming, before the keys (default 500)
 #   WTYPE_PRIME=0  no Shift priming: for a lane whose oracle counts the
 #                  modifier events themselves (plat38's delivery sequence)
@@ -38,6 +43,10 @@
 # ci/test/wtype-keys-guard-test.sh refuses a lane that calls `wtype` directly.
 set -euo pipefail
 
+if [ "${1:-}" = --hold ]; then
+	ms="${2:?usage: wtype-keys.sh --hold <milliseconds>}"
+	exec wtype -s "${ms}"
+fi
 lead="${WTYPE_LEAD_MS:-500}"
 if [ "${WTYPE_PRIME:-1}" = "1" ]; then
 	exec wtype -M shift -m shift -s "${lead}" "$@"

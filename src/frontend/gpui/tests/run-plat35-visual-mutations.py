@@ -424,10 +424,15 @@ ARMS = [
         "can see, and the suite now says so in the case rather than implying "
         "a check it does not have."),
 
+    # Re-aimed 2026-11-26: 010bf78b2 (element reuse) builds the footer inside the
+    # `pool.keyed("pager", ...)` block, one indent deeper, so the old two-space
+    # needle no longer matched where the footer is built and the added line
+    # broke the build instead of the footer's behaviour. The mutation is the
+    # same: the footer element gains a `data-column-index`.
     Arm("N5", LEAVES,
-        '  r.setAttribute(foot, EventLogFooterAttribute, "true")\n',
-        '  r.setAttribute(foot, EventLogFooterAttribute, "true")\n'
-        '  r.setAttribute(foot, "data-column-index", "0")\n',
+        '    r.setAttribute(foot, EventLogFooterAttribute, "true")\n',
+        '    r.setAttribute(foot, EventLogFooterAttribute, "true")\n'
+        '    r.setAttribute(foot, "data-column-index", "0")\n',
         FOOTER_SUITE,
         "the footer carries NO column index, so a click cannot re-sort the log",
         CTL[LEAVES][0], CTL[LEAVES][1],

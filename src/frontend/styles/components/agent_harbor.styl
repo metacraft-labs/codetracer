@@ -1181,14 +1181,37 @@ AH_MARK = 0.5rem
   color: colors-ui-text-primary-label
   white-space: nowrap
 
-.ah-att-needs-input .ah-initiative-session-status
-  color: by-mode(colors-ui-text-warning-primary, colors-ui-text-warning-primary-hover)
+// A session's status word, on a session line (the Initiatives panel and the
+// initiative popup) and on a `WAITING FOR YOU` row: the Agent Harbor
+// palette's `initiativeSessionWordColour`, which the terminal and the GPUI
+// front end draw, so one word on one ground is one ink across the screen.
+// Dark keeps each role. Light takes the role's 800 step wherever it holds
+// 4.5:1 (WCAG 2.2 SC 1.4.3): on the panel, the card band and a popup.
+.ah-att-needs-input .ah-initiative-session-status,
+.ah-cc-waiting-state.ah-att-needs-input
+  color: by-mode(colors-ui-text-warning-primary, colors-warning-800)
 
-.ah-att-running .ah-initiative-session-status
-  color: by-mode(colors-ui-text-success-primary, colors-ui-text-success-primary-hover)
+.ah-att-running .ah-initiative-session-status,
+.ah-cc-waiting-state.ah-att-running
+  color: by-mode(colors-ui-text-success-primary, colors-success-800)
 
-.ah-att-failed .ah-initiative-session-status
-  color: by-mode(colors-ui-text-error-primary, colors-ui-text-error-primary-hover)
+.ah-att-failed .ah-initiative-session-status,
+.ah-cc-waiting-state.ah-att-failed
+  color: by-mode(colors-ui-text-error-primary, colors-error-800)
+
+// On `surface/primary/secondary-hover` (#c8c2b5: a hovered or selected
+// initiative, a hovered waiting row) orange and green/800 fall under 4.5:1,
+// so they are taken a quarter toward the body text there, as the palette
+// takes them; red/800 holds, so `failed` keeps the rule above.
+.ah-initiative-row:hover .ah-att-needs-input .ah-initiative-session-status,
+.ah-initiative-row-selected .ah-att-needs-input .ah-initiative-session-status,
+.ah-cc-waiting-row:hover .ah-cc-waiting-state.ah-att-needs-input
+  color: by-mode(colors-ui-text-warning-primary, mix-ink(colors-warning-800, colors-ui-text-primary-body, 25%))
+
+.ah-initiative-row:hover .ah-att-running .ah-initiative-session-status,
+.ah-initiative-row-selected .ah-att-running .ah-initiative-session-status,
+.ah-cc-waiting-row:hover .ah-cc-waiting-state.ah-att-running
+  color: by-mode(colors-ui-text-success-primary, mix-ink(colors-success-800, colors-ui-text-primary-body, 25%))
 
 .ah-initiative-more
   margin-left: 1rem

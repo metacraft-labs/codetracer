@@ -181,6 +181,31 @@ if [ -n "$_CT_WORKSPACE_ROOT" ] && [ -x "$_CT_WORKSPACE_ROOT/codetracer-native-b
 		fi
 	fi
 	_ct_detect_summary "codetracer-native-backend (ct-native-replay available)"
+	# The rr that records. ct-native-replay records with `$CT_RR_EXE`, else
+	# the `rr` beside it, else whatever `rr` is on PATH. Only CodeTracer's rr
+	# (codetracer-rr, the native backend's `rr-soft` input) writes the
+	# recording's output to `rr/write_events.txt`, which is where the Event
+	# Log and the terminal read it from; a stock rr records a program that
+	# replays but whose output is gone. The `rr` beside the binary is put
+	# there by the native backend's own dev shell, so a checkout built
+	# without entering it has none, and recording fell back to the host's
+	# rr. Put the backend's own rr there, at the revision its flake.lock pins,
+	# as its dev shell does (once: the next shell finds it); where the folder
+	# cannot be written, name it in CT_RR_EXE instead.
+	if [ -z "${CT_RR_EXE:-}" ] && [ ! -e "$_CT_WORKSPACE_ROOT/codetracer-native-backend/target/debug/rr" ] &&
+		command -v nix >/dev/null 2>&1; then
+		_ct_rr="$(nix build --no-link --print-out-paths \
+			--inputs-from "$_CT_WORKSPACE_ROOT/codetracer-native-backend" 'rr-soft#rr' 2>/dev/null | head -n 1)"
+		if [ -n "$_ct_rr" ] && [ -x "$_ct_rr/bin/rr" ]; then
+			ln -sfn "$_ct_rr/bin/rr" "$_CT_WORKSPACE_ROOT/codetracer-native-backend/target/debug/rr" 2>/dev/null ||
+				export CT_RR_EXE="$_ct_rr/bin/rr"
+		else
+			echo "  WARNING: ct-native-replay has no CodeTracer rr beside it, and the native backend's rr-soft" >&2
+			echo "    input did not build: rr recordings will be made with the rr on PATH and carry no output" >&2
+			echo "    (an empty Event Log). Set CT_RR_EXE to codetracer-rr's rr." >&2
+		fi
+		unset _ct_rr
+	fi
 fi
 
 # --- codetracer-native-recorder (ct-mcr / Multi-Core Recorder) ---

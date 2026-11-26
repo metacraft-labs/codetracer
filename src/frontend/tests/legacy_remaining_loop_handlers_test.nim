@@ -19,6 +19,13 @@ import ../communication
 import ../../common/ct_event
 import ../ui/[value, editor, unified_diff]
 import ../viewmodel/viewmodels/[generated_code_operation, review_flow_overlay]
+import ../viewmodel/input/[dom_pointer, element_press]
+import ../viewmodel/keymap/[base_keymaps, context_keys, editing_keymap, keymap_router]
+import ../viewmodel/viewmodels/product_mode
+from ../../common/key_names import kpNative
+
+const Desktop = KeyDelivery(frontEnd: feDesktop, platform: pkLinux,
+                            keyProtocol: kpNative)
 
 # Only the destination of the history seek is substituted. The production
 # renderer emits its real CtHistoryJump event through the real mediator.
@@ -51,11 +58,19 @@ suite "legacy value, generated targets and review sliders retain each item":
     let component = ValueComponent(state: state, api: api, baseAddress: NO_ADDRESS)
     let root = renderHistoryTableDom(component, cstring"x", ChartComponent(viewKind: ViewTable))
     let nodes = root.querySelectorAll(cstring".history-value")
+    document.body.appendChild(root)
+    installDomPointerRouting(routerResolver(initKeymapRouter(bkCua, Desktop),
+      SessionFacts(product: pmDebug, replayLoaded: true)))
     leftDown(nodes[0])
     leftDown(nodes[1])
     check sink.ticks == @[11, 22]
     if sink.ticks != @[11, 22]: failExit()
-    document.body.innerHTML = cstring"<div id='context-menu-container'></div>"
+    # The menu container goes BESIDE the table: a right press reaches its
+    # menu through the window's pointer listener, so the table stays in the
+    # document.
+    let menuHost = document.createElement(cstring"div")
+    menuHost.id = cstring"context-menu-container"
+    document.body.appendChild(menuHost)
     context(nodes[0])
     click(document.querySelector(cstring"#menu-item-0"))
     let locations = root.querySelectorAll(cstring".history-location")

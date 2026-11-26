@@ -135,13 +135,18 @@ proc legendCells*(counts: array[MilestoneStatusClass, int]): int =
 
 proc drawMilestoneBar*(c: var AhCanvas; parent: AhNode; row, col, width: int;
                        counts: array[MilestoneStatusClass, int];
-                       labelled: bool; legendSlot = 0): int =
+                       labelled: bool; legendSlot = 0; onGround = false): int =
   ## Milestones by status: a bar of segments, each as wide as its count's
   ## share (at least one cell), and its legend — under it with the words
   ## (`labelled`, wrapping), or beside it with the numbers. Beside it, the
   ## legend has a slot of `legendSlot` cells (at least the 9rem the
   ## stylesheet gives it) with the counts at its end, so every bar of a list
   ## given the same slot is one width and ends in one column, on one scale.
+  ## `onGround`: each status segment and mark takes its role's ink readable
+  ## on the ground under it (`markOn`), as a surface dropped from the
+  ## caption bar draws them (the initiative popup); the panels keep the
+  ## roles themselves (on a panel's selected row, Light's status roles still
+  ## fall to 1.9-2.9:1; a known gap, not resolved here).
   ## Returns the rows.
   let n = c.node(parent, row, col, width, 1, [("milestone-bar", statusCountsText(counts))])
   var total = 0
@@ -182,7 +187,9 @@ proc drawMilestoneBar*(c: var AhCanvas; parent: AhNode; row, col, width: int;
   var at = col + 1
   let track = c.node(n, row, col + 1, barW, 1, [("ms-bar", "track")])
   for i, s in present:
-    discard c.put(row, at, repeat(BarGlyphHalf, cells[i]), c.p.segmentOf(s))
+    let ink = if onGround and s != mscPlanned: c.p.markOn(c.p.markOf(s), c.bgAt(row, at)).colour
+              else: c.p.segmentOf(s)
+    discard c.put(row, at, repeat(BarGlyphHalf, cells[i]), ink)
     discard c.node(track, row, at, cells[i], 1, [("segment", $s & ":" & $counts[s])])
     at += cells[i]
   var r = row
@@ -202,7 +209,8 @@ proc drawMilestoneBar*(c: var AhCanvas; parent: AhNode; row, col, width: int;
     if labelled and lc + need > col + width - 1 and lc > col + 1:
       inc r
       lc = col + 1
-    discard c.mark(legend, r, lc, c.p.markOf(s))
+    let m = c.p.markOf(s)
+    discard c.mark(legend, r, lc, if onGround: c.p.markOn(m, c.bgAt(r, lc)) else: m)
     discard c.put(r, lc + 2, words, c.p.textLabel)
     lc += need + 2
   n.height = r - row + 1
@@ -215,19 +223,27 @@ proc drawCurrent*(c: var AhCanvas; parent: AhNode; row, col, width: int; text: s
   discard c.text(n, row, col + w + 1, max(1, width - w - 1), text, c.p.textBody)
 
 proc drawSessionLine*(c: var AhCanvas; parent: AhNode; item: SessionItem;
-                      row, col, width: int) =
+                      row, col, width: int; onGround = false) =
   ## One of an initiative's sessions: its mark, title and status word.
+  ## `onGround`: the mark takes its role's ink readable on the ground under
+  ## it (`markOn`), as `drawMilestoneBar`'s.
   let n = c.node(parent, row, col, width, 1, [("session", item.id),
                                               ("attention", $item.attention),
                                               ("tooltip", item.tooltip)])
-  discard c.mark(n, row, col, c.p.markOf(item.attention))
+  let ground = c.bgAt(row, col)
+  let m = c.p.markOf(item.attention)
+  discard c.mark(n, row, col, if onGround: c.p.markOn(m, ground) else: m)
   let sw = widthOf(item.statusLabel)
   # Two cells before the right-aligned status word, as a menu item keeps
   # before its origin (`StatusWordGap`).
   discard c.text(n, row, col + 2, max(1, width - 2 - sw - StatusWordGap), item.title,
                  c.p.textBody, fact = "title")
-  discard c.text(n, row, col + width - sw, sw, item.statusLabel,
-                 c.p.initiativeSessionWordColour(item.attention), fact = "status")
+  # The status word is the shared palette's one rule for it in every front
+  # end (`initiativeSessionWordColour`), for the ground under the word.
+  let wordCol = col + width - sw
+  discard c.text(n, row, wordCol, sw, item.statusLabel,
+                 c.p.initiativeSessionWordColour(item.attention, c.bgAt(row, wordCol)),
+                 fact = "status")
 
 # ---------------------------------------------------------------------------
 # Initiatives

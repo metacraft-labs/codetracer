@@ -116,16 +116,26 @@ proc drawOverflowChip*(c: var AhCanvas; parent: AhNode; row, col: int; h: Hidden
                                           ("overflow-severity", $h.severity),
                                           ("tooltip", chipTitle(h, "tab", "tabs"))])
   if open: c.fill(row, col, w, 1, c.tone.chip)
+  # Its inks are resolved for the ground it is drawn on (the bar's at rest,
+  # the chip's while open; `statusTextInk`, `markOn`): in Light the status
+  # roles fall under their floors there (the open chip's warning dot was
+  # 1.61:1, the failure count 4.47:1 on the bar). A failure's mark and count
+  # are one ink, the count's, so the bar draws one red for a failure, as
+  # the recordings' `+N` does.
+  let ground = c.bgAt(row, col)
+  let failedInk = c.p.statusTextInk(prError, ground)
   var at = col + 1
   case h.severity
   of hsFailed:
-    discard c.mark(n, row, at, c.p.markOf(saFailed))
+    var m = c.p.markOf(saFailed)
+    m.colour = failedInk
+    discard c.mark(n, row, at, m)
     at += 2
   of hsNeedsInput:
-    discard c.mark(n, row, at, c.p.markOf(saNeedsInput))
+    discard c.mark(n, row, at, c.p.markOn(c.p.markOf(saNeedsInput), ground))
     at += 2
   of hsNone: discard
-  let ink = if h.severity == hsFailed: c.p.textError
+  let ink = if h.severity == hsFailed: failedInk
             elif open: c.p.textBody
             else: c.p.textLabel
   discard c.put(row, at, "+" & $h.hidden, ink)
@@ -169,7 +179,9 @@ proc drawMenuItem*(c: var AhCanvas; menu: AhNode; row, col, width: int;
   ## menu's edge, with `MenuOriginGap` cells between it and the title.
   result = c.node(menu, row, col, width, 1, [("menu-item", key), ("active", $active)])
   if active: c.fill(row, col, width, 1, c.p.activeTab)
-  discard c.mark(result, row, col + 1, m)
+  # The mark readable on the item's own ground (the menu's, or the active
+  # item's; `markOn`).
+  discard c.mark(result, row, col + 1, c.p.markOn(m, c.bgAt(row, col + 1)))
   let tail = trailingCells(trailing)
   let column = max(tail, trailColumn)
   let columnAt = col + width - MenuInset - column
@@ -263,8 +275,10 @@ proc drawStripNotice*(c: var AhCanvas; parent: AhNode; row, col, width: int;
   let w = min(widthOf(message), room)
   let n = c.node(parent, row, col, w + 2, 1, [("notice", kind)])
   c.area("notice", row, col, w + 2, 1, c.noticeGround)
+  # The error in the error role readable on the notice's ground
+  # (`statusTextInk`): Light's error text was 3.34:1 on its card.
   discard c.text(n, row, col + 1, room, message,
-                 if error: c.p.textError else: c.p.textCaption,
+                 if error: c.p.statusTextInk(prError, c.noticeGround) else: c.p.textCaption,
                  fact = if error: "error" else: "message")
   result = w + 2
   if retry != nil:

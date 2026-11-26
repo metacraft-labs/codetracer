@@ -9,7 +9,15 @@
 ## The story draws the caption bar on the window's first row (the bar's
 ## ground): the recording's tab, active (the active tab's ground), its name
 ## and, at its end, the recording switcher's numbered buttons for the
-## processes; then a plain tab; an empty working area below.
+## processes; then a plain tab; an empty working area below; and the status
+## line on the window's last row.
+##
+## THE HINT. A terminal draws no tooltip, so while the switcher has the
+## focus the status line shows the focused button's tooltip
+## (`ProcessSwitcherVM.focusHint`: the process, its pid and binary, its
+## state), at the line's start, cut with `…` where the line cannot hold it;
+## without the focus the line is empty. The line is the gaze story's
+## (`statusLineInks`).
 ##
 ## THE BUTTONS ARE THE INITIATIVE BAR'S OWN DRAWING. The tab takes a
 ## `SwitcherSlot`; `RecordingSwitcherSlot`, the default, measures and draws
@@ -19,7 +27,8 @@
 ## P1d site 19), which also draws the ring (D81). Moving that drawing to a
 ## module of its own comes after CTF-P1d step 5b (manager note 143).
 ##
-## Facts: `tabFacts` and `tooltip` on the tab, `surface` on the story's root.
+## Facts: `tabFacts` and `tooltip` on the tab, `surface` on the story's root,
+## `status-line` on the line and `hint` (the whole tooltip) on the hint.
 
 import ../../viewmodel/views/agent_harbor_process_switcher_words
 import ./ah_tui_canvas
@@ -69,6 +78,18 @@ proc slotsForCells*(cols: int): int =
   ## narrow window's two below 90 cells (720px at 8px a cell), else five.
   if cols < 90: 2 else: 5
 
+proc drawSwitcherStatusLine*(c: var AhCanvas; parent: AhNode; vm: ProcessSwitcherVM;
+                             row, col, width: int) =
+  ## The status line at `row`: its own ground across the window, and, while
+  ## the switcher has the focus, the focused button's tooltip from its
+  ## second cell, cut with `…` a cell before the window's edge.
+  let (ground, ink) = statusLineInks(c)
+  c.area("status-line", row, col, width, 1, ground)
+  let line = c.node(parent, row, col, width, 1, [("status-line", "true")])
+  let hint = vm.focusHint
+  if hint.len > 0:
+    discard c.text(line, row, col + 1, max(1, width - 2), hint, ink, fact = "hint")
+
 proc drawProcessSwitcherStory*(c: var AhCanvas; vm: ProcessSwitcherVM;
                                row, col, width, height: int; otherTab: string;
                                nextChord, previousChord: string;
@@ -109,3 +130,5 @@ proc drawProcessSwitcherStory*(c: var AhCanvas; vm: ProcessSwitcherVM;
     let other = c.node(host, row, otherCol, w, 1, [("tab", otherTab), ("active", "false")])
     discard c.text(other, row, otherCol + 1, max(1, w - 2), otherTab, c.p.textCaption,
                    fact = "label")
+  if height >= 3:
+    c.drawSwitcherStatusLine(host, vm, row + height - 1, col, width)

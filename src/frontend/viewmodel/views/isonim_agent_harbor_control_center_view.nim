@@ -112,7 +112,10 @@ proc renderWaitingRow[R, N](r: R; row: WaitingRow; focused: bool): N =
       tdiv(`data-ah-cut` = "line", class = "ah-cc-waiting-title"):
         text row.item.title
       tdiv(class = "ah-cc-waiting-meta"):
-        span(class = "ah-cc-waiting-state ah-role-" & role):
+        # `ah-att-*`: the session's state, which the stylesheet draws the
+        # state word in by the palette's one rule for a session's status
+        # word (`initiativeSessionWordColour`).
+        span(class = "ah-cc-waiting-state ah-role-" & role & " ah-att-" & $row.item.attention):
           text row.stateWordOf
         span(`data-ah-cut` = "line", class = "ah-cc-waiting-where"):
           text row.waitingMeta
