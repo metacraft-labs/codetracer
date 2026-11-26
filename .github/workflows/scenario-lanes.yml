@@ -121,7 +121,7 @@ jobs:
             codetracer-snapshot-codecs=3e503da83b73e805f30096d4baa45c18d138f6d3
             codetracer-image-diff=982e669585a150ede87973db281df63188459328
             reprobuild=37a109c4e1cf650e6eb79b11d9fadf6e49e64614
-            runquota=83d89e581d01c96eadb157bee48cecab6aba1866
+            runquota=b07b355d4fee99a2cf260fb98da94f88e124c06d
 
       - name: Stage codetracer-trace-format into libs/
         # The nix flake build below overrides the codetracer-trace-format input

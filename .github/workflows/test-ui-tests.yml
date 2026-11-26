@@ -113,25 +113,13 @@ jobs:
             # the lock, as for the trace-format pair above.
             codetracer-visual-replay=360a8131ec9fc81d0ebd1cdbd1743238218346af
             codetracer-native-backend=367e7164f43453513681807eeadb8797b6d5bcde
-            # The desktop scenario lane's recorders and recordings: the BEAM
-            # recorder at repro.lock's pin, and the example recordings at the
-            # pin of the test lock (ci/test/siblings/repro.lock), the commit their
-            # scenarios were measured against.
+            # The BEAM recorder, at repro.lock's pin.
             codetracer-beam-recorder=e8ba8f7b77ac609faca152b7139b19ed4db7cffb
-            codetracer-example-recordings=b87d40d6b7b0a4d2e4d8306b16a8f9f778838013
-            # The Windows portable recording's system files (its CAS remote):
-            # ci/toolchain.pin's PRIVATE_SIBLING_CODETRACER_PRIVATE_RECORDINGS.
-            codetracer-private-recordings=c20937d81529a2d079676aa6755deb972bdacb64
-            # The HCR flame scenarios' demo, and reprobuild (repro.lock's pin) for the
-            # HCR coordinator driver, the patchable-profile emitter and the in-target
-            # agent the patchable Godot links.
-            codetracer-flame-demo=27425eebeb9ac79708cbde7a38c054f74b0c415f
             # codetracer-visual-replay's config.nims puts both on its --path
             # (ct_gfx_player's build); snapshot-codecs at visual-replay's
             # repro.lock pin, image-diff at codetracer's.
             codetracer-snapshot-codecs=3e503da83b73e805f30096d4baa45c18d138f6d3
             codetracer-image-diff=982e669585a150ede87973db281df63188459328
-            reprobuild=37a109c4e1cf650e6eb79b11d9fadf6e49e64614
             runquota=b07b355d4fee99a2cf260fb98da94f88e124c06d
 
       - name: Stage codetracer-trace-format into libs/
