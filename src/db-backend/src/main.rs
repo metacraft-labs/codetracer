@@ -158,6 +158,7 @@ mod catalog_autoload;
 mod session_handler;
 mod session_manifest;
 // Where a session may read source text from; see `source_access.rs`.
+mod call_run_line_index;
 mod source_access;
 #[allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 mod stack_unwinder;

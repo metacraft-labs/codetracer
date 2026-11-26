@@ -7,7 +7,7 @@ use crate::{
     },
 };
 use codetracer_trace_types::Line;
-use log::{debug, info, warn};
+use log::{debug, info, trace, warn};
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::error::Error;
@@ -674,6 +674,31 @@ pub struct ExprLoader {
     /// A loader made with [`Self::new`] has its own, which reads the host
     /// as this loader always did.
     source_access: SourceAccessHandle,
+    /// Paths [`Self::load_file`] could not read, with the error it got, the
+    /// [`crate::vfs::vfs_generation`] it got it at, and the source-reading
+    /// rule it was read under.
+    ///
+    /// `load_location` loads the step's source on EVERY step. In a browser no
+    /// path is ever readable from the filesystem, so before this every step
+    /// re-ran the whole failing lookup (the filesystem probe, two VFS reads, an
+    /// error value) and logged it: a 673,363-step EVM launch logged it about
+    /// 245,800 times, each line a worker message. A failure now costs one
+    /// lookup per path per loader and is logged once.
+    ///
+    /// Forgotten when the VFS is written to (the host may push the recording's
+    /// sources after the first failure) and when the source-reading rule
+    /// changes — whether this loader is handed a new rule
+    /// ([`Self::set_source_access`]) or the SHARED rule it holds gains a root.
+    /// The second is the common case: the handler's loader fails every
+    /// stepped path at construction (`StepLinesLoader::new`), before the trace
+    /// folder's `files/` and the extracted bundle are recorded on the handle
+    /// (`SourceAccessHandle::set_files_root` / `set_bundled_root`), so a memo
+    /// keyed on the VFS alone would hide those copies for the whole session.
+    /// A file that APPEARS on disk later is not re-read by this
+    /// loader — the same contract as a successful load, which `processed_files`
+    /// keeps for the loader's lifetime and never re-reads either. Loaders that
+    /// must see a fresh disk are made fresh (each flow walk makes its own).
+    failed_loads: HashMap<PathBuf, (u64, crate::source_access::SourceAccess, String)>,
     /// FALSIFIER ARM ONLY — see the arm's note in `get_source_line_v2`. Keyed
     /// by path STRING, which is the whole point: it is design §7.2's named
     /// implementation error made real so the reverse-navigation gate can be
@@ -764,6 +789,31 @@ pub fn source_text(path: &Path) -> Option<String> {
     }
 }
 
+/// Log that `path` could not be read, the first time any loader in this
+/// process fails on it.
+///
+/// Per process, not per loader: every flow walk makes its own loader, and a
+/// browser session walks a flow per step, so a per-loader log would still be
+/// a worker message per step. The set holds one entry per distinct unreadable
+/// path, which a session bounds by its recording's path table.
+fn warn_load_failure_once(path: &Path, message: &str) {
+    static WARNED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<PathBuf>>> =
+        std::sync::OnceLock::new();
+    let first = WARNED
+        .get_or_init(Default::default)
+        .lock()
+        .map(|mut warned| warned.insert(path.to_path_buf()))
+        // A poisoned set only loses the dedupe; logging again is harmless.
+        .unwrap_or(true);
+    if first {
+        warn!(
+            "expr loader: cannot read {}: {message} — using the trace's own function boundaries \
+             (reported once per path)",
+            path.display()
+        );
+    }
+}
+
 #[allow(clippy::unwrap_used)]
 impl ExprLoader {
     pub fn new(trace: CoreTrace) -> Self {
@@ -774,6 +824,7 @@ impl ExprLoader {
     pub fn with_source_access(trace: CoreTrace, source_access: SourceAccessHandle) -> Self {
         ExprLoader {
             processed_files: HashMap::new(),
+            failed_loads: HashMap::new(),
             loop_index: 1,
             trace,
             source_access,
@@ -793,6 +844,7 @@ impl ExprLoader {
     pub fn set_source_access(&mut self, source_access: SourceAccessHandle) {
         self.source_access = source_access;
         self.processed_files.clear();
+        self.failed_loads.clear();
     }
 
     /// The spelling of a recorded path the origin code probes: under the
@@ -2566,9 +2618,33 @@ impl ExprLoader {
         }
     }
 
+    /// Read and index `path`, once: a loaded file is kept for this loader's
+    /// lifetime, and so is a failure, until the VFS is written to or the
+    /// source-reading rule changes (see `failed_loads`). The first failure for
+    /// a path is logged (once per process); a repeat returns the same error
+    /// without reading anything or logging again.
     pub fn load_file(&mut self, path: &PathBuf) -> Result<(), Box<dyn Error>> {
         if !self.processed_files.contains_key(path) {
-            let source_code = self.file_source_code(path)?;
+            let generation = crate::vfs::vfs_generation();
+            let rule = self.source_access.get();
+            if let Some((failed_at, failed_under, message)) = self.failed_loads.get(path)
+                && *failed_at == generation
+                && *failed_under == rule
+            {
+                return Err(message.clone().into());
+            }
+            let source_code = match self.file_source_code(path) {
+                Ok(source_code) => {
+                    self.failed_loads.remove(path);
+                    source_code
+                }
+                Err(e) => {
+                    let message = e.to_string();
+                    warn_load_failure_once(path, &message);
+                    self.failed_loads.insert(path.clone(), (generation, rule, message));
+                    return Err(e);
+                }
+            };
             let mut file_info = FileInfo::new(&source_code);
             file_info
                 .file_lines
@@ -2677,8 +2753,8 @@ impl ExprLoader {
     }
 
     pub fn get_loop_shape(&self, line: Position, path: &PathBuf) -> Option<LoopShape> {
-        info!("path {}", path.display());
-        info!(
+        trace!("path {}", path.display());
+        trace!(
             "get_loop_shape {} {:?}",
             line.0,
             self.processed_files.get(path)?.position_loops
@@ -4504,5 +4580,87 @@ mod flow_fixture_extraction_tests {
             by_line.get(&24).cloned().unwrap_or_default(),
             vec!["final_result".to_string()]
         );
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::panic)]
+mod load_failure_memo_tests {
+    use super::*;
+
+    /// A path `load_file` could not read fails again WITHOUT being read again,
+    /// until the VFS is written to. Shown by making the file readable on disk
+    /// after the first failure: a re-read would now succeed, the memo must not.
+    ///
+    /// The VFS is process-wide and other tests write to it, so an attempt
+    /// during which its generation moved is inconclusive and is retried on a
+    /// fresh path; the assertion is only ever made over a quiet window.
+    #[test]
+    fn a_failed_load_is_not_retried_until_the_vfs_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        for attempt in 0..50 {
+            let path = dir.path().join(format!("appears_later_{attempt}.py"));
+            let mut loader = ExprLoader::new(CoreTrace::default());
+            let quiet_from = crate::vfs::vfs_generation();
+            let first = loader.load_file(&path).expect_err("the file does not exist yet");
+            std::fs::write(&path, "x = 1\n").unwrap();
+            let second = loader.load_file(&path);
+            if crate::vfs::vfs_generation() != quiet_from {
+                continue;
+            }
+            let second = second.expect_err("a memoized failure must not re-read the file");
+            assert_eq!(second.to_string(), first.to_string(), "the memo returns the same error");
+
+            // Any VFS write invalidates the memo, so the file is read now.
+            crate::vfs::vfs_write("load-failure-memo-test/unrelated", vec![]);
+            loader
+                .load_file(&path)
+                .expect("after a VFS write the path is read again, and it exists now");
+            return;
+        }
+        panic!("the VFS generation never stayed still for one attempt");
+    }
+
+    /// A root recorded on the SHARED rule after a failed load makes the path
+    /// readable to every loader holding that rule, without any of them being
+    /// handed a new rule. The handler's loader is the case: it fails every
+    /// stepped path at construction (`StepLinesLoader::new`), before the trace
+    /// folder's `files/` and the extracted bundle are recorded on the handle.
+    #[test]
+    fn a_root_recorded_on_the_shared_rule_after_a_failure_is_read() {
+        use crate::source_access::{HostSourceReads, SourceAccess};
+        let dir = tempfile::tempdir().unwrap();
+        let recorded = PathBuf::from("/project/late_root.py");
+        let files = dir.path().join("files");
+        std::fs::create_dir_all(files.join("project")).unwrap();
+        std::fs::write(files.join("project/late_root.py"), "z = 3\n").unwrap();
+        let rule = SourceAccessHandle::new(SourceAccess {
+            host_reads: HostSourceReads::Refused,
+            files_root: None,
+            bundled_root: None,
+        });
+        let mut loader = ExprLoader::with_source_access(CoreTrace::default(), rule.clone());
+        assert!(loader.load_file(&recorded).is_err(), "no root carries a copy yet");
+        rule.set_files_root(Some(files));
+        loader
+            .load_file(&recorded)
+            .expect("the files root recorded on the shared rule now carries the copy");
+    }
+
+    /// Changing the source-reading rule forgets the failures made under the
+    /// old one, as it forgets the loads.
+    #[test]
+    fn a_new_source_access_rule_forgets_failures() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("appears_later.py");
+        let mut loader = ExprLoader::new(CoreTrace::default());
+        assert!(loader.load_file(&path).is_err());
+        std::fs::write(&path, "x = 1\n").unwrap();
+        let rule = loader.source_access().clone();
+        loader.set_source_access(rule);
+        loader
+            .load_file(&path)
+            .expect("the failure was forgotten with the rule");
     }
 }

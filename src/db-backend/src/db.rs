@@ -10,7 +10,7 @@ use codetracer_trace_types::{
     CallKey, EventLogKind, FullValueRecord, FunctionId, FunctionRecord, Line, NO_KEY, PathId, Place, StepId, TypeId,
     TypeKind, TypeRecord, TypeSpecificInfo, ValueRecord, VariableId,
 };
-use log::{error, info, warn};
+use log::{error, info, trace, warn};
 
 use crate::distinct_vec::DistinctVec;
 use crate::expr_loader::ExprLoader;
@@ -351,10 +351,10 @@ impl Db {
                         location.function_last = last_line;
                     }
                 }
-                Err(e) => {
-                    // No tree-sitter grammar for this language (Cairo, Circom, etc.).
-                    // Fall back to the trace's own function line data.
-                    warn!("expr loader load file error: {e:?} — using trace function boundaries");
+                Err(_) => {
+                    // The source cannot be read. Fall back to the trace's own
+                    // function line data. Not logged here: `ExprLoader::load_file`
+                    // reports a path's failure once, and this runs per step.
                     let function_id = self.calls[CallKey(call_key_int)].function_id;
                     let function_record = &self.functions[function_id];
                     location.function_first = function_record.line.0;
@@ -2786,7 +2786,9 @@ impl ReplaySession for MaterializedReplaySession {
     }
 
     fn load_location(&mut self, expr_loader: &mut ExprLoader) -> Result<Location, Box<dyn Error>> {
-        info!("load_location: db replay");
+        // `trace!`, not `info!`: this runs once per walked step of every call
+        // flow, and in a browser each log line is a worker console message.
+        trace!("load_location: db replay");
         // Event-only traces (e.g. Stylus) have no steps — return a default location
         // so the DAP server can still initialize and serve event data.
         if self.reader.first_step_id().is_none() {
@@ -2796,7 +2798,7 @@ impl ReplaySession for MaterializedReplaySession {
         let call_key = self.reader.call_key_for_step(self.step_id).unwrap_or(CallKey(0));
         self.call_key = call_key;
         let location = self.reader.load_location(self.step_id, call_key, expr_loader);
-        info!("  location: {location:?}");
+        trace!("  location: {location:?}");
         Ok(location)
     }
 

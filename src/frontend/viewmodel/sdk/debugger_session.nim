@@ -197,17 +197,27 @@ func classifyStartFailure*(engineReached: bool): DebuggerSessionErrorKind =
   ## Why a launch that never settled failed, from the one fact the transport
   ## knows: whether the engine itself was ever reached.
   ##
-  ## Not every engine failure arrives as a message. A deployed engine that
-  ## refuses a container's format can log the refusal to its own console and
-  ## answer the handshake with success, and an engine whose worker script
-  ## never loaded answers nothing at all. Both leave a session `dspLaunching`
-  ## with nothing to classify, and they are different faults with different
-  ## remedies: the first is the trace (`dseUnsupportedTraceKind`), the second
-  ## is the transport (`dseWorkerFailed`). A host that holds a deadline over
-  ## the launch, and knows whether its engine reported itself loaded (the
-  ## worker's `wasm-loaded`), settles the session with this through
-  ## `failStart`. Moved here from BlockTracer (Shared-DOM-Front-Ends D8).
-  if engineReached: dseUnsupportedTraceKind else: dseWorkerFailed
+  ## A launch the engine REFUSED does not come here: the engine answers the
+  ## request that completes the handshake with `success: false` and the
+  ## reason (a container format or version it cannot read, a missing trace),
+  ## and `classifyBackendFailure` classifies that answer. What is left for a
+  ## host's deadline is a launch nothing answered, and that is two different
+  ## faults with different remedies:
+  ##
+  ## * the engine was never reached (the worker's `wasm-loaded` never came):
+  ##   the transport failed, `dseWorkerFailed`;
+  ## * the engine was reached and is still working on the launch — a trace
+  ##   too large to open within the host's deadline. Nothing was rejected, so
+  ##   no trace-side kind is true of it; the host abandoned the operation,
+  ##   which is `dseCancelled`.
+  ##
+  ## This used to answer `dseUnsupportedTraceKind` for the second case, on
+  ## the belief that a deployed engine logged its format refusal and answered
+  ## success. That was a guess, and it labelled a large recording that was
+  ## still opening as a format refusal (codetracer-pm issue
+  ## 2026-11-26-large-evm-recordings-cannot-be-debugged-in-the-hydrated-debug-page).
+  ## Moved here from BlockTracer (Shared-DOM-Front-Ends D8).
+  if engineReached: dseCancelled else: dseWorkerFailed
 
 # ---------------------------------------------------------------------------
 # Construction
