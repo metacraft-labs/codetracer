@@ -28,17 +28,6 @@ proc markText*(vm: GazeStatusVM): string =
   ## What the mark draws: the glyph and the words; "" when off.
   if not vm.shown: "" else: vm.glyphOf & " " & vm.text
 
-proc statusLineInks*(c: AhCanvas): tuple[ground, ink: string] =
-  ## The status line's ground and its items' ink, on a ground no area of the
-  ## control center above it takes. Dark: `surface/base/raised` (#161616),
-  ## the items in the caption role (about 9:1). Light: `surface/base/card`
-  ## (#dbd6cc, 1.34:1 off a highlighted row's #f8f6f2 and 1.12:1 off the
-  ## panel), where the caption role falls to 3.2:1, so the items and the
-  ## mark take the label role (follow-up review round 2: `raised` was 1.03:1
-  ## off a highlighted initiative row at the sidebar's foot).
-  if c.p.mode == dmDark: (tokenHexOf(dtColorsUiSurfaceBaseRaised, c.p.mode), c.p.textCaption)
-  else: (tokenHexOf(dtColorsUiSurfaceBaseCard, c.p.mode), c.p.textLabel)
-
 proc drawGazeStory*(c: var AhCanvas; vm: GazeStatusVM; row, col, width, height: int;
                     items: string; press: GazePress = nil;
                     above: proc(c: var AhCanvas) = nil) =

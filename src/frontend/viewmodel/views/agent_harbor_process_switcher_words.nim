@@ -99,8 +99,13 @@ proc runProcessSwitcherOperation*(vm: ProcessSwitcherVM; operation: string;
 
 proc runProcessSwitcherPress*(vm: ProcessSwitcherVM; operation, target: string): bool =
   ## Runs a press's operation: a press on a button selects its process
-  ## (`target`: the process's recording id).
+  ## (`target`: the process's recording id) and gives the switcher the
+  ## focus, as a press on a control focuses it (`ProcessSwitcherVM.focused`;
+  ## true when only the focus changed).
   if vm.isNil: return false
   case operation
-  of ProcessSelectOperation: vm.select(target)
+  of ProcessSelectOperation:
+    let focusing = not vm.focused.val
+    vm.focused.val = true
+    vm.select(target) or focusing
   else: false

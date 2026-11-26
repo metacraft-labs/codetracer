@@ -19,6 +19,11 @@
 ## * **Keys are routed**: `CSI 6;7~` / `CSI 5;7~` (`Ctrl+Alt+PageDown` /
 ##   `PageUp`, as a terminal sends them) step the processes; a digit picks
 ##   one, and picking the ringed process clears the ring.
+## * **The status line's hint** (a terminal draws no tooltip):
+##   while the switcher has the focus, the window's last row shows the
+##   focused (active) button's tooltip, readable on the line's ground, cut
+##   with `…` where the line cannot hold it; without the focus the line is
+##   empty; a press on a button gives the switcher the focus.
 ##
 ## One stand-in, justified: `markingSlot` and `wideSlot` below are slots
 ## written in this test, to observe what the tab hands a slot (the buttons,
@@ -160,6 +165,20 @@ suite "CTF-P2c: the terminal process switcher's tab":
     check contrastOf(l.textError, l.panel) < 4.5
     check contrastOf(l.textCaption, l.panel) < 4.5
 
+  test "a stated button keeps its padding on both sides":
+    # Terminal review, 2026-11-25: `␣2…` and `␣3?` spent the right pad on
+    # the mark, which touched the button's edge; the web draws `2 …`.
+    let m = mount("loading-and-missing")
+    let b = m.tab.all("recording")
+    check b.mapIt(it.attr("recording-label")) ==
+      @[" 1 ", " 2\xE2\x80\xA6 ", " 3? "]
+    for e in b:
+      let last = e.col + e.width - 1
+      check m.canvas.grid.runeAt(e.row, e.col) == " "
+      check m.canvas.grid.runeAt(e.row, last) == " "
+      check m.canvas.bgAt(e.row, last) == m.canvas.bgAt(e.row, e.col)
+    m.dispose()
+
   test "+N is a button on the numbered buttons' ground, not the tab's":
     # The web's `.ah-rec-more`: a button like its siblings. Its control: the
     # chip's old ground, `tone.chip`, IS the active tab's fill in both
@@ -257,3 +276,96 @@ suite "CTF-P2c: the terminal process switcher's keys":
     check m.lastOperation == ProcessSelectOperation
     check m.tab.attr("process-active") == "3"
     m.dispose()
+
+proc lineText(m: AhTuiMount; row: int): string =
+  for col in 0 ..< m.cols: result.add m.canvas.grid.runeAt(row, col)
+
+proc frontendTooltip(): string =
+  "frontend \xC2\xB7 pid 4180 \xC2\xB7 /srv/envelope/bin/frontend"
+
+suite "CTF-P2c: the process switcher's hint in the status line":
+  test "focused: the focused button's tooltip, on the status line's ground":
+    for mode in [dmDark, dmLight]:
+      for cols in [180, 95]:
+        let m = mount("correlation", cols, mode = mode)
+        check m.processes.focused.val
+        let lines = m.view.all("status-line")
+        check lines.len == 1
+        let line = lines[0]
+        check line.row == m.rows - 1
+        let (ground, ink) = statusLineInks(m.canvas)
+        check m.canvas.bgAt(line.row, 0) == ground
+        let hints = m.view.all("hint")
+        check hints.len == 1
+        if hints.len == 1:
+          let h = hints[0]
+          # The focused button is the active one; its tooltip, whole.
+          check h.attr("hint") == frontendTooltip()
+          check h.attr("hint") == m.tab.all("recording").filterIt(
+            it.attr("recording-active") == "true")[0].attr("tooltip")
+          check m.lineText(line.row).strip == frontendTooltip()
+          check h.col == 1
+          let st = m.canvas.grid.styleAt(h.row, h.col)
+          check st.fg == ink
+          check contrastOf(st.fg, st.bg) >= 4.5
+        m.dispose()
+
+  test "unfocused: the status line holds no hint":
+    for mode in [dmDark, dmLight]:
+      let m = mount("three", mode = mode)
+      check not m.processes.focused.val
+      check m.processes.focusHint == ""
+      check m.view.all("status-line").len == 1
+      check m.view.all("hint").len == 0
+      check m.lineText(m.rows - 1).strip == ""
+      m.dispose()
+    # The control: the same story given the focus shows it, and taking the
+    # focus away clears it.
+    let m = mount("three")
+    m.processes.focused.val = true
+    m.draw()
+    check m.view.all("hint").mapIt(it.attr("hint")) == @[frontendTooltip()]
+    m.processes.focused.val = false
+    m.draw()
+    check m.view.all("hint").len == 0
+    m.dispose()
+
+  test "the hint follows the selection, and names a state that is not ready":
+    let m = mount("many")
+    check m.handleInput("6")   # worker-4, whose trace failed to load
+    check m.view.all("hint").mapIt(it.attr("hint")) ==
+      @["worker-4 \xC2\xB7 pid 4193 \xC2\xB7 /srv/envelope/bin/worker" &
+        " (failed to load: trace file truncated)"]
+    m.dispose()
+
+  test "a press on a button gives the switcher the focus":
+    let m = mount("three")
+    check m.view.all("hint").len == 0
+    check m.pressProcessSwitcher(ProcessSelectOperation, "envelope-backend")
+    check m.processes.focused.val
+    check m.view.all("hint").mapIt(it.attr("hint")) ==
+      @["backend \xC2\xB7 pid 4182 \xC2\xB7 /srv/envelope/bin/backend"]
+    # A press on the active button only focuses: drawn again all the same.
+    m.processes.focused.val = false
+    m.draw()
+    check m.pressProcessSwitcher(ProcessSelectOperation, "envelope-backend")
+    check m.view.all("hint").len == 1
+    m.dispose()
+
+  test "a tooltip longer than the line is cut with an ellipsis":
+    for mode in [dmDark, dmLight]:
+      # At the sidebar's 45 cells the line holds 43; the front end's
+      # tooltip is 48.
+      let m = mount("many", 45, mode = mode)
+      let h = m.view.all("hint")
+      check h.len == 1
+      if h.len == 1:
+        check h[0].attr("hint") == frontendTooltip()   # the fact: whole
+        let shown = m.lineText(h[0].row).strip
+        check shown.endsWith("\xE2\x80\xA6")
+        check widthOf(shown) == 43
+        check frontendTooltip().startsWith(shown[0 ..< shown.len - 3])
+        # A cell clear at either end of the line.
+        check m.canvas.grid.runeAt(h[0].row, 0) == " "
+        check m.canvas.grid.runeAt(h[0].row, 44) == " "
+      m.dispose()

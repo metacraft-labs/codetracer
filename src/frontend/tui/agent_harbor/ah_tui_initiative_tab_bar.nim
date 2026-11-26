@@ -40,12 +40,14 @@ proc keyOf(tab: StripTab): string =
   if tab.kind == stkInitiative: initiativeKey(tab.id) else: sessionKey(tab.id)
 
 proc buttonLabel*(rb: RecordingButton): string =
-  ## A recording button as the terminal draws it: three cells, a space, the
-  ## number and its state's mark in the cell after it (`␣1␣`, `␣2…`, `␣3✕`,
-  ## `␣4?`; the web's `2 …` without its space), so the active tab keeps
-  ## room for its title. The leading space parts it from its neighbour.
+  ## A recording button as the terminal draws it: a space, the number, its
+  ## state's mark in the cell after it when it has one, and a space (`␣1␣`,
+  ## `␣2…␣`, `␣3✕␣`, `␣4?␣`; the web's `2 …` without the space between), so
+  ## the active tab keeps room for its title. The spaces are the button's
+  ## padding on both sides: a stated button's mark never takes the right
+  ## pad and touches the button's edge (terminal review, 2026-11-25).
   let suffix = stateSuffix(rb.state).strip
-  " " & $rb.number & (if suffix.len > 0: suffix else: " ")
+  " " & $rb.number & suffix & " "
 
 const RecordingGap* = 1
   ## Between two recording buttons, and before `+N`: a cell of the tab's own
@@ -86,11 +88,12 @@ proc tabMinCellsOf(vm: InitiativeTabStripVM; tab: StripTab): int =
 
 proc buttonStateInk*(p: AhPalette; state: RecordingState): string =
   ## A recording button's number (and `+N`'s, and its mark) in its state's
-  ## role, on the buttons' ground (the panel's). Dark keeps the roles
-  ## themselves (7:1 or more there). Light's roles fall under the text floor
-  ## on its warm panel (#e6e2db; terminal review of the process switcher,
-  ## 2026-11-25: the warning role 2.76:1, the error role 3.74:1, the caption
-  ## role 3.55:1), so Light takes readable steps, each 4.5:1 or more: a
+  ## role, on the buttons' ground (the panel's), by the palette's one rule
+  ## for a status word on a ground (`statusTextInk`, 4.5:1). Dark keeps the
+  ## roles themselves (7:1 or more there). Light's roles fall under the text
+  ## floor on its warm panel (#e6e2db; terminal review of the process
+  ## switcher, 2026-11-25: the warning role 2.76:1, the error role 3.74:1,
+  ## the caption role 3.55:1), so Light takes the rule's readable steps: a
   ## failed one the error role's 700 step (its hover step, red/700, 5.0:1); a
   ## missing one the warning role's 700 step taken a quarter toward the body
   ## text (#9b3a12, about orange/800: the design system's alias
@@ -101,12 +104,8 @@ proc buttonStateInk*(p: AhPalette; state: RecordingState): string =
   case state
   of rsReady: p.textLabel
   of rsLoading: (if p.mode == dmDark: p.textCaption else: p.textLabel)
-  of rsFailed:
-    if p.mode == dmDark: p.textError
-    else: tokenHexOf(dtColorsUiTextErrorPrimaryHover, p.mode)
-  of rsMissing:
-    if p.mode == dmDark: p.textWarning
-    else: mixInk(tokenHexOf(dtColorsUiTextWarningPrimaryHover, p.mode), p.textBody, 25)
+  of rsFailed: p.statusTextInk(prError, p.panel)
+  of rsMissing: p.statusTextInk(prWarning, p.panel)
 
 proc ringUnderlineInk*(p: AhPalette): string =
   ## The correlation ring's underline: the action colour's ring step
@@ -258,9 +257,15 @@ proc drawPopup(c: var AhCanvas; parent: AhNode; popup: InitiativePopup;
   discard c.dropArea("popup", row, col, width, min(height, c.rows - row))
   let n = c.node(parent, row, col, width, height, [("popup", popup.id)])
   var r = row + 1
-  discard c.mark(n, r, col + 1, c.p.markOf(popup.state))
+  # Every status ink in the popup is resolved for its dropped ground
+  # (`markOn`, `statusTextInk`): in Light the roles fall to 2.0-2.5:1 on the
+  # card and on #c8c2b5 (terminal review of the initiative tab bar,
+  # 2026-11-26).
+  let ground = c.bgAt(r, col + 1)
+  discard c.mark(n, r, col + 1, c.p.markOn(c.p.markOf(popup.state), ground))
   let stateColour = case popup.state
-                    of isNeedsInput, isWorking, isBlocked: c.p.stateWordColour(popup.state)
+                    of isNeedsInput, isWorking, isBlocked:
+                      c.p.statusTextInk(pieRoleOf(popup.state), ground)
                     else: c.p.textLabel
   let word = stateWord(popup.state)
   let ww = widthOf(word)
@@ -272,7 +277,8 @@ proc drawPopup(c: var AhCanvas; parent: AhNode; popup: InitiativePopup;
   inc r
   discard c.text(n, r, col + 1, inner, popup.headline, c.p.textCaption, fact = "headline")
   inc r
-  r += c.drawMilestoneBar(n, r, col, width, popup.statusCounts, labelled = true)
+  r += c.drawMilestoneBar(n, r, col, width, popup.statusCounts, labelled = true,
+                          onGround = true)
   if popup.currentMilestone.len > 0:
     c.drawCurrent(n, r, col + 1, inner, popup.currentMilestone)
     inc r
@@ -284,7 +290,7 @@ proc drawPopup(c: var AhCanvas; parent: AhNode; popup: InitiativePopup;
       inc r
   inc r   # a blank line before the sessions (the web's rule above them)
   for item in popup.sessions:
-    c.drawSessionLine(n, item, r, col + 1, inner)
+    c.drawSessionLine(n, item, r, col + 1, inner, onGround = true)
     inc r
   let bound = height
   height = r - row + 1
@@ -402,7 +408,8 @@ proc drawElsewhereItem(c: var AhCanvas; menu: AhNode; entry: ElsewhereSession;
   let height = if stacked: 2 else: 1
   let n = c.node(menu, row, col, width, height, [("menu-item", entry.item.id)])
   c.target(row, col, width, height, onClick)
-  discard c.mark(n, row, col + 1, c.p.markOf(entry.item.attention))
+  discard c.mark(n, row, col + 1, c.p.markOn(c.p.markOf(entry.item.attention),
+                                             c.bgAt(row, col + 1)))
   let ow = ElsewhereOriginCells
   if not stacked:
     # Each column cut before the next keeps `StatusWordGap` cells before it

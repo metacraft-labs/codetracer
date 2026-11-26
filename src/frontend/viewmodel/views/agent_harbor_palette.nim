@@ -121,6 +121,12 @@ type
     ## A status mark: a filled dot, or a hollow ring (idle, planned).
     colour*: string
     ring*: bool
+    role*: PieRole
+      ## The status role the mark draws (`markOf`), so a view can resolve
+      ## its ink for the ground under it (`markOn`); read only when `roled`.
+    roled*: bool
+      ## Whether `role` is set: false for a mark with no status role (the
+      ## auto-switch dot, a milestone's planned or other mark).
 
 proc ahPalette*(mode: DesignMode): AhPalette =
   template t(token: DesignToken): string = DesignTokenHex[token][mode]
@@ -197,27 +203,27 @@ proc inboxStepInk*(p: AhPalette; disabled: bool): string =
 
 proc markOf*(p: AhPalette; attention: SessionAttention): MarkStyle =
   case attention
-  of saNeedsInput: MarkStyle(colour: p.iconWarning)
-  of saRunning: MarkStyle(colour: p.iconSuccess)
-  of saQueued: MarkStyle(colour: p.iconInfo)
-  of saFailed: MarkStyle(colour: p.iconError)
-  of saIdle: MarkStyle(colour: p.iconDefault, ring: true)
-  of saEnded: MarkStyle(colour: p.endedMark)
+  of saNeedsInput: MarkStyle(colour: p.iconWarning, role: prWarning, roled: true)
+  of saRunning: MarkStyle(colour: p.iconSuccess, role: prSuccess, roled: true)
+  of saQueued: MarkStyle(colour: p.iconInfo, role: prInfo, roled: true)
+  of saFailed: MarkStyle(colour: p.iconError, role: prError, roled: true)
+  of saIdle: MarkStyle(colour: p.iconDefault, ring: true, role: prIdle, roled: true)
+  of saEnded: MarkStyle(colour: p.endedMark, role: prEnded, roled: true)
 
 proc markOf*(p: AhPalette; state: InitiativeState): MarkStyle =
   case state
-  of isNeedsInput: MarkStyle(colour: p.iconWarning)
-  of isWorking: MarkStyle(colour: p.iconSuccess)
-  of isBlocked: MarkStyle(colour: p.iconError)
-  of isIdle: MarkStyle(colour: p.iconDefault, ring: true)
-  of isEnded: MarkStyle(colour: p.endedMark)
+  of isNeedsInput: MarkStyle(colour: p.iconWarning, role: prWarning, roled: true)
+  of isWorking: MarkStyle(colour: p.iconSuccess, role: prSuccess, roled: true)
+  of isBlocked: MarkStyle(colour: p.iconError, role: prError, roled: true)
+  of isIdle: MarkStyle(colour: p.iconDefault, ring: true, role: prIdle, roled: true)
+  of isEnded: MarkStyle(colour: p.endedMark, role: prEnded, roled: true)
 
 proc markOf*(p: AhPalette; status: MilestoneStatusClass): MarkStyle =
   case status
-  of mscCompleted: MarkStyle(colour: p.iconSuccess)
-  of mscInProgress: MarkStyle(colour: p.iconInfo)
-  of mscPartial: MarkStyle(colour: p.iconWarning)
-  of mscBlocked: MarkStyle(colour: p.iconError)
+  of mscCompleted: MarkStyle(colour: p.iconSuccess, role: prSuccess, roled: true)
+  of mscInProgress: MarkStyle(colour: p.iconInfo, role: prInfo, roled: true)
+  of mscPartial: MarkStyle(colour: p.iconWarning, role: prWarning, roled: true)
+  of mscBlocked: MarkStyle(colour: p.iconError, role: prError, roled: true)
   of mscPlanned: MarkStyle(colour: p.trackPlanned)
   of mscOther: MarkStyle(colour: p.iconSubtle)
 
@@ -667,6 +673,77 @@ proc readableInk*(p: AhPalette; ground: string; floor = StoryTextFloor): string 
 
 proc pieInks*(p: AhPalette; role: PieRole; ground: PieGround): PieInks =
   p.pieInks(role, p.pieGroundColour(ground))
+
+# ---------------------------------------------------------------------------
+# Status inks on a ground: a status word, a status count and a status mark
+# readable on the ground they are drawn on
+# ---------------------------------------------------------------------------
+#
+# The design system's status roles (`colors-ui-text-<status>-primary`,
+# `colors-ui-icon-<status>-primary`) are measured against its own surfaces;
+# on Light's warm grounds they fall under the floors (the terminal review of
+# the initiative tab bar, 2026-11-26: the warning dot 1.61:1 on the open
+# `+N` chip's #b5ae9f, the error banner 3.34:1 and the menus' status words
+# and dots 2.0-2.5:1 on the card #dbd6cc and on #c8c2b5). Each is resolved
+# here, per ground, by one rule for every view that draws on such a ground:
+#
+# - a status WORD or COUNT is text: WCAG 2.2 SC 1.4.3, 4.5:1
+#   (https://www.w3.org/TR/WCAG22/#contrast-minimum). It takes the role's
+#   text step where that holds, else its hover step (the 700 step), else
+#   that step taken `StatusInkStepPercent` at a time toward the body text
+#   (`statusTextInk`): only tokens, mixed in code, as `buttonStateInk` mixes
+#   orange/700 toward the body for orange/800 (the Nim design-token table
+#   carries no 800 step);
+# - a status MARK (the one-cell dot) is a graphical object: SC 1.4.11, 3:1
+#   (https://www.w3.org/TR/WCAG22/#non-text-contrast). It keeps the role's
+#   icon ink where that holds, else it takes the pie's ink for its role on
+#   that ground (`roleInks`, 3.3:1 and 20 CIEDE2000 from every other role),
+#   so a pie and a dot of one role on one ground are one ink (`markOn`).
+#
+# Dark's roles hold both floors on every Dark ground the views use, so Dark
+# draws the roles themselves.
+
+const
+  StatusTextFloor* = 4.5
+    ## A status word's or count's least contrast on its ground (SC 1.4.3).
+  StatusMarkFloor* = 3.0
+    ## A status mark's least contrast on its ground (SC 1.4.11).
+  StatusInkStepPercent* = 25
+    ## The step a status role's hover ink is taken toward the body text by.
+
+proc statusTextSteps(p: AhPalette; role: PieRole): (string, string) =
+  ## A status role's text step and its hover (700) step; a role with no
+  ## status text (idle, ended) has the label role for both.
+  template t(token: DesignToken): string = DesignTokenHex[token][p.mode]
+  case role
+  of prWarning: (t(dtColorsUiTextWarningPrimary), t(dtColorsUiTextWarningPrimaryHover))
+  of prSuccess: (t(dtColorsUiTextSuccessPrimary), t(dtColorsUiTextSuccessPrimaryHover))
+  of prInfo: (t(dtColorsUiTextInformationPrimary), t(dtColorsUiTextInformationPrimaryHover))
+  of prError: (t(dtColorsUiTextErrorPrimary), t(dtColorsUiTextErrorPrimaryHover))
+  of prIdle, prEnded: (p.textLabel, p.textLabel)
+
+proc statusTextInk*(p: AhPalette; role: PieRole; ground: string;
+                    floor = StatusTextFloor): string =
+  ## A status word or count of `role` readable on `ground` (see the
+  ## section's header): the role's text step, else its hover step, else the
+  ## hover step taken toward the body text a `StatusInkStepPercent` step at
+  ## a time, the first that holds `floor`; the body text when none does.
+  let (primary, hover) = p.statusTextSteps(role)
+  if inkContrast(primary, ground) >= floor: return primary
+  var step = 0
+  while step < 100:
+    let ink = mixInk(hover, p.textBody, step)
+    if inkContrast(ink, ground) >= floor: return ink
+    step += StatusInkStepPercent
+  p.textBody
+
+proc markOn*(p: AhPalette; m: MarkStyle; ground: string): MarkStyle =
+  ## `m` readable on `ground` (see the section's header): as it is when its
+  ## ink holds `StatusMarkFloor` there or it has no status role, else in the
+  ## pie's ink for its role on that ground.
+  result = m
+  if m.roled and inkContrast(m.colour, ground) < StatusMarkFloor:
+    result.colour = p.roleInks(ground)[m.role]
 
 type
   PieShape* = enum

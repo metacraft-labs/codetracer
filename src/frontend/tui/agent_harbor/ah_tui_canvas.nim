@@ -285,6 +285,18 @@ proc dropGround*(p: AhPalette; covered: openArray[string]): string =
     if clear: return candidate
   candidates[^1]
 
+proc statusLineInks*(c: AhCanvas): tuple[ground, ink: string] =
+  ## The status line's ground and its items' ink (a story's status line: the
+  ## gaze mark's, the process switcher's hint), on a ground no area of the
+  ## control center above it takes. Dark: `surface/base/raised` (#161616),
+  ## the items in the caption role (about 9:1). Light: `surface/base/card`
+  ## (#dbd6cc, 1.34:1 off a highlighted row's #f8f6f2 and 1.12:1 off the
+  ## panel), where the caption role falls to 3.2:1, so the items and the
+  ## mark take the label role (follow-up review round 2: `raised` was 1.03:1
+  ## off a highlighted initiative row at the sidebar's foot).
+  if c.p.mode == dmDark: (tokenHexOf(dtColorsUiSurfaceBaseRaised, c.p.mode), c.p.textCaption)
+  else: (tokenHexOf(dtColorsUiSurfaceBaseCard, c.p.mode), c.p.textLabel)
+
 proc selectedGround*(p: AhPalette): string =
   ## The palette's selection tint over the panel (the changes inbox's active
   ## tab and current item).

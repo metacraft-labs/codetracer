@@ -1154,6 +1154,13 @@ proc checkProcessSwitcher(view: AhNode; vm: ProcessSwitcherVM): seq[string] =
   result.expect("hidden ring",
                 t.all("recordings-hidden").mapIt(it.attr("recordings-hidden-ringed") == "true"),
                 (if b.hidden > 0: @[b.hiddenRinged] else: newSeq[bool]()))
+  # The status line's hint is the focused button's tooltip while the
+  # switcher has the focus, and nothing without it: a terminal draws no
+  # tooltip, so its status line shows the focused button's.
+  let lines = view.all("status-line")
+  result.expect("status lines", lines.len, 1)
+  result.expect("hint", view.all("hint").mapIt(it.attr("hint")),
+                (if vm.focusHint.len > 0: @[vm.focusHint] else: newSeq[string]()))
 
 proc checkStory(m: AhTuiMount): seq[string] =
   let view = m.view
@@ -1382,11 +1389,14 @@ proc styleProblems(m: AhTuiMount; look: LookOf): seq[string] =
     if h.attr("head") == "section header":
       result.expectGround(look, h, rows, "the section head", t.head)
   # A failure says what failed in the error role: a strip's one-line notice
-  # all of it, a panel's error block its title (its reason is a caption).
+  # all of it, readable on the notice's own ground (`statusTextInk`: Light's
+  # error role is 3.34:1 on its card), a panel's error block its title (its
+  # reason is a caption).
   for n in view.all("notice"):
     if n.attr("notice") != "error": continue
     if n.height == 1:
-      result.expectInk(look, n.first("error"), rows, "the error", p.textError)
+      result.expectInk(look, n.first("error"), rows, "the error",
+                       p.statusTextInk(prError, noticeGround(p)))
     else:
       result.expectInk(look, n.first("error-title"), rows, "the error's title", p.textError)
       result.expectInk(look, n.first("error"), rows, "the error's reason", p.textCaption)

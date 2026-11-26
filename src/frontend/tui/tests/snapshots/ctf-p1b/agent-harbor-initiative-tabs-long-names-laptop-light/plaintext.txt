@@ -1,4 +1,4 @@
- ◔ Telemetry u…   1   2…  3✕  4?   ◔ Route cache on the…   ◑ Settings redesign…    ◑ CI runner migratio…   +1   +     2  Agent Harbor sessions   ← 2 waiting  →   Auto-switch: off
+ ◔ Telemetr…   1   2…   3✕   4?    ◔ Route cache on the…   ◑ Settings redesign…    ◑ CI runner migratio…   +1   +     2  Agent Harbor sessions   ← 2 waiting  →   Auto-switch: off
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     
