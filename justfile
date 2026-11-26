@@ -5792,6 +5792,12 @@ scenario-stage-test:
 scenario-gui-binding-test:
   bash ci/test/scenarios.sh gui-binding-test
 
+# The editor scenario bindings' own suites (src/tests/scenarios/bindings/
+# termassert/*_test.nim, over screens Neovim and Emacs draw): the
+# `scenario-term-bindings` test lane.
+scenario-term-binding-test:
+  bash ci/test/scenarios.sh term-binding-test
+
 # One flavour's lane: `terminal`, `gpui` or `electron` (the last two need a
 # display: run them under Xvfb, as `scenario-lane-xvfb` does).
 scenario-lane flavour: build-tui

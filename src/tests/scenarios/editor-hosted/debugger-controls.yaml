@@ -1,0 +1,55 @@
+scenario: 1
+name: editor-hosted/debugger-controls
+pack: codetracer
+summary: >-
+  In an editor hosting CodeTracer (Neovim, Emacs), the debugger's controls
+  are a strip of buttons beside the editor's own tabs: a click on Next steps
+  over, a click on Reverse next steps back, and CodeTracer's own key for
+  Next does the same in the source buffer.
+
+stage:
+  - use: record-program
+    with: { program: calc }
+  - use: open-recording
+    with: { width: 200, height: 50 }
+
+steps:
+  - beat: open
+    narration: { text: "The debugger's controls sit beside the editor's own tabs.", voice: narrator }
+    caption: { text: "The debugger controls, in the editor's tab line" }
+    steps:
+      - wait: { until: replay-idle, timeout: 120s }
+      - wait: { until: editor.loaded, timeout: 60s }
+      - expect: { at: 'editor[file="main.py"]', assert: "stopped-at(1)" }
+      - expect: { at: 'toolbar/toolbar-button[label="Next"]', present: true }
+
+  - beat: next
+    narration: { text: "A click on Next steps over, as in any debugger.", voice: narrator }
+    caption: { text: "Click Next" }
+    steps:
+      - click: { at: 'toolbar/toolbar-button[label="Next"]', pace: thoughtful }
+        settle: false
+      - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(2)" }, timeout: 60s }
+        dwell: 700ms
+      - click: { at: 'toolbar/toolbar-button[label="Next"]', pace: thoughtful }
+        settle: false
+      - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(29)" }, timeout: 60s }
+        dwell: 700ms
+
+  - beat: reverse-next
+    narration: { text: "And Reverse next steps back again.", voice: narrator }
+    caption: { text: "Click Reverse next" }
+    steps:
+      - click: { at: 'toolbar/toolbar-button[label="Reverse next"]', pace: thoughtful }
+        settle: false
+      - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(2)" }, timeout: 60s }
+        dwell: 700ms
+
+  - beat: key
+    narration: { text: "CodeTracer's own key for Next works in the source buffer too.", voice: narrator }
+    caption: { text: "Next, from the keyboard" }
+    steps:
+      - chord: { bound: debugger.step-over }
+        settle: false
+      - wait: { until: { at: 'editor[file="main.py"]', assert: "stopped-at(29)" }, timeout: 60s }
+        dwell: 1500ms

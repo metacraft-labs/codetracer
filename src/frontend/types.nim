@@ -15,6 +15,8 @@ export FlowLayoutStep, FlowLayoutLoop, FlowLayoutWindow, FlowValueText,
   FlowLayoutEvent
 import context_menu_item
 export context_menu_item
+from ui/flow_reload_gate import FlowReloadGate
+export FlowReloadGate
 
 type
   defaultstring = cstring
@@ -1570,6 +1572,11 @@ type
     multilineWidgets*: JsAssoc[int, JsAssoc[cstring, js]]
     multilineZones*: JsAssoc[int, MultilineZone]
     mutationObserver*: MutationObserver
+    reloadGate*: FlowReloadGate
+      ## Bounds the `.view-lines` watcher's re-renders (`ui/flow_reload_gate`).
+    renderTargets*: seq[int]
+      ## The step counts the last `renderFlowLines` tried to give a node: the
+      ## watcher counts only these as missing.
     pixelsPerSymbol*: int
     recalculate*: bool
     selected*: bool
