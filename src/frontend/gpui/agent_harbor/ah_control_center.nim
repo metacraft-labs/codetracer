@@ -75,7 +75,7 @@ const
   TitleLinePx = 20        ## a waiting row's title, a recent launch's text
   RowPadPx = 6            ## a waiting row's padding
   RecentPadPx = 4         ## a recent launch's padding
-  MoreLinePx = 20         ## the waiting list's `+N more` line
+  MoreLinePx* = 20        ## the waiting list's `+N more` line
   EmptyLinePx = 12 + 16   ## an empty fleet's `No initiatives yet.`, 12px down
 
 proc renameFact(r: GpuiRenderer; e: GpuiElement; name, to: string) =
@@ -377,7 +377,7 @@ proc launchColumn(r: GpuiRenderer; p: AhPalette; vm: ControlCenterVM;
   h += PartGapPx * max(0, parts - 1)
   (col, h)
 
-proc waitingRowHeightPx(row: WaitingRow; innerPx: int): int =
+proc waitingRowHeightPx*(row: WaitingRow; innerPx: int): int =
   let why = row.waitingWhy
   result = 2 * RowPadPx + TitleLinePx + 1 + 16
   if why.len > 0: result += 1 + 16 * min(2, wrappedRows(why, CaptionPx, innerPx))
