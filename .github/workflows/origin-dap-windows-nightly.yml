@@ -108,21 +108,6 @@ jobs:
           key: windows-diy-origin-dap-v3-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}
           fail-on-cache-miss: true
 
-      - name: Restore db-backend's compiler cache
-        # sccache's local store, not db-backend's target directory: the test
-        # compile of db-backend and its dependencies took 36m53s of the Python
-        # job's 75 minutes on a clean-start runner (run 45718096371). Keyed on
-        # the toolchain and Cargo.lock; a dependency change restores the
-        # nearest older store, and sccache recompiles only what changed.
-        # SCCACHE_CACHE_SIZE on the test step bounds what is saved.
-        id: sccache_cache
-        uses: actions/cache/restore@v4
-        with:
-          path: ${{ runner.temp }}\sccache
-          key: sccache-db-backend-windows-v1-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}-${{ hashFiles('src/db-backend/Cargo.lock') }}
-          restore-keys: |
-            sccache-db-backend-windows-v1-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}-
-
       - name: Setup db-backend siblings
         # `windows-diy`, for the reason spelled out in the per-PR job above:
         # the `nix` flavor cannot install Nix on a Windows runner, and this
@@ -141,6 +126,25 @@ jobs:
         with:
           env-flavor: windows-diy
           gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Restore db-backend's compiler cache
+        # sccache's local store, not db-backend's target directory: the test
+        # compile of db-backend and its dependencies took 36m53s of the Python
+        # job's 75 minutes on a clean-start runner (run 45718096371). Keyed on
+        # the toolchain and Cargo.lock; a dependency change restores the
+        # nearest older store, and sccache recompiles only what changed.
+        # SCCACHE_CACHE_SIZE on the test step bounds what is saved.
+        # After env.ps1 has put its pinned zstd on PATH, as the save step
+        # runs: actions/cache records the compressor in the cache's version,
+        # so a restore before it (gzip) never matched a store saved after it
+        # (zstd), and every run missed (runs 45736854050 and 45775567755).
+        id: sccache_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}\sccache
+          key: sccache-db-backend-windows-v1-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}-${{ hashFiles('src/db-backend/Cargo.lock') }}
+          restore-keys: |
+            sccache-db-backend-windows-v1-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}-
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
