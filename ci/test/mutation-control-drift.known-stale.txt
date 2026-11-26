@@ -216,7 +216,7 @@ src/frontend/tui/tests/plat59-visual-replay-mutation-control.sha256	src/tests/gu
 # plat47: graded at 39e4112f69; b9396a9502  moved
 # src/frontend/tui/app/runtime.nim after the grade. Re-grade the arms whose
 # needles sit in them.
-src/tests/scenarios/plat66-pack-mutation-control.sha256	ci/test/scenarios.sh	4edebac246b9c375f8b5e181b3fb621774088543476bea5c556b0e1d642c0e77	4e8a6f84c587bf2d0ffe70577696e2e1721d84180baaacad52f9cf73bbdc8102
+src/tests/scenarios/plat66-pack-mutation-control.sha256	ci/test/scenarios.sh	4edebac246b9c375f8b5e181b3fb621774088543476bea5c556b0e1d642c0e77	cdb78c3636e4239d3232803e6fa3595085b52b6333f2dd063bab3f0a46536bbd
 
 # The shared editor on every editor surface (ui/editor_surface: the macro
 # expansions, low-level views, a recording-with-diff's removed lines, the
@@ -312,15 +312,15 @@ src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/gpui/t
 src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/gpui/tests/test_plat51b_gpui_plan.nim	4dc3f2cdbece84047e697a99daaf09b0464b433edc6eccaf0fdf5b17ee67999d	1f8e80e49bb71a5cd29a7c40285846dc5a2921686b6ff7fe70beca5153c2668b
 src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/gpui/tests/test_m71_gpui_plan.nim	3adcbfe834483ada743aeefb4d47e45bfe4952bc411ea0cc0f1062b529f1eeaa	8a1d256f4b67bd2c68a79bcf01621fa848d4d934d28b6797cf44fdf11bf17909
 src/frontend/viewmodel/tests/unit/plat29-async-mutation-control.sha256	src/frontend/dap.nim	3f8d3569e3e93f71f6e286e03033715eccfb0ddc61b18d11c11c2934afeb85d4	04c62b2afc836d3cd871970f23f169119f6fdf53216469d8a9a7aebb44ab31c8
-ci/test/plat70c-find-mutation-control.sha256	src/frontend/ui/editor.nim	58e7279dd66adf426e4fdb32b5836fd8ad049a427f9f45e86a1084735cfc2405	93c108e5ad262bb6749f9c6430abe16ecef7ef1e977332248cb8f64c83c01db8
-src/frontend/tui/tests/plat53-test-results-mutation-control.sha256	src/frontend/ui/editor.nim	3ae3540e694e8e2ec989dfa8d59ffb7c3975f9713dfd319120e95ce089609b25	93c108e5ad262bb6749f9c6430abe16ecef7ef1e977332248cb8f64c83c01db8
-src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/ui/editor.nim	58e7279dd66adf426e4fdb32b5836fd8ad049a427f9f45e86a1084735cfc2405	93c108e5ad262bb6749f9c6430abe16ecef7ef1e977332248cb8f64c83c01db8
-src/frontend/tui/tests/plat70g-multiclick-mutation-control.sha256	src/frontend/ui/editor.nim	86d697eaff217cdde77e51da1433f850081b315422e9c533035a505af56f0426	93c108e5ad262bb6749f9c6430abe16ecef7ef1e977332248cb8f64c83c01db8
+ci/test/plat70c-find-mutation-control.sha256	src/frontend/ui/editor.nim	58e7279dd66adf426e4fdb32b5836fd8ad049a427f9f45e86a1084735cfc2405	149ec641d7688847aeb456ae82a6dd9873c68079bc90523f8605f48da091a686
+src/frontend/tui/tests/plat53-test-results-mutation-control.sha256	src/frontend/ui/editor.nim	3ae3540e694e8e2ec989dfa8d59ffb7c3975f9713dfd319120e95ce089609b25	149ec641d7688847aeb456ae82a6dd9873c68079bc90523f8605f48da091a686
+src/frontend/tui/tests/plat60-low-level-code-mutation-control.sha256	src/frontend/ui/editor.nim	58e7279dd66adf426e4fdb32b5836fd8ad049a427f9f45e86a1084735cfc2405	149ec641d7688847aeb456ae82a6dd9873c68079bc90523f8605f48da091a686
+src/frontend/tui/tests/plat70g-multiclick-mutation-control.sha256	src/frontend/ui/editor.nim	86d697eaff217cdde77e51da1433f850081b315422e9c533035a505af56f0426	149ec641d7688847aeb456ae82a6dd9873c68079bc90523f8605f48da091a686
 src/frontend/tui/tests/plat51-parity-mutation-control.sha256	src/frontend/tui/tests/real_terminal/test_plat51b_pty.nim	76cf4b642edb03f7e49a64a6be915d8118fd62cb1c2165920c94edfb5baf3ff0	aa262206e487de87f53b45be7499c15abb3285b2f544434c32b2a846fe1f6205
 src/frontend/tui/tests/plat52-terminal-mutation-control.sha256	src/tests/gui/tests/views/isonim_views_test.nim	9eaf8754a0eade9bc628c1532aa3f4045c1d21e1021313d5bd9378c5e8816281	a61d87c74a222b2ee626aa2e190a4f71781ea8dc0b0a313ddd630666688fb40a
 src/frontend/tui/tests/plat61-shell-mutation-control.sha256	scripts/plat61-capture-electron.sh	ddf8eb29ee05d8338a6ae75d6b760fd8e97e93b9d305e91b23edec85ebc78f31	29ffb9b9c2b989f03e4c56fdcc77ede40448ee3c85ed688dcab66897d59a93c6
 src/frontend/viewmodel/tests/unit/plat29-async-mutation-control.sha256	src/frontend/tests/dap_session_routing_test.nim	23f78b7c75cf637296b0c6f87a1cfe695fb20ace8b7642f04df618a2b88cd56d	62e57ece0d63f73d0c2a18e98f4f3600ee96785701286b8250698fcaf25a06c4
-src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/playwright/codetracer-binding.ts	dac9e35953b0d93636c2284d9c9a858c2bba982b92e9311b0f41fb666e6879c0	978f1ff8956b46dd5cb69f3c7765e4577acc96c2097b221c400973007e0b91ed
+src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/playwright/codetracer-binding.ts	dac9e35953b0d93636c2284d9c9a858c2bba982b92e9311b0f41fb666e6879c0	2129262503a0d7c532c4939a7e824c7cfbefbb01b855193e1aae4904aff91269
 # The Agent Harbor session timeline's story hosts (`feat(agent-harbor): the session activity timeline in every story host`)
 # moved test_plat64_reachability.nim: the timeline's four press operations count as offered.
 # Re-grade the plat64 arms whose needles sit in it.
@@ -505,7 +505,7 @@ src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/fro
 # 2026-11-21, the browser's two keyboard oracles: test_cross_renderer_panes.nim
 # exports the four keyboard panes for the Chromium suite, and the renderer-chromium
 # lane lists that suite. Each harness below owes a re-grade for those bytes.
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/test-lane-files.sh	b463de41f09e76644ec644ddfe51bd166d7e2c033699c98ecca5083540215051	404e881a7c8307ee667db825de21b8f924d5bf95bc94ea036d275cd7b19c1998
+src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/test-lane-files.sh	b463de41f09e76644ec644ddfe51bd166d7e2c033699c98ecca5083540215051	984ce737de571eba3fbac9c301bbaa9a8915b633ccf0ac68fad7ff586b0d3576
 # 2026-11-21: a docked plugin pane previews on hover (auto_hide_hover, runtime); these harnesses digest those subjects and owe a re-grade.
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/headless_app/auto_hide_hover.nim	c2395cd53d7292e511d36c714f483d8f6ac8d8bf1f35c2c78237bebd54c73c62	0b4958cca008fcb95abaa5f2a2157cb461ed0b361fe1e0b702efc004cbbcf46f
 
@@ -564,7 +564,7 @@ src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/gpui/a
 ci/test/plat70c-find-mutation-control.sha256	src/frontend/viewmodel/editor/find_match.nim	085731b1ac292e06d6947610ed9dd8a4035c8a21ae1b6e65c68df8bee222b31e	bafa5a0329c8f63e24cbb42453112ba36a3bb2aa4fe6794b2249fab4aa255ae2
 ci/test/plat70c-find-mutation-control.sha256	src/frontend/viewmodel/editor/operations.nim	81f5945815c45a6d7c910335f266d9e526efc488962f3fcd11927de2b1e35719	6ba96746bc6aea47ebb5a05f9e589ed4658b406604d2b48b5338193c01c46053
 ci/test/plat70c-find-mutation-control.sha256	src/frontend/viewmodel/viewmodels/find_vm.nim	33cb0de4b03e05d45c1df0d9b59ee5f25915d440b8525f885eac9bce68769154	1cad990d3cbab9c394997f9928a226035d43661fe670e4ce46e725ed99d6853b
-src/frontend/tests/plat67-shared-editor-mutation-control.sha256	src/frontend/ui/shared_editor.nim	14aaa4b1a7653f032f0c4efa4e06f6144391d4ec050290d4fb86a04caeba586b	612e69b073d1963a8510bf8fe63f7769b85a79c95616c47c39104aaf9ce88c62
+src/frontend/tests/plat67-shared-editor-mutation-control.sha256	src/frontend/ui/shared_editor.nim	14aaa4b1a7653f032f0c4efa4e06f6144391d4ec050290d4fb86a04caeba586b	03f633d93fb60b935cc0467ecef66af3605291d2c1e9d4dccf82fadb67c14456
 src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/styles/generated/design_tokens.nim	28847f24c485fceae5ab2007a5202d5e9ca22e5b80148d49a3cf725f83821d5c	30c4b3ab59823aeb46ab2bc0c2d65e2cdcf52782e08ca906f0a84a41fdb47ead
 src/frontend/tui/tests/plat47-parity-mutation-control.sha256	scripts/tokens-to-styl.sh	92b76397e164fec56e5091a5e2d4ab7a314035095ced745b52d29713be5a8fbf	e5262c65cbd6300d43f22bac5312b6cbf2afac4e91b54d3d8344c0e61457fd6c
 src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/tui/app/theme/roles.nim	44373bc763be9d896445891509ac39004d39d783c098a269874e096b730198db	bd4768a43ab21b91aebff34c3ac2de9a5f512c46898cbedeb1f4580a56367dd3
@@ -594,7 +594,7 @@ src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend
 
 # 2026-11-21, the terminal binding's Variables reader reads the column layout
 # (a fold glyph, then name, type and value), for the project-definitions port.
-src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/termassert/ct_tui_screen.nim	255a2526134d381474f695d7fd979d939f84bcbce60d0cffb1893725869e1816	467e0b911964693dfb4b3599fbc601a4b32a76b334ce1ae9d801c4322bf8383b
+src/tests/scenarios/plat66-pack-mutation-control.sha256	src/tests/scenarios/bindings/termassert/ct_tui_screen.nim	255a2526134d381474f695d7fd979d939f84bcbce60d0cffb1893725869e1816	745dfe0f8cff3c4c94964aeb1ce3666bbb5d961e2fed6ce2cce2a802b90c1ada
 
 # CTF-P3 step 5 (the terminal Changes panel and Inbox) moved overlay_rows.nim and
 # scope_path.nim again (the `changes` and `inbox` scopes and their key rows; the
@@ -688,7 +688,7 @@ src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	src/frontend/ui/ke
 # draws them (trace.updateGlyphMarks, editor's redraw hook), the main process sends
 # them (plugin_sessions). plat50, plat53, plat60, plat70g and plat81-node-plugin-host
 # owe re-grades.
-src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/ui/editor.nim	3ae3540e694e8e2ec989dfa8d59ffb7c3975f9713dfd319120e95ce089609b25	93c108e5ad262bb6749f9c6430abe16ecef7ef1e977332248cb8f64c83c01db8
+src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/ui/editor.nim	3ae3540e694e8e2ec989dfa8d59ffb7c3975f9713dfd319120e95ce089609b25	149ec641d7688847aeb456ae82a6dd9873c68079bc90523f8605f48da091a686
 src/frontend/tui/tests/plat70g-multiclick-mutation-control.sha256	src/frontend/ui/trace.nim	a98d49ef54a45b722f1ab02156a2dbb1e973ee7d59b902fe3cd3668d40d69e10	6cda94da93d6c4f09a7cb45712e513a7524a7e2dd9cfecb9c426b2798cf52fbf
 
 # 2026-11-24, ci/lib/test-lane-files.sh moved in 24bb8bb4a10 (agent-harbor web views
@@ -756,7 +756,7 @@ src/frontend/tui/tests/plat58-requests-mutation-control.sha256	src/frontend/view
 # path strings changed. Each control file names the moved subjects at their new paths with the
 # digests it recorded, so every harness below owes a re-grade for the moved bytes.
 ci/test/plat70-find-decisions-mutation-control.sha256	src/frontend/gpui/app/edit_arm.nim	bd79648c35fc18b2d8ae2dc8d8c208419c058fdb755e8075e1a3430141f64773	e2b0e14dd3141e2a234b45cc4efbe385d9eb6a48814066a984307cea739dd3fc
-src/frontend/gpui/tests/gpui-plugins-mutation-control.sha256	src/frontend/host/plugin_processes.nim	e7c1a24b0eca583538cbea93d8b96a12484c27e35adde4303fd6d66f7e6c6a83	e8119b02bd08a7f1d1e46b03e2d97b5f7b7320dd4fb212942299dc9c537d7e59
+src/frontend/gpui/tests/gpui-plugins-mutation-control.sha256	src/frontend/host/plugin_processes.nim	e7c1a24b0eca583538cbea93d8b96a12484c27e35adde4303fd6d66f7e6c6a83	504c41125e9bfe2de0f3115e91791f546ba5777d963d4fcb6c9286b827f9aee7
 src/frontend/gpui/tests/gpui-plugins-mutation-control.sha256	src/frontend/host/plugin_panes.nim	d9aba9dc68dd568155b5c3fb22ff62bbb08fc190b601099cc12d3f26505cdf8c	2cb413dd75f0431075931a5cfc72454652240084aaacd81c8b61ca5bee45e031
 src/frontend/tui/tests/build-residuals-mutation-control.sha256	src/frontend/tui/host/build_output_source.nim	01802c6ee323728bd743a72fa1e7ebc6c1c07aaa82ea3e245db8661ae9811ec3	182f6b717b3f669c5f573d5d0cb0340a9b5d18167aea53c3d42b9d2769390426
 src/frontend/tui/tests/build-residuals-mutation-control.sha256	src/frontend/host/build_problems.nim	f07d44b9221f998dd8a7e8adaa6ba9684368e9a949b86ab19a5a79eca8bd5cbe	d556e85c7accd842b14605fd3b4529ea62926b1ea07a63179a6bca1cd8ac424e
@@ -792,7 +792,7 @@ src/frontend/tui/tests/plat62-constraints-mutation-control.sha256	src/frontend/t
 src/frontend/tui/tests/plat63-verification-mutation-control.sha256	src/frontend/tui/tests/test_plat63_verification.nim	af249a16439bc091fe296bc08c2fbddd4a6e5b4c86bbee916e509034d4f1ea8e	6f38cf8af0293a6b3856fa591df00ca66eeb81abc0e8aa6db4c1125bc5e41545
 src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend/tui/tests/test_plat48_top_bar.nim	8d176a5a5beafc3d74e57322412d846de668e9f33c223435d7f230a0e41c6aa6	0d9de228818643ec3c0ad2b6457f17c9b09a4bf59aee2b7f6282057683dfad78
 src/frontend/tui/tests/plat70d-grep-mutation-control.sha256	src/frontend/viewmodel/host/find_in_files.nim	7d78c16a901b281665310d163a9c30a4f2aba0385ae3cbf7a431f192ef93191d	574e842b0279e8132579ce2d1858cc9f3a0db260cc10fa1f54d88da4324cbb45
-src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/index/plugin_sessions.nim	b11872bdb3846299913918257d3bc9359c239ffa43078d3562efdf7ca18796f8	503c8ce71b8f01286ce0e4bb202445d183d4ceb261c05f491f9ccced65504617
+src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/index/plugin_sessions.nim	b11872bdb3846299913918257d3bc9359c239ffa43078d3562efdf7ca18796f8	b840273cb025ed45ea60b8330becf685f7bcb598e04bb259aed59944a25a1e56
 src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/tests/plugin_sessions_test.nim	fd4f7b3978e1f47d5713a0acb99d6396e370d838454132d8872b94513d38cd87	cfa57468f74db7da81599de6cccac0622676470279e3ff33eb7c387e4e0db282
 src/frontend/tui/tests/plat81-plugin-panes-mutation-control.sha256	src/frontend/host/plugin_panes.nim	b716e2b7781cc5abfd11c3027ef2dc760e1429f91422e4264bfc4d7d186ac28a	2cb413dd75f0431075931a5cfc72454652240084aaacd81c8b61ca5bee45e031
 src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/tui/host/plugin_service.nim	b1bf1fde41673cacebe77f0dc26c683be3fad804ef03f79529a58a8e66e7c5eb	9e0d2dac48c6557b18633570c6c14abdb71c3bc1f5a57cca772126d21e45ba1d
@@ -838,8 +838,8 @@ src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/fro
 # package by name and checks the admission; the suite changed, so the harness grading it owes
 # a re-grade.
 src/frontend/gpui/tests/plat20-mutation-control.sha256	src/frontend/gpui/tests/test_gpui_shell_split.nim	3d8325b36f086841e52b6032017041f6e015bba121482c5765a8b5140e05e1ee	e31ea3dce4e758df5744984ae12c76d3ab3c8b02d6a5ff199006e21bb9b604b4
-src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/viewmodel/plugin_host/supervisor.nim	37a911c95f7ce375ba18f590470046ad9550343fadf19166e6bf8ec65e2bd4fe	538e210863e1e1f99f853d55b69d1481dd9ce7eed49808bc7a3d15800c892ed8
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/supervisor.nim	37a911c95f7ce375ba18f590470046ad9550343fadf19166e6bf8ec65e2bd4fe	538e210863e1e1f99f853d55b69d1481dd9ce7eed49808bc7a3d15800c892ed8
+src/frontend/tui/tests/plat81-node-plugin-host-mutation-control.sha256	src/frontend/viewmodel/plugin_host/supervisor.nim	37a911c95f7ce375ba18f590470046ad9550343fadf19166e6bf8ec65e2bd4fe	f8d16286b327105199a698c33ddf60ba44b4beb3a6b2b6d1882f0518473ba6ca
+src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/plugin_host/supervisor.nim	37a911c95f7ce375ba18f590470046ad9550343fadf19166e6bf8ec65e2bd4fe	f8d16286b327105199a698c33ddf60ba44b4beb3a6b2b6d1882f0518473ba6ca
 
 # 2026-11-25, the SDK acknowledges an autoAck plugin's invoke on its reader thread
 # (codetracer-pm 2026-11-24-a-freshly-activated-plugins-first-key-misses-its-input-
@@ -847,7 +847,7 @@ src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/fronten
 # M25, its positive control run by hand: ackEarly off fails the new case) and the SDK
 # under plat83-ct-lens (its M3 re-indented to compile; by hand, it fails "a slow git
 # does not hold the sibling plugin"). Both owe a re-grade for these bytes.
-src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_plugin_process_host.nim	a89551d91a97127efb3167bff332656b21a67e21ce5bdc6e9222924210b3d119	e60205a8fba6e07a3bfd8f2a176ce73450edfd6324a0145513bfe2f6e09a4c4d
+src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_plugin_process_host.nim	a89551d91a97127efb3167bff332656b21a67e21ce5bdc6e9222924210b3d119	f0ab9fafe8155c3604e57b6f1051f52da82e9a8ae18de5edeb5916cd5e54f68f
 src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/plugin_sdk/codetracer_plugin_sdk.nim	2d4903eaa226c5295c0ced78d7a2666d9ecabd473c9bf9d3066d0a009d782fee	e2c939f3be8c6038dff6f10c0bb7c71b0faf5657f99ebcae999ea82b523483a1
 # 2026-11-25: the status line's row-sharing rule moved from the GPUI window
 # geometry into the viewmodel layer (window_geometry.nim re-exports it), and the
@@ -855,7 +855,7 @@ src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/plugin_
 # does not run (test-lane-files.sh); these harnesses digest those subjects and
 # owe a re-grade.
 src/frontend/gpui/tests/plat20-mutation-control.sha256	src/frontend/gpui/window_geometry.nim	8595f1669201ae3addab9f7134adf5c0ce306855acc4726ccfe1d41fb0e79ed7	fade42f842eab416a16e489917dd21c36d0577f86ed04910d418f212d1b9f4c2
-src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	ci/lib/test-lane-files.sh	8723f13449df6da6d5acdf55932cab0382378d8cb62d41cd89503d948c776663	404e881a7c8307ee667db825de21b8f924d5bf95bc94ea036d275cd7b19c1998
+src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	ci/lib/test-lane-files.sh	8723f13449df6da6d5acdf55932cab0382378d8cb62d41cd89503d948c776663	984ce737de571eba3fbac9c301bbaa9a8915b633ccf0ac68fad7ff586b0d3576
 ci/test/plat70-find-decisions-mutation-control.sha256	src/frontend/gpui/main.nim	74d1b4cb7c6794d7176211fc032aec567fa8d23bc4cc2a44907913bc6f089cbc	e7008c3a965527413534da1ebed1cc29dda1066d519194c91ea3edd04e6788cd
 ci/test/plat70c-find-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	e7008c3a965527413534da1ebed1cc29dda1066d519194c91ea3edd04e6788cd
 ci/test/plat70i-fit-mutation-control.sha256	src/frontend/gpui/main.nim	220d8170c7218709d5ae77691e7cfbfce2954ae359429ba9554c046b0b637053	e7008c3a965527413534da1ebed1cc29dda1066d519194c91ea3edd04e6788cd
@@ -889,7 +889,7 @@ src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	src/frontend/gpui/
 src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/gpui/main.nim	35ee2065e843830fe3a07b221e3c9e9f7ea1cb32735cb25a2d6167f5cc4a1e09	e7008c3a965527413534da1ebed1cc29dda1066d519194c91ea3edd04e6788cd
 src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	e7008c3a965527413534da1ebed1cc29dda1066d519194c91ea3edd04e6788cd
 src/frontend/tui/tests/plat70b-table-mutation-control.sha256	src/frontend/viewmodel/views/table_overflow_dom.nim	3cafcc6a3e9313fd18877db72be64ad195f0a86801bf89f119e79601d250fe83	651dc6c35d6eb035eda0eb6e83cfb7d48fc61d50618e29cbe67e098c825d64f4
-src/frontend/viewmodel/tests/unit/plat29-async-mutation-control.sha256	src/frontend/ui/state.nim	dffab8fbd926da0a6350b4bfa1ee15ae5940fb3b35e8630fe3fc07cb370f4e9f	bd66da9527b6298b1f91aaef8e60c68aa75e1b7847189f039b7d0bbd6671274e
+src/frontend/viewmodel/tests/unit/plat29-async-mutation-control.sha256	src/frontend/ui/state.nim	dffab8fbd926da0a6350b4bfa1ee15ae5940fb3b35e8630fe3fc07cb370f4e9f	12a6af08ebfa0247ea5ace4813b0d771297eaba419a1f2627439909a90bc48e7
 
 # Re-grades owed for subjects moved by a379c1fc4e6 without ledger lines;
 # the harnesses that digest them owe a re-grade of the arms that sit in them.
@@ -900,7 +900,7 @@ src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	src/f
 # the tokenizer, the reveals, the view zones); these harnesses owe a re-grade at those bytes:
 ci/test/plat70-find-decisions-mutation-control.sha256	src/frontend/viewmodel/editor/operations.nim	ae471882f9ac66dc73d0809af6d54ec7afd0ac3ab6430c489692e2bee0510398	6ba96746bc6aea47ebb5a05f9e589ed4658b406604d2b48b5338193c01c46053
 src/frontend/tests/plat67-shared-editor-mutation-control.sha256	src/frontend/ui/shared_editor_facade.nim	d701979616b3e6b24a6b7d2dfdd4a7ed79fabda55bd6508b10a31e79c187f1fb	3a5fa89917fcaa318d24665aabe7cd9ed9f65939ac0e8e8d8edf5ec51f03f8ab
-src/frontend/tests/plat67-shared-editor-mutation-control.sha256	src/frontend/tests/shared_editor_chromium_test.nim	9695a076fc615ecd5ac3e2044d513e60bf0d5e2a86574303b8f2fde0720745de	ef0ac8389103e53a88e8c49575a5be1e969d49d41a4d65b483961ef3844d7b5b
+src/frontend/tests/plat67-shared-editor-mutation-control.sha256	src/frontend/tests/shared_editor_chromium_test.nim	9695a076fc615ecd5ac3e2044d513e60bf0d5e2a86574303b8f2fde0720745de	c65262d1fe8437310098b0df98aab944f7039cd8beeb833dfcab0cbcb0eebd3f
 src/frontend/tui/tests/plat43-selector-mutation-control.sha256	src/frontend/viewmodel/editing_core.nim	523e410249726163c1fcb2f1117c70346130e56c3b84fd3bb3e5105d15a9fc86	05304883fb5e13c5090ddfc902dd8c3dd79841c109816a693bf20cb57274bfc6
 src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/tui/app/theme/editor_theme.nim	8d1d7844d8dd3ec12850cfcc72adbfb199d244563f5058dbd30855a3ce5ca2df	ad35d5e74e004acfda6b2a6e9cc499bad38e244f5c2713fbaae02865c7af0af9
 src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/tui/app/syntax/monarch.nim	181d9ec8d995b6563b371c79d390f14ec35ff5aad2f62083f6c7147045847efb	27c6dc86b6837c90ccba5906788a4f789a56d5a35078e281ad5382d1d2193420
@@ -976,12 +976,30 @@ src/frontend/viewmodel/tests/unit/plat18-marshalling-mutation-control.sha256	src
 # 5bfdeb5ae64 moved the collaboration lanes into viewmodel-tests.yml; the examples
 # suite now reads codetracer.yml with the workflows it calls, so plat33-collab owes a re-grade.
 src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_editor_collab_examples.nim	9d5c50c7146301ed8a5552b668b51672db8f91af7473503a90334ad987228cbb	5ed19dba8795a97e566e7aeb6ac94d3d237a6d2f2eb22709eb852e8bcf2912b5
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	8bda0738c9719a3f394aa9ee384bc2c920800d78e38e9b540d58ff8a018e0cc0	e44604281deb6d86c792a7105b5daf910c31e43f438fe2b78ca7c112e88c8d7b
+src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	8bda0738c9719a3f394aa9ee384bc2c920800d78e38e9b540d58ff8a018e0cc0	2d5def4d9dd24aec467014ed9dd87859ccdcdbafef9644659c4c6882a2fbf92f
 src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/styles/components/button.styl	daf83b8c3ee1848282d0edf04ac63a2b3813fb69f642154ad83248320f8b65aa	801731f5a002841ed30761c4409e972bf365dde4603ae29c5b974479dd8ce924
 
 # Re-grades owed for subjects moved by 0a4f1da4d53 without ledger lines;
 # the harnesses that digest them owe a re-grade of the arms that sit in them.
-src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	ci/lib/test-lane-files.sh	a7a0360b1bf2ceb0286af1ecfb5d43f5f40d3bc5b306fd21b7b8667af77edf92	404e881a7c8307ee667db825de21b8f924d5bf95bc94ea036d275cd7b19c1998
+src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	ci/lib/test-lane-files.sh	a7a0360b1bf2ceb0286af1ecfb5d43f5f40d3bc5b306fd21b7b8667af77edf92	984ce737de571eba3fbac9c301bbaa9a8915b633ccf0ac68fad7ff586b0d3576
 
 src/frontend/viewmodel/tests/unit/plat9-surface-mutation-control.sha256	src/frontend/viewmodel/plugin_host/surface_host.nim	3fddebc1d5a1d4df6d8846db8374b95600bb0b09dd3d28b102283f41a0d3bbec	1f7e9eb0d6529b821484d8abcc91f100ce56471507377a2fc92004cc46172bc1
 src/frontend/tui/tests/plat52-terminal-mutation-control.sha256	src/frontend/viewmodel/views/isonim_terminal_output_view.nim	a0cefbc87feb909e990970968e69f06cbdcad37ceb53420628727d68e6dc9158	92146278d8c37c0ea2c9654796b5dacf04fea8fb6496d9d86cd440e8495321ed
+# 2026-11-26: the menu looks each chord up once per build (ui/menu.nim) and its test
+# joined the renderer-dom lane (ci/lib/test-lane-files.sh); these re-grades are owed.
+src/frontend/tui/tests/plat48-topbar-mutation-control.sha256	src/frontend/ui/menu.nim	a21de826c432989a02a66677c4652ab2e46b9691b8c91426e6fd266ac68fda6a	a926ca11ed4aaaa18356fcde161e2055de8729c9b436fcdf8f6508161e4e69fc
+# The last move answered to the asker only (middleware.nim) and its redelivery guard (editor.nim),
+# the shared editor's widgetid and its suite case, and complete_move_redelivery_test in renderer-dom.
+src/frontend/tests/plat67-large-file-mutation-control.sha256	src/frontend/ui/shared_editor.nim	612e69b073d1963a8510bf8fe63f7769b85a79c95616c47c39104aaf9ce88c62	03f633d93fb60b935cc0467ecef66af3605291d2c1e9d4dccf82fadb67c14456
+src/frontend/tests/plat67-large-file-mutation-control.sha256	src/frontend/tests/shared_editor_chromium_test.nim	ef0ac8389103e53a88e8c49575a5be1e969d49d41a4d65b483961ef3844d7b5b	c65262d1fe8437310098b0df98aab944f7039cd8beeb833dfcab0cbcb0eebd3f
+
+# 2026-11-26, "Show value origin" on a Pixel History entry (codetracer-pm issue
+# 2026-11-26, "Pixel History entries offer no value origin"): the Pixel History
+# model gains the operation, the Origin Chain side panel draws a named refusal
+# (ui/isonim_origin_chain.nim; ui/state.nim's render effect follows it), and the
+# desktop binding reads the refusal. plat59, plat70f, plat29 and plat66 owe a
+# re-grade for those bytes.
+src/frontend/tui/tests/plat59-visual-replay-mutation-control.sha256	src/frontend/viewmodel/viewmodels/pixel_history_vm.nim	3bddbf10d7275223f08ea303974132c6a49b269eed4b23b6932e8714464b7a6f	b44769d6f3487b6559add583dd5fe99f74248c527d7ceb68ba402f552fd01f8c
+src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/ui/isonim_origin_chain.nim	3246085ee3e0c0d543085e3627231732bb352593b76d0fa468761e531576b31d	bd2fdf9ff7fcd03e7259073f9c2892532f78ce3c96a971c6ef989a9b54e510b6
+
+src/frontend/tui/tests/plat83-ct-lens-mutation-control.sha256	src/frontend/host/plugin_processes.nim	e8119b02bd08a7f1d1e46b03e2d97b5f7b7320dd4fb212942299dc9c537d7e59	504c41125e9bfe2de0f3115e91791f546ba5777d963d4fcb6c9286b827f9aee7

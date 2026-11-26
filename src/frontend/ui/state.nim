@@ -196,18 +196,20 @@ when defined(js):
 
   proc renderOriginSidePanelDomReactive() =
     ## Mount or refresh the side panel.  Driven by an isonim render
-    ## effect: subscribes to ``sidePanelOpen`` + ``activeChain`` and
-    ## re-emits the DOM whenever either changes.
+    ## effect: subscribes to ``sidePanelOpen``, ``activeChain`` and
+    ## ``refusal`` (``sidePanelShown``) and re-emits the DOM whenever one
+    ## changes.
     if originChainVMInstance.isNil:
       return
     if originSidePanelEffectInstalled:
       return
     originSidePanelEffectInstalled = true
     createEffect proc() =
-      let open = originChainVMInstance.sidePanelOpen.val
-      let chain = originChainVMInstance.activeChain.val
+      # Open with a chain, or with the refusal that stands in for one (a
+      # pixel's origin: `OriginChainVM.onShowPixelOrigin`).
+      let shown = originChainVMInstance.sidePanelShown()
       let host = ensureOriginSidePanelHost()
-      if open and chain.isSome:
+      if shown:
         host.style.display = cstring"block"
         renderPanelDom(host, originChainVMInstance, originSidePanelState)
         # focus the host so keyboard nav is immediately active

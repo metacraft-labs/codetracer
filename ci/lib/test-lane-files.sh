@@ -365,6 +365,7 @@ ct-host-manifest
 screen-oracle
 scenario-stages
 scenario-bindings
+scenario-term-bindings
 EOF
 }
 
@@ -420,6 +421,7 @@ test_lane_description() {
 	ct-host-manifest) echo 'ct host --manifest slice selection, end to end: the real ct host opens the mcr_slices slice the replay start (or CODETRACER_START_SLICE_KEY) names, refuses one it does not list' ;;
 	scenario-stages) echo "the scenario pack's stage tool: what a stage decides without a product build (which fixture-cache entries are whole)" ;;
 	scenario-bindings) echo "the scenario pack's GPUI binding: what it reads off committed frames of the window, through the real OCR engine (a code-face digit by its outlines)" ;;
+	scenario-term-bindings) echo "the scenario pack's editor bindings (Neovim, Emacs): what they read off an editor's screen and how they spell its keys and commands" ;;
 	screen-oracle) echo "PLAT-39 unprivileged screen oracle: the committed record's gate, and the live pixel suite over the six Electron captures (just plat35-capture-electron) and the two GPUI window frames (the plat37-capture recipe, a compositor lane no workflow runs)" ;;
 	*)
 		echo "unknown lane '$1'" >&2
@@ -543,6 +545,12 @@ test_lane_recipe() {
 		# GPUI binding's own modules and GuiAssert / DemoVideoScript-GuiAssert
 		# beside them, and they need `tesseract`; the runner has no such path.
 		echo "scenario-gui-binding-test"
+		;;
+	scenario-term-bindings)
+		# `ci/test/scenarios.sh term-binding-test` compiles each against the
+		# terminal binding's modules and TermAssert / DemoVideoScript-TermAssert
+		# beside them; the runner has no such path.
+		echo "scenario-term-binding-test"
 		;;
 	*) ;;
 	esac
@@ -1205,11 +1213,19 @@ test_lane_files() {
 		# is drawn into `#status` only while that tab is the one on screen.
 		echo src/frontend/tests/locals_answer_identity_test.nim
 		echo src/frontend/tests/later_session_launch_failure_test.nim
+		# `complete_move_redelivery_test.nim` holds the last move, asked for
+		# by a pane built after it, to reaching that pane only, and an editor
+		# to building its flow once for one jump that opens it.
+		echo src/frontend/tests/complete_move_redelivery_test.nim
 		# `debug_toolbar_follows_active_tab_test.nim` holds the window's one
 		# debugger toolbar to driving the tab on screen: its step, Run to
 		# Entry and history jump reach the active tab's views mediator, not
 		# the one that was active when the toolbar's routes were built.
 		echo src/frontend/tests/debug_toolbar_follows_active_tab_test.nim
+		# `menu_chord_lookups_dom_test.nim` holds one menu build (every
+		# `data.redraw()` makes one) to asking the key router for each item's
+		# chord once, not once per item per sibling.
+		echo src/frontend/tests/menu_chord_lookups_dom_test.nim
 		echo src/frontend/tests/agent_editor_selection_dom_test.nim
 		echo src/frontend/tests/origin_chain_wiring_test.nim
 		# `wasm_pane_transport_test.nim` holds the WebAssembly panes' transport
@@ -2583,6 +2599,11 @@ test_lane_files() {
 		# failed test-lane-coverage; discovery over the directory keeps the
 		# next one in this lane.
 		_tlf_glob src/tests/scenarios/bindings/guiassert '*_test.nim'
+		;;
+
+	scenario-term-bindings)
+		# The editor bindings' own suites, over screens the editors draw.
+		_tlf_glob src/tests/scenarios/bindings/termassert '*_test.nim'
 		;;
 
 	ui-selection)

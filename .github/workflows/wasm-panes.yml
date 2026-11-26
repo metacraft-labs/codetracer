@@ -1,0 +1,99 @@
+name: WebAssembly panes build
+
+# The renderer's WebAssembly panes (`ci/lib/web-core-build.sh`, the
+# `frontend-wasm-panes` action of `just build-once`), built on Linux on every
+# push to `agents` and `dev` and on every pull request that touches their
+# sources. The ViewModel core is compiled for wasm32 with Emscripten, so a
+# change that compiles natively and under nim js can still break it; on Linux
+# nothing else built it before a release: codetracer.yml does not run on
+# `agents` pushes, and its Linux legs reach the panes only inside the Nix
+# package. So the KeyEvent break of 0eee6f47571 (fixed in 9033c896ac1) was
+# caught only by the macOS build-once leg.
+#
+# CT_WEB_CORE_RELEASE=1 is the shipped configuration: the Nix package's
+# `wasmPanes` derivation builds with it. Measured with this step's command:
+# at 0eee6f47571 it fails with
+#   isonim_terminal_output_view.nim(196, 53) Error: undeclared identifier: 'KeyEvent'
+# and at 9033c896ac1 it builds all seven files.
+
+on:
+  push:
+    branches: [agents, dev]
+    paths:
+      - 'src/frontend/**'
+      - 'src/common/**'
+      - 'config.nims'
+      - 'repro.lock'
+      - 'flake.lock'
+      - 'libs/**'
+      - 'ci/lib/web-core-build.sh'
+      - 'ci/lib/nim-cache-root.sh'
+      - '.github/workflows/wasm-panes.yml'
+  pull_request:
+    branches-ignore: [agents]
+    paths:
+      - 'src/frontend/**'
+      - 'src/common/**'
+      - 'config.nims'
+      - 'repro.lock'
+      - 'flake.lock'
+      - 'libs/**'
+      - 'ci/lib/web-core-build.sh'
+      - 'ci/lib/nim-cache-root.sh'
+      - '.github/workflows/wasm-panes.yml'
+  workflow_dispatch:
+
+# On `agents`, a newer push must not cancel the running build (agents land
+# there every few minutes; see zgui.yml): GitHub keeps the running run plus
+# one waiting run, and each newer push replaces the waiting one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_name != 'agents' }}
+
+permissions:
+  contents: read
+
+jobs:
+  wasm-panes:
+    name: WebAssembly panes (x86_64-linux, release)
+    runs-on: [self-hosted, linux, x64]
+    # Setup is the ViewModel jobs' (provisioning siblings 3-37 minutes in
+    # run 45590873552); the build itself took 5 minutes on a loaded
+    # workstation (load average ~100 on 24 CPUs).
+    timeout-minutes: 60
+    steps:
+      - name: Generate CI token
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Provision dependency siblings from repro.lock
+        # The core compiles against ../isonim/src and the other IsoNim
+        # siblings, at the revisions repro.lock pins.
+        uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      - name: Build the WebAssembly panes as they ship
+        env:
+          CT_WEB_CORE_RELEASE: "1"
+        run: nix develop .#devShells.x86_64-linux.default --command bash ci/lib/web-core-build.sh "${RUNNER_TEMP}/wasm-panes"

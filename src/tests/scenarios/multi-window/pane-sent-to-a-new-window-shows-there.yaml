@@ -28,7 +28,11 @@ steps:
     as: main
   - wait: { until: { at: 'pane-tab[label="EVENT LOG"]', absent: true }, timeout: 30s }
     as: main
+  # A new window builds its whole layout and replays the stop into it,
+  # which on a loaded host takes longer than the settle bound; the wait that
+  # follows names what the window must show.
   - open-client: { name: second, open: app-window }
+    settle: false
   - wait: { until: event-log.loaded, timeout: 120s }
     as: second
   - expect: { at: event-log, assert: 'has-output("print using print")' }

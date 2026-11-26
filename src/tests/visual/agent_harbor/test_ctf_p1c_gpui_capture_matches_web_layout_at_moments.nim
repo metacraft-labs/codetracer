@@ -35,6 +35,11 @@
 ## region off or drawn on one side only, a different row, a wrong fill). The
 ## CTF-P1b test's header says why each of those is what it is.
 ##
+## The judge's one allowance, the control center's sidebar fold (which
+## covers the ControlCenterPlayback moments too),
+## applies here as in CTF-P1b, with the same falsifying controls planted on a
+## playback moment (their own suite, before the tolerances' suite).
+##
 ## On top of the judge, the record itself must match the declaration: an
 ## entry naming a story or moment that no longer exists fails, so a record
 ## left over from a renamed moment cannot pass by being ignored.
@@ -178,7 +183,7 @@ suite "CTF-P1c: the layout check tells the moments apart (negative control)":
         inc compared
         let earlier = run[i - 1].expected.id
         let j = judgeCapture(later.id, gpuiDir, web{earlier}, later.width, later.height)
-        if j.verdict in {vLayout, vFill, vPixels, vHang, vCut}:
+        if j.verdict in {vLayout, vFill, vPixels, vHang, vCut, vFold}:
           told.add later.id & " against " & earlier & " [" & $j.verdict & "]: " &
                    (if j.problems.len > 0: j.problems[0] else: "")
     echo "  ", told.len, " of ", compared, " captures fail against the moment before them"
@@ -237,6 +242,75 @@ suite "CTF-P1c: the layout check sees a line of text cut on one side (negative c
     var moment = web{source.id}.copy
     moment["regions"]["playback-moment"]["cut"] = %true
     check elisionProblems(moment["regions"], moment["regions"]).len == 1
+    removeDir(scratch)
+
+suite "CTF-P2c: at a playback moment the judge allows the sidebar fold and nothing else (falsifying controls)":
+  # The CTF-P1b test's fold controls, on a control-center playback moment at
+  # the sidebar size (the fold covers these moments too):
+  # the same plants, through the same judge.
+  let web = loadWebRecord(webRecordPath)
+  const
+    Folded = "agent-harbor-control-center-playback-at-bench-asks-sidebar-dark"
+    Laptop = "agent-harbor-control-center-playback-at-bench-asks-laptop-dark"
+  let scratch = getTempDir() / "ctf-p1c-fold-controls-" & $getCurrentProcessId()
+
+  proc planted(plant: FoldPlant): CaptureJudgement =
+    plantedFold(gpuiDir, scratch, Folded, web{Folded}, 360, 900, plant)
+
+  proc says(j: CaptureJudgement; words: string): bool = words in j.problems.join(" ")
+
+  test "the folded moment passes with the fold allowed":
+    check foldMayApply(Folded, 360, 900)
+    check not foldMayApply(Laptop, 1440, 900)
+    let j = planted(fpUntouched)
+    check j.verdict == vPass
+    check j.foldPx > 100.0
+    for p in j.problems: checkpoint p
+
+  test "a region the fold does not move, moved 20px, fails":
+    let j = planted(fpUnrelatedMoved)
+    check j.verdict == vLayout
+    check j.says("region head:")
+
+  test "a launch column folded to another height than the folded form's fails":
+    for plant in [fpLaunchShorter, fpLaunchTaller]:
+      let j = planted(plant)
+      check j.verdict == vFold
+      check j.says("the fold: GPUI's launch column is")
+
+  test "the fact present and the regions under it not moved up by the height it frees fails":
+    let j = planted(fpBelowNotMoved)
+    check j.verdict in {vLayout, vPixels}
+    check j.says("region cc-overview:")
+    let send = planted(fpSendNotMoved)
+    check send.verdict == vFold
+    check send.says("the fold: GPUI's send line starts at")
+    let row = planted(fpRowNotMoved)
+    check row.verdict == vPixels
+    check row.says("region cc-waiting-row-first: y is")
+
+  test "a fold at the laptop size fails":
+    let folded = regionsOf(parseJson(readFile(gpuiDir / (Folded & ".regions.json")))["regions"])
+    check FoldSummaryRegion in folded
+    if FoldSummaryRegion in folded:
+      let j = plantedFoldAt(gpuiDir, scratch, Laptop, web{Laptop}, 1440, 900,
+                            folded[FoldSummaryRegion])
+      check j.verdict != vPass
+      check j.says(FoldSummaryRegion)
+
+  test "with no fold fact the moment fails as it did before the allowance":
+    let j = planted(fpNoFact)
+    check j.verdict == vLayout
+    check j.says("region cc-launch:")
+
+  test "the fold recorded but the column's ground drawn on past its foot fails, on the frame":
+    # No playback moment draws the whole form (the CTF-P1b
+    # control plants the regions of a fold over the empty fleet's whole
+    # form); here the frame of a real fold is painted as the whole form
+    # would draw it under the column's foot, the regions untouched.
+    let j = planted(fpGroundRunsOn)
+    check j.verdict == vFold
+    check j.says("runs on past its foot")
     removeDir(scratch)
 
 suite "CTF-P1c: the tolerances are the plan's, in absolute numbers (negative controls)":

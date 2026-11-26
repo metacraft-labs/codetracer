@@ -19,8 +19,12 @@ steps:
   # Into iterate_asteroids, whose loop body draws short values on screen,
   # then step so the values beside the code are drawn again.
   - wait: { until: { at: 'call-trace/call[name="iterate_asteroids"]', present: true }, timeout: 60s }
+  # The jump opens shield.nr and draws its flow, which on a loaded host
+  # takes longer than the window's settle bound: the wait that follows is
+  # the condition, not a quiet window.
   - click: { at: 'call-trace/call[name="iterate_asteroids"]', anchor: name }
-  - wait: replay-idle
+    settle: false
+  - wait: { until: replay-idle, timeout: 60s }
   - click: 'toolbar/toolbar-button[label="next-image"]'
     settle: false
   - wait: replay-idle
@@ -45,5 +49,8 @@ steps:
   # last click holds that click's entry, once: a panel from an earlier
   # generation still listening would add it again.
   - wait: { until: { at: scratchpad, count: 1 }, timeout: 20s }
-  - wait: settled
+  # Quiet for long enough that a second listener would have added its entry
+  # by now. On a loaded host the window takes more than the default 5 s to
+  # go quiet after the panel opens.
+  - wait: { until: settled, timeout: 30s }
   - expect: { at: scratchpad, count: 1 }

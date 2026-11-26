@@ -1,0 +1,40 @@
+scenario: 1
+name: editor-hosted/nim-static-block-tracing
+pack: codetracer
+summary: >-
+  In an editor hosting CodeTracer, on a Nim project in Edit mode, the
+  plugin's command traces the `static:` block under the cursor with
+  codetracer-nim's compiler; the recording of that compile-time code opens
+  in a session of its own, stopped inside the block.
+
+stage:
+  - use: nim-project
+  - use: open-project
+    with: { folder: $project, file: tracing.nim, width: 200, height: 50 }
+
+steps:
+  - beat: open
+    narration: { text: "A Nim project with a static block: code the compiler runs while it builds.", voice: narrator }
+    caption: { text: "A Nim project in Edit mode" }
+    steps:
+      - wait: { until: { at: 'editor[file="tracing.nim"]/line[number="19"]', present: true }, timeout: 120s }
+      - expect: { at: session-strip, count: 1 }
+
+  - beat: caret
+    narration: { text: "Put the cursor in the static block.", voice: narrator }
+    caption: { text: "The cursor in the static block" }
+    steps:
+      - click: { at: 'editor[file="tracing.nim"]/line[number="19"]', anchor: text-start, pace: thoughtful }
+      - wait: { until: { at: 'editor[file="tracing.nim"]', assert: "caret-at(19)" }, timeout: 10s }
+
+  - beat: trace
+    narration: { text: "One command traces it, and the compile-time run opens like any recording.", voice: narrator }
+    caption: { text: "Trace the static block" }
+    steps:
+      - chord: { bound: editor.trace-static-block-at-cursor }
+        settle: false
+        dwell: 1s
+      - wait: { until: { at: session-strip, count: 2 }, timeout: 300s }
+      - wait: { until: replay-idle, timeout: 120s }
+      - expect: { at: 'editor[file="tracing.nim"]', assert: "stopped-within(18, 21)" }
+        dwell: 2500ms

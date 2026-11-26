@@ -370,14 +370,51 @@ when defined(js):
       if effect.kind == skeSeek:
         vm.seekToHopInOwningProcess(active.get, effect.hop)
 
+  proc appendQueryBreadcrumbs(nav: Node; vm: OriginChainVM) =
+    ## The strip of the questions asked (`breadcrumbStack`, spec §3.3), each
+    ## a button going back to it; the last is the one the panel shows.
+    let entries = vm.breadcrumbStack.val
+    for index, entry in entries:
+      let crumb = document.createElement(cstring"button")
+      crumb.setAttribute(cstring"class",
+                         cstring"breadcrumb-chip ct-origin-breadcrumb-entry")
+      crumb.innerText = cstring(entry.variableName & "@" & $entry.stepId)
+      if index == entries.len - 1:
+        # The query the panel shows: announced as the current step.
+        crumb.setAttribute(cstring"aria-current", cstring"step")
+      crumb.addEventListener(cstring"click",
+                             breadcrumbEntryHandler(vm, index))
+      nav.appendChild(crumb)
+
+  proc renderRefusalDom(parent: Node; vm: OriginChainVM) =
+    ## The side panel when its question was refused (`OriginChainVM.refusal`,
+    ## a pixel's origin today): the questions' breadcrumbs, then why there is
+    ## no chain — in words, as a status the screen reader announces.
+    let section = document.createElement(cstring"section")
+    section.setAttribute(cstring"aria-label", cstring"Value origin chain")
+    parent.appendChild(section)
+    let nav = document.createElement(cstring"nav")
+    nav.setAttribute(cstring"aria-label", cstring"Origin breadcrumbs")
+    appendQueryBreadcrumbs(nav, vm)
+    section.appendChild(nav)
+    let refusal = document.createElement(cstring"p")
+    refusal.setAttribute(cstring"class", cstring"ct-origin-refusal")
+    refusal.setAttribute(cstring"role", cstring"status")
+    refusal.textContent = cstring(vm.refusalText())
+    section.appendChild(refusal)
+
   proc renderPanelDom*(parent: Node;
                        vm: OriginChainVM;
                        panel: var OriginChainPanel) {.discardable.} =
     ## Render the side panel into `parent`. Walks the active chain
     ## from `OriginChainVM.activeChain` and emits the semantic HTML
-    ## described in the module docstring.
+    ## described in the module docstring; a refused question
+    ## (`OriginChainVM.refusal`) is drawn as its refusal instead.
     while not parent.firstChild.isNil:
       parent.removeChild(parent.firstChild)
+    if vm.refusalText().len > 0:
+      renderRefusalDom(parent, vm)
+      return
     if vm.activeChain.val.isNone:
       let placeholder = document.createElement(cstring"p")
       placeholder.setAttribute(cstring"class", cstring"ct-origin-side-empty")
@@ -430,18 +467,7 @@ when defined(js):
                                breadcrumbChipHandler(vm, chipCopy))
         nav.appendChild(crumb)
     else:
-      let entries = vm.breadcrumbStack.val
-      for index, entry in entries:
-        let crumb = document.createElement(cstring"button")
-        crumb.setAttribute(cstring"class",
-                           cstring"breadcrumb-chip ct-origin-breadcrumb-entry")
-        crumb.innerText = cstring(entry.variableName & "@" & $entry.stepId)
-        if index == entries.len - 1:
-          # The query the panel shows: announced as the current step.
-          crumb.setAttribute(cstring"aria-current", cstring"step")
-        crumb.addEventListener(cstring"click",
-                               breadcrumbEntryHandler(vm, index))
-        nav.appendChild(crumb)
+      appendQueryBreadcrumbs(nav, vm)
     section.appendChild(nav)
 
     let ol = document.createElement(cstring"ol")

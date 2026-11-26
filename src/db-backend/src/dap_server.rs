@@ -3096,6 +3096,94 @@ fn browser_setup_from_vfs_when_ready(
     }
 }
 
+/// Answer one half of the browser handshake (`launch` or `configurationDone`)
+/// AFTER running the setup it may complete, so a setup that fails is reported
+/// on that request instead of after it.
+///
+/// `handle_message` answers both requests `success: true` before any trace is
+/// opened. Natively that is followed, on failure, by `ct/launch-failed`
+/// (see [`send_launch_failure_notification`]). The browser path had nothing:
+/// `setup_from_vfs`'s error left `handle_message_browser` through `?`, and the
+/// worker's message loop posted a SECOND response to the same request —
+/// after the client had already settled it on the `success: true`. A page
+/// handed a container this engine refuses (a `meta.dat` version it does not
+/// read, say) therefore reached its ready state with live controls whose
+/// requests were then refused one by one, and no step said why.
+///
+/// So the protocol response is held until `setup` has run:
+/// * on success, it is sent first and the setup's own messages (the stop
+///   events of `run_to_entry`) after it, the order the client saw before;
+/// * on failure, that same response is sent as `success: false` with the
+///   setup error as its `message`, followed by `ct/notification` and
+///   [`LAUNCH_FAILED_EVENT`] carrying the same sentence, as natively. The
+///   failure is then handled: no second response is posted for it.
+///
+/// A failure of `handle_message` itself is still propagated, as before.
+#[cfg(feature = "browser-transport")]
+fn browser_handshake_request(
+    msg: &DapMessage,
+    req: &dap::Request,
+    sender: Sender<DapMessage>,
+    ctx: &mut Ctx,
+    handler: &mut Option<Handler>,
+    setup: impl FnOnce(&mut Ctx, Sender<DapMessage>, &mut Option<Handler>) -> Result<(), Box<dyn Error>>,
+) -> Result<(), Box<dyn Error>> {
+    let (protocol_sender, protocol_messages) = std::sync::mpsc::channel::<DapMessage>();
+    handle_message(msg, protocol_sender, ctx)?;
+    let mut protocol: Vec<DapMessage> = protocol_messages.try_iter().collect();
+
+    let (setup_sender, setup_messages) = std::sync::mpsc::channel::<DapMessage>();
+    let outcome = setup(ctx, setup_sender, handler);
+    let setup_messages: Vec<DapMessage> = setup_messages.try_iter().collect();
+
+    let failure = match outcome {
+        Ok(()) => None,
+        Err(e) => {
+            let text = e.to_string();
+            error!(
+                "handle_message_browser: `{}` could not open the trace: {text}",
+                req.command
+            );
+            let mut answered = false;
+            for message in &mut protocol {
+                if let DapMessage::Response(response) = message
+                    && response.request_seq == req.base.seq
+                    && response.command == req.command
+                {
+                    response.success = false;
+                    response.message = Some(text.clone());
+                    answered = true;
+                }
+            }
+            if !answered {
+                // `handle_message` always answers these two requests, so this
+                // is not expected; answer here rather than leave the request
+                // without one.
+                protocol.push(DapMessage::Response(Response {
+                    base: ProtocolMessage {
+                        seq: 0,
+                        type_: "response".to_string(),
+                    },
+                    request_seq: req.base.seq,
+                    success: false,
+                    command: req.command.clone(),
+                    message: Some(text.clone()),
+                    body: json!({}),
+                }));
+            }
+            Some(text)
+        }
+    };
+
+    for message in protocol.into_iter().chain(setup_messages) {
+        sender.send(message)?;
+    }
+    if let Some(text) = failure {
+        send_launch_failure_notification(&sender, &text);
+    }
+    Ok(())
+}
+
 /// Browser/WASM message handler that maintains a [`Handler`] inline.
 ///
 /// In the browser build, threads are unavailable and all DAP messages are
@@ -3127,32 +3215,30 @@ pub fn handle_message_browser(
             handle_message(msg, sender, ctx)?;
         }
         DapMessage::Request(req) if req.command == "launch" => {
-            // Store launch parameters in ctx (same as native path).
-            handle_message(msg, sender.clone(), ctx)?;
-
-            // In the browser, re-detect the trace file from the VFS.  The
-            // native auto-detect uses `Path::is_file()` which always returns
-            // false in WASM, so we always re-run detection here using
-            // VFS-aware lookups. Materialized traces are CTFS-only.
-            browser_detect_trace_file_in_vfs(ctx)?;
-
+            // Store launch parameters in ctx (same as native path), then, in
+            // the browser, re-detect the trace file from the VFS: the native
+            // auto-detect uses `Path::is_file()`, which always returns false
+            // in WASM. Materialized traces are CTFS-only.
+            //
             // `configurationDone` may already have arrived — the SDK's
             // `DebuggerSession.launch` sends it *before* `launch`. Setting
             // up here is the browser counterpart of the native launch
             // arm's `if ctx.received_configuration_done { to_stable_sender
             // .send(req) }`; without it the handler is never built and
             // every later request is dropped with no response at all.
-            browser_setup_from_vfs_when_ready(sender, ctx, handler)?;
+            browser_handshake_request(msg, req, sender, ctx, handler, |ctx, sender, handler| {
+                browser_detect_trace_file_in_vfs(ctx)?;
+                browser_setup_from_vfs_when_ready(sender, ctx, handler)
+            })?;
         }
         DapMessage::Request(req) if req.command == "configurationDone" => {
-            // Send the configurationDone response first.
-            handle_message(msg, sender.clone(), ctx)?;
-
-            // Now perform the actual trace setup from VFS, if `launch` has
+            // Perform the actual trace setup from VFS, if `launch` has
             // already named a folder. This is the browser counterpart of
             // the native configurationDone arm's `to_stable_sender
             // .send(ctx.launch_request)` replay.
-            browser_setup_from_vfs_when_ready(sender, ctx, handler)?;
+            browser_handshake_request(msg, req, sender, ctx, handler, |ctx, sender, handler| {
+                browser_setup_from_vfs_when_ready(sender, ctx, handler)
+            })?;
         }
         DapMessage::Request(req) if req.command == "disconnect" => {
             // NOT `handle_message`: its disconnect arm waits for a writer
@@ -5378,20 +5464,133 @@ mod tests {
             crate::vfs::vfs_write(&format!("{folder}/{SESSION_MANIFEST_FILE}"), b"version = 1\n".to_vec());
             crate::vfs::vfs_write(&format!("{folder}/trace.ct"), container_bytes(minimal_trace_events()));
 
-            let (sender, _receiver) = std::sync::mpsc::channel::<DapMessage>();
+            let (sender, receiver) = std::sync::mpsc::channel::<DapMessage>();
             let mut ctx = Ctx::default();
             let mut handler: Option<Handler> = None;
-            let err = handle_message_browser(
+            handle_message_browser(
                 &request(1, "launch", json!({ "traceFolder": folder })),
                 sender,
                 &mut ctx,
                 &mut handler,
             )
-            .expect_err("a multi-recording session manifest must be refused, not degraded");
+            .expect("the refusal is the launch's answer, not an engine error");
+            assert!(handler.is_none(), "a session manifest must be refused, not degraded");
+            let received: Vec<DapMessage> = receiver.try_iter().collect();
+            let launch = launch_responses(&received);
+            assert_eq!(launch.len(), 1, "exactly one answer to `launch`: {launch:?}");
+            assert!(!launch[0].0, "the launch must be refused");
             assert!(
-                format!("{err}").contains("session manifest"),
-                "the refusal must name the manifest, got: {err}",
+                launch[0].1.contains("session manifest"),
+                "the refusal must name the manifest, got: {}",
+                launch[0].1,
             );
+        }
+
+        /// Every `launch` response in `received`, as `(success, message)`.
+        fn launch_responses(received: &[DapMessage]) -> Vec<(bool, String)> {
+            received
+                .iter()
+                .filter_map(|m| match m {
+                    DapMessage::Response(r) if r.command == "launch" => {
+                        Some((r.success, r.message.clone().unwrap_or_default()))
+                    }
+                    _ => None,
+                })
+                .collect()
+        }
+
+        /// The names of the events in `received`, in order.
+        fn event_names(received: &[DapMessage]) -> Vec<String> {
+            received
+                .iter()
+                .filter_map(|m| match m {
+                    DapMessage::Event(e) => Some(e.event.clone()),
+                    _ => None,
+                })
+                .collect()
+        }
+
+        /// A container this engine refuses — a `meta.dat` of a schema version
+        /// it does not read, the case a page met with a writer one version
+        /// behind — is refused ON THE REQUEST THAT COMPLETES THE HANDSHAKE,
+        /// with the reader's own sentence. It used to be answered
+        /// `success: true` there and then reported in a second response to the
+        /// same request, which a client had already settled, so the page went
+        /// ready and learned nothing.
+        ///
+        /// Both orders: the SDK sends `configurationDone` first, so `launch`
+        /// completes the handshake; the other order completes it on
+        /// `configurationDone`.
+        #[test]
+        fn a_refused_container_fails_the_request_that_completes_the_handshake() {
+            let dir = tempfile::tempdir().unwrap();
+            let ct = dir.path().join("v6.ct");
+            let v6 = with_meta_dat_version(non_mcr_meta_dat_bytes(), 6);
+            write_minimal_ctfs(&ct, &[("meta.dat", &v6), ("steps.dat", b"")]).unwrap();
+            let bytes = std::fs::read(&ct).unwrap();
+
+            for (folder, order) in [
+                ("browser-refused-configuration-first", ["configurationDone", "launch"]),
+                ("browser-refused-launch-first", ["launch", "configurationDone"]),
+            ] {
+                crate::vfs::vfs_write(&format!("{folder}/trace.ct"), bytes.clone());
+                let (sender, receiver) = std::sync::mpsc::channel::<DapMessage>();
+                let mut ctx = Ctx::default();
+                let mut handler: Option<Handler> = None;
+                for (i, command) in ["initialize"].iter().chain(order.iter()).enumerate() {
+                    let arguments = match *command {
+                        "initialize" => json!({ "clientID": "test", "adapterID": "codetracer" }),
+                        "launch" => json!({ "traceFolder": folder }),
+                        _ => json!({}),
+                    };
+                    handle_message_browser(
+                        &request(i as i64 + 1, command, arguments),
+                        sender.clone(),
+                        &mut ctx,
+                        &mut handler,
+                    )
+                    .unwrap_or_else(|e| panic!("{folder}: {command} must be answered, not fail: {e}"));
+                }
+                drop(sender);
+                let received: Vec<DapMessage> = receiver.into_iter().collect();
+                assert!(handler.is_none(), "{folder}: a refused container opens no session");
+
+                let completing = order[1];
+                let answers: Vec<(bool, String)> = received
+                    .iter()
+                    .filter_map(|m| match m {
+                        DapMessage::Response(r) if r.command == completing => {
+                            Some((r.success, r.message.clone().unwrap_or_default()))
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(
+                    answers.len(),
+                    1,
+                    "{folder}: exactly one answer to `{completing}`: {answers:?}"
+                );
+                assert!(!answers[0].0, "{folder}: `{completing}` must be refused: {answers:?}");
+                assert!(
+                    answers[0].1.contains("meta.dat: version 6 is not readable"),
+                    "{folder}: the refusal must carry the reader's sentence, got: {}",
+                    answers[0].1
+                );
+                // The request that did NOT complete the handshake opened
+                // nothing and is answered as it always was.
+                let first = order[0];
+                assert!(
+                    received
+                        .iter()
+                        .any(|m| matches!(m, DapMessage::Response(r) if r.command == first && r.success)),
+                    "{folder}: `{first}` is still acknowledged"
+                );
+                assert!(
+                    event_names(&received).iter().any(|e| e == LAUNCH_FAILED_EVENT),
+                    "{folder}: the native failure event is sent too: {:?}",
+                    event_names(&received)
+                );
+            }
         }
 
         // ── Run-to-line on the browser path ───────────────────────────

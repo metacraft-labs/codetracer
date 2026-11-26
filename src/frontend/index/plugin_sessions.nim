@@ -242,28 +242,6 @@ proc ensureTimer() =
 # Opening and closing
 # ---------------------------------------------------------------------------
 
-proc applyTestThresholds*(sup: Supervisor) =
-  ## `CODETRACER_PLUGIN_TEST_THRESHOLDS`: a JSON object of the supervisor's
-  ## input-defence thresholds (`inputDeadlineMs`, `strikesToOpen`,
-  ## `breakerBackoffMs`, `breakerBackoffCapMs`, `openingsToLatch`,
-  ## `strikeWindowMs`), for the GUI suites that walk a breaker through
-  ## half-open and latch in minutes rather than the product's 30 s backoffs.
-  ## Unset in the product; a malformed value is logged and ignored.
-  let text = $jsEnv(cstring"CODETRACER_PLUGIN_TEST_THRESHOLDS")
-  if text.len == 0: return
-  try:
-    let t = parseJson(text)
-    if t.hasKey("inputDeadlineMs"): sup.inputDeadlineMs = t["inputDeadlineMs"].getInt
-    if t.hasKey("strikesToOpen"): sup.strikesToOpen = t["strikesToOpen"].getInt
-    if t.hasKey("breakerBackoffMs"): sup.breakerBackoffMs = t["breakerBackoffMs"].getInt
-    if t.hasKey("breakerBackoffCapMs"): sup.breakerBackoffCapMs = t["breakerBackoffCapMs"].getInt
-    if t.hasKey("openingsToLatch"): sup.openingsToLatch = t["openingsToLatch"].getInt
-    if t.hasKey("strikeWindowMs"): sup.strikeWindowMs = t["strikeWindowMs"].getInt
-    if t.hasKey("halfOpenProbationMs"): sup.halfOpenProbationMs = t["halfOpenProbationMs"].getInt
-    infoPrint "plugins: test thresholds ", text
-  except CatchableError as e:
-    warnPrint "plugins: CODETRACER_PLUGIN_TEST_THRESHOLDS ignored: ", e.msg
-
 proc openPluginSession*(key: string; tab: int; session: SessionViewModel;
                         sessionId: string; deliver: PluginDeliver;
                         frontEnd: string; startDir = ""): PluginSession =
@@ -279,7 +257,6 @@ proc openPluginSession*(key: string; tab: int; session: SessionViewModel;
     result.plugins = openSessionPlugins(session, sessionId, extensionsEnabled(),
                                         dir, frontEnd = frontEnd,
                                         surfaces = feWeb)
-    result.plugins.sup.applyTestThresholds()
     result.plugins.attach(session, sessionId)
   except CatchableError as e:
     # The session is the user's; its plugins failing to open must not take

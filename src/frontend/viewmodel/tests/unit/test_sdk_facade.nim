@@ -666,16 +666,18 @@ suite "Embed SDK facade — upstreamed from BlockTracer (Shared-DOM-Front-Ends D
 
   test "a launch the host gave up on is classified by whether the engine was reached":
     check classifyStartFailure(engineReached = false) == dseWorkerFailed
-    check classifyStartFailure(engineReached = true) == dseUnsupportedTraceKind
+    # Reached but unanswered is a launch still in progress, not a refusal:
+    # a refusal arrives as a failed response and is classified from it.
+    check classifyStartFailure(engineReached = true) == dseCancelled
     let mock = mockBackend()
     mock.deferResponses = true
     let session = newDebuggerSession(mock.toBackendService())
     session.launch(localFolderTrace("/trace"))
     check session.phase.val == dspLaunching
     session.failStart(classifyStartFailure(engineReached = true),
-                      "the engine rejected the container")
+                      "the engine was still opening the trace at the deadline")
     check session.phase.val == dspFailed
-    check session.failure.val == some(dseUnsupportedTraceKind)
+    check session.failure.val == some(dseCancelled)
     session.dispose()
 
   test "a late deadline does not undo a launch that succeeded":

@@ -26,6 +26,9 @@ import
   # Pure loop-iteration arithmetic, factored out so it is testable on the C
   # backend — this module is JS-only. See flow_loop_math.nim.
   flow_loop_math,
+  # How far the `.view-lines` watcher may re-render; testable on the C
+  # backend. See flow_reload_gate.nim.
+  flow_reload_gate,
   # noUiSlider's construction, its zero-width refusal and its idempotency
   # marker, shared with the review's loop control (UD-3). See
   # flow_loop_slider.nim.
@@ -2899,19 +2902,20 @@ proc addStepValues*(self: FlowComponent, step: FlowLayoutStep) =
     else:
       addInlineStepValues(self, step)
 
-proc isFullyLoaded(self: FlowComponent): bool =
-  var result = true
-  let stepWithValues =
-    self.flow.steps.filter(step => step.beforeCount > 0)
-
-  for step in stepWithValues:
+proc missingRenderTargets(self: FlowComponent): int =
+  ## How many of the steps the last render drew still have no node. Only
+  ## those: a render draws each line's current step, so a step of another
+  ## loop iteration has no node by design, and counting it kept the watcher
+  ## re-rendering forever (`ui/flow_reload_gate`).
+  if self.flow.isNil:
+    return 0
+  for stepCount in self.renderTargets:
+    if stepCount < 0 or stepCount >= self.flow.steps.len:
+      continue
+    let step = self.flow.steps[stepCount]
     if not self.flowDom.hasKey(step.line) or
-       not self.stepNodes.hasKey(step.stepCount):
-        result = false
-
-        break
-
-  return result
+        not self.stepNodes.hasKey(stepCount):
+      inc result
 
 proc setEditorMutationObserver(self: FLowComponent) =
   let editorId = self.editorUI.id
@@ -2922,8 +2926,9 @@ proc setEditorMutationObserver(self: FLowComponent) =
     self.mutationObserver = createMutationObserver(
       proc(mutationList: seq[MutationRecord], observer: MutationObserver) =
         if mutationList.any(record => $(record.`type`) == cstring"childList"):
-          if not self.isFullyLoaded():
-            reloadFlow(self))
+          self.reloadGate.onLinesMutated(
+            proc(): int = self.missingRenderTargets(),
+            proc() = reloadFlow(self)))
 
     self.mutationObserver.observe(
       cast[Element](editorLinesDom),
@@ -3853,6 +3858,7 @@ proc renderFlowLines*(self: FlowComponent) =
     self.editorUI.monacoEditor.config.layoutInfo.contentLeft.float
 
   self.createLoopStates()
+  self.renderTargets = @[]
 
   let positions = self.sortedFlowLinePositions()
 
@@ -3899,6 +3905,7 @@ proc renderFlowLines*(self: FlowComponent) =
            self.flowLoops.hasKey(step.line):
           continue
         if step.beforeCount > 0 or step.afterCount > 0 or step.events.len > 0:
+          self.renderTargets.add(step.stepCount)
           self.addStepValues(step)
     except IndexDefect as e:
       cerror cstring(fmt"flow: renderFlowLines IndexDefect for line {line}: {e.msg} " &
@@ -3992,6 +3999,7 @@ proc recalculateAndRedrawFlow*(self: FlowComponent) =
   if not self.flowIsLive:
     return
   if not self.flow.isNil:
+    self.reloadGate.reset()
     self.createFlowLines()
     self.calculateLineHeight()
     self.renderFlowLines()

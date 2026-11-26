@@ -14,6 +14,10 @@ import isonim/web/web_renderer
 import ./panel_host
 import ../viewmodel/input/[dom_pointer, dom_pane_presses, pane_presses]
 from ../viewmodel/session_vm import SessionViewModel
+from ../context_menu_item import ContextMenuItem
+from kdom import nil
+# The Origin Chain model the side panel draws (`ui/state.nim` installs it).
+import ./origin_chain_runtime
 
 var pixelHistoryVMInstance: PixelHistoryVM
 var pixelHistoryVMProvider*: proc(): PixelHistoryVM
@@ -73,3 +77,26 @@ method register*(self: PixelHistoryComponent, api: MediatorWithSubscribers) =
 registerElementOperation("pixel-history.activate", proc(p: ElementPress): bool =
   pressPixelHistory(pixelHistoryVMInstance, "pixel-history.activate",
                     readerOf(p.element)))
+
+proc entryMenuItems(vm: PixelHistoryVM; index: int): seq[ContextMenuItem] =
+  ## An entry's right-click menu: "Show value origin", which opens the
+  ## Origin Chain side panel on the colour that draw wrote to the pixel
+  ## (`PixelHistoryVM.showValueOriginForEntry`; it refuses by name while no
+  ## back end answers a pixel's origin). Empty for an index outside the
+  ## history, so the press is left alone.
+  if vm.isNil or vm.pixelOriginQueryFor(index).isNone:
+    return @[]
+  let theVm = vm
+  @[ContextMenuItem(
+    name: cstring(ShowValueOriginLabel), hint: cstring"",
+    handler: proc(ev: kdom.Event) =
+      discard theVm.showValueOriginForEntry(
+        index, originChainVM()))]
+
+# A right press on an entry opens its menu: the pointer row
+# `context-menu.open`, performed for this pane on the entry the key router's
+# hit test found (`input/dom_pointer`), as the Constraints pane does.
+registerPaneOperation("context-menu.open", "pixelHistory", proc(p: ElementPress): bool =
+  let index = intAttributeOf(p.element, "data-pixel-history-index")
+  initPixelHistoryVM()
+  p.showMenuAt(entryMenuItems(pixelHistoryVMInstance, index)))

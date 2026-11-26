@@ -3,7 +3,7 @@ use std::error::Error;
 use std::path::{Path, PathBuf};
 
 use codetracer_trace_types::{CallKey, Line, NO_KEY, StepId, TypeKind, TypeRecord, TypeSpecificInfo};
-use log::{debug, error, info, warn};
+use log::{error, info, trace, warn};
 
 use crate::{
     db::DbRecordEvent,
@@ -945,7 +945,7 @@ impl<'a> CallFlowPreloader<'a> {
     //   for RR: rr ticks might stay the same, but we still return progressing `true` unless we have an error for
     //      stepping/location
     fn move_to_next_step(&mut self, from_step_id: StepId, replay: &mut dyn ReplaySession) -> (StepId, bool, bool) {
-        info!("  move_to_next_step:");
+        trace!("  move_to_next_step:");
         match self.mode {
             FlowMode::Call => {
                 // let step_to_different_line = true; // for flow for now makes sense to try to always reach a new line
@@ -1161,7 +1161,11 @@ impl<'a> CallFlowPreloader<'a> {
                 flow_view_update.location = self.location.clone();
             }
 
-            info!(
+            // Per-step diagnostics in this walk are `trace!`, below the
+            // browser's log level: there every log line is a worker console
+            // message, and a call flow walks up to `STEP_COUNT_LIMIT` steps
+            // on every move — at `info!` they were ~90,000 messages per flow.
+            trace!(
                 "  location for step count {}: {}:{}",
                 step_count, new_location.path, new_location.line
             );
@@ -1293,7 +1297,7 @@ impl<'a> CallFlowPreloader<'a> {
             ));
             flow_view_update.relevant_step_count.push(line as usize);
             flow_view_update.add_step_count(line, step_count);
-            info!("  process loops");
+            trace!("  process loops");
             let path_buf = &PathBuf::from(&new_location.path);
             // Both helpers take the update by value and hand it back, so it is
             // MOVED through them. Cloning it here copied every step walked so
@@ -1441,7 +1445,7 @@ impl<'a> CallFlowPreloader<'a> {
                     flow_view_update.loops.clone().last_mut().unwrap().base.0,
                     self.flow_preloader.expr_loader.load_branch_for_position(line, path_buf),
                 );
-                info!("    add branch for position {:?} {:?}", path_buf.display(), line);
+                trace!("    add branch for position {:?} {:?}", path_buf.display(), line);
             }
         } else {
             flow_view_update.loop_iteration_steps[0][0]
@@ -1451,7 +1455,7 @@ impl<'a> CallFlowPreloader<'a> {
                 0,
                 self.flow_preloader.expr_loader.load_branch_for_position(line, path_buf),
             );
-            info!("    add branch for position {:?} {:?}", path_buf.display(), line);
+            trace!("    add branch for position {:?} {:?}", path_buf.display(), line);
         }
         // AFTER the loop bookkeeping above, because both halves of this need
         // the cell indices it has just settled: the verdicts being resolved are
@@ -1462,7 +1466,7 @@ impl<'a> CallFlowPreloader<'a> {
         // `debug!`, not `info!`: the table grows with the walk, so formatting
         // all of it on every step is quadratic, and the replay server logs
         // `info!` unconditionally.
-        debug!("    branches taken {:?}", flow_view_update.branches_taken);
+        trace!("    branches taken {:?}", flow_view_update.branches_taken);
         flow_view_update
     }
 
@@ -1839,7 +1843,7 @@ impl<'a> CallFlowPreloader<'a> {
             // Circom, Leo, Tolk, MASM), load variable names directly from the trace data.
             // DB-based traces embed variable names at each step, so we can use load_locals()
             // instead of the static source analysis.
-            info!(
+            trace!(
                 " no tree-sitter var list for line {:?} at step {:?} — trying trace-embedded variables",
                 line, step_id
             );
@@ -1883,7 +1887,7 @@ impl<'a> CallFlowPreloader<'a> {
                     expr_order.push(value_name);
                 }
                 flow_view_update.steps.last_mut().unwrap().expr_order = expr_order.clone();
-                info!(
+                trace!(
                     " loaded {} variables from trace data at step {:?}",
                     locals.len(),
                     step_id
