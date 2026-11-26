@@ -115,6 +115,7 @@ import ../viewmodel/platform/vcs
 import ../viewmodel/platform/settings
 import ../viewmodel/platform/endpoint_codec
 import ../viewmodel/host/node_certificate_host
+import ./content_id_service
 
 export endpoint_codec
 
@@ -513,6 +514,10 @@ type
     deployment*: JsonNode
       ## §6.3's opaque half, echoed into `welcome`. WD1c owns its shape (§7);
       ## this module carries it and reads nothing in it.
+    contentIds*: ContentIdService
+      ## Where `vcs.contentId` and `vcs.declaredScopes` are computed: the
+      ## process's content-id worker (`content_id_service`) unless the
+      ## endpoint was given another.
     granted*: CapabilitySet
       ## The capabilities this endpoint may exercise for its caller. A verb
       ## whose capabilities (`FacadeVerb.serves`) are not all granted is
@@ -540,7 +545,8 @@ proc defaultSettingsRoot(): string =
 
 proc newFacadeEndpoint*(settingsRoot = ""; tempRoot = "";
                         deployment: JsonNode = nil;
-                        granted: CapabilitySet = allCapabilities
+                        granted: CapabilitySet = allCapabilities;
+                        contentIds: ContentIdService = nil
                        ): FacadeEndpoint =
   ## `granted` defaults to EVERY capability, which the dispatcher reads as
   ## "everything the table serves": the table, not this default, is what
@@ -550,7 +556,16 @@ proc newFacadeEndpoint*(settingsRoot = ""; tempRoot = "";
                   else: defaultSettingsRoot(),
     tempRoot: if tempRoot.len > 0: tempRoot else: $(nos.tmpdir().to(cstring)),
     deployment: if deployment.isNil: newJObject() else: deployment,
+    contentIds: contentIds,
     granted: granted)
+
+proc contentIdService(ep: FacadeEndpoint): ContentIdService =
+  ## The endpoint's content-id service; the process's own unless it was
+  ## given one. Asked for when a verb needs it, so an endpoint nobody asks
+  ## for a content id starts no worker.
+  if ep.contentIds.isNil:
+    ep.contentIds = processContentIdService()
+  ep.contentIds
 
 proc grantedProfile(ep: FacadeEndpoint): PlatformProfile =
   ## The profile a handler that drives a shared facade implementation
@@ -1012,11 +1027,16 @@ proc replyOfOutcome[T](outcome: PlatformOutcome[T];
 
 proc hVcsContentId(ep: FacadeEndpoint; args: JsonNode): PlatformFuture[VerbReply] =
   ## `vcs.contentId` — the content id of W, H or S (Status-Bar.md), by the ONE
-  ## recipe (`ct_test/certificate_content_id`, through `vcs.contentIdOverAsync`,
-  ## which re-runs `vcs.contentIdOver` under `runResumable`) with node's
-  ## `child_process.spawn` as its git and the endpoint's temp root for its
-  ## temporary index. The certificate indicator asks for it every 15 s; each
-  ## computation is several git runs, and none of them holds the event loop.
+  ## recipe (`ct_test/certificate_content_id`'s, through `vcs.contentIdOver`),
+  ## computed in the content-id worker thread (`content_id_service`) with the
+  ## endpoint's temp root for its temporary index. The certificate indicator
+  ## asks for it every 15 s; the computation holds neither the event loop nor
+  ## any other client's answer.
+  ##
+  ## It used to run here, through `vcs.contentIdOverAsync`: git in child
+  ## processes, but the recipe driven by `runResumable`, which re-runs it once
+  ## per git answer and so re-reads the whole index listing each time — on
+  ## this thread, the one every client's IPC goes through.
   ##
   ## REQUIRES `capVcsRead` (`vcs.ContentIdRequires`). WHAT IT WRITES: loose,
   ## content-addressed blob and tree objects into the repository's
@@ -1030,8 +1050,8 @@ proc hVcsContentId(ep: FacadeEndpoint; args: JsonNode): PlatformFuture[VerbReply
     raise newException(ProtocolError, "'scope' must be a list of paths")
   let scope = decodeTextSeq(scopeField)
   mapLater(
-    contentIdOverAsync(nodeAsyncContentIdHost(ep.tempRoot), ep.grantedProfile(),
-                       repository, state, algorithm, scope),
+    ep.contentIdService().contentId(ep.grantedProfile(), repository, state,
+                                    algorithm, scope, ep.tempRoot),
     proc(outcome: PlatformOutcome[VcsContentId]): VerbReply =
       replyOfOutcome(outcome, encodeVcsContentId),
     proc(message: string): VerbReply =
@@ -1040,12 +1060,12 @@ proc hVcsContentId(ep: FacadeEndpoint; args: JsonNode): PlatformFuture[VerbReply
 proc hVcsDeclaredScopes(ep: FacadeEndpoint; args: JsonNode): PlatformFuture[VerbReply] =
   ## `vcs.declaredScopes` — the certificate scopes the repository declares
   ## (test-certificates-spec Tooling §3.1), by the ONE reader
-  ## (`vcs.declaredScopesOverAsync`) with node's `child_process.spawn` as its
-  ## git. REQUIRES `capVcsRead` (`vcs.DeclaredScopesRequires`); writes nothing.
+  ## (`vcs.declaredScopesOver`), in the content-id worker thread. REQUIRES
+  ## `capVcsRead` (`vcs.DeclaredScopesRequires`); writes nothing.
   let repository = argText(args, "repository")
   mapLater(
-    declaredScopesOverAsync(nodeAsyncContentIdHost(ep.tempRoot),
-                            ep.grantedProfile(), repository),
+    ep.contentIdService().declaredScopes(ep.grantedProfile(), repository,
+                                         ep.tempRoot),
     proc(outcome: PlatformOutcome[VcsDeclaredScopes]): VerbReply =
       replyOfOutcome(outcome, encodeVcsDeclaredScopes),
     proc(message: string): VerbReply =

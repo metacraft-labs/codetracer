@@ -35,14 +35,13 @@
 ## `ct_test/certificate_content_id` implements through each host's own way of
 ## running git (`contentIdOver` below). No instantiation restates the recipe.
 ##
-## A host whose thread must not wait for git — the container endpoint, whose
-## event loop carries every client's IPC — answers through
-## `contentIdOverAsync`, which runs the SAME `contentIdOver` (the `git
-## --version` probe included) under `certificate_content_id.runResumable` over
-## an asynchronous git, and settles its future when the last git call has
-## answered (Status-Bar.md, "A refresh never stalls the window"). The
-## Electron desktop instead runs `contentIdOver` itself on a thread that may
-## wait: the main process's content-id worker (`index/content_id_worker.nim`).
+## A host whose thread must not wait for git — the Electron renderer and main
+## process, `ct host`'s event loop — runs `contentIdOver` on a thread that
+## may: the content-id worker (`index/content_id_worker.nim`), through
+## `index/content_id_service.nim`. `contentIdOverAsync` runs the SAME
+## `contentIdOver` under `certificate_content_id.runResumable` over an
+## asynchronous git instead; it waits for nothing, but replays the recipe once
+## per git answer on the calling thread, so no product host uses it.
 
 import std/[algorithm, strutils]
 
@@ -596,9 +595,8 @@ proc declaredScopesOver*(host: ContentIdHost; profile: PlatformProfile;
 proc declaredScopesOverAsync*(host: AsyncContentIdHost;
                               profile: PlatformProfile; repository: string
                              ): PlatformFuture[PlatformOutcome[VcsDeclaredScopes]] =
-  ## `declaredScopesOver` over a host whose git answers later — the
-  ## container endpoint's — through the same `runResumable` driver
-  ## `contentIdOverAsync` uses, so its event loop never waits for git.
+  ## `declaredScopesOver` over a host whose git answers later, through the
+  ## same `runResumable` driver `contentIdOverAsync` uses.
   settledLater(proc(settle: proc(value: PlatformOutcome[VcsDeclaredScopes])) =
     runResumable(host,
       proc(sync: ContentIdHost): PlatformOutcome[VcsDeclaredScopes] =

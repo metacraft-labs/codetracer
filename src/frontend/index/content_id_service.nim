@@ -163,25 +163,28 @@ proc ask(service: ContentIdService; request: ContentIdRequest;
 
 proc contentId*(service: ContentIdService; profile: PlatformProfile;
                 repository: string; state: VcsBlobSource; algorithm: string;
-                scope: seq[string]): PlatformFuture[PlatformOutcome[VcsContentId]] =
-  ## `vcs.contentId`, computed by the worker. A profile without
+                scope: seq[string]; tempRoot = ""
+               ): PlatformFuture[PlatformOutcome[VcsContentId]] =
+  ## `vcs.contentId`, computed by the worker, its temporary indexes under
+  ## `tempRoot` (empty: the worker's `os.tmpdir()`). A profile without
   ## `ContentIdRequires` is refused here, before any worker starts.
   if not profile.hasAll(ContentIdRequires):
     return resolved(contentIdRefusal(profile))
   let request = ContentIdRequest(op: OpContentId, repository: repository,
                                  state: state, algorithm: algorithm,
-                                 scope: scope)
+                                 scope: scope, tempRoot: tempRoot)
   settledLater(proc(settle: proc(value: PlatformOutcome[VcsContentId])) =
     service.ask(request, proc(answer: cstring) =
       settle(decodeContentIdOutcome($answer))))
 
 proc declaredScopes*(service: ContentIdService; profile: PlatformProfile;
-                     repository: string
+                     repository: string; tempRoot = ""
                     ): PlatformFuture[PlatformOutcome[VcsDeclaredScopes]] =
   ## `vcs.declaredScopes`, read by the worker.
   if not profile.hasAll(DeclaredScopesRequires):
     return resolved(declaredScopesRefusal(profile))
-  let request = ContentIdRequest(op: OpDeclaredScopes, repository: repository)
+  let request = ContentIdRequest(op: OpDeclaredScopes, repository: repository,
+                                 tempRoot: tempRoot)
   settledLater(proc(settle: proc(value: PlatformOutcome[VcsDeclaredScopes])) =
     service.ask(request, proc(answer: cstring) =
       settle(decodeDeclaredScopesOutcome($answer))))

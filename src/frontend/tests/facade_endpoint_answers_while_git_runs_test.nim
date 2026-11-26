@@ -56,6 +56,15 @@
 ## setup calls the real git by its absolute path, so the delay is paid only
 ## where it is being measured.
 ##
+## THE CONTENT-ID WORKER runs this suite's own bundle. The server computes
+## `vcs.contentId` in the content-id service's worker thread
+## (`index/content_id_service.nim`), whose shipped script
+## (`content_id_worker.js`) does not sit beside a suite the lane compiled on
+## its own. Started as that worker, this bundle serves content-id requests
+## (`content_id_worker.serveContentIdRequests`, the shipped worker's whole
+## body) and runs none of the suite: its statements are behind
+## `isMainThread()`, because the worker shares this process's environment.
+##
 ## Lane: `main-process` — `nim js -d:nodejs -d:ctIndex -d:server`.
 
 import std/[json, jsffi, strutils]
@@ -63,6 +72,8 @@ import std/[json, jsffi, strutils]
 import lib/src_relative_require
 import ../index/config
 import ../index/server_config
+import ../index/content_id_service
+import ../index/content_id_worker
 import ../viewmodel/platform/vcs
 import ../viewmodel/platform/process
 import ../viewmodel/platform/endpoint_protocol
@@ -313,40 +324,48 @@ proc start(httpPort, socketPort: int) =
           $reason & ")"
         finish())
 
-echo "facade_endpoint_answers_while_git_runs_test"
+proc isMainThread(): bool {.importjs: "require('worker_threads').isMainThread".}
+proc thisBundle(): cstring {.importjs: "(__filename)@".}
 
-scratch = $makeTempDir(cstring"ct-facade-git-loop-")
-realGit = $whichGit()
-repository = scratch & "/repo"
+if isMainThread():
+  # The server's content-id worker runs this bundle (header).
+  processWorkerScript = $thisBundle()
+  echo "facade_endpoint_answers_while_git_runs_test"
 
-# A repository on `main` with one commit, made with the REAL git.
-makeDir(repository.cstring)
-writeFile(cstring(repository & "/a.txt"), cstring("one\n"))
-writeFile(cstring(scratch & "/b.txt"), cstring("b's file\n"))
-for args in [@["init", "-q"], @["symbolic-ref", "HEAD", "refs/heads/main"],
-             @["add", "a.txt"],
-             @["-c", "user.name=Suite", "-c", "user.email=suite@example.invalid",
-               "commit", "-q", "-m", "one"]]:
-  var argv: seq[cstring] = @[]
-  for a in args: argv.add a.cstring
-  discard runSync(realGit.cstring, argv, repository.cstring)
+  scratch = $makeTempDir(cstring"ct-facade-git-loop-")
+  realGit = $whichGit()
+  repository = scratch & "/repo"
 
-# The slow git, first on the PATH the server's children inherit.
-makeDir(cstring(scratch & "/slow-bin"))
-writeExecutable(cstring(scratch & "/slow-bin/git"), cstring(
-  "#!/bin/sh\nsleep " & $SlowGitSeconds & "\nexec '" & realGit & "' \"$@\"\n"))
-setEnv(cstring"PATH", cstring(scratch & "/slow-bin:" & $getEnv(cstring"PATH")))
+  # A repository on `main` with one commit, made with the REAL git.
+  makeDir(repository.cstring)
+  writeFile(cstring(repository & "/a.txt"), cstring("one\n"))
+  writeFile(cstring(scratch & "/b.txt"), cstring("b's file\n"))
+  for args in [@["init", "-q"], @["symbolic-ref", "HEAD", "refs/heads/main"],
+               @["add", "a.txt"],
+               @["-c", "user.name=Suite", "-c", "user.email=suite@example.invalid",
+                 "commit", "-q", "-m", "one"]]:
+    var argv: seq[cstring] = @[]
+    for a in args: argv.add a.cstring
+    discard runSync(realGit.cstring, argv, repository.cstring)
 
-# The settings root and the session secret, as `facade_endpoint_over_socket_test`
-# sets them and for its reasons: settings stay in `scratch`, and the server
-# admits only a client holding the secret (`index/host_session_guard.nim`).
-setEnv(cstring"CODETRACER_HOME", (scratch & "/ct-home").cstring)
-setEnv(cstring"XDG_CONFIG_HOME", (scratch & "/config").cstring)
-const TestSessionSecret = "facade-endpoint-answers-while-git-runs-secret"
-setEnv(cstring"CODETRACER_HOST_SESSION_SECRET", TestSessionSecret.cstring)
-setEnv(cstring"CT_TEST_SESSION_SECRET", TestSessionSecret.cstring)
-setEnv(cstring"GIT_CONFIG_NOSYSTEM", cstring"1")
+  # The slow git, first on the PATH the server's children inherit.
+  makeDir(cstring(scratch & "/slow-bin"))
+  writeExecutable(cstring(scratch & "/slow-bin/git"), cstring(
+    "#!/bin/sh\nsleep " & $SlowGitSeconds & "\nexec '" & realGit & "' \"$@\"\n"))
+  setEnv(cstring"PATH", cstring(scratch & "/slow-bin:" & $getEnv(cstring"PATH")))
 
-freePort(proc(p1: int) =
-  freePort(proc(p2: int) =
-    start(p1, p2)))
+  # The settings root and the session secret, as `facade_endpoint_over_socket_test`
+  # sets them and for its reasons: settings stay in `scratch`, and the server
+  # admits only a client holding the secret (`index/host_session_guard.nim`).
+  setEnv(cstring"CODETRACER_HOME", (scratch & "/ct-home").cstring)
+  setEnv(cstring"XDG_CONFIG_HOME", (scratch & "/config").cstring)
+  const TestSessionSecret = "facade-endpoint-answers-while-git-runs-secret"
+  setEnv(cstring"CODETRACER_HOST_SESSION_SECRET", TestSessionSecret.cstring)
+  setEnv(cstring"CT_TEST_SESSION_SECRET", TestSessionSecret.cstring)
+  setEnv(cstring"GIT_CONFIG_NOSYSTEM", cstring"1")
+
+  freePort(proc(p1: int) =
+    freePort(proc(p2: int) =
+      start(p1, p2)))
+else:
+  serveContentIdRequests()
