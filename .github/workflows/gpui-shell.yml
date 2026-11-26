@@ -154,6 +154,31 @@ jobs:
           bash ci/unpack-ct-build-products.sh "${RUNNER_TEMP}/visual-replay-tools" visual-replay-tools.tar.gz
           echo "CT_VISUAL_REPLAY_TOOLS_PREBUILT=1" >>"$GITHUB_ENV"
 
+      - name: Restore the headless shim from the cache
+        # isonim-gpui's `--features gpui-headless` shim, staged with its build
+        # stamps in rust/target/plat37 by its `just plat37-shims`, for PLAT-35's
+        # compositor-free pixel capture below. Keyed on the pin.
+        id: plat37_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ../isonim-gpui/rust/target/plat37
+          key: gpui-shim-plat37-v1-${{ steps.gpui_pin.outputs.rev }}
+
+      - name: Build the headless shim
+        if: ${{ steps.plat37_cache.outputs.cache-hit != 'true' }}
+        run: |
+          set -euo pipefail
+          (cd ../isonim-gpui && nix develop --profile "${CT_GCROOT_DIR:-$RUNNER_TEMP}/isonim-gpui-shell" --command just plat37-shims)
+          ls -la ../isonim-gpui/rust/target/plat37
+
+      - name: Save the headless shim to the cache
+        if: ${{ steps.plat37_cache.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ../isonim-gpui/rust/target/plat37
+          key: gpui-shim-plat37-v1-${{ steps.gpui_pin.outputs.rev }}
+
       - name: Restore the featureless shim from the cache
         # For when the tools artifact did not bring it; keyed on the pin, so
         # a restored file is the same shim the artifact would carry.
@@ -197,6 +222,12 @@ jobs:
 
       - name: The GPUI shell lane
         run: nix develop .#devShells.x86_64-linux.default --command just test-gpui-shell
+
+      - name: PLAT-35's GPUI pixel capture, through the headless shim
+        # `gpui_render_to_pixels`, no compositor; each scenario is graded on
+        # the census the binary writes (ci/test/plat35-gpui-capture.sh).
+        if: ${{ !cancelled() }}
+        run: nix develop .#devShells.x86_64-linux.default --command just plat35-capture-gpui
 
       - name: Upload the lane's log
         if: ${{ !cancelled() }}
