@@ -234,6 +234,37 @@ proc statusWordColour*(p: AhPalette; attention: SessionAttention): string =
   of saEnded: p.endedWord
   else: p.textLabel
 
+proc initiativeSessionWordColour*(p: AhPalette; attention: SessionAttention): string =
+  ## An Initiatives session line's status word (`.ah-att-*
+  ## .ah-initiative-session-status`), in the terminal, GPUI and the web
+  ## alike, the session lines of the initiative popup included. It is the
+  ## line's only word for its state, beside a dot of the same hue, so it is
+  ## text (WCAG 2.2 SC 1.4.3) and at the least the state's non-colour cue,
+  ## held to 3:1 (SC 1.4.11) on every ground the panel draws it on.
+  ##
+  ## Light's raw status text roles fall under that on the panel (#e6e2db)
+  ## and the stripe (#f8f6f2): `running` #16a34a 2.55:1 and 3.05:1, `needs
+  ## input` #ea580c 2.76:1 and 3.30:1 (`failed` #dc2626 3.74:1 and 4.47:1).
+  ## So in Light the word takes its role's text hover step, the darker
+  ## design-system step, as the timeline's `timelineAdded` and
+  ## `timelineWarning` do: `needs input` text/warning/primary-hover #c2410c
+  ## (4.01:1 panel, 4.80:1 stripe), `running` text/success/primary-hover
+  ## #15803d (3.88:1, 4.65:1), `failed` text/error/primary-hover #b91c1c
+  ## (5.01:1, 5.99:1). Dark keeps each role. Every other state is in the
+  ## label role. The dot keeps its icon colour (`markOf`). The selected
+  ## initiative's ground (`activeRow`) is outside this rule (codetracer-pm
+  ## issue 2026-11-24-light-status-colours-fall-to-1-9-to-2-9-to-1-on-the-selected-row-ground.md).
+  template t(token: DesignToken): string = DesignTokenHex[token][p.mode]
+  let light = p.mode != dmDark
+  case attention
+  of saNeedsInput:
+    if light: t(dtColorsUiTextWarningPrimaryHover) else: p.textWarning
+  of saRunning:
+    if light: t(dtColorsUiTextSuccessPrimaryHover) else: p.textSuccess
+  of saFailed:
+    if light: t(dtColorsUiTextErrorPrimaryHover) else: p.textError
+  else: p.textLabel
+
 proc stateWordColour*(p: AhPalette; state: InitiativeState): string =
   case state
   of isNeedsInput: p.textWarning
