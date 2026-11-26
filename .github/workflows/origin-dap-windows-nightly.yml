@@ -108,6 +108,21 @@ jobs:
           key: windows-diy-origin-dap-v3-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}
           fail-on-cache-miss: true
 
+      - name: Restore db-backend's compiler cache
+        # sccache's local store, not db-backend's target directory: the test
+        # compile of db-backend and its dependencies took 36m53s of the Python
+        # job's 75 minutes on a clean-start runner (run 45718096371). Keyed on
+        # the toolchain and Cargo.lock; a dependency change restores the
+        # nearest older store, and sccache recompiles only what changed.
+        # SCCACHE_CACHE_SIZE on the test step bounds what is saved.
+        id: sccache_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}\sccache
+          key: sccache-db-backend-windows-v1-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}-${{ hashFiles('src/db-backend/Cargo.lock') }}
+          restore-keys: |
+            sccache-db-backend-windows-v1-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}-
+
       - name: Setup db-backend siblings
         # `windows-diy`, for the reason spelled out in the per-PR job above:
         # the `nix` flavor cannot install Nix on a Windows runner, and this
@@ -121,7 +136,7 @@ jobs:
         # above; env.ps1 finds them installed and skips them. NARGO stays out.
         env:
           WINDOWS_DIY_INSTALL_ROOT: ${{ runner.temp }}\ct-diy
-          WINDOWS_DIY_ONLY: "GCC,ZSTD,ZLIB,RUST,NIM,CAPNP,UV,NODE,JUST,TTD"
+          WINDOWS_DIY_ONLY: "GCC,ZSTD,ZLIB,RUST,NIM,CAPNP,UV,NODE,JUST,TTD,SCCACHE"
         uses: ./.github/actions/setup-db-backend-siblings
         with:
           env-flavor: windows-diy
@@ -319,9 +334,33 @@ jobs:
       - name: Run routed materialized origin-DAP matrix
         shell: bash
         env:
+          RUSTC_WRAPPER: ${{ runner.temp }}\ct-diy\cargo\bin\sccache.exe
+          SCCACHE_DIR: ${{ runner.temp }}\sccache
+          SCCACHE_CACHE_SIZE: "2500M"
+          # sccache cannot cache an incrementally compiled crate, and the dev
+          # profile compiles db-backend's own crates incrementally.
+          CARGO_INCREMENTAL: "0"
           CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
           CT_TEST_LANGS: all
         run: just test-origin-dap
+
+      - name: Report and flush db-backend's compiler cache
+        if: always()
+        shell: bash
+        env:
+          RUSTC_WRAPPER: ${{ runner.temp }}\ct-diy\cargo\bin\sccache.exe
+        run: |
+          sccache=$(cygpath -u "$RUSTC_WRAPPER")
+          if [ ! -f "$sccache" ]; then echo "no sccache at $RUSTC_WRAPPER"; exit 0; fi
+          "$sccache" --show-stats || true
+          "$sccache" --stop-server || true
+
+      - name: Save db-backend's compiler cache
+        if: always() && steps.sccache_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}\sccache
+          key: sccache-db-backend-windows-v1-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}-${{ hashFiles('src/db-backend/Cargo.lock') }}
 
       - name: Verify test-reprobuild-hcr-mcr-dap fails loudly unsupported on Windows
         shell: bash

@@ -745,6 +745,46 @@ proc markOn*(p: AhPalette; m: MarkStyle; ground: string): MarkStyle =
   if m.roled and inkContrast(m.colour, ground) < StatusMarkFloor:
     result.colour = p.roleInks(ground)[m.role]
 
+proc initiativeSessionWordColour*(p: AhPalette; attention: SessionAttention): string =
+  ## An Initiatives session line's status word (`.ah-att-*
+  ## .ah-initiative-session-status`), in the terminal, GPUI and the web
+  ## alike, the session lines of the initiative popup included. It is the
+  ## line's only word for its state, beside a dot of the same hue, so it is
+  ## text: WCAG 2.2 SC 1.4.3, `StatusTextFloor` (4.5:1), on every ground the
+  ## panel and the popup draw it on
+  ## (https://www.w3.org/TR/WCAG22/#contrast-minimum). One ink per state,
+  ## whatever the ground, so the web's stylesheet draws the same one.
+  ##
+  ## Light's grounds for it are the panel (#e6e2db), its stripe (#f8f6f2),
+  ## the popup's card (#dbd6cc) and, where the popup drops over a panel,
+  ## `surface/primary/secondary-hover` (`hover`, #c8c2b5), the darkest. The
+  ## text roles fall under the floor there, and so do their hover (700)
+  ## steps: `running` #15803d 2.83:1, `needs input` #c2410c 2.92:1, `failed`
+  ## #b91c1c 3.65:1 (on the panel 3.88, 4.01 and 5.01:1); the 800 steps,
+  ## green #166534 4.02:1 and orange #9a3412 4.12:1, would still fall under
+  ## it. So in Light the word is the palette's one rule for a status word,
+  ## `statusTextInk`, on that darkest ground, which then holds on every
+  ## lighter one: the hover step taken `StatusInkStepPercent` at a time
+  ## toward the body text until it holds. The Nim token table carries no
+  ## 800 or 900 step (only the Stylus alias layer does, with no semantic
+  ## token), so the step is derived from two tokens, and the web mixes the
+  ## same two tokens by the same weight (`mix-ink` in `defaults.styl`).
+  ##
+  ## `needs input` #753317 (the hover step half toward the body, about
+  ## orange/900), `running` #1e5330 (half, about green/900), `failed`
+  ## #951e1e (a quarter, about red/800): on #c8c2b5 5.28, 5.07 and 4.77:1;
+  ## on the card 6.47, 6.21 and 5.84:1; on the panel 7.25, 6.97 and 6.55:1;
+  ## on the stripe 8.68, 8.33 and 7.84:1.
+  ##
+  ## Dark keeps each role. Every other state is in the label role. The dot
+  ## beside the word is a graphical object held to 3:1 (SC 1.4.11) by its
+  ## own rule (`markOf`, and `markOn` where a view resolves it per ground).
+  case attention
+  of saNeedsInput, saRunning, saFailed:
+    if p.mode == dmDark: p.statusTextSteps(pieRoleOf(attention))[0]
+    else: p.statusTextInk(pieRoleOf(attention), p.hover)
+  else: p.textLabel
+
 type
   PieShape* = enum
     ## How a pie is drawn, whatever its role and inks.

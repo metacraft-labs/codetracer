@@ -971,6 +971,15 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
   entries.addMany("AgentActivityVM", ["expandedTestRuns", "expandedTests"],
     vscSharedSessionViewState,
     "Drilled-open test-run and test rows are shared review intent, keyed by agent message anchor ids.")
+  # The conversation's own disclosures are the same intent as the cards'
+  # drill-down above: which agent turns a reader flipped open or closed
+  # (`toggledThoughts`, by message id) and which "N tools used" groups they
+  # opened (`expandedToolHistories`, `toolHistoryKey(messageId, group)`). Both
+  # are keyed by message identities that do not drift, so neither is stable-id
+  # blocked; a peer following the review sees the same turns open.
+  entries.addMany("AgentActivityVM", ["toggledThoughts", "expandedToolHistories"],
+    vscSharedSessionViewState,
+    "Agent turns flipped open or closed and tool-call groups opened are shared review intent, keyed by agent message ids.")
   entries.addEntry("AgentActivityVM", "inputValue", vscRendererLocal,
     "Prompt draft is local typing state.")
   # The toolbar's three session facts, set by the host rather than typed by a
@@ -1028,6 +1037,14 @@ proc collabSignalRegistry*(): seq[SignalRegistryEntry] =
      "settingsDeliveryMode", "settingsDeliveryBranch", "settingsPermissions"],
     vscRendererLocal,
     "The agent-session settings form before it is submitted; a draft, like `inputValue`. What the session actually runs with is reported back as a backend fact.")
+  # The runtimes the form offers beyond the built-in list come from THIS
+  # renderer's host: "Agent Harbor worktree" is listed when the host has a
+  # Harbor server configured (`ui/agent_activity`, Agentic-Coding-Integration.md
+  # §6.8). Another participant's host may have none, so the list is part of the
+  # local form, not a fact of the session; the runtime a submitted session
+  # runs with is reported back like the rest of the form.
+  entries.addEntry("AgentActivityVM", "settingsExtraRuntimes", vscRendererLocal,
+    "The settings form's extra runtime choices, offered by this renderer's own host configuration (a configured Harbor server).")
   entries.addDerived("AgentActivityVM",
     ["messageCount", "terminalCount", "hasMessages", "hasSessionNotice",
      "testRunCount", "evidenceCallCount"])

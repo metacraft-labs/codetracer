@@ -1181,14 +1181,20 @@ AH_MARK = 0.5rem
   color: colors-ui-text-primary-label
   white-space: nowrap
 
+// A session line's status word: the Agent Harbor palette's
+// `initiativeSessionWordColour`, which the terminal and the GPUI front end
+// draw. Dark keeps each role. Light takes the role's hover step taken toward
+// the body text until it holds 4.5:1 (WCAG 2.2 SC 1.4.3) on the darkest
+// ground the panel and the popup draw it on (#c8c2b5): half way for needs
+// input and running, a quarter for failed.
 .ah-att-needs-input .ah-initiative-session-status
-  color: colors-ui-text-warning-primary
+  color: by-mode(colors-ui-text-warning-primary, mix-ink(colors-ui-text-warning-primary-hover, colors-ui-text-primary-body, 50%))
 
 .ah-att-running .ah-initiative-session-status
-  color: colors-ui-text-success-primary
+  color: by-mode(colors-ui-text-success-primary, mix-ink(colors-ui-text-success-primary-hover, colors-ui-text-primary-body, 50%))
 
 .ah-att-failed .ah-initiative-session-status
-  color: colors-ui-text-error-primary
+  color: by-mode(colors-ui-text-error-primary, mix-ink(colors-ui-text-error-primary-hover, colors-ui-text-primary-body, 25%))
 
 .ah-initiative-more
   margin-left: 1rem

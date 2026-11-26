@@ -222,19 +222,11 @@ proc drawCurrent*(c: var AhCanvas; parent: AhNode; row, col, width: int; text: s
   let w = c.put(row, col, "CURRENT", c.p.textLabel, bold = true)
   discard c.text(n, row, col + w + 1, max(1, width - w - 1), text, c.p.textBody)
 
-proc sessionStatusColour(p: AhPalette; attention: SessionAttention): string =
-  case attention
-  of saNeedsInput: p.textWarning
-  of saRunning: p.textSuccess
-  of saFailed: p.textError
-  else: p.textLabel
-
 proc drawSessionLine*(c: var AhCanvas; parent: AhNode; item: SessionItem;
                       row, col, width: int; onGround = false) =
   ## One of an initiative's sessions: its mark, title and status word.
-  ## `onGround`: the mark and the status word take their role's inks
-  ## readable on the ground under them (`markOn`, `statusTextInk`), as
-  ## `drawMilestoneBar`'s.
+  ## `onGround`: the mark takes its role's ink readable on the ground under
+  ## it (`markOn`), as `drawMilestoneBar`'s.
   let n = c.node(parent, row, col, width, 1, [("session", item.id),
                                               ("attention", $item.attention),
                                               ("tooltip", item.tooltip)])
@@ -246,10 +238,11 @@ proc drawSessionLine*(c: var AhCanvas; parent: AhNode; item: SessionItem;
   # before its origin (`StatusWordGap`).
   discard c.text(n, row, col + 2, max(1, width - 2 - sw - StatusWordGap), item.title,
                  c.p.textBody, fact = "title")
-  let word = if onGround and item.attention in {saNeedsInput, saRunning, saFailed}:
-               c.p.statusTextInk(pieRoleOf(item.attention), ground)
-             else: c.p.sessionStatusColour(item.attention)
-  discard c.text(n, row, col + width - sw, sw, item.statusLabel, word, fact = "status")
+  # The status word is the shared palette's one rule for it, on every ground
+  # and in every front end (`initiativeSessionWordColour`), so it is not
+  # resolved per ground here as the mark is.
+  discard c.text(n, row, col + width - sw, sw, item.statusLabel,
+                 c.p.initiativeSessionWordColour(item.attention), fact = "status")
 
 # ---------------------------------------------------------------------------
 # Initiatives

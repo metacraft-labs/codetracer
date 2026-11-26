@@ -22,7 +22,19 @@
             {
               # Preserve the configured hook tools before backend compiler inputs.
               inputsFrom = [
-                config.pre-commit.devShell
+                # The hook tools only, NOT git-hooks.nix's own shellHook:
+                # mkShell concatenates the shellHook of every inputsFrom
+                # entry, and that one is the upstream installationScript. Run
+                # on entry, it moved the shared Reprobuild dispatchers for
+                # pre-commit and pre-push to `.legacy` and took their slots
+                # with relative-config pre-commit shims, so the main
+                # checkout's publication gate stopped running (2026-11-26).
+                # Hooks are installed only by devShells.default, through
+                # nix/git-hooks.nix, which keeps the dispatchers.
+                # ci/test/pre-commit-shell-keeps-dispatchers-test.sh.
+                (config.pre-commit.devShell.overrideAttrs (_: {
+                  shellHook = "";
+                }))
                 # A complete backend derivation also contributes its test-only
                 # inputs (including Noir). Hooks need the shared compiler inputs,
                 # not a build of every recorder used by backend runtime tests.

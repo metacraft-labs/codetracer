@@ -115,3 +115,17 @@ by-mode(dark, light)
   if COLOR_MODE is defined and COLOR_MODE == "Light"
     return light
   dark
+
+// mix-ink(a, b, percent) — `a` taken `percent` % of the way toward `b`, per
+// sRGB channel, each channel rounded half up: the Agent Harbor palette's
+// `mixInk` (`src/frontend/viewmodel/views/agent_harbor_palette.nim`), so a
+// colour the native front ends derive from two design tokens is the same hex
+// here, derived from the same two tokens.
+//
+// Not Stylus's own `mix()`: it rounds a channel that falls exactly on a half
+// down (#c2410c a quarter toward #272522 is #9b3a11 there, #9b3a12 in the
+// palette), so the web would draw a colour one step away from the terminal's
+// and the GPUI front end's.
+mix-ink(a, b, percent)
+  t = unit(percent / 100, '')
+  rgb(round(red(a) * (1 - t) + red(b) * t), round(green(a) * (1 - t) + green(b) * t), round(blue(a) * (1 - t) + blue(b) * t))

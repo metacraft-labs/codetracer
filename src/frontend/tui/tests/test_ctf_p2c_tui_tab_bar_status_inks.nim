@@ -13,7 +13,9 @@
 ##
 ## * a status word or count (the popup's state word and its sessions'
 ##   status words, a failed `+N`'s count, the error notice) holds 4.5:1
-##   (WCAG 2.2 SC 1.4.3) on the cell's own ground;
+##   (WCAG 2.2 SC 1.4.3) on the cell's own ground; the popup's session
+##   status words are the Initiatives panel's one rule for them in every
+##   front end (`initiativeSessionWordColour`), not resolved per ground;
 ## * a status mark and a milestone bar's status segment (graphical objects)
 ##   hold 3:1 (SC 1.4.11) on the cell's own ground; a neutral mark (idle,
 ##   ended, planned, other) has no status role and is not held here;
@@ -76,7 +78,7 @@ proc segmentProblems(m: AhTuiMount; parent: AhNode; what: string): seq[string] =
 suite "CTF-P2c: the tab bars' status inks on their grounds":
   test "the initiative popup's marks, segments, state word and status words":
     var problems: seq[string]
-    var seen = 0
+    var seen, words = 0
     for fixture in ["popup", "popup-over-panel"]:
       for (size, cols, rows) in Sizes:
         for mode in [dmDark, dmLight]:
@@ -89,8 +91,19 @@ suite "CTF-P2c: the tab bars' status inks on their grounds":
             problems.add m.inkProblems(popup.first("state"), TextFloor, where & "state word")
             for s in popup.all("status"):
               problems.add m.inkProblems(s, TextFloor, where & "session status")
+            for line in popup.all("session"):
+              let word = line.first("status")
+              if word.isNil or word.row >= m.rows: continue
+              let attention = parseEnum[SessionAttention](line.attr("attention"))
+              let fg = m.canvas.grid.styleAt(word.row, word.col).fg
+              if attention in {saNeedsInput, saRunning, saFailed}: inc words
+              if fg != m.canvas.p.initiativeSessionWordColour(attention):
+                problems.add where & "session status '" & word.attr("status") & "' is " & fg &
+                             ", not the panel's " & m.canvas.p.initiativeSessionWordColour(attention)
           m.dispose()
     check seen == 8
+    # Each popup draws running and waiting sessions (three of them).
+    check words >= 8 * 3
     if problems.len > 0: echo problems.join("\n")
     check problems.len == 0
 
@@ -189,6 +202,18 @@ suite "CTF-P2c: the palette's status inks on a ground":
     # toward the body (5.84:1; about red/800 #991b1b, which the Nim table
     # lacks).
     check l.statusTextInk(prError, l.menu) == "#951e1e"
+    # An Initiatives session's status word, one ink per state on every
+    # ground. Dark keeps each role; Light takes this rule on the darkest
+    # ground it is drawn on, the popup's over a panel (#c8c2b5).
+    check d.initiativeSessionWordColour(saNeedsInput) == d.textWarning
+    check d.initiativeSessionWordColour(saRunning) == d.textSuccess
+    check d.initiativeSessionWordColour(saFailed) == d.textError
+    check l.initiativeSessionWordColour(saNeedsInput) == "#753317"   # about orange/900
+    check l.initiativeSessionWordColour(saRunning) == "#1e5330"      # about green/900
+    check l.initiativeSessionWordColour(saFailed) == "#951e1e"       # about red/800
+    for att in [saNeedsInput, saRunning, saFailed]:
+      for ground in [l.panel, l.menu, l.ground, l.hover]:
+        check contrastOf(l.initiativeSessionWordColour(att), ground) >= TextFloor
     # The `+N` chip's failure on the bar: red/700, the recordings' red.
     check l.statusTextInk(prError, l.ground) == "#b91c1c"
     # The open chip's warning dot: the pie's warning ink on that fill.

@@ -177,8 +177,6 @@ file public/resources/debug/Restart_16x16px.svg
 file public/resources/debug/StartDebugging_16x16px.svg
 file public/resources/debug/continue-out_16.svg
 file public/resources/debug/continue-out_16_dark.svg
-file public/resources/debug/jump-after_16.svg
-file public/resources/debug/jump-before_16.svg
 file public/resources/debug/pause_16.svg
 file public/resources/debug/pause_ongoing_16.gif
 file public/resources/debug/stop_16.svg

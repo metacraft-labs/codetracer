@@ -69,11 +69,14 @@ proc newPanelElement(text: cstring): kdom.Element {.importjs: """
 var failures = 0
 
 proc check(ok: bool; label: string; detail = "") =
+  ## In the lane runner's format (ci/lib/run-nim-test-lane.sh counts the
+  ## `[OK]` and `[FAILED]` lines): a check printed any other way is not
+  ## counted, and a passing file reads as one that ran nothing.
   if ok:
-    echo "  ok   " & label
+    echo "  [OK] " & label
   else:
     inc failures
-    echo "  FAIL " & label & (if detail.len > 0: ": " & detail else: "")
+    echo "  [FAILED] " & label & (if detail.len > 0: ": " & detail else: "")
 
 proc panel(title: string; edge: AutoHideEdge): AutoHidePanel =
   AutoHidePanel(edge: edge, title: cstring(title),
