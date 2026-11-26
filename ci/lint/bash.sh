@@ -859,6 +859,14 @@ lint_step "contract suite: a test lane's user-state guard names the file that to
 lint_step "contract suite: no lock file names a local path" \
 	bash ci/test/lock-local-paths-test.sh
 
+# A lane may run its files several at a time (ci/lib/job-pool.sh). The suite
+# runs the real runner over fixture files, a slow one first and a failing one
+# among them, and holds the pool to the serial run's report: lane order, the
+# same totals, a failing file's whole output, a time per file. Pure bash, a
+# `nim` stub.
+lint_step "contract suite: a test lane's file pool reports as the serial run does" \
+	bash ci/test/lane-pool-test.sh
+
 # The VS Code sources ci/test/cua-keymap-extractor.sh caches go under
 # $CODETRACER_HOME/cache when that is set, and exactly where they always went
 # when it is not; on 2026-11-02 the lint-nim stage left them in a developer's

@@ -645,6 +645,27 @@ test_lane_is_compile_only() {
 	esac
 }
 
+# test_lane_parallel_safe ID — 1 when ci/lib/run-nim-test-lane.sh may run the
+# lane's files several at a time (ci/lib/job-pool.sh sizes the pool), else 0.
+#
+# The two ViewModel unit lanes compile ~270 files each, one at a time, and no
+# longer fit their CI jobs (run 45590873552: 70 minutes for the WASM lane
+# alone). Their files keep their state per file: a nimcache, CODETRACER_HOME,
+# the XDG roots and the user-state sandbox layers are the lane's per file, and
+# a fixed temporary name in a suite is that suite's own. The one directory they
+# share, the plugin fixtures' build scratch (`CT_PLUGIN_TEST_SCRATCH`), is
+# given per file by the runner when it runs files in parallel.
+#
+# Every other lane stays serial until someone has made the same check for it:
+# a lane that spawns a browser, a terminal or a recorder can collide on things
+# the runner does not isolate.
+test_lane_parallel_safe() {
+	case "$1" in
+	vm-unit | vm-unit-wasm) echo 1 ;;
+	*) echo 0 ;;
+	esac
+}
+
 # test_lane_parity_partner ID — the lane that deliberately compiles the SAME
 # files on the other backend, or empty.
 #

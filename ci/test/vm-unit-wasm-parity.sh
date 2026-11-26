@@ -27,8 +27,21 @@
 #     n and passes. Only an EQUALITY against the other backend sees it.
 #
 # So this script runs both lanes and compares them file by file. It is slow
-# (two full compiles of ~70 ViewModel suites) and that is the price of the
-# claim; it is a gate, not a unit test.
+# (two full compiles of every shared ViewModel suite: 216 files in CI job
+# 138720017748 and 221 in job 139074713989 a day later, up from ~70 when this
+# gate was written) and that is the price of the claim; it is a gate, not a
+# unit test.
+#
+# SO THE FILES ARE MEASURED SEVERAL AT A TIME (ci/lib/job-pool.sh sizes the
+# pool from the CPUs and the memory; CT_LANE_JOBS=1 is one at a time). Each
+# file's native and wasm builds run one after the other inside one job, so no
+# file is ever running twice at once; each has its own nimcache per lane. The
+# comparison below then reads the measurements in the lane's file order, so
+# the report is the same whatever order the files finished in. One file at a
+# time, the gate took 63 minutes in job 138720017748, 104 on a busier host in
+# job 139074713989, and ran into its job's 150-minute limit in job
+# 139360457418.
+# test-logs/vm-unit-wasm-parity.timings.tsv records each file's two times.
 #
 # WHAT IS COMPARED, AND WHAT EACH NUMBER IS WORTH
 # ----------------------------------------------
@@ -95,10 +108,13 @@
 #                       cache have already produced a green lane that
 #                       measured another tree's source).
 #
+#   CT_LANE_JOBS        how many files are measured at once (default: from
+#                       the CPUs and the memory, ci/lib/job-pool.sh).
+#
 #   CT_PARITY_ONLY      a `grep -E` pattern restricting contract 2 to the
 #                       files it matches. For FALSIFYING this gate and for
-#                       iterating on it — a full run is two compiles of ~70
-#                       suites, and an arm that plants a divergence in one
+#                       iterating on it — a full run is two compiles of
+#                       every shared suite, and an arm that plants a divergence in one
 #                       file should not cost that.
 #
 #                       IT CANNOT BE USED AS A MUTE BUTTON, and that is
@@ -197,6 +213,7 @@ measure_file() {
 	backend="$(test_lane_backend "${lane}")"
 	cache="${cache_root}/parity-${lane}-${name}"
 	read -r -a extra <<<"$(test_lane_extra_flags "${lane}")"
+	extra+=(${pool_flags[@]+"${pool_flags[@]}"})
 
 	if [ "${backend}" = "wasm" ]; then
 		artifact="${cache}/${name}.js"
@@ -333,12 +350,86 @@ if [ -n "${parity_only}" ]; then
 	fi
 fi
 
+# THE MEASUREMENTS, in a pool; the comparison after it reads them in order.
+# shellcheck source=ci/lib/job-pool.sh
+# shellcheck disable=SC1091 # resolved at runtime from $REPO_ROOT
+source "${REPO_ROOT}/ci/lib/job-pool.sh"
+pool_size="$(ct_pool_size 2048)" || exit 2
+pool_flags=()
+if [ "${pool_size}" -gt 1 ]; then
+	pool_flags=("--parallelBuild:$(ct_pool_parallel_build "${pool_size}")")
+fi
+parity_dir="$(mktemp -d "${TMPDIR:-/tmp}/ct-parity.XXXXXX")"
+trap 'rm -rf "${parity_dir}"' EXIT
+timings="test-logs/vm-unit-wasm-parity.timings.tsv"
+echo "    (${pool_size} file(s) at a time; per-file times in ${timings})"
+echo
+
+now_s() {
+	if [ -n "${EPOCHREALTIME:-}" ]; then printf '%s\n' "${EPOCHREALTIME}"; else date +%s; fi
+}
+
+# One file, both lanes, one after the other: <i>.res holds the native line
+# and then the wasm line, <i>.time the two durations.
+measure_pair() {
+	local idx="$1" f="$2"
+	(
+		# The plugin fixtures' build scratch is shared by every suite that
+		# uses them; suites measured at the same time get one each.
+		if [ "${pool_size}" -gt 1 ] && [ -z "${CT_PLUGIN_TEST_SCRATCH:-}" ]; then
+			mkdir -p "${parity_dir}/scratch-${idx}"
+			export CT_PLUGIN_TEST_SCRATCH="${parity_dir}/scratch-${idx}"
+		fi
+		t0="$(now_s)"
+		n="$(measure_file vm-unit "${f}")"
+		t1="$(now_s)"
+		w="$(measure_file vm-unit-wasm "${f}")"
+		t2="$(now_s)"
+		printf '%s\n%s\n' "${n}" "${w}" >"${parity_dir}/${idx}.res.tmp"
+		awk -v a="${t0}" -v b="${t1}" -v c="${t2}" 'BEGIN { printf "%.1f\t%.1f\n", b - a, c - b }' \
+			>"${parity_dir}/${idx}.time"
+		mv -f "${parity_dir}/${idx}.res.tmp" "${parity_dir}/${idx}.res"
+	)
+}
+
+parity_files=()
+while read -r f; do
+	[ -n "${f}" ] && parity_files+=("${f}")
+done <<<"${compare_files}"
+pool_pids=""
+i=0
+while [ "${i}" -lt "${#parity_files[@]}" ]; do
+	if [ "${pool_size}" -le 1 ]; then
+		measure_pair "${i}" "${parity_files[${i}]}"
+	else
+		ct_pool_wait_for_slot "${pool_size}" "${pool_pids}"
+		measure_pair "${i}" "${parity_files[${i}]}" &
+		pool_pids="${pool_pids} $!"
+	fi
+	i=$((i + 1))
+done
+wait
+printf 'file\tnative_s\twasm_s\n' >"${timings}"
+i=0
+while [ "${i}" -lt "${#parity_files[@]}" ]; do
+	printf '%s\t%s\n' "${parity_files[${i}]}" "$(cat "${parity_dir}/${i}.time" 2>/dev/null || printf 'NA\tNA')" >>"${timings}"
+	i=$((i + 1))
+done
+
 printf '  %-62s %-18s %-18s\n' "file" "native c/a/f" "wasm c/a/f"
+idx=-1
 while read -r f; do
 	[ -n "${f}" ] || continue
+	idx=$((idx + 1))
 
-	IFS=$'\t' read -r n_cases n_fails n_checks n_status <<<"$(measure_file vm-unit "${f}")"
-	IFS=$'\t' read -r w_cases w_fails w_checks w_status <<<"$(measure_file vm-unit-wasm "${f}")"
+	if [ ! -f "${parity_dir}/${idx}.res" ]; then
+		echo "  ${f#src/frontend/viewmodel/tests/unit/}  <- NOT MEASURED (its job was killed?)"
+		fail "${f}: no measurement"
+		divergent=$((divergent + 1))
+		continue
+	fi
+	IFS=$'\t' read -r n_cases n_fails n_checks n_status <<<"$(sed -n 1p "${parity_dir}/${idx}.res")"
+	IFS=$'\t' read -r w_cases w_fails w_checks w_status <<<"$(sed -n 2p "${parity_dir}/${idx}.res")"
 
 	compared=$((compared + 1))
 	total_native_cases=$((total_native_cases + n_cases))

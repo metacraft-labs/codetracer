@@ -82,6 +82,7 @@ fake="${scratch}/repo"
 mkdir -p "${fake}/ci/lib" "${fake}/tests" "${scratch}/bin" "${scratch}/tmp"
 cp "${repo_root}/ci/lib/run-nim-test-lane.sh" \
 	"${repo_root}/ci/lib/codetracer-home.sh" \
+	"${repo_root}/ci/lib/job-pool.sh" \
 	"${repo_root}/ci/lib/test-lane-report.sh" \
 	"${repo_root}/ci/lib/known_failures.py" "${fake}/ci/lib/"
 # An empty ledger: no registration may excuse anything here.
