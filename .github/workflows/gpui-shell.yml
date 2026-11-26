@@ -5,15 +5,25 @@ name: GPUI shell lane
 # replay-server. Before this job no CI job ran the lane at all
 # (ci/test/shell-gate-coverage.known-dark.txt recorded it as BLOCKED).
 #
-# Called from codetracer.yml (pull requests and dispatches) and from
-# gpui-shell-agents.yml (pushes to `agents` that touch the GPUI paths), each
-# beside ct-build and visual-replay-tools, whose artifacts it restores: ct,
-# replay-server and the bundles from ct-build; ct_gfx_player, ct-native-replay,
-# ct-mcr and the featureless shim from visual-replay-tools. Where either is
-# missing it builds what it lacks, as the GPUI window shards do, so a failed
-# tools job costs time, never a result.
+# Called from codetracer.yml (pull requests and dispatches), beside ct-build
+# and visual-replay-tools, whose artifacts it restores: ct, replay-server and
+# the bundles from ct-build; ct_gfx_player, ct-native-replay, ct-mcr and the
+# featureless shim from visual-replay-tools. And from gpui-shell-agents.yml on
+# pushes to `agents` with `standalone: true`, where it is the only job and
+# builds ct, replay-server and the tools itself: a separate ct-build and tools
+# job would each pay a runner's 20-40 minutes of provisioning again. The tools
+# come through ./.github/actions/provide-visual-replay-tools either way.
 on:
   workflow_call:
+    inputs:
+      standalone:
+        description: >
+          true when no ct-build or visual-replay-tools job runs beside this
+          one (gpui-shell-agents.yml): the job then builds ct, replay-server
+          and the visual replay tools itself.
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -23,10 +33,11 @@ permissions:
 jobs:
   gpui-shell:
     runs-on: [self-hosted, linux, x64]
-    # Provisioning as the GPUI window shards (setup-db-backend-siblings and
+    # Standalone, build-once (24-43 minutes cold) and the tools as well as
+    # provisioning as the GPUI window shards (setup-db-backend-siblings and
     # repro.lock's siblings), the wait for the tools artifact, `just
     # build-gpui`, and the lane.
-    timeout-minutes: 120
+    timeout-minutes: 180
     name: GPUI shell lane (headless shim)
     steps:
       - name: Generate CI token
@@ -101,7 +112,81 @@ jobs:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
+      - name: Read the private siblings' pins
+        # Standalone only: the siblings ct, replay-server and the tools build
+        # from, as visual-replay-tools.yml clones them.
+        if: ${{ inputs.standalone }}
+        id: private_pins
+        run: |
+          set -euo pipefail
+          flake_rev() { jq -er --arg r "$1" '[.nodes[] | .locked? | select(.owner? == "metacraft-labs" and .repo? == $r) | .rev] | unique | if length == 1 then .[0] else error("\($r): \(length) revisions in flake.lock") end' flake.lock; }
+          {
+            echo "native_backend=$(flake_rev codetracer-native-backend)"
+            echo "native_recorder=$(flake_rev codetracer-native-recorder)"
+            echo "visual_replay=$(flake_rev codetracer-visual-replay)"
+            echo "snapshot_codecs=$(sed -n 's/^PRIVATE_SIBLING_CODETRACER_SNAPSHOT_CODECS=\([0-9a-f]\{40\}\)$/\1/p' ci/toolchain.pin)"
+          } | tee -a "$GITHUB_OUTPUT"
+          grep -q '^snapshot_codecs=[0-9a-f]\{40\}$' "$GITHUB_OUTPUT"
+
+      - name: Mint a token for the clones below
+        if: ${{ inputs.standalone }}
+        id: late_token
+        uses: ./.github/actions/refresh-github-token
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      - name: Clone codetracer-native-backend
+        if: ${{ inputs.standalone }}
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-native-backend
+          ref: ${{ steps.private_pins.outputs.native_backend }}
+          path: ${{ github.workspace }}/../codetracer-native-backend
+          gh-token: ${{ steps.late_token.outputs.token }}
+          submodules: 'true'
+
+      - name: Clone codetracer-native-recorder
+        if: ${{ inputs.standalone }}
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-native-recorder
+          ref: ${{ steps.private_pins.outputs.native_recorder }}
+          path: ${{ github.workspace }}/../codetracer-native-recorder
+          gh-token: ${{ steps.late_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Clone codetracer-visual-replay
+        if: ${{ inputs.standalone }}
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-visual-replay
+          ref: ${{ steps.private_pins.outputs.visual_replay }}
+          path: ${{ github.workspace }}/../codetracer-visual-replay
+          gh-token: ${{ steps.late_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Clone codetracer-snapshot-codecs
+        if: ${{ inputs.standalone }}
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-snapshot-codecs
+          ref: ${{ steps.private_pins.outputs.snapshot_codecs }}
+          path: ${{ github.workspace }}/../codetracer-snapshot-codecs
+          gh-token: ${{ steps.late_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Build ct and replay-server
+        # Standalone only; ct-build's step, verbatim.
+        if: ${{ inputs.standalone }}
+        env:
+          CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
+          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
+        run: nix develop .#devShells.x86_64-linux.default --command bash ci/build/bounded-build-once.sh "${RUNNER_TEMP}/build-once-diagnostics" 0 90
+
       - name: Restore ct and replay-server from the ct-build job
+        if: ${{ !inputs.standalone }}
         id: ct
         uses: actions/download-artifact@v4
         with:
@@ -111,6 +196,7 @@ jobs:
       - name: Unpack them beside the siblings
         # A short download exits 3 and is fetched again below (see
         # gpui-window-captures).
+        if: ${{ !inputs.standalone }}
         id: unpack
         continue-on-error: true
         run: bash ci/unpack-ct-build-products.sh "${RUNNER_TEMP}/ct-build"
@@ -126,33 +212,13 @@ jobs:
         if: ${{ steps.unpack.outcome == 'failure' }}
         run: bash ci/unpack-ct-build-products.sh "${RUNNER_TEMP}/ct-build-retry"
 
-      - name: Wait for the visual replay tools
-        # visual-replay-tools runs beside ct-build and is not a `needs` of this
-        # job. When it failed, or the bound passes, the restore below is
-        # skipped and the steps after it build what is missing.
-        id: vr_wait
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: nix develop .#ci --command bash ci/wait-for-run-artifact.sh visual-replay-tools "visual-replay-tools /" 3600
-
-      - name: Restore the visual replay tools from the visual-replay-tools job
-        if: ${{ steps.vr_wait.outcome == 'success' }}
-        id: vr_tools
-        continue-on-error: true
-        uses: actions/download-artifact@v4
+      - name: Provide ct_gfx_player and the visual replay tools
+        # From this run's visual-replay-tools artifact under codetracer.yml,
+        # built here when standalone: the one entry point the TUI and GPUI
+        # shards use too.
+        uses: ./.github/actions/provide-visual-replay-tools
         with:
-          name: visual-replay-tools
-          path: ${{ runner.temp }}/visual-replay-tools
-
-      - name: Unpack the visual replay tools
-        # ct_gfx_player, ct-native-replay, ct-mcr and isonim-gpui's featureless
-        # shim, beside the siblings.
-        if: ${{ steps.vr_tools.outcome == 'success' }}
-        continue-on-error: true
-        run: |
-          bash ci/unpack-ct-build-products.sh "${RUNNER_TEMP}/visual-replay-tools" visual-replay-tools.tar.gz
-          echo "CT_VISUAL_REPLAY_TOOLS_PREBUILT=1" >>"$GITHUB_ENV"
+          from-run-artifact: ${{ inputs.standalone && 'false' || 'true' }}
 
       - name: Restore the headless shim from the cache
         # isonim-gpui's `--features gpui-headless` shim, staged with its build
@@ -208,14 +274,6 @@ jobs:
         with:
           path: ../isonim-gpui/rust/target/debug/libgpui_nim_shim.so
           key: gpui-shim-featureless-v1-${{ steps.gpui_pin.outputs.rev }}
-
-      - name: Provide ct_gfx_player and the visual replay tools
-        # Reuses the restored tools (CT_VISUAL_REPLAY_TOOLS_PREBUILT), else
-        # builds them; exports what the visual fixtures read.
-        run: |
-          nix develop .#devShells.x86_64-linux.default --command bash ci/test/visual-replay-tools.sh "$RUNNER_TEMP/visual-replay.env"
-          # shellcheck disable=SC1091
-          ( . "$RUNNER_TEMP/visual-replay.env"; env | grep -E '^(CODETRACER_|CT_)' ) >> "$GITHUB_ENV"
 
       - name: Build codetracer-gpui against the featureless shim
         run: nix develop .#devShells.x86_64-linux.default --command just build-gpui

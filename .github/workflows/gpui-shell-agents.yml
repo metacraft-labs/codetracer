@@ -1,9 +1,8 @@
 name: GPUI shell lane (agents)
 # The GPUI shell lane (gpui-shell.yml) on pushes to `agents` that touch the
-# GPUI front-end, where codetracer.yml does not run. It brings its own
-# ct-build and visual-replay-tools jobs, which are what codetracer.yml gives
-# the lane on pull requests; the `ci/gpui-shell` branch is for proving changes
-# to the lane's job.
+# GPUI front-end, where codetracer.yml does not run. One job, which builds
+# what codetracer.yml's ct-build and visual-replay-tools jobs give the lane on
+# pull requests; the `ci/gpui-shell` branch is for proving changes to it.
 
 on:
   push:
@@ -31,16 +30,11 @@ permissions:
   actions: read
 
 jobs:
-  ct-build:
-    uses: ./.github/workflows/ct-build.yml
-    secrets: inherit
-
-  visual-replay-tools:
-    uses: ./.github/workflows/visual-replay-tools.yml
-    secrets: inherit
-
+  # ONE job: it builds ct, replay-server and the visual replay tools itself
+  # (`standalone`), because each extra job pays a runner's 20-40 minutes of
+  # provisioning again.
   gpui-shell:
-    needs: [ct-build]
-    if: ${{ !cancelled() && needs.ct-build.result == 'success' }}
     uses: ./.github/workflows/gpui-shell.yml
+    with:
+      standalone: true
     secrets: inherit
