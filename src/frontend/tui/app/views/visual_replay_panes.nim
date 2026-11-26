@@ -113,6 +113,9 @@ type
     vaPickerState   ## the picker on (`on`) or off, without committing
     vaHistorySelect ## move the history's selection to row `index`
     vaHistoryActivate ## a history row's click: navigate (`index`)
+    vaHistoryValueOrigin
+      ## a history row's "Show value origin" (`index`): the host asks the
+      ## pixel's origin question and says its answer (`note`)
     vaShaderStep    ## a shader step button (`button`)
     vaTick          ## the idle tick: answers, playback, a coalesced scrub
 

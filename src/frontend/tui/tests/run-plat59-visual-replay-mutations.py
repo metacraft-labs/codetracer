@@ -84,6 +84,7 @@ OVERLAY = "src/frontend/viewmodel/keymap/overlay_rows.nim"
 
 # Suites.
 VMU = "src/frontend/viewmodel/tests/unit/test_plat59_visual_replay.nim"
+ORIGIN = "src/frontend/viewmodel/tests/unit/test_pixel_history_value_origin.nim"
 TBL = "src/frontend/tui/tests/test_plat59_visual_replay.nim"
 PTY = "src/frontend/tui/tests/real_terminal/test_plat59_visual_replay_pty.nim"
 PLAN = "src/frontend/gpui/tests/test_plat59_gpui_visual_replay.nim"
@@ -93,7 +94,7 @@ SPEC = "src/tests/gui/tests/frame-viewer/plat59-visual-replay-capture.spec.ts"
 SUBJECTS = [PANES, PLAYER, FRAME, HISTORY, CLIENT, PRODUCER, OPEN, CHANNEL, TUI_PANE,
             TUI_PANES, BINDING, RUNTIME, HOST, FRAME_IMAGE, MAIN, GPUI_LEAF,
             GPUI_MAIN, VOCAB, FACTORY, OVERLAY]
-SUITES = [VMU, TBL, PTY, PLAN, SPEC, REFUSAL]
+SUITES = [VMU, TBL, PTY, PLAN, SPEC, REFUSAL, ORIGIN]
 
 TBL_REFUSED = "*::a recording the engine refuses opens with its graphics, and says why"
 # The terminal suite's other cases are ONE scenario over one session, in this
@@ -113,6 +114,7 @@ TBL_SCENARIO = [
     "*::the nested draw-call scrubber shows a frame's draw calls",
     "*::the picker's magnifier picks a source pixel and its history loads",
     "*::a history row navigates: the Video Player shows its draw call",
+    "*::a history row's menu offers Show value origin, and refuses by name",
     "*::shader debug shows the fragment and the shader's source",
     "*::at tier 0 the frame is transmitted over the cells the pane reserves",
     "*::the vocabulary's Video Player view says the shared words",
@@ -131,13 +133,16 @@ TBL_SCRUB = through(TBL_SCENARIO[2])
 TBL_DRAW = through(TBL_SCENARIO[3])
 TBL_PICK = through(TBL_SCENARIO[4])
 TBL_NAV = through(TBL_SCENARIO[5])
-TBL_TIER0 = through(TBL_SCENARIO[7])
-TBL_VOCAB = through(TBL_SCENARIO[8])
-TBL_KEYS = through(TBL_SCENARIO[9])
+TBL_MENU = through(TBL_SCENARIO[6])
+TBL_TIER0 = through(TBL_SCENARIO[8])
+TBL_VOCAB = through(TBL_SCENARIO[9])
+TBL_KEYS = through(TBL_SCENARIO[10])
 PLAN_FRAMES = "*::the frame at three positions: the program's pixels, the desktop's"
 PLAN_DRAW = "*::the nested draw-call scrubber shows a frame's draw calls"
 PLAN_PICK = "*::the picker's loupe, a pick, the pixel's history and its navigation"
 PLAN_KEYS = "*::the desktop's keys on the focused Video Player"
+PLAN_MENU = "*::a history row's menu offers Show value origin, and refuses by name"
+ORIGIN_NATIVE = "*::a front-end with no side panel gets the panel's words"
 
 # (id, [(subject, find, replace), ...], [(suite, filter), ...], what it breaks)
 ARMS = [
@@ -185,6 +190,16 @@ ARMS = [
     ("V12", [(PLAYER, "  discard vm.scrubRevision.val", "")],
      [(VMU, None)],
      "the desktop's frame label freezes on the frame a drag pressed"),
+    # A history entry's value origin (K76) on a front-end with no side
+    # panel: the Origin Chain model's answer, the refusal by name.
+    ("V13", [(HISTORY, "  origin.refusalText()", '  ""')],
+     [(ORIGIN, ORIGIN_NATIVE), (TBL, TBL_MENU), (PLAN, PLAN_MENU)],
+     "the terminal and GPUI ask the pixel's origin and say nothing of the "
+     "refusal"),
+    ("V14", [(HISTORY, "    return pixelOriginRefusalText(query.get)",
+              '    return ""')],
+     [(ORIGIN, ORIGIN_NATIVE)],
+     "a host with no Origin Chain model says nothing"),
     ("C1", [(CLIENT, "        else: postJson(pixelHistoryUrl(baseUrl, x, y, frame),\n"
                      "                       pixelHistoryRequestToJson(x, y, frame))",
              "        else: getJson(pixelHistoryUrl(baseUrl, x, y, frame))")],
@@ -271,6 +286,15 @@ ARMS = [
     ("T6", [(RUNTIME, "  if t.kind != vtHistoryRow:", "  if true:")],
      [(TBL, TBL_NAV)],
      "a press on a history row does nothing"),
+    ("T18", [(RUNTIME, "  if event.button notin {mbLeft, mbRight} or not rt.app.pixelHistory.loaded:",
+              "  if event.button notin {mbLeft} or not rt.app.pixelHistory.loaded:")],
+     [(TBL, TBL_MENU)],
+     "a right press on a history row opens no menu"),
+    ("T19", [(HOST, "    result.note = panes.history.valueOriginWordsForEntry(act.index, origin)",
+              "    discard origin")],
+     [(TBL, TBL_MENU)],
+     "the terminal's Show value origin on a draw with no CPU-side value "
+     "does nothing and says nothing"),
     ("T7", [(RUNTIME, "  if not m.pane or not (m.scrubbing or m.drawScrubbing):",
              "  if true:")],
      [(TBL, TBL_SCRUB)],
@@ -310,6 +334,12 @@ ARMS = [
     ("G4", [(GPUI_MAIN, "    if hit.kind == gvHistoryRow:", "    if false:")],
      [(PLAN, PLAN_PICK)],
      "a GPUI press on a history row does nothing"),
+    ("G7", [(GPUI_MAIN, "    if pressPixelHistoryMenu(r, x, y):", "    if false:")],
+     [(PLAN, PLAN_MENU)],
+     "a GPUI right-click on a history row opens no menu"),
+    ("G8", [(GPUI_MAIN, "  sayStatus(words)", "  discard words")],
+     [(PLAN, PLAN_MENU)],
+     "GPUI's Show value origin on a draw with no CPU-side value says nothing"),
     ("G6", [(GPUI_MAIN, "  if pane in gPanesArmed:\n    return", "")],
      [(PLAN, PLAN_KEYS)],
      "every key in the window runs twice: a press of Right steps two frames"),

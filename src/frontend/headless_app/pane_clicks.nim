@@ -174,6 +174,11 @@ type
       ## line — the expansion of the Nim macro call there opened beside the
       ## source, or closed. Offered only by a front-end that draws the Macro
       ## Expansion pane (`editorTextContextMenu`'s `macroExpansion`).
+    caPixelShowValueOrigin = "pixel-show-value-origin"
+      ## A Pixel History entry's "Show value origin" (K76): the origin chain
+      ## of the recorded value the colour that draw wrote came from, or the
+      ## refusal by name (`pixel_history_vm.valueOriginOf`); the entry is
+      ## `ContextTarget.index`.
 
   ContextMenuKind* = enum
     cmkTab = "tab"
@@ -203,6 +208,8 @@ type
       ## (K65).
     cmkConstraintRow = "constraint-row"
       ## PLAT-62: a row of the Constraints pane (K68).
+    cmkPixelHistoryEntry = "pixel-history-entry"
+      ## A Pixel History entry, one draw call that wrote the pixel (K76).
 
   ContextMenuEntry* = object
     label*: string
@@ -322,7 +329,8 @@ const ContextActionOperations*: array[ContextAction, string] = [
     caTraceStaticBlock: "editor.trace-static-block-at-cursor",
     caTraceConstant: "editor.trace-constant-at-cursor",
     caTraceEval: "editor.trace-eval",
-    caToggleMacroExpansion: "editor.toggle-macro-expansion"]
+    caToggleMacroExpansion: "editor.toggle-macro-expansion",
+    caPixelShowValueOrigin: "pixel-history.show-value-origin"]
   ## The operation each context menu action runs (Input-Routing §3.2): the
   ## array's index type makes it total, and `test_plat64_operation_mapping`
   ## asserts every name is catalogued and none is listed twice.
@@ -772,6 +780,17 @@ func valueHistoryEntryContextMenu*(expression, value: string;
       entry(AddToScratchpadLabel, caAddValueToScratchpad),
       entry("Show value origin", caShowValueOrigin)])
 
+func pixelHistoryEntryContextMenu*(index: int): ContextMenuModel =
+  ## K76: a Pixel History entry's right-click menu — "Show value origin",
+  ## as the Variables pane and a value-history entry offer it. The entry is
+  ## always enabled: choosing it on a draw the recording maps no CPU-side
+  ## value to says so by name (`pixel_history_vm.valueOriginOf`), rather than
+  ## greying out an entry a user has no way to ask about.
+  ContextMenuModel(
+    kind: cmkPixelHistoryEntry,
+    target: ContextTarget(pane: panePixelHistory, index: int64(index)),
+    entries: @[entry("Show value origin", caPixelShowValueOrigin)])
+
 func agentAddContextMenu*(editorSelection: string): ContextMenuModel =
   ## The Agent Activity prompt's `+` menu — the desktop's four items, in its
   ## order and words (`agent_prompt_context.AgentAddContextItem`). A native
@@ -884,7 +903,7 @@ func k(id, target: string; gestures: set[ClickGesture];
                  desktop: desktop, sharedOp: sharedOp, terminal: terminal,
                  gpui: gpui, note: note)
 
-const ClickInventory*: array[75, ClickBehaviour] = [
+const ClickInventory*: array[76, ClickBehaviour] = [
   k("K1", "Top bar: menu button / item", {cgClick},
     "open the menu; run the item / enter the folder", "MenuVM",
     nsExisting, nsExisting, "PLAT-48/49"),
@@ -1156,7 +1175,13 @@ const ClickInventory*: array[75, ClickBehaviour] = [
     "select the line; drag selects lines, Shift+click extends by lines where " &
       "the medium delivers it; Alt+click adds a whole-line cursor; right click " &
       "opens the editor menu",
-    "select-line-at, extend-by-unit-to", nsDone, nsDone)]
+    "select-line-at, extend-by-unit-to", nsDone, nsDone),
+  k("K76", "Pixel History: row", {cgRightClick},
+    "menu: Show value origin — the chain of the recorded value the colour " &
+      "that draw wrote came from, or the refusal by name when the " &
+      "recording maps no CPU-side value to it",
+    "PixelHistoryVM.valueOriginOf", nsDone, nsDone,
+    "the desktop's menu, the terminal's and GPUI's alike")]
 
 const
   GestureMachine* = "gesture"
@@ -1202,7 +1227,7 @@ const
     ("K69", "video-player.toggle-play"), ("K70", "video-player.seek-frame"),
     ("K71", "video-player.seek-draw"), ("K72", "video-player.select-pixel"),
     ("K73", "pixel-history.activate"), ("K74", "shader-debug.step"),
-    ("K75", "editor.select-line-at")]
+    ("K75", "editor.select-line-at"), ("K76", "context-menu.open")]
 
 func clickOperationOf*(id: string): string =
   ## The operation inventory row `id` declares, or "".

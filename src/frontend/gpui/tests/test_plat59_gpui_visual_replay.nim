@@ -25,6 +25,9 @@
 ##     that wrote it — the last one the quad's colour — the desktop's rows;
 ##     a press on a row shows that draw call; the shader's source in Shader
 ##     Debug;
+##   * A ROW'S MENU (K76): a right-click (or the Menu key) offers "Show value
+##     origin"; on this recording, which maps no CPU-side value to a draw,
+##     choosing it says so by name on the status line and opens no chain;
 ##   * THE DESKTOP'S KEYS on the focused Video Player: Space, `l`, Home,
 ##     Right, Shift+Right.
 ##
@@ -42,7 +45,7 @@ import gpui/visual_replay_leaf
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling
 # as the suite's RUNTIME assertion count.
-const ExpectedAssertions = 47
+const ExpectedAssertions = 53
 
 var countedAssertions = 0
 
@@ -298,6 +301,37 @@ suite "PLAT-59: the Visual Replay panes in the GPUI window":
           for t in c{"children"}.getElems:
             source.add t{"text"}.getStr & "\n"
       ck "u_color" in source
+
+    test "a history row's menu offers Show value origin, and refuses by name":
+      # No back end traces a pixel's colour back to the program's values:
+      # choosing the entry says so, by name, on the status line, and opens
+      # no chain.
+      let picked = Show & ",visual:key:video:end,visual:wait," &
+                   "visual:key:video:p,visual:pixel:40:50,visual:wait," &
+                   "visual:show:history"
+      let want = "The recording has no CPU-side origin for pixel 40, 50 " &
+        "in frame " & $(GlSceneFrames - 1) & " (draw "
+      let at = "): the colour this draw wrote cannot be traced back to the " &
+        "program's values."
+      var trace = ""
+      let plan = windowPlan(picked & ",visual:history:0:menu," &
+                            "ctx:Show value origin", trace)
+      checkpoint(trace)
+      ck trace.contains("context menu pixel-history-entry Show value origin")
+      ck trace.contains("context action pixel-show-value-origin")
+      let note = plan.first("data-ct-footer-note").attr("data-ct-footer-note")
+      ck note.startsWith(want) and note.endsWith(at)
+      ck not trace.contains("hop(s)")
+      # The Menu key on the focused pane opens the selected row's menu.
+      var keyed = ""
+      let byKey = windowPlan(picked & ",visual:key:history:down," &
+                             "visual:key:history:menu," &
+                             "ctx:Show value origin", keyed)
+      checkpoint(keyed)
+      ck keyed.contains("context menu pixel-history-entry Show value origin")
+      let keyNote = byKey.first("data-ct-footer-note").attr(
+        "data-ct-footer-note")
+      ck keyNote.startsWith(want) and keyNote.endsWith(at)
 
     test "the desktop's keys on the focused Video Player":
       let keys = Show & ",visual:key:video:right,visual:wait"

@@ -8,7 +8,7 @@ import isonim/viewmodel
 import ../store/replay_data_store
 import visual_replay_client
 import origin_chain_types
-from origin_chain_vm import OriginChainVM, onShowPixelOrigin
+from origin_chain_vm import OriginChainVM, onShowPixelOrigin, refusalText
 
 export ShowValueOriginLabel
 
@@ -183,6 +183,28 @@ proc showValueOriginForEntry*(vm: PixelHistoryVM; index: int;
     return false
   origin.onShowPixelOrigin(query.get)
   true
+
+const NoHistoryEntryText* =
+  "No value origin: that draw call is no longer listed"
+    ## What a front-end without the side panel says when the entry it was
+    ## asked about is gone (a new pixel's history replaced the list).
+
+proc valueOriginWordsForEntry*(vm: PixelHistoryVM; index: int;
+                               origin: OriginChainVM): string =
+  ## "Show value origin" on the entry at `index` for a front-end that draws
+  ## no Origin Chain side panel (the terminal, the GPUI window): the same
+  ## question asked of the same model (`showValueOriginForEntry`), answered
+  ## with the words the panel shows in place of a chain — the refusal by
+  ## name, `pixelOriginRefusalText` — for the host's status line. A host
+  ## with no Origin Chain model gets the same words. "" when the model
+  ## answered with a chain instead (no back end does yet), which the host
+  ## then shows as it shows any origin chain.
+  let query = vm.pixelOriginQueryFor(index)
+  if query.isNone:
+    return NoHistoryEntryText
+  if origin.isNil or not vm.showValueOriginForEntry(index, origin):
+    return pixelOriginRefusalText(query.get)
+  origin.refusalText()
 
 proc bindReplayStore*(vm: PixelHistoryVM; store: ReplayDataStore) =
   if store.isNil or vm.store == store:

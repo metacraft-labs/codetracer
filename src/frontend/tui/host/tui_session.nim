@@ -1246,6 +1246,14 @@ proc visualAct*(s: TuiSession; rt: TuiRuntime;
       result.note = drawText(e) & " (" & geidText(e) & ")"
       if s.visualMoved(rt):
         result.moved = true
+  of vaHistoryValueOrigin:
+    # K76: the pixel's origin question, asked of the session's Origin Chain
+    # model as the desktop asks it; the terminal draws no side panel, so its
+    # answer (today the refusal by name) goes to the status line.
+    let origin =
+      if s.session.isNil or s.session.session.isNil: nil
+      else: s.session.session.originChainVM
+    result.note = panes.history.valueOriginWordsForEntry(act.index, origin)
   of vaShaderStep:
     case act.button
     of sbFirst: panes.shader.stepFirst()
