@@ -73,6 +73,8 @@ lint_step "the prebuilt tree-sitter-nim parser is what the grammar generates" \
 # Requires the host's Nix daemon and real local bare repositories, so this
 # belongs to the Nix lane rather than the lightweight shell-only lint lane.
 lint_step "Nix Git hooks in fresh worktrees" bash ci/test/nix-git-hooks-test.sh
+lint_step "nix develop .#pre-commit leaves the Reprobuild hook dispatchers alone" \
+	bash ci/test/pre-commit-shell-keeps-dispatchers-test.sh
 
 lint_step "nix flake check" flake_check
 
