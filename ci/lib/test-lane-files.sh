@@ -1238,6 +1238,10 @@ test_lane_files() {
 		# by a pane built after it, to reaching that pane only, and an editor
 		# to building its flow once for one jump that opens it.
 		echo src/frontend/tests/complete_move_redelivery_test.nim
+		# `session_tab_strip_redraw_test.nim` holds the session strip to
+		# keeping its nodes across a redraw that changes nothing, so a press
+		# on "+" whose release comes after a redraw still clicks it.
+		echo src/frontend/tests/session_tab_strip_redraw_test.nim
 		# `debug_toolbar_follows_active_tab_test.nim` holds the window's one
 		# debugger toolbar to driving the tab on screen: its step, Run to
 		# Entry and history jump reach the active tab's views mediator, not

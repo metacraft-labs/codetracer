@@ -214,6 +214,11 @@ when defined(js):
                           js{sessionId: tabId}))], x, y)
         true)
 
+  var lastDrawnBar: isonim_dom.Element
+  var lastDrawnSignature = ""
+    ## The strip the last draw went into, and what it showed
+    ## (`renderIsoNimSessionTabs`).
+
   proc renderIsoNimSessionTabs*(data: Data) =
     ## Build the session tab bar DOM using IsoNim WebRenderer and
     ## render directly into `#session-tab-bar`.
@@ -228,15 +233,33 @@ when defined(js):
     if isonim_dom.isNodeNil(isonim_dom.Node(container)):
       return
 
-    let r = WebRenderer()
     let records = sessionTabRecords(data)
+    let visibleCount = visibleTabCapacity(container, records.len)
+    # The strip as drawn: its tabs, the active one and how many fit.
+    #
+    # Every redraw asks for the strip again (`ui/menu.nim`), and drawing it
+    # replaces every node in it. A press on "+" or a tab whose release came
+    # after such a redraw went down on one node and up on another, so the
+    # browser sent no click and the press did nothing: on a busy window the
+    # first click on "+" often opened no tab. The strip is only drawn again
+    # when what it shows has changed.
+    var signature = $data.activeSessionIndex & "/" & $visibleCount
+    for record in records:
+      signature.add "/" & record.label
+    if container == lastDrawnBar and signature == lastDrawnSignature and
+        not isonim_dom.isNodeNil(isonim_dom.Node(container).firstChild):
+      return
+    lastDrawnBar = container
+    lastDrawnSignature = signature
+
+    let r = WebRenderer()
     let overflowWasOpen = container.hasClass(cstring"overflow-open")
     renderSessionTabsInto(
       r,
       container,
       records,
       data.activeSessionIndex,
-      visibleTabCapacity(container, records.len),
+      visibleCount,
       sessionTabCallbacks(data))
     if overflowWasOpen:
       container.addClass(cstring"overflow-open")
