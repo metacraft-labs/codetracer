@@ -1751,6 +1751,16 @@ test-launcher-recorder-e2e-wiring:
 test-php-recorder-downstream-wiring:
   bash ci/test/php-recorder-downstream-workflow-test.sh
 
+# codetracer-image-diff's downstream lane: RUNS image-diff-downstream.yml's
+# plan step under good and bad callers and revisions and its "predates this
+# lane" refusal against fixture checkouts, checks the caller's `with:` against
+# the declared input (when ../codetracer-image-diff is present), runs the
+# driver's refusals that need no dev shell, and rejects a set of mutations of
+# the workflow, with a positive control. Stock bash.
+# See ci/test/image-diff-downstream-workflow-test.sh.
+test-image-diff-downstream-wiring:
+  bash ci/test/image-diff-downstream-workflow-test.sh
+
 # Verify that a FAILED sibling build prints the tail of its own build log, both
 # in scripts/build-siblings.sh's summary and in the launcher<->recorder
 # driver's failure path, and still fails.  Stock bash; `repro` and `just` are
@@ -2725,6 +2735,18 @@ test-recorder-siblings:
 # ci/test/php-recorder-consumers.sh.
 test-php-recorder-consumers:
   bash ci/test/php-recorder-consumers.sh
+
+# CodeTracer's consumers of the ../codetracer-image-diff checkout: the PLAT-37
+# parity suite through its C ABI shim and real FLIP, a `nim c` and a `nim cpp`
+# compile of every module that imports image_diff, and the flake's
+# codetracer-image-diff input locked to that checkout. Ends with a
+# `TEST-COUNTS:` line and fails on any failed or skipped test, or none. Pass
+# `--expect-image-diff-rev <sha>` to pin the checkout, `--list` for the
+# selection. The body of the library's downstream lane
+# (.github/workflows/image-diff-downstream.yml); run it inside the `ci` dev
+# shell. See ci/test/image-diff-consumers.sh.
+test-image-diff-consumers *args:
+  bash ci/test/image-diff-consumers.sh {{args}}
 
 # The WebAssembly boundary-recording checks: record each demo from this
 # tree and replay it.

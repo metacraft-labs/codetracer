@@ -335,7 +335,13 @@ done
 # consumers against a recorder change. It installs Nix through
 # metacraft-github-actions/setup-dev-env (env-flavor nix) before its first
 # `nix`, as launcher-recorder-e2e does.
-readonly EXPECTED_NIX_JOBS=59
+#
+# 59 -> 60: image-diff-downstream.yml's `image-diff-downstream`, the reusable
+# workflow codetracer-image-diff calls to run CodeTracer's consumers of the
+# FLIP library against a library change. It installs Nix through
+# metacraft-github-actions/setup-dev-env (env-flavor nix) before its first
+# `nix`, as php-recorder-downstream does.
+readonly EXPECTED_NIX_JOBS=60
 
 if [ "${#nix_jobs[@]}" -eq "$EXPECTED_NIX_JOBS" ]; then
 	ok "the scanner still classifies the nix-using jobs (${#nix_jobs[@]})"

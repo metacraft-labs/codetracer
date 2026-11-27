@@ -1,0 +1,231 @@
+# =============================================================================
+# codetracer-image-diff downstream lane -- REUSABLE WORKFLOW.
+#
+# WHAT THIS IS
+#   The CI half of codetracer-image-diff's downstream lane for this
+#   repository: a change to the FLIP library is run against CodeTracer's
+#   consumers of it before it lands on the library's mainline. It runs
+#
+#       just test-image-diff-consumers     (ci/test/image-diff-consumers.sh)
+#
+#   which runs the PLAT-37 parity suite through the library's C ABI shim and
+#   real FLIP, compiles every Nim module here that imports `image_diff`
+#   (story_diff), and locks the flake's `codetracer-image-diff` input to the
+#   commit under test. It ends with a `TEST-COUNTS:` line and fails on any
+#   failed or skipped test, or none: a cross-repo gate must never degrade
+#   into a zero-test or skipped run.
+#
+# WHY IT LIVES HERE
+#   The driver and every consumer it runs are this repository's, so the
+#   workflow that orchestrates them belongs beside them, as for
+#   php-recorder-downstream.yml. The library carries a thin caller:
+#
+#     codetracer-image-diff/.github/workflows/downstream.yml
+#
+# WORKSPACE LAYOUT
+#   The calling repository is the primary checkout (`$GITHUB_WORKSPACE`, at
+#   `github.sha`: inside a reusable workflow that is the caller's commit), and
+#   codetracer is cloned beside it, where ci/test/plat37-parity.sh and
+#   scripts/story-parity.sh look for the library:
+#
+#     $GITHUB_WORKSPACE/../
+#       codetracer-image-diff/   <-- actions/checkout, at github.sha
+#       codetracer/              <-- at the codetracer-revision input
+#
+#   No other sibling is read: the consumers need the library, and codetracer's
+#   `ci` dev shell for nim, python3 and the C++ compiler.
+#
+# PINNING
+#   * codetracer: the `codetracer-revision` input, which must be 40-hex. The
+#     caller resolves it from its committed ci/downstream/codetracer.pin, or from
+#     a 40-hex workflow_dispatch input; never a branch tip. A revision that
+#     predates this lane's driver is refused by name.
+#   * the calling library is never cloned or reset.
+#
+# RUNNER
+#   [self-hosted, linux, x64]: no GPU is involved (the parity suite grades
+#   synthetic PNGs on the CPU), and it is the label the other nix jobs here
+#   use. The job is short: a dev shell, one C++ compile, two Nim compiles
+#   and a lock.
+#
+# LANDING ORDER
+#   The caller references this file `@dev`, so the caller fails at workflow
+#   resolution until this file is on codetracer@dev, and fails in the refusal
+#   step until the caller's lock pins a codetracer revision that carries the
+#   driver. Both are loud failures.
+# =============================================================================
+
+name: image-diff-downstream (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      codetracer-revision:
+        description: >
+          The codetracer commit (40 lowercase hex digits) whose image-diff
+          consumers the library under test is checked against. The caller
+          reads it from its committed ci/downstream/codetracer.pin, or takes it
+          from an explicit workflow_dispatch input. Never a branch: anything
+          that is not a 40-hex revision is refused.
+        required: true
+        type: string
+    secrets:
+      CI_TOKEN_PROVIDER_APP_ID:
+        # Optional because some repos hold the App ID as a repository VARIABLE
+        # rather than a secret; the steps fall back to
+        # vars.CI_TOKEN_PROVIDER_APP_ID. Callers pass `secrets: inherit`.
+        required: false
+      CI_TOKEN_PROVIDER_PRIVATE_KEY:
+        required: false
+      ATTIC_TOKEN:
+        # The private substituter's read token, for the dev shell. Reaches
+        # this workflow through the caller's `secrets: inherit`.
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  image-diff-downstream:
+    runs-on: [self-hosted, linux, x64] # CIP-5 nix job
+    name: codetracer image-diff consumers
+    # Realising the ci dev shell on a cold runner dominates; bounded so a hung
+    # step frees the runner.
+    timeout-minutes: 60
+
+    steps:
+      - name: Plan the workspace layout
+        # The calling repository is the primary checkout and the library under
+        # test, so it must be codetracer-image-diff: any other caller has no
+        # defined place in this layout. The codetracer revision is validated
+        # here, before anything is cloned. Inputs reach the script through
+        # `env:`, never by `${{ }}` interpolation into its body.
+        id: plan
+        shell: bash
+        env:
+          CT_REV: ${{ inputs.codetracer-revision }}
+          SELF_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          SELF="${GITHUB_REPOSITORY##*/}"
+          if [ "${SELF}" != codetracer-image-diff ]; then
+            echo "::error::image-diff-downstream was called from '${GITHUB_REPOSITORY}'. It tests the CALLING repository as the image-diff library, so only codetracer-image-diff may call it."
+            exit 1
+          fi
+          if ! [[ "${CT_REV}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::codetracer-revision must be a 40-hex commit (got '${CT_REV}'). The caller resolves it from its committed ci/downstream/codetracer.pin or an explicit 40-hex dispatch input; this lane never tests a branch tip."
+            exit 1
+          fi
+          PARENT="$(cd "${GITHUB_WORKSPACE}/.." && pwd)"
+          CT_DIR="${PARENT}/codetracer"
+          echo "library under test (primary): ${SELF} @ ${SELF_SHA}"
+          echo "codetracer revision:          ${CT_REV}"
+          echo "codetracer checkout:          ${CT_DIR}"
+          echo "- library under test: \`${SELF}@${SELF_SHA}\`; codetracer: \`${CT_REV}\`" >>"${GITHUB_STEP_SUMMARY}"
+          {
+            echo "self=${SELF}"
+            echo "ct-dir=${CT_DIR}"
+            echo "ct-rev=${CT_REV}"
+          } >>"${GITHUB_OUTPUT}"
+
+      - name: Mint installation token for cross-repo sibling access
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID || vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout the library under test (the workspace root)
+        # `github.sha` inside a reusable workflow is the CALLER's commit: the
+        # pushed commit, or the pull request's merge commit.
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          token: ${{ steps.ci_token.outputs.token }}
+          # setup-dev-env gives every later git call a credential; a second
+          # persisted one makes GitHub refuse the request ("Duplicate header").
+          persist-credentials: false
+
+      - name: Clone codetracer at that revision
+        # The directory and revision reach the script through `env:` (git-auth
+        # runs it with the step's environment), never as `${{ }}` text in it.
+        # Submodules: the `ci` dev shell is entered as '.?submodules=1#ci'.
+        uses: metacraft-labs/metacraft-github-actions/git-auth@a190f3a8b37c5a239d88b8c964b6d13f64fbaa0d
+        env:
+          CT_DIR: ${{ steps.plan.outputs.ct-dir }}
+          CT_REV: ${{ steps.plan.outputs.ct-rev }}
+        with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          working-directory: ${{ github.workspace }}
+          run: |
+            set -euo pipefail
+            rm -rf "${CT_DIR}"
+            git init -q "${CT_DIR}"
+            git -C "${CT_DIR}" remote add origin https://github.com/metacraft-labs/codetracer
+            git -C "${CT_DIR}" fetch -q --depth 1 origin "${CT_REV}"
+            git -C "${CT_DIR}" -c advice.detachedHead=false checkout -q FETCH_HEAD
+            git -C "${CT_DIR}" submodule update -q --init --recursive --depth 1
+            got="$(git -C "${CT_DIR}" rev-parse HEAD)"
+            [ "${got}" = "${CT_REV}" ] || { echo "::error::fetched codetracer ${got}, not ${CT_REV}"; exit 1; }
+            echo "codetracer at ${got}"
+
+      - name: Refuse a codetracer revision that predates this lane
+        # This file is taken from codetracer@dev; the checkout it drives is
+        # the pinned revision. Every repo-relative script the driver runs is
+        # checked here, so a pin that is too old fails in seconds, by name,
+        # instead of as `No such file or directory` after the dev shell.
+        shell: bash
+        env:
+          CT_DIR: ${{ steps.plan.outputs.ct-dir }}
+        run: |
+          set -euo pipefail
+          for script in ci/test/image-diff-consumers.sh ci/test/plat37-parity.sh; do
+            if [ ! -f "${CT_DIR}/${script}" ]; then
+              echo "::error::the codetracer revision under test ($(git -C "${CT_DIR}" rev-parse HEAD)) predates ${script}, which this lane runs. Move the codetracer pin in codetracer-image-diff's ci/downstream/codetracer.pin (or the dispatch input) to a revision that carries it."
+              exit 1
+            fi
+            echo "  OK   ${CT_DIR}/${script}"
+          done
+          if ! grep -q '^test-image-diff-consumers' "${CT_DIR}/justfile"; then
+            echo "::error::the codetracer revision under test has no 'test-image-diff-consumers' recipe; move the pin forward."
+            exit 1
+          fi
+
+      - name: Setup dev env
+        # Installs Nix and the job's credentials. No sibling is cloned: the
+        # calling repo is listed only to keep the list non-empty
+        # (clone-siblings skips an entry naming the triggering repository, and
+        # an empty list would fall back to the caller's own
+        # .github/sibling-repos).
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
+        with:
+          env-flavor: nix
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          # With the App's id and key the credential broker re-mints the Nix
+          # GitHub credential in place if realising the dev shell outlives the
+          # token's hour.
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID || vars.CI_TOKEN_PROVIDER_APP_ID }}
+          app-private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          # The substituter is private: without its token nix reads it
+          # anonymously, gets 401 and builds the dev shell from source.
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          attic-cache: ${{ vars.ATTIC_CACHE }}
+          siblings: |
+            ${{ steps.plan.outputs.self }}
+
+      - name: Run CodeTracer's image-diff consumers against this library
+        # The driver's TEST-COUNTS line is the last line of this step's log; it
+        # exits non-zero on any failed or skipped test, or none.
+        # --expect-image-diff-rev holds it to the commit checked out above.
+        shell: bash
+        env:
+          CT_DIR: ${{ steps.plan.outputs.ct-dir }}
+          SELF_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          cd "${CT_DIR}"
+          nix develop --no-update-lock-file '.?submodules=1#ci' --command \
+            just test-image-diff-consumers --expect-image-diff-rev "${SELF_SHA}"
