@@ -835,7 +835,7 @@ with pkgs;
     # libexec/repro-cargo-shim/cargo beside the `repro` that ships it) records which
     # units of the target directory a build keeps live, so the daily `repro cargo gc`
     # can free the rest; without a recorded live set gc never touches a target
-    # directory. reprobuild docs/cargo-gc.md; reprobuild-pm CG2 plan, D5.
+    # directory. reprobuild docs/cargo-gc.md.
     # Only where the shim exists (a `repro` older than the one that ships it leaves
     # the shell unchanged) and only on Linux until the shim is verified on macOS;
     # REPRO_CARGO_SHIM_DIR names the directory explicitly and opts in on any host.
