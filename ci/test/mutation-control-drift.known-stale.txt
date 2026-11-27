@@ -697,7 +697,6 @@ src/frontend/tui/tests/plat65-nim-tracing-mutation-control.sha256	src/frontend/t
 src/frontend/tui/tests/plat48-topbar-mutation-control.sha256	src/common/key_names.nim	1acf4821d23f7cf4529431a99b64ccde8d30f63f9df9547869f22af730c837c9	f1a70bdb7cbc96c678dee9f08374a322033a7d0ca8d9ab7422d6cd1030c1b741
 src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/common/key_names.nim	1acf4821d23f7cf4529431a99b64ccde8d30f63f9df9547869f22af730c837c9	f1a70bdb7cbc96c678dee9f08374a322033a7d0ca8d9ab7422d6cd1030c1b741
 src/frontend/tui/tests/plat70e-origin-mutation-control.sha256	src/common/key_names.nim	1acf4821d23f7cf4529431a99b64ccde8d30f63f9df9547869f22af730c837c9	f1a70bdb7cbc96c678dee9f08374a322033a7d0ca8d9ab7422d6cd1030c1b741
-src/frontend/viewmodel/tests/unit/plat31-keymap-mutation-control.sha256	src/common/key_names.nim	1acf4821d23f7cf4529431a99b64ccde8d30f63f9df9547869f22af730c837c9	f1a70bdb7cbc96c678dee9f08374a322033a7d0ca8d9ab7422d6cd1030c1b741
 
 # 2026-11-21, computed plugin visualisers: the supervisor asks a plugin's computed rows
 # about the values on screen and keeps their answers by epoch; flow steps carry their
@@ -793,7 +792,6 @@ src/frontend/tui/tests/plat72-screen-reader-mutation-control.sha256	src/frontend
 # Reading keymap rows in place (`perf(keymap): read a keymap's rows in place ...`) moved these subjects; re-grade the arms whose needles sit in them.
 src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend/viewmodel/keymap/keymap_router.nim	35992a226bb769b76dd6d3725f4af231cf54e97ee3c76be7b493c95c11858ae2	5aa56d7fc405efc67a11f057aa79cfdbfb817022055c34f6f5712254138ff772
 src/frontend/tui/tests/plat72-screen-reader-mutation-control.sha256	src/frontend/tui/app/runtime.nim	44d968e50c635c06040e3b6c4198fe2c748584d80ac55290aeee3283a918fd96	da449643b3ba2079623d78d28f12d60dd280a0bf064416a8437f01df91846226
-src/frontend/viewmodel/tests/unit/plat31-keymap-mutation-control.sha256	src/frontend/viewmodel/keymap/editing_keymap.nim	0951fb885eb3f1f2f2d7ce24aadaeeed92982ce8d77a9502d444075035084bd5	438c7068c4ee324fe1154e7b16227d8d07d2feec3c22982fa73b9e65f3e45f01
 
 # 2026-11-25, the GPUI shell-split suite admits the renderer-free agent-harbor ViewModel
 # package by name and checks the admission; the suite changed, so the harness grading it owes
