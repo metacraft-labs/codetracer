@@ -82,7 +82,11 @@ ARMS = [
      [(NODE, "start-failure")],
      "an executable that cannot be started reads as a clean exit, not "
      "`execve`'s 127"),
-    ("J8", [(LINK, "      link.stderrTail.add data", "      discard")],
+    # Re-aimed 2026-11-26: f480b952f changed the Node link's stderr keep from
+    # `link.stderrTail.add data` to `link.stderrTail.appendBytes data` (a pipe
+    # chunk, `byte_append`); same decision, new spelling.
+    ("J8", [(LINK, "      link.stderrTail.appendBytes data"
+             "   # a pipe chunk (`byte_append`)", "      discard")],
      [(NODE, "segfault")],
      "§11.6.1: Node's stderr is not kept; the SDK's crash record is never "
      "read and a segfault is unattributed"),

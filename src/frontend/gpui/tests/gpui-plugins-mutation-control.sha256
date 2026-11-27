@@ -2,9 +2,9 @@
 # subjects AND the suites the arms are graded by.
 # Refreshed with --record-control-hashes, gated by the
 # needle scan.
-9c1a4d14a52d12410bb6ce311b58fcdb493ba672c02105bab6e65639f99a6a38  src/frontend/gpui/host/gpui_plugins.nim
-e7c1a24b0eca583538cbea93d8b96a12484c27e35adde4303fd6d66f7e6c6a83  src/frontend/host/plugin_processes.nim
+19530f56fbda01ca8e69b0728526a17305e4e1443424c320e57759e91a051f1e  src/frontend/gpui/host/gpui_plugins.nim
+504c41125e9bfe2de0f3115e91791f546ba5777d963d4fcb6c9286b827f9aee7  src/frontend/host/plugin_processes.nim
 0f037c56269e3ad51c084fc0e545fcd851102cfa91ce32ed2507b9995f372f42  src/frontend/gpui/app/leaves.nim
 fa57785969e88f3e03240f840175b5d80fed03d8321770842b1ab18f8fafdd6b  src/frontend/gpui/window_clicks.nim
-d9aba9dc68dd568155b5c3fb22ff62bbb08fc190b601099cc12d3f26505cdf8c  src/frontend/host/plugin_panes.nim
-425d9555b41054c89f265e414d603e59eab892b361add30cb9e31590cd527d74  src/frontend/gpui/tests/test_gpui_plugins_host.nim
+2cb413dd75f0431075931a5cfc72454652240084aaacd81c8b61ca5bee45e031  src/frontend/host/plugin_panes.nim
+a3c6fbd4232479c31236d82ee62b60199cc7272f4f301422995dff801f8802a4  src/frontend/gpui/tests/test_gpui_plugins_host.nim

@@ -1,0 +1,344 @@
+# =============================================================================
+# PHP recorder downstream lane -- REUSABLE WORKFLOW.
+#
+# WHAT THIS IS
+#   The CI half of codetracer-php-recorder's downstream lane: a recorder
+#   change is run against CodeTracer's PHP consumers before it lands on the
+#   recorder's mainline. It runs
+#
+#       just test-php-recorder-consumers      (ci/test/php-recorder-consumers.sh)
+#
+#   which builds the recorder's C extension in the recorder's own dev shell,
+#   records one fresh `php -S` request session with it, and runs the
+#   db-backend's php_flow_dap_test and the Request Panel ViewModel suite
+#   php_request_panel_vm_test.nim against recordings made with THAT extension.
+#   It ends with a `TEST-COUNTS:` line and fails on any failed or skipped test,
+#   or none (codetracer-specs Testing/Cross-Repo-CI-Integration.md,
+#   "Downstream Breakage Responsibility").
+#
+# WHY IT LIVES HERE
+#   The driver, the db-backend, the ViewModel suite, ci/test/build-recorder-
+#   siblings.sh and the sibling provisioning it reuses are all this repo's, so
+#   the workflow that orchestrates them belongs beside them, as for
+#   launcher-recorder-e2e.yml. The recorder carries a thin caller:
+#
+#     codetracer-php-recorder/.github/workflows/cross-repo-tests.yml
+#
+# WORKSPACE LAYOUT
+#   The calling repository is the primary checkout (`$GITHUB_WORKSPACE`, at
+#   `github.sha`: inside a reusable workflow that is the caller's commit), and
+#   everything else is cloned beside it, where the driver and the db-backend's
+#   relative paths look:
+#
+#     $GITHUB_WORKSPACE/../
+#       codetracer-php-recorder/      <-- actions/checkout, at github.sha
+#       codetracer/                   <-- at the codetracer-revision input
+#       codetracer-trace-format/      <-- db-backend path dependency
+#       codetracer-trace-format-nim/  <-- the extension links its writer;
+#                                         db-backend and the VM suite read
+#       codetracer-native-recorder/   <-- db-backend build.rs (ct_emulator)
+#       <codetracer's build inputs>   <-- the VM suite's Nim imports
+#
+# SIBLING PINNING
+#   * codetracer: the `codetracer-revision` input, which must be 40-hex. The
+#     caller resolves it from its committed ci/downstream/repro.lock, or from
+#     a 40-hex workflow_dispatch input; never a branch tip. A revision that
+#     predates this lane's driver is refused by name.
+#   * every other sibling: codetracer's locks at that revision, resolved by
+#     ci/launcher-recorder-e2e-resolve-siblings.sh (repro.lock build inputs
+#     and test lock: provision-repro-lock-siblings; private repositories:
+#     their one home, flake.lock or ci/toolchain.pin), exactly as the
+#     launcher <-> recorder gate does. A sibling none of them pins fails.
+#   * the calling recorder is never cloned or reset.
+#   codetracer-trace-format-nim is therefore codetracer's pin, not the one the
+#   recorder's own repro.lock records: one directory serves the extension's
+#   link and codetracer's readers, and the consumers under test are
+#   codetracer's.
+#
+# LANDING ORDER
+#   The caller references this file `@dev`, so the caller fails at workflow
+#   resolution until this file is on codetracer@dev, and fails in the plan
+#   step until the caller's lock pins a codetracer revision that carries the
+#   driver. Both are loud failures.
+# =============================================================================
+
+name: php-recorder-downstream (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      codetracer-revision:
+        description: >
+          The codetracer commit (40 lowercase hex digits) whose PHP consumers
+          the recorder under test is checked against. The caller reads it
+          from its committed ci/downstream/repro.lock, or takes it from an
+          explicit workflow_dispatch input. Never a branch: anything that is
+          not a 40-hex revision is refused.
+        required: true
+        type: string
+    secrets:
+      CI_TOKEN_PROVIDER_APP_ID:
+        # Optional because some repos hold the App ID as a repository VARIABLE
+        # rather than a secret; the steps fall back to
+        # vars.CI_TOKEN_PROVIDER_APP_ID. Callers pass `secrets: inherit`.
+        required: false
+      CI_TOKEN_PROVIDER_PRIVATE_KEY:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  php-recorder-downstream:
+    # The label every other nix job in these repos uses (launcher-recorder-
+    # e2e.yml, cross-repo-tests.yml's recorder-tests).
+    runs-on: [self-hosted, linux, x64] # CIP-5 nix job
+    name: codetracer PHP consumers
+    # The db-backend test build and codetracer's ci shell dominate; bounded so
+    # a hung build frees the runner.
+    timeout-minutes: 180
+
+    steps:
+      - name: Plan the workspace layout
+        # The calling repository is the primary checkout and the recorder under
+        # test, so it must be codetracer-php-recorder: any other caller has no
+        # defined place in this layout. The codetracer revision is validated
+        # here, before anything is cloned. Inputs reach the script through
+        # `env:`, never by `${{ }}` interpolation into its body.
+        id: plan
+        shell: bash
+        env:
+          CT_REV: ${{ inputs.codetracer-revision }}
+          SELF_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          SELF="${GITHUB_REPOSITORY##*/}"
+          if [ "${SELF}" != codetracer-php-recorder ]; then
+            echo "::error::php-recorder-downstream was called from '${GITHUB_REPOSITORY}'. It tests the CALLING repository as the PHP recorder, so only codetracer-php-recorder may call it."
+            exit 1
+          fi
+          if ! [[ "${CT_REV}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::codetracer-revision must be a 40-hex commit (got '${CT_REV}'). The caller resolves it from its committed ci/downstream/repro.lock or an explicit 40-hex dispatch input; this lane never tests a branch tip."
+            exit 1
+          fi
+          PARENT="$(cd "${GITHUB_WORKSPACE}/.." && pwd)"
+          CT_DIR="${PARENT}/codetracer"
+          echo "triggering repo (primary):   ${SELF} @ ${SELF_SHA}"
+          echo "codetracer revision:         ${CT_REV}"
+          echo "codetracer checkout will be: ${CT_DIR}"
+          echo "- recorder under test: \`${SELF}@${SELF_SHA}\`; codetracer: \`${CT_REV}\`" >>"${GITHUB_STEP_SUMMARY}"
+          {
+            echo "self=${SELF}"
+            echo "ct-dir=${CT_DIR}"
+            echo "ct-rev=${CT_REV}"
+            # The siblings the driver and the db-backend reach by relative path,
+            # by NAME: revisions come from codetracer's locks and homes.
+            echo "siblings<<PHP_DOWNSTREAM_SIBLINGS_EOF"
+            echo "codetracer-trace-format"
+            echo "codetracer-trace-format-nim"
+            echo "codetracer-native-recorder"
+            echo "PHP_DOWNSTREAM_SIBLINGS_EOF"
+          } >>"${GITHUB_OUTPUT}"
+
+      - name: Mint installation token for cross-repo sibling access
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID || vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout the recorder under test (the workspace root)
+        # `github.sha` inside a reusable workflow is the CALLER's commit: the
+        # pushed commit, or the pull request's merge commit.
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+          token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Clone codetracer at that revision
+        uses: metacraft-labs/metacraft-github-actions/git-auth@a190f3a8b37c5a239d88b8c964b6d13f64fbaa0d
+        with:
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          working-directory: ${{ github.workspace }}
+          run: |
+            set -euo pipefail
+            ct_dir="${{ steps.plan.outputs.ct-dir }}"
+            rm -rf "${ct_dir}"
+            git init -q "${ct_dir}"
+            git -C "${ct_dir}" remote add origin https://github.com/metacraft-labs/codetracer
+            git -C "${ct_dir}" fetch -q --depth 1 origin "${{ steps.plan.outputs.ct-rev }}"
+            git -C "${ct_dir}" -c advice.detachedHead=false checkout -q FETCH_HEAD
+            git -C "${ct_dir}" submodule update -q --init --recursive --depth 1
+            echo "codetracer at $(git -C "${ct_dir}" rev-parse HEAD)"
+
+      - name: Refuse a codetracer revision that predates this lane
+        # This file is taken from codetracer@dev; the checkout it drives is
+        # the pinned revision. Every repo-relative script a later step runs
+        # from that checkout is checked here, so a pin that is too old fails
+        # in seconds, by name, instead of as `No such file or directory` after
+        # the dev shell has been realised.
+        shell: bash
+        env:
+          CT_DIR: ${{ steps.plan.outputs.ct-dir }}
+        run: |
+          set -euo pipefail
+          for script in ci/test/php-recorder-consumers.sh ci/test/build-recorder-siblings.sh \
+                        ci/lib/run-nim-test-lane.sh ci/launcher-recorder-e2e-resolve-siblings.sh \
+                        ci/prefetch-ci-flake-inputs.sh; do
+            if [ ! -f "${CT_DIR}/${script}" ]; then
+              echo "::error::the codetracer revision under test ($(git -C "${CT_DIR}" rev-parse HEAD)) predates ${script}, which this lane runs. Move the codetracer pin in the recorder's ci/downstream/repro.lock (or the dispatch input) to a revision that carries it."
+              exit 1
+            fi
+            echo "  OK   ${CT_DIR}/${script}"
+          done
+          if ! grep -q '^test-php-recorder-consumers:' "${CT_DIR}/justfile"; then
+            echo "::error::the codetracer revision under test has no 'test-php-recorder-consumers' recipe; move the pin forward."
+            exit 1
+          fi
+
+      - name: Resolve every sibling from codetracer's locks and homes
+        id: resolve
+        shell: bash
+        env:
+          SELF: ${{ steps.plan.outputs.self }}
+          CT_DIR: ${{ steps.plan.outputs.ct-dir }}
+          PLANNED: ${{ steps.plan.outputs.siblings }}
+        run: |
+          set -euo pipefail
+          bash "${CT_DIR}/ci/launcher-recorder-e2e-resolve-siblings.sh" \
+            --ct-dir "${CT_DIR}" --self "${SELF}" --planned "${PLANNED}" \
+            --out "${GITHUB_OUTPUT}"
+
+      - name: Setup dev env + clone the private siblings
+        # Only the PRIVATE siblings go through here, each as `<name>=<rev>`
+        # from its one home at the codetracer revision. The calling repo is
+        # listed too: clone-siblings skips an entry naming the triggering
+        # repository, so it keeps the list non-empty (an empty list would fall
+        # back to the caller's own .github/sibling-repos).
+        uses: metacraft-labs/metacraft-github-actions/setup-dev-env@dev
+        with:
+          env-flavor: nix
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          # The job outlives the token's hour; with the App's id and key the
+          # credential broker re-mints the Nix GitHub credential in place.
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID || vars.CI_TOKEN_PROVIDER_APP_ID }}
+          app-private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          attic-cache: ${{ vars.ATTIC_CACHE }}
+          siblings: |
+            ${{ steps.plan.outputs.self }}
+            ${{ steps.resolve.outputs.private }}
+
+      - name: Stage codetracer's provisioning action at the revision under test
+        # `uses:` cannot take an expression, so the action is copied from the
+        # codetracer checkout and used from there: the action that provisions
+        # the siblings is the one at the revision whose locks it reads. A
+        # revision whose action predates its `codetracer-dir` input is refused
+        # here, as launcher-recorder-e2e.yml does (this is the first step after
+        # Nix is installed that reads the action, so nix-provisioning-test.sh
+        # sees no use of it before setup-dev-env).
+        shell: bash
+        env:
+          CT_DIR: ${{ steps.plan.outputs.ct-dir }}
+        run: |
+          set -euo pipefail
+          src="${CT_DIR}/.github/actions/provision-repro-lock-siblings/action.yml"
+          if ! grep -q '^  codetracer-dir:' "${src}"; then
+            echo "::error::the codetracer revision under test ($(git -C "${CT_DIR}" rev-parse HEAD)) predates provision-repro-lock-siblings' codetracer-dir input; move the pin forward."
+            exit 1
+          fi
+          mkdir -p "${GITHUB_WORKSPACE}/.php-downstream-actions/provision-repro-lock-siblings"
+          cp "${src}" "${GITHUB_WORKSPACE}/.php-downstream-actions/provision-repro-lock-siblings/action.yml"
+
+      - name: Clone the public siblings from codetracer's locks
+        uses: ./.php-downstream-actions/provision-repro-lock-siblings
+        with:
+          codetracer-dir: ${{ steps.plan.outputs.ct-dir }}
+          exclude: ${{ steps.plan.outputs.self }}
+          test-siblings: ${{ steps.resolve.outputs.test-siblings }}
+          root-default-shell: "false"
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID || vars.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      - name: Fetch every flake input later steps evaluate, while the token is valid
+        # ci/prefetch-ci-flake-inputs.sh: the nixpkgs repro provisions tools
+        # from, then each dev shell a later step enters (codetracer's ci shell;
+        # the recorder's, the trace writer's and the native recorder's, which
+        # `direnv exec` evaluates).
+        shell: bash
+        env:
+          CT_DIR: ${{ steps.plan.outputs.ct-dir }}
+        run: |
+          set -euo pipefail
+          PARENT="$(cd "${CT_DIR}/.." && pwd)"
+          bash "${CT_DIR}/ci/prefetch-ci-flake-inputs.sh" --ct-dir "${CT_DIR}" \
+            "${CT_DIR}:ci" \
+            "${GITHUB_WORKSPACE}:default" \
+            "${PARENT}/codetracer-trace-format-nim:default" \
+            "${PARENT}/codetracer-native-recorder:default"
+
+      - name: Prepare selected Repro toolchains before long running gates
+        uses: metacraft-labs/metacraft-github-actions/prepare-repro-envs@80542fb7298e274fd739d06c6f626f227ace308a
+        with:
+          working-directory: ${{ steps.plan.outputs.ct-dir }}
+          nix-shell: .?submodules=1#ci
+          projects: |
+            ${{ steps.plan.outputs.ct-dir }}
+            ${{ steps.plan.outputs.ct-dir }}/../codetracer-trace-format-nim
+            ${{ github.workspace }}
+
+      - name: Allow direnv in the freshly cloned siblings
+        # The recorder build, the fixture recording and db-backend's build.rs
+        # all run `direnv exec <sibling>`, and a fresh clone's .envrc is
+        # blocked. The ci shell is realised first, on its own, so a shell that
+        # does not build is not reported as a missing direnv.
+        shell: bash
+        env:
+          CT_DIR: ${{ steps.plan.outputs.ct-dir }}
+        run: |
+          set -euo pipefail
+          cd "${CT_DIR}"
+          if ! nix develop '.?submodules=1#ci' --command true; then
+            echo "::error::the codetracer 'ci' dev shell FAILED TO BUILD (nix develop '.?submodules=1#ci'); nix's own diagnostic is above this line."
+            exit 1
+          fi
+          nix develop '.?submodules=1#ci' --command bash -c 'command -v direnv' \
+            || { echo "::error::the codetracer 'ci' dev shell builds, but direnv is not on PATH inside it (nix/shells/ci-base.nix declares it)."; exit 1; }
+          for dir in "${GITHUB_WORKSPACE}" "${CT_DIR}/../codetracer-trace-format-nim" "${CT_DIR}/../codetracer-native-recorder"; do
+            if [ -f "${dir}/.envrc" ]; then
+              nix develop '.?submodules=1#ci' --command direnv allow "${dir}"
+              echo "direnv allow: ${dir}"
+            else
+              echo "no .envrc in ${dir} (nothing to allow)"
+            fi
+          done
+
+      - name: Resolve ct_emulator nimble dependencies
+        # db-backend's build.rs compiles the native recorder's ct_emulator,
+        # whose .nimble requires `results`; resolve it in the recorder's own
+        # environment, as the recorder-tests job of cross-repo-tests.yml does.
+        shell: bash
+        env:
+          CT_DIR: ${{ steps.plan.outputs.ct-dir }}
+        run: |
+          set -euo pipefail
+          cd "${CT_DIR}"
+          RECORDER_DIR="$(cd .. && pwd)/codetracer-native-recorder"
+          nix develop '.?submodules=1#ci' --command \
+            direnv exec "${RECORDER_DIR}" \
+              bash -c "cd '${RECORDER_DIR}/ct_emulator' && nimble install --depsOnly -y"
+
+      - name: Run CodeTracer's PHP consumers against this recorder
+        # The driver's TEST-COUNTS line is the last line of this step's log; it
+        # exits non-zero on any failed or skipped test, or none.
+        shell: bash
+        env:
+          CT_DIR: ${{ steps.plan.outputs.ct-dir }}
+          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ steps.plan.outputs.ct-dir }}/libs/nim-stew/stew:${{ steps.plan.outputs.ct-dir }}/libs/nim-stew:${{ steps.plan.outputs.ct-dir }}/libs/nim-result
+        run: |
+          set -euo pipefail
+          cd "${CT_DIR}"
+          nix develop '.?submodules=1#ci' --command just test-php-recorder-consumers
