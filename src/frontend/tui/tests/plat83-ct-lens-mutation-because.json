@@ -1,7 +1,7 @@
 {
   "M1": "\"History of apply (calc.py:4-6)\" in text",
   "M10": "sess.commandShows(\"plugins\", \"ct-lens.history  running\")",
-  "M11": "sess.statusHas(\"history: \" &",
+  "M11": "changed.len > 0",
   "M12": "r.sup.waitUntil(\"the decoration\", proc (): bool =",
   "M13": "r.sup.waitUntil(\"the jump reached the backend\", proc (): bool =",
   "M2": "r.sup.waitUntil(\"deadline\", proc (): bool =",

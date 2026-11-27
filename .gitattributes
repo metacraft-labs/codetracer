@@ -2,3 +2,18 @@
 /.yarn/releases/*    binary
 /.yarn/plugins/**/*  binary
 /.pnp.*              binary linguist-generated
+
+# The JS boundary log's shared byte vectors, pinned byte for byte: SHA256SUMS
+# lists each file's SHA-256, libs/jsbound/tests/vectors.rs
+# (`sha256sums_cover_every_vector_file`) checks every file against it, and
+# codetracer-js-recorder vendors the directory and compares its SHA256SUMS with
+# this one byte for byte. Git for Windows defaults to `core.autocrlf=true`,
+# which would check out every multi-line `.json` vector and SHA256SUMS itself
+# with CRLF line endings, so they would no longer be the bytes their hashes
+# were taken of. `-text` turns off line-ending conversion whatever
+# `core.autocrlf` says (https://git-scm.com/docs/gitattributes, "text"); the
+# `.bin` vectors carry no NUL byte, so git's binary heuristic would not protect
+# them either. The rule lives here, not in a .gitattributes inside the
+# directory, because that directory may hold only the files SHA256SUMS lists.
+/libs/jsbound/vectors/** -text
+/libs/jsbound/vectors/*.bin -diff

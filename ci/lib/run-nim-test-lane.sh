@@ -52,6 +52,13 @@
 #
 # Usage:
 #   bash ci/lib/run-nim-test-lane.sh <lane-id> [--compile-only] [--list-shard]
+#                                    [--file <path>]
+#
+# --file <path> runs ONE of the lane's files, with exactly the lane's flags,
+# environment and scoring. A path that is not one of the lane's files is
+# refused (exit 2), so the option cannot run a file under flags its lane does
+# not give it. The PHP recorder's downstream lane
+# (ci/test/php-recorder-consumers.sh) runs one vm-native suite this way.
 #
 # NIM_TEST_LANE_SHARD=i/n runs one shard of the lane: every n-th of its files,
 # starting with the i-th, so the n shards together run each file exactly once
@@ -91,10 +98,19 @@ shift
 
 compile_only=0
 list_shard=0
+only_file=""
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--compile-only) compile_only=1 ;;
 	--list-shard) list_shard=1 ;;
+	--file)
+		if [ $# -lt 2 ] || [ -z "$2" ]; then
+			echo "run-nim-test-lane.sh: --file needs a path" >&2
+			exit 2
+		fi
+		only_file="${2#./}"
+		shift
+		;;
 	*)
 		echo "run-nim-test-lane.sh: unknown argument '$1'" >&2
 		exit 2
@@ -103,8 +119,13 @@ while [ $# -gt 0 ]; do
 	shift
 done
 
-# The lane's files, or the shard NIM_TEST_LANE_SHARD=i/n names of them.
+# The lane's files, or the shard NIM_TEST_LANE_SHARD=i/n names of them, or
+# the one file --file names.
 lane_run_files() {
+	if [ -n "${only_file}" ]; then
+		printf '%s\n' "${only_file}"
+		return
+	fi
 	if [ -z "${NIM_TEST_LANE_SHARD:-}" ]; then
 		test_lane_files "${lane}"
 		return
@@ -132,6 +153,19 @@ lane_run_files() {
 		k=$((k + 1))
 	done <<<"${all}"
 }
+if [ -n "${only_file}" ]; then
+	if [ -n "${NIM_TEST_LANE_SHARD:-}" ]; then
+		echo "run-nim-test-lane.sh: --file and NIM_TEST_LANE_SHARD cannot be combined" >&2
+		exit 2
+	fi
+	# The lane's own list is the authority: a file outside it would be run
+	# under flags nobody chose for it.
+	_ct_lane_all="$(test_lane_files "${lane}")" || exit 2
+	if ! grep -qxF -- "${only_file}" <<<"${_ct_lane_all}"; then
+		echo "run-nim-test-lane.sh: '${only_file}' is not one of lane '${lane}'s files" >&2
+		exit 2
+	fi
+fi
 if [ "${list_shard}" -eq 1 ]; then
 	lane_run_files
 	exit $?
@@ -439,6 +473,7 @@ failed=0
 passed=0
 total_oks=0
 total_skips=0
+total_fails=0
 total_checks=0
 declared_files=0
 undeclared_files=0
@@ -755,6 +790,7 @@ while read -r f; do
 
 	total_oks=$((total_oks + oks))
 	total_skips=$((total_skips + skips))
+	total_fails=$((total_fails + fails))
 	verdict="$(classify_test_run "${rc}" "${oks}" "${fails}" "${checks}")"
 	test_run_headline "${verdict}" "${rc}" "${oks}" "${fails}" "${skips}"
 
@@ -884,6 +920,15 @@ fi
 if [ "${platform_skipped}" -gt 0 ]; then
 	echo "${lane}: ${platform_skipped} file(s) SKIPPED (platform eligibility)"
 fi
+
+# The same tally once more, as one machine-readable line, for a caller that
+# aggregates lanes into a TEST-COUNTS report (ci/test/php-recorder-consumers.sh).
+# `case-failed` counts [FAILED] markers, so a file that crashed or failed to
+# compile shows in `files-failed` and may print no case marker at all; a caller
+# must read both.
+echo "NIM-LANE-COUNTS: lane=${lane} files=${files} files-failed=${failed}" \
+	"case-ok=${total_oks} case-failed=${total_fails} case-skipped=${total_skips}" \
+	"files-platform-skipped=${platform_skipped}"
 
 # HOW MUCH OF THAT TALLY IS AN ASSERTION COUNT, AND HOW MUCH IS CASE MARKERS.
 #

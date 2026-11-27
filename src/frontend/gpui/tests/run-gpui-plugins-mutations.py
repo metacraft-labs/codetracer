@@ -60,7 +60,12 @@ DRAWN = S + ("the editor draws a plugin's marker in the mark column and its "
              "decoration after the code")
 
 ARMS = [
-    ("G1", [(DOOR, '  if k == "esc": "escape" else: k', "  k")],
+    # Re-aimed 2026-11-26: b74778a9a moved the fold of the window's `Esc` into
+    # the manifests' spelling out of `pluginKeyName` (`if k == "esc":
+    # "escape" else: k`) into `key_names.bindingKeyName`; the door now just
+    # calls it. The arm bypasses that call with the old lower-casing, so the
+    # window's `Esc` reads `esc` and is not the manifests' `Esc`.
+    ("G1", [(DOOR, "  bindingKeyName(canonical)", "  canonical.toLowerAscii")],
      [(SUITE, KEYS)],
      "§11.7.6: the window's `Esc` is not the manifests' `escape`; a layer "
      "binding Escape never sees it"),
@@ -74,7 +79,9 @@ ARMS = [
              '("stepOut", "step-out"),')],
      [(SUITE, MOVE)],
      "a plugin's step forward runs as the window's step in"),
-    ("G4", [(DOOR, '  if pluginKeyName(canonical) != "escape": return false',
+    # Re-aimed 2026-11-26: b74778a9a renamed the canonical spelling the door
+    # compares against from `escape` to `Esc` (`key_names.bindingKeyName`).
+    ("G4", [(DOOR, '  if pluginKeyName(canonical) != "Esc": return false',
              "  discard")],
      [(SUITE, KEYS)],
      "§11.7.6: any three keys open the recovery dialog"),

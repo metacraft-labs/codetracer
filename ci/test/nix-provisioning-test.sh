@@ -329,7 +329,13 @@ done
 # moved out of the zgui lane so it fits a budget of its own. It runs the
 # harness in this repository's dev shell and installs Nix through
 # ./.github/actions/setup-nix first.
-readonly EXPECTED_NIX_JOBS=58
+#
+# 58 -> 59: php-recorder-downstream.yml's `php-recorder-downstream`, the
+# reusable workflow codetracer-php-recorder calls to run CodeTracer's PHP
+# consumers against a recorder change. It installs Nix through
+# metacraft-github-actions/setup-dev-env (env-flavor nix) before its first
+# `nix`, as launcher-recorder-e2e does.
+readonly EXPECTED_NIX_JOBS=59
 
 if [ "${#nix_jobs[@]}" -eq "$EXPECTED_NIX_JOBS" ]; then
 	ok "the scanner still classifies the nix-using jobs (${#nix_jobs[@]})"

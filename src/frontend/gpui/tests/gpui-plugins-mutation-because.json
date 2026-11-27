@@ -1,5 +1,5 @@
 {
-  "G1": "pluginKeyName(\"Esc\") == \"escape\"",
+  "G1": "pluginKeyName(\"Esc\") == \"Esc\"",
   "G10": "\"metrics ok\" in p.windowFooterNote(\"a note\")",
   "G11": "\"Plugins: Re-enable acme-tools.flame\" notin labels(p.pluginEntries())",
   "G12": "\"Plugins: Re-enable acme-tools.flame\" in offered",
