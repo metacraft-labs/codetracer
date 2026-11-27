@@ -810,7 +810,6 @@ src/frontend/gpui/tests/plat20-mutation-control.sha256	src/frontend/gpui/tests/t
 # does not run (test-lane-files.sh); these harnesses digest those subjects and
 # owe a re-grade.
 src/frontend/gpui/tests/plat20-mutation-control.sha256	src/frontend/gpui/window_geometry.nim	8595f1669201ae3addab9f7134adf5c0ce306855acc4726ccfe1d41fb0e79ed7	fade42f842eab416a16e489917dd21c36d0577f86ed04910d418f212d1b9f4c2
-src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	ci/lib/test-lane-files.sh	8723f13449df6da6d5acdf55932cab0382378d8cb62d41cd89503d948c776663	bec598b1dc9721ddca16f03205c1df4678c300c0157a45ee4fcfbba8f2579fdb
 ci/test/plat70-find-decisions-mutation-control.sha256	src/frontend/gpui/main.nim	74d1b4cb7c6794d7176211fc032aec567fa8d23bc4cc2a44907913bc6f089cbc	0c7c7ace190b9d2d8d9a8ff98a96d37c3205071761a6936fa3080229b0763702
 ci/test/plat70c-find-mutation-control.sha256	src/frontend/gpui/main.nim	bd206f82ec3b500e52053e6eeda52e891e83aede0353ce2e485c65e1fcf50d85	0c7c7ace190b9d2d8d9a8ff98a96d37c3205071761a6936fa3080229b0763702
 ci/test/plat70i-fit-mutation-control.sha256	src/frontend/gpui/main.nim	220d8170c7218709d5ae77691e7cfbfce2954ae359429ba9554c046b0b637053	0c7c7ace190b9d2d8d9a8ff98a96d37c3205071761a6936fa3080229b0763702
@@ -857,7 +856,6 @@ src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/tui/ap
 src/frontend/tui/tests/plat46-design-mutation-control.sha256	scripts/tokens-to-styl.sh	e5262c65cbd6300d43f22bac5312b6cbf2afac4e91b54d3d8344c0e61457fd6c	00a0a122ea421a55547c4a128d525e4fbe7ba1fbc08db0f51c7672f62d84347f
 src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/tui/app/syntax/monarch.nim	181d9ec8d995b6563b371c79d390f14ec35ff5aad2f62083f6c7147045847efb	27c6dc86b6837c90ccba5906788a4f789a56d5a35078e281ad5382d1d2193420
 src/frontend/tui/tests/plat70a-hscroll-mutation-control.sha256	src/frontend/viewmodel/editing_core.nim	523e410249726163c1fcb2f1117c70346130e56c3b84fd3bb3e5105d15a9fc86	05304883fb5e13c5090ddfc902dd8c3dd79841c109816a693bf20cb57274bfc6
-src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	src/frontend/viewmodel/editor/operations.nim	ae471882f9ac66dc73d0809af6d54ec7afd0ac3ab6430c489692e2bee0510398	6ba96746bc6aea47ebb5a05f9e589ed4658b406604d2b48b5338193c01c46053
 src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	src/frontend/viewmodel/editing_core.nim	523e410249726163c1fcb2f1117c70346130e56c3b84fd3bb3e5105d15a9fc86	05304883fb5e13c5090ddfc902dd8c3dd79841c109816a693bf20cb57274bfc6
 
 
@@ -906,7 +904,6 @@ src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend
 src/frontend/viewmodel/tests/unit/plat18-marshalling-mutation-control.sha256	src/frontend/viewmodel/views/isonim_calltrace_view.nim	2697620b8aa813e868301bf028930639c30e3a78c839bd446a597c13dec886fc	f87ba53fdb97a68ab6b0b98d07619c4633ccc66b2b0caba71eff82610e29663f
 # 5bfdeb5ae64 moved the collaboration lanes into viewmodel-tests.yml; the examples
 # suite now reads codetracer.yml with the workflows it calls, so plat33-collab owes a re-grade.
-src/frontend/viewmodel/tests/unit/plat33-collab-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_editor_collab_examples.nim	9d5c50c7146301ed8a5552b668b51672db8f91af7473503a90334ad987228cbb	5ed19dba8795a97e566e7aeb6ac94d3d237a6d2f2eb22709eb852e8bcf2912b5
 src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	8bda0738c9719a3f394aa9ee384bc2c920800d78e38e9b540d58ff8a018e0cc0	e304894122178c41e0b0d6a3e11c301ed1741e496fe0fce12d0850d512accdd1
 src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/styles/components/button.styl	daf83b8c3ee1848282d0edf04ac63a2b3813fb69f642154ad83248320f8b65aa	801731f5a002841ed30761c4409e972bf365dde4603ae29c5b974479dd8ce924
 
