@@ -15,7 +15,7 @@
  Type the instruction to launch   Launch    regeneration cap and the fixture loader; over to…
                                                                                                
  Started on hub-a                           INITIATIVES  invented project noir-space-ship
- executor ws-ada · session 8c1a13                                4 initiatives · 12 sessions ·
+ executor ws-ada · session 8c1a13                                  4 initiatives · 12 sessions
                                                              2 need input · 1 in no initiative
  RECENT LAUNCHES                            ▾ ● Shield model hardening               2/5 · 40%
  Add a test for a hit on an empty shield        ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀       ● 2  ● 2  ● 1
