@@ -89,6 +89,22 @@ proc request(srv: PaneServer; meth: string; params: JsonNode = newJObject()):
 proc notes(msgs: seq[JsonNode]; meth: string): seq[JsonNode] =
   msgs.filterIt(it{"method"}.getStr("") == meth)
 
+proc paneRowsOf(msgs: seq[JsonNode]; pane: string;
+                rows: var seq[string]): bool =
+  ## The rows of the last `pane/content` for `pane` in `msgs` applied to
+  ## `rows` (a full update replaces them, a partial one patches them); true
+  ## when there was one.
+  for n in msgs.notes("pane/content"):
+    if n{"params", "pane"}.getStr != pane:
+      continue
+    result = true
+    if n{"params", "full"}.getBool:
+      rows = @[]
+    for r in n{"params", "rows"}.getElems:
+      let i = r{"index"}.getInt
+      while rows.len <= i: rows.add ""
+      rows[i] = r{"text"}.getStr
+
 proc rowTexts(content: JsonNode): Table[int, string] =
   for r in content{"params", "rows"}.getElems:
     result[r{"index"}.getInt] = r{"text"}.getStr
@@ -850,6 +866,101 @@ suite "HSF-E1: the pane server, over a real recording":
     discard srv.request("shutdown")
     removeProject(project)
 
+  test "HSF-E8: tracing a macro from a session on a recording, at the editor's cursor":
+    # The same trace from Debug mode: the session stays on the recording (of
+    # `build.nims`, evaluated), and the editor's cursor (`source/cursor`) on
+    # the macro call in `tracing.nim` is where it traces. Until 2026-11-26 the
+    # trace read the session's shown document and its caret — the recording's
+    # file, at the stop — so nothing traced and nothing opened, in both
+    # editors. No stand-in, as above.
+    let missing = missingPrereq()
+    if missing.len > 0:
+      echo "  MISSING-PREREQ: ", missing
+      fail()
+      return
+    let project = writeNimProject("hsf-e8-debug")
+    let srv = newPaneServer(dap = false)
+    srv.projectRoot = project.root
+    discard srv.request("initialize", %*{"capabilities": {"media": ["text"]},
+                                         "keymapOverrides": []})
+    let (opened, _) = srv.request("session/open", %*{"trace": project.recording})
+    let sid = opened{"result", "session"}.getInt
+    check sid > 0
+    check opened{"result", "mode"}.getStr == "debug"
+    discard srv.request("source/cursor", %*{"session": sid,
+      "file": project.root / "tracing.nim", "line": TwiceLine, "column": 1})
+    let (answer, _) = srv.request("operation/run", %*{"session": sid,
+      "operation": "editor.trace-macro-at-cursor"})
+    checkpoint("trace-macro answered " & $answer)
+    check answer{"result", "ok"}.getBool
+    var traced, settled: JsonNode = nil
+    let deadline = epochTime() + 300.0
+    while settled.isNil and epochTime() < deadline:
+      for m in srv.tick():
+        case m{"method"}.getStr
+        of "session/opened": traced = m{"params"}
+        of "trace/settled": settled = m{"params"}
+        else: discard
+      sleep(100)
+    checkpoint("settled: " & (if settled.isNil: "nothing" else: $settled))
+    check not settled.isNil and settled{"outcome"}.getStr == "done"
+    check not traced.isNil
+    if not traced.isNil:
+      check traceFolderProblem(traced{"trace"}.getStr) == ""
+      check traced{"session"}.getInt != sid
+    discard srv.request("shutdown")
+    removeProject(project)
+
+  test "HSF-E8: a trace the compiler refuses is reported (trace/settled)":
+    # A trace that records nothing opens no session, so the editor needs to be
+    # told how it ended: until 2026-11-26 it showed "Tracing..." for good.
+    # Here the static block does not compile, so codetracer-nim's nimsuggest
+    # records nothing, and `trace/settled` carries "failed" and its reason.
+    # No stand-in: the real nimsuggest over a real file.
+    let missing = missingPrereq()
+    if missing.len > 0:
+      echo "  MISSING-PREREQ: ", missing
+      fail()
+      return
+    let dir = createTempDir("ct-hsf-e8-refused-", "")
+    let source = dir / "broken.nim"
+    writeFile(source, "static:\n  let answer: int = \"forty-two\"\n  echo answer\n")
+    let srv = newPaneServer(dap = false)
+    srv.projectRoot = dir
+    discard srv.request("initialize", %*{"capabilities": {"media": ["text"]},
+                                         "keymapOverrides": []})
+    let (opened, _) = srv.request("session/open", %*{"project": dir})
+    let sid = opened{"result", "session"}.getInt
+    check sid > 0
+    discard srv.request("source/cursor", %*{"session": sid, "file": source,
+                                            "line": 2, "column": 3})
+    let (answer, _) = srv.request("operation/run", %*{"session": sid,
+      "operation": "editor.trace-static-block-at-cursor"})
+    checkpoint("trace answered " & $answer)
+    check answer{"result", "ok"}.getBool
+    var settled: JsonNode = nil
+    var opens = 0
+    let deadline = epochTime() + 300.0
+    while settled.isNil and epochTime() < deadline:
+      for m in srv.tick():
+        case m{"method"}.getStr
+        of "trace/settled": settled = m{"params"}
+        of "session/opened": inc opens
+        else: discard
+      sleep(100)
+    checkpoint("settled: " & (if settled.isNil: "nothing" else: $settled))
+    check not settled.isNil
+    if not settled.isNil:
+      check settled{"session"}.getInt == sid
+      check settled{"outcome"}.getStr == "failed"
+      # what the tool said, not the progress text the editor still shows
+      check settled{"message"}.getStr.len > 0
+      check "Tracing" notin settled{"message"}.getStr
+      check settled{"trace"}.getStr == ""
+    check opens == 0
+    discard srv.request("shutdown")
+    removeDir(dir)
+
   test "HSF-E9: an editor's Low Level Code pane is sent the stop's listing":
     # Editor-Hosted-Front-Ends §E13. The listing is asked for only while the
     # pane is shown, and until 2026-11-12 "shown" meant the terminal's own
@@ -867,7 +978,11 @@ suite "HSF-E1: the pane server, over a real recording":
     let srv = newPaneServer(dap = false)
     discard srv.request("initialize", %*{"capabilities": {"media": ["text"]},
                                          "keymapOverrides": []})
+    let openedAt = epochTime()
     let (opened, _) = srv.request("session/open", %*{"trace": recording})
+    # how long the native backend took to open the rr recording (a 30 s
+    # adapter timeout was seen once on a loaded host)
+    echo "  E9 session/open took ", formatFloat(epochTime() - openedAt, ffDecimal, 1), " s"
     checkpoint("open: " & $opened)
     let sid = opened{"result", "session"}.getInt
     check sid > 0
@@ -924,10 +1039,25 @@ suite "HSF-E1: the pane server, over a real recording":
     # The pane shows the C the cursor's line compiled to: the directive
     # naming that line is in view, not the file's `#define`s at its top.
     check cRows.anyIt(("#line " & $at.line & " ") in it)
-    # "View Disassembly" is the pane's machine code again.
-    let (asmShown, _) = srv.request("operation/run", %*{"session": sid,
+    # "View Disassembly" is the pane's machine code again — the listing, not
+    # only the answer: until 2026-11-26 the operation opened the pane and
+    # left the C in it.
+    let (asmShown, asmNotes) = srv.request("operation/run", %*{"session": sid,
       "operation": "view.disassembly"})
     check asmShown{"result", "ok"}.getBool
+    var asmRows = cRows
+    var seen = asmNotes
+    let asmDeadline = epochTime() + 60.0
+    while epochTime() < asmDeadline:
+      discard paneRowsOf(seen, "lowLevelCode", asmRows)
+      if asmRows.len > 0 and not asmRows.anyIt(("#line " & $at.line & " ") in it) and
+         not asmRows.anyIt("No low-level code" in it):
+        break
+      seen = srv.tick()
+      sleep(100)
+    checkpoint("after View Disassembly:\n" & asmRows[0 ..< min(asmRows.len, 20)].join("\n"))
+    check asmRows.len > 0
+    check not asmRows.anyIt(("#line " & $at.line & " ") in it)
     # Outside a Nim source the operation refuses, with its reason.
     discard srv.request("source/cursor", %*{"session": sid,
       "file": "/somewhere/else.py", "line": 1, "column": 1})
@@ -953,22 +1083,6 @@ const
     ## checked by its text as well as by its mapping.
   BrokenNim = "let answer: int = \"forty-two\"\n"
     ## A type error: `nim c` fails with "type mismatch".
-
-proc paneRowsOf(msgs: seq[JsonNode]; pane: string;
-                rows: var seq[string]): bool =
-  ## The rows of the last `pane/content` for `pane` in `msgs` applied to
-  ## `rows` (a full update replaces them, a partial one patches them); true
-  ## when there was one.
-  for n in msgs.notes("pane/content"):
-    if n{"params", "pane"}.getStr != pane:
-      continue
-    result = true
-    if n{"params", "full"}.getBool:
-      rows = @[]
-    for r in n{"params", "rows"}.getElems:
-      let i = r{"index"}.getInt
-      while rows.len <= i: rows.add ""
-      rows[i] = r{"text"}.getStr
 
 proc tickUntil(srv: PaneServer; pane: string; rows: var seq[string];
                done: proc(rows: seq[string]): bool; seconds = 120.0): bool =
