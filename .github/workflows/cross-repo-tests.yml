@@ -127,7 +127,7 @@ jobs:
           attic-token: ${{ secrets.ATTIC_TOKEN }}
           attic-cache: ${{ vars.ATTIC_CACHE }}
           siblings: |
-            codetracer-native-backend=${{ github.event.inputs.rr_backend_ref || '9fcfc0adfd81894bf82fc75efee21146caa1b59d' }}
+            codetracer-native-backend=${{ github.event.inputs.rr_backend_ref || '367e7164f43453513681807eeadb8797b6d5bcde' }}
             # codetracer-trace-format{,-nim} BY COMMIT, not `=dev`: the two halves of
             # the FFI pair are `/agents` inputs in flake.nix, and trace-format's `dev`
             # tip (051a298, 2026-09-30) predates the FileTable / PathTableKind API that
@@ -136,7 +136,7 @@ jobs:
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=2f01e602e70f69a04675293f3fa0d5bad9f196a1
             codetracer-trace-format-nim=3e50ca3f2bf6316e8f764952a84078cf59b11023
-            codetracer-native-recorder=6142cc6a30bc3057ee01c6a8c417436744e393ed
+            codetracer-native-recorder=95da3c1397cd62b9940ca91ce9109b7a61b228a9
 
       - name: Unfold native-backend submodules into parent index
         # codetracer-native-backend's flake.nix has

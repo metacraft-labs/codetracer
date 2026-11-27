@@ -17,6 +17,9 @@ type
     bytes: array[DiagnosticTailBytes, char]
     first, length: int
     truncated: bool
+    received: int
+      ## Every byte read so far, kept or not: the engine's sign of life that
+      ## a read bound counts as progress (`bytesReceived`).
     ended: bool
     readError: OSErrorCode
   StderrCapture* = object
@@ -55,6 +58,7 @@ proc readAvailable(state: ptr CaptureState): bool =
         state.ended = true
   if count <= 0:
     return false
+  state.received += count
   for i in 0 ..< count:
     if state.length < DiagnosticTailBytes:
       state.bytes[(state.first + state.length) mod DiagnosticTailBytes] = buffer[i]
@@ -92,6 +96,16 @@ proc startStderrCapture*(handle: FileHandle): StderrCapture =
     deallocShared(result.state)
     result.state = nil
     raise
+
+proc bytesReceived*(capture: var StderrCapture): int =
+  ## How many bytes the child has written to stderr so far. It only grows: a
+  ## reader compares two readings to tell an engine that is logging its
+  ## progress from one that has gone quiet.
+  if capture.state == nil:
+    return 0
+  acquire(capture.state.lock)
+  defer: release(capture.state.lock)
+  capture.state.received
 
 proc diagnosticTail*(capture: var StderrCapture): string =
   ## Drain already queued bytes before taking a snapshot. This closes the race

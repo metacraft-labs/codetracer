@@ -41,7 +41,7 @@ type
     ekNeovim = "nvim", ekEmacs = "emacs"
 
 const
-  NvimInit = """
+  NvimInit* = """
 -- The scenario's user configuration: the plugin, line numbers, the mouse.
 local dir = os.getenv("CT_SCENARIO_EDITOR_DIR")
 package.path = dir .. "/?.lua;" .. package.path
@@ -73,7 +73,7 @@ vim.api.nvim_create_autocmd("VimEnter", { callback = function()
   if file ~= "" then open_file(300) end
 end })
 """
-  NvimSurface = """
+  NvimSurface* = """
 -- What the binding asks Neovim: the current tab page's windows.
 local M = {}
 function M.surface()
@@ -115,7 +115,7 @@ function M.key(operation)
 end
 return M
 """
-  EmacsInit = """
+  EmacsInit* = """
 ;; The scenario's user configuration: the plugin, line numbers, the mouse.
 (setq inhibit-startup-screen t make-backup-files nil auto-save-default nil
       create-lockfiles nil)
@@ -133,6 +133,11 @@ return M
 (load (expand-file-name "ctscenario.el" (getenv "CT_SCENARIO_EDITOR_DIR")))
 (setq server-socket-dir (getenv "CT_SCENARIO_EDITOR_DIR"))
 (server-start)
+;; the binding's questions are not the user's business: a question that
+;; outlived its time (Emacs busy with a long request) leaves "process server
+;; <n> no longer connected to pipe" in the echo area otherwise
+(advice-add 'server-sentinel :around
+            (lambda (f &rest args) (let ((inhibit-message t)) (apply f args))))
 (add-hook 'emacs-startup-hook
           (lambda ()
             (let ((session (codetracer-open (getenv "CT_SCENARIO_TARGET")))
@@ -142,15 +147,23 @@ return M
                 (select-window (codetracer--source-window session))
                 (find-file file)))))
 """
-  EmacsSurface = """
+  EmacsSurface* = """
 ;;; What the binding asks Emacs: the selected frame's windows.
 (require 'json)
 (defun ctscenario--window (w source)
   (let* ((b (window-buffer w))
          (e (window-inside-edges w))
          (m (or (car (window-margins w)) 0))
-         (ln (with-selected-window w
-               (if display-line-numbers (+ 2 (line-number-display-width)) 0))))
+         ;; The line numbers' columns without selecting the window: a
+         ;; selection runs the plugin's window hooks, and run from the
+         ;; server between the bytes of a mouse report it broke their
+         ;; decoding ("m is undefined"). Emacs makes the column as wide as
+         ;; the window's largest number, and two more.
+         (ln (with-current-buffer b
+               (if display-line-numbers
+                   (+ 2 (length (number-to-string
+                                 (line-number-at-pos (or (window-end w) (point-max))))))
+                 0))))
     `((buf . ,(buffer-name b))
       (file . ,(or (buffer-file-name b)
                    (buffer-local-value 'codetracer--recorded-path b) ""))
@@ -280,6 +293,13 @@ proc ask(ctx: TermContext; kind: EditorKind; nvimExpr, emacsForm: string): strin
     if rc != 0: return ""
     result = o.strip
   of ekEmacs:
+    # Not while Emacs is still reading what was typed or clicked: a question
+    # answered from the server while a mouse report was half read broke its
+    # decoding ("m is undefined", the click lost). Asked once the input is
+    # read and the screen has been quiet for a moment.
+    let started = epochTime()
+    while epochTime() - started < 2.0:
+      if ctx.sess.pendingInput() <= 0 and ctx.sess.drainOutput(50) == 0: break
     let sock = dir / "server"
     let answer = dir / "answer"
     removeFile(answer)
@@ -292,6 +312,10 @@ proc ask(ctx: TermContext; kind: EditorKind; nvimExpr, emacsForm: string): strin
 proc layoutOf(ctx: TermContext; kind: EditorKind): JsonNode =
   let answer = ctx.ask(kind, "luaeval('require(\"ctscenario\").surface()')",
                        "(ctscenario-surface $OUT)")
+  # CT_SCENARIO_EDITOR_LAYOUT_LOG: the last answer, kept for reading a failed run
+  let log = getEnv("CT_SCENARIO_EDITOR_LAYOUT_LOG")
+  if log.len > 0:
+    try: writeFile(log, answer) except IOError: discard
   if answer.len == 0: return %*{"windows": [], "mode": ""}
   try: parseJson(answer) except JsonParsingError: %*{"windows": [], "mode": ""}
 
@@ -410,7 +434,10 @@ proc ctEditorBinding*(kind: EditorKind): TermBinding =
     condition: proc (ctx: TermContext; name: string): Option[bool] =
       case name
       of "replay-idle":
-        some(ctx.surfaceOf(kind).hasExecutionLine and ctx.screenQuiet())
+        # quiet first: asking the editor makes it redraw (Emacs's echo area
+        # and mode line), so a quiet window measured after the question can
+        # never come
+        some(ctx.screenQuiet() and ctx.surfaceOf(kind).hasExecutionLine)
       of "ready":
         var panes = 0
         for w in ctx.layoutOf(kind){"windows"}.getElems:

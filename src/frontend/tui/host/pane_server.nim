@@ -63,6 +63,8 @@ import ../app/views/variables
 import ../app/views/shell
 from ../app/views/low_level_code_pane import LowLevelAct, LowLevelActResult   # HSF-E11
 from ../../viewmodel/viewmodels/low_level_code_vm import LowLevelCodeTitle
+from ../../viewmodel/viewmodels/nim_tracing_vm import nimTraceActionOfOperation,
+  NimTraceRequest, ntpRunning
 import ../../host/native_host
 import ./tui_session
 import ./visual_replay_host
@@ -392,8 +394,11 @@ proc openServerSession(srv: PaneServer; trace: string): ServerSession =
   var tui: TuiSession = nil
   try:
     tui = openTuiSession(folder, viewportHeight = 1,
+                         # an engine that keeps logging is still opening
+                         # (an rr replay on a loaded host took 32.6 s once)
                          bound = DapReadBound(timeoutMs: handshakeBudgetMs(),
-                                              interruptFd: -1))
+                                              interruptFd: -1,
+                                              progressCapMs: DefaultOpenProgressCapMs))
   except EngineStalledAfterOpenError as e:
     fail(ErrRequestFailed, "cannot open " & folder & ": " &
          StalledAfterOpenPhrase & " (" & e.msg & ")")
@@ -966,6 +971,21 @@ proc runOperation(srv: PaneServer; s: ServerSession; params: JsonNode): JsonNode
       else: s.frame = clamp(int(paneArgsOf(params{"args"}).index), 0, last)
       return %*{"ok": true, "operation": text,
                 "detail": "frame " & $(s.frame + 1) & " of " & $g.frameCount}
+  # §E12: a Nim trace acts at the editor's cursor, in the file the cursor is
+  # in. Outside Edit mode the runtime's trace reads the shown document — a
+  # recording's file, its caret at the stop — so tracing a macro from a
+  # session on a recording traced the stop's line, or another file
+  # altogether, and opened nothing (until 2026-11-26).
+  let traced = nimTraceActionOfOperation(name)
+  if traced.found and s.app.modes.product != pmEdit and s.cursor.file.len > 0 and
+     s.cursor.line > 0 and fileExists(s.cursor.file) and
+     not s.rt.editServices.startNimTrace.isNil:
+    let said = s.rt.editServices.startNimTrace(
+      NimTraceRequest(action: traced.action, path: s.cursor.file,
+                      line: s.cursor.line, column: max(1, s.cursor.column)),
+      readFile(s.cursor.file).splitLines())
+    return %*{"ok": s.edit.nimTracer.vm.phase == ntpRunning, "operation": text,
+              "detail": said}
   if params.hasKey("pane") and params{"pane"}.getStr("") != FrameViewerPane:
     discard s.rt.focusHostedPane(paneParam(params))
   var outcome: RuntimeOutcome
@@ -1534,6 +1554,17 @@ proc openRecording(srv: PaneServer; origin: ServerSession; folder: string;
   srv.outbox.add srv.publish(opened)
   ""
 
+proc traceSettledParams(s: ServerSession): JsonNode =
+  ## `trace/settled`: `outcome` "done" (the recording, `trace`, opened as a
+  ## session of its own — announced by `session/opened` before this) or
+  ## "failed" (nothing recorded), and `message`, what to show: the status
+  ## line's words (the compiler's error for a refusal).
+  let vm = s.edit.nimTracer.vm
+  %*{"session": s.id,
+     "outcome": (if vm.phase == ntpDone: "done" else: "failed"),
+     "message": s.app.notification,
+     "trace": (if vm.phase == ntpDone: vm.tracePath else: "")}
+
 proc tick*(srv: PaneServer): seq[JsonNode] =
   ## Advance what runs without a request — a build, a Nim trace, a test run,
   ## the VCS listing — and return what the editor must now be told: the
@@ -1550,10 +1581,18 @@ proc tick*(srv: PaneServer): seq[JsonNode] =
       continue
     var changed = advanceBuild(s.rt, s.edit, report = true)
     let sess = s
-    changed = advanceNimTrace(s.rt, s.edit,
+    let traced = advanceNimTrace(s.rt, s.edit,
       proc(request: TraceOpenRequest): string =
         srv.openRecording(sess, request.tracePath, request.policy),
-      followIntoDebug = false) or changed
+      followIntoDebug = false)
+    if traced:
+      # §E12: how a Nim trace ended, said to the editor (`trace/settled`).
+      # Its start was the `operation/run` answer ("Tracing macro
+      # expansion..."); a trace that recorded nothing — refused by the
+      # compiler, failed, timed out — opens no session, and until 2026-11-26
+      # the editor was told nothing more and showed "Tracing..." for good.
+      srv.outbox.add notification("trace/settled", traceSettledParams(s))
+    changed = traced or changed
     # HSF-E11: Edit mode's generated C, when its compile settles.
     changed = advanceGeneratedC(s.rt, s.edit) or changed
     changed = s.tests.tick(s.rt) or changed

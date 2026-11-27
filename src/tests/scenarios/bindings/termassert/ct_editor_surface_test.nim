@@ -187,3 +187,34 @@ suite "the editors' keys and commands":
     check commandChords(ekEmacs, "debugger.step-over", "codetracer-step-over") ==
       "Alt+x " & "codetracer-step-over".toSeq.mapIt($it).join(" ") & " Enter"
     check commandChords(ekEmacs, "debugger.step-over", "") == ""
+
+proc lispBalance(code: string): int =
+  ## The depth an Emacs Lisp text ends at (0 when its parentheses balance,
+  ## -1 when one closes too soon), outside strings, characters and comments.
+  var i = 0
+  while i < code.len:
+    case code[i]
+    of ';':
+      while i < code.len and code[i] != '\n': inc i
+    of '"':
+      inc i
+      while i < code.len and code[i] != '"':
+        if code[i] == '\\': inc i
+        inc i
+    of '?':
+      inc i                   # a character literal, ?( or ?\(
+      if i < code.len and code[i] == '\\': inc i
+    of '(': inc result
+    of ')':
+      dec result
+      if result < 0: return -1
+    else: discard
+    inc i
+
+suite "the editor configurations the binding writes":
+  test "the Emacs Lisp reads: its parentheses balance":
+    # A paren too many in the windows query made every Emacs run answer
+    # nothing (2026-11-26): each wait timed out with a correct screen.
+    check lispBalance(EmacsInit) == 0
+    check lispBalance(EmacsSurface) == 0
+    check lispBalance("(a))") == -1

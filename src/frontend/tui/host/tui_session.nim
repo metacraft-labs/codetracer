@@ -2656,6 +2656,11 @@ proc header*(s: TuiSession; rt: TuiRuntime) =
   # built by the shared presenter from THIS recording's files, read as the
   # Debug-mode editor reads them, and shown in the Low Level Code pane.
   let owner = s
+  rt.editServices.showDisassembly = proc() =
+    let vm = owner.session.session.lowLevelCodeVM
+    if not vm.isNil and vm.generatedAtStop.val.len > 0:
+      vm.clearInstructions()
+      owner.refreshLowLevel(rt)
   rt.editServices.showGeneratedCode = proc(targetId, path: string;
                                            line: int): string =
     let core = owner.session.session

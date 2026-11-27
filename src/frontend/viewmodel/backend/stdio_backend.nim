@@ -151,6 +151,20 @@ type
       ## know what an input token is, and a front-end that had its keystroke
       ## eaten by its debug adapter would be a worse defect than the one this
       ## exists to fix.
+    progressCapMs*: int
+      ## A read whose ``timeoutMs`` ran out while the engine kept WRITING
+      ## TO STDERR is not a stall: the replay server's workers log as they
+      ## go (an rr replay's spawn, its socket, its run to the entry), and a
+      ## recording that takes longer than the budget to open on a loaded
+      ## host is still opening. With this set (``> 0``) the budget measures
+      ## silence on stdout AND stderr together, and a read gives up only
+      ## after ``timeoutMs`` with neither, or after ``progressCapMs`` in all.
+      ## ``0`` (the default) keeps the plain per-message budget.
+      ##
+      ## Measured 2026-11-26: opening a native rr recording through the pane
+      ## server took 32.6 s once on a loaded host, its worker logging all the
+      ## while, and was refused at the 30 s budget; the same open took 5.9 s
+      ## and 9.9 s on the next runs.
     untimedOperations*: bool
       ## Whether a read that waits for an engine OPERATION is exempt from
       ## ``timeoutMs``.  ``false`` (the default, and every caller before the
@@ -361,6 +375,8 @@ type
     ## clock.
     budgetMs: int
     at: MonoTime
+    start: MonoTime
+      ## When this read began: ``progressCapMs`` counts from here.
 
 proc readDeadline(backend: DapStdioBackend; operation: bool): ReadDeadline =
   ## The clock for the message about to be read, starting now.
@@ -368,8 +384,9 @@ proc readDeadline(backend: DapStdioBackend; operation: bool): ReadDeadline =
     if operation and backend.bound.untimedOperations: 0
     else: backend.bound.timeoutMs
   if budget > 0:
+    let now = getMonoTime()
     ReadDeadline(budgetMs: budget,
-                 at: getMonoTime() + initDuration(milliseconds = budget))
+                 at: now + initDuration(milliseconds = budget), start: now)
   else:
     ReadDeadline()
 
@@ -396,6 +413,8 @@ proc awaitReadable(backend: DapStdioBackend; deadline: ReadDeadline) =
     return
   else:
     let fd = backend.process.outputHandle
+    var deadline = deadline
+    var heard = backend.stderrCapture.bytesReceived()
     while true:
       var rs: TFdSet
       FD_ZERO(rs)
@@ -407,7 +426,22 @@ proc awaitReadable(backend: DapStdioBackend; deadline: ReadDeadline) =
           maxFd = backend.bound.interruptFd
       var sliceMs = InterruptPollMs
       if deadline.budgetMs > 0:
-        let left = (deadline.at - getMonoTime()).inMilliseconds
+        var left = (deadline.at - getMonoTime()).inMilliseconds
+        let cap = backend.bound.progressCapMs
+        if cap > 0:
+          # the engine's stderr is progress: the silence starts again
+          let now = getMonoTime()
+          let total = (now - deadline.start).inMilliseconds
+          let said = backend.stderrCapture.bytesReceived()
+          if said != heard:
+            heard = said
+            deadline.at = now + initDuration(milliseconds = deadline.budgetMs)
+            left = deadline.budgetMs
+          if total >= cap:
+            raise newException(DapStalledError,
+              "DapStdioBackend: the debug adapter sent no message in " &
+              $cap & " ms, though it kept logging")
+          left = min(left, cap - total)
         if left <= 0:
           raise newException(DapStalledError,
             "DapStdioBackend: the debug adapter sent nothing for " &

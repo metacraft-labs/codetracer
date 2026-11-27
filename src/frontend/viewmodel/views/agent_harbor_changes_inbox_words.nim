@@ -27,6 +27,7 @@ import std/strutils
 
 import nim_agents_isonim_viewmodels/agent_harbor/[changes_vm, inbox_vm, inbox_item_vm]
 import ../keymap/[base_keymaps, context_keys, editing_keymap, keymap_router, scope_path]
+from ../keymap/operation_catalogue import InboxTable
 
 export changes_vm, inbox_vm
 
@@ -332,10 +333,27 @@ proc stepperKey*(next: bool): string =
   ## The key the base keymap binds to Next or Previous in the Inbox's scope
   ## (`overlay_rows`: `]` and `[`), as a tooltip names it (IR-3: the key
   ## shown is one that, typed there, runs it); "" when none does.
+  ##
+  ## Only the Inbox table's own rows are candidates. The window's table binds
+  ## the same operations to `Alt+]` / `Alt+[` (the sessions bar's keys, which
+  ## work from anywhere) and those resolve in the panel too, so the router's
+  ## `chordFor`, which answers with the first row in table order, would name
+  ## them; the panel names its own, unmodified key. Each candidate is typed
+  ## through the router in the panel's scope, as `chordFor` checks its rows,
+  ## and named only when it lands on the operation.
   let router = initKeymapRouter(bkCua, KeyDelivery(frontEnd: feWeb, platform: hostPlatform(),
                                                    keyProtocol: kpNative))
-  router.chordFor(if next: InboxNextOperation else: InboxPreviousOperation, SessionFacts(),
-                  @[element(ekWindow, "window"), pane(InboxPanelScope)], nmNormal)
+  let operation = if next: InboxNextOperation else: InboxPreviousOperation
+  let path = @[element(ekWindow, "window"), pane(InboxPanelScope)]
+  for b in router.effective.bindingsFor(operation):
+    if tableOf(b) != InboxTable: continue
+    var typed = router
+    var res: EditingResolution
+    for chord in b.chords:
+      res = typed.route(SessionFacts(), path, nmNormal, chord, 0)
+    if res.kind == erOperation and res.operation == operation and res.argument.len == 0:
+      return b.spelling
+  ""
 
 proc stepperTitle*(next: bool): string =
   ## Previous's or Next's tooltip: what it does and its key (N6).
