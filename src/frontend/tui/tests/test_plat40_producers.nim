@@ -429,9 +429,11 @@ suite "PLAT-40 3 — the producer partition":
                                         "eventLog.rows.val ="]),
     "pointList": ("applyPointRows", @["applyPointRows(",
                                       "pointList.rows.val ="])}.toTable
-  const Fixture = "src/frontend/storybook_components.nim"
+  const Fixture = "src/frontend/stories/story_fixtures.nim"
     ## The storybook builds demonstration stores and is neither shipped nor a
-    ## test; its writers are REPORTED, never counted as producers.
+    ## test; its writers are REPORTED, never counted as producers. The stand-in
+    ## store (`makeStore`) moved here from `storybook_components.nim` unchanged
+    ## (1f00ec8e9) so a native renderer can draw a story from the same state.
 
   for pane in ["calltrace", "eventLog", "pointList"]:
     test "the writers of the " & pane & " rows are exactly the declared producers":
