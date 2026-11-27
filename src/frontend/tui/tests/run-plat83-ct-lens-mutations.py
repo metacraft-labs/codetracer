@@ -56,6 +56,8 @@ PANE_JUMP = "*::a call activated in its docked pane is a jump, without the mode"
 NEXT_SESSION = "*::plugins granted in an earlier session start by themselves in the next"
 STATUS_ITEM = ("*::installed and granted, one process runs history and watch; "
                "history follows the debugger through git")
+F7_WATCH = ("*::F7 watches what the step changed; "
+            "the plugin's visualiser renders Python's None")
 
 ARMS = [
     ("M1", [(LENS, "  if st.path == result.file and st.functionFirst > 0 and",
@@ -114,7 +116,14 @@ ARMS = [
      "the terminal: activation closures made in the loop share one id"),
     ("M11", [(RUNTIME, "      model.status.notification.add \"  \" & pluginStatus",
               "      discard")],
-     [(PTY, STATUS_ITEM)],
+     # Re-aimed 2026-11-27: STATUS_ITEM alone no longer notices. Since the
+     # source decoration was mirrored onto the status line (a decoration on
+     # the execution line is appended to the note as `<plugin>: <text>`), the
+     # history status item `history: <hash>` is also a substring of that
+     # decoration note, so the case reads green with the status items hidden.
+     # The watch plugin's status item (`changed: ...`), which F7_WATCH reads
+     # after every `next`, has no such second route and goes red.
+     [(PTY, STATUS_ITEM), (PTY, F7_WATCH)],
      "the terminal: a note hides the plugins' status items"),
 ]
 

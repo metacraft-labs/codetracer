@@ -220,7 +220,7 @@ jobs:
         # what the script's stale-checkout check can hold a checkout to.
         env:
           GH_TOKEN: ${{ steps.fresh_token.outputs.token }}
-          RR_BACKEND_REF: 9fcfc0adfd81894bf82fc75efee21146caa1b59d
+          RR_BACKEND_REF: 367e7164f43453513681807eeadb8797b6d5bcde
         run: ./ci/setup-rr-backend.sh
 
       - name: Assert the ct-native-replay build-siblings builds can start

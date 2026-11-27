@@ -32,7 +32,11 @@
 ##      cells, and its counts are never cut below their floor, the first
 ##      count's number and its "…" (`countsFloor`, `1…`; CTF-P1c D7)
 ##      (`cutTextProblems`). A text that lists its parts with " · "
-##      wraps only after a separator (`separatorWrapProblems`); a tree
+##      wraps only after a separator (`separatorWrapProblems`), and the
+##      separator a wrap leaves at a line's end is dropped, the line break
+##      separating the parts (`11 sessions`, never `11 sessions ·`): both
+##      checks read such a break as the separator it stands for, and only
+##      there (`wrappedReading`); a tree
 ##      node's counts are always drawn, end flush with the rows' ages, and
 ##      are cut only where the line cannot hold them whole
 ##      (`sessionHeaderProblems`); the popup's heading shows a title whole
@@ -110,7 +114,7 @@ from ../../../viewmodel/views/agent_harbor_words import tabLabelOf, filterCount,
   countsText, activityLineIsError, countsFloor, danglesBeforeEllipsis
 
 # One line, deliberately: `ci/lib/run-nim-test-lane.sh` reads this spelling.
-const ExpectedAssertions = 167
+const ExpectedAssertions = 177
 
 const CountsLeast = 8
   ## The least room a tree node's counts give up to before its title is
@@ -192,6 +196,36 @@ proc sameWords(drawn, value: string): bool =
   ## two lines (a word longer than a line) included.
   drawn == value or drawn.replace(" ", "") == value.replace(" ", "")
 
+const MiddotGlyph = "\xC2\xB7"
+  ## The separator's own glyph, as a trimmed line ends with it.
+
+proc wrappedReading(lines: seq[string]; value: string): tuple[text: string, atSeparator: seq[bool]] =
+  ## A wrapped text's lines read as one text, and for each break between
+  ## two lines whether it falls between two of the text's ` · ` parts. The
+  ## terminal drops the separator a wrap leaves at a line's end (the line
+  ## break separates the parts, so a line reads `11 sessions`, never
+  ## `11 sessions ·`), where the web's CSS wrap keeps it: a break is read
+  ## as that separator, and it is put back, only where `value` holds
+  ## ` · ` at that very place, the next line's text following it. Any
+  ## other break joins the lines by a space, as the words were, so a cut
+  ## (`11 sessi…`) or a lost word still reads as a text that differs from
+  ## `value`. Spaces are ignored in the comparison, as in `sameWords`, so a
+  ## word cut across two lines earlier does not hide a later separator.
+  if lines.len == 0: return
+  let wanted = value.replace(" ", "")
+  result.text = lines[0]
+  for line in lines[1 .. ^1]:
+    if result.text.endsWith(MiddotGlyph):
+      result.atSeparator.add true
+      result.text.add " " & line
+    elif line.len > 0 and
+        wanted.startsWith((result.text & Middot & line).replace(" ", "")):
+      result.atSeparator.add true
+      result.text.add Middot & line
+    else:
+      result.atSeparator.add false
+      result.text.add " " & line
+
 proc drawnTextProblems(m: AhTuiMount): seq[string] =
   ## Each text fact against the cells under its node. A node below the
   ## screen's foot is in the tree and clipped off it, like a list the web
@@ -231,7 +265,10 @@ proc cutTextProblems(m: AhTuiMount): seq[string] =
   ## (badge, label, position, auto-switch) shows no "…".
   proc whole(m: AhTuiMount; n: AhNode; fact: string; into: var seq[string]) =
     if n.row >= m.rows or n.attr(fact).len == 0: return
-    let drawn = m.drawnText(n)
+    # A wrapped text is read with the separators its wraps dropped put
+    # back (`wrappedReading`): a dropped ` · ` is not a cut.
+    let drawn = if n.height <= 1: m.drawnText(n)
+                else: wrappedReading(m.drawnLines(n), n.attr(fact)).text
     if not sameWords(drawn, n.attr(fact)):
       into.add "the " & fact & " '" & n.attr(fact) & "' is cut to '" & drawn &
                "' where the web shows it whole"
@@ -290,8 +327,10 @@ const SeparatorWrappedFacts = ["summary", "source", "caveat", "meta", "executive
 proc separatorWrapProblems(m: AhTuiMount): seq[string] =
   ## A text that lists its parts with " · " and wraps breaks only after a
   ## separator, so no part (`Tests: 1 failing, 2 pending`) is split across
-  ## lines: every line but the last ends with "·" — wherever every part
-  ## (with its " ·") fits on a line of the text's width.
+  ## lines: every break falls between two parts, the line ending with
+  ## "·" or the "·" dropped at the break
+  ## (`wrappedReading`) — wherever every part (with its " ·") fits on a
+  ## line of the text's width.
   for fact in SeparatorWrappedFacts:
     for n in m.canvas.root.all(fact):
       if n.height <= 1 or n.row >= m.rows: continue
@@ -302,8 +341,9 @@ proc separatorWrapProblems(m: AhTuiMount): seq[string] =
         if widthOf(part) + 2 > n.width: fits = false
       if not fits: continue
       let lines = m.nodeLines(n)
-      for i in 0 ..< lines.len - 1:
-        if not lines[i].endsWith("\xC2\xB7"):
+      let reading = wrappedReading(lines, value)
+      for i, atSeparator in reading.atSeparator:
+        if not atSeparator:
           result.add "the " & fact & " '" & value & "' wraps inside a part: '" &
                      lines[i] & "' / '" & lines[i + 1] & "'"
           break
@@ -1804,6 +1844,39 @@ suite "CTF-P1b: the comparisons can fail":
     let problems = cutTextProblems(m)
     ck problems.len == 1
     ck problems.join(" ").contains("where the web shows it whole")
+    m.dispose()
+
+  test "a separator dropped where a summary wraps is not a cut; a cut there is":
+    # The head band's summary wraps at the sidebar's width, and the
+    # terminal drops the ` · ` its wrap leaves at a line's end. That reads
+    # whole. A real cut planted at the same line's end (its last word ended
+    # in "…", or the word blanked) must still be reported, by both checks.
+    let m = mountStory(storyOf("agent-harbor-initiatives", "populated"), 45, 56, dmDark)
+    let summary = m.view.first("summary")
+    ck summary.height > 1
+    let lines = m.drawnLines(summary)
+    var at = -1
+    for i in 0 ..< lines.len - 1:
+      if at < 0 and not lines[i].endsWith(MiddotGlyph): at = i
+    ck at >= 0
+    ck cutTextProblems(m).len == 0
+    ck separatorWrapProblems(m).len == 0
+    let row = summary.row + at
+    let drawnRow = m.canvas.grid.cellsText(row, summary.col, summary.width)
+    let lineEnd = summary.col + widthOf(drawnRow.strip(leading = false))
+    let style = m.canvas.grid.styleAt(row, lineEnd - 1)
+    # A cut: the line's last word ended in "…".
+    m.canvas.grid.paint(row, lineEnd - 3, Ellipsis & "  ", style)
+    ck m.drawnLines(summary)[at].endsWith(Ellipsis)
+    ck cutTextProblems(m).join(" ").contains("where the web shows it whole")
+    ck separatorWrapProblems(m).join(" ").contains("wraps inside a part")
+    m.draw()
+    ck cutTextProblems(m).len == 0
+    # A lost word: the line's last word blanked.
+    let word = lines[at].rsplit(' ', 1)[^1]
+    m.canvas.grid.paint(row, lineEnd - widthOf(word), repeat(" ", widthOf(word)), style)
+    ck m.drawnLines(summary)[at] != lines[at]
+    ck cutTextProblems(m).join(" ").contains("where the web shows it whole")
     m.dispose()
 
   test "a group title cut while its counts have room to give is reported":

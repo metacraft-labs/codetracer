@@ -70,6 +70,11 @@
 ##
 ## Compile and run:
 ##   nim c -r src/tests/gui/tests/request-panel/php_request_panel_vm_test.nim
+##
+## ``CODETRACER_PHP_REQUEST_PANEL_FIXTURE=<path to an app.ct>`` reads that
+## container instead of the checked-in fixture (it must exist, or the suite
+## fails before any case runs).  The PHP recorder's downstream lane uses it to
+## run this suite on a session recorded with the recorder revision under test.
 
 import std/[json, options, os, strutils, tables, unittest]
 import vm_test_helpers
@@ -94,9 +99,38 @@ from codetracer_trace_writer/multi_stream_writer import DefaultLinesPerFile
 # ---------------------------------------------------------------------------
 
 const
-  FixtureContainer = currentSourcePath.parentDir /
+  CheckedInFixture = currentSourcePath.parentDir /
     "fixtures" / "php_builtin" / "app.ct"
+    ## The checked-in recording this suite reads by default.
 
+  FixtureOverrideVar = "CODETRACER_PHP_REQUEST_PANEL_FIXTURE"
+    ## Names a container to read INSTEAD of ``CheckedInFixture``.  The PHP
+    ## recorder's downstream lane (``ci/test/php-recorder-consumers.sh``)
+    ## records a fresh session with the recorder revision under test and
+    ## points this at it, so a recorder change is checked against this suite
+    ## before codetracer picks the recorder up.  The checked-in fixture is
+    ## never overwritten.
+
+proc resolveFixtureContainer(): string =
+  ## The container this run reads: the override when set, else the checked-in
+  ## fixture.  A set override that names no file is a hard failure, never a
+  ## silent fall-back to the checked-in fixture: the lane that sets it would
+  ## otherwise report green about a recording it never read.
+  let override = getEnv(FixtureOverrideVar)
+  if override.len == 0:
+    return CheckedInFixture
+  if not fileExists(override):
+    raise newException(IOError, FixtureOverrideVar & " is set to '" &
+      override & "', which is not an existing file. Point it at a recorded " &
+      "app.ct (the PHP recorder's `just record-request-panel-fixture <dir>` " &
+      "writes <dir>/app.ct), or unset it to read the checked-in fixture.")
+  override
+
+let FixtureContainer = resolveFixtureContainer()
+  ## Resolved once, at start-up, so every assertion below reads one container.
+echo "php_request_panel_vm_test: reading " & FixtureContainer
+
+const
   DemoAppSuffix = "web/app.php"
     ## The recorded demo app.  A row's seek must land in THIS file, which for
     ## the PHP recorder also means it must not land on the synthetic

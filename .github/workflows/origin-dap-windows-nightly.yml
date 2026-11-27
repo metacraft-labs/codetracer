@@ -134,6 +134,12 @@ jobs:
         # the toolchain and Cargo.lock; a dependency change restores the
         # nearest older store, and sccache recompiles only what changed.
         # SCCACHE_CACHE_SIZE on the test step bounds what is saved.
+        # One store per job, and a key per run, restored from the newest of
+        # its job's: the key was the same from run to run, so after the first
+        # save every restore was an exact hit and nothing it compiled since was
+        # saved (the Python job of run 45952274107 restored a store and still
+        # missed 146 of 347 compiles). The save step below saves a run's store
+        # only when it compiled something.
         # After env.ps1 has put its pinned zstd on PATH, as the save step
         # runs: actions/cache records the compressor in the cache's version,
         # so a restore before it (gzip) never matched a store saved after it
@@ -142,9 +148,10 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}\sccache
-          key: sccache-db-backend-windows-v1-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}-${{ hashFiles('src/db-backend/Cargo.lock') }}
+          key: sccache-db-backend-windows-v2-origin-dap-windows-nightly-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}-${{ hashFiles('src/db-backend/Cargo.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            sccache-db-backend-windows-v1-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}-
+            sccache-db-backend-windows-v2-origin-dap-windows-nightly-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}-${{ hashFiles('src/db-backend/Cargo.lock') }}-
+            sccache-db-backend-windows-v2-origin-dap-windows-nightly-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}-
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -354,6 +361,7 @@ jobs:
         run: just test-origin-dap
 
       - name: Report and flush db-backend's compiler cache
+        id: sccache_stats
         if: always()
         shell: bash
         env:
@@ -364,15 +372,18 @@ jobs:
         run: |
           sccache=$(cygpath -u "$RUSTC_WRAPPER")
           if [ ! -f "$sccache" ]; then echo "no sccache at $RUSTC_WRAPPER"; exit 0; fi
-          "$sccache" --show-stats || true
+          stats=$("$sccache" --show-stats 2>&1 || true)
+          printf '%s\n' "$stats"
+          misses=$(printf '%s\n' "$stats" | tr -d '\r' | awk '/^Cache misses[[:space:]]+[0-9]+$/ {print $3; exit}')
+          echo "misses=${misses:-0}" >>"$GITHUB_OUTPUT"
           "$sccache" --stop-server || true
 
       - name: Save db-backend's compiler cache
-        if: always() && steps.sccache_cache.outputs.cache-hit != 'true'
+        if: always() && steps.sccache_stats.outputs.misses != '' && steps.sccache_stats.outputs.misses != '0'
         uses: actions/cache/save@v4
         with:
           path: ${{ runner.temp }}\sccache
-          key: sccache-db-backend-windows-v1-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}-${{ hashFiles('src/db-backend/Cargo.lock') }}
+          key: sccache-db-backend-windows-v2-origin-dap-windows-nightly-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}-${{ hashFiles('src/db-backend/Cargo.lock') }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Verify test-reprobuild-hcr-mcr-dap fails loudly unsupported on Windows
         shell: bash

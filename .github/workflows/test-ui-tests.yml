@@ -106,13 +106,13 @@ jobs:
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=2f01e602e70f69a04675293f3fa0d5bad9f196a1
             codetracer-trace-format-nim=3e50ca3f2bf6316e8f764952a84078cf59b11023
-            codetracer-native-recorder=6142cc6a30bc3057ee01c6a8c417436744e393ed
+            codetracer-native-recorder=95da3c1397cd62b9940ca91ce9109b7a61b228a9
             # codetracer-native-backend and codetracer-visual-replay BY COMMIT as well: both are
             # `/agents` inputs in flake.nix (7ab073a22), so `=dev` cloned a different tree than the
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
             # the lock, as for the trace-format pair above.
-            codetracer-visual-replay=d1bf6605a818b192ab03b8f7b187858e3d3804d5
-            codetracer-native-backend=9fcfc0adfd81894bf82fc75efee21146caa1b59d
+            codetracer-visual-replay=360a8131ec9fc81d0ebd1cdbd1743238218346af
+            codetracer-native-backend=367e7164f43453513681807eeadb8797b6d5bcde
             # The desktop scenario lane's recorders and recordings: the BEAM
             # recorder at repro.lock's pin, and the example recordings at the
             # pin of the test lock (ci/test/siblings/repro.lock), the commit their

@@ -165,6 +165,13 @@ type
       ## Starts a build and takes ownership of the process. The SESSION it
       ## reports into is `TuiApp.build`, which the host fills, because the poll
       ## loop that advances it is the host's too.
+    showDisassembly*: proc() {.closure.}
+      ## Generated-Code-Listing §13.4, "View Disassembly": the Low Level Code
+      ## pane back to the stop's machine code when it shows a generated C
+      ## listing — the listing the stop loader leaves alone
+      ## (`LowLevelCodeVM.generatedAtStop`) cleared, so the loader asks for
+      ## the machine code again, as the desktop's `showDisassembly` does. Nil
+      ## in a session with no replay.
     showGeneratedCode*: proc(targetId, path: string; line: int): string {.closure.}
       ## The Generated Code Listing operation (Generated-Code-Listing §7,
       ## §13.4) for `path:line`: the host builds the listing from the
@@ -10075,7 +10082,15 @@ proc buildOperationTables(rt: TuiRuntime) =
   # recording — and "View Generated C Source" the listing of the C the
   # source under the caret compiled to, in that pane, cross-referenced with
   # the source. Both did nothing on every surface until 2026-11-12.
-  session.bindOp("view.disassembly", act(rt.openLowLevelCode(outcome)))
+  session.bindOp("view.disassembly",
+    act do:
+      # The machine code, not the generated C listing a View Generated C
+      # Source left in the pane: until 2026-11-26 this only opened the pane,
+      # so after the C the listing stayed C (in the terminal and in both
+      # editors).
+      if not rt.editServices.showDisassembly.isNil:
+        rt.editServices.showDisassembly()
+      rt.openLowLevelCode(outcome))
   session.bindOp("view.generated-c-source",
     act do:
       let (path, line) = rt.generatedCodeSubject()

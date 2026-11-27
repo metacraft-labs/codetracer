@@ -1,5 +1,5 @@
- ◌ Replace the hand…  CLI ✕   ◌ Cap the telem…  CT   ◌ Fix the flaky…  Tg   ◌ Add search t…  TUI   ◌ Benchmark rou…  CT   ◌ Add jitter t…  Web   ◌ Cache the de…  CLI
- ◌ Profile the i…  CT   ◌ Migrate cache…  Tg   ◌ Persist the…  TUI    ◌ Migrate the C…  CT   ◌ Split the se…  Web   ◌ Port the rou…  CLI   ◌ Retry telemet…  CT   +
+ ○ Replace the hand…  CLI ✕   ○ Cap the telem…  CT   ◌ Fix the flaky…  Tg   ● Add search t…  TUI   ◑ Benchmark rou…  CT   ◌ Add jitter t…  Web   ◔ Cache the de…  CLI
+ ◌ Profile the i…  CT   ◌ Migrate cache…  Tg   ● Persist the…  TUI    ◑ Migrate the C…  CT   ◌ Split the se…  Web   ○ Port the rou…  CLI   ◔ Retry telemet…  CT   +
                                                                                                                                                                                     
                                                                                                                                                                                     
                                                                                                                                                                                     

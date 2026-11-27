@@ -57,7 +57,7 @@ type
     ## rule, and the copy that would have been forgotten is the entrypoint's,
     ## because no suite compiles this module.
     running: RunningBuild
-    nimTracer: NativeNimTracer
+    nimTracer*: NativeNimTracer
       ## Nim's compile-time tracing: the one trace in flight, polled by the
       ## loop like the build (`advanceNimTrace`).
     generatedC: NimCCompile
