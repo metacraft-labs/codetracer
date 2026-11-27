@@ -342,6 +342,21 @@ jobs:
         # belongs in the same job as the trace-layer units above.
         run: nix develop .#devShells.x86_64-linux.default --command just test-mcr-enrichment-units
 
+      - name: Build ct (needed by the CLI dispatch tests)
+        id: ct
+        # Whatever failed before it: every desktop and browser step below
+        # needs `ct`, and they were skipped whenever an earlier suite failed.
+        # Before the recorder-gated suites, whose recipe builds replay-server
+        # with cargo unless it finds one, and build-once's is one it finds:
+        # in the other order the two built it twice (30 and 25 minutes, run
+        # 45953247163).
+        if: ${{ !cancelled() }}
+        # record_missing_recorder_test.nim and record_dispatch_e2e_test.nim
+        # drive the SHIPPED `ct` binary rather than importing its modules, so
+        # the lane needs a build.  The pure dispatch table test does not, but
+        # it runs in the same recipe.
+        run: nix develop .#devShells.x86_64-linux.default --command just build-once
+
       - name: Run recorder-gated ViewModel tests (JS recorder + replay-server)
         if: ${{ !cancelled() }}
         # Builds the JS recorder sibling via scripts/build-siblings.sh, builds
@@ -349,17 +364,6 @@ jobs:
         # zero-test guard that fails if they all skip (so a missing recorder
         # cannot masquerade as a pass).
         run: nix develop .#devShells.x86_64-linux.default --command just test-vm-recorder-gated
-
-      - name: Build ct (needed by the CLI dispatch tests)
-        id: ct
-        # Whatever failed before it: every desktop and browser step below
-        # needs `ct`, and they were skipped whenever an earlier suite failed.
-        if: ${{ !cancelled() }}
-        # record_missing_recorder_test.nim and record_dispatch_e2e_test.nim
-        # drive the SHIPPED `ct` binary rather than importing its modules, so
-        # the lane needs a build.  The pure dispatch table test does not, but
-        # it runs in the same recipe.
-        run: nix develop .#devShells.x86_64-linux.default --command just build-once
 
       - name: Run ct record CLI dispatch tests
         if: ${{ !cancelled() }}

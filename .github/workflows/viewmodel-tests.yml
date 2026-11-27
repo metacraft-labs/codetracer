@@ -13,11 +13,13 @@ permissions:
 jobs:
   viewmodel-tests:
     runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; H4: routed to GPU host gpu-server-001
-    # MEASURED 2026-11-22/23 (runs 45069526428, 45118976975): the steps that
-    # stay in this job took 56 and 68 minutes (provisioning siblings alone 31
-    # and 27), and the old 75-minute limit then ran out in the steps that are
-    # now `viewmodel-tests-wasm`'s. 90 minutes is 1.3x the slower run.
-    timeout-minutes: 90
+    # MEASURED 2026-11-27 with every step running (run 45953247163, job
+    # 140353735866, a GARM VM): 193 minutes -- provisioning 17, the NS1
+    # host-free build 26, the ViewModel headless suites 28, the web bundle
+    # steps 25, editor-model 11. The 90 minutes measured before (runs
+    # 45069526428, 45118976975) were the length of a job whose first red
+    # suite skipped every step after it. 240 is 1.25x the measured run.
+    timeout-minutes: 240
     name: ViewModel headless tests (native + JS)
     steps:
       - name: Generate CI token
