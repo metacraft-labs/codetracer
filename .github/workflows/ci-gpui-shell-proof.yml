@@ -1,0 +1,22 @@
+name: PROOF gpui-shell lane beside ct-build and the tools job
+# PROOF BRANCH ONLY (ci/gpui-shell): the three jobs codetracer.yml runs for
+# the lane, without the rest of codetracer.yml. Never landed.
+on:
+  push:
+    branches: ['ci/gpui-shell']
+permissions:
+  contents: read
+  id-token: write
+  actions: read
+jobs:
+  ct-build:
+    uses: ./.github/workflows/ct-build.yml
+    secrets: inherit
+  visual-replay-tools:
+    uses: ./.github/workflows/visual-replay-tools.yml
+    secrets: inherit
+  gpui-shell:
+    needs: [ct-build]
+    if: ${{ !cancelled() && needs.ct-build.result == 'success' }}
+    uses: ./.github/workflows/gpui-shell.yml
+    secrets: inherit

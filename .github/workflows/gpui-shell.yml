@@ -8,22 +8,17 @@ name: GPUI shell lane
 # Called from codetracer.yml (pull requests and dispatches), beside ct-build
 # and visual-replay-tools, whose artifacts it restores: ct, replay-server and
 # the bundles from ct-build; ct_gfx_player, ct-native-replay, ct-mcr and the
-# featureless shim from visual-replay-tools. And from gpui-shell-agents.yml on
-# pushes to `agents` with `standalone: true`, where it is the only job and
-# builds ct, replay-server and the tools itself: a separate ct-build and tools
-# job would each pay a runner's 20-40 minutes of provisioning again. The tools
-# come through ./.github/actions/provide-visual-replay-tools either way.
+# featureless shim from visual-replay-tools, through
+# ./.github/actions/provide-visual-replay-tools.
+#
+# NOT ON `agents` PUSHES YET, measured rather than assumed: a single job that
+# builds ct, replay-server and the tools itself spent 3 hours on setup on a
+# garm VM (run 45951461429: build-once 75 minutes, the tools 57), and the lane
+# runs its 113 files one at a time, about 80 seconds each, so the job needs
+# about 5.5 hours. Beside ct-build and visual-replay-tools it needs about 35
+# minutes of setup plus the lane.
 on:
   workflow_call:
-    inputs:
-      standalone:
-        description: >
-          true when no ct-build or visual-replay-tools job runs beside this
-          one (gpui-shell-agents.yml): the job then builds ct, replay-server
-          and the visual replay tools itself.
-        type: boolean
-        required: false
-        default: false
 
 permissions:
   contents: read
@@ -33,11 +28,10 @@ permissions:
 jobs:
   gpui-shell:
     runs-on: [self-hosted, linux, x64]
-    # Standalone, measured in run 45807145346 (garm VM, cold): repro.lock's
-    # siblings 33 minutes, build-once 55, the visual replay tools 30, the
-    # headless shim 12 (cached after), `just build-gpui` 11 -- 2h27m before the
-    # lane's first suite. Beside codetracer.yml's ct-build and tools jobs the
-    # job restores those instead and is far shorter.
+    # repro.lock's siblings 24-33 minutes, the headless shim 12 (cached after
+    # its first build), `just build-gpui` 7-11, and the lane, about 80 seconds
+    # a file over 113 files run one at a time (run 45951461429: 44 files in
+    # 58 minutes).
     timeout-minutes: 240
     name: GPUI shell lane (headless shim)
     steps:
@@ -127,82 +121,7 @@ jobs:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
-      - name: Read the private siblings' pins
-        # Standalone only: the siblings ct, replay-server and the tools build
-        # from, as visual-replay-tools.yml clones them.
-        if: ${{ inputs.standalone }}
-        id: private_pins
-        run: |
-          set -euo pipefail
-          flake_rev() { jq -er --arg r "$1" '[.nodes[] | .locked? | select(.owner? == "metacraft-labs" and .repo? == $r) | .rev] | unique | if length == 1 then .[0] else error("\($r): \(length) revisions in flake.lock") end' flake.lock; }
-          {
-            echo "native_backend=$(flake_rev codetracer-native-backend)"
-            echo "native_recorder=$(flake_rev codetracer-native-recorder)"
-            echo "visual_replay=$(flake_rev codetracer-visual-replay)"
-            echo "snapshot_codecs=$(sed -n 's/^PRIVATE_SIBLING_CODETRACER_SNAPSHOT_CODECS=\([0-9a-f]\{40\}\)$/\1/p' ci/toolchain.pin)"
-          } | tee -a "$GITHUB_OUTPUT"
-          grep -q '^snapshot_codecs=[0-9a-f]\{40\}$' "$GITHUB_OUTPUT"
-
-      - name: Mint a token for the clones below
-        if: ${{ inputs.standalone }}
-        id: late_token
-        uses: ./.github/actions/refresh-github-token
-        with:
-          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
-          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
-
-      - name: Clone codetracer-native-backend
-        if: ${{ inputs.standalone }}
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
-        with:
-          repo: metacraft-labs/codetracer-native-backend
-          ref: ${{ steps.private_pins.outputs.native_backend }}
-          path: ${{ github.workspace }}/../codetracer-native-backend
-          gh-token: ${{ steps.late_token.outputs.token }}
-          submodules: 'true'
-
-      - name: Clone codetracer-native-recorder
-        if: ${{ inputs.standalone }}
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
-        with:
-          repo: metacraft-labs/codetracer-native-recorder
-          ref: ${{ steps.private_pins.outputs.native_recorder }}
-          path: ${{ github.workspace }}/../codetracer-native-recorder
-          gh-token: ${{ steps.late_token.outputs.token }}
-          submodules: 'false'
-
-      - name: Clone codetracer-visual-replay
-        if: ${{ inputs.standalone }}
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
-        with:
-          repo: metacraft-labs/codetracer-visual-replay
-          ref: ${{ steps.private_pins.outputs.visual_replay }}
-          path: ${{ github.workspace }}/../codetracer-visual-replay
-          gh-token: ${{ steps.late_token.outputs.token }}
-          submodules: 'false'
-
-      - name: Clone codetracer-snapshot-codecs
-        if: ${{ inputs.standalone }}
-        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
-        with:
-          repo: metacraft-labs/codetracer-snapshot-codecs
-          ref: ${{ steps.private_pins.outputs.snapshot_codecs }}
-          path: ${{ github.workspace }}/../codetracer-snapshot-codecs
-          gh-token: ${{ steps.late_token.outputs.token }}
-          submodules: 'false'
-
-      - name: Build ct and replay-server
-        # Standalone only; ct-build's step, verbatim.
-        if: ${{ inputs.standalone }}
-        id: ct_built
-        env:
-          CODETRACER_DB_BACKEND_SKIP_DIRENV: "1"
-          CT_EMULATOR_EXTRA_NIM_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
-          CODETRACER_TRACE_FORMAT_NIM_EXTRA_PATHS: ${{ github.workspace }}/libs/nim-stew/stew:${{ github.workspace }}/libs/nim-stew:${{ github.workspace }}/libs/nim-result
-        run: nix develop .#devShells.x86_64-linux.default --command bash ci/build/bounded-build-once.sh "${RUNNER_TEMP}/build-once-diagnostics" 0 90
-
       - name: Restore ct and replay-server from the ct-build job
-        if: ${{ !inputs.standalone }}
         id: ct_restored
         uses: actions/download-artifact@v4
         with:
@@ -212,7 +131,6 @@ jobs:
       - name: Unpack them beside the siblings
         # A short download exits 3 and is fetched again below (see
         # gpui-window-captures).
-        if: ${{ !inputs.standalone }}
         id: unpack
         continue-on-error: true
         run: bash ci/unpack-ct-build-products.sh "${RUNNER_TEMP}/ct-build"
@@ -230,18 +148,17 @@ jobs:
 
       - name: ct is here, built or restored
         # The one `steps.ct` the steps that run past a failure wait on
-        # (ci/test/ct-build-gate-test.sh).
-        if: ${{ steps.ct_built.outcome == 'success' || steps.ct_restored.outcome == 'success' }}
+        # (ci/test/ct-build-gate-test.sh): the restored products hold ct.
+        if: ${{ steps.ct_restored.outcome == 'success' }}
         id: ct
         run: test -x src/build-debug-repro/bin/ct || test -x build/bin/ct || { ls src/build-debug-repro/bin build/bin 2>&1; exit 1; }
 
       - name: Provide ct_gfx_player and the visual replay tools
-        # From this run's visual-replay-tools artifact under codetracer.yml,
-        # built here when standalone: the one entry point the TUI and GPUI
-        # shards use too.
+        # From this run's visual-replay-tools artifact, built here when it is
+        # missing: the one entry point the TUI and GPUI shards use too.
         uses: ./.github/actions/provide-visual-replay-tools
         with:
-          wait-for-artifact: ${{ inputs.standalone && 'false' || 'true' }}
+          wait-for-artifact: 'true'
 
       - name: Restore the headless shim from the cache
         # isonim-gpui's `--features gpui-headless` shim, staged with its build
