@@ -859,9 +859,6 @@ src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/tui/ap
 src/frontend/tui/tests/plat46-design-mutation-control.sha256	scripts/tokens-to-styl.sh	e5262c65cbd6300d43f22bac5312b6cbf2afac4e91b54d3d8344c0e61457fd6c	00a0a122ea421a55547c4a128d525e4fbe7ba1fbc08db0f51c7672f62d84347f
 src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/tui/app/syntax/monarch.nim	181d9ec8d995b6563b371c79d390f14ec35ff5aad2f62083f6c7147045847efb	27c6dc86b6837c90ccba5906788a4f789a56d5a35078e281ad5382d1d2193420
 src/frontend/tui/tests/plat70a-hscroll-mutation-control.sha256	src/frontend/viewmodel/editing_core.nim	523e410249726163c1fcb2f1117c70346130e56c3b84fd3bb3e5105d15a9fc86	05304883fb5e13c5090ddfc902dd8c3dd79841c109816a693bf20cb57274bfc6
-src/frontend/viewmodel/tests/unit/plat28-decoration-mutation-control.sha256	src/frontend/viewmodel/editor/editor_state.nim	5c55fd12d22f786a2512fcb320c3fea660ad25c489b40b1a866fe872415a480a	206ff017be27d709689782d4472387eed8007d46387ec08910e42141212c69c8
-src/frontend/viewmodel/tests/unit/plat28-decoration-mutation-control.sha256	src/frontend/viewmodel/editor/operations.nim	ae471882f9ac66dc73d0809af6d54ec7afd0ac3ab6430c489692e2bee0510398	6ba96746bc6aea47ebb5a05f9e589ed4658b406604d2b48b5338193c01c46053
-src/frontend/viewmodel/tests/unit/plat28-decoration-mutation-control.sha256	src/frontend/viewmodel/editor/wrap.nim	052fae1a6f0523639c55708e9e2e0c4fce245d57e688d92b418153348371e6e7	01eecfaf12b2524e611ce59860739e42babf164e9dd5fcf8078ef10145b76f46
 src/frontend/viewmodel/tests/unit/plat30-vocabulary-mutation-control.sha256	src/frontend/viewmodel/editor/operations.nim	ae471882f9ac66dc73d0809af6d54ec7afd0ac3ab6430c489692e2bee0510398	6ba96746bc6aea47ebb5a05f9e589ed4658b406604d2b48b5338193c01c46053
 src/frontend/viewmodel/tests/unit/plat30-vocabulary-mutation-control.sha256	src/frontend/viewmodel/editor/editor_state.nim	5c55fd12d22f786a2512fcb320c3fea660ad25c489b40b1a866fe872415a480a	206ff017be27d709689782d4472387eed8007d46387ec08910e42141212c69c8
 src/frontend/viewmodel/tests/unit/plat30-vocabulary-mutation-control.sha256	src/frontend/viewmodel/editing_core.nim	523e410249726163c1fcb2f1117c70346130e56c3b84fd3bb3e5105d15a9fc86	05304883fb5e13c5090ddfc902dd8c3dd79841c109816a693bf20cb57274bfc6
@@ -926,7 +923,6 @@ src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/styl
 # the harnesses that digest them owe a re-grade of the arms that sit in them.
 src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	ci/lib/test-lane-files.sh	a7a0360b1bf2ceb0286af1ecfb5d43f5f40d3bc5b306fd21b7b8667af77edf92	bec598b1dc9721ddca16f03205c1df4678c300c0157a45ee4fcfbba8f2579fdb
 
-src/frontend/viewmodel/tests/unit/plat9-surface-mutation-control.sha256	src/frontend/viewmodel/plugin_host/surface_host.nim	3fddebc1d5a1d4df6d8846db8374b95600bb0b09dd3d28b102283f41a0d3bbec	1f7e9eb0d6529b821484d8abcc91f100ce56471507377a2fc92004cc46172bc1
 src/frontend/tui/tests/plat52-terminal-mutation-control.sha256	src/frontend/viewmodel/views/isonim_terminal_output_view.nim	a0cefbc87feb909e990970968e69f06cbdcad37ceb53420628727d68e6dc9158	92146278d8c37c0ea2c9654796b5dacf04fea8fb6496d9d86cd440e8495321ed
 # 2026-11-26: the menu looks each chord up once per build (ui/menu.nim) and its test
 # joined the renderer-dom lane (ci/lib/test-lane-files.sh); these re-grades are owed.
