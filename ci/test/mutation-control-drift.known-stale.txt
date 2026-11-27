@@ -843,7 +843,6 @@ src/frontend/gpui/tests/gpui-visualiser-mutation-control.sha256	src/frontend/gpu
 # the tokenizer, the reveals, the view zones); these harnesses owe a re-grade at those bytes:
 ci/test/plat70-find-decisions-mutation-control.sha256	src/frontend/viewmodel/editor/operations.nim	ae471882f9ac66dc73d0809af6d54ec7afd0ac3ab6430c489692e2bee0510398	6ba96746bc6aea47ebb5a05f9e589ed4658b406604d2b48b5338193c01c46053
 src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/tui/app/theme/editor_theme.nim	8d1d7844d8dd3ec12850cfcc72adbfb199d244563f5058dbd30855a3ce5ca2df	ad35d5e74e004acfda6b2a6e9cc499bad38e244f5c2713fbaae02865c7af0af9
-src/frontend/tui/tests/plat46-design-mutation-control.sha256	scripts/tokens-to-styl.sh	e5262c65cbd6300d43f22bac5312b6cbf2afac4e91b54d3d8344c0e61457fd6c	00a0a122ea421a55547c4a128d525e4fbe7ba1fbc08db0f51c7672f62d84347f
 src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/tui/app/syntax/monarch.nim	181d9ec8d995b6563b371c79d390f14ec35ff5aad2f62083f6c7147045847efb	27c6dc86b6837c90ccba5906788a4f789a56d5a35078e281ad5382d1d2193420
 
 
