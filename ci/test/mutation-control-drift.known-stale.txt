@@ -491,7 +491,6 @@ src/frontend/tui/tests/plat62-constraints-mutation-control.sha256	src/frontend/t
 # 2026-11-21, the browser's two keyboard oracles: test_cross_renderer_panes.nim
 # exports the four keyboard panes for the Chromium suite, and the renderer-chromium
 # lane lists that suite. Each harness below owes a re-grade for those bytes.
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/test-lane-files.sh	b463de41f09e76644ec644ddfe51bd166d7e2c033699c98ecca5083540215051	bec598b1dc9721ddca16f03205c1df4678c300c0157a45ee4fcfbba8f2579fdb
 # 2026-11-21: a docked plugin pane previews on hover (auto_hide_hover, runtime); these harnesses digest those subjects and owe a re-grade.
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/headless_app/auto_hide_hover.nim	c2395cd53d7292e511d36c714f483d8f6ac8d8bf1f35c2c78237bebd54c73c62	0b4958cca008fcb95abaa5f2a2157cb461ed0b361fe1e0b702efc004cbbcf46f
 
@@ -901,7 +900,6 @@ src/frontend/tui/tests/plat64-input-routing-mutation-control.sha256	src/frontend
 src/frontend/viewmodel/tests/unit/plat18-marshalling-mutation-control.sha256	src/frontend/viewmodel/views/isonim_calltrace_view.nim	2697620b8aa813e868301bf028930639c30e3a78c839bd446a597c13dec886fc	f87ba53fdb97a68ab6b0b98d07619c4633ccc66b2b0caba71eff82610e29663f
 # 5bfdeb5ae64 moved the collaboration lanes into viewmodel-tests.yml; the examples
 # suite now reads codetracer.yml with the workflows it calls, so plat33-collab owes a re-grade.
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	8bda0738c9719a3f394aa9ee384bc2c920800d78e38e9b540d58ff8a018e0cc0	e304894122178c41e0b0d6a3e11c301ed1741e496fe0fce12d0850d512accdd1
 src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/styles/components/button.styl	daf83b8c3ee1848282d0edf04ac63a2b3813fb69f642154ad83248320f8b65aa	801731f5a002841ed30761c4409e972bf365dde4603ae29c5b974479dd8ce924
 
 # Re-grades owed for subjects moved by 0a4f1da4d53 without ledger lines;
@@ -934,7 +932,6 @@ src/frontend/viewmodel/tests/unit/hsf-sdk-mutation-control.sha256	src/frontend/v
 # subjects; these re-grades are owed.
 src/frontend/tui/tests/plat50-stop-path-mutation-control.sha256	src/db-backend/src/expr_loader.rs	ead979b896269620b974d62c3eb01dac7d10338251cee6e83b56b5d3e3bb231d	c10017caf68e99a97d4a650f13dc1b3ccf9b374f6941ca0c4750458b3cba7237
 src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/db-backend/src/db.rs	8051651f4a8174b46e971cbbd295ffc02eba5a22c2276479f075faec9d9ad9f5	362fa4d42e8342493b35812a6383a79578112ba51f77922e9f68d02690349d4b
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_sdk_facade.nim	f868eb5b9644a11e21b73e5026a5d31988685c8943e4476b38eb619dcc94f877	6cc01b92d3df398f5ce5ce5a9fb610ac008da271cf62bd1a398f246529440f22
 # 2026-11-26: the desktop's certificate content ids moved to a main-process worker thread
 # (vcs.nim's docs, ipc_utils.nim's handler list, the lane list); these re-grades are owed.
 src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/viewmodel/platform/vcs.nim	4081198df3df8ecc4e1710ea30a4b6fc33a515c5fe9d292cb4b3bc520f54e72c	ece57ae8774d14a50cf1795289e5414cf2a0e430cd110c021159a564685ac78b
@@ -942,7 +939,6 @@ src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/viewmo
 # Re-grades owed for subjects moved by aa75ead0407 cc304d4b682 without ledger lines;
 # the harnesses that digest them owe a re-grade of the arms that sit in them.
 # ci/lib/run-nim-test-lane.sh: --list-shard and sharded runs read the lane's files into a variable, so an unknown lane fails.
-src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/run-nim-test-lane.sh	3466f2374fa109b34c6326f47f0bccff13a5591911f251156bc5a4255f010916	04c424b08d8e58312dae8d3d7aecfdc87e8b2e306fad2437e2b36cdf9b38d222
 # cc304d4b682 and aa75ead0407 (CTF-M1 slices 1 and 4) re-export nim_agents modules from two plat54 subjects; plat54 owes a re-grade.
 src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/viewmodel/viewmodels/agent_activity_text.nim	c7506cecd14c044eea0a632be20e56162d1ae19b0d014449abf70cbdc07b3a88	15c7ebd515471ad913198e2173a8740bd85e1bdf7e57fa69a5349fbd63695f63
 src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/viewmodel/viewmodels/agent_prompt_context.nim	06b4662611704d45c1ebeb976561cad9392c889913645371b948e28e7d8a8bbe	dc751cdb4328dbb7bbf7946067da2b879ea5746c7a9bb6f2d2ba3e400c727406
