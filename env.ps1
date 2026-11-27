@@ -1094,6 +1094,7 @@ foreach ($guard in (Assert-NonInteractiveDebugger)) {
 . "$windowsDir/ensure-zlib.ps1"
 . "$windowsDir/ensure-llvm.ps1"
 . "$windowsDir/ensure-clingo.ps1"
+. "$windowsDir/ensure-ruby.ps1"
 
 $preferGitBash = ConvertTo-BoolFromEnv -Name "WINDOWS_DIY_PREFER_GIT_BASH" -Default $true
 $gitBashBinDir = ""
@@ -1221,6 +1222,10 @@ if ($doSync) {
   # dependency; install it whenever the user does not opt out via
   # WINDOWS_DIY_SKIP_CLINGO=1.
   Invoke-BootstrapStep -Step "CLINGO" -Relocatability relocatable -Root $installRoot -Action { Ensure-Clingo -Root $installRoot -Arch $arch -Toolchain $toolchain }
+  # Ruby (RubyInstaller, MinGW-UCRT) and the libclang rb-sys's bindgen needs,
+  # for building and running the Ruby recorder. Archives only; it builds
+  # nothing, so it needs no other component to install.
+  Invoke-BootstrapStep -Step "RUBY"  -Relocatability relocatable -Root $installRoot -Action { Ensure-Ruby  -Root $installRoot -Arch $arch -Toolchain $toolchain }
 
   # Phase 2: Rust (no deps on other managed tools)
   Invoke-BootstrapStep -Step "RUST" -Relocatability relocatable -Root $installRoot -Action { Ensure-Rust -Root $installRoot -Arch $arch -Toolchain $toolchain }
@@ -1527,6 +1532,10 @@ $llvmBinDir = Join-Path $llvmDir "bin"
 $clingoDir = Join-Path $installRoot ("clingo\" + $toolchain["CLINGO_VERSION"])
 $clingoBinDir = Join-Path $clingoDir "bin"
 
+# Ruby install layout produced by ensure-ruby.ps1 (Get-RubyInstallLayout).
+$rubyLayout = Get-RubyInstallLayout -Root $installRoot -Toolchain $toolchain
+$rubyBinDir = $rubyLayout.RubyBinDir
+
 # Ensure-NodeTooling shells out to npx.cmd under $nodeDir to run `yarn install`
 # in node-packages/ when the stylus/webpack shims aren't yet on disk. When the
 # bootstrap phase is skipped (WINDOWS_DIY_SYNC=0, e.g. on hosted GHA Windows
@@ -1617,6 +1626,30 @@ function Resolve-ClExePath {
 [Environment]::SetEnvironmentVariable("ZSTD_DIR", $zstdDir, "Process")
 [Environment]::SetEnvironmentVariable("ZLIB_DIR", $zlibDir, "Process")
 [Environment]::SetEnvironmentVariable("CLINGO_DIR", $clingoDir, "Process")
+# Only when installed: clang-sys searches LIBCLANG_PATH, and a directory that
+# does not hold libclang.dll would only hide one found elsewhere.
+if (Test-Path -LiteralPath (Join-Path $rubyLayout.LibclangBinDir "libclang.dll") -PathType Leaf) {
+  [Environment]::SetEnvironmentVariable("LIBCLANG_PATH", $rubyLayout.LibclangBinDir, "Process")
+  # libclang did not find its own resource headers beside it: rb-sys's
+  # bindgen pass failed on mingw's malloc.h with "'mm_malloc.h' file not
+  # found" (run 46097188597), a header only clang's resource directory has.
+  # So name the directory. Forward slashes, because bindgen splits this
+  # variable like a shell and a backslash would be read as an escape.
+  $resourceDir = (Join-Path $rubyLayout.LibclangDir ("lib\clang\" + ($toolchain["LLVM_VERSION"] -split '\.')[0])) -replace '\\', '/'
+  [Environment]::SetEnvironmentVariable("BINDGEN_EXTRA_CLANG_ARGS_x86_64_pc_windows_gnu", "-resource-dir=$resourceDir", "Process")
+}
+# CC and CXX name MSVC's cl above, and cc-rs reads them for every target, so a
+# build for x86_64-pc-windows-gnu (the Ruby recorder's native extension, which
+# links RubyInstaller's MinGW-UCRT Ruby) would compile its C with cl and link
+# it with MinGW. The target-specific variables outrank CC/CXX, and the linker
+# is named so cargo does not depend on which gcc is first on PATH.
+$gccExe = Join-Path $gccBinDir "gcc.exe"
+if (Test-Path -LiteralPath $gccExe -PathType Leaf) {
+  [Environment]::SetEnvironmentVariable("CC_x86_64_pc_windows_gnu", $gccExe, "Process")
+  [Environment]::SetEnvironmentVariable("CXX_x86_64_pc_windows_gnu", (Join-Path $gccBinDir "g++.exe"), "Process")
+  [Environment]::SetEnvironmentVariable("AR_x86_64_pc_windows_gnu", (Join-Path $gccBinDir "ar.exe"), "Process")
+  [Environment]::SetEnvironmentVariable("CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER", $gccExe, "Process")
+}
 # Prepend the zlib lib dir to LIBRARY_PATH so the MinGW gcc linker finds
 # `libz.a` when codetracer's Nim build emits `-lz`. PATH gets
 # the same dir below (mirrors how ZSTD_DIR is consumed downstream) for any
@@ -1784,7 +1817,8 @@ Prepend-PathEntries -Entries @(
   $fpcBinDir,
   $llvmBinDir,
   $zlibLibDir,
-  $clingoBinDir
+  $clingoBinDir,
+  $rubyBinDir
 )
 
 # Default off under WINDOWS_DIY_ONLY: the tree-sitter Nim parser is one of
@@ -1908,6 +1942,8 @@ Write-Host "GOROOT=$env:GOROOT"
 Write-Host "ZSTD_DIR=$zstdDir"
 Write-Host "ZLIB_DIR=$zlibDir"
 Write-Host "CLINGO_DIR=$clingoDir"
+Write-Host "RUBY_BIN_DIR=$rubyBinDir"
+Write-Host "LIBCLANG_PATH=$env:LIBCLANG_PATH"
 Write-Host "LLVM_DIR=$llvmDir"
 Write-Host "WINDOWS_DIY_SHIMS_DIR=$shimsDir"
 Write-Host "CODETRACER_REPO_ROOT_PATH=$env:CODETRACER_REPO_ROOT_PATH"

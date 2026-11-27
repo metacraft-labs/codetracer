@@ -119,13 +119,23 @@ jobs:
         # 44940608244.
         # Only the components this job uses, at the cached root restored
         # above; env.ps1 finds them installed and skips them. NARGO stays out.
+        # RUBY is the pinned RubyInstaller Ruby and the libclang its native
+        # extensions are built with (ensure-ruby.ps1): the Ruby suite records
+        # with the Ruby recorder, and run 45952274107 failed all four Ruby
+        # tests on "ruby is not available on PATH".
+        # The two recorder siblings are the Ruby and JavaScript suites': the
+        # test harness builds each from its checkout (find_ruby_recorder,
+        # find_js_recorder), at the commits flake.lock and repro.lock pin.
         env:
           WINDOWS_DIY_INSTALL_ROOT: ${{ runner.temp }}\ct-diy
-          WINDOWS_DIY_ONLY: "GCC,ZSTD,ZLIB,RUST,NIM,CAPNP,UV,NODE,JUST,TTD,SCCACHE"
+          WINDOWS_DIY_ONLY: "GCC,ZSTD,ZLIB,RUST,NIM,CAPNP,UV,NODE,JUST,TTD,SCCACHE,RUBY"
         uses: ./.github/actions/setup-db-backend-siblings
         with:
           env-flavor: windows-diy
           gh-token: ${{ steps.ci_token.outputs.token }}
+          extra-siblings: |
+            codetracer-ruby-recorder=faf4e082c59b2907361a55aa62adb99e266611d4
+            codetracer-js-recorder=6f699e3112484c6c73f7cf8d654e1f3106e76162
 
       - name: Restore db-backend's compiler cache
         # sccache's local store, not db-backend's target directory: the test
@@ -152,9 +162,45 @@ jobs:
           restore-keys: |
             sccache-db-backend-windows-v2-origin-dap-windows-nightly-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}-${{ hashFiles('src/db-backend/Cargo.lock') }}-
             sccache-db-backend-windows-v2-origin-dap-windows-nightly-${{ hashFiles('non-nix-build/windows/toolchain-versions.env', 'non-nix-build/windows/ensure-*.ps1') }}-
+            sccache-db-backend-windows-v2-origin-dap-windows-nightly-
+        # The last key takes this job's newest store from before a toolchain
+        # change. sccache keys every entry on the compiler that produced it,
+        # so a store from another toolchain costs misses, never wrong output,
+        # and a pin that does not touch Rust (RUBY, say) no longer turns the
+        # next run's whole compile cold.
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install the recorder siblings' pinned Rust toolchains
+        # The Ruby and JS recorders each pin a Rust channel in their
+        # rust-toolchain.toml, which rustup reads when they are built below.
+        # Their component lists include rustc-dev, llvm-tools and
+        # rust-analyzer, which nothing here uses and which rustup would
+        # download on every run; the build steps set RUSTUP_AUTO_INSTALL=0, so
+        # the toolchains installed here, minimal, are the ones used. The Ruby
+        # recorder builds for x86_64-pc-windows-gnu, to link RubyInstaller's
+        # MinGW-UCRT Ruby.
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $rustup = Join-Path $env:CARGO_HOME "bin\rustup.exe"
+          $recorders = @(
+            @{ Repo = "codetracer-ruby-recorder"; Targets = @("x86_64-pc-windows-gnu") },
+            @{ Repo = "codetracer-js-recorder"; Targets = @() }
+          )
+          foreach ($recorder in $recorders) {
+            $toolchainFile = Join-Path $env:GITHUB_WORKSPACE "..\$($recorder.Repo)\rust-toolchain.toml"
+            if (-not (Test-Path -LiteralPath $toolchainFile -PathType Leaf)) { throw "no $toolchainFile" }
+            $match = Select-String -LiteralPath $toolchainFile -Pattern '^\s*channel\s*=\s*"([^"]+)"' | Select-Object -First 1
+            if (-not $match) { throw "no channel in $toolchainFile" }
+            $channel = $match.Matches[0].Groups[1].Value
+            $arguments = @("toolchain", "install", $channel, "--profile", "minimal", "--no-self-update")
+            foreach ($target in $recorder.Targets) { $arguments += @("--target", $target) }
+            Write-Host "$($recorder.Repo): rustup $($arguments -join ' ')"
+            & $rustup @arguments
+            if ($LASTEXITCODE -ne 0) { throw "rustup could not install $channel for $($recorder.Repo) (exit $LASTEXITCODE)" }
+          }
 
       - name: Use the pinned Cap'n Proto from env.ps1
         # env.ps1 (windows-diy, above) already provisions the pinned Cap'n
@@ -341,6 +387,51 @@ jobs:
           if (-not (Test-Path -LiteralPath $just -PathType Leaf)) { throw "env.ps1 put no just.exe at $just" }
           Add-Content -Path $env:GITHUB_PATH -Value (Split-Path -Parent $just)
           & $just --version
+
+      - name: Build the Ruby recorder
+        # Here, with env.ps1's pinned toolchain, rather than by the test
+        # harness: the harness builds a recorder through
+        # scripts/build-siblings.sh, which runs every build under
+        # `repro exec <sibling>`, and no `repro` is on this runner's PATH
+        # (run 46036873740: "build-siblings.sh: ERROR: repro not found on
+        # PATH"). The recorder's own dev env would also bring its rolling MSYS2
+        # Ruby, not the pinned one. The test step finds this build through
+        # CODETRACER_RUBY_RECORDER_PATH, which find_ruby_recorder uses as given.
+        shell: bash
+        env:
+          RUSTC_WRAPPER: ${{ runner.temp }}\ct-diy\cargo\bin\sccache.exe
+          SCCACHE_DIR: ${{ runner.temp }}\sccache
+          SCCACHE_CACHE_SIZE: "2500M"
+          CARGO_INCREMENTAL: "0"
+          RUSTUP_AUTO_INSTALL: "0"
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/../codetracer-ruby-recorder"
+          ruby --version
+          # Into the gem's own target/, the directory its loader reads.
+          CARGO_TARGET_DIR="$PWD/gems/codetracer-ruby-recorder/ext/native_tracer/target" just build-extension
+          extension="$PWD/gems/codetracer-ruby-recorder/ext/native_tracer/target/release/codetracer_ruby_recorder.$(ruby -e 'print RbConfig::CONFIG["DLEXT"]')"
+          [ -f "$extension" ] || { echo "::error::just build-extension produced no $extension"; exit 1; }
+          echo "CODETRACER_RUBY_RECORDER_PATH=$(cygpath -w "$PWD/gems/codetracer-ruby-recorder/bin/codetracer-ruby-recorder")" >>"$GITHUB_ENV"
+
+      - name: Build the JavaScript recorder
+        # For the reason the Ruby recorder's step gives; the commands are
+        # build-siblings.sh's entry for this recorder, whose comment explains
+        # the second `npm install`.
+        shell: bash
+        env:
+          RUSTC_WRAPPER: ${{ runner.temp }}\ct-diy\cargo\bin\sccache.exe
+          SCCACHE_DIR: ${{ runner.temp }}\sccache
+          SCCACHE_CACHE_SIZE: "2500M"
+          CARGO_INCREMENTAL: "0"
+          RUSTUP_AUTO_INSTALL: "0"
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/../codetracer-js-recorder"
+          npm install && just build && npm install
+          cli="$PWD/packages/cli/dist/index.js"
+          [ -f "$cli" ] || { echo "::error::the JavaScript recorder build produced no $cli"; exit 1; }
+          echo "CODETRACER_JS_RECORDER_PATH=$(cygpath -w "$cli")" >>"$GITHUB_ENV"
 
       - name: Run routed materialized origin-DAP matrix
         shell: bash

@@ -90,7 +90,7 @@ jobs:
           WINDOWS_DIY_INSTALL_ROOT: ${{ runner.temp }}\ct-diy
           # The components the nightly origin-DAP job uses (see its setup
           # step); keep the two lists identical.
-          WINDOWS_DIY_ONLY: "GCC,ZSTD,ZLIB,RUST,NIM,CAPNP,UV,NODE,JUST,TTD,SCCACHE"
+          WINDOWS_DIY_ONLY: "GCC,ZSTD,ZLIB,RUST,NIM,CAPNP,UV,NODE,JUST,TTD,SCCACHE,RUBY"
           WINDOWS_DIY_ENSURE_TTD: "true"
         run: |
           $ErrorActionPreference = "Stop"

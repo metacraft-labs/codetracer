@@ -139,10 +139,11 @@ jobs:
         # check made it fail setup on a runner without the WinDbg package in
         # run 45069526428. The nightly matrix below keeps TTD required.
         # The nightly job's cached root and component list, so the two share one
-        # cache. TTD is in the list only for that, and stays unchecked here.
+        # cache. TTD and RUBY are in the list only for that; TTD stays
+        # unchecked here, and nothing here runs Ruby.
         env:
           WINDOWS_DIY_INSTALL_ROOT: ${{ runner.temp }}\ct-diy
-          WINDOWS_DIY_ONLY: "GCC,ZSTD,ZLIB,RUST,NIM,CAPNP,UV,NODE,JUST,TTD,SCCACHE"
+          WINDOWS_DIY_ONLY: "GCC,ZSTD,ZLIB,RUST,NIM,CAPNP,UV,NODE,JUST,TTD,SCCACHE,RUBY"
           WINDOWS_DIY_ENSURE_TTD: "false"
         uses: ./.github/actions/setup-db-backend-siblings
         with:

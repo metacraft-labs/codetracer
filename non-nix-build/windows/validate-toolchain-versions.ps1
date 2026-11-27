@@ -43,7 +43,13 @@ $requiredKeys = @(
   # is not enforced is a comment.
   "WINDBG_BUNDLE_VERSION",
   "TTD_BUNDLE_URL",
-  "TTD_BUNDLE_SHA256"
+  "TTD_BUNDLE_SHA256",
+  # Ruby and the libclang its native extensions are built with (ensure-ruby.ps1).
+  "LLVM_VERSION",
+  "LLVM_WIN_X64_SHA256",
+  "RUBY_VERSION",
+  "RUBYINSTALLER_RELEASE",
+  "RUBYINSTALLER_WIN_X64_SHA256"
 )
 
 $valuePatterns = @{
@@ -79,6 +85,11 @@ $valuePatterns = @{
   "WINDBG_BUNDLE_VERSION" = '^[0-9]+(?:\.[0-9]+)*$'
   "TTD_BUNDLE_URL" = '^https://\S+$'
   "TTD_BUNDLE_SHA256" = '^[A-Fa-f0-9]{64}$'
+  "LLVM_VERSION" = '^[0-9]+\.[0-9]+\.[0-9]+$'
+  "LLVM_WIN_X64_SHA256" = '^[A-Fa-f0-9]{64}$'
+  "RUBY_VERSION" = '^[0-9]+\.[0-9]+\.[0-9]+$'
+  "RUBYINSTALLER_RELEASE" = '^[0-9]+\.[0-9]+\.[0-9]+-[0-9]+$'
+  "RUBYINSTALLER_WIN_X64_SHA256" = '^[A-Fa-f0-9]{64}$'
 }
 
 if (-not (Test-Path -LiteralPath $FilePath)) {

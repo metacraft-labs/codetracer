@@ -105,6 +105,11 @@ function Ensure-Llvm {
   Download-File -Url $tarUrl -OutFile $tempTar
 
   try {
+    # The x64 archive is pinned (LLVM_WIN_X64_SHA256, which records how its
+    # digest was established); no arm64 digest is pinned yet.
+    if ($llvmTarget -eq "x86_64-pc-windows-msvc") {
+      Assert-FileSha256 -Path $tempTar -Expected $Toolchain["LLVM_WIN_X64_SHA256"]
+    }
     Ensure-CleanDirectory -Path $llvmVersionRoot
     $tarExe = Get-WindowsTarExe
     & $tarExe -xJf $tempTar -C $llvmVersionRoot | Out-Host
