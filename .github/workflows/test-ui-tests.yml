@@ -131,8 +131,8 @@ jobs:
             # repro.lock pin, image-diff at codetracer's.
             codetracer-snapshot-codecs=3e503da83b73e805f30096d4baa45c18d138f6d3
             codetracer-image-diff=982e669585a150ede87973db281df63188459328
-            reprobuild=2f7cb5db5289fa1e9e060281ebe8c095bf9669e9
-            runquota=b63c6c17ffd9f046baa70a62cbeb067c3a0a2745
+            reprobuild=37a109c4e1cf650e6eb79b11d9fadf6e49e64614
+            runquota=83d89e581d01c96eadb157bee48cecab6aba1866
 
       - name: Stage codetracer-trace-format into libs/
         # The nix flake build below overrides the codetracer-trace-format input
@@ -653,7 +653,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ github.workspace }}/../codetracer-engine-godot/bin/godot.linuxbsd.template_debug.x86_64.hcrgpu
-          key: hcr-godot-c2b72fd205bcb509cca8513a2627ae18d9809562-reprobuild-2f7cb5db5289fa1e9e060281ebe8c095bf9669e9-vulkan-hcrgpu
+          key: hcr-godot-c2b72fd205bcb509cca8513a2627ae18d9809562-reprobuild-37a109c4e1cf650e6eb79b11d9fadf6e49e64614-vulkan-hcrgpu
 
       - name: The HCR flame demo for the desktop scenario lane
         id: hcr-flame

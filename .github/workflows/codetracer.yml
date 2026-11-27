@@ -3283,9 +3283,9 @@ jobs:
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=2f01e602e70f69a04675293f3fa0d5bad9f196a1
             codetracer-trace-format-nim=3e50ca3f2bf6316e8f764952a84078cf59b11023
-            io-mon=6a6713e53f4cf1d863a8d94e3353ecd0581da85f
+            io-mon=1365943692eedfb0699ce90e59c4602d90317561
             nim-shm-queue=0d6049997d77421b6e4748f819657cf6042e9508
-            nim-shm-gset=fc0c74478d945161574a9fc49389c8fd65f09d2e
+            nim-shm-gset=803a4faa23f985ad9697437603436f2f784072be
             nim-stackable-hooks=07319306758cf608e664fe9e64ab7e0bed5ca186
             # codetracer-native-backend and codetracer-visual-replay BY COMMIT as well: both are
             # `/agents` inputs in flake.nix (7ab073a22), so `=dev` cloned a different tree than the
@@ -3295,7 +3295,7 @@ jobs:
             codetracer-native-backend=367e7164f43453513681807eeadb8797b6d5bcde
             codetracer-native-recorder=95da3c1397cd62b9940ca91ce9109b7a61b228a9
             codetracer-native-test-programs=0d0d64e2ebe2cb261284778fa7959bb7cf761604
-            runquota=b63c6c17ffd9f046baa70a62cbeb067c3a0a2745
+            runquota=83d89e581d01c96eadb157bee48cecab6aba1866
             isonim-tui
             test-certificates-tools
             nim-pty
@@ -3633,9 +3633,9 @@ jobs:
             # rule: .github/actions/setup-db-backend-siblings/action.yml.
             codetracer-trace-format=2f01e602e70f69a04675293f3fa0d5bad9f196a1
             codetracer-trace-format-nim=3e50ca3f2bf6316e8f764952a84078cf59b11023
-            io-mon=6a6713e53f4cf1d863a8d94e3353ecd0581da85f
+            io-mon=1365943692eedfb0699ce90e59c4602d90317561
             nim-shm-queue=0d6049997d77421b6e4748f819657cf6042e9508
-            nim-shm-gset=fc0c74478d945161574a9fc49389c8fd65f09d2e
+            nim-shm-gset=803a4faa23f985ad9697437603436f2f784072be
             nim-stackable-hooks=07319306758cf608e664fe9e64ab7e0bed5ca186
             codetracer-native-recorder=95da3c1397cd62b9940ca91ce9109b7a61b228a9
             codetracer-js-recorder=6f699e3112484c6c73f7cf8d654e1f3106e76162
@@ -3655,7 +3655,7 @@ jobs:
             # at the rev flake.lock locks (ci/test/sibling-input-branch-test.sh).
             # Move these lines with the lock.
             nim-entrypoints=d7edafaa9df1c7ae77d469754a463d4a512ec928
-            reprobuild=2f7cb5db5289fa1e9e060281ebe8c095bf9669e9
+            reprobuild=37a109c4e1cf650e6eb79b11d9fadf6e49e64614
 
       - name: Allow direnv in the cloned recorder siblings
         # scripts/build-siblings.sh runs every sibling build as

@@ -296,6 +296,12 @@ lint_step "shellcheck: flake pin alignment guard" \
 lint_step "shellcheck: reprobuild dependency pins guard" \
 	shellcheck scripts/test-reprobuild-dependency-pins.sh
 
+# scripts/test-pinned-repro-sibling-recipes.sh runs the pinned reprobuild's
+# `repro` over the sibling recipes codetracer's build enters with `repro exec`.
+# Same reason: under scripts/, out of the glob's reach.
+lint_step "shellcheck: pinned repro sibling recipes guard" \
+	shellcheck scripts/test-pinned-repro-sibling-recipes.sh
+
 # scripts/test-reprobuild-catalog-coverage.sh is the static guard on the pair
 # `repro.nim` `uses:` list / pinned `reprobuild-packages` catalog. Same reason:
 # it is under scripts/, which the glob does not reach.

@@ -104,8 +104,9 @@ jobs:
           workspace-directory: wr3-${{ github.run_id }}-${{ github.run_attempt }}
           sibling-strategy: repro-lock
           # Built from the reprobuild revision repro.lock pins, not a release.
-          # The pinned repro.nim (2f7cb5db5) calls `nim.c(..., binary = ...,
-          # noNimblePath = ...)`; no published Windows release has that API:
+          # The pinned repro.nim (37a109c4e, v0.2.36) calls `nim.c(...,
+          # binary = ..., noNimblePath = ...)`; when the source build was
+          # adopted (at 2f7cb5db5) no published Windows release had that API:
           # v0.2.28 stopped the provider compile with "unknown named
           # parameter: binary / noNimblePath" (run 45068892139), and the
           # v0.2.31 release is cut from 7618e3cb2, before af8bf966a added
@@ -114,8 +115,8 @@ jobs:
           # equal to repro.lock's reprobuild revision; a release published
           # from it or later can replace the source build.
           repro-from-source: true
-          repro-build-pin: 2f7cb5db5289fa1e9e060281ebe8c095bf9669e9
-          repro-version: v0.2.31
+          repro-build-pin: 37a109c4e1cf650e6eb79b11d9fadf6e49e64614
+          repro-version: v0.2.36
           gh-token: ${{ steps.ci_token.outputs.token }}
           # THIS LIST HOLDS ONLY WHAT THE LOCK PATH WILL NOT CLONE. `repro develop
           # --all` materialises what repro.lock pins, but it skips a row a recipe

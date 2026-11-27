@@ -203,6 +203,19 @@ test-flake-pin-alignment:
 test-reprobuild-dependency-pins:
   bash scripts/test-reprobuild-dependency-pins.sh
 
+# Assert the `repro` this repo's PINNED `reprobuild` flake input builds can
+# compile the `repro.nim` of each sibling codetracer's build enters through
+# `repro exec` (today the native recorder, via src/db-backend/build.rs). The
+# pin is a floor for those recipes: a sibling that adopts newer DSL breaks the
+# db-backend build inside cargo (`undeclared identifier: 'pinned'` at the
+# 0.2.31 pin). Resolves and builds the pinned repro through nix, never the one
+# on PATH (a workspace `.envrc` swaps in `../reprobuild`). Skips LOUDLY when
+# nix or the sibling is missing; CT_PINNED_REPRO_SIBLING_RECIPES_STRICT=1
+# makes that a failure.
+# See the header of scripts/test-pinned-repro-sibling-recipes.sh.
+test-pinned-repro-sibling-recipes:
+  bash scripts/test-pinned-repro-sibling-recipes.sh
+
 # Assert every package name `repro.nim`'s `uses:` list declares (every `when`
 # branch; also `buildDeps:` / `nativeBuildDeps:` / `runtimeDeps:`) resolves
 # against the `reprobuild-packages` catalog this flake pins, by reprobuild's
@@ -1462,6 +1475,7 @@ test:
     test-gpui-shim-staging \
     test-flake-pin-alignment \
     test-reprobuild-dependency-pins \
+    test-pinned-repro-sibling-recipes \
     test-reprobuild-catalog-coverage \
     test-dev-env-flake-metadata \
     test-flake-lock-node-dates \

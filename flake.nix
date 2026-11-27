@@ -179,7 +179,7 @@
     # reprobuild's own, are on 56ffd673. Following reprobuild therefore put
     # two catalogs in codetracer's lock closure, and every refresh and
     # platform re-solve of repro.lock failed. runquota moved to 56ffd673
-    # itself in aad94ad; no reprobuild revision pins a runquota that new yet. reprobuild-pm
+    # itself in aad94ad; no reprobuild revision pinned a runquota that new before 37a109c4 (below). reprobuild-pm
     # issues/2026-11-18-the-runquota-reprobuild-pins-as-runquota-src-carries-catalog-15ceea67-while-reprobuilds-own-lock-pins-29b7bb9b-or-56ffd67.md
     #
     # ## What still holds
@@ -201,7 +201,10 @@
     # unless the pair is recorded in ci/runquota-catalog-known-mismatch.txt.
     #
     # Return to the follows edge once a reprobuild pin carries a runquota on
-    # this repo's catalog.
+    # this repo's catalog. reprobuild 37a109c4 (0.2.36) is the first such pin:
+    # its `runquota-src` is 83d89e58, the revision this input is locked at,
+    # so the known-mismatch file is empty. Restoring the edge is a separate
+    # change, not part of that bump.
     runquota = {
       url = "github:metacraft-labs/runquota/agents";
       inputs.nixos-modules.follows = "nix-blockchain-development/nixos-modules";
@@ -275,6 +278,18 @@
       #
       #   repro.nim(1766, 40) Error: type mismatch
       #     [7] extraEnv = GateEnv: ...  unknown named parameter: extraEnv
+      #
+      # The floor covers SIBLING recipes too. The `repro` this pins compiles
+      # the `repro.nim` of every sibling codetracer's build enters with `repro
+      # exec`: src/db-backend/build.rs runs `repro exec
+      # ../codetracer-native-recorder -- bash ct_emulator/build_native_api.sh`.
+      # When codetracer-native-recorder adopted `pinned:` (reprobuild
+      # c1e518185, first in v0.2.36) while this pinned 2f7cb5db52 (0.2.31),
+      # the db-backend build died with `repro.nim(169, 3) Error: undeclared
+      # identifier: 'pinned'`, so the pin moved to 37a109c4 (0.2.36, the
+      # fleet pin). `just test-pinned-repro-sibling-recipes`
+      # (scripts/test-pinned-repro-sibling-recipes.sh) runs the PINNED repro
+      # over the sibling's recipe and fails naming both.
       #
       # Nothing in CI compiles `repro.nim` on a pull request, so a pin that is
       # merely old is indistinguishable from a pin that is too old until
@@ -457,7 +472,7 @@
       flake = false;
     };
     nim-shm-gset = {
-      url = "github:metacraft-labs/nim-shm-gset/fc0c74478d945161574a9fc49389c8fd65f09d2e";
+      url = "github:metacraft-labs/nim-shm-gset/803a4faa23f985ad9697437603436f2f784072be";
       flake = false;
     };
 
@@ -476,7 +491,7 @@
     # from 8b8faa8). Move this input and repro.lock's nim-cli-spec
     # (`repro lock update`) in the change that moves `io-mon` past efe6dc5.
     nim-cli-spec = {
-      url = "github:metacraft-labs/nim-cli-spec/5380e20c8866e49e000e8070f692f54d303b5658";
+      url = "github:metacraft-labs/nim-cli-spec/6e0b4e78d96c4118103f2be571e1edd6ff0c938d";
       flake = false;
     };
 
@@ -554,7 +569,7 @@
     # 2026-09-30) and have never been promoted to `dev`, whose tip has not
     # moved since 2026-09-29.
     reprobuild-packages = {
-      url = "github:metacraft-labs/reprobuild-packages/92100803eb827ff21d0cc48b7474fb0a65057cbd";
+      url = "github:metacraft-labs/reprobuild-packages/7559a1c9648c45117381d6ab38829dfa6177d701";
       flake = false;
     };
 
