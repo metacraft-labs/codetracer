@@ -15,7 +15,7 @@
  test/empty-shield · Claude                 regeneration cap and the fixture loader; over to…
                                                                                                
                           Enter   Launch    INITIATIVES  invented project noir-space-ship
-                                                                 4 initiatives · 11 sessions ·
+                                                                   4 initiatives · 11 sessions
  Could not launch: hub-a has no executor                     2 need input · 1 in no initiative
  free for noir-space-ship                   ▾ ● Shield model hardening               2/5 · 40%
                                                 ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀       ● 2  ● 2  ● 1
