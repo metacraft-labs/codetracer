@@ -3,6 +3,6 @@
 # Refreshed with --record-control-hashes, gated by the needle
 # scan (§39a).
 0f037c56269e3ad51c084fc0e545fcd851102cfa91ce32ed2507b9995f372f42  src/frontend/gpui/app/leaves.nim
-f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00  src/frontend/gpui/main.nim
+0c7c7ace190b9d2d8d9a8ff98a96d37c3205071761a6936fa3080229b0763702  src/frontend/gpui/main.nim
 a8585c47ba2ceac2209df15bb29bfaaca43b0aff20717f014cfa57efb761c5e0  src/frontend/host/project_definitions_host.nim
 23c060d288d9b532951fb6a8ee6801af466f5db483ad3b724a6fbb87b164799e  src/frontend/gpui/tests/test_gpui_project_visualisers.nim

@@ -837,7 +837,6 @@ src/frontend/tui/tests/plat70b-table-mutation-control.sha256	src/frontend/viewmo
 # Re-grades owed for subjects moved by a379c1fc4e6 without ledger lines;
 # the harnesses that digest them owe a re-grade of the arms that sit in them.
 
-src/frontend/gpui/tests/gpui-visualiser-mutation-control.sha256	src/frontend/gpui/main.nim	f1d13c42fdb89105ee3118cad12d97b06a9b5d09984908622412ba8663be4a00	0c7c7ace190b9d2d8d9a8ff98a96d37c3205071761a6936fa3080229b0763702
 # 2026-11-25, the shared editor: a keystroke in a large file costs the edit (the editing core,
 # the tokenizer, the reveals, the view zones); these harnesses owe a re-grade at those bytes:
 ci/test/plat70-find-decisions-mutation-control.sha256	src/frontend/viewmodel/editor/operations.nim	ae471882f9ac66dc73d0809af6d54ec7afd0ac3ab6430c489692e2bee0510398	6ba96746bc6aea47ebb5a05f9e589ed4658b406604d2b48b5338193c01c46053
