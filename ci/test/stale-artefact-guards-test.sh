@@ -125,7 +125,7 @@ BUILD_SIBLINGS="${SUITE_ROOT}/scripts/build-siblings.sh"
 # Every contract this suite claims to check. A suite that silently runs fewer
 # assertions than it advertises is a suite that stops protecting anything, so
 # the count is asserted at the end and has to be changed deliberately.
-EXPECTED_ASSERTIONS=207
+EXPECTED_ASSERTIONS=211
 
 ASSERTIONS=0
 FAILURES=0
@@ -513,6 +513,8 @@ touch -t "${SB_T_REBUILD2}" "${SB}/storybook/storybook-static/index.html"
 touch -t "${SB_T_NIM}" "${SB}/src/frontend/ui.nim"
 run_expect_failure "Nim sources newer than the components bundle are refused" \
 	"Stale storybook components" -- check_storybook
+run_expect_failure "...and the refusal names the recipe that rebuilds the whole chain" \
+	"just storybook-build" -- check_storybook
 touch -t "${SB_T_REBUILD3}" "${SB}/storybook/dist/components.js" \
 	"${SB}/storybook/storybook-static/index.html"
 assert_contains "$(check_storybook)" "FRESH" \
@@ -835,6 +837,12 @@ const cases = {
   joined: 'const a = staticRead("dir/" & name)',
   exec: 'const v = gorgeEx("git rev-parse HEAD")',
   comment: '## read through gorgeEx and staticRead(path)',
+  commandLiteral: 'const a = staticRead "x.txt"',
+  commandComputed: 'const a = staticRead path',
+  methodComputed: 'const a = path.staticRead',
+  methodSlurp: 'const a = (root / "x.txt").slurp',
+  methodLiteral: 'const a = "x.txt".slurp',
+  methodCall: 'const a = root.staticRead("x.txt")',
 };
 for (const [name, text] of Object.entries(cases)) {
   console.log(name, compileTimeReads("/m/mod.nim", text).unresolved);
@@ -843,6 +851,19 @@ MJS
 assert_contains "$(node "${TEST_ROOT}/scan.mjs" 2>&1 | tr '\n' ' ')" \
 	"literal false computed true joined true exec true comment false" \
 	"the scan follows a literal staticRead and gives up on a computed one, a joined one and gorgeEx, not on a comment"
+assert_contains "$(node "${TEST_ROOT}/scan.mjs" 2>&1 | tr '\n' ' ')" \
+	"commandLiteral false commandComputed true" \
+	"command syntax: a literal staticRead is followed, a computed one gives up"
+assert_contains "$(node "${TEST_ROOT}/scan.mjs" 2>&1 | tr '\n' ' ')" \
+	"methodComputed true methodSlurp true methodLiteral true methodCall true" \
+	"method syntax (path.staticRead, x.slurp) is a read the scan cannot follow"
+cat >"${TEST_ROOT}/scan-literal.mjs" <<MJS
+import { compileTimeReads } from "${STORYBOOK_FRESHNESS}";
+const r = compileTimeReads("/m/mod.nim", 'const a = staticRead "x.txt"');
+console.log(r.files.concat(r.absent).join(","));
+MJS
+assert_contains "$(node "${TEST_ROOT}/scan-literal.mjs" 2>&1)" "/m/x.txt" \
+	"...and a command-syntax literal resolves against the module's directory"
 
 # ---------------------------------------------------------------------------
 section "A components build that Nim left unchanged is still a fresh build"

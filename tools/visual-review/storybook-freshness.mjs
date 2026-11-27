@@ -228,21 +228,31 @@ function stripNimComment(line) {
 // text can tell. A literal `staticRead("x")` / `slurp("x")` is resolved
 // against the module's directory, as the compiler first resolves it; found, it
 // is a file, missing, it is absent (the compiler then searched the `--path`
-// directories, which this does not follow). A computed argument, or any
-// `gorge`, `gorgeEx` or `staticExec`, is `unresolved`: the caller then
-// compares the module's whole checkout instead.
+// directories, which this does not follow). Any other mention of
+// `staticRead` / `slurp` -- a computed argument, command syntax with a
+// computed argument (`staticRead path`), method syntax (`path.staticRead`,
+// `"x".slurp`), or the bare name passed as a value -- and any `gorge`,
+// `gorgeEx` or `staticExec`, is `unresolved`: the caller then compares the
+// module's whole checkout instead. Erring towards `unresolved` only widens
+// what is compared; missing a read would accept a stale bundle.
+// See https://nim-lang.org/docs/manual.html#procedures-command-invocation-syntax
+// and https://nim-lang.org/docs/manual.html#procedures-method-call-syntax.
 export function compileTimeReads(modulePath, text) {
   const files = [];
   const absent = [];
   let unresolved = false;
   const literal = /\b(?:staticRead|slurp)\s*\(?\s*"((?:[^"\\]|\\.)*)"\s*\)?/g;
-  const anyRead = /\b(?:staticRead|slurp)\b\s*(\(|")?/g;
+  const anyRead = /\b(?:staticRead|slurp)\b/g;
   for (const raw of text.split(/\r?\n/)) {
     const line = stripNimComment(raw);
     if (/\b(?:gorge|gorgeEx|staticExec)\b/.test(line)) unresolved = true;
-    const literals = [...line.matchAll(literal)];
-    const calls = [...line.matchAll(anyRead)].filter((m) => m[1] !== undefined);
-    if (calls.length > literals.length) unresolved = true;
+    // A literal read is one whose name is not the method of a dotted call:
+    // `x.staticRead("y")` passes `x` as the first argument, not `"y"`.
+    const isMethod = (index) => /\.\s*$/.test(line.slice(0, index));
+    const literals = [...line.matchAll(literal)].filter((m) => !isMethod(m.index));
+    const literalAt = new Set(literals.map((m) => m.index));
+    // Every mention of the name that is not one of those literals.
+    if ([...line.matchAll(anyRead)].some((m) => !literalAt.has(m.index))) unresolved = true;
     for (const m of literals) {
       // A literal that continues (`staticRead("dir/" & name)`) is computed.
       const after = line.slice(m.index + m[0].length).trimStart();
@@ -613,7 +623,7 @@ export function requireFreshStorybookStatic(repoRoot) {
     if (newerNim) {
       throw new Error(
         `Stale storybook components: ${components} is older than its source ${newerNim}.\n` +
-          "Rebuild with `just build-storybook-components`, then run this again.",
+          REBUILD_REMEDY,
       );
     }
     // And everything else it was compiled from: the sibling checkouts, the
