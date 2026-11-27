@@ -324,6 +324,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just test-plat18-dev-loop
 
       - name: Run ct trace-layer unit tests
+        if: ${{ !cancelled() }}
         # src/ct/trace/*_test.nim (recording-folder shape detection,
         # session-manifest open path, CTFS source materialization, path
         # handling, ct host idle-timeout parsing) is matched by neither
@@ -332,6 +333,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just test-ct-trace-units
 
       - name: Run ct upload MCR-enrichment unit tests
+        if: ${{ !cancelled() }}
         # src/ct/online_sharing/test_mcr_enrichment.nim was matched by no
         # runner at all — 34 assertions that could not fail a build — and the
         # member-check suite alongside it pins that `ct upload` does not
@@ -341,6 +343,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just test-mcr-enrichment-units
 
       - name: Run recorder-gated ViewModel tests (JS recorder + replay-server)
+        if: ${{ !cancelled() }}
         # Builds the JS recorder sibling via scripts/build-siblings.sh, builds
         # replay-server, then runs the recorder-gated unit VM suites with a
         # zero-test guard that fails if they all skip (so a missing recorder
@@ -349,6 +352,9 @@ jobs:
 
       - name: Build ct (needed by the CLI dispatch tests)
         id: ct
+        # Whatever failed before it: every desktop and browser step below
+        # needs `ct`, and they were skipped whenever an earlier suite failed.
+        if: ${{ !cancelled() }}
         # record_missing_recorder_test.nim and record_dispatch_e2e_test.nim
         # drive the SHIPPED `ct` binary rather than importing its modules, so
         # the lane needs a build.  The pure dispatch table test does not, but
@@ -356,6 +362,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just build-once
 
       - name: Run ct record CLI dispatch tests
+        if: ${{ !cancelled() }}
         # Asserts that every language detection produces reaches a recorder,
         # that a missing recorder fails non-zero naming the language and the
         # remedy, and that a real `ct record` through the JS recorder sibling
