@@ -2,7 +2,7 @@
  ◌ Retire the o…  Web
  ◌ Reset a sett…  CLI
  ◌ Fix the route…  CT
- ◌ Document the…   Tg
+ ◌ Document the…  Tg
  ◌ Add a dark t…  TUI
  ◌ Show test dur…  CT
  ◌ Show which s…  Web
@@ -16,15 +16,15 @@
  ◌ Draft the 3.0…  CT
  ◌ Move the macO…  Tg
  ◌ Add keyboard…  TUI
- ◌ Expire stale…   CT
+ ◌ Expire stale…  CT
  ◌ Teach the pa…  Web
  ◌ Rename the u…  CLI
  ◌ Fix the flaky…  CT
- ◌ Keep unsaved…   Tg
+ ◌ Keep unsaved…  Tg
  ◌ Benchmark ro…  TUI
  ◌ Cap the telem…  CT
  ◌ Trim the 3.0…  Web
- ◌ Replace the…   CLI
+ ◌ Replace the…  CLI
  ◌ Move the acco…  CT
  ◌ Migrate cache…  Tg
  ◌ Add jitter t…  TUI

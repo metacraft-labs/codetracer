@@ -538,7 +538,12 @@ proc errorBlock*(r: GpuiRenderer; p: AhPalette; title, message: string;
                                          ("padding-right", "40px"),
                                          ("items", "center"), ("justify", "center")])
   r.tag(result, "notice", "error")
-  r.appendChild(result, r.text(title, BodyPx, p.textError, shrink = false))
+  # The title by the palette's rule for status text on a ground
+  # (`statusTextInk`, 4.5:1) on the panel body it fills: Light's error role
+  # (#dc2626) is 3.74:1 there, its 700 step (#b91c1c) 5.01:1, as the
+  # terminal's and the web's error titles (terminal review round 3,
+  # 2026-11-26). Dark's role holds.
+  r.appendChild(result, r.text(title, BodyPx, p.statusTextInk(prError, p.panel), shrink = false))
   # On the caption's 16px lines (`.ah-fleet-error-message`: `line-height:
   # type-ui-lineheight-caption-md`), not the face's own, which wraps at 19px.
   let why = r.text(message, CaptionPx, p.textCaption, shrink = false,

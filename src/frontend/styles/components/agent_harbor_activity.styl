@@ -241,8 +241,9 @@ AH_ACTIVITY_TURN_GAP = 0.5rem      // above each turn after the first
   padding: 0 2.5rem
   text-align: center
 
+// As `.ah-fleet-error-title`: Light's error role is under 4.5:1 on the panel.
 .ah-activity-error-title
-  color: colors-ui-text-error-primary
+  color: by-mode(colors-ui-text-error-primary, colors-ui-text-error-primary-hover)
   font-size: unit(type-ui-size-body-md / 16, 'rem')
 
 .ah-activity-error-message

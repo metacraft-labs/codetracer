@@ -351,6 +351,217 @@ suite "CTF-P2c: the GPUI control center":
     check x.view.fact("cc-state") == "asError"
     x.dispose()
 
+  test "the error block's title and the selected initiative's bar hold their floors":
+    # Terminal review round 3 (2026-11-26), the GPUI side of two findings:
+    # Light's error title was the error role (#dc2626, 3.74:1 on the panel)
+    # and the selected initiative's bar the action border (#6366f1, under
+    # 3:1 on the selected-row ground in both modes).
+    proc allWith(n: JsonNode; attribute: string; into: var seq[JsonNode]) =
+      let a = n{"attributes"}
+      if a != nil and a.kind == JObject and a.hasKey(attribute): into.add n
+      for c in n{"children"}.getElems: allWith(c, attribute, into)
+    for mode in [dmDark, dmLight]:
+      let p = ahPalette(mode)
+      gpui_reset_tree()
+      let x = r.mountAgentHarborStoryGpui("agent-harbor-control-center", "error", 1440, 900, mode)
+      var notices: seq[JsonNode]
+      allWith(parseJson(renderPlanJson(r, x.root)), "data-ah-notice", notices)
+      notices = notices.filterIt(it{"attributes"}{"data-ah-notice"}.getStr == "error")
+      check notices.len >= 1
+      for n in notices:
+        let title = n{"children"}.getElems[0]{"styles"}{"text_color"}.getStr
+        check title.toLowerAscii == p.statusTextInk(prError, p.panel)
+        check contrastRatio(title, p.panel) >= StatusTextFloor
+      x.dispose()
+      gpui_reset_tree()
+      let s = r.mountAgentHarborStoryGpui("agent-harbor-initiatives", "selected", 1440, 900, mode)
+      var rows: seq[JsonNode]
+      allWith(parseJson(renderPlanJson(r, s.root)), "data-ah-selected", rows)
+      rows = rows.filterIt(it{"attributes"}{"data-ah-selected"}.getStr == "true")
+      check rows.len == 1
+      for row in rows:
+        let bars = row{"children"}.getElems.filterIt(it{"styles"}{"position"}.getStr == "absolute")
+        check bars.len == 1
+        if bars.len == 1:
+          let bar = bars[0]{"styles"}{"bg"}.getStr.toLowerAscii
+          check bar == p.actionRingInk
+          check contrastRatio(bar, p.activeRow) >= 3.0
+          check contrastRatio(p.borderAction, p.activeRow) < 3.0   # the control
+      s.dispose()
+
+  test "the Initiatives panel's status marks hold 3:1 on the plain panel, by markOnPanel":
+    # In Light the success and warning icon inks are 2.55 and 2.76:1 on the
+    # panel (#e6e2db), a milestone's other mark 2.42:1 and planned (the
+    # border role) 1.92:1, under WCAG 2.2 SC 1.4.11's 3:1. A row on the
+    # plain panel draws its state dot, its sessions' dots, its legend's marks
+    # and its bar's segments by `markOnPanel`; the band and the selected row
+    # keep the icon inks; planned is grey/400 in Light on every ground.
+    proc markFact(m: MarkStyle): string =
+      if m.ring: "ring:" & m.colour else: m.colour
+    var problems: seq[string]
+    var onPanel: seq[string]
+    var checked = 0
+    proc walk(n: JsonNode; p: AhPalette; ground, ctx, where: string;
+              segments: var seq[MilestoneStatusClass]; legend: var seq[string];
+              problems: var seq[string]; onPanel: var seq[string]; checked: var int) =
+      let a = n{"attributes"}
+      var ctx = ctx
+      if a != nil and a.kind == JObject:
+        if a.hasKey("data-ah-session"): ctx = "session:" & a{"data-ah-attention"}.getStr
+        elif a.hasKey("data-ah-ms-legend"): ctx = "legend"
+        if a.hasKey("data-ah-segment"):
+          let status = parseEnum[MilestoneStatusClass](a{"data-ah-segment"}.getStr.split(':')[0])
+          segments.add status
+          let bg = n{"styles"}{"bg"}.getStr.toLowerAscii
+          let wanted = p.segmentOnPanel(status, ground)
+          inc checked
+          if bg != wanted:
+            problems.add where & " segment " & $status & " is " & bg & ", not " & wanted
+          if status == mscPlanned and bg != p.trackPlanned:
+            problems.add where & " planned segment is " & bg
+          if ground == p.panel and status != mscPlanned:
+            if contrastRatio(bg, ground) < StatusMarkFloor:
+              problems.add where & " segment " & $status & " under 3:1 on the panel"
+            if p.mode == dmLight: onPanel.add "segment " & $status
+        if a.hasKey("data-ah-mark"):
+          let got = a{"data-ah-mark"}.getStr.toLowerAscii
+          if ctx == "legend": legend.add got
+          else:
+            let (kind, want) =
+              if ctx.startsWith("session:"):
+                let att = parseEnum[SessionAttention](ctx["session:".len .. ^1])
+                ("session " & $att, p.markOnPanel(p.markOf(att), ground))
+              else:
+                ("initiative", p.markOnPanel(p.markOf(
+                   parseEnum[InitiativeState](where.split(' ')[^1])), ground))
+            inc checked
+            if got != markFact(want):
+              problems.add where & " " & kind & " mark is " & got & ", not " & markFact(want)
+            if ground == p.panel:
+              if contrastRatio(want.colour, ground) < StatusMarkFloor:
+                problems.add where & " " & kind & " mark under 3:1 on the panel"
+              if p.mode == dmLight: onPanel.add kind.split(' ')[0] & " " &
+                (if ctx.startsWith("session:"): ctx["session:".len .. ^1] else: where.split(' ')[^1])
+      for c in n{"children"}.getElems:
+        walk(c, p, ground, ctx, where, segments, legend, problems, onPanel, checked)
+    proc rows(n: JsonNode; into: var seq[JsonNode]) =
+      let a = n{"attributes"}
+      if a != nil and a.kind == JObject and a.hasKey("data-ah-initiative") and
+         a.hasKey("data-ah-ground"):
+        into.add n
+        return
+      for c in n{"children"}.getElems: rows(c, into)
+    var legends = 0
+    for (surface, fixture) in [("agent-harbor-control-center", "populated"),
+                               ("agent-harbor-initiatives", "populated"),
+                               ("agent-harbor-initiatives", "selected")]:
+      for (w, h) in [(1440, 900), (360, 900)]:
+        for mode in [dmDark, dmLight]:
+          let p = ahPalette(mode)
+          gpui_reset_tree()
+          let m = r.mountAgentHarborStoryGpui(surface, fixture, w, h, mode)
+          var found: seq[JsonNode]
+          rows(parseJson(renderPlanJson(r, m.root)), found)
+          # The narrow control center has room for its first initiative only.
+          check found.len >= 1
+          for row in found:
+            let a = row{"attributes"}
+            let ground = a{"data-ah-ground"}.getStr.toLowerAscii
+            let where = $mode & " " & surface & "/" & fixture & " " & $w & " " &
+                        a{"data-ah-initiative"}.getStr & " " & a{"data-ah-state"}.getStr
+            var segments: seq[MilestoneStatusClass]
+            var legend: seq[string]
+            walk(row, p, ground, "", where, segments, legend, problems, onPanel, checked)
+            # The legend's marks, in the bar's order, by the same rule.
+            if legend.len != segments.len:
+              problems.add where & ": " & $legend.len & " legend marks for " &
+                           $segments.len & " segments"
+            for i in 0 ..< min(legend.len, segments.len):
+              inc legends
+              let want = markFact(p.markOnPanel(p.markOf(segments[i]), ground))
+              if legend[i] != want:
+                problems.add where & " legend " & $segments[i] & " is " & legend[i] & ", not " & want
+          m.dispose()
+    for problem in problems: echo "  ", problem
+    check problems.len == 0
+    for key in ["session running", "session needs-input", "segment completed"]:
+      if key notin onPanel: echo "  never on the panel: ", key
+      check key in onPanel
+    check checked > 0
+    check legends > 0
+    # The planned mark is grey/400; the bar's planned remainder is the bar's
+    # own ground and stays the light border role, so a bar does not read as
+    # full.
+    check ahPalette(dmLight).plannedMark == DesignPrimitiveHex[dpColorsGrey400][dmLight]
+    check ahPalette(dmLight).plannedMark == "#727272"
+    check ahPalette(dmLight).trackPlanned == DesignTokenHex[dtColorsUiBorderPrimary][dmLight]
+    check ahPalette(dmLight).trackPlanned == "#aca494"
+
+  test "the initiative popup's header word is its session lines' ink, 4.5:1 on the popup":
+    # The header drew the raw roles (`stateWordColour`): Light's needs input
+    # #ea580c on the popup's #f8f6f2 is 3.30:1, under the session line's
+    # #92400e (6.57:1) below it; blocked's #dc2626 4.47:1. It takes the
+    # popup's one rule (`popupStateWordColour`), as the terminal's and the
+    # web's headers do.
+    var headers, lines = 0
+    proc collectJson(n: JsonNode; attribute: string; into: var seq[JsonNode]) =
+      let a = n{"attributes"}
+      if a != nil and a.kind == JObject and a.hasKey(attribute): into.add n
+      for c in n{"children"}.getElems: collectJson(c, attribute, into)
+    for (w, h) in [(1440, 900), (360, 900)]:
+      for mode in [dmDark, dmLight]:
+        let p = ahPalette(mode)
+        gpui_reset_tree()
+        let m = r.mountAgentHarborStoryGpui("agent-harbor-initiative-tabs", "popup", w, h, mode)
+        var popups: seq[JsonNode]
+        collectJson(parseJson(renderPlanJson(r, m.root)), "data-ah-popup", popups)
+        check popups.len == 1
+        for popup in popups:
+          var states, sessions: seq[JsonNode]
+          collectJson(popup, "data-ah-state", states)
+          collectJson(popup, "data-ah-attention", sessions)
+          check states.len == 1
+          for st in states:
+            inc headers
+            let word = st{"attributes"}{"data-ah-state"}.getStr
+            let state = case word
+                        of "needs input": isNeedsInput
+                        of "working": isWorking
+                        of "blocked": isBlocked
+                        of "idle": isIdle
+                        else: isEnded
+            let ink = st{"styles"}{"text_color"}.getStr.toLowerAscii
+            check ink == p.popupStateWordColour(state, p.ground)
+            check contrastRatio(ink, p.ground) >= StatusTextFloor
+            if state == isNeedsInput:
+              for s in sessions:
+                if s{"attributes"}{"data-ah-attention"}.getStr != "needs-input": continue
+                var words: seq[JsonNode]
+                collectJson(s, "data-ah-status", words)
+                for wd in words:
+                  inc lines
+                  check wd{"styles"}{"text_color"}.getStr.toLowerAscii == ink
+        m.dispose()
+    check headers == 4
+    check lines >= 4
+    # Every state the header names a status for, on the popup's ground.
+    for mode in [dmDark, dmLight]:
+      let p = ahPalette(mode)
+      for state in [isNeedsInput, isWorking, isBlocked]:
+        check contrastRatio(p.popupStateWordColour(state, p.ground), p.ground) >= StatusTextFloor
+      check p.popupStateWordColour(isNeedsInput, p.ground) ==
+        p.initiativeSessionWordColour(saNeedsInput, p.ground)
+    check ahPalette(dmLight).popupStateWordColour(isBlocked, ahPalette(dmLight).ground) == "#b91c1c"
+    check ahPalette(dmLight).popupStateWordColour(isNeedsInput, ahPalette(dmLight).ground) == "#92400e"
+    # `needs input` everywhere GPUI draws it (the popup, the panel's rows,
+    # its band, the selected row): amber/800 where it holds 4.5:1, amber/900
+    # where it does not. Orange/800 (#9a3412) was 7.8 CIEDE2000 from failed.
+    let l = ahPalette(dmLight)
+    for (ground, ink) in [(l.ground, "#92400e"), (l.panel, "#92400e"), (l.menu, "#92400e"),
+                          (l.activeRow, "#78350f")]:
+      check l.initiativeSessionWordColour(saNeedsInput, ground) == ink
+      check contrastRatio(ink, ground) >= StatusTextFloor
+
   test "a press on a toggle and on a waiting row does what it carries":
     let m = mount("populated")
     fireEvent(m.view.carrying(ControlCenterNewInitiativeOperation)[0], "mousedown")

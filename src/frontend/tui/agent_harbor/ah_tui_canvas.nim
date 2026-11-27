@@ -871,7 +871,15 @@ proc errorBlock*(c: var AhCanvas; parent: AhNode; row, col, width, height: int;
       right = max(right, at + widthOf(l))
       inc r
     discard c.node(n, first, left, max(0, right - left), lines.len, [(fact, value)])
-  c.centred(titleLines, r, c.p.textError, "error-title", title)
+  # The title in the error role by the palette's one rule for status text on
+  # a ground (`statusTextInk`, 4.5:1, WCAG 2.2 SC 1.4.3): Light's error role
+  # (#dc2626) is 3.74:1 on its panel (#e6e2db) and 4.47:1 even on the
+  # window's ground, so Light takes its 700 step (#b91c1c, 5.01:1 on the
+  # panel), the red the control center's `Could not launch` already draws
+  # (terminal review round 3, 2026-11-26). Dark's role holds (7.77:1).
+  let under = c.bgAt(top, col + max(0, width div 2))
+  let titleInk = c.p.statusTextInk(prError, if under.len > 0: under else: c.tone.body)
+  c.centred(titleLines, r, titleInk, "error-title", title)
   c.centred(whyLines, r, c.p.textCaption, "error", message)
   # Retry on the controls' own ground (`tone.chip`, the tab bar's Retry's):
   # the web outlines the button, and the secondary surface it fills it with

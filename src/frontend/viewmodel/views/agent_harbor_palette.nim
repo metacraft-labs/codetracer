@@ -89,7 +89,24 @@ type
       ## on every Light surface a row sits on, as the row's quiet text does
       ## on selection (`activeRowQuiet`).
     iconDefault*: string     ## the hollow ring of an idle session
-    trackPlanned*: string    ## the milestone bar's planned segment (`by-mode`)
+    plannedMark*: string
+      ## A planned milestone's mark (the legend's and a milestone row's dot):
+      ## `by-mode(colors-ui-icon-primary-subtle, colors-grey-400)`, one ink
+      ## on every ground. A planned milestone has no status role, so no
+      ## per-ground rule resolves it; Light takes grey/400 (#727272, the
+      ## brand palette's primitive), the lightest design-system grey that
+      ## holds WCAG 2.2 SC 1.4.11's 3:1 on every panel ground: 3.73:1 on the
+      ## panel (#e6e2db), 3.32:1 on the card (#dbd6cc), 4.46:1 on the
+      ## default surface (#f8f6f2). The border role (#aca494) was 1.92:1 on
+      ## the panel; grey/350 holds the panel (3.02:1) but not the card. Dark
+      ## keeps icon-subtle (#919191), 3.5:1 or more on every Dark ground.
+    trackPlanned*: string
+      ## The milestone bar's planned segment, the part of the bar not yet
+      ## done: `by-mode(colors-ui-icon-primary-subtle,
+      ## colors-ui-border-primary)`. It is the bar's own ground, the track
+      ## the status segments fill, not a mark that tells a state apart, so
+      ## it is not held to SC 1.4.11's 3:1; it stays light so a bar reads as
+      ## part done (in grey/400 the remainder read as filled).
     tabIcon*: string
       ## A frame tab's pin and close icons: `TAB_ICON_COLOR`, the
       ## icon-subtle role (#919191 / #999180), as the masks are painted.
@@ -126,7 +143,8 @@ type
       ## its ink for the ground under it (`markOn`); read only when `roled`.
     roled*: bool
       ## Whether `role` is set: false for a mark with no status role (the
-      ## auto-switch dot, a milestone's planned or other mark).
+      ## auto-switch dot, a milestone's planned mark). A milestone's other
+      ## mark is a neutral grey and takes the ended role's (`markOf`).
 
 proc ahPalette*(mode: DesignMode): AhPalette =
   template t(token: DesignToken): string = DesignTokenHex[token][mode]
@@ -169,9 +187,12 @@ proc ahPalette*(mode: DesignMode): AhPalette =
                 else: t(dtColorsUiTextPrimaryLabel)),
     iconDefault: t(dtColorsUiIconPrimaryDefault),
     # The stylesheet's last word on planned (`agent_harbor.styl`, "Planned
-    # in Dark: a mark the eye finds"): the mark and the bar's segment both
-    # `by-mode(colors-ui-icon-primary-subtle, colors-ui-border-primary)`,
-    # filled.
+    # in Dark: a mark the eye finds"): the mark
+    # `by-mode(colors-ui-icon-primary-subtle, colors-grey-400)` and the
+    # bar's segment `by-mode(colors-ui-icon-primary-subtle,
+    # colors-ui-border-primary)`, both filled.
+    plannedMark: (if mode == dmDark: t(dtColorsUiIconPrimarySubtle)
+                  else: DesignPrimitiveHex[dpColorsGrey400][mode]),
     trackPlanned: (if mode == dmDark: t(dtColorsUiIconPrimarySubtle)
                    else: t(dtColorsUiBorderPrimary)),
     tabIcon: t(dtColorsUiIconPrimarySubtle),
@@ -224,8 +245,11 @@ proc markOf*(p: AhPalette; status: MilestoneStatusClass): MarkStyle =
   of mscInProgress: MarkStyle(colour: p.iconInfo, role: prInfo, roled: true)
   of mscPartial: MarkStyle(colour: p.iconWarning, role: prWarning, roled: true)
   of mscBlocked: MarkStyle(colour: p.iconError, role: prError, roled: true)
-  of mscPlanned: MarkStyle(colour: p.trackPlanned)
-  of mscOther: MarkStyle(colour: p.iconSubtle)
+  of mscPlanned: MarkStyle(colour: p.plannedMark)
+  # A status the plan names and no class covers: a neutral grey, so where
+  # its icon ink falls under 3:1 (Light's #999180 is 2.42:1 on the panel)
+  # it takes the ended role's neutral ink for the ground (`markOn`).
+  of mscOther: MarkStyle(colour: p.iconSubtle, role: prEnded, roled: true)
 
 proc segmentOf*(p: AhPalette; status: MilestoneStatusClass): string =
   ## A milestone bar's segment (`.ah-ms-seg.ah-ms-*`).
@@ -662,6 +686,21 @@ proc pieInks*(p: AhPalette; role: PieRole; ground: string): PieInks =
   let ink = p.roleInks(ground)[role]
   PieInks(wedge: ink, edge: ink, ground: ground)
 
+proc actionRingInk*(p: AhPalette): string =
+  ## The action colour's ring step: brand/400 in Dark, brand/700 in Light,
+  ## the web's `by-mode(colors-brand-400, colors-brand-700)`. The palette has
+  ## neither step as a role; each is the other mode's
+  ## `surface/action/primary-hover`. It is the action colour wherever it is
+  ## the only mark of a state and must hold WCAG 2.2 SC 1.4.11's 3:1
+  ## (https://www.w3.org/TR/WCAG22/#non-text-contrast) on a ground the action
+  ## border itself (brand/500, #6366f1) falls under it on: the correlation
+  ## ring around a recording button, and the selected initiative's inset bar on the
+  ## selected-row ground (#4338ca 4.46:1 on Light's #c8c2b5, #818cf8 3.70:1
+  ## on Dark's #3c3c3c, where brand/500 is 2.52 and 2.47:1; terminal review
+  ## round 3, 2026-11-26).
+  let other = if p.mode == dmDark: dmLight else: dmDark
+  DesignTokenHex[dtColorsUiSurfaceActionPrimaryHover][other]
+
 proc readableInk*(p: AhPalette; ground: string; floor = StoryTextFloor): string =
   ## The quietest of the text roles (caption, label, body) that holds
   ## `floor` on `ground`; the one with the most contrast when none does.
@@ -752,15 +791,37 @@ proc markOn*(p: AhPalette; m: MarkStyle; ground: string): MarkStyle =
   if m.roled and inkContrast(m.colour, ground) < StatusMarkFloor:
     result.colour = p.roleInks(ground)[m.role]
 
+proc markOnPanel*(p: AhPalette; m: MarkStyle; ground: string): MarkStyle =
+  ## A status mark of the Initiatives panel (its initiatives' and sessions'
+  ## dots, its milestone legend and bar), in every host: `markOn` where the
+  ## mark sits on the plain panel ground (`panel`), `m` as it is on any other
+  ## ground. On Light's panel the success and warning icon inks are 2.55 and
+  ## 2.76:1 and a milestone's other mark 2.42:1, under WCAG 2.2 SC 1.4.11's
+  ## 3:1, so they take the pie's ink for their role there. The panel's other
+  ## grounds are not resolved here: the card band keeps the roles, and so
+  ## does the selected or hovered row (#c8c2b5), where Light's roles fall
+  ## to 1.9-2.9:1, a known gap tracked on its own.
+  if ground == p.panel: p.markOn(m, ground) else: m
+
+proc segmentOnPanel*(p: AhPalette; status: MilestoneStatusClass; ground: string): string =
+  ## A milestone bar's segment on `ground` by `markOnPanel`: its status
+  ## mark's ink; planned's track remainder (`trackPlanned`) on every ground.
+  if status == mscPlanned: p.trackPlanned
+  else: p.markOnPanel(p.markOf(status), ground).colour
+
 proc statusStep800*(p: AhPalette; role: PieRole): string =
-  ## A status role's 800 step, the design system's `colors-<role>-800`
-  ## primitive (green, orange and red/800 for success, warning and error;
-  ## the Nim table carries it as `DesignPrimitive`); the label role for a
+  ## The 800 step a status role's word starts from in Light
+  ## (`initiativeSessionWordColour`): green/800 and red/800 for success and
+  ## error (`colors-success-800`, `colors-error-800`), and amber/800 for
+  ## warning (`colors-amber-800`, #92400e). Warning takes amber rather than
+  ## its own orange/800 (#9a3412), which is only 7.8 CIEDE2000 from
+  ## red/800, so `needs input` read as `failed`; amber/800 is 12.8 from it.
+  ## The Nim table carries them as `DesignPrimitive`. The label role for a
   ## role it is not given for.
   template t(step: DesignPrimitive): string = DesignPrimitiveHex[step][p.mode]
   case role
   of prSuccess: t(dpColorsSuccess800)
-  of prWarning: t(dpColorsWarning800)
+  of prWarning: t(dpColorsAmber800)
   of prError: t(dpColorsError800)
   of prInfo, prIdle, prEnded: p.textLabel
 
@@ -775,19 +836,22 @@ proc initiativeSessionWordColour*(p: AhPalette; attention: SessionAttention;
   ## `StatusTextFloor` (4.5:1) on the ground it is drawn on
   ## (https://www.w3.org/TR/WCAG22/#contrast-minimum).
   ##
-  ## Light: the role's 800 step (`statusStep800`: `needs input` #9a3412,
-  ## `running` #166534, `failed` #991b1b) wherever it holds 4.5:1, which is
-  ## every Light ground but the darkest; where it does not, the 800 step
+  ## Light: the role's 800 step (`statusStep800`: `needs input` amber/800
+  ## #92400e, `running` #166534, `failed` #991b1b) wherever it holds 4.5:1,
+  ## which is every Light ground but the darkest. Where it does not,
+  ## `needs input` takes amber/900 (#78350f), and the others their 800 step
   ## taken `StatusInkStepPercent` at a time toward the body text, the first
-  ## that holds. On the panel (#e6e2db) the three are 5.66, 5.52 and
-  ## 6.44:1, on the card (#dbd6cc) 5.05, 4.92 and 5.74:1, on the default
-  ## surface (#f8f6f2) 6.77, 6.61 and 7.70:1. On
+  ## that holds. On the panel (#e6e2db) the three are 5.49, 5.52 and
+  ## 6.44:1, on the card (#dbd6cc) 4.90, 4.92 and 5.74:1, on the default
+  ## surface (#f8f6f2) 6.57, 6.61 and 7.70:1. On
   ## `surface/primary/secondary-hover` (#c8c2b5: a selected or hovered row,
-  ## and the popup where it drops over a panel) orange and green/800 fall to
-  ## 4.12 and 4.02:1, so they are taken a quarter toward the body there,
-  ## #7d3016 (5.13:1) and #1a5530 (4.96:1); red/800 holds (4.69:1). The web
-  ## names the same primitives (`colors-warning-800`, ...) and mixes the same
-  ## way (`mix-ink` in `defaults.styl`) on the grounds where this mixes.
+  ## and the popup where it drops over a panel) amber and green/800 fall to
+  ## 4.00 and 4.02:1, so `needs input` is amber/900 there (5.11:1) and
+  ## `running` is taken a quarter toward the body, #1a5530 (4.96:1); red/800
+  ## holds (4.69:1); on the canvas (#d2ccc1) amber/800 is 4.44:1 and
+  ## amber/900 5.68:1. The web names the same primitives
+  ## (`colors-amber-800`, `colors-amber-900`, `colors-success-800`, ...) and
+  ## mixes the same way (`mix-ink` in `defaults.styl`) where this mixes.
   ##
   ## An unknown ground ("": a cell nothing was drawn under) is taken as
   ## #c8c2b5, the darkest of them, so the ink holds on any of them.
@@ -799,9 +863,30 @@ proc initiativeSessionWordColour*(p: AhPalette; attention: SessionAttention;
   case attention
   of saNeedsInput, saRunning, saFailed:
     let role = pieRoleOf(attention)
+    let on = if ground.len > 0: ground else: p.hover
     if p.mode == dmDark: p.statusTextSteps(role)[0]
-    else: p.inkTowardBody(p.statusStep800(role), (if ground.len > 0: ground else: p.hover),
-                          StatusTextFloor)
+    elif role == prWarning and inkContrast(p.statusStep800(role), on) < StatusTextFloor:
+      # amber/900, a design-system step, rather than a mix; taken toward
+      # the body only on a ground it, too, falls under the floor on.
+      p.inkTowardBody(DesignPrimitiveHex[dpColorsAmber900][p.mode], on, StatusTextFloor)
+    else: p.inkTowardBody(p.statusStep800(role), on, StatusTextFloor)
+  else: p.textLabel
+
+proc popupStateWordColour*(p: AhPalette; state: InitiativeState; ground: string): string =
+  ## The initiative popup's header state word on `ground`, in every host.
+  ## `needs input` is also the word the popup's session lines draw, so it
+  ## takes their rule (`initiativeSessionWordColour`) and the word has one
+  ## ink on each ground, the header's and the line's. `working` and
+  ## `blocked` are the initiative's own words, which no session line
+  ## repeats: they take the rule for a status word on its ground
+  ## (`statusTextInk`, 4.5:1). Every other state is in the label role, as
+  ## the web's `.ah-popup-state`. In Light, on the GPUI and web popup's
+  ## default surface (#f8f6f2): #92400e 6.57:1, #15803d 4.65:1, #b91c1c
+  ## 5.99:1, where the roles themselves are 3.30, 3.05 and 4.47:1. Dark keeps
+  ## the roles.
+  case state
+  of isNeedsInput: p.initiativeSessionWordColour(saNeedsInput, ground)
+  of isWorking, isBlocked: p.statusTextInk(pieRoleOf(state), ground)
   else: p.textLabel
 
 type
@@ -905,6 +990,21 @@ proc pieStylesheet*(): string =
       result.add "\n.ah-pie-on-" & $ground & ".ah-pie-" & $role & "\n"
       result.add "  --ah-pie-wedge: by-mode(" & d.wedge & ", " & l.wedge & ")\n"
       result.add "  --ah-pie-edge: by-mode(" & d.edge & ", " & l.edge & ")\n"
+  # The Initiatives panel's status marks on the plain panel ground
+  # (`markOnPanel`): one custom property per status role, from the role's
+  # icon ink, and one for a milestone's other mark (icon-subtle, resolved as
+  # the ended role), which `agent_harbor.styl` reads on a panel row that is
+  # neither banded, selected nor hovered.
+  result.add "\n// The Initiatives panel's status marks on the plain panel ground\n" &
+    "// (`markOnPanel`), each `by-mode(<Dark>, <Light>)`.\n\n:root\n"
+  proc onPanel(p: AhPalette; m: MarkStyle): string = p.markOnPanel(m, p.panel).colour
+  proc roleMark(p: AhPalette; role: PieRole): MarkStyle =
+    MarkStyle(colour: p.roleInk(role), role: role, roled: true)
+  for role in PieRole:
+    result.add "  --ah-mark-panel-" & $role & ": by-mode(" &
+      dark.onPanel(dark.roleMark(role)) & ", " & light.onPanel(light.roleMark(role)) & ")\n"
+  result.add "  --ah-mark-panel-other: by-mode(" & dark.onPanel(dark.markOf(mscOther)) & ", " &
+    light.onPanel(light.markOf(mscOther)) & ")\n"
 
 
 # ---------------------------------------------------------------------------

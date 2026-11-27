@@ -194,9 +194,8 @@ proc ringInk*(p: AhPalette): string =
   ## SC 1.4.11) against the active tab's fill it sits on as well as its halo.
   ## The action border (brand/500) does not: 2.5:1 on Dark's fill, 2.8:1 on
   ## Light's halo. The palette has neither step; each is the other mode's
-  ## `surface/action/primary-hover` (brand/700 in Dark, brand/400 in Light).
-  let other = if p.mode == dmDark: dmLight else: dmDark
-  DesignTokenHex[dtColorsUiSurfaceActionPrimaryHover][other]
+  ## `surface/action/primary-hover` (`actionRingInk`).
+  p.actionRingInk
 
 proc recordingRing(r: GpuiRenderer; p: AhPalette): GpuiElement =
   ## The ring a correlation marker puts around a recording button, drawn
@@ -402,9 +401,11 @@ proc drawPopup(r: GpuiRenderer; p: AhPalette; popup: InitiativePopup; widthPx: i
                      pairs = [("flex-grow", "1"), ("line-height", "21px")])
   r.tag(title, "title", popup.title)
   r.appendChild(head, title)
-  let stateColour = case popup.state
-                    of isNeedsInput, isWorking, isBlocked: p.stateWordColour(popup.state)
-                    else: p.textLabel
+  # By the popup's one rule in every host, for the popup's ground
+  # (`popupStateWordColour`): `needs input` in the session lines' ink below
+  # it, `working` and `blocked` readable on that ground. The raw roles were
+  # 3.30, 3.05 and 4.47:1 on Light's default surface.
+  let stateColour = p.popupStateWordColour(popup.state, p.ground)
   let state = r.text(stateWord(popup.state), CaptionPx, stateColour,
                      shrink = false, pairs = [("line-height", "18px")])
   r.tag(state, "state", stateWord(popup.state))

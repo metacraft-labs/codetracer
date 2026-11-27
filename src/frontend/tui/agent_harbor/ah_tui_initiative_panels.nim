@@ -135,7 +135,8 @@ proc legendCells*(counts: array[MilestoneStatusClass, int]): int =
 
 proc drawMilestoneBar*(c: var AhCanvas; parent: AhNode; row, col, width: int;
                        counts: array[MilestoneStatusClass, int];
-                       labelled: bool; legendSlot = 0; onGround = false): int =
+                       labelled: bool; legendSlot = 0; onGround = false;
+                       panelMarks = false): int =
   ## Milestones by status: a bar of segments, each as wide as its count's
   ## share (at least one cell), and its legend — under it with the words
   ## (`labelled`, wrapping), or beside it with the numbers. Beside it, the
@@ -144,9 +145,12 @@ proc drawMilestoneBar*(c: var AhCanvas; parent: AhNode; row, col, width: int;
   ## given the same slot is one width and ends in one column, on one scale.
   ## `onGround`: each status segment and mark takes its role's ink readable
   ## on the ground under it (`markOn`), as a surface dropped from the
-  ## caption bar draws them (the initiative popup); the panels keep the
-  ## roles themselves (on a panel's selected row, Light's status roles still
-  ## fall to 1.9-2.9:1; a known gap, not resolved here).
+  ## caption bar draws them (the initiative popup). `panelMarks` (an
+  ## Initiatives row): only a segment or mark on the plain panel ground
+  ## does (`markOnPanel`); the card band and a selected row keep the roles
+  ## themselves (on a panel's selected row, Light's status roles still fall
+  ## to 1.9-2.9:1; a known gap, not resolved here). Neither (the progress
+  ## panel's summary): the roles themselves.
   ## Returns the rows.
   let n = c.node(parent, row, col, width, 1, [("milestone-bar", statusCountsText(counts))])
   var total = 0
@@ -188,6 +192,7 @@ proc drawMilestoneBar*(c: var AhCanvas; parent: AhNode; row, col, width: int;
   let track = c.node(n, row, col + 1, barW, 1, [("ms-bar", "track")])
   for i, s in present:
     let ink = if onGround and s != mscPlanned: c.p.markOn(c.p.markOf(s), c.bgAt(row, at)).colour
+              elif panelMarks: c.p.segmentOnPanel(s, c.bgAt(row, at))
               else: c.p.segmentOf(s)
     discard c.put(row, at, repeat(BarGlyphHalf, cells[i]), ink)
     discard c.node(track, row, at, cells[i], 1, [("segment", $s & ":" & $counts[s])])
@@ -210,7 +215,9 @@ proc drawMilestoneBar*(c: var AhCanvas; parent: AhNode; row, col, width: int;
       inc r
       lc = col + 1
     let m = c.p.markOf(s)
-    discard c.mark(legend, r, lc, if onGround: c.p.markOn(m, c.bgAt(r, lc)) else: m)
+    discard c.mark(legend, r, lc, if onGround: c.p.markOn(m, c.bgAt(r, lc))
+                                  elif panelMarks: c.p.markOnPanel(m, c.bgAt(r, lc))
+                                  else: m)
     discard c.put(r, lc + 2, words, c.p.textLabel)
     lc += need + 2
   n.height = r - row + 1
@@ -226,13 +233,14 @@ proc drawSessionLine*(c: var AhCanvas; parent: AhNode; item: SessionItem;
                       row, col, width: int; onGround = false) =
   ## One of an initiative's sessions: its mark, title and status word.
   ## `onGround`: the mark takes its role's ink readable on the ground under
-  ## it (`markOn`), as `drawMilestoneBar`'s.
+  ## it (`markOn`), else only on the plain panel ground (`markOnPanel`), as
+  ## `drawMilestoneBar`'s.
   let n = c.node(parent, row, col, width, 1, [("session", item.id),
                                               ("attention", $item.attention),
                                               ("tooltip", item.tooltip)])
   let ground = c.bgAt(row, col)
   let m = c.p.markOf(item.attention)
-  discard c.mark(n, row, col, if onGround: c.p.markOn(m, ground) else: m)
+  discard c.mark(n, row, col, if onGround: c.p.markOn(m, ground) else: c.p.markOnPanel(m, ground))
   let sw = widthOf(item.statusLabel)
   # Two cells before the right-aligned status word, as a menu item keeps
   # before its origin (`StatusWordGap`).
@@ -274,7 +282,10 @@ proc drawInitiativeRow(c: var AhCanvas; parent: AhNode; vm: InitiativesVM;
   let selected = row.selected
   # The selected initiative on the selected-row ground every list shares
   # (the palette's `activeRow`, the web's `.ah-initiative-row-selected`), with
-  # the action bar down its left edge.
+  # the action bar down its left edge, in the action colour's ring step
+  # (`actionRingInk`): the bar is the only mark of the selection beyond a
+  # ground 1.37:1 off its neighbours', and the action border (#6366f1) is
+  # under 3:1 on the selected-row ground in both modes.
   let ground = if selected: c.p.activeRow
                elif index mod 2 == 1: c.tone.band else: c.tone.body
   if ground == c.tone.body:
@@ -286,11 +297,12 @@ proc drawInitiativeRow(c: var AhCanvas; parent: AhNode; vm: InitiativesVM;
                   ("folded", $row.folded)])
   c.target(top, col, width, height, proc() = vm.select(id))
   if selected:
-    for r in top ..< top + height: discard c.put(r, col, BarGlyph, c.p.borderAction)
+    for r in top ..< top + height: discard c.put(r, col, BarGlyph, c.p.actionRingInk)
   discard c.put(top, col + 1, if row.folded: FoldedGlyph else: UnfoldedGlyph, c.p.textLabel)
   discard c.node(n, top, col + 1, 1, 1, [("fold", id)])
   c.target(top, col + 1, 1, 1, proc() = vm.toggleFolded(id))
-  discard c.mark(n, top, col + 3, c.p.markOf(row.state))
+  # The state mark readable on the plain panel (`markOnPanel`).
+  discard c.mark(n, top, col + 3, c.p.markOnPanel(c.p.markOf(row.state), c.bgAt(top, col + 3)))
   let pw = widthOf(row.progressText)
   discard c.text(n, top, col + 5, max(1, infoW - 5 - pw - 1), row.title, c.p.textBody,
                  bold = true, fact = "title")
@@ -298,7 +310,7 @@ proc drawInitiativeRow(c: var AhCanvas; parent: AhNode; vm: InitiativesVM;
                  fact = "progress")
   var r = top + 1
   r += c.drawMilestoneBar(n, r, col + 4, infoW - 3, row.statusCounts, labelled = false,
-                          legendSlot = legendSlot)
+                          legendSlot = legendSlot, panelMarks = true)
   if row.currentMilestone.len > 0:
     c.drawCurrent(n, r, col + 5, infoW - 4, row.currentMilestone)
     inc r

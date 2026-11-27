@@ -24,7 +24,11 @@
 ##   `+N` failure ink, so one bar draws one red;
 ## * the palette's rule itself: Dark keeps the roles, Light takes the
 ##   readable steps pinned below, and the roles they replace are under the
-##   floors (the controls: each check here fails on the old inks).
+##   floors (the controls: each check here fails on the old inks);
+## * the popup's `needs input` header word is the session lines' ink on its
+##   ground (`initiativeSessionWordColour`; round 3, 2026-11-26);
+## * and one layout rule of the same bars: a cut session tab's label keeps
+##   exactly `StatusWordGap` cells before its origin (round 3).
 ##
 ## No stand-ins: the stories' own viewmodels drawn by the real views onto
 ## the real canvas (`mountAgentHarborStoryTui`).
@@ -45,7 +49,7 @@ proc mount(surface, fixture: string; cols, rows: int; mode: DesignMode): AhTuiMo
 proc neutral(p: AhPalette; ink: string): bool =
   ## A mark with no status role: idle's ring, ended's grey, a milestone
   ## planned or other.
-  ink in [p.iconDefault, p.endedMark, p.trackPlanned, p.iconSubtle]
+  ink in [p.iconDefault, p.endedMark, p.trackPlanned, p.plannedMark, p.iconSubtle]
 
 proc inkProblems(m: AhTuiMount; n: AhNode; floor: float; what: string): seq[string] =
   ## Every drawn cell of `n` whose ink is under `floor` on its own ground.
@@ -125,6 +129,43 @@ suite "CTF-P2c: the tab bars' status inks on their grounds":
     # over a panel, on #c8c2b5 (orange and green/800 do not).
     check on800 > 0
     check darker > 0
+    if problems.len > 0: echo problems.join("\n")
+    check problems.len == 0
+
+  test "the popup's needs-input header word is the session lines' ink on its ground":
+    # Terminal review round 3 (2026-11-26): the header drew `needs input`
+    # by the tab bar's rule (#9b3a12, #753317 over a panel) above session
+    # lines in the Initiatives rule (now #92400e, #78350f): one word, two inks
+    # on one ground.
+    var problems: seq[string]
+    var headers, lines = 0
+    for fixture in ["popup", "popup-over-panel"]:
+      for (size, cols, rows) in Sizes:
+        for mode in [dmDark, dmLight]:
+          let m = mount("agent-harbor-initiative-tabs", fixture, cols, rows, mode)
+          let p = m.canvas.p
+          let where = fixture & " " & size & " " & $mode & ": "
+          for popup in m.view.all("popup"):
+            let state = popup.first("state")
+            if state.isNil or state.attr("state") != "needs input": continue
+            inc headers
+            let st = m.canvas.grid.styleAt(state.row, state.col)
+            let wanted = p.initiativeSessionWordColour(saNeedsInput, st.bg)
+            if st.fg != wanted:
+              problems.add where & "header 'needs input' " & st.fg & " on " & st.bg &
+                           ", not the session lines' " & wanted
+            for line in popup.all("session"):
+              let word = line.first("status")
+              if word.isNil or word.row >= m.rows or line.attr("attention") != "needs-input": continue
+              let ws = m.canvas.grid.styleAt(word.row, word.col)
+              if ws.bg != st.bg: continue
+              inc lines
+              if ws.fg != st.fg:
+                problems.add where & "header " & st.fg & " and session line " & ws.fg &
+                             " on " & st.bg
+          m.dispose()
+    check headers == 8
+    check lines >= 8
     if problems.len > 0: echo problems.join("\n")
     check problems.len == 0
 
@@ -231,22 +272,41 @@ suite "CTF-P2c: the palette's status inks on a ground":
       check d.initiativeSessionWordColour(saNeedsInput, ground) == d.textWarning
       check d.initiativeSessionWordColour(saRunning, ground) == d.textSuccess
       check d.initiativeSessionWordColour(saFailed, ground) == d.textError
-    check l.statusStep800(prWarning) == "#9a3412"   # orange/800
+    # Needs input starts from amber/800, not orange/800 (#9a3412), which is
+    # only 7.8 CIEDE2000 from failed's red/800.
+    check l.statusStep800(prWarning) == "#92400e"   # amber/800
+    check deltaE2000(l.statusStep800(prWarning), l.statusStep800(prError)) >= 12.0
     check l.statusStep800(prSuccess) == "#166534"   # green/800
     check l.statusStep800(prError) == "#991b1b"     # red/800
     for att in [saNeedsInput, saRunning, saFailed]:
       for ground in [l.ground, l.panel, l.menu]:
         check l.initiativeSessionWordColour(att, ground) == l.statusStep800(pieRoleOf(att))
-    # On #c8c2b5 orange and green/800 fall under it (4.12 and 4.02:1), so
-    # they are taken a quarter toward the body text there; red/800 holds.
+    # On #c8c2b5 amber and green/800 fall under it (4.00 and 4.02:1): needs
+    # input takes amber/900 there, running is taken a quarter toward the
+    # body text; red/800 holds.
     check contrastOf(l.statusStep800(prWarning), l.hover) < TextFloor
     check contrastOf(l.statusStep800(prSuccess), l.hover) < TextFloor
     check contrastOf(l.statusStep800(prError), l.hover) >= TextFloor
-    check l.initiativeSessionWordColour(saNeedsInput, l.hover) == "#7d3016"
+    check l.initiativeSessionWordColour(saNeedsInput, l.hover) == "#78350f"   # amber/900
     check l.initiativeSessionWordColour(saRunning, l.hover) == "#1a5530"
     check l.initiativeSessionWordColour(saFailed, l.hover) == "#991b1b"
     check l.initiativeSessionWordColour(saNeedsInput, l.hover) ==
-      mixInk(l.statusStep800(prWarning), l.textBody, StatusInkStepPercent)
+      DesignPrimitiveHex[dpColorsAmber900][dmLight]
+    # Needs input on every Light ground: amber/800 where it holds 4.5:1,
+    # amber/900 where it does not, and the darkest for an unknown ground.
+    for (ground, ink, ratio) in [
+        (l.ground, "#92400e", 6.57),                                          # stripe
+        (DesignTokenHex[dtColorsUiSurfaceBaseRaised][dmLight], "#92400e", 6.39),  # raised
+        (l.panel, "#92400e", 5.49),
+        (l.menu, "#92400e", 4.90),                                            # card
+        (DesignTokenHex[dtColorsUiSurfaceBaseCanvas][dmLight], "#78350f", 5.68),  # canvas
+        (l.hover, "#78350f", 5.11),
+        ("", "#78350f", 5.11)]:
+      let got = l.initiativeSessionWordColour(saNeedsInput, ground)
+      check got == ink
+      check abs(contrastOf(got, if ground.len > 0: ground else: l.hover) - ratio) < 0.01
+    check DesignTokenHex[dtColorsUiSurfaceBaseRaised][dmLight] == "#f3f3f3"
+    check DesignTokenHex[dtColorsUiSurfaceBaseCanvas][dmLight] == "#d2ccc1"
     # A cell with no ground is taken as the darkest one.
     check l.initiativeSessionWordColour(saRunning, "") == "#1a5530"
     for att in [saNeedsInput, saRunning, saFailed]:
@@ -279,3 +339,35 @@ suite "CTF-P2c: the palette's status inks on a ground":
     # A mark with no status role is left as it is.
     let planned = l.markOf(mscPlanned)
     check l.markOn(planned, l.tertiary) == planned
+
+suite "CTF-P2c: a cut session tab's gap before its origin":
+  test "a cut label keeps exactly StatusWordGap cells before the origin":
+    # Terminal review round 3 (2026-11-26): where the cut fell after a
+    # space, the space went with it (no space before the "…") and the origin
+    # stood three cells off (`Persist the…   TUI`); now always two.
+    var problems: seq[string]
+    var cut, afterSpace = 0
+    for fixture in ["multi-line", "multi-line-40", "focused-initiative", "single-line",
+                    "single-line-40", "long-names"]:
+      for (size, cols, rows) in Sizes:
+        for mode in [dmDark, dmLight]:
+          let m = mount("agent-harbor-session-tabs", fixture, cols, rows, mode)
+          for tab in m.view.all("tab"):
+            let label = tab.first("label")
+            let origin = tab.first("origin")
+            if label.isNil or origin.isNil or label.row >= m.rows: continue
+            let full = label.attr("label")
+            if widthOf(full) <= label.width: continue   # whole: the layout's own gap
+            inc cut
+            let cells = label.width
+            if cells < widthOf(full) and cellSlice(full, cells - 1, cells) == " ":
+              inc afterSpace
+            let gap = origin.col - (label.col + label.width)
+            if gap != StatusWordGap:
+              problems.add fixture & " " & size & " " & $mode & ": '" & full & "' cut to " &
+                           $label.width & " cells, " & $gap & " before its origin"
+          m.dispose()
+    check cut > 0
+    check afterSpace > 0   # a cut that fell after a space is among them
+    if problems.len > 0: echo problems.join("\n")
+    check problems.len == 0

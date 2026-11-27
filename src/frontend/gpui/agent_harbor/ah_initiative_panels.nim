@@ -138,12 +138,15 @@ proc initiativesHeadPx*(vm: InitiativesVM; widthPx: int; linePx = HeadLinePx): i
 
 proc drawMilestoneBar*(r: GpuiRenderer; p: AhPalette;
                        counts: array[MilestoneStatusClass, int];
-                       labelled: bool; availPx = 0): GpuiElement =
+                       labelled: bool; availPx = 0; ground = ""): GpuiElement =
   ## Progress at a glance: one thin bar split by status, done first, each
   ## segment its share; the counts with their marks beside it (a row of the
   ## Initiatives panel) or, `labelled`, named under it -- WRAPPING onto more
   ## lines, 10px apart, when they do not fit in `availPx` (`.ah-ms-labelled
   ## .ah-ms-legend`: `flex-wrap: wrap`, `gap: 10px`, 14px lines).
+  ## `ground`: what an Initiatives row draws it on; its segments and marks
+  ## are readable there when it is the plain panel (`markOnPanel`), and keep
+  ## the roles on any other ground ("" for a bar that is not resolved).
   # `.ah-ms-progress`: the bar and its legend 12px apart on one line, or,
   # labelled, 6px apart one above the other.
   result = r.box(column = labelled, pairs = [("gap", if labelled: "6px" else: "12px"),
@@ -169,13 +172,14 @@ proc drawMilestoneBar*(r: GpuiRenderer; p: AhPalette;
     let n = counts[status]
     if n == 0: continue
     let seg = r.box(pairs = [("flex-grow", $n), ("height", $BarPx & "px"),
-                             ("min-width", "2px"), ("background", p.segmentOf(status))])
+                             ("min-width", "2px"),
+                             ("background", p.segmentOnPanel(status, ground))])
     r.tag(seg, "segment", $status & ":" & $n)
     r.appendChild(bar, seg)
     segments.add seg
     let item = r.box(pairs = [("gap", "4px"), ("items", "center"), ("flex-shrink", "0")])
     let words = $n & (if labelled: " " & $status else: "")
-    r.appendChild(item, r.mark(p.markOf(status)))
+    r.appendChild(item, r.mark(p.markOnPanel(p.markOf(status), ground)))
     # The counts in tabular figures (`.ah-ms-legend`).
     r.appendChild(item, r.text(words, CaptionPx, p.textLabel, shrink = false,
                                tabular = true,
@@ -228,7 +232,8 @@ proc drawSessionLine*(r: GpuiRenderer; p: AhPalette; item: SessionItem;
   r.tag(result, "session", item.id)
   r.tag(result, "attention", $item.attention)
   r.tag(result, "tooltip", item.tooltip)
-  r.appendChild(result, r.mark(p.markOf(item.attention)))
+  # The dot readable on the plain panel (`markOnPanel`).
+  r.appendChild(result, r.mark(p.markOnPanel(p.markOf(item.attention), ground)))
   let title = r.text(item.title, BodyPx, if onAction: p.onAction else: p.textBody,
                      pairs = [("flex-grow", "1"), ("line-height", $LinePx & "px")])
   r.tag(title, "title", item.title)
@@ -252,8 +257,10 @@ proc drawInitiativeRow(r: GpuiRenderer; p: AhPalette; vm: InitiativesVM;
   let selected = row.selected
   # The selected initiative is drawn on the selected-row ground every list
   # shares (the palette's `activeRow`, `.ah-initiative-row-selected`), with a
-  # 3px bar in the action role down its left edge; it keeps its words'
-  # colours, status words included.
+  # 3px bar down its left edge in the action colour's ring step
+  # (`actionRingInk`: the action border, #6366f1, is under 3:1 on the
+  # selected-row ground in both modes); it keeps its words' colours, status
+  # words included.
   let fg = p.textBody
   let quiet = p.textCaption
   result = r.box(column = true, pairs = [("gap", "6px"), ("padding-top", "10px"),
@@ -268,7 +275,7 @@ proc drawInitiativeRow(r: GpuiRenderer; p: AhPalette; vm: InitiativesVM;
                else: p.panel
   if selected:
     r.styles(result, [("background", ground), ("position", "relative")])
-    r.appendChild(result, r.insetBar(p.borderAction, 3))
+    r.appendChild(result, r.insetBar(p.actionRingInk, 3))
   elif index mod 2 == 1: r.setStyle(result, "background", ground)
   r.tag(result, "ground", ground)
   r.tag(result, "initiative", id)
@@ -285,7 +292,7 @@ proc drawInitiativeRow(r: GpuiRenderer; p: AhPalette; vm: InitiativesVM;
   r.tag(fold, "fold", id)
   r.addEventListener(fold, "click", proc() = vm.toggleFolded(id))
   r.appendChild(head, fold)
-  r.appendChild(head, r.mark(p.markOf(row.state)))
+  r.appendChild(head, r.mark(p.markOnPanel(p.markOf(row.state), ground)))
   let title = r.text(row.title, BodyPx, fg, bold = true,
                      pairs = [("flex-grow", "1"), ("line-height", $LinePx & "px")])
   r.tag(title, "title", row.title)
@@ -308,7 +315,8 @@ proc drawInitiativeRow(r: GpuiRenderer; p: AhPalette; vm: InitiativesVM;
       ("width", $min(WideInfoMaxPx, (widthPx - 2 * InsetPx - WideColumnGapPx) div 2) & "px")])
     r.appendChild(result, info)
   r.appendChild(info, head)
-  r.appendChild(info, r.drawMilestoneBar(p, row.statusCounts, labelled = false))
+  r.appendChild(info, r.drawMilestoneBar(p, row.statusCounts, labelled = false,
+                                         ground = ground))
   if row.currentMilestone.len > 0:
     r.appendChild(info, r.drawCurrent(p, row.currentMilestone, ""))
   var meta: seq[string]

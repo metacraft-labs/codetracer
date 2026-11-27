@@ -114,9 +114,8 @@ proc ringUnderlineInk*(p: AhPalette): string =
   ## (brand/500) it replaced was 3.3:1 and 3.5:1 on the buttons' ground, under
   ## the ring step's 4.9:1 and 6.1:1 (terminal review, 2026-11-25). The
   ## palette has neither step; each is the other mode's
-  ## `surface/action/primary-hover`.
-  let other = if p.mode == dmDark: dmLight else: dmDark
-  tokenHexOf(dtColorsUiSurfaceActionPrimaryHover, other)
+  ## `surface/action/primary-hover` (`actionRingInk`).
+  p.actionRingInk
 
 proc drawRecordingButton*(c: var AhCanvas; parent: AhNode; vm: InitiativeTabStripVM;
                           initiativeId: string; rb: RecordingButton; row, col: int;
@@ -263,10 +262,12 @@ proc drawPopup(c: var AhCanvas; parent: AhNode; popup: InitiativePopup;
   # 2026-11-26).
   let ground = c.bgAt(r, col + 1)
   discard c.mark(n, r, col + 1, c.p.markOn(c.p.markOf(popup.state), ground))
-  let stateColour = case popup.state
-                    of isNeedsInput, isWorking, isBlocked:
-                      c.p.statusTextInk(pieRoleOf(popup.state), ground)
-                    else: c.p.textLabel
+  # The header's state word by the popup's one rule in every host
+  # (`popupStateWordColour`): `needs input` takes the session lines' rule,
+  # so the word has one ink on one ground, the header's and the line's below
+  # it (it drew the tab bar's #9b3a12 and, where the popup drops over a
+  # panel, #753317, over the lines' own inks).
+  let stateColour = c.p.popupStateWordColour(popup.state, ground)
   let word = stateWord(popup.state)
   let ww = widthOf(word)
   # Two cells before the state word (`StatusWordGap`; `popupHeadingCells`

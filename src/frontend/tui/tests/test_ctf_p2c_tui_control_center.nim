@@ -21,9 +21,15 @@
 ##   panel, the stripe and the selected initiative) and the waiting rows'.
 ##   In Light `running`, `needs input` and `failed` take their role's 800
 ##   step wherever it holds and a darker ink only where it does not; one
-##   word on one ground is one ink in both places; the dot beside a line
-##   keeps its icon colour; the web's rules resolve to the same inks on the
-##   grounds the web draws them on.
+##   word on one ground is one ink in both places; the web's rules resolve
+##   to the same inks on the grounds the web draws them on.
+## * **The Initiatives panel's status marks hold 3:1 on the plain panel**
+##   (WCAG 2.2 SC 1.4.11): its initiatives' and sessions' dots, its
+##   milestone legend's marks and its bar's segments take `markOnPanel` on
+##   the panel ground and keep their icon inks on the band and the selected
+##   row; a planned mark and segment are grey/400 in Light on every ground;
+##   the web's plain-row rules and the popup header's rules resolve to the
+##   same inks.
 ## * **The gaze mark**: off draws nothing; tracking and paused draw the eye
 ##   (struck when paused) and the words at the status line's end; the pause
 ##   key (`Ctrl+Alt+Y`, ESC then ^Y as a terminal sends it) and a click
@@ -75,6 +81,51 @@ proc wordProblems(p: AhPalette; attention: SessionAttention; fg, bg, where: stri
       if fg != step: result.add where & ": " & fg & " on " & bg & ", not the 800 step " & step
     elif fg == step or inkLuminance(fg) >= inkLuminance(step):
       result.add where & ": " & fg & " on " & bg & " is not darker than the 800 step " & step
+
+proc tokenHex(name: string; mode: DesignMode): string =
+  ## The hex of the design token `name` spells (`colors-ui-…`, or a
+  ## primitive step such as `colors-warning-800`), or "".
+  for t in DesignToken:
+    if ($t).replace('/', '-') == name: return DesignTokenHex[t][mode]
+  for t in DesignPrimitive:
+    if ($t).replace('/', '-') == name: return DesignPrimitiveHex[t][mode]
+
+proc modeArgs(args: string): seq[string] =
+  ## `args` split at its top-level commas: a `mix-ink(…)` stays whole.
+  var depth = 0
+  var arg = ""
+  for ch in args:
+    if ch == ',' and depth == 0:
+      result.add arg.strip
+      arg = ""
+      continue
+    if ch == '(': inc depth
+    elif ch == ')': dec depth
+    arg.add ch
+  result.add arg.strip
+
+proc resolved(value: string; mode: DesignMode): string =
+  ## A mode's value as the stylesheet resolves it (a token's name, or
+  ## `mix-ink(<token>, <token>, <n>%)`, which `defaults.styl` defines as the
+  ## palette's `mixInk`), or "" for anything this does not read.
+  if value.startsWith("mix-ink(") and value.endsWith(")"):
+    let args = modeArgs(value["mix-ink(".len ..< value.high])
+    if args.len != 3 or not args[2].endsWith("%"): return ""
+    let (a, b) = (tokenHex(args[0], mode), tokenHex(args[1], mode))
+    if a.len == 0 or b.len == 0: return ""
+    return mixInk(a, b, parseInt(args[2][0 ..< args[2].high]))
+  tokenHex(value, mode)
+
+proc byModeOf(value: string; mode: DesignMode): string =
+  ## A `by-mode(<Dark>, <Light>)` value's `mode` half, unresolved, or "".
+  if not (value.startsWith("by-mode(") and value.endsWith(")")): return ""
+  let names = modeArgs(value["by-mode(".len ..< value.high])
+  if names.len == 2: names[ord(mode)] else: ""
+
+proc stylesheet(name: string): seq[string] =
+  ## A component stylesheet's lines (`styles/components/<name>`).
+  readFile(currentSourcePath().parentDir.parentDir.parentDir / "styles" / "components" /
+           name).splitLines
 
 suite "CTF-P2c: the terminal control center":
   test "two columns at laptop and wide, one column, launching first, at sidebar":
@@ -388,6 +439,61 @@ suite "CTF-P2c: the terminal control center":
     check x.view.attr("cc-state") == "asError"
     x.dispose()
 
+  test "the error block's title holds 4.5:1 on its ground, in the error rule's one red":
+    # Terminal review round 3 (2026-11-26): Light's `Could not load the
+    # initiatives` was the error role, #dc2626, 3.74:1 on the panel, beside
+    # `Could not launch: ...` in red/700 (#b91c1c, 5.01:1). The title takes
+    # the palette's rule for status text on its ground (`statusTextInk`).
+    var titles = 0
+    for (surface, fixture) in [("agent-harbor-control-center", "error"),
+                               ("agent-harbor-initiatives", "error")]:
+      for (cols, rows) in [(180, 56), (45, 56), (220, 56)]:
+        for mode in [dmDark, dmLight]:
+          let m = mountAgentHarborStoryTui(surface, fixture, cols, rows, mode)
+          let p = m.canvas.p
+          for n in m.canvas.root.all("notice"):
+            if n.attr("notice") != "error": continue
+            let t = n.first("error-title")
+            check not t.isNil
+            if t.isNil: continue
+            inc titles
+            for col in t.col ..< t.col + t.width:
+              if m.canvas.grid.runeAt(t.row, col).strip.len == 0: continue
+              let st = m.canvas.grid.styleAt(t.row, col)
+              check st.fg == p.statusTextInk(prError, st.bg)
+              check contrastOf(st.fg, st.bg) >= StatusTextFloor
+              if mode == dmLight:
+                # The same red as `Could not launch` (red/700), not the role.
+                check st.fg == tokenHexOf(dtColorsUiTextErrorPrimaryHover, dmLight)
+                check contrastOf(p.textError, st.bg) < StatusTextFloor   # the control
+          m.dispose()
+    check titles >= 12
+
+  test "the selected initiative's bar holds 3:1 on the selected row, in the ring step":
+    # Terminal review round 3 (2026-11-26): the bar `▎` was the action border
+    # (#6366f1), 2.52:1 on Light's #c8c2b5 and 2.47:1 on Dark's #3c3c3c. It
+    # is the action colour's ring step (`actionRingInk`, the correlation
+    # ring's step).
+    var bars = 0
+    for (cols, rows) in [(180, 56), (45, 56)]:
+      for mode in [dmDark, dmLight]:
+        let m = mountAgentHarborStoryTui("agent-harbor-initiatives", "selected", cols, rows, mode)
+        let p = m.canvas.p
+        for row in m.canvas.root.all("initiative"):
+          if row.attr("selected") != "true": continue
+          for r in row.row ..< min(row.row + row.height, m.rows):
+            check m.canvas.grid.runeAt(r, row.col) == BarGlyph
+            let st = m.canvas.grid.styleAt(r, row.col)
+            inc bars
+            check st.fg == p.actionRingInk
+            check st.bg == p.activeRow
+            check contrastOf(st.fg, st.bg) >= 3.0
+            check contrastOf(p.borderAction, st.bg) < 3.0   # the control
+        m.dispose()
+    check bars >= 4
+    check actionRingInk(ahPalette(dmLight)) == "#4338ca"   # brand/700
+    check actionRingInk(ahPalette(dmDark)) == "#818cf8"    # brand/400
+
   test "a click on a chip and on a waiting row does what it carries":
     let m = mount("populated")
     let initiative = m.view.all("toggle").filterIt(it.attr("toggle") == "New initiative")
@@ -431,7 +537,7 @@ suite "CTF-P2c: the terminal control center":
       check idle.fg == p.textLabel
       if mode == dmLight:
         check ask.bg == p.panel
-        check ask.fg == "#9a3412"            # orange/800
+        check ask.fg == "#92400e"            # amber/800
       else:
         check ask.fg == p.textWarning
       for w in words:
@@ -439,7 +545,7 @@ suite "CTF-P2c: the terminal control center":
         check contrastOf(st.fg, st.bg) >= StatusTextFloor
       m.dispose()
 
-  test "the Initiatives panel's session status words hold 4.5:1 on every ground; their dots keep the icon colour":
+  test "the Initiatives panel's session status words hold 4.5:1 on every ground; their dots take markOnPanel":
     # The status word is a session line's only word for its state, beside a
     # dot of the same hue, so it is text (WCAG 2.2 SC 1.4.3): 4.5:1 against
     # the ground it is drawn on, the selected initiative's (#c8c2b5 in
@@ -469,11 +575,12 @@ suite "CTF-P2c: the terminal control center":
                 continue
               # A line laid out past the screen's last row is not drawn.
               if word.row >= m.rows or mark.row >= m.rows: continue
-              # The dot keeps its icon colour.
+              # The dot is its icon colour, readable on the plain panel
+              # (`markOnPanel`; the marks test below).
               let dot = m.canvas.grid.styleAt(mark.row, mark.col)
-              if dot.fg != p.markOf(attention).colour:
-                problems.add where & ": the dot is " & dot.fg & ", its icon colour " &
-                  p.markOf(attention).colour
+              let dotInk = p.markOnPanel(p.markOf(attention), dot.bg).colour
+              if dot.fg != dotInk:
+                problems.add where & ": the dot is " & dot.fg & ", not " & dotInk
               let st = m.canvas.grid.styleAt(word.row, word.col)
               if st.fg.len == 0 or st.bg.len == 0:
                 problems.add where & ": the status word's cell has no colours"
@@ -497,6 +604,109 @@ suite "CTF-P2c: the terminal control center":
           let key = $mode & " " & $attention & " " & ground
           if key notin seen: echo "  never checked: ", key
           check key in seen
+
+  test "the Initiatives panel's status marks hold 3:1 on the plain panel, by markOnPanel":
+    # In Light the success and warning icon inks are 2.55 and 2.76:1 on the
+    # panel (#e6e2db), a milestone's other mark 2.42:1 and the planned track
+    # (the border role, #aca494) 1.92:1, under WCAG 2.2 SC 1.4.11's 3:1. On
+    # the plain panel ground each status mark takes `markOnPanel` (the pie's
+    # ink for its role there); on the band and the selected row it keeps its
+    # icon ink (the selected row's gap is tracked on its own); the planned
+    # mark is grey/400 on every ground. The bar's planned remainder is the
+    # bar's own ground, not a mark: it stays the light border role, so a bar
+    # does not read as full.
+    let grey400 = DesignPrimitiveHex[dpColorsGrey400][dmLight]
+    check grey400 == "#727272"
+    check ahPalette(dmLight).plannedMark == grey400
+    check ahPalette(dmLight).markOf(mscPlanned).colour == grey400
+    check ahPalette(dmDark).plannedMark == tokenHexOf(dtColorsUiIconPrimarySubtle, dmDark)
+    check ahPalette(dmLight).trackPlanned == tokenHexOf(dtColorsUiBorderPrimary, dmLight)
+    check ahPalette(dmLight).trackPlanned == "#aca494"
+    check ahPalette(dmDark).trackPlanned == tokenHexOf(dtColorsUiIconPrimarySubtle, dmDark)
+    var problems: seq[string]
+    var onPanel: seq[string]   # "<kind> <status>", checked on the panel in Light
+    var planned, offPanel = 0
+    proc checkCell(m: AhTuiMount; r, col: int; want: MarkStyle; kind, status, where: string;
+                   problems: var seq[string]; onPanel: var seq[string]; offPanel: var int) =
+      ## The cell at (`r`, `col`) is `want` by `markOnPanel` on its ground,
+      ## and holds 3:1 where that ground is the panel.
+      let p = m.canvas.p
+      let st = m.canvas.grid.styleAt(r, col)
+      let wanted = p.markOnPanel(want, st.bg).colour
+      let what = kind & " " & status & " " & where
+      if st.fg != wanted:
+        problems.add what & " is " & st.fg & " on " & st.bg & ", not " & wanted
+      if st.bg == p.panel:
+        if contrastOf(st.fg, st.bg) < StatusMarkFloor:
+          problems.add what & " is " & formatFloat(contrastOf(st.fg, st.bg), ffDecimal, 2) &
+                       ":1 on the panel"
+        if p.mode == dmLight: onPanel.add kind & " " & status
+      elif st.fg == want.colour: inc offPanel
+    var legends = 0
+    for (surface, fixture) in [("agent-harbor-control-center", "populated"),
+                               ("agent-harbor-initiatives", "populated"),
+                               ("agent-harbor-initiatives", "selected")]:
+      for (cols, rows) in [(95, 40), (45, 56), (180, 56)]:
+        for mode in [dmDark, dmLight]:
+          let m = mountAgentHarborStoryTui(surface, fixture, cols, rows, mode)
+          let p = m.canvas.p
+          let at = $mode & " " & surface & "/" & fixture & " " & $cols & "x" & $rows
+          for panel in m.canvas.root.all("surface"):
+            if panel.attr("surface") != "agent-harbor-initiatives": continue
+            for row in panel.all("initiative"):
+              let where = at & " " & row.attr("initiative")
+              let mark = row.first("mark")
+              if not mark.isNil and mark.row < m.rows:
+                m.checkCell(mark.row, mark.col,
+                            p.markOf(parseEnum[InitiativeState](row.attr("state"))),
+                            "initiative", row.attr("state"), where, problems, onPanel, offPanel)
+              for s in row.all("session"):
+                let mk = s.first("mark")
+                if mk.isNil or mk.row >= m.rows: continue
+                m.checkCell(mk.row, mk.col,
+                            p.markOf(parseEnum[SessionAttention](s.attr("attention"))),
+                            "session", s.attr("attention"), where, problems, onPanel, offPanel)
+              for bar in row.all("milestone-bar"):
+                # The segments, cell by cell; the legend's marks follow in the
+                # bar's order, one per status present.
+                var present: seq[MilestoneStatusClass]
+                for seg in bar.all("segment"):
+                  let status = parseEnum[MilestoneStatusClass](seg.attr("segment").split(':')[0])
+                  present.add status
+                  if seg.row >= m.rows: continue
+                  for col in seg.col ..< seg.col + seg.width:
+                    if status == mscPlanned:
+                      inc planned
+                      let st = m.canvas.grid.styleAt(seg.row, col)
+                      if st.fg != p.trackPlanned:
+                        problems.add "segment planned " & where & " is " & st.fg & ", not " &
+                                     p.trackPlanned
+                    else:
+                      m.checkCell(seg.row, col, p.markOf(status), "segment", $status, where,
+                                  problems, onPanel, offPanel)
+                var marks: seq[AhNode]
+                for legend in bar.all("ms-legend"): marks.add legend.all("mark")
+                if marks.len != present.len:
+                  problems.add "legend " & where & ": " & $marks.len & " marks for " &
+                               $present.len & " statuses"
+                for i in 0 ..< min(marks.len, present.len):
+                  if marks[i].row >= m.rows: continue
+                  inc legends
+                  m.checkCell(marks[i].row, marks[i].col, p.markOf(present[i]), "legend",
+                              $present[i], where, problems, onPanel, offPanel)
+          m.dispose()
+    for problem in problems: echo "  ", problem
+    check problems.len == 0
+    # A check that ran on no mark proves nothing: the fixtures put the roles
+    # Light changes on the plain panel, leave marks off it in their icon
+    # inks, and draw a planned segment and the legends.
+    for key in ["session running", "session needs-input", "segment completed",
+                "legend completed", "initiative working"]:
+      if key notin onPanel: echo "  never on the panel: ", key
+      check key in onPanel
+    check offPanel > 0
+    check planned > 0
+    check legends > 0
 
   test "one ink per status word per ground across WAITING FOR YOU and the Initiatives panel":
     # The tab draws a session's state in two places, its waiting row and its
@@ -555,35 +765,6 @@ suite "CTF-P2c: the terminal control center":
           while k < styl.len and styl[k].len > 0 and styl[k][0] != ' ': inc k
           if k < styl.len and styl[k].strip.startsWith("color:"):
             return styl[k].strip["color:".len .. ^1].strip
-    proc tokenHex(name: string; mode: DesignMode): string =
-      ## The hex of the design token `name` spells, or "".
-      for t in DesignToken:
-        if ($t).replace('/', '-') == name: return DesignTokenHex[t][mode]
-      for t in DesignPrimitive:
-        if ($t).replace('/', '-') == name: return DesignPrimitiveHex[t][mode]
-    proc modeArgs(args: string): seq[string] =
-      ## `args` split at its top-level commas: a `mix-ink(…)` stays whole.
-      var depth = 0
-      var arg = ""
-      for ch in args:
-        if ch == ',' and depth == 0:
-          result.add arg.strip
-          arg = ""
-          continue
-        if ch == '(': inc depth
-        elif ch == ')': dec depth
-        arg.add ch
-      result.add arg.strip
-    proc resolved(value: string; mode: DesignMode): string =
-      ## A mode's value as the stylesheet resolves it, or "" for anything
-      ## this does not read.
-      if value.startsWith("mix-ink(") and value.endsWith(")"):
-        let args = modeArgs(value["mix-ink(".len ..< value.high])
-        if args.len != 3 or not args[2].endsWith("%"): return ""
-        let (a, b) = (tokenHex(args[0], mode), tokenHex(args[1], mode))
-        if a.len == 0 or b.len == 0: return ""
-        return mixInk(a, b, parseInt(args[2][0 ..< args[2].high]))
-      tokenHex(value, mode)
     let initiativesHover = ".ah-initiative-row:hover "
     let selected = ".ah-initiative-row-selected "
     let waitingHover = ".ah-cc-waiting-row:hover "
@@ -630,6 +811,114 @@ suite "CTF-P2c: the terminal control center":
     # the waiting row's on 1 and 3 hover rules on 1; failed, the line's rule
     # on 4 grounds and the waiting row's on 2.
     check resolvedRules == 2 * 2 * (3 + 1 + 3) + 2 * (4 + 2)
+
+  test "the web's plain-panel mark rules, planned rule and popup header resolve to the palette":
+    # The web does not read the palette. The Initiatives panel's marks on a
+    # plain panel row read `--ah-mark-panel-<role>`, which the palette writes
+    # into agent_harbor_pie_inks.styl (`markOnPanel`); planned's rule names
+    # grey/400 in Light; the popup header's state word names the tokens
+    # `popupStateWordColour` resolves to on the popup's default surface.
+    let sheet = stylesheet("agent_harbor.styl")
+    let inks = stylesheet("agent_harbor_pie_inks.styl")
+    proc panelVar(name: string; mode: DesignMode): string =
+      ## `--ah-mark-panel-<name>`'s `mode` hex in the generated sheet, or "".
+      for line in inks:
+        let l = line.strip
+        if l.startsWith("--ah-mark-panel-" & name & ":"):
+          return byModeOf(l[l.find(':') + 1 .. ^1].strip, mode)
+    # The plain row's block: each selector under it and the variable it reads.
+    const Plain = ".agent-harbor-initiatives .ah-initiative-row:nth-child(odd)" &
+                  ":not(.ah-initiative-row-selected):not(:hover)"
+    var rules: seq[(string, string)]   # (selector, variable name)
+    var start = -1
+    for i, line in sheet:
+      if line == Plain: start = i
+    check start >= 0
+    if start >= 0:
+      var pending: seq[string]
+      var i = start + 1
+      while i < sheet.len and (sheet[i].len == 0 or sheet[i].startsWith(" ")):
+        let l = sheet[i]
+        if l.startsWith("    background: var(--ah-mark-panel-") and l.endsWith(")"):
+          let name = l.strip["background: var(--ah-mark-panel-".len ..< l.strip.high]
+          for sel in pending: rules.add (sel, name)
+          pending = @[]
+        elif l.startsWith("  ") and not l.startsWith("   ") and l.strip.len > 0:
+          pending.add l.strip.strip(leading = false, chars = {','})
+        inc i
+    proc wantedOf(p: AhPalette; selector: string): MarkStyle =
+      ## The mark a plain-row selector draws, by the class it names.
+      for att in SessionAttention:
+        if selector == ".ah-att-" & $att & " .ah-tab-mark": return p.markOf(att)
+      for st in InitiativeState:
+        if selector == "&.ah-ist-" & $st & " > .ah-initiative-info > .ah-initiative-head > .ah-tab-mark":
+          return p.markOf(st)
+      for ms in MilestoneStatusClass:
+        let cls = case ms
+                  of mscInProgress: "in-progress"
+                  of mscPartial: "partial"
+                  of mscBlocked: "blocked"
+                  of mscPlanned: "planned"
+                  of mscCompleted: "completed"
+                  of mscOther: "other"
+        if selector in [".ah-ms-" & cls & " .ah-ms-mark", ".ah-ms-seg.ah-ms-" & cls]:
+          return p.markOf(ms)
+      MarkStyle()
+    var checked = 0
+    for mode in [dmDark, dmLight]:
+      let p = ahPalette(mode)
+      for (selector, name) in rules:
+        let want = p.wantedOf(selector)
+        check want.colour.len > 0
+        if want.colour.len == 0:
+          echo "  a plain-row selector this test does not know: ", selector
+          continue
+        let hex = panelVar(name, mode)
+        let wanted = p.markOnPanel(want, p.panel).colour
+        if hex != wanted: echo "  ", $mode, " ", selector, " reads ", name, " = ", hex, ", not ", wanted
+        check hex == wanted
+        check contrastOf(hex, p.panel) >= StatusMarkFloor
+        inc checked
+    # Every status class the panel draws a mark for has its rule, in both
+    # modes: the session dots (needs input, running, queued, failed), the
+    # initiative dots (needs input, working, blocked), the legend's and the
+    # bar's (completed, in progress, partial, blocked, other).
+    check rules.len == 4 + 3 + 2 * 5
+    check checked == 2 * rules.len
+    # Planned: the last rule that paints it, the segment (the bar's
+    # remainder, `trackPlanned`) and the mark (`plannedMark`) apart.
+    for mode in [dmDark, dmLight]:
+      let p = ahPalette(mode)
+      for (selector, wanted) in [(".ah-ms-seg.ah-ms-planned", p.trackPlanned),
+                                 (".ah-ms-planned .ah-ms-mark", p.plannedMark)]:
+        var value = ""
+        for i, line in sheet:
+          if line == selector and i + 1 < sheet.len and
+             sheet[i + 1].strip.startsWith("background:"):
+            value = sheet[i + 1].strip["background:".len .. ^1].strip
+        let hex = resolved(byModeOf(value, mode), mode)
+        if hex != wanted: echo "  ", $mode, " ", selector, " is ", value, " = ", hex
+        check hex == wanted
+    check resolved(byModeOf("by-mode(colors-ui-icon-primary-subtle, colors-grey-400)",
+                            dmLight), dmLight) == "#727272"
+    # The popup header's state word, on the popup's default surface.
+    var headers = 0
+    for (cls, state) in [("needs-input", isNeedsInput), ("working", isWorking),
+                         ("blocked", isBlocked)]:
+      var value = ""
+      for i, line in sheet:
+        if line == ".ah-popup-state-" & cls and i + 1 < sheet.len:
+          value = sheet[i + 1].strip["color:".len .. ^1].strip
+      for mode in [dmDark, dmLight]:
+        let p = ahPalette(mode)
+        let hex = resolved(byModeOf(value, mode), mode)
+        let wanted = p.popupStateWordColour(state, p.ground)
+        if hex != wanted: echo "  ", $mode, " .ah-popup-state-", cls, " is ", value, " = ", hex,
+                               ", not ", wanted
+        check hex == wanted
+        check contrastOf(hex, p.ground) >= StatusTextFloor
+        inc headers
+    check headers == 6
 
 suite "CTF-P2c: the terminal gaze mark":
   test "off draws nothing; tracking and paused draw the eye and the words at the end":

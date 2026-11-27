@@ -502,9 +502,13 @@ AH_PIE_TAB = 0.625rem
   padding: 0 EMPTY_OVERLAY_SIDE_GAP
   text-align: center
 
+// The error role by the palette's rule for status text on a ground
+// (`statusTextInk`, 4.5:1): Light's role (#dc2626) is 3.74:1 on the panel
+// (#e6e2db), so Light takes its 700 step (#b91c1c, 5.01:1), as the terminal
+// and GPUI draw it. Dark's role holds.
 .ah-fleet-error-title
   font-size: ah-rem(type-ui-size-body-md)
-  color: colors-ui-text-error-primary
+  color: by-mode(colors-ui-text-error-primary, colors-ui-text-error-primary-hover)
 
 .ah-fleet-error-message
   font-size: ah-rem(type-ui-size-caption-md)
@@ -1187,9 +1191,11 @@ AH_MARK = 0.5rem
 // front end draw, so one word on one ground is one ink across the screen.
 // Dark keeps each role. Light takes the role's 800 step wherever it holds
 // 4.5:1 (WCAG 2.2 SC 1.4.3): on the panel, the card band and a popup.
+// `needs input` takes amber/800, not orange/800, which read as `failed`'s
+// red/800 beside it.
 .ah-att-needs-input .ah-initiative-session-status,
 .ah-cc-waiting-state.ah-att-needs-input
-  color: by-mode(colors-ui-text-warning-primary, colors-warning-800)
+  color: by-mode(colors-ui-text-warning-primary, colors-amber-800)
 
 .ah-att-running .ah-initiative-session-status,
 .ah-cc-waiting-state.ah-att-running
@@ -1200,13 +1206,14 @@ AH_MARK = 0.5rem
   color: by-mode(colors-ui-text-error-primary, colors-error-800)
 
 // On `surface/primary/secondary-hover` (#c8c2b5: a hovered or selected
-// initiative, a hovered waiting row) orange and green/800 fall under 4.5:1,
-// so they are taken a quarter toward the body text there, as the palette
-// takes them; red/800 holds, so `failed` keeps the rule above.
+// initiative, a hovered waiting row) amber and green/800 fall under 4.5:1:
+// `needs input` takes amber/900 there and `running` is taken a quarter
+// toward the body text, as the palette takes them; red/800 holds, so
+// `failed` keeps the rule above.
 .ah-initiative-row:hover .ah-att-needs-input .ah-initiative-session-status,
 .ah-initiative-row-selected .ah-att-needs-input .ah-initiative-session-status,
 .ah-cc-waiting-row:hover .ah-cc-waiting-state.ah-att-needs-input
-  color: by-mode(colors-ui-text-warning-primary, mix-ink(colors-warning-800, colors-ui-text-primary-body, 25%))
+  color: by-mode(colors-ui-text-warning-primary, colors-amber-900)
 
 .ah-initiative-row:hover .ah-att-running .ah-initiative-session-status,
 .ah-initiative-row-selected .ah-att-running .ah-initiative-session-status,
@@ -2025,15 +2032,21 @@ AH_MARK = 0.5rem
   background: colors-ui-border-primary
   box-shadow: none
 
-// The popup's state word in its state's colour.
+// The popup's state word in its state's colour, by the palette's
+// `popupStateWordColour` for the popup's ground (the default surface), as
+// GPUI and the terminal draw it: `needs input` in its session lines' ink
+// (amber/800 in Light, the `.ah-initiative-session-status` rule above), so
+// the word has one ink in the header and the lines; `working` and `blocked`
+// readable as text (WCAG 2.2 SC 1.4.3, 4.5:1), Light's 700 steps (4.65 and
+// 5.99:1; the roles are 3.05 and 4.47:1 there). Dark keeps the roles.
 .ah-popup-state-needs-input
-  color: colors-ui-text-warning-primary
+  color: by-mode(colors-ui-text-warning-primary, colors-amber-800)
 
 .ah-popup-state-working
-  color: colors-ui-text-success-primary
+  color: by-mode(colors-ui-text-success-primary, colors-ui-text-success-primary-hover)
 
 .ah-popup-state-blocked
-  color: colors-ui-text-error-primary
+  color: by-mode(colors-ui-text-error-primary, colors-ui-text-error-primary-hover)
 
 // The legend keeps a fixed width so the bars of all rows end together.
 .ah-ms-legend
@@ -2156,7 +2169,9 @@ AH_MARK = 0.5rem
 // action surface they lost contrast).
 .agent-harbor-initiatives .ah-initiative-row.ah-initiative-row-selected
   background: by-mode(#3c3c3c, colors-ui-surface-primary-secondary-hover)
-  box-shadow: inset 0.1875rem 0 0 colors-ui-border-action
+  // The action colour's ring step (brand/400 Dark, brand/700 Light; the
+  // palette's `actionRingInk`): the action border is under 3:1 on this ground.
+  box-shadow: inset 0.1875rem 0 0 by-mode(colors-brand-400, colors-brand-700)
 
   &:hover
     background: by-mode(#3c3c3c, colors-ui-surface-primary-secondary-hover)
@@ -2279,8 +2294,18 @@ AH_MARK = 0.5rem
   .agent-harbor-progress .ah-milestone-meta
     overflow: visible
 
-// Planned in Dark: a mark the eye finds beside the other statuses.
-.ah-ms-planned .ah-ms-mark,
+// Planned in Dark: a mark the eye finds beside the other statuses. In Light
+// the mark is grey/400 (`colors-grey-400`, #727272), the lightest
+// design-system grey that keeps 3:1 (WCAG 2.2 SC 1.4.11) on every panel
+// ground: 3.73:1 on the panel, 3.32:1 on the card; the border role was
+// 1.92:1 on the panel. The palette's `plannedMark`.
+.ah-ms-planned .ah-ms-mark
+  background: by-mode(colors-ui-icon-primary-subtle, colors-grey-400)
+
+// The bar's planned segment is the part not yet done: the bar's own ground,
+// which the status segments fill, not a mark, so it is not held to 3:1 and
+// stays light in Light (the border role), or the bar reads as full. The
+// palette's `trackPlanned`.
 .ah-ms-seg.ah-ms-planned
   background: by-mode(colors-ui-icon-primary-subtle, colors-ui-border-primary)
 
@@ -2654,3 +2679,42 @@ AH_MARK = 0.5rem
 
   .ah-playback-glyph
     display: inline
+
+// The Initiatives panel's status marks on the plain panel ground -- an odd
+// row that is neither selected nor hovered: its state dot, its sessions'
+// dots, its milestone legend's marks and its bar's segments. Each takes the
+// palette's `markOnPanel` for its role (`--ah-mark-panel-*`, written into
+// agent_harbor_pie_inks.styl from the palette), as GPUI and the terminal
+// draw them: in Light the success and warning icon inks (2.55 and 2.76:1 on
+// the panel) and a milestone's other mark (2.42:1) are under WCAG 2.2 SC
+// 1.4.11's 3:1 there, so they take the pie's ink for their role on the panel
+// (https://www.w3.org/TR/WCAG22/#non-text-contrast). The card band and the
+// selected or hovered row keep the rules above. Planned is not a role: its
+// rule above holds on every ground.
+.agent-harbor-initiatives .ah-initiative-row:nth-child(odd):not(.ah-initiative-row-selected):not(:hover)
+  &.ah-ist-needs-input > .ah-initiative-info > .ah-initiative-head > .ah-tab-mark,
+  .ah-att-needs-input .ah-tab-mark,
+  .ah-ms-partial .ah-ms-mark,
+  .ah-ms-seg.ah-ms-partial
+    background: var(--ah-mark-panel-warning)
+
+  &.ah-ist-working > .ah-initiative-info > .ah-initiative-head > .ah-tab-mark,
+  .ah-att-running .ah-tab-mark,
+  .ah-ms-completed .ah-ms-mark,
+  .ah-ms-seg.ah-ms-completed
+    background: var(--ah-mark-panel-success)
+
+  .ah-att-queued .ah-tab-mark,
+  .ah-ms-in-progress .ah-ms-mark,
+  .ah-ms-seg.ah-ms-in-progress
+    background: var(--ah-mark-panel-info)
+
+  &.ah-ist-blocked > .ah-initiative-info > .ah-initiative-head > .ah-tab-mark,
+  .ah-att-failed .ah-tab-mark,
+  .ah-ms-blocked .ah-ms-mark,
+  .ah-ms-seg.ah-ms-blocked
+    background: var(--ah-mark-panel-error)
+
+  .ah-ms-other .ah-ms-mark,
+  .ah-ms-seg.ah-ms-other
+    background: var(--ah-mark-panel-other)

@@ -1390,15 +1390,19 @@ proc styleProblems(m: AhTuiMount; look: LookOf): seq[string] =
       result.expectGround(look, h, rows, "the section head", t.head)
   # A failure says what failed in the error role: a strip's one-line notice
   # all of it, readable on the notice's own ground (`statusTextInk`: Light's
-  # error role is 3.34:1 on its card), a panel's error block its title (its
-  # reason is a caption).
+  # error role is 3.34:1 on its card), a panel's error block its title,
+  # readable on the ground under it by the same rule (Light's role is
+  # 3.74:1 on the panel; terminal review round 3), its reason a caption.
   for n in view.all("notice"):
     if n.attr("notice") != "error": continue
     if n.height == 1:
       result.expectInk(look, n.first("error"), rows, "the error",
                        p.statusTextInk(prError, noticeGround(p)))
     else:
-      result.expectInk(look, n.first("error-title"), rows, "the error's title", p.textError)
+      let title = n.first("error-title")
+      let under = if title.isNil or title.row >= rows: p.panel
+                  else: look(title.row, title.col).bg
+      result.expectInk(look, title, rows, "the error's title", p.statusTextInk(prError, under))
       result.expectInk(look, n.first("error"), rows, "the error's reason", p.textCaption)
   # A panel's Retry is a control on its own ground, a visible step off the
   # panel's (`ControlGroundMinContrast`), as the web's outlined button is.
@@ -1516,8 +1520,9 @@ proc styleProblems(m: AhTuiMount; look: LookOf): seq[string] =
         # The row's first cells after its left edge (the bar is drawn there).
         let probe = AhNode(row: e.row, col: e.col + 1, width: 1, height: 1)
         result.expectGround(look, probe, rows, "initiative " & row.id, wanted)
+        # Its state mark, readable on the plain panel (`markOnPanel`).
         result.expectInk(look, e.first("mark"), rows, "the mark of " & row.id,
-                         markInk(p.markOf(row.state)))
+                         markInk(p.markOnPanel(p.markOf(row.state), wanted)))
   of "agent-harbor-initiative-progress":
     let vm = m.progress
     if vm.state.val == asReady and vm.found:

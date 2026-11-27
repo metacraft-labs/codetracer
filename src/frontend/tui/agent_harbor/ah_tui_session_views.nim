@@ -232,16 +232,28 @@ proc drawTab(c: var AhCanvas; parent: AhNode; vm: SessionTabStripVM;
     discard c.put(row, right + 1, "\xE2\x9C\x95", quietOnActive)
     discard c.node(n, row, right + 1, 1, 1, [("close", id)])
     c.target(row, right + 1, 1, 1, proc() = discard vm.close(id))
+  var originAt = -1
   if tab.originShort.len > 0:
     right -= widthOf(tab.originShort) + 1
     nextAt = right + 1
-    discard c.text(n, row, right + 1, widthOf(tab.originShort), tab.originShort,
+    originAt = right + 1
+  let label = tabLabelOf(tab)
+  let labelCells = max(1, right - (col + 3))
+  let shown = c.text(n, row, col + 3, labelCells, label,
+                     if tab.active: c.p.activeTabText else: c.p.textCaption, fact = "label",
+                     before = nextAt)
+  if originAt >= 0:
+    # A cut label keeps exactly `StatusWordGap` cells before the origin. The
+    # cut is fitted to end that far before it, but where it falls after a
+    # space the space goes with it (`elide`: no space before the "…"), and
+    # the origin would stand three cells off (`Persist the…   TUI`; terminal
+    # review round 3, 2026-11-26): the origin then moves in to the gap and
+    # the freed cell stays the tab's own, at its end.
+    if widthOf(label) > labelCells:
+      originAt = min(originAt, col + 3 + shown + StatusWordGap)
+    discard c.text(n, row, originAt, widthOf(tab.originShort), tab.originShort,
                    if tab.active: quietOnActive else: c.p.textCaption,
                    fact = "origin")
-  let label = tabLabelOf(tab)
-  discard c.text(n, row, col + 3, max(1, right - (col + 3)), label,
-                 if tab.active: c.p.activeTabText else: c.p.textCaption, fact = "label",
-                 before = nextAt)
   if vm.isInFocus(tab):
     # The focused initiative's tabs: an underline in the action role under
     # the tab (SGR 58 gives it its own colour, the web's 2px action line),
