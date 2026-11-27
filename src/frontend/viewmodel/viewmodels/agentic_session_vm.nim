@@ -24,6 +24,7 @@ import ../platform/paths
 import ../agent_service
 import ../store/[replay_data_store, types]
 import agent_activity_vm, agent_workspace_vm, deepreview_vm, editor_vm, vcs_vm
+import agent_diff_rows
 import review_entry
 
 type
@@ -106,53 +107,7 @@ proc projectActivity(vm: AgenticSessionVM; session: AgentServiceSessionEntry) =
   # .applyAgentSession`), shared with the native front-ends' agent host.
   vm.activity.applyAgentSession(session)
 
-proc diffRows(diff: string): seq[VCSDiffLineRow] =
-  var oldLine = 0
-  var newLine = 0
-  for line in diff.splitLines():
-    if line.startsWith("@@"):
-      result.add VCSDiffLineRow(lineType: "hunk", content: line,
-        oldLine: oldLine, newLine: newLine)
-    elif line.startsWith("+") and not line.startsWith("+++"):
-      inc newLine
-      result.add VCSDiffLineRow(lineType: "add", content: line,
-        oldLine: 0, newLine: newLine)
-    elif line.startsWith("-") and not line.startsWith("---"):
-      inc oldLine
-      result.add VCSDiffLineRow(lineType: "delete", content: line,
-        oldLine: oldLine, newLine: 0)
-    else:
-      inc oldLine
-      inc newLine
-      result.add VCSDiffLineRow(lineType: "context", content: line,
-        oldLine: oldLine, newLine: newLine)
-
-proc deepReviewLineType(line: string): string =
-  if line.startsWith("+") and not line.startsWith("+++"): "added"
-  elif line.startsWith("-") and not line.startsWith("---"): "removed"
-  else: "context"
-
-proc deepReviewLines(diff: string): seq[DeepReviewDiffLineEntry] =
-  var oldLine = 0
-  var newLine = 0
-  for line in diff.splitLines():
-    if line.startsWith("@@"):
-      continue
-    let lineType = line.deepReviewLineType()
-    case lineType
-    of "added":
-      inc newLine
-      result.add DeepReviewDiffLineEntry(lineType: lineType,
-        content: line, oldLine: 0, newLine: newLine)
-    of "removed":
-      inc oldLine
-      result.add DeepReviewDiffLineEntry(lineType: lineType,
-        content: line, oldLine: oldLine, newLine: 0)
-    else:
-      inc oldLine
-      inc newLine
-      result.add DeepReviewDiffLineEntry(lineType: lineType,
-        content: line, oldLine: oldLine, newLine: newLine)
+# `diffRows` and `deepReviewLines` live in `agent_diff_rows` (CTF-M1 slice 8).
 
 proc evidenceToVcsFile(file: AgentServiceEvidenceFileEntry; selected: bool):
     VCSFileRow =
