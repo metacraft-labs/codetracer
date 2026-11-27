@@ -17,23 +17,30 @@ jobs:
     # ct-native-replay, ct_gfx_player and ct-mcr from visual-replay-tools, once
     # per run. Seventeen legs that each built all of it filled the runner disk
     # pool (the host's guard stopped six jobs of run 45755922336) and timed out
-    # the private Nix cache. Four shards per desktop run, balanced by the lane's
-    # measured times (src/tests/scenarios/lanes/electron.timings.tsv,
-    # ci/test/scenario-lane-shard.py): about 70 minutes of scenarios each, about
-    # 45 of setup. ci/test/scenario-lane-shard-test.sh fails unless these legs
+    # the private Nix cache. Seven shards per desktop run, balanced by the lane's
+    # measured times (src/tests/scenarios/lanes/electron.timings.tsv, from run
+    # 45822112077's legs; ci/test/scenario-lane-shard.py): about 79 minutes of
+    # scenarios each, after 45 to 85 of setup. ci/test/scenario-lane-shard-test.sh
+    # fails unless these legs
     # run every scenario of each lane exactly once.
     strategy:
       fail-fast: false
       matrix:
         include:
-          - {leg: electron-1-of-4, lane: electron, shard: 1/4}
-          - {leg: electron-2-of-4, lane: electron, shard: 2/4}
-          - {leg: electron-3-of-4, lane: electron, shard: 3/4}
-          - {leg: electron-4-of-4, lane: electron, shard: 4/4}
-          - {leg: electron-monaco-1-of-4, lane: electron, shard: 1/4, shared-editor: "0"}
-          - {leg: electron-monaco-2-of-4, lane: electron, shard: 2/4, shared-editor: "0"}
-          - {leg: electron-monaco-3-of-4, lane: electron, shard: 3/4, shared-editor: "0"}
-          - {leg: electron-monaco-4-of-4, lane: electron, shard: 4/4, shared-editor: "0"}
+          - {leg: electron-1-of-7, lane: electron, shard: 1/7}
+          - {leg: electron-2-of-7, lane: electron, shard: 2/7}
+          - {leg: electron-3-of-7, lane: electron, shard: 3/7}
+          - {leg: electron-4-of-7, lane: electron, shard: 4/7}
+          - {leg: electron-5-of-7, lane: electron, shard: 5/7}
+          - {leg: electron-6-of-7, lane: electron, shard: 6/7}
+          - {leg: electron-7-of-7, lane: electron, shard: 7/7}
+          - {leg: electron-monaco-1-of-7, lane: electron, shard: 1/7, shared-editor: "0"}
+          - {leg: electron-monaco-2-of-7, lane: electron, shard: 2/7, shared-editor: "0"}
+          - {leg: electron-monaco-3-of-7, lane: electron, shard: 3/7, shared-editor: "0"}
+          - {leg: electron-monaco-4-of-7, lane: electron, shard: 4/7, shared-editor: "0"}
+          - {leg: electron-monaco-5-of-7, lane: electron, shard: 5/7, shared-editor: "0"}
+          - {leg: electron-monaco-6-of-7, lane: electron, shard: 6/7, shared-editor: "0"}
+          - {leg: electron-monaco-7-of-7, lane: electron, shard: 7/7, shared-editor: "0"}
           - {leg: firefox-1-of-1, lane: firefox, shard: ""}
     name: scenario-lanes (${{ matrix.leg }})
     runs-on: [self-hosted, linux, x64]
@@ -185,11 +192,13 @@ jobs:
           app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
           # From the test lock, ci/test/siblings/repro.lock: the runner and the
-          # desktop arm (ci/test/scenarios.sh) and the three blockchain recorders
-          # the column-breakpoint scenarios record with. Nothing else is
+          # desktop arm (ci/test/scenarios.sh) and the blockchain recorders the
+          # lane's scenarios record with (built only on the shards that use
+          # them; several scenarios record a program from a recorder's own
+          # checkout, so all are cloned). Nothing else is
           # provisioned for the lanes: ct comes from ct-build and the native
           # tools from visual-replay-tools (below).
-          test-siblings: DemoVideoScript,DemoVideoScript-Playwright,codetracer-solana-recorder,codetracer-polkavm-recorder,codetracer-evm-recorder
+          test-siblings: DemoVideoScript,DemoVideoScript-Playwright,codetracer-solana-recorder,codetracer-polkavm-recorder,codetracer-evm-recorder,codetracer-cairo-recorder,codetracer-leo-recorder,codetracer-miden-recorder,codetracer-cardano-recorder,codetracer-flow-recorder,codetracer-move-recorder,codetracer-fuel-recorder,codetracer-ton-recorder
 
       - name: Restore ct and replay-server from the ct-build job
         # build-once's tree (src/build-debug-repro), where the lane's stages and
@@ -294,6 +303,16 @@ jobs:
             exit 1
           fi
           echo "js recorder CLI: $(pwd)/packages/cli/dist/index.js"
+          # `ct record` finds the recorder on PATH only (src/common/paths.nim,
+          # jsRecorderExe), and the build makes no node_modules/.bin entry for
+          # it, so scripts/detect-siblings.sh puts none on PATH ("the
+          # JavaScript recorder `codetracer-js-recorder` was not found", run
+          # 45822112077). A launcher for the built CLI, on the job's PATH:
+          bin="${RUNNER_TEMP}/js-recorder-bin"
+          mkdir -p "$bin"
+          printf '#!/usr/bin/env bash\nexec node %q "$@"\n' "$(pwd)/packages/cli/dist/index.js" >"$bin/codetracer-js-recorder"
+          chmod +x "$bin/codetracer-js-recorder"
+          echo "$bin" >>"$GITHUB_PATH"
 
       - name: What this shard records with
         # The HCR flame demo and the blockchain recorders are built only on the
@@ -312,6 +331,18 @@ jobs:
         # What each piece is and where it lands: ci/test/scenario-lane-provision.sh.
         if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         run: bash ci/test/scenario-lane-provision.sh beam
+
+      - name: rr, gdb and dlv for the rr recordings
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        run: bash ci/test/scenario-lane-provision.sh rr
+
+      - name: The Ruby recorder's native extension
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && steps.needs.outputs.ruby == 'true' }}
+        run: bash ci/test/scenario-lane-provision.sh ruby
+
+      - name: ct-instrument for the cross-process recording
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' && steps.needs.outputs.instrument == 'true' }}
+        run: bash ci/test/scenario-lane-provision.sh instrument
 
       - name: The blockchain recorders for the scenario lane
         if: ${{ !cancelled() && steps.ct.outcome == 'success' && steps.needs.outputs.recorders != '' }}
@@ -356,7 +387,7 @@ jobs:
         # and opens the page in Playwright's Firefox (ci/test/scenarios.sh,
         # `browser_of`). Under Xvfb at 2560x1440, 96 dpi. The broken-run check
         # runs once, on the desktop lane's first shard. The timeout is the
-        # shard's own bound: shards are balanced to about 70 minutes
+        # shard's own bound: shards are balanced to about 80 minutes
         # (ci/test/scenario-lane-shard.py --weights), so 120 leaves room for
         # timings that run long and still ends a stuck leg inside the job's.
         id: lane
@@ -376,7 +407,7 @@ jobs:
             [ -z "$EDITOR_OVERRIDE" ] || export CODETRACER_SHARED_EDITOR="$EDITOR_OVERRIDE"
             just scenario-build dvs stage playwright
             just scenario-lane-xvfb "$LANE"
-            if [ "$LEG" = electron-1-of-4 ]; then
+            if [ "$LEG" = electron-1-of-7 ]; then
               . scripts/lib/own-xvfb.sh
               trap own_xvfb_stop EXIT
               own_xvfb_start -screen 0 2560x1440x24 -dpi 96 -nolisten tcp

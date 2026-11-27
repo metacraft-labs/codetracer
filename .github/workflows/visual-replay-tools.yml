@@ -166,6 +166,19 @@ jobs:
             isonim-gpui/rust/target/debug/libgpui_nim_shim.so
           )
           [ ! -e codetracer-visual-replay/ct-native-replay ] || files+=(codetracer-visual-replay/ct-native-replay)
+          # What `just build-ct-mcr` puts beside ct_cli, and the static-binary
+          # loader it leaves in ct_interpose: ct-mcr loads them at run time, and
+          # without them every recording it makes fails ("could not load
+          # libct_license_ffi.so", the scenario lanes of run 45822112077). The
+          # player's own shared libraries likewise, if it has any.
+          shopt -s nullglob
+          for f in codetracer-native-recorder/ct_cli/*.so codetracer-native-recorder/ct_interpose/*.so \
+            codetracer-native-recorder/ct_cli/ct-clr-fields codetracer-native-recorder/ct_cli/ct-dwarf-paths \
+            codetracer-native-recorder/ct_cli/race-calibration/RaceCalibration.* codetracer-visual-replay/*.so; do
+            files+=("$f")
+          done
+          shopt -u nullglob
+          printf 'packing %s\n' "${files[@]}"
           # The store paths these run against (glibc-2.40-224, lldb,
           # vulkan-loader, ...), which a shard realises after unpacking.
           (cd codetracer && nix develop .#devShells.x86_64-linux.default --command bash ci/build/record-runtime-closure.sh \
