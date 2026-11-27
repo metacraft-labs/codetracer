@@ -33,11 +33,12 @@ permissions:
 jobs:
   gpui-shell:
     runs-on: [self-hosted, linux, x64]
-    # Standalone, build-once (24-43 minutes cold) and the tools as well as
-    # provisioning as the GPUI window shards (setup-db-backend-siblings and
-    # repro.lock's siblings), the wait for the tools artifact, `just
-    # build-gpui`, and the lane.
-    timeout-minutes: 180
+    # Standalone, measured in run 45807145346 (garm VM, cold): repro.lock's
+    # siblings 33 minutes, build-once 55, the visual replay tools 30, the
+    # headless shim 12 (cached after), `just build-gpui` 11 -- 2h27m before the
+    # lane's first suite. Beside codetracer.yml's ct-build and tools jobs the
+    # job restores those instead and is far shorter.
+    timeout-minutes: 240
     name: GPUI shell lane (headless shim)
     steps:
       - name: Generate CI token
@@ -83,6 +84,20 @@ jobs:
           repo: metacraft-labs/GuiAssert
           ref: agents
           path: ${{ github.workspace }}/../GuiAssert
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Clone codetracer-pm sibling
+        # Suites of the lane read their oracle from the specification checkout
+        # (`$CT_SPECS_DIR`, else `../codetracer-pm`), and the lane refuses to
+        # run without it (run 45807145346:
+        # test_cross_renderer_visual_alignment). Not a build input, so cloned
+        # at its mainline `latest`, as the ViewModel jobs do.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-pm
+          ref: latest
+          path: ${{ github.workspace }}/../codetracer-pm
           gh-token: ${{ steps.ci_token.outputs.token }}
           submodules: 'false'
 
@@ -294,7 +309,9 @@ jobs:
         # the census the binary writes (ci/test/plat35-gpui-capture.sh). Not
         # when there is no ct.
         if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
-        run: nix develop .#devShells.x86_64-linux.default --command just plat35-capture-gpui
+        # It captures the `calc` recording, which the lane's fixture provider
+        # records; record-calc-fixture.sh records it when the lane did not.
+        run: nix develop .#devShells.x86_64-linux.default --command bash -c 'bash scripts/record-calc-fixture.sh && just plat35-capture-gpui'
 
       - name: Upload the lane's log
         if: ${{ !cancelled() }}
