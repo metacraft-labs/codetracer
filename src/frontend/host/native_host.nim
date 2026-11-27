@@ -404,6 +404,11 @@ const
     ## (`gpui_host.openGpuiTrace`): it has no window to take a keystroke yet,
     ## so for it the clock is the ONLY way out, and the argument above for a
     ## generous budget applies with more force, not less.
+  DefaultOpenProgressCapMs* = 600_000
+    ## The most an open may take while the engine keeps logging its
+    ## progress (`DapReadBound.progressCapMs`): ten minutes. The handshake
+    ## budget above then measures SILENCE, stdout and stderr together, and
+    ## this caps a replay that logs for ever without answering.
   HandshakeEnvVar* = "CODETRACER_TUI_HANDSHAKE_MS"
     ## Overrides `DefaultHandshakeMs`, in milliseconds.
     ##

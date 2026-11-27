@@ -394,8 +394,11 @@ proc openServerSession(srv: PaneServer; trace: string): ServerSession =
   var tui: TuiSession = nil
   try:
     tui = openTuiSession(folder, viewportHeight = 1,
+                         # an engine that keeps logging is still opening
+                         # (an rr replay on a loaded host took 32.6 s once)
                          bound = DapReadBound(timeoutMs: handshakeBudgetMs(),
-                                              interruptFd: -1))
+                                              interruptFd: -1,
+                                              progressCapMs: DefaultOpenProgressCapMs))
   except EngineStalledAfterOpenError as e:
     fail(ErrRequestFailed, "cannot open " & folder & ": " &
          StalledAfterOpenPhrase & " (" & e.msg & ")")
