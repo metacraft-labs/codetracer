@@ -32,7 +32,7 @@ jobs:
   # between them (D:\metacraft-dev-deps vs the account's LOCALAPPDATA), which
   # would make each runner class miss the other's cache.
   origin-dap-windows-toolchain:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.ref_name == 'ci/windows-measure'
     runs-on: [self-hosted, windows, x64]
     name: origin-DAP Windows toolchain cache
     # A cold bootstrap of the components below: GCC 244 s, NIM 283 s, RUST

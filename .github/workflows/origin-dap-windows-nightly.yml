@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   origin-dap-windows-nightly:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.ref_name == 'ci/windows-measure'
     runs-on: [self-hosted, windows, x64]  # CIP-5: DIY-Windows (env.ps1) -> eph-win-x64
     name: origin-DAP (nightly routed materialized matrix, Windows)
     # See the timeout-minutes rationale on windows-rust-components. This job is

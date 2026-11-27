@@ -1,0 +1,24 @@
+name: Windows origin-DAP measurement (proof branch only)
+# Proof-only: runs the three Windows origin-DAP jobs and nothing else, so a
+# measurement does not queue Linux jobs. Never lands.
+on:
+  push:
+    branches: [ci/windows-measure]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  origin-dap-windows:
+    uses: ./.github/workflows/origin-dap-windows.yml
+    secrets: inherit
+
+  origin-dap-windows-toolchain:
+    uses: ./.github/workflows/origin-dap-windows-toolchain.yml
+    secrets: inherit
+
+  origin-dap-windows-nightly:
+    needs: origin-dap-windows-toolchain
+    uses: ./.github/workflows/origin-dap-windows-nightly.yml
+    secrets: inherit
