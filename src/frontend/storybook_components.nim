@@ -140,6 +140,26 @@ import stories/agent_harbor_changes_inbox_stories
 import viewmodel/views/[isonim_agent_harbor_changes_view, isonim_agent_harbor_inbox_view]
 import ../ct_test/contracts as ct_test_contracts
 
+const storybookFixtureInputsOut {.strdefine.} = ""
+  ## When set, the compile writes the fixture set it embedded to this path as
+  ## JSON: `root` (`AgentHarborFixtureRoot`), `inputs`
+  ## (`AgentHarborFixtureInputs`: every file `staticRead` embedded, the
+  ## manifest first) and `absent` (`AgentHarborFixtureAbsentProbes`: the paths
+  ## whose absence chose the set). `scripts/build-storybook-components.sh`
+  ## sets it and records the result beside the bundle, so
+  ## `tools/visual-review/storybook-freshness.mjs` can refuse a bundle built
+  ## before a fixture refresh. Nim's own dependency list names modules only,
+  ## not `staticRead` files, so only the compile itself can say which files it
+  ## embedded. `nim js` re-runs this block on every compile (it keeps no
+  ## incremental cache), so the file always describes the compile that wrote it.
+when storybookFixtureInputsOut.len > 0:
+  static:
+    writeFile(storybookFixtureInputsOut, $(%*{
+      "root": AgentHarborFixtureRoot,
+      "inputs": AgentHarborFixtureInputs,
+      "absent": AgentHarborFixtureAbsentProbes,
+    }))
+
 type
   DisposeProc = proc()
   MountBody = proc(store: ReplayDataStore): DisposeProc

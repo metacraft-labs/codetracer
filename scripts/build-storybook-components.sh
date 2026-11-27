@@ -30,6 +30,22 @@
 # later than the start. This is the ordering the GPUI shim stamp uses
 # (codetracer-pm spec/Testing/Cross-Renderer-Visual-Alignment.md).
 #
+# THE INPUT RECORD. The bundle compiles in more than `src/frontend`: modules
+# from the sibling checkouts on the search path, files embedded with
+# `staticRead` (the Agent Harbor fixture set among them) and the Nim
+# configuration. After a successful compile this writes what the compile read
+# to `storybook/dist/components.js.inputs.json`: the compiler's own module list
+# (`--genScript:on` writes `<nimcache>/storybook_components.deps`; the JS
+# backend keeps nothing else in its nimcache, so a private temporary one is
+# used), and the fixture files the compile embedded, which
+# `storybook_components.nim` writes out when `-d:storybookFixtureInputsOut` is
+# set. `tools/visual-review/record-storybook-inputs.mjs` adds each sibling
+# checkout's HEAD and dirty flag and a digest of the fixture set, and the guard
+# refuses a bundle whose recorded inputs have changed, or that has no record.
+# See `INPUTS_RECORD` in `tools/visual-review/storybook-freshness.mjs`. The
+# record is written before the stamp, so a recording that fails leaves the
+# compile unstamped.
+#
 # A FAILED COMPILE IS NOT STAMPED. With `set -e` the script stops before the
 # `touch`, so the stamp keeps its old mtime and the guard still refuses it.
 set -euo pipefail
@@ -39,8 +55,12 @@ cd -- "${repo_root}"
 
 bundle=storybook/dist/components.js
 compiled_stamp="${bundle}.compiled"
+inputs_record="${bundle}.inputs.json"
 start_stamp="$(mktemp)"
-trap 'rm -f -- "${start_stamp}"' EXIT
+inputs_dir="$(mktemp -d)"
+trap 'rm -rf -- "${start_stamp}" "${inputs_dir}"' EXIT
+# `nim js` does not create its nimcache directory before writing the `.deps`.
+mkdir -p "${inputs_dir}/nimcache"
 
 mkdir -p storybook/dist
 nim \
@@ -48,8 +68,18 @@ nim \
 	-d:ctRenderer \
 	--path:../nim-everywhere/src \
 	--hints:off \
+	--genScript:on \
+	--nimcache:"${inputs_dir}/nimcache" \
+	-d:storybookFixtureInputsOut="${inputs_dir}/fixture-inputs.json" \
 	--out:"${bundle}" \
 	js src/frontend/storybook_components.nim
+
+node tools/visual-review/record-storybook-inputs.mjs \
+	"${repo_root}" \
+	"${repo_root}/src/frontend/storybook_components.nim" \
+	"${inputs_dir}/nimcache/storybook_components.deps" \
+	"${inputs_dir}/fixture-inputs.json" \
+	"${inputs_record}"
 
 # `touch -r` copies a reference file's mtime. It is the portable spelling: BSD
 # touch has no GNU `-d @epoch`. Only a bundle nim rewrote is newer than the
