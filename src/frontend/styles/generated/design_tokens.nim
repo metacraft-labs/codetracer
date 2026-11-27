@@ -456,15 +456,21 @@ const
 
 type
   DesignPrimitive* = enum
-    ## The `alias` layer's primitive colour steps a native view names
+    ## The `alias` and `brand` layers' primitive colour steps a native view names
     ## directly (the generator's `NIM_PRIMITIVES`); the `mapped` layer has
     ## no semantic token for them.
     dpColorsSuccess800 = "colors/success/800"
     dpColorsWarning800 = "colors/warning/800"
     dpColorsError800 = "colors/error/800"
+    dpColorsAmber800 = "colors/amber/800"
+    dpColorsAmber900 = "colors/amber/900"
+    dpColorsGrey400 = "colors/grey/400"
 
 const
   DesignPrimitiveHex*: array[DesignPrimitive, array[DesignMode, string]] = [
     dpColorsSuccess800: ["#166534", "#166534"],
     dpColorsWarning800: ["#9a3412", "#9a3412"],
-    dpColorsError800: ["#991b1b", "#991b1b"]]
+    dpColorsError800: ["#991b1b", "#991b1b"],
+    dpColorsAmber800: ["#92400e", "#92400e"],
+    dpColorsAmber900: ["#78350f", "#78350f"],
+    dpColorsGrey400: ["#727272", "#727272"]]

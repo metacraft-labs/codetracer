@@ -423,17 +423,26 @@ NIM_MODES = ["Dark", "Light"]
   # publishing is a loud failure below, not a silent fallback to $value.
 
 NIM_PRIMITIVES = [
-    # The `alias` layer's primitive colour steps a native view names
-    # directly, by token path. The `mapped` layer has no semantic token for
-    # them, so without this list the Nim table cannot carry them and a view
-    # would have to mix a stand-in; the stylesheets already have them as
-    # stylus variables (`colors-success-800`, ...). Each is resolved like a
-    # mapped token, in every mode, into `DesignPrimitive` /
-    # `DesignPrimitiveHex`. A path the design system stops defining fails
-    # the run.
+    # The `alias` and `brand` layers' primitive colour steps a native view
+    # names directly, by token path. The `mapped` layer has no semantic
+    # token for them, so without this list the Nim table cannot carry them
+    # and a view would have to mix a stand-in; the stylesheets already have
+    # them as stylus variables (`colors-success-800`, `colors-amber-800`,
+    # ...). Each is resolved like a mapped token, in every mode, into
+    # `DesignPrimitive` / `DesignPrimitiveHex`. A path the design system
+    # stops defining fails the run.
     ("colors", "success", "800"),
     ("colors", "warning", "800"),
     ("colors", "error", "800"),
+    # The `needs input` status word's Light steps (`agent_harbor_palette.
+    # initiativeSessionWordColour`): amber/800 where it holds 4.5:1, amber/900
+    # where it does not. The brand palette's, with no alias name.
+    ("colors", "amber", "800"),
+    ("colors", "amber", "900"),
+    # The neutral step the milestone's planned mark and track take in Light,
+    # the lightest grey that holds WCAG 2.2 SC 1.4.11's 3:1 on every panel
+    # ground (`agent_harbor_palette.trackPlanned`).
+    ("colors", "grey", "400"),
 ]
 
 def nim_ident(path_parts):
@@ -571,14 +580,14 @@ def emit_nim(out_file):
             lines.append(f"    (scope: \"{scope}\", token: {ident}){sep}")
     # The primitive steps (`NIM_PRIMITIVES`), after everything above so the
     # mapped table keeps its shape: an enum of their paths and their hexes.
-    alias_paths = set(flats["alias"].keys())
     for p in NIM_PRIMITIVES:
-        if tuple(p) not in alias_paths or flats["alias"][tuple(p)]["type"] != "color":
-            raise SystemExit(f"[ERROR] the alias layer defines no colour token {'/'.join(p)}")
+        if not any(tuple(p) in flats[layer] and flats[layer][tuple(p)]["type"] == "color"
+                   for layer in ("alias", "brand")):
+            raise SystemExit(f"[ERROR] neither the alias nor the brand layer defines a colour token {'/'.join(p)}")
     lines += ["",
               "type",
               "  DesignPrimitive* = enum",
-              "    ## The `alias` layer's primitive colour steps a native view names",
+              "    ## The `alias` and `brand` layers' primitive colour steps a native view names",
               "    ## directly (the generator's `NIM_PRIMITIVES`); the `mapped` layer has",
               "    ## no semantic token for them."]
     for p in NIM_PRIMITIVES:
