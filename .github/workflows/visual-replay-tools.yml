@@ -18,9 +18,12 @@ permissions:
 jobs:
   visual-replay-tools:
     runs-on: [self-hosted, linux, x64]
-    # The provisioning ct-build measures (32-61 minutes cold, run 44269676398)
-    # plus the three builds (about 25 minutes in a GPUI shard of that run).
-    timeout-minutes: 150
+    # Cold, the build is most of it: 50 minutes in run 45822112077, 40 of them
+    # ct_cli's release compile, and on a loaded host that compile alone ran
+    # past 64 minutes and the job past its old 150 (run 45959049981, after 36
+    # of provisioning). A warm job restores the products from the cache below
+    # and builds nothing.
+    timeout-minutes: 210
     name: Build the visual replay tools (once per run)
     steps:
       - name: Record when the job started
@@ -88,8 +91,21 @@ jobs:
             echo "native_recorder=$(flake_rev codetracer-native-recorder)"
             echo "visual_replay=$(flake_rev codetracer-visual-replay)"
             echo "snapshot_codecs=$(sed -n 's/^PRIVATE_SIBLING_CODETRACER_SNAPSHOT_CODECS=\([0-9a-f]\{40\}\)$/\1/p' ci/toolchain.pin)"
+            echo "isonim_gpui=$(grep -o '{ name = "isonim-gpui"[^}]*' repro.lock | sed -n 's/.*revision = "\([0-9a-f]\{40\}\)".*/\1/p' | head -n 1)"
           } | tee -a "$GITHUB_OUTPUT"
           grep -q '^snapshot_codecs=[0-9a-f]\{40\}$' "$GITHUB_OUTPUT"
+          grep -q '^isonim_gpui=[0-9a-f]\{40\}$' "$GITHUB_OUTPUT"
+
+      - name: Restore the products built from these revisions
+        # What the build below makes is decided by these revisions and by the
+        # scripts that build and pack it, so a job whose key was built before
+        # skips the build. Inside the checkout: a cache's path is part of its
+        # key, and runners differ in RUNNER_TEMP.
+        id: vrt_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: vrt-cache/visual-replay-tools.tar.gz
+          key: visual-replay-tools-v1-${{ steps.private_pins.outputs.native_backend }}-${{ steps.private_pins.outputs.native_recorder }}-${{ steps.private_pins.outputs.visual_replay }}-${{ steps.private_pins.outputs.snapshot_codecs }}-${{ steps.private_pins.outputs.isonim_gpui }}-${{ hashFiles('ci/test/visual-replay-tools.sh', 'ci/build/record-runtime-closure.sh', '.github/workflows/visual-replay-tools.yml') }}
 
       - name: Mint a token for the clones below
         # An installation token lives an hour, and these clones come after
@@ -140,9 +156,11 @@ jobs:
 
       - name: Build ct-native-replay, ct_gfx_player and ct-mcr
         id: tools
+        if: ${{ steps.vrt_cache.outputs.cache-hit != 'true' }}
         run: nix develop .#devShells.x86_64-linux.default --command bash ci/test/visual-replay-tools.sh "${RUNNER_TEMP}/visual-replay.env"
 
       - name: Build isonim-gpui's featureless shim
+        if: ${{ steps.vrt_cache.outputs.cache-hit != 'true' }}
         # For GPUI shard 1's plat45, which links `just build-gpui` against it:
         # built there, it cost the shard about 9.5 minutes of isonim-gpui's dev
         # shell and cargo (run 44384977215), before its first capture. Only the
@@ -154,6 +172,8 @@ jobs:
           ls -la rust/target/debug/libgpui_nim_shim.so
 
       - name: Pack them
+        id: pack
+        if: ${{ steps.vrt_cache.outputs.cache-hit != 'true' }}
         # Paths relative to the workspace's parent, as ct-build packs its
         # products, so a shard restores them beside its own siblings. The
         # licence is not packed: it is generated per job from ct-native-replay.
@@ -186,6 +206,19 @@ jobs:
           files+=(codetracer-visual-replay/nix-runtime-closure.txt)
           tar -czf "${RUNNER_TEMP}/visual-replay-tools.tar.gz" "${files[@]}"
           ls -la "${RUNNER_TEMP}/visual-replay-tools.tar.gz"
+          mkdir -p "${GITHUB_WORKSPACE}/vrt-cache"
+          cp "${RUNNER_TEMP}/visual-replay-tools.tar.gz" "${GITHUB_WORKSPACE}/vrt-cache/"
+
+      - name: Save them for the next job with these revisions
+        if: ${{ steps.pack.outcome == 'success' }}
+        uses: actions/cache/save@v4
+        with:
+          path: vrt-cache/visual-replay-tools.tar.gz
+          key: ${{ steps.vrt_cache.outputs.cache-primary-key }}
+
+      - name: Use the restored products
+        if: ${{ steps.vrt_cache.outputs.cache-hit == 'true' }}
+        run: cp vrt-cache/visual-replay-tools.tar.gz "${RUNNER_TEMP}/visual-replay-tools.tar.gz"
 
       - name: Upload them
         uses: actions/upload-artifact@v4
@@ -214,7 +247,7 @@ jobs:
           ATTIC_ENDPOINT: ${{ vars.ATTIC_ENDPOINT }}
           ATTIC_CACHE: ${{ vars.ATTIC_CACHE }}
           ATTIC_TOKEN: ${{ secrets.ATTIC_TOKEN }}
-          CT_JOB_TIMEOUT_MINUTES: 150
+          CT_JOB_TIMEOUT_MINUTES: 210
         # CT_JOB_TIMEOUT_MINUTES is this job's timeout-minutes (held equal by
         # push-built-closure-test.sh).
         run: bash ci/deploy/push-built-closure.sh --gcroots "${CT_GCROOT_DIR:-$RUNNER_TEMP/ct-gcroots}" --flake-inputs
