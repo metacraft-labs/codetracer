@@ -867,7 +867,6 @@ src/frontend/viewmodel/tests/unit/plat8-io-mutation-control.sha256	src/frontend/
 # src/frontend/tui/host/terminal_driver.nim, src/frontend/tui/main.nim,
 # src/frontend/tui/app/runtime.nim and test_esc_delay.nim; the ct-lens
 # suite's chord and drawn-at-once cases moved its PTY suite.
-src/frontend/tui/tests/plat42-surface-mutation-control.sha256	src/frontend/tui/app/runtime.nim	a8f6c18817375c1435f4e1aabef5026a12730813e635a3ee159f497cd5a30c5d	da449643b3ba2079623d78d28f12d60dd280a0bf064416a8437f01df91846226
 src/frontend/tui/tests/plat43-selector-mutation-control.sha256	src/frontend/tui/app/runtime.nim	a8f6c18817375c1435f4e1aabef5026a12730813e635a3ee159f497cd5a30c5d	da449643b3ba2079623d78d28f12d60dd280a0bf064416a8437f01df91846226
 src/frontend/tui/tests/plat45-layout-mutation-control.sha256	src/frontend/tui/main.nim	dc07c46cddae122d6e2d4b327728d4b45b11219fb59c29d77caf904f45e6168e	564a9b1e1bedb7f1552a47d13bd9b3d5c48cbc94d1782a38bbe2ff26cfabc571
 src/frontend/tui/tests/plat48-topbar-mutation-control.sha256	src/frontend/tui/host/terminal_driver.nim	f53f2ef2d01ee89e78f90c5c6324f753a5519704c2bf69abfc10c508600de980	f19178594ca6fa6c59708a9a05fd94367214a77600f8bed97236ebea8a76f3f2
@@ -913,7 +912,6 @@ src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/ui/i
 # 2026-11-26: flow_vm.nim presents each recorded value once (rows reuse the window's texts);
 # these re-grades are owed.
 src/frontend/tui/tests/plat41-pane-mutation-control.sha256	src/frontend/viewmodel/viewmodels/flow_vm.nim	20bd8e27ae57706b72c20908cd24b30511871f474bac980fa21dfeb4ec8384d4	32de153acb3979afe1b72f85835434f87730a0b0c065aaaa74b6569145f37867
-src/frontend/tui/tests/plat42-surface-mutation-control.sha256	src/frontend/viewmodel/viewmodels/flow_vm.nim	20bd8e27ae57706b72c20908cd24b30511871f474bac980fa21dfeb4ec8384d4	32de153acb3979afe1b72f85835434f87730a0b0c065aaaa74b6569145f37867
 src/frontend/viewmodel/tests/unit/hsf-sdk-mutation-control.sha256	src/frontend/viewmodel/viewmodels/flow_vm.nim	20bd8e27ae57706b72c20908cd24b30511871f474bac980fa21dfeb4ec8384d4	32de153acb3979afe1b72f85835434f87730a0b0c065aaaa74b6569145f37867
 # 2026-11-26: 94065cdb745 (linear-time loading of long single-call browser traces) moved these
 # subjects; these re-grades are owed.
@@ -932,7 +930,6 @@ src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/fronten
 # The terminal's and GPUI's Pixel History "Show value origin": the menu, the
 # routes, the history model and its suites; these harnesses owe a re-grade.
 src/frontend/tui/tests/plat40-producer-mutation-control.sha256	src/frontend/tui/host/tui_session.nim	9f655ae7cd7349021eb696c8a23768ff5734266d167af6657cd6c8533b9a3b64	431da9925aaddeb11f3d0a5132c0918d751bbee534c49c5a6a67dc6a7aa21a1b
-src/frontend/tui/tests/plat42-surface-mutation-control.sha256	src/frontend/tui/host/tui_session.nim	9f655ae7cd7349021eb696c8a23768ff5734266d167af6657cd6c8533b9a3b64	431da9925aaddeb11f3d0a5132c0918d751bbee534c49c5a6a67dc6a7aa21a1b
 src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/headless_app/pane_clicks.nim	7ab7a6d5165f440e6a68dd39d7f190b16ac69816205762a300d0fe711a360ab1	f3947c7d15c7b95be74efa22ec3d2dd6bced93681d72f3a9c1098656b010a8e0
 src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_plat50_click_models.nim	8283889992ddf541d8a0d0558057c1014f9c25aba56c4ef73b08d2c5c2dd8c4d	b61e6598666a1989b752daf9a25a3f37aadf8860bd40d0f8af8914733bfe19bf
 src/frontend/tui/tests/plat59-visual-replay-mutation-control.sha256	src/frontend/tui/app/views/visual_replay_panes.nim	bda0d75f185df7e1c65802b276e36e61bced1f7b2cd9b8f4f101386f562cc380	dc3ff2faafa3bd9076ddcb7ff7ba13bc0ec7a1571e7dd3d898ee472adbd92c2c
@@ -951,7 +948,6 @@ src/frontend/viewmodel/tests/unit/hsf-sdk-mutation-control.sha256	src/frontend/v
 src/frontend/viewmodel/tests/unit/hsf-sdk-mutation-control.sha256	src/frontend/viewmodel/store/replay_data_store.nim	dd907fd2e95bc33cc1266ead0c38e5821b93d5184950f3563825a7a472c93e39	5ae3b32a7f7e2e0d7ebe7de7ff9a4e02f1cc5a8a9b44440fdd321fa6a47ea2db
 src/frontend/tui/tests/plat40-producer-mutation-control.sha256	src/frontend/host/native_host.nim	df3d2de7332f2ece3801f93c9e8ada6d4bc49eaf8aaa3bed50b860827fb97561	b474f4c12d11885ba82d85aebdf7afc2319b332cb2eb9450624cd78e283c68f6
 src/frontend/tui/tests/plat41-pane-mutation-control.sha256	src/frontend/host/native_host.nim	df3d2de7332f2ece3801f93c9e8ada6d4bc49eaf8aaa3bed50b860827fb97561	b474f4c12d11885ba82d85aebdf7afc2319b332cb2eb9450624cd78e283c68f6
-src/frontend/tui/tests/plat42-surface-mutation-control.sha256	src/frontend/viewmodel/backend/stdio_backend.nim	d650b14e5215cb908c837551bfb09963c976ef035823b2169822a59653f71aa9	b652b936345be64adfd7df754563cb5b141a23dea101fe229d817b740ae8492d
 src/frontend/tui/tests/plat81-plugin-panes-mutation-control.sha256	src/frontend/tui/app/runtime.nim	4538ef44314fb05aa6efbd5592c7126db50b83285ba761aeeba09c969afa3339	da449643b3ba2079623d78d28f12d60dd280a0bf064416a8437f01df91846226
 src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/tui/app/runtime.nim	4538ef44314fb05aa6efbd5592c7126db50b83285ba761aeeba09c969afa3339	da449643b3ba2079623d78d28f12d60dd280a0bf064416a8437f01df91846226
 src/frontend/tui/tests/plat83-ct-lens-mutation-control.sha256	src/frontend/tui/app/runtime.nim	4538ef44314fb05aa6efbd5592c7126db50b83285ba761aeeba09c969afa3339	da449643b3ba2079623d78d28f12d60dd280a0bf064416a8437f01df91846226
