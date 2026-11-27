@@ -14,13 +14,11 @@ settle-timeout: 15000
 stage-timeout: 300000
 retention: { runs: 5, failure-days: 7 }
 applicable:
-  # Not tour/calc-debugging-session: codetracer.el stacks the panes beside
-  # the editor in one side column, so State has 10 rows at 200x50 and the
-  # `left` its "inspect" beat reads is below them.
-  # Not tracing/trace-macro-at-caret: tracing a macro from a session on a
-  # recording never opens its recording through the pane server (it stays at
-  # "Tracing macro expansion..."); the static block is traced from Edit mode
-  # below, as the plugins' own suites do.
+  # a whole debugging session, the one every front-end renders into a video
+  - ../tour/calc-debugging-session.yaml
+  # Nim compile-time tracing: a macro from a session on a recording, and the
+  # static block from Edit mode (below)
+  - ../tracing/trace-macro-at-caret.yaml
   # the editor-hosted front-ends' own features
   - ../editor-hosted/debugger-controls.yaml
   - ../editor-hosted/generated-c-in-edit-mode.yaml
