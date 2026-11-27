@@ -109,6 +109,7 @@ VISUAL_CAPTURE="${SUITE_ROOT}/scripts/docs/capture-visual-recording-screenshots.
 STORYBOOK_FRESHNESS="${SUITE_ROOT}/tools/visual-review/storybook-freshness.mjs"
 STORYBOOK_DEPS="${SUITE_ROOT}/scripts/storybook-deps.sh"
 BUILD_COMPONENTS="${SUITE_ROOT}/scripts/build-storybook-components.sh"
+RECORD_INPUTS="${SUITE_ROOT}/tools/visual-review/record-storybook-inputs.mjs"
 RR_SETUP="${SUITE_ROOT}/ci/setup-rr-backend.sh"
 SETUP_CERTS="${SUITE_ROOT}/browser-replay/setup-certs.sh"
 WEBP="${SUITE_ROOT}/scripts/docs/generate-webp-animations.sh"
@@ -124,7 +125,7 @@ BUILD_SIBLINGS="${SUITE_ROOT}/scripts/build-siblings.sh"
 # Every contract this suite claims to check. A suite that silently runs fewer
 # assertions than it advertises is a suite that stops protecting anything, so
 # the count is asserted at the end and has to be changed deliberately.
-EXPECTED_ASSERTIONS=181
+EXPECTED_ASSERTIONS=207
 
 ASSERTIONS=0
 FAILURES=0
@@ -186,7 +187,7 @@ run_expect_failure() {
 	assert_contains "${out}" "${fragment}" "${desc}"
 }
 
-for required in "${VISUAL_CAPTURE}" "${STORYBOOK_FRESHNESS}" "${STORYBOOK_DEPS}" "${BUILD_COMPONENTS}" \
+for required in "${VISUAL_CAPTURE}" "${STORYBOOK_FRESHNESS}" "${STORYBOOK_DEPS}" "${BUILD_COMPONENTS}" "${RECORD_INPUTS}" \
 	"${RR_SETUP}" "${SETUP_CERTS}" "${WEBP}" "${CAPTURE_LIB}" \
 	"${DESKTOP_COMPONENT}" "${DEVELOPER_SETUP}" "${DEPLOY_WASM}" \
 	"${CROSS_REPO}" "${DESKTOP_CAPS}" "${VERSION_NIM}" "${BUILD_SIBLINGS}"; do
@@ -453,6 +454,22 @@ touch -t "${SB_T_SOURCES}" \
 	"${SB}/src/build-debug-repro/public/index.css"
 touch -t "${SB_T_BUILT}" "${SB}/storybook/storybook-static/index.html"
 
+# The input record `just build-storybook-components` writes beside the bundle
+# (see the section on inputs from outside the tree, below). Here the bundle's
+# only recorded input is the one Nim source, so this section grades the rules
+# it always graded. The user's Nim configuration directory is pointed into the
+# test tree, so a `nim.cfg` on the machine running the suite is not an input.
+# shellcheck disable=SC2329 # invoked below, and again by later sections
+record_inputs() {
+	local root="$1" deps="$2" fixture="$3"
+	XDG_CONFIG_HOME="${TEST_ROOT}/xdg" node "${RECORD_INPUTS}" "${root}" \
+		"${root}/src/frontend/storybook_components.nim" "${deps}" "${fixture}" \
+		"${root}/storybook/dist/components.js.inputs.json"
+}
+printf '%s\n' "${SB}/src/frontend/ui.nim" >"${TEST_ROOT}/sb.deps"
+printf 'null\n' >"${TEST_ROOT}/sb-fixture.json"
+record_inputs "${SB}" "${TEST_ROOT}/sb.deps" "${TEST_ROOT}/sb-fixture.json"
+
 cat >"${TEST_ROOT}/check-storybook.mjs" <<EOF
 import { requireFreshStorybookStatic } from "${STORYBOOK_FRESHNESS}";
 try {
@@ -631,6 +648,203 @@ run_expect_failure "an absent corpus is still refused, with the remedy" \
 	"just storybook-build" -- check_storybook
 
 # ---------------------------------------------------------------------------
+section "the components bundle refuses inputs from outside the tree that changed"
+# ---------------------------------------------------------------------------
+#
+# The bundle compiles in modules from sibling checkouts (nim-agents,
+# nim-agents-isonim-viewmodels, isonim, ...) and embeds the Agent Harbor
+# fixture set, and the guard compared it with `src/frontend` only, so a bundle
+# built before a sibling moved or the fixtures were refreshed passed as fresh.
+# The recipe now records what the compile read
+# (`storybook/dist/components.js.inputs.json`), and the guard compares it.
+#
+# A synthetic workspace: this checkout (`ct`), one sibling git checkout (`sib`)
+# whose module embeds a file with a literal `staticRead`, and a fixture set
+# outside any checkout. The dependency file is what `nim js --genScript:on`
+# writes: one absolute path per line, a Nix store path among them. The
+# recorder, the record and the guard are the real ones.
+SI="${TEST_ROOT}/inputs-ws"
+SI_CT="${SI}/ct"
+SI_SIB="${SI}/sib"
+SI_FX="${SI}/fixtures"
+mkdir -p "${SI_CT}/storybook/dist" "${SI_CT}/storybook/storybook-static" "${SI_CT}/src/frontend" \
+	"${SI_SIB}/src" "${SI_FX}"
+printf 'x\n' >"${SI_CT}/storybook/dist/components.js"
+printf 'x\n' >"${SI_CT}/storybook/storybook-static/index.html"
+# A `gorgeEx` named in a comment is not a compile-time read of this checkout.
+printf '# not a shell test through gorgeEx\nconst a = staticRead("../../assets/a.txt")\n' \
+	>"${SI_CT}/src/frontend/ui.nim"
+mkdir -p "${SI_CT}/assets"
+printf 'a\n' >"${SI_CT}/assets/a.txt"
+printf 'const s = staticRead("data.txt")\n' >"${SI_SIB}/src/sib.nim"
+printf 'd\n' >"${SI_SIB}/src/data.txt"
+printf 'r\n' >"${SI_SIB}/README"
+printf '{"files":{"one.json":{}}}\n' >"${SI_FX}/manifest.json"
+printf '{"v":1}\n' >"${SI_FX}/one.json"
+# Every input is older than the compile, stated (see the note on stated mtimes
+# above). The sibling's files are stamped BEFORE they are committed, so the
+# index matches them and `git status` sees a clean checkout.
+touch -t 202001010000 "${SI_CT}/src/frontend/ui.nim" "${SI_CT}/assets/a.txt" \
+	"${SI_SIB}/src/sib.nim" "${SI_SIB}/src/data.txt" "${SI_SIB}/README" \
+	"${SI_FX}/manifest.json" "${SI_FX}/one.json"
+git -C "${SI_SIB}" init -q
+git -C "${SI_SIB}" config user.email t@t.local
+git -C "${SI_SIB}" config user.name t
+git -C "${SI_SIB}" add -A
+git -C "${SI_SIB}" commit -qm "sibling sources"
+si_head="$(git -C "${SI_SIB}" rev-parse HEAD)"
+# This checkout is a git checkout too, so that the comment below can be seen
+# NOT to make it a compared repository (only an unresolved read would).
+git -C "${SI_CT}" init -q
+git -C "${SI_CT}" config user.email t@t.local
+git -C "${SI_CT}" config user.name t
+git -C "${SI_CT}" add src assets
+git -C "${SI_CT}" commit -qm "checkout sources"
+# A second sibling whose module reads a path it computes, here a git-ignored
+# build output, as isonim's Tailwind map is read. No scan can list that file,
+# so its whole checkout is walked.
+SI_GEN="${SI}/gen"
+mkdir -p "${SI_GEN}/src" "${SI_GEN}/build"
+printf 'const g = staticRead(currentSourcePath().parentDir / "../build/map.json")\n' >"${SI_GEN}/src/gen.nim"
+printf '{}\n' >"${SI_GEN}/build/map.json"
+printf 'build/\n' >"${SI_GEN}/.gitignore"
+touch -t 202001010000 "${SI_GEN}/src/gen.nim" "${SI_GEN}/build/map.json" "${SI_GEN}/.gitignore"
+git -C "${SI_GEN}" init -q
+git -C "${SI_GEN}" config user.email t@t.local
+git -C "${SI_GEN}" config user.name t
+git -C "${SI_GEN}" add -A
+git -C "${SI_GEN}" commit -qm "generator sources"
+printf '%s\n' "${SI_CT}/src/frontend/ui.nim" "${SI_SIB}/src/sib.nim" "${SI_GEN}/src/gen.nim" \
+	"/nix/store/00000000000000000000000000000000-nim/lib/system.nim" >"${TEST_ROOT}/si.deps"
+cat >"${TEST_ROOT}/si-fixture.json" <<JSON
+{"root": "${SI_FX}", "inputs": ["${SI_FX}/manifest.json", "${SI_FX}/one.json"],
+ "absent": ["${SI}/private/manifest.json"]}
+JSON
+touch -t 202001020000 "${SI_CT}/storybook/dist/components.js" "${SI_CT}/storybook/dist/components.js.compiled"
+touch -t 202001030000 "${SI_CT}/storybook/storybook-static/index.html"
+si_record="${SI_CT}/storybook/dist/components.js.inputs.json"
+record_si() { record_inputs "${SI_CT}" "${TEST_ROOT}/si.deps" "${TEST_ROOT}/si-fixture.json"; }
+check_si() { node "${TEST_ROOT}/check-storybook.mjs" "${SI_CT}" 2>&1; }
+record_si
+
+assert_contains "$(check_si)" "FRESH" \
+	"a bundle whose recorded inputs are all unchanged is fresh"
+si_record_text="$(cat "${si_record}")"
+assert_contains "${si_record_text}" "\"head\": \"${si_head}\"" \
+	"the record names the sibling checkout's HEAD"
+assert_contains "${si_record_text}" "${SI_SIB}/src/data.txt" \
+	"...and the file its module embeds with a literal staticRead"
+assert_contains "${si_record_text}" "${SI_CT}/assets/a.txt" \
+	"...and the file a module of this checkout embeds"
+assert_not_contains "${si_record_text}" "/nix/store/" \
+	"a Nix store module is not compared (a store path is immutable)"
+assert_not_contains "${si_record_text}" "\"path\": \"${SI_CT}\"" \
+	"a gorgeEx named in a comment does not make this checkout a compared repository"
+
+assert_contains "$(node -e 'const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); console.log(JSON.stringify(r.dirs))' "${si_record}" 2>&1)" \
+	"[\"${SI_GEN}\"]" \
+	"only the checkout with a read the scan cannot resolve is walked whole"
+
+# That checkout's git-ignored build output is regenerated after the compile:
+# neither its HEAD nor its dirty flag moves, only the walk sees it.
+touch -t 202001040000 "${SI_GEN}/build/map.json"
+run_expect_failure "a file newer than the compile in a walked checkout is refused, though git sees no change" \
+	"is older than ${SI_GEN}/build/map.json" -- check_si
+touch -t 202001010000 "${SI_GEN}/build/map.json"
+# What a test compile writes beside its source is not an input.
+printf 'x\n' >"${SI_GEN}/src/t.nim"
+printf 'x\n' >"${SI_GEN}/src/t.js"
+touch -t 202001010000 "${SI_GEN}/src/t.nim"
+touch -t 202001040000 "${SI_GEN}/src/t.js"
+assert_contains "$(check_si)" "FRESH" \
+	"...but a test compile's output beside its source is not"
+rm -f "${SI_GEN}/src/t.nim" "${SI_GEN}/src/t.js"
+
+mv "${si_record}" "${TEST_ROOT}/si-record.saved"
+run_expect_failure "a bundle with no input record is refused" \
+	"Unrecorded storybook components" -- check_si
+assert_contains "$(check_si)" "just storybook-build" \
+	"...with the remedy"
+mv "${TEST_ROOT}/si-record.saved" "${si_record}"
+
+# The sibling moves to another commit. The new commit touches no recorded file,
+# so only the HEAD comparison can see it.
+printf 'n\n' >"${SI_SIB}/NEWS"
+git -C "${SI_SIB}" add NEWS
+git -C "${SI_SIB}" commit -qm "a later sibling commit"
+run_expect_failure "a sibling checkout that moved after the build is refused" \
+	"was compiled from ${SI_SIB} at ${si_head:0:12}" -- check_si
+git -C "${SI_SIB}" reset -q --hard "${si_head}"
+assert_contains "$(check_si)" "FRESH" \
+	"...and moving it back makes it fresh again"
+
+# Uncommitted changes to a tracked file, again one the compile did not read.
+printf 'r2\n' >"${SI_SIB}/README"
+run_expect_failure "a sibling checkout that became dirty after the build is refused" \
+	"${SI_SIB} with no uncommitted changes, and it now has some" -- check_si
+git -C "${SI_SIB}" checkout -q -- README
+assert_contains "$(check_si)" "FRESH" \
+	"...and cleaning it makes it fresh again"
+
+# A bundle built from a dirty sibling is fresh while it stays as it was, and an
+# edit to one of its modules after that is still refused, by mtime.
+printf 'r2\n' >"${SI_SIB}/README"
+record_si
+assert_contains "$(check_si)" "FRESH" \
+	"a bundle built from a dirty sibling is fresh while the sibling is unchanged"
+touch -t 202001040000 "${SI_SIB}/src/data.txt"
+run_expect_failure "an embedded sibling file edited after the build is refused" \
+	"is older than its input ${SI_SIB}/src/data.txt" -- check_si
+touch -t 202001010000 "${SI_SIB}/src/data.txt"
+git -C "${SI_SIB}" checkout -q -- README
+record_si
+
+# A fixture refresh that keeps the files' mtimes (`cp -p`, `rsync -a`): only
+# the content digest can see it.
+printf '{"v":2}\n' >"${SI_FX}/one.json"
+touch -t 202001010000 "${SI_FX}/one.json"
+run_expect_failure "fixture data changed after the build is refused, though its mtime did not move" \
+	"embeds the Agent Harbor fixture set at ${SI_FX}, which has changed" -- check_si
+printf '{"v":1}\n' >"${SI_FX}/one.json"
+touch -t 202001010000 "${SI_FX}/one.json"
+assert_contains "$(check_si)" "FRESH" \
+	"...and restoring it makes it fresh again"
+
+# The private manifest whose absence chose the embedded set appears: a rebuild
+# would embed another set.
+mkdir -p "${SI}/private"
+printf '{}\n' >"${SI}/private/manifest.json"
+run_expect_failure "a path whose absence chose the fixture set, now present, is refused" \
+	"${SI}/private/manifest.json did not exist" -- check_si
+rm -rf "${SI}/private"
+
+# A record older than the compile was not written by it (an older recipe).
+touch -t 203001010000 "${SI_CT}/storybook/dist/components.js.compiled"
+run_expect_failure "an input record older than the compile is refused" \
+	"the record describes an older compile" -- check_si
+touch -t 202001020000 "${SI_CT}/storybook/dist/components.js.compiled"
+assert_contains "$(check_si)" "FRESH" \
+	"...and the workspace is fresh again when every input is restored"
+
+# The scanner on its own: what counts as a compile-time read it cannot follow.
+cat >"${TEST_ROOT}/scan.mjs" <<MJS
+import { compileTimeReads } from "${STORYBOOK_FRESHNESS}";
+const cases = {
+  literal: 'const a = staticRead("x.txt")',
+  computed: 'const a = staticRead(root / "x.txt")',
+  joined: 'const a = staticRead("dir/" & name)',
+  exec: 'const v = gorgeEx("git rev-parse HEAD")',
+  comment: '## read through gorgeEx and staticRead(path)',
+};
+for (const [name, text] of Object.entries(cases)) {
+  console.log(name, compileTimeReads("/m/mod.nim", text).unresolved);
+}
+MJS
+assert_contains "$(node "${TEST_ROOT}/scan.mjs" 2>&1 | tr '\n' ' ')" \
+	"literal false computed true joined true exec true comment false" \
+	"the scan follows a literal staticRead and gives up on a computed one, a joined one and gorgeEx, not on a comment"
+
+# ---------------------------------------------------------------------------
 section "A components build that Nim left unchanged is still a fresh build"
 # ---------------------------------------------------------------------------
 #
@@ -652,6 +866,8 @@ mkdir -p "${CB}/storybook/.storybook" "${CB}/storybook/stories" "${CB}/storybook
 	"${CB}/scripts" "${CB_BIN}"
 cp "${SUITE_ROOT}/justfile" "${CB}/justfile"
 cp "${BUILD_COMPONENTS}" "${CB}/scripts/"
+mkdir -p "${CB}/tools/visual-review"
+cp "${RECORD_INPUTS}" "${STORYBOOK_FRESHNESS}" "${CB}/tools/visual-review/"
 printf 'x\n' >"${CB}/storybook/.storybook/main.ts"
 printf 'x\n' >"${CB}/storybook/stories/One.stories.js"
 printf 'x\n' >"${CB}/storybook/scripts/check.mjs"
@@ -668,11 +884,24 @@ printf 'x\n' >"${CB}/storybook/storybook-static/index.html"
 # The stub records its argv, then fails when NIM_FAIL is set. On success it
 # leaves the output alone, which is what an unchanged compile looks like, unless
 # NIM_WRITE is set: then it rewrites the bundle, as a compile that changed it does.
+#
+# It also writes what a real compile reports for the input record: the
+# compiler's dependency file in the `--nimcache:` directory (`--genScript:on`)
+# and the embedded fixture files at `-d:storybookFixtureInputsOut=` (none
+# here), unless NIM_NODEPS is set, which is a compile that reported nothing.
 cat >"${CB_BIN}/nim" <<STUB
 #!/usr/bin/env bash
 printf '%s\n' "\$*" >>"${CB_NIM_CALLS}"
 [[ -z "\${NIM_FAIL:-}" ]] || exit 1
 [[ -z "\${NIM_WRITE:-}" ]] || printf 'y\n' >"${CB}/storybook/dist/components.js"
+[[ -z "\${NIM_NODEPS:-}" ]] || exit 0
+for arg in "\$@"; do
+	case "\${arg}" in
+	--nimcache:*) printf '%s\n' "${CB}/src/frontend/storybook_components.nim" "${CB}/src/frontend/ui.nim" \
+		>"\${arg#--nimcache:}/storybook_components.deps" ;;
+	-d:storybookFixtureInputsOut=*) printf 'null\n' >"\${arg#*=}" ;;
+	esac
+done
 STUB
 chmod +x "${CB_BIN}/nim"
 
@@ -723,6 +952,10 @@ if [[ ! ${bundle} -nt ${CB_REF} && ! ${CB_REF} -nt ${bundle} ]]; then
 else
 	bad "a compile nim left unchanged leaves the bundle's mtime alone" "the bundle's mtime moved"
 fi
+assert_contains "$(cat "${bundle}.inputs.json" 2>&1)" "${CB}/src/frontend/ui.nim" \
+	"the recipe records the modules the compiler listed beside the bundle"
+assert_contains "$(cat "${CB_NIM_CALLS}")" "--genScript:on" \
+	"...from the compiler's own dependency list"
 
 # `storybook-static` copies the bundle, so a recompile that changes nothing (the
 # low-level-code gate recompiles it) must not leave the corpus older than an
@@ -763,6 +996,17 @@ else
 fi
 run_expect_failure "a failed compile leaves the bundle refused" \
 	"Stale storybook components" -- check_components
+
+# A compile that succeeds but whose inputs cannot be recorded (here: nim wrote
+# no dependency list) fails the recipe before the stamp, like a failed compile.
+nodeps_out="$(NIM_NODEPS=1 build_components)"
+nodeps_status=$?
+if [[ ${nodeps_status} -ne 0 && ! ${compiled_stamp} -nt ${CB_REF}.compiled && ! ${CB_REF}.compiled -nt ${compiled_stamp} ]]; then
+	ok "a compile whose inputs cannot be recorded fails the recipe and is not stamped"
+else
+	bad "a compile whose inputs cannot be recorded fails the recipe and is not stamped" \
+		"status ${nodeps_status}" "output: ${nodeps_out:0:600}"
+fi
 
 # A successful rebuild after the edit is fresh again.
 build_out="$(build_components)"

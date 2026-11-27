@@ -17,8 +17,11 @@
 // against a synthetic tree, which is what `ci/test/stale-artefact-guards-test.sh`
 // does with it.
 
-import { existsSync, readdirSync, statSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, dirname, isAbsolute, join, parse, resolve, sep } from "node:path";
 
 // firstNewerThan(paths, referenceMs) -> the first file found newer than the
 // reference, or null. Early-exits, so a large tree costs one walk and stops at
@@ -92,6 +95,378 @@ export function componentsCompiledAt(bundle) {
     }
   };
   return Math.max(at(bundle), at(join(dirname(bundle), COMPONENTS_STAMP)));
+}
+
+// ---------------------------------------------------------------------------
+// THE INPUTS OF THE COMPONENTS BUNDLE THAT ARE NOT UNDER `src/frontend`.
+//
+// The bundle compiles in modules from the sibling checkouts `config.nims` puts
+// on the search path (nim-agents, nim-agents-isonim-viewmodels, isonim, ...),
+// files embedded with `staticRead` (codetracer's `test-programs/`, the
+// Agent Harbor fixture set), and whatever the Nim configuration files say. A
+// bundle built before any of them changed shows the old inputs, and comparing
+// it with `src/frontend` alone passed it as fresh: a bundle built before a
+// fixture refresh was photographed as the current design.
+//
+// So the recipe RECORDS what the compile read, and the guard compares the
+// record with the tree. Nothing here guesses the list: the modules come from
+// the compiler's own dependency file (`nim js --genScript:on` writes
+// `<nimcache>/<project>.deps`), and the embedded fixture files from the
+// compile itself (`storybook_components.nim` writes `AgentHarborFixtureInputs`
+// out when `-d:storybookFixtureInputsOut` is set), because the compiler's list
+// names modules, not `staticRead` targets.
+//
+// The record, `storybook/dist/components.js.inputs.json`:
+//
+//   files    every input file, compared by mtime with the compile. The
+//            modules (Nix store paths excepted: a store path is immutable),
+//            the literal `staticRead`/`slurp` targets beside them, the
+//            embedded fixture files, and the Nim configuration files that
+//            exist among those the compile loads.
+//   absent   paths whose ABSENCE decided what was compiled: configuration
+//            files that do not exist, a literal `staticRead` target missing
+//            beside its module, the private fixture manifest whose absence
+//            chose the synthetic set. One that now exists is refused.
+//   dirs     the checkout of every module that reads at compile time in a way
+//            the scan below cannot resolve (a computed `staticRead` path, a
+//            `gorgeEx`), walked for any file newer than the compile. Such a
+//            read can name a git-ignored build output (isonim's
+//            `build/tailwind-styles.json`), which no git state shows. This
+//            over-approximates on purpose: a false refusal costs a rebuild,
+//            a false acceptance a review of a design that no longer exists.
+//   repos    every git checkout other than this one that holds a module, and
+//            this one when it is in `dirs`: its HEAD and whether it had
+//            uncommitted changes to tracked files. A checkout that moved, or
+//            became dirty or clean, is refused. This catches a sibling switched
+//            to another commit whose changed files keep old mtimes.
+//   fixtures the Agent Harbor fixture set the compile embedded: its root and a
+//            content digest of every file it embedded. A refresh that keeps
+//            the files' mtimes (`cp -p`, `rsync -a`, an archive) is refused.
+//
+// The record is written beside the bundle and the stamp, and like the stamp it
+// is not a source of `storybook-static`: every recompile rewrites it.
+export const INPUTS_RECORD = "components.js.inputs.json";
+export const INPUTS_RECORD_VERSION = 1;
+
+const REBUILD_REMEDY =
+  "Rebuild with `just storybook-build` (or `just build-storybook-components` for the bundle alone), then run this again.";
+
+// gitCheckoutOf(path) -> the nearest directory containing the file `path`
+// that holds a `.git` entry (a directory, or the file a worktree or submodule has), or null.
+// Lexical, so it does not depend on a `git` binary.
+export function gitCheckoutOf(path) {
+  let dir = dirname(resolve(path));
+  for (;;) {
+    if (existsSync(join(dir, ".git"))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
+const realOrSelf = (path) => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
+};
+
+// checkoutState(dir) -> { head, dirty } of the git checkout at `dir`, or null
+// when it is not one any more. `dirty` counts changes to TRACKED files only:
+// an untracked file is not compiled unless a module imports it, and then the
+// importing module's own change is what is seen. GIT_OPTIONAL_LOCKS=0 keeps
+// `git status` from refreshing the index, so checking a shared checkout never
+// writes to it.
+export function checkoutState(dir) {
+  const git = (...args) =>
+    execFileSync("git", ["-C", dir, ...args], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      env: { ...process.env, GIT_OPTIONAL_LOCKS: "0" },
+    });
+  try {
+    const head = git("rev-parse", "HEAD").trim();
+    const dirty = git("status", "--porcelain", "--untracked-files=no").trim().length > 0;
+    return { head, dirty };
+  } catch {
+    return null;
+  }
+}
+
+// fixtureDigest(paths) -> a sha256 over each embedded file's path and bytes,
+// in order, or null when one of them cannot be read.
+export function fixtureDigest(paths) {
+  const hash = createHash("sha256");
+  for (const path of paths) {
+    let bytes;
+    try {
+      bytes = readFileSync(path);
+    } catch {
+      return null;
+    }
+    hash.update(path).update("\0").update(bytes).update("\0");
+  }
+  return `sha256:${hash.digest("hex")}`;
+}
+
+// stripNimComment(line) -> the line without its `#` comment, keeping a `#`
+// inside a double-quoted string. Enough for the scan below, which only needs
+// to not mistake prose ("not a shell `test -f` through `gorgeEx`") for code.
+function stripNimComment(line) {
+  let inString = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"' && line[i - 1] !== "\\") inString = !inString;
+    else if (c === "#" && !inString) return line.slice(0, i);
+  }
+  return line;
+}
+
+// compileTimeReads(modulePath, text) -> { files, absent, unresolved }: what the
+// module reads from the file system at compile time, as far as a scan of its
+// text can tell. A literal `staticRead("x")` / `slurp("x")` is resolved
+// against the module's directory, as the compiler first resolves it; found, it
+// is a file, missing, it is absent (the compiler then searched the `--path`
+// directories, which this does not follow). A computed argument, or any
+// `gorge`, `gorgeEx` or `staticExec`, is `unresolved`: the caller then
+// compares the module's whole checkout instead.
+export function compileTimeReads(modulePath, text) {
+  const files = [];
+  const absent = [];
+  let unresolved = false;
+  const literal = /\b(?:staticRead|slurp)\s*\(?\s*"((?:[^"\\]|\\.)*)"\s*\)?/g;
+  const anyRead = /\b(?:staticRead|slurp)\b\s*(\(|")?/g;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = stripNimComment(raw);
+    if (/\b(?:gorge|gorgeEx|staticExec)\b/.test(line)) unresolved = true;
+    const literals = [...line.matchAll(literal)];
+    const calls = [...line.matchAll(anyRead)].filter((m) => m[1] !== undefined);
+    if (calls.length > literals.length) unresolved = true;
+    for (const m of literals) {
+      // A literal that continues (`staticRead("dir/" & name)`) is computed.
+      const after = line.slice(m.index + m[0].length).trimStart();
+      if (!m[0].trimEnd().endsWith(")") && after.startsWith("&")) {
+        unresolved = true;
+        continue;
+      }
+      const target = isAbsolute(m[1]) ? m[1] : join(dirname(modulePath), m[1]);
+      (existsSync(target) ? files : absent).push(target);
+    }
+  }
+  return { files, absent, unresolved };
+}
+
+// nimConfigCandidates(projectFile, repoRoot, env) -> every configuration file
+// `nim` would load for `projectFile`, whether or not it exists: the user's
+// `nim.cfg` / `config.nims`, the same two in every parent directory of the
+// project's directory and in that directory itself, the project's own
+// `.nimcfg`, `.nim.cfg` and `.nims`, and the files this checkout's
+// `config.nims` reads for search paths (`reprobuild.paths`, `repro.paths`).
+// See https://nim-lang.org/docs/nimc.html#compiler-usage-configuration-files.
+export function nimConfigCandidates(projectFile, repoRoot, env = process.env) {
+  const userDir = env.XDG_CONFIG_HOME || join(env.HOME || homedir(), ".config");
+  const out = [join(userDir, "nim", "nim.cfg"), join(userDir, "nim", "config.nims")];
+  const projectDir = dirname(resolve(projectFile));
+  const chain = [];
+  for (let dir = projectDir; ; dir = dirname(dir)) {
+    chain.unshift(dir);
+    if (dirname(dir) === dir) break;
+  }
+  for (const dir of chain) out.push(join(dir, "nim.cfg"), join(dir, "config.nims"));
+  const stem = join(projectDir, parse(projectFile).name);
+  out.push(`${stem}.nimcfg`, `${stem}.nim.cfg`, `${stem}.nims`);
+  out.push(join(repoRoot, "reprobuild.paths"), join(repoRoot, "repro.paths"));
+  return out;
+}
+
+const isNixStore = (path) => path.startsWith(`${sep}nix${sep}store${sep}`);
+
+// Directories a `dirs` walk does not enter: git's own, installed packages,
+// Nim's intermediates, and the StoryBook outputs (this bundle, its record and
+// the corpus are written after the compile starts, every time).
+const WALK_SKIPPED = new Set([".git", "node_modules", ".nimcache", "storybook-static"]);
+
+// isTestCompileOutput(path) -> true for what a test compile writes beside its
+// source: the program `nim c foo.nim` writes as `foo` (see
+// `isCompiledNimProgram`) or the `foo.js` that `nim js foo.nim` writes.
+function isTestCompileOutput(path, stat) {
+  if (path.endsWith(".js") && existsSync(path.replace(/\.js$/, ".nim"))) return true;
+  return isCompiledNimProgram(path, stat);
+}
+
+// firstNewerInCheckout(dir, referenceMs) -> the first file under `dir` newer
+// than the reference, or null. Symbolic links are compared by their own mtime
+// and not followed, so a link into another tree (or a cycle) is not walked.
+export function firstNewerInCheckout(dir, referenceMs) {
+  const walk = (target) => {
+    let entries;
+    try {
+      entries = readdirSync(target, { withFileTypes: true });
+    } catch {
+      return null;
+    }
+    for (const entry of entries) {
+      const path = join(target, entry.name);
+      if (entry.isDirectory()) {
+        if (WALK_SKIPPED.has(entry.name) || path.endsWith(join("storybook", "dist"))) continue;
+        const found = walk(path);
+        if (found) return found;
+        continue;
+      }
+      let stat;
+      try {
+        stat = lstatSync(path);
+      } catch {
+        continue;
+      }
+      if (stat.mtimeMs > referenceMs && !isTestCompileOutput(path, stat)) return path;
+    }
+    return null;
+  };
+  return walk(dir);
+}
+
+// collectStorybookInputs({...}) -> the record described above.
+//   repoRoot     this checkout
+//   projectFile  the compiled module (`src/frontend/storybook_components.nim`)
+//   depsText     the compiler's dependency file: one absolute path per line
+//   fixture      what the compile wrote for `-d:storybookFixtureInputsOut`
+//                ({ root, inputs, absent }), or null for a compile that
+//                embeds no fixture set
+export function collectStorybookInputs({ repoRoot, projectFile, depsText, fixture, env = process.env }) {
+  const files = new Set();
+  const absent = new Set();
+  const checkouts = new Map(); // real path -> lexical path
+  const dirs = new Map(); // real path -> lexical path
+  const self = realOrSelf(gitCheckoutOf(join(repoRoot, "x")) ?? repoRoot);
+  const modules = depsText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !isNixStore(line));
+  for (const module of modules) {
+    files.add(module);
+    let text = "";
+    try {
+      text = readFileSync(module, "utf8");
+    } catch {
+      text = ""; // a listed module that is gone is refused by the check
+    }
+    const reads = compileTimeReads(module, text);
+    for (const f of reads.files) if (!isNixStore(f)) files.add(f);
+    for (const a of reads.absent) absent.add(a);
+    const checkout = gitCheckoutOf(module);
+    if (reads.unresolved) {
+      const dir = checkout ?? dirname(module);
+      dirs.set(realOrSelf(dir), dir);
+    }
+    if (checkout === null) continue;
+    const real = realOrSelf(checkout);
+    if (real !== self || reads.unresolved) checkouts.set(real, checkout);
+  }
+  for (const candidate of nimConfigCandidates(projectFile, repoRoot, env)) {
+    (existsSync(candidate) ? files : absent).add(candidate);
+  }
+  let fixtures = null;
+  if (fixture !== null && fixture !== undefined) {
+    for (const f of fixture.inputs) files.add(f);
+    for (const a of fixture.absent) absent.add(a);
+    fixtures = { root: fixture.root, inputs: fixture.inputs, digest: fixtureDigest(fixture.inputs) };
+  }
+  const repos = [...checkouts.values()].sort().map((path) => {
+    const state = checkoutState(path);
+    if (state === null) throw new Error(`cannot read the git state of ${path}, which the bundle compiled from`);
+    return { path, ...state };
+  });
+  for (const f of files) absent.delete(f);
+  return {
+    version: INPUTS_RECORD_VERSION,
+    files: [...files].sort(),
+    absent: [...absent].sort(),
+    dirs: [...dirs.values()].sort(),
+    repos,
+    fixtures,
+  };
+}
+
+// writeStorybookInputs(path, record): written whole or not at all, so a
+// recording that fails leaves no half record for the guard to trust.
+export function writeStorybookInputs(path, record) {
+  const tmp = `${path}.tmp-${process.pid}`;
+  writeFileSync(tmp, `${JSON.stringify(record, null, 2)}\n`);
+  renameSync(tmp, path);
+}
+
+// checkStorybookInputs(components, componentsAt) — throws unless every input
+// the record beside `components` names is as it was when the bundle compiled.
+export function checkStorybookInputs(components, componentsAt) {
+  const recordPath = join(dirname(components), INPUTS_RECORD);
+  const refuse = (what) => {
+    throw new Error(`Stale storybook components: ${components} ${what}\n${REBUILD_REMEDY}`);
+  };
+  let record;
+  let recordAt;
+  try {
+    recordAt = statSync(recordPath).mtimeMs;
+    record = JSON.parse(readFileSync(recordPath, "utf8"));
+  } catch {
+    throw new Error(
+      `Unrecorded storybook components: ${components} has no readable record of the inputs it was compiled from (${recordPath}).\n` +
+        "Without it a change to a sibling checkout or to the fixture set cannot be seen.\n" +
+        REBUILD_REMEDY,
+    );
+  }
+  const lists = ["files", "absent", "dirs", "repos"];
+  if (record?.version !== INPUTS_RECORD_VERSION || !lists.every((key) => Array.isArray(record[key]))) {
+    refuse(`has an input record of another format (${recordPath}, version ${record?.version}).`);
+  }
+  // The recipe writes the record after the compile and then stamps the compile
+  // with its START, so a record older than the compile was not written by it.
+  if (recordAt < componentsAt) {
+    refuse(`was compiled after its input record was written (${recordPath}): the record describes an older compile.`);
+  }
+  for (const repo of record.repos) {
+    const now = checkoutState(repo.path);
+    if (now === null) refuse(`was compiled from the checkout ${repo.path}, which is no longer a git checkout.`);
+    if (now.head !== repo.head) {
+      refuse(`was compiled from ${repo.path} at ${repo.head.slice(0, 12)}, which is now at ${now.head.slice(0, 12)}.`);
+    }
+    if (now.dirty !== repo.dirty) {
+      refuse(
+        repo.dirty
+          ? `was compiled from ${repo.path} with uncommitted changes, which it no longer has.`
+          : `was compiled from ${repo.path} with no uncommitted changes, and it now has some.`,
+      );
+    }
+  }
+  if (record.fixtures) {
+    const digest = fixtureDigest(record.fixtures.inputs);
+    if (digest !== record.fixtures.digest) {
+      refuse(`embeds the Agent Harbor fixture set at ${record.fixtures.root}, which has changed since it was compiled.`);
+    }
+  }
+  for (const file of record.files) {
+    // The later of the link's and its target's mtime: a symbolic link
+    // re-pointed at an older file is a changed input too.
+    let mtimeMs;
+    try {
+      mtimeMs = Math.max(lstatSync(file).mtimeMs, statSync(file).mtimeMs);
+    } catch {
+      refuse(`was compiled from ${file}, which is gone.`);
+    }
+    if (mtimeMs > componentsAt) refuse(`is older than its input ${file}.`);
+  }
+  for (const dir of record.dirs) {
+    const newer = firstNewerInCheckout(dir, componentsAt);
+    if (newer) {
+      refuse(
+        `is older than ${newer}, in ${dir}, which the compile read from at compile time in a way the record cannot list file by file.`,
+      );
+    }
+  }
+  for (const path of record.absent) {
+    if (existsSync(path)) refuse(`was compiled while ${path} did not exist, and it now does.`);
+  }
 }
 
 // The stamp `just storybook-styles` (scripts/build-storybook-styles.sh) sets to
@@ -178,7 +553,9 @@ export function requireFreshStorybookStatic(repoRoot) {
     join(repoRoot, `src/${buildDir}/public`),
   ];
 
-  const isStamp = (path) => basename(path) === COMPONENTS_STAMP;
+  // Neither the compile stamp nor the input record is a source of the corpus:
+  // every recompile rewrites both, even one that leaves the bundle unchanged.
+  const isStamp = (path) => basename(path) === COMPONENTS_STAMP || basename(path) === INPUTS_RECORD;
   const newer = firstNewerThan(sources, builtAt, isStamp);
   if (newer) {
     throw new Error(
@@ -239,5 +616,8 @@ export function requireFreshStorybookStatic(repoRoot) {
           "Rebuild with `just build-storybook-components`, then run this again.",
       );
     }
+    // And everything else it was compiled from: the sibling checkouts, the
+    // embedded fixture set, the Nim configuration (see `INPUTS_RECORD`).
+    checkStorybookInputs(components, componentsAt);
   }
 }
