@@ -360,10 +360,18 @@ ARMS = [
     # no longer decides it, and the single edit survived (graded 2026-11-15:
     # the late OSC 52 answer stayed out of the document). The defect the arm
     # names is a late answer TYPED, so it now removes both mechanisms.
+    # Re-aimed 2026-11-27: a THIRD protection holds the case. The case sends
+    # its late answer 900 ms after the paste, INSIDE the 3000 ms reply window
+    # (`ReplyWindowMs`), where `expectReplies` keeps `framer.expectStrings`
+    # set and `ESC ]` frames as a string whatever the Kitty flag or
+    # `replyStart` say. Graded by hand at 363f55872: the two edits above
+    # leave the case green; all three turn it red (`typed was true`).
     ("H1", [(DRIVER, "  d.framer.altChordsAsCsiU = want == 1",
              "  d.framer.altChordsAsCsiU = false"),
             (DRIVER, "  of ']': b in {'0' .. '9'}",
-             "  of ']': false")],
+             "  of ']': false"),
+            (DRIVER, "  d.framer.expectStrings = on",
+             "  d.framer.expectStrings = false")],
      [(PTYB, "*::a LATE clipboard answer is not typed into the document*")],
      "a late OSC 52 answer is typed into the document as text"),
     ("H2", [(CAPS, "  if env.term in ClipboardReadPromptTerms or",
