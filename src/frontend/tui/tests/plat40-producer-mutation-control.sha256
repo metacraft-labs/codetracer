@@ -3,9 +3,9 @@
 # Refreshed with --record-control-hashes, gated by the needle
 # scan (§39a).
 2bfeb15974bcfcd2ae75897a9c9a7c1d1626b25a266f47b2d47c1483319a5274  src/frontend/viewmodel/headless_session.nim
-dd907fd2e95bc33cc1266ead0c38e5821b93d5184950f3563825a7a472c93e39  src/frontend/viewmodel/store/replay_data_store.nim
-df3d2de7332f2ece3801f93c9e8ada6d4bc49eaf8aaa3bed50b860827fb97561  src/frontend/host/native_host.nim
-9f655ae7cd7349021eb696c8a23768ff5734266d167af6657cd6c8533b9a3b64  src/frontend/tui/host/tui_session.nim
+5ae3b32a7f7e2e0d7ebe7de7ff9a4e02f1cc5a8a9b44440fdd321fa6a47ea2db  src/frontend/viewmodel/store/replay_data_store.nim
+b474f4c12d11885ba82d85aebdf7afc2319b332cb2eb9450624cd78e283c68f6  src/frontend/host/native_host.nim
+431da9925aaddeb11f3d0a5132c0918d751bbee534c49c5a6a67dc6a7aa21a1b  src/frontend/tui/host/tui_session.nim
 6a21298445ac4d112fa8dc906f943865ec39d4b42040fbfaf6d1b147778f2d8a  src/frontend/tui/app/views/shell.nim
 fdb065e1c5b34db8e9a9d384d157c03dc2a35cd5bfd5f0baed938b793ebf0469  src/frontend/viewmodel/viewmodels/point_list_vm.nim
-c88c5b63596edaabfcc15c0c9dd12d88e3761936a37ce058a57fe016c380cb4f  src/frontend/tui/tests/test_plat40_producers.nim
+6c58f03db66b1c654f676128b3efaa4e56e99918b57a4f7e5ea0d5ba50ed85df  src/frontend/tui/tests/test_plat40_producers.nim
