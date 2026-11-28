@@ -310,6 +310,7 @@ jobs:
             build/story-parity/report.*
             build/story-parity/*/*/*.png
             build/story-parity/*/*/*.json
+            build/story-parity/*/*/*.log
           retention-days: 30
 
   macos:

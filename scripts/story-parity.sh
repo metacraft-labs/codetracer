@@ -148,6 +148,14 @@ if [ "$(uname -s)" = Linux ] && [ -z "${DISPLAY:-}" ] && [[ ",$arms," == *",dom,
 	. "$repo/scripts/lib/own-xvfb.sh"
 	trap 'own_xvfb_stop' EXIT
 	own_xvfb_start -screen 0 4000x2400x24 -dpi 96 -nolisten tcp || die "Xvfb did not start"
+	echo "==> display: own Xvfb ${DISPLAY:-} at 96 dpi"
+elif [[ ",$arms," == *",dom,"* ]]; then
+	echo "==> display: inherited DISPLAY=${DISPLAY:-} (no own Xvfb)"
+fi
+# The environment a DOM capture depends on, so captures that differ between
+# runners can be traced to it (each capture also logs its computed font sizes).
+if [[ ",$arms," == *",dom,"* ]] && command -v fc-match >/dev/null 2>&1; then
+	echo "==> fonts: monospace=$(fc-match monospace 2>/dev/null) sans=$(fc-match sans-serif 2>/dev/null)"
 fi
 
 # --- the captures -----------------------------------------------------------
@@ -181,6 +189,7 @@ while IFS= read -r line || [ -n "$line" ]; do
 			failed=1
 			continue
 		fi
+		grep '^environment:' "$dir/dom.log" | sed 's/^/   /' || true
 		for arm in "${arm_list[@]}"; do
 			[ "$arm" = dom ] && continue
 			case "$arm" in

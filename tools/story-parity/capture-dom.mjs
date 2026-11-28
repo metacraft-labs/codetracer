@@ -147,6 +147,19 @@ try {
   if (size[0] !== width || size[1] !== height || size[2] !== scale) {
     throw new Error(`the window's content is ${size[0]}x${size[1]} @${size[2]}, not ${width}x${height} @${scale}`);
   }
+  // What the page was drawn with, so a capture that differs between runners can
+  // be traced to its environment: the display, the root and body font sizes,
+  // and the face a monospace row actually rendered with.
+  const env = await page.evaluate(() => {
+    const cs = (el) => (el ? getComputedStyle(el) : null);
+    const row = document.querySelector(".calltrace-call-line, .event-log, .ct-storybook-panel-content");
+    const loaded = [...document.fonts].filter((f) => f.status === "loaded")
+      .map((f) => `${f.family}:${f.weight}`);
+    return { root: cs(document.documentElement).fontSize, body: cs(document.body).fontSize,
+      rowFont: row ? `${cs(row).fontSize} ${cs(row).fontFamily}` : "", fonts: [...new Set(loaded)] };
+  });
+  console.log(`environment: DISPLAY=${process.env.DISPLAY || ""} dpr=${size[2]} root=${env.root} ` +
+    `body=${env.body} row=${env.rowFont} loaded=[${env.fonts.join(", ")}]`);
   mkdirSync(dirname(out), { recursive: true });
   await page.screenshot({ path: out, scale: "device" });
   if (regionsOut) {
