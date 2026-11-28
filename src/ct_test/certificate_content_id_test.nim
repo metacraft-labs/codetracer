@@ -38,10 +38,18 @@ proc isolateGit() =
   ## process's environment) must not be redirected into some caller's
   ## repository — a hook exports GIT_DIR — or shaped by the developer's
   ## configuration (autocrlf, a default object format, commit signing).
+  ##
+  ## Nor by GIT_OPTIONAL_LOCKS, which agent shells and some developer setups
+  ## export as `0`: it stops `git status` from writing the index, so the
+  ## filesystem-monitor case's setup would never record the monitor's token
+  ## and its control (the monitor hides an edit from `git status`) would fail
+  ## for the caller's reason. The recipe is unaffected either way — it never
+  ## relies on `git status` writing the index — so clearing it here changes
+  ## only what the suite's own setup can do.
   for key in ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE",
               "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
               "GIT_COMMON_DIR", "GIT_NAMESPACE", "GIT_LITERAL_PATHSPECS",
-              "GIT_DEFAULT_HASH"]:
+              "GIT_DEFAULT_HASH", "GIT_OPTIONAL_LOCKS"]:
     delEnv(key)
   let emptyConfig = suiteDir / "gitconfig"
   writeFile(emptyConfig, "")
