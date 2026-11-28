@@ -902,7 +902,6 @@ src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/ui/i
 
 # 2026-11-26: flow_vm.nim presents each recorded value once (rows reuse the window's texts);
 # these re-grades are owed.
-src/frontend/tui/tests/plat41-pane-mutation-control.sha256	src/frontend/viewmodel/viewmodels/flow_vm.nim	20bd8e27ae57706b72c20908cd24b30511871f474bac980fa21dfeb4ec8384d4	32de153acb3979afe1b72f85835434f87730a0b0c065aaaa74b6569145f37867
 # 2026-11-26: 94065cdb745 (linear-time loading of long single-call browser traces) moved these
 # subjects; these re-grades are owed.
 src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/db-backend/src/db.rs	8051651f4a8174b46e971cbbd295ffc02eba5a22c2276479f075faec9d9ad9f5	362fa4d42e8342493b35812a6383a79578112ba51f77922e9f68d02690349d4b
@@ -927,11 +926,9 @@ src/frontend/tui/tests/plat65-nim-tracing-mutation-control.sha256	src/frontend/h
 src/frontend/tui/tests/plat70g-multiclick-mutation-control.sha256	src/frontend/headless_app/pane_clicks.nim	7ab7a6d5165f440e6a68dd39d7f190b16ac69816205762a300d0fe711a360ab1	f3947c7d15c7b95be74efa22ec3d2dd6bced93681d72f3a9c1098656b010a8e0
 # db36e253970 (calltrace loading rows) moved replay_data_store.nim, calltrace_vm.nim and
 # isonim_calltrace_view.nim, and e9baa144198 (CTF-M1 slice 5) agent_activity_feed.nim, unledgered.
-src/frontend/tui/tests/plat41-pane-mutation-control.sha256	src/frontend/viewmodel/store/replay_data_store.nim	dd907fd2e95bc33cc1266ead0c38e5821b93d5184950f3563825a7a472c93e39	5ae3b32a7f7e2e0d7ebe7de7ff9a4e02f1cc5a8a9b44440fdd321fa6a47ea2db
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/viewmodel/viewmodels/calltrace_vm.nim	d985752421180dec8d198b1a2f9149dc8500970748d235c15df2562c5eea37f6	12aa59d33d0f5520cf9d494cdfac2e6d0e7321f23d04eb96681aa6383adbc96b
 src/frontend/tui/tests/plat50-clicks-mutation-control.sha256	src/frontend/viewmodel/viewmodels/calltrace_vm.nim	d985752421180dec8d198b1a2f9149dc8500970748d235c15df2562c5eea37f6	12aa59d33d0f5520cf9d494cdfac2e6d0e7321f23d04eb96681aa6383adbc96b
 src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/frontend/viewmodel/viewmodels/agent_activity_feed.nim	9c8d69af9b1be788abdbd95ff9d2cfb35ba1fb704936be879383c4ed4bff3c0f	799420de4a16781437217604d5268ee02463dd2762ecdc0180b0d3d00ebee120
-src/frontend/tui/tests/plat41-pane-mutation-control.sha256	src/frontend/host/native_host.nim	df3d2de7332f2ece3801f93c9e8ada6d4bc49eaf8aaa3bed50b860827fb97561	b474f4c12d11885ba82d85aebdf7afc2319b332cb2eb9450624cd78e283c68f6
 src/frontend/tui/tests/plat81-plugin-panes-mutation-control.sha256	src/frontend/tui/app/runtime.nim	4538ef44314fb05aa6efbd5592c7126db50b83285ba761aeeba09c969afa3339	da449643b3ba2079623d78d28f12d60dd280a0bf064416a8437f01df91846226
 src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/tui/app/runtime.nim	4538ef44314fb05aa6efbd5592c7126db50b83285ba761aeeba09c969afa3339	da449643b3ba2079623d78d28f12d60dd280a0bf064416a8437f01df91846226
 src/frontend/tui/tests/plat83-ct-lens-mutation-control.sha256	src/frontend/tui/app/runtime.nim	4538ef44314fb05aa6efbd5592c7126db50b83285ba761aeeba09c969afa3339	da449643b3ba2079623d78d28f12d60dd280a0bf064416a8437f01df91846226

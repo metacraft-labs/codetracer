@@ -3,9 +3,9 @@
 # Refreshed with --record-control-hashes, gated by the needle
 # scan (§39a).
 5b322241f6c9aeb977548b135edcf9f5995b56d6c3c9469379a6ef1810c677f0  src/frontend/view_vocabulary/pane_views.nim
-20bd8e27ae57706b72c20908cd24b30511871f474bac980fa21dfeb4ec8384d4  src/frontend/viewmodel/viewmodels/flow_vm.nim
-dd907fd2e95bc33cc1266ead0c38e5821b93d5184950f3563825a7a472c93e39  src/frontend/viewmodel/store/replay_data_store.nim
-df3d2de7332f2ece3801f93c9e8ada6d4bc49eaf8aaa3bed50b860827fb97561  src/frontend/host/native_host.nim
+32de153acb3979afe1b72f85835434f87730a0b0c065aaaa74b6569145f37867  src/frontend/viewmodel/viewmodels/flow_vm.nim
+5ae3b32a7f7e2e0d7ebe7de7ff9a4e02f1cc5a8a9b44440fdd321fa6a47ea2db  src/frontend/viewmodel/store/replay_data_store.nim
+b474f4c12d11885ba82d85aebdf7afc2319b332cb2eb9450624cd78e283c68f6  src/frontend/host/native_host.nim
 094f79d7ce65bca148eb8b54882e85c46e558e8bcfa99e8d55d5e0c06c383096  src/frontend/headless_app/headless_app.nim
 ab9468597d0a869eca1fb548135bc9d7a83a49a7e7cbc3c5a4c97719084ef341  src/common/trace_source_paths.nim
 407affa3f0117bbf2802496330310672a026c46e5641878dc26ee3a28f8b404e  src/frontend/tui/tests/test_plat41_parity.nim
