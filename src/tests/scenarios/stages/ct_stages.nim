@@ -377,18 +377,43 @@ proc buildPolkavmGuest(crate: string): string =
     if kind in {pcFile, pcLinkToFile} and path.endsWith(".elf"): return path
   raise newException(IOError, "record-program " & crate & ": the guest build made no .elf")
 
+proc stylusContractWasm*(cargoMessages: string): string =
+  ## The contract module among the artifacts a `cargo build
+  ## --message-format=json` reported: the `.wasm` of the crate's `cdylib`
+  ## target, the one that exports `user_entrypoint`. "" when there is none.
+  ##
+  ## A Stylus crate also has a `bin` target (the SDK template's
+  ## `export-abi` main, `src/main.rs`), whose `.wasm` lands in the same
+  ## folder and exports `main` and no entrypoint. Taking "the first `.wasm`
+  ## in the folder" took whichever the file system listed first: on one CI
+  ## runner that was the bin, and the recorder, asked to call an entrypoint
+  ## the module does not have, died (exit 139) on a nil function.
+  for line in cargoMessages.splitLines:
+    if not line.startsWith("{"): continue
+    let msg = try: parseJson(line) except JsonParsingError: continue
+    if msg{"reason"}.getStr != "compiler-artifact": continue
+    var cdylib = false
+    for kind in msg{"target", "kind"}.getElems:
+      if kind.getStr == "cdylib": cdylib = true
+    if not cdylib: continue
+    for f in msg{"filenames"}.getElems:
+      if f.getStr.endsWith(".wasm"): return f.getStr
+  ""
+
 proc buildStylusWasm(crate: string): string =
   ## A Stylus contract crate built as `ct arb deploy` builds it for
   ## debugging (`cargo build --target wasm32-unknown-unknown`, with DWARF),
-  ## and the module that build made.
-  let (output, code) = execCmdEx("cargo build --target wasm32-unknown-unknown",
-                                 workingDir = crate)
+  ## and the contract module that build made (`stylusContractWasm`).
+  let (output, code) = execCmdEx(
+    "cargo build --target wasm32-unknown-unknown --message-format=json-render-diagnostics",
+    workingDir = crate)
   if code != 0:
     raise newException(IOError, "record-program " & crate &
                        ": `cargo build --target wasm32-unknown-unknown` exited " & $code & "\n" & output)
-  for kind, path in walkDir(crate / "target" / "wasm32-unknown-unknown" / "debug"):
-    if kind == pcFile and path.endsWith(".wasm"): return path
-  raise newException(IOError, "record-program " & crate & ": the build made no .wasm")
+  result = stylusContractWasm(output)
+  if result.len == 0:
+    raise newException(IOError, "record-program " & crate &
+                       ": the build made no cdylib .wasm (the contract module)")
 
 proc stockNim(): string =
   ## The stock Nim compiler (not CodeTracer's fork; its C carries `#line`
