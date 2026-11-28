@@ -1,0 +1,442 @@
+name: ViewModel tests with ct (recorder-gated, CLI, web core, desktop references)
+# Called from codetracer.yml (job `viewmodel-tests-with-ct`), which keeps the
+# triggers, the concurrency group, the `needs: [ct-build]` and ci-verdict's
+# view of it.
+#
+# THE STEPS OF `viewmodel-tests-wasm` THAT NEED `ct`, IN JOBS OF THEIR OWN.
+# That job built ct itself and then ran them, and with every step let run it
+# took 281 minutes against its 120-minute limit (run 46036475105, job
+# 140633047557, a GARM VM, at adc73e3ede7: 0a59db8feff's job with its limit
+# raised), so nothing from the recorder-gated suites on — PLAT-86's browser
+# web core and the twenty desktop reference captures included — had a CI
+# result. Here `ct` comes from the ct-build job, as the TUI and GPUI shards'
+# does, instead of a 51-minute build-once, and the steps run in one job of
+# their own (why one, and its bound, are beside it). The steps, their names and
+# their conditions are the ones `viewmodel-tests-wasm` had.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  viewmodel-tests-with-ct:
+    runs-on: [self-hosted, linux, x64]  # CIP-5 nix job; same label as `viewmodel-tests-wasm`
+    # ONE JOB, NOT TWO. The desktop captures each assemble a prefix with
+    # `repro build` of the front-end bundles (scripts/plat45-desktop-prefix.sh),
+    # and in a fresh checkout the first two of those builds are slow and the
+    # rest take ~5 minutes: with the captures split over two jobs (proof run
+    # 46112355458, at da243e02c5d, GARM VMs) the first job's took 19 and 16
+    # minutes and the second's 47 and 40, which ran the second job into its
+    # 160-minute limit with five steps left. In one job that cost is paid once.
+    #
+    # Measured in that run: setup 20-28 minutes (provisioning, the restore);
+    # the recorder-gated suites 1046 s, `ct record`'s CLI tests 287, the web
+    # core 94; the captures 1156, 1027 and 231 s in the first job, and in the
+    # second, past its two slow prefixes, 730 s and then 29-379 s each; the
+    # five steps the limit cut are 2100 s in run 46036475105. On the slower
+    # of the two hosts (47 and 40 minutes for the slow prefixes) that sums to
+    # about 230 minutes, on the faster to about 166. 300 is the slower host's
+    # x1.3, under the 359 ci/verdict/job-timeouts.py allows.
+    timeout-minutes: 300
+    name: ViewModel tests with ct (recorder-gated, CLI, web core, desktop references)
+    steps:
+      - name: Generate CI token
+        id: ci_token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+          owner: metacraft-labs
+
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Read the codetracer-native-recorder pin
+        # The workspace `viewmodel-tests-wasm` ran these steps in, sibling for
+        # sibling (scripts/detect-siblings.sh exports this one). It is private,
+        # so the public repro.lock cannot pin it: it is cloned at the one
+        # revision flake.lock locks. Read here, before Nix, with the runner's
+        # jq (sibling-pin-outputs.sh's flake source needs nothing else), so
+        # the clone sits with the others inside the token's hour.
+        id: native_recorder_pin
+        run: bash ci/lib/sibling-pin-outputs.sh native_recorder=flake:codetracer-native-recorder
+
+      # EVERY AUTHENTICATED CLONE IS IN THIS BLOCK, at the top of the job: the
+      # installation token minted above expires an hour after it is minted (see
+      # viewmodel-tests-wasm.yml), and this job is longer than that.
+      - name: Clone codetracer-trace-format-nim sibling
+        # `config.nims` resolves `codetracer_ctfs` from this sibling for every
+        # module that imports it (see viewmodel-tests-wasm.yml).
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-trace-format-nim
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-trace-format-nim
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Clone codetracer-js-recorder sibling
+        # The recorder-gated suites, `ct record`'s end-to-end test and the
+        # browser web core's recording all record through the real JS
+        # recorder, which the recorder-gated step builds. `dev` is its default
+        # branch.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-js-recorder
+          ref: dev
+          path: ${{ github.workspace }}/../codetracer-js-recorder
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Clone runquota sibling
+        # `build-tui`, `build-gpui` and the prefix the desktop captures
+        # assemble compile codetracer modules whose import chain reaches
+        # `runquota_process`, resolved from `../runquota` (issue #641).
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/runquota
+          ref: dev
+          path: ${{ github.workspace }}/../runquota
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Clone codetracer-pm sibling
+        # Spec-reading suites read `$CT_SPECS_DIR`, else `../codetracer-pm`;
+        # not in `repro.lock`, so cloned at its mainline `latest`.
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-pm
+          ref: latest
+          path: ${{ github.workspace }}/../codetracer-pm
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Clone codetracer-native-recorder
+        uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
+        with:
+          repo: metacraft-labs/codetracer-native-recorder
+          ref: ${{ steps.native_recorder_pin.outputs.native_recorder }}
+          path: ${{ github.workspace }}/../codetracer-native-recorder
+          gh-token: ${{ steps.ci_token.outputs.token }}
+          submodules: 'false'
+
+      - name: Install Nix
+        uses: ./.github/actions/setup-nix
+        with:
+          trusted-public-keys: ${{ vars.ATTIC_TRUSTED_PUBLIC_KEY }}
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
+          substituters: ${{ vars.ATTIC_SUBSTITUTER }}
+          gh-token: ${{ steps.ci_token.outputs.token }}
+
+      - name: Provision dependency siblings from repro.lock
+        # isonim et al., which the suites and the desktop's bundles compile
+        # against through codetracer's top-level `config.nims`. After `Install
+        # Nix`: the action reaches `repro` through this repo's dev shell.
+        uses: ./.github/actions/provision-repro-lock-siblings
+        with:
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
+
+      - name: Restore ct and replay-server from the ct-build job
+        # ct-build.yml runs `just build-once` once per run (this workflow's
+        # caller `needs:` it): `src/build-debug-repro` with ct, replay-server
+        # and the front-end bundles, which is the build the recorder-gated
+        # recipe, `ct record`'s tests, the web core and every desktop prefix
+        # (scripts/plat45-desktop-prefix.sh) look in first. It replaces the
+        # 51-minute build-once these steps used to wait on (run 46036475105).
+        # After the provisioning above, which creates the `../isonim-gpui`
+        # checkout the products' windowed shim unpacks into.
+        id: ct
+        uses: actions/download-artifact@v4
+        with:
+          name: ct-build-products
+          path: ${{ runner.temp }}/ct-build
+
+      - name: Unpack them beside the siblings
+        # Tested whole first: download-artifact can finish "successfully" with
+        # a short file (run 44269676398). A short one exits 3 and is downloaded
+        # again below.
+        id: unpack
+        continue-on-error: true
+        run: bash ci/unpack-ct-build-products.sh "${RUNNER_TEMP}/ct-build"
+
+      - name: Restore the ct-build products again, the first download being incomplete
+        if: ${{ steps.unpack.outcome == 'failure' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ct-build-products
+          path: ${{ runner.temp }}/ct-build-retry
+
+      - name: Unpack the second download
+        if: ${{ steps.unpack.outcome == 'failure' }}
+        run: bash ci/unpack-ct-build-products.sh "${RUNNER_TEMP}/ct-build-retry"
+
+      - name: Date the restored build after this checkout
+        # ct-build built these from this same commit, earlier in this run, and
+        # tar keeps their times, so every file of this job's checkout is newer
+        # than the restored `ct`. cs_m10_cli_surface_unchanged_test refuses a
+        # `ct` older than its newest source by modification time, and in proof
+        # run 46112355458 it did not run at all ("bin/ct is older than
+        # libs/nim-confutils/..."), where the job that built ct ran it.
+        run: find src/build-debug-repro -exec touch -h {} +
+
+      - name: Run recorder-gated ViewModel tests (JS recorder + replay-server)
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        # Builds the JS recorder sibling via scripts/build-siblings.sh, finds
+        # the restored replay-server (building one only when none of the
+        # places src/common/replay_server_path.nim searches holds it), then
+        # runs the recorder-gated unit VM suites with a
+        # zero-test guard that fails if they all skip (so a missing recorder
+        # cannot masquerade as a pass).
+        run: nix develop .#devShells.x86_64-linux.default --command just test-vm-recorder-gated
+
+      - name: Run ct record CLI dispatch tests
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        # Asserts that every language detection produces reaches a recorder,
+        # that a missing recorder fails non-zero naming the language and the
+        # remedy, and that a real `ct record` (the restored `ct`) through the
+        # JS recorder sibling cloned above produces a real CTFS container (with a zero-test guard
+        # against an all-skipped run).
+        run: nix develop .#devShells.x86_64-linux.default --command just test-cli-record
+
+      - name: The browser front-end's WebAssembly core on a real recording (Chromium, Firefox)
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        # The wasm32 core (src/frontend/web_core) and the same core built with
+        # nim js, each opening a recording of test-programs/js_flow_test made
+        # here with the restored `ct` and the JS recorder the recorder-gated
+        # step built, served by the restored replay-server; documents
+        # compared stop for stop.
+        run: nix develop .#devShells.x86_64-linux.default --command bash -c 'source scripts/detect-siblings.sh && just test-web-core-browser'
+
+      - name: The desktop opens the one shared default arrangement, and follows it
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        # The desktop's first-run default is GENERATED from the arrangement the
+        # terminal and the GPUI window also open with, and `ci/lint/nim.sh`
+        # already fails when the committed file is stale. This is the half a
+        # staleness check cannot see: that the REAL Electron app, launched with
+        # no saved layout, opens exactly that file's arrangement; that a
+        # rearrangement is remembered across a restart in the desktop's own
+        # file; that View > Reset Layout returns the shared default in place;
+        # and — through a SCRATCH build of the generator with one pane moved
+        # in the shared tree — that the desktop's default follows the shared
+        # tree rather than a hand-kept file.
+        #
+        # Here because this job has what it needs and the GUI jobs do not:
+        # the restored `src/build-debug-repro` (ct-build's build-once) is what
+        # the prefix the recipe assembles is built from (the GUI jobs launch a
+        # packaged, wrapped `ct` whose main script cannot be swapped), and the
+        # dev shell's interpreter carries the Python recorder the specs record
+        # `test-programs/calc` with. The recipe starts its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat45-capture-electron
+
+      - name: The desktop shows what the terminal and GPUI front-ends must equal
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        # The desktop column of the terminal's and GPUI's desktop-parity
+        # suites: the first-run arrangement, the editor's colours as the eye
+        # sees them, the focused panel's outline, the Files pane's entries and
+        # the calltrace pane's calls, captured from the REAL Electron app on
+        # the terminal lanes' own `calc` recording (recorded here when absent)
+        # with this checkout's desktop JavaScript. Here for the reasons the
+        # step above gives; the recipe starts its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat47-capture-electron
+
+      - name: The desktop's menu is drawn from the shared Menu ViewModel
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        # The desktop column of the one menu drawn three ways: a highlight
+        # given to the Menu ViewModel ALONE must move the desktop's DOM
+        # highlight (a renderer keeping its own copy fails here), the Debug
+        # folder's shortcuts are the keymap's chords, choosing Step Over moves
+        # the debugger, and the footer's labels are the shared default's
+        # docked panes — read from the REAL Electron app on `calc` with this
+        # checkout's desktop JavaScript. Here for the reasons the steps above
+        # give; the recipe starts its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat48-capture-electron
+
+      - name: The desktop's chrome is the reference for the other front-ends
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        # The desktop column of the chrome the terminal and GPUI front-ends
+        # draw: one root menu button whose first level drops below it and
+        # whose submenus open to its right, each transport control's tooltip
+        # (the ViewModel's label and chord) and the omnibar's placeholder —
+        # read from the REAL Electron app on `calc` with this checkout's
+        # desktop JavaScript. Here for the reasons the PLAT-45 step above
+        # gives; the recipe starts its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat49-capture-electron
+
+      - name: The desktop's click behaviours and chrome are the reference
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        # The desktop column of the click sweep and the chrome colours: its
+        # caption bar (the omnibox centred, the buttons on the bar's ground),
+        # its strip and splitters, its menu surface, its right-click menus and
+        # what a click on a call, an event and the gutter does — read from the
+        # REAL Electron app on `calc` with this checkout's desktop JavaScript.
+        # Here for the reasons the steps above give; the recipe starts its own
+        # Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat50-capture-electron
+
+      - name: The desktop's Terminal Output pane is the reference
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        # The desktop column of the Terminal Output pane: the lines of a
+        # program writing coloured output with each fragment's computed
+        # style, where a click on a fragment moves the debugger, and the
+        # screen of a full-screen program with its scrubber held and released
+        # at several writes — read from the REAL Electron app with this
+        # checkout's desktop JavaScript. Here for the reasons the steps above
+        # give; the recipe starts its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat52-capture-electron
+
+      - name: The desktop's Test Results pane is the reference
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        # The desktop column of the Test Results pane: its rows before and
+        # after a real `ct test run` over a Noir crate with a passing and a
+        # failing test, the controls' titles and modes, the marks' colours,
+        # and what a right-click on a row opens — read from the REAL Electron
+        # app. Here for the reasons the steps above give; the recipe starts
+        # its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat53-capture-electron
+
+      - name: The desktop's Constraints pane is the reference
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        # The desktop column of the Constraints pane: the rows of a Noir
+        # crate measured by a real `nargo info --json`, where each function is
+        # declared, what a right-click on a row opens and where a press goes —
+        # read from the REAL Electron app. Here for the reasons the steps above
+        # give; the recipe starts its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat62-capture-electron
+
+      - name: The desktop's Agent Activity pane is the reference
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        # The desktop column of the Agent Activity pane: a review's agent
+        # session replayed through `ct review` — every evidence card in its
+        # state with its shape, dataset, command and note, the `ct test` run
+        # card and its tests, and what a right-click on a card opens — read
+        # from the REAL Electron app. Here for the reasons the steps above
+        # give; the recipe starts its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat54-capture-electron
+
+      - name: The desktop's Problems panel is the reference
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        # The desktop column of the Problems pane: its rows after a real
+        # `nargo compile` of a crate with one warning and two errors in two
+        # files, the icons' colours, the Errors filter and Group by File, and
+        # what a right-click and a press on a row open — read from the REAL
+        # Electron app. Here for the reasons the steps above give; the recipe
+        # starts its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat55-capture-electron
+
+      - name: The desktop's Build Output is the reference
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        # The desktop column of the Build Output pane: each line's class, text
+        # and colours after a real coloured `gcc` build that fails and one
+        # that passes, the verdict, the status bar's build indicator, a press
+        # on a located line and the history picker — read from the REAL
+        # Electron app. Here for the reasons the steps above give; the recipe
+        # starts its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat56-capture-electron
+
+      - name: The desktop's Requests pane is the reference
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        # The desktop column of the Requests pane: the rows of a recording
+        # carrying request spans, the Method and Status filters and the URL
+        # search, a double-click going to a request's handler, and the
+        # right-click menu on a row — read from the REAL Electron app with
+        # this checkout's desktop JavaScript. Here for the reasons the steps
+        # above give; the recipe starts its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat58-capture-electron
+
+      - name: The desktop's Low Level Code view is the reference
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        # The desktop column of the Low Level Code pane: the listing of a Noir
+        # recording opened with Alt+1, its execution pointer, its header, an
+        # instruction's right-click menu and a click going to its source line —
+        # read from the REAL Electron app with this checkout's desktop
+        # JavaScript. Here for the reasons the steps above give; the recipe
+        # starts its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat60-capture-electron
+
+      - name: The desktop's Shell pane is the reference
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        # The desktop column of the Shell pane: a recorded build run in the
+        # pane's shell, its output and the recording's marked lines, and a
+        # click opening the recording in a new tab — read from the REAL
+        # Electron app with this checkout's desktop JavaScript. The recipe
+        # starts its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat61-capture-electron
+
+      - name: The desktop's Timeline removal, list scrubbers and changed values are the reference
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        # The desktop column of the 2026-10-05 decisions: no Timeline (and a
+        # saved layout that held one opens without it), the Event Log's, the
+        # Call Trace's and the Terminal Output's scrollbars as scrubbers over
+        # the whole list, and a changed value's accent — read from the REAL
+        # Electron app with this checkout's desktop JavaScript and
+        # stylesheets. Here for the reasons the steps above give; the recipe
+        # starts its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat51-capture-electron
+
+      - name: The desktop's keys go through the shared keymap router
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        # The desktop column of the one keymap every front-end resolves:
+        # each F-key runs its operation once, a letter steps and Enter opens
+        # the tracepoint editor in the read-only editor, Alt+E focuses the
+        # event log with the caret anywhere, Ctrl+B and Ctrl+Shift+B, and the
+        # user's keybindings.json (a row added, a row removed, the chord the
+        # toolbar shows, a reload without a restart) — pressed in the REAL
+        # Electron app on `calc` with this checkout's desktop JavaScript and
+        # stylesheets. Here for the reasons the steps above give; the recipe
+        # starts its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command just plat68-desktop-keys
+
+      - name: The desktop answers every key as the shared rule does (DIFF-13)
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        # The cross-front-end differential's desktop column: every key of the
+        # four base keymaps in six situations, built as a real KeyboardEvent
+        # and named by the desktop's own decoder, resolved for the scope path
+        # the desktop reads off its DOM focus chain, against the committed
+        # answers the terminal and GPUI are held to in the tui lane
+        # (src/tests/gui/tests/keymaps/diff13/).
+        env:
+          PLAT68_SPEC: tests/keymaps/plat68-diff13-desktop.spec.ts
+        run: nix develop .#devShells.x86_64-linux.default --command just plat68-desktop-keys
+
+      - name: One keybindings.json, three front-ends, one behaviour
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        # The same user file read by the terminal (a real pty), the GPUI
+        # window and the Electron app in one run: a rebound call-trace
+        # operation and a removed base row give the same execution lines on
+        # all three. Needs the terminal and GPUI binaries beside the desktop
+        # build; the recipe's desktop half starts its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command bash -c 'just build-tui && just build-gpui && just plat68-one-keymap'
+
+      - name: One input routing, three front-ends (keys and presses)
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        # Input-Routing-And-Keymaps.md IR-3, IR-5 and §5.1: one user file
+        # binds a chord to Step Over and Ctrl+click on a call-trace row to
+        # Continue; the terminal (a real pty), the GPUI window and the
+        # Electron app each step on the chord, continue on the rebound press,
+        # go to the call on the plain press, and show the new chord. The
+        # recipe's desktop half starts its own Xvfb.
+        run: nix develop .#devShells.x86_64-linux.default --command bash -c 'just build-tui && just build-gpui && just plat64-input-routing'
+
+      - name: The desktop's presses are the pointer keymap's rows
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
+        # A press on a call, its toggle and an Event Log column header runs
+        # each element's pointer row through the desktop's one pointer
+        # listener; a user's row removing the base's leaves the press with
+        # nothing to run — in the REAL Electron app on `calc`.
+        env:
+          PLAT68_SPEC: tests/keymaps/plat64-desktop-pointer-rows.spec.ts
+        run: nix develop .#devShells.x86_64-linux.default --command just plat68-desktop-keys
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: viewmodel-with-ct-test-logs
+          path: test-logs/
+          retention-days: 30

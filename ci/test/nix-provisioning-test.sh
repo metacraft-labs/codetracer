@@ -341,7 +341,13 @@ done
 # FLIP library against a library change. It installs Nix through
 # metacraft-github-actions/setup-dev-env (env-flavor nix) before its first
 # `nix`, as php-recorder-downstream does.
-readonly EXPECTED_NIX_JOBS=60
+#
+# 60 -> 61: viewmodel-tests-with-ct.yml's `viewmodel-tests-with-ct`, the
+# steps of `viewmodel-tests-wasm` that need `ct`, split off so each job fits
+# its limit (run 46036475105 ran them past the old job's 120 minutes). It
+# installs Nix through ./.github/actions/setup-nix, as the job they came from
+# does.
+readonly EXPECTED_NIX_JOBS=61
 
 if [ "${#nix_jobs[@]}" -eq "$EXPECTED_NIX_JOBS" ]; then
 	ok "the scanner still classifies the nix-using jobs (${#nix_jobs[@]})"

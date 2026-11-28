@@ -54,6 +54,10 @@ cross-process-linux
 ct-host-container-gate
 viewmodel-tests
 viewmodel-tests-wasm
+# The steps of `viewmodel-tests-wasm` that need `ct`, which never reached a
+# result inside that job's limit (run 46036475105). It waits on `ct-build`, as
+# `tui-tests` does, so a run whose ct-build failed reports it as not run.
+viewmodel-tests-with-ct
 viewmodel-tests-wasm-parity
 # The TUI's two lanes (`just test-tui`, `just test-tui-real-terminal`) were
 # called by no workflow, so their 197 files ran nowhere while every guard was

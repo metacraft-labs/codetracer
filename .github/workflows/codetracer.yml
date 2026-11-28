@@ -1148,6 +1148,18 @@ jobs:
     uses: ./.github/workflows/viewmodel-tests-wasm.yml
     secrets: inherit
 
+  viewmodel-tests-with-ct:
+    # The job is in .github/workflows/viewmodel-tests-with-ct.yml: the steps
+    # of `viewmodel-tests-wasm` that need `ct`, which they take from ct-build
+    # as tui-tests does rather than building it themselves.
+    needs: [ct-build]
+    if: ${{ !cancelled() && needs.ct-build.result == 'success' }}
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/viewmodel-tests-with-ct.yml
+    secrets: inherit
+
 
   viewmodel-tests-wasm-parity:
     # The job is in .github/workflows/viewmodel-tests-wasm-parity.yml.
@@ -5028,6 +5040,7 @@ jobs:
       - ct-host-container-gate
       - viewmodel-tests
       - viewmodel-tests-wasm
+      - viewmodel-tests-with-ct
       - viewmodel-tests-wasm-parity
       - tui-tests
       - isonim-editor-smoke
