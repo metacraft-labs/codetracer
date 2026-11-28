@@ -5,8 +5,9 @@ summary: >-
   Resting the pointer on a pinned pane's strip tab slides the pane in over
   the layout, titled with its name; Escape dismisses the overlay, with the
   pointer in the overlay or still resting on the tab (which then opens
-  nothing until the pointer leaves it), and so does a click on the backdrop;
-  the pane stays pinned either way.
+  nothing until the pointer leaves it); an overlay opened from View > Event
+  Log stays open with the pointer away from it and a click on the backdrop
+  dismisses it; the pane stays pinned either way.
 
 stage:
   - use: record-program
@@ -52,10 +53,25 @@ steps:
       - wait: { until: { at: auto-hide-overlay, absent: true }, timeout: 15s }
       - expect: { at: window, strip-tabs: { count: 5 } }
 
+  # A hover preview closes by itself once the pointer leaves it (§3.2), so a
+  # pointer on its way to the backdrop closes it before it gets there. The
+  # backdrop dismisses an overlay that stays open without the pointer
+  # (Auto-Hide-Panes §10.8, "Escape / click outside"): one opened as a
+  # request, View > Event Log.
   - beat: backdrop
     steps:
-      - hover: { at: 'strip-tab[label="EVENT LOG"]', for: 500ms }
-      - wait: { until: { at: auto-hide-overlay, present: true }, timeout: 15s }
+      - click: menu-bar
+      - wait: { until: { at: 'menu-bar/menu[label="View"]', present: true }, timeout: 10s }
+      - hover: { at: 'menu-bar/menu[label="View"]', for: 300ms }
+      - wait: { until: { at: 'menu-bar/menu-item[label="Filesystem"]', present: true }, timeout: 10s }
+      # Down into the menu first, so the way to its fourth entry stays on it
+      # rather than crossing the next menu's title.
+      - hover: { at: 'menu-bar/menu-item[label="Filesystem"]', for: 200ms }
+      - wait: settled
+      - click: 'menu-bar/menu-item[label="Event Log"]'
+      - wait: { until: { at: auto-hide-overlay, title: "EVENT LOG" }, timeout: 15s }
+      - move: { at: 'pane-tab[label="VARIABLES"]' }
+      - expect: { at: auto-hide-overlay, title: "EVENT LOG" }
       - click: { at: auto-hide-backdrop }
       - wait: { until: { at: auto-hide-overlay, absent: true }, timeout: 15s }
       - expect: { at: window, strip-tabs: { count: 5 } }
