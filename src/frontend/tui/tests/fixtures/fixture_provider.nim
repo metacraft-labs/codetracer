@@ -66,7 +66,7 @@
 ## `--path:src/frontend/viewmodel` so `headless_session` — itself a
 ## process-spawning host — is reachable from the suites that use this.
 
-import std/[algorithm, md5, os, osproc, strutils]
+import std/[algorithm, md5, os, osproc, strutils, times]
 
 import ../../../../common/replay_server_path   # the one search order
 from ../../../../ct/trace/ctfs_sources import readCtfsMetaDat
@@ -683,6 +683,25 @@ proc recordTimeoutSeconds(): int =
         "CT_TUI_FIXTURE_TIMEOUT is not a number: " & fromEnv)
   600
 
+proc acquireFixtureLock(cached: string): string =
+  ## Take `<cached>.lock`, a directory, created atomically (mkdir), polling
+  ## while another process holds it. A lock older than the longest a
+  ## recording may take plus five minutes belongs to a process that died
+  ## holding it, and is taken over.
+  result = cached & ".lock"
+  let stale = float(recordTimeoutSeconds() + 300)
+  while existsOrCreateDir(result):
+    try:
+      if epochTime() - getLastModificationTime(result).toUnixFloat() > stale:
+        removeDir(result)
+        continue
+    except OSError:
+      continue  # released between the two calls
+    sleep(250)
+
+proc releaseFixtureLock(lock: string) =
+  removeDir(lock)
+
 proc recordFixture(root, ctBin: string; spec: FixtureSpec;
                    destination: string): string =
   ## Record `spec` into `destination` and return the recorded trace directory.
@@ -799,6 +818,15 @@ proc resolveFixture*(spec: FixtureSpec;
 
   let key = fixtureKey(root, spec)
   let cached = fixtureCacheRoot(root) / (spec.name & "-" & key)
+  # ONE PROCESS AT A TIME PER FIXTURE. A lane that runs its files in
+  # parallel (ci/lib/job-pool.sh) can have two suites miss the same fixture
+  # at once, and `recordFixture` stages into the one directory
+  # `<cache>.partial`, which each would remove under the other. Holding the
+  # fixture's lock across the cache check and the recording makes the second
+  # suite wait, and then find the first one's recording in the cache.
+  createDir(fixtureCacheRoot(root))
+  let fixtureLock = acquireFixtureLock(cached)
+  defer: releaseFixtureLock(fixtureLock)
 
   # 2. The cache. The stamp is checked as well as the trace shape, so a
   #    directory left by an interrupted run is re-recorded rather than adopted.
