@@ -205,4 +205,12 @@ proc ctwTableCopyRow(pane, selected: cstring): bool {.exportc.} =
   copyRowOf($pane, selected)
 
 {.emit: "globalThis.ctwDecoratePanes = ctwDecoratePanes;".}
-{.emit: "globalThis.ctwTableShowDetail = ctwTableShowDetail; globalThis.ctwTableCopyRow = ctwTableCopyRow;".}
+proc ctwTableFocusedCell(pane, selected: cstring): JsObject {.exportc.} =
+  ## The focused row's cell on such a pane (`focusedRowCell`: the selected
+  ## row's, else the row last pressed's), or nil: what the page's key router
+  ## acts on for the Variables pane's `variables.show-value-origin` and
+  ## `context-menu.open`, which this bundle's copy of `table_overflow_dom`
+  ## holds and the page's does not.
+  focusedRowCell($pane, selected)
+
+{.emit: "globalThis.ctwTableShowDetail = ctwTableShowDetail; globalThis.ctwTableCopyRow = ctwTableCopyRow; globalThis.ctwTableFocusedCell = ctwTableFocusedCell;".}

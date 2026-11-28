@@ -663,11 +663,23 @@ proc runPaletteOperation*(operation, argument: string) =
                                               operation: operation,
                                               argument: argument))
 
+proc coreTableFocusedCell(pane, selected: cstring): JsObject {.importjs:
+  "(globalThis.ctwTableFocusedCell ? globalThis.ctwTableFocusedCell(#, #) : null)".}
+  ## The focused row's cell on a table pane the WebAssembly core draws, held
+  ## by the decoration bundle's copy of `table_overflow_dom`; null where
+  ## there is none.
+
 proc focusedStateRow(): JsObject =
   ## PLAT-70 Part E: the Variables row the keys act on — the row of the
   ## state pane's focused (last pressed) cell, as `list.show-detail` reads it.
-  let cell = focusedRowCell(StateDetailPane, cstring"")
-  if cell.isNil: return nil
+  ## The desktop's Variables pane is drawn by the WebAssembly core, and its
+  ## cells are held by the decoration bundle's copy of `table_overflow_dom`,
+  ## not this one: asked of this copy only, the row was never found, and
+  ## Ctrl+Shift+O and the menu key did nothing in that pane.
+  var cell = focusedRowCell(StateDetailPane, cstring"")
+  if cell.isNil or cell.isUndefined:
+    cell = coreTableFocusedCell(cstring(StateDetailPane), cstring"")
+  if cell.isNil or cell.isUndefined: return nil
   let row = cell.closest(cstring"[data-variable-name]")
   if row.isNil or row.isUndefined: nil else: row
 
