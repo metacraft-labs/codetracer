@@ -125,7 +125,7 @@ jobs:
             # The HCR flame scenarios' demo, and reprobuild (repro.lock's pin) for the
             # HCR coordinator driver, the patchable-profile emitter and the in-target
             # agent the patchable Godot links.
-            codetracer-flame-demo=220d7abd236c610b69f2d3900a0c0d2eae884416
+            codetracer-flame-demo=27425eebeb9ac79708cbde7a38c054f74b0c415f
             # codetracer-visual-replay's config.nims puts both on its --path
             # (ct_gfx_player's build); snapshot-codecs at visual-replay's
             # repro.lock pin, image-diff at codetracer's.
