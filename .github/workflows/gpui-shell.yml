@@ -159,6 +159,10 @@ jobs:
         uses: ./.github/actions/provide-visual-replay-tools
         with:
           wait-for-artifact: 'true'
+          # Lets the action clone the siblings it builds the tools from when
+          # this run's tools job left no artifact.
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Restore the headless shim from the cache
         # isonim-gpui's `--features gpui-headless` shim, staged with its build
