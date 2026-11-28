@@ -57,6 +57,7 @@ import viewmodels/[
   shell_vm,
   filesystem_vm,
   origin_chain_vm,
+  origin_chain_bridges,
   origin_chain_types,
   terminal_output_vm,
   build_vm,
@@ -332,6 +333,26 @@ proc initializePanelViewModels*(session: SessionViewModel) =
 # M29 §5.3 — multi-process session management
 # ---------------------------------------------------------------------------
 
+proc wireOriginBridgesOf(session: SessionViewModel; vm: StateVM) =
+  ## Give `vm`, one of the session's per-recording StateVMs, the session's
+  ## value-origin bridges (`origin_chain_bridges.wireOriginChainBridges`),
+  ## when the session has an OriginChainVM and `vm` has none yet.
+  ##
+  ## After a process switch (`onSwitchProcess`) `session.stateVM` is the
+  ## switched-to recording's VM, and the hosts reach the origin through it:
+  ## the WebAssembly core's "Show in side panel" arrives at the page as
+  ## `session.stateVM.onShowOriginProc` (`ui/panel_host`). A per-recording VM
+  ## built without the bridges left that proc nil, so after switching to a
+  ## second recording the side panel never opened. One OriginChainVM serves
+  ## them all: it asks through the session's store, which routes each
+  ## request to the active recording.
+  if session.originChainVM.isNil or vm.isNil or
+      not vm.onShowOriginProc.isNil:
+    return
+  let s = session
+  wireOriginChainBridges(vm, session.originChainVM,
+    proc(): ScratchpadVM = s.scratchpadVM)
+
 proc ensureStateVM*(session: SessionViewModel;
                     recordingId: string): StateVM =
   ## Return the per-recording StateVM, creating it lazily on first
@@ -374,6 +395,7 @@ proc ensureStateVM*(session: SessionViewModel;
   let vm = createStateVM(session.store, nil, session.runtimeRole,
                          watchOwner = owner, recordingId = recordingId)
   session.stateVMs[recordingId] = vm
+  session.wireOriginBridgesOf(vm)
   vm
 
 proc setProcessTree*(session: SessionViewModel;
@@ -514,6 +536,8 @@ proc attachOriginChainVM*(session: SessionViewModel;
   ## existed would have observed no signals and would not recompute
   ## when `activeChain` later changed).
   session.originChainVM = originVM
+  for vm in session.stateVMs.values:
+    session.wireOriginBridgesOf(vm)
   session.crossProcessSpans =
     createMemo[seq[CrossProcessSpan]] proc(): seq[CrossProcessSpan] =
       let chain = originVM.activeChain.val
