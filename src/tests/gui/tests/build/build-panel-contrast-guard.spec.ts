@@ -107,10 +107,12 @@ const LIGHT_FILED_PAIRS: readonly FiledLightPair[] = [
   { selector: "#build .build-stderr", ratio: 3.74, measured: "ui/text/error/primary #dc2626, 3.74:1" },
   { selector: "#build .build-line-error", ratio: 3.74, measured: "ui/text/error/primary #dc2626, 3.74:1" },
   { selector: "#panel-succeeded .build-header.build-succeeded .build-command-label", ratio: 2.55, measured: "ui/text/success/primary #16a34a, 2.55:1" },
-  { selector: "#panel-running .build-scroll-btn.active", ratio: 2.55, measured: "ui/text/success/primary #16a34a, 2.55:1" },
+  // On the button look's `surface/primary/default` Light (#f8f6f2), which the
+  // controls carry since bd4998cd07f, not on the panel.
+  { selector: "#panel-running .build-scroll-btn.active", ratio: 3.05, measured: "ui/text/success/primary #16a34a on surface/primary/default, 3.05:1" },
   { selector: "#build .build-line-warning", ratio: 2.76, measured: "ui/text/warning/primary #ea580c, 2.76:1" },
   { selector: "#panel-running .build-duration", ratio: 3.55, measured: "ui/text/primary/caption #7a756a, 3.55:1" },
-  { selector: "#panel-running .build-stop-btn.disabled", ratio: 2.76, measured: "ui/text/primary/label-subtle #8e8778, 2.76:1" },
+  { selector: "#panel-running .build-stop-btn.disabled", ratio: 3.30, measured: "ui/text/primary/label-subtle #8e8778 on surface/primary/default, 3.30:1" },
 ];
 
 /**
@@ -381,16 +383,28 @@ test.describe("build panel contrast (WCAG 1.4.3), /noir/demo BUILD pane", () => 
     // The panel's ground is `ui/surface/base/panel` in both builds, in each
     // build's own mode. Until the light theme set `COLOR_MODE`, both compiled
     // the same `#282828` panel and the light run measured the dark one twice.
-    const grounds: Record<string, string> = {};
+    // The header controls carry the shared button look (button.styl) since
+    // bd4998cd07f, so their ground is that look's `ui/surface/primary/default`,
+    // again in each build's own mode.
+    const isControl = (selector: string) => selector.includes(".build-ctrl-btn") ||
+      /\.build-(run|stop|clear|scroll)-btn/.test(selector);
+    const grounds: Record<string, { panel: string; controls: string }> = {};
     for (const theme of ["default_dark_theme_electron.css", "default_white_theme_electron.css"]) {
       await layOutPanel(page, theme);
-      const probes = await probeBarContrast(page, BUILD_PANEL_REGIONS);
-      const grounded = probes.filter((p) => p.found).map((p) => rgbToHex(p.background));
-      grounds[theme] = [...new Set(grounded)].join(",");
+      const probes = (await probeBarContrast(page, BUILD_PANEL_REGIONS)).filter((p) => p.found);
+      const hexes = (ps: typeof probes) => [...new Set(ps.map((p) => rgbToHex(p.background)))].join(",");
+      grounds[theme] = {
+        panel: hexes(probes.filter((p) => !isControl(p.selector))),
+        controls: hexes(probes.filter((p) => isControl(p.selector))),
+      };
     }
+    const expected = (mode: "Dark" | "Light") => ({
+      panel: designTokenHex(repoRoot, "dtColorsUiSurfaceBasePanel", mode),
+      controls: designTokenHex(repoRoot, "dtColorsUiSurfacePrimaryDefault", mode),
+    });
     expect(grounds).toEqual({
-      "default_dark_theme_electron.css": designTokenHex(repoRoot, "dtColorsUiSurfaceBasePanel", "Dark"),
-      "default_white_theme_electron.css": designTokenHex(repoRoot, "dtColorsUiSurfaceBasePanel", "Light"),
+      "default_dark_theme_electron.css": expected("Dark"),
+      "default_white_theme_electron.css": expected("Light"),
     });
   });
 
