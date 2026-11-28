@@ -1,0 +1,37 @@
+# PROOF ONLY, ci/plat59-shards, NEVER LANDED. Runs just what TUI shards 3/8 and
+# 8/8 need (the visual-fixture suites at this tip), to verify the PLAT-59 suites pass there (agents
+# 400f380cd01 / 7727e93f3d3 / 6cde0ba5f0d) without queueing the whole codetracer.yml while the
+# Linux runner pools are saturated. tui-tests.yml's matrix is cut to [3, 8] on
+# this branch only.
+name: plat59 shards proof (ci only)
+on:
+  push:
+    branches: [ci/plat59-shards]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: plat59-shards-proof
+  cancel-in-progress: true
+
+jobs:
+  ct-build:
+    uses: ./.github/workflows/ct-build.yml
+    secrets: inherit
+
+  visual-replay-tools:
+    uses: ./.github/workflows/visual-replay-tools.yml
+    secrets: inherit
+
+  tui-tests:
+    needs: [ct-build]
+    if: ${{ !cancelled() && needs.ct-build.result == 'success' }}
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+    uses: ./.github/workflows/tui-tests.yml
+    secrets: inherit

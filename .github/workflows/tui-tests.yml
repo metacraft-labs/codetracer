@@ -45,7 +45,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        shard: [3, 8]  # PROOF BRANCH ONLY (ci/plat59-shards): never landed
     name: TUI tests (Tier 1 + Tier 2) (${{ matrix.shard }}/8)
     # WHY THIS JOB EXISTS. `just test-tui` and `just test-tui-real-terminal` are
     # the only routes to the `tui` and `tui-real-terminal` lanes of
