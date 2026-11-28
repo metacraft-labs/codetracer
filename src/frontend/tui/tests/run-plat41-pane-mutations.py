@@ -64,7 +64,11 @@ ARMS = [
      '  result.root = viewTreeNode("debugControls", "Debug controls", children,\n'
      '                             expanded = false)',
      [PARITY], "the debug controls collapse again: a heading and no buttons"),
-    ("X2", FLOWVM, "  vm.steps.val = flowStepEntriesOf(view)", "  discard",
+    # Re-aimed 2026-11-28: ddda832de decodes the window once, so the call now
+    # takes the decoded window and the step file.
+    ("X2", FLOWVM,
+     "  vm.steps.val = flowStepEntriesOf(windows[0], flowStepFileOf(view))",
+     "  discard",
      [PARITY], "the flow window's steps are dropped again"),
     ("X3", STORE, "  if maxTicks > store.timeline.val.maxRRTicks:",
      "  if false:", [PARITY],
@@ -83,12 +87,15 @@ ARMS = [
     # N1 RE-AIMED 2026-10-17: `flowStepEventsOf` (added with the redesign)
     # derives the same `base`, so the one-line needle occurred twice; it now
     # quotes the step-entries loop head that follows it.
+    # Re-aimed 2026-11-28: ddda832de moved the step rows to
+    # `flowStepEntriesOf`; this loop is now `flowWindowReturnsOf`'s, so the
+    # needle quotes its `events` line.
     ("N1", FLOWVM, "  let base = file[file.rfind('/') + 1 .. ^1]\n"
      "  for st in steps:\n    if st.kind != JObject: continue\n"
-     "    let line = jsonInt(st{\"position\"}, 0)",
+     "    let events = st{\"events\"}",
      "  let base = file[(file.rfind('/') + 1) .. ^1]\n"
      "  for st in steps:\n    if st.kind != JObject: continue\n"
-     "    let line = jsonInt(st{\"position\"}, 0)", [PARITY],
+     "    let events = st{\"events\"}", [PARITY],
      "behaviour-preserving: the DECLARED SURVIVOR"),
 ]
 DECLARED_SURVIVORS = {"N1"}

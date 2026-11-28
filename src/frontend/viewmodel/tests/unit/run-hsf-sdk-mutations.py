@@ -191,9 +191,13 @@ ARMS = [
     ),
     Arm(
         "F1", FLOWVM,
-        "  result.text = presented.root.text\n",
-        '  result.text = (if value{"text"}.isNil: presented.root.text '
-        'else: "")\n',
+        # Re-aimed 2026-11-28: ddda832de (present each recorded value of a
+        # flow window once) moved the presentation into `presentFlowValue`;
+        # the text is now assigned through the tuple.  Same meaning: a value
+        # carrying a "text" (a recorded string) is blanked.
+        "  (result.text, result.truncated) = presentFlowValue(value)\n",
+        "  (result.text, result.truncated) = presentFlowValue(value)\n"
+        '  if not value{"text"}.isNil: result.text = ""\n',
         K_STRING,
         "**A RECORDED STRING IS DRAWN BLANK.** The overlay keeps its labels, "
         "on the right lines, and says nothing about the strings",
