@@ -1,0 +1,32 @@
+name: ViewModel WASM and with-ct split (proof branch only)
+# Proof-only: runs ct-build, `viewmodel-tests-wasm` and the two jobs of
+# viewmodel-tests-with-ct.yml exactly as codetracer.yml calls them, at their
+# landed limits. Never lands.
+on:
+  push:
+    branches: [ci/web-core]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  ct-build:
+    uses: ./.github/workflows/ct-build.yml
+    secrets: inherit
+
+  viewmodel-tests-wasm:
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/viewmodel-tests-wasm.yml
+    secrets: inherit
+
+  viewmodel-tests-with-ct:
+    needs: [ct-build]
+    if: ${{ !cancelled() && needs.ct-build.result == 'success' }}
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/viewmodel-tests-with-ct.yml
+    secrets: inherit
