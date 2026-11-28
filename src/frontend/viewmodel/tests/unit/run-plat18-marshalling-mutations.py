@@ -587,7 +587,9 @@ ARMS = [
     Arm(
         id="D1",
         path=DEV_SH,
-        find='\tlimit="${CT_P18_DEV_MAX:-5.0}"\n',
+        # Re-aimed 2026-11-28: the gate moved to CPU time and its limit to
+        # 8.0x (`plat18-dev-loop.sh`, "THE GATE IS ON CPU TIME").
+        find='\tlimit="${CT_P18_DEV_MAX:-8.0}"\n',
         replace='\tlimit="${CT_P18_DEV_MAX:-0.1}"\n',
         grader=G_DEV,
         killer="(contract 2 — the developer-loop regression gate)",
@@ -599,8 +601,8 @@ ARMS = [
             "`plat18-dev-loop: all contracts hold` would be true of a loop "
             "that had become ten times slower",
         control_name="the regression limit is written with a trailing zero",
-        control_find='\tlimit="${CT_P18_DEV_MAX:-5.0}"\n',
-        control_replace='\tlimit="${CT_P18_DEV_MAX:-5.00}"\n',
+        control_find='\tlimit="${CT_P18_DEV_MAX:-8.0}"\n',
+        control_replace='\tlimit="${CT_P18_DEV_MAX:-8.00}"\n',
     ),
 
     # -------------------------------------------------------------------

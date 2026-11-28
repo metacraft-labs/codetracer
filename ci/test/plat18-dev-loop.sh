@@ -45,6 +45,38 @@
 # measured under the same scheduler, and every arm's own median, min and max
 # are printed beside it so a reader can see the spread rather than a point.
 #
+# ## THE GATE IS ON CPU TIME, NOT WALL TIME
+#
+# The regression gate (contract 2) compares the CPU each loop costs — user+sys
+# of the arm and every process it waits for, read with bash's `time` on the
+# arm's subshell — not its wall clock. Interleaving was not enough: the two
+# loops parallelise differently (the wasm arm compiles a hundred C units
+# through emcc, the js arm emits one file), so the wall ratio moves with how
+# many cores the host has free and how many jobs the compiler may run. On one
+# tree (0dd7194d23a), 2026-11-27/28, the wall ratio read 5.14x (Nim
+# parallelBuild 1, load ~105), under 5.0 (default parallelism on 6 cores, load
+# ~112) and 9.94x (parallelBuild 4 on 6 cores, load ~138): the gate passed and
+# failed the same bytes. The CPU ratio on that tree, 2026-11-28:
+#
+#   | condition                              | load | js cpu | wasm cpu | ratio |
+#   |----------------------------------------+------+--------+----------+-------|
+#   | parallelBuild 4, 6 cores               |   89 | 3562   | 21073    | 5.92x |
+#   | parallelBuild 1, 6 cores               |   73 | 3520   | 20022    | 5.69x |
+#   | parallelBuild 4, 2 cores, nice 19      |   68 | 3650   | 23035    | 6.31x |
+#   | REGRESSION: wasm link + Asyncify, -O3  |   68 | 3490   | 39884    | 11.43x |
+#
+# (cpu in ms, one repetition's median of three). The wall ratio of the
+# regressed run was 4.33x — inside the range the healthy tree's wall ratio
+# wandered over — so a wall-time gate could not have told it from noise; the
+# CPU gate does. No idle-host figure exists: this host never fell below load
+# 68 in the measurement window, which is why the table spans parallelism and
+# core count instead.
+#
+# THE LIMIT IS 8.0x: about a quarter above the highest healthy reading (6.31x)
+# and well below the regression (11.43x). It is a regression gate, not §5's
+# criterion; that one stays on wall time below, because it is about how an
+# edit feels, and it is reported rather than gated.
+#
 # ## THE CACHE IS CLEARED PER ARM PER REPETITION
 #
 # A developer's edit invalidates the module they edited and everything
@@ -100,41 +132,51 @@ echo
 
 now_ms() { date +%s%3N; }
 
-declare -A samples cases_of
-for arm in native js wasm; do samples["${arm}"]=""; done
+declare -A samples cpu cases_of
+for arm in native js wasm; do
+	samples["${arm}"]=""
+	cpu["${arm}"]=""
+done
 
 for rep in $(seq 1 "${REPS}"); do
 	for arm in native js wasm; do
 		cache="${out_dir}/${arm}-${rep}"
 		rm -rf "${cache}"
 		t0="$(now_ms)"
-		case "${arm}" in
-		native)
-			nim c --hints:off --warnings:off --mm:orc \
-				--path:src/frontend/viewmodel \
-				--nimcache:"${cache}" -o:"${cache}.bin" "${SUITE}" \
-				>"${cache}.log" 2>&1 && "${cache}.bin" >>"${cache}.log" 2>&1
-			;;
-		js)
-			nim js -d:nodejs --hints:off --warnings:off \
-				--path:src/frontend/viewmodel \
-				--nimcache:"${cache}" -o:"${cache}.js" "${SUITE}" \
-				>"${cache}.log" 2>&1 && node "${cache}.js" >>"${cache}.log" 2>&1
-			;;
-		wasm)
-			nim c --hints:off --warnings:off \
-				--cpu:wasm32 --os:linux -d:emscripten \
-				--cc:clang --clang.exe:emcc --clang.linkerexe:emcc \
-				--mm:orc --threads:off \
-				--passL:-sSTACK_SIZE=8388608 \
-				--passL:-sNODERAWFS=1 \
-				--passL:-sALLOW_MEMORY_GROWTH=1 \
-				--passL:-sEXIT_RUNTIME=1 \
-				--path:src/frontend/viewmodel \
-				--nimcache:"${cache}" -o:"${cache}.js" "${SUITE}" \
-				>"${cache}.log" 2>&1 && node "${cache}.js" >>"${cache}.log" 2>&1
-			;;
-		esac
+		# CPU TIME, NOT ONLY WALL TIME: `time` on the subshell reports the
+		# user+sys of every process the arm waited for (nim, cc/emcc, the
+		# linker, node), so a busy host that stretches the wall clock leaves
+		# this figure almost where it was ("THE GATE IS ON CPU TIME", in the header).
+		TIMEFORMAT='%3U %3S'
+		{ time (
+			case "${arm}" in
+			native)
+				nim c --hints:off --warnings:off --mm:orc \
+					--path:src/frontend/viewmodel \
+					--nimcache:"${cache}" -o:"${cache}.bin" "${SUITE}" \
+					>"${cache}.log" 2>&1 && "${cache}.bin" >>"${cache}.log" 2>&1
+				;;
+			js)
+				nim js -d:nodejs --hints:off --warnings:off \
+					--path:src/frontend/viewmodel \
+					--nimcache:"${cache}" -o:"${cache}.js" "${SUITE}" \
+					>"${cache}.log" 2>&1 && node "${cache}.js" >>"${cache}.log" 2>&1
+				;;
+			wasm)
+				nim c --hints:off --warnings:off \
+					--cpu:wasm32 --os:linux -d:emscripten \
+					--cc:clang --clang.exe:emcc --clang.linkerexe:emcc \
+					--mm:orc --threads:off \
+					--passL:-sSTACK_SIZE=8388608 \
+					--passL:-sNODERAWFS=1 \
+					--passL:-sALLOW_MEMORY_GROWTH=1 \
+					--passL:-sEXIT_RUNTIME=1 \
+					--path:src/frontend/viewmodel \
+					--nimcache:"${cache}" -o:"${cache}.js" "${SUITE}" \
+					>"${cache}.log" 2>&1 && node "${cache}.js" >>"${cache}.log" 2>&1
+				;;
+			esac
+		) } 2>"${cache}.cpu"
 		rc=$?
 		t1="$(now_ms)"
 		if [ "${rc}" -ne 0 ]; then
@@ -143,6 +185,8 @@ for rep in $(seq 1 "${REPS}"); do
 			continue
 		fi
 		samples["${arm}"]="${samples[${arm}]} $((t1 - t0))"
+		cpu_ms="$(awk 'END{printf "%d", ($1 + $2) * 1000}' "${cache}.cpu")"
+		cpu["${arm}"]="${cpu[${arm}]} ${cpu_ms}"
 		# THE CASE COUNT IS READ FROM THE RUN, NOT ASSUMED. A backend that ran
 		# fewer cases took less time for a reason that is not about the
 		# backend, and this is where that would show.
@@ -162,11 +206,12 @@ minv() { _lines "$1" | sort -n | head -1; }
 maxv() { _lines "$1" | sort -n | tail -1; }
 
 echo
-printf '  %-10s %-12s %-10s %-10s %-10s\n' backend "median ms" "min" "max" "[OK] cases"
+printf '  %-10s %-12s %-10s %-10s %-12s %-10s\n' backend "median ms" "min" "max" "median cpu ms" "[OK] cases"
 for arm in native js wasm; do
-	printf '  %-10s %-12s %-10s %-10s %-10s\n' "${arm}" \
+	printf '  %-10s %-12s %-10s %-10s %-12s %-10s\n' "${arm}" \
 		"$(median "${samples[${arm}]}")" "$(minv "${samples[${arm}]}")" \
-		"$(maxv "${samples[${arm}]}")" "${cases_of[${arm}]:-<none>}"
+		"$(maxv "${samples[${arm}]}")" "$(median "${cpu[${arm}]}")" \
+		"${cases_of[${arm}]:-<none>}"
 done
 echo
 
@@ -200,25 +245,28 @@ else
 	n="$(median "${samples[native]}")"
 	j="$(median "${samples[js]}")"
 	w="$(median "${samples[wasm]}")"
+	jc="$(median "${cpu[js]}")"
+	wc="$(median "${cpu[wasm]}")"
 	# THE REGRESSION LIMIT IS LOOSE ON PURPOSE. It is not §5's criterion —
 	# that is reported below — it is the value above which something has
-	# broken rather than merely got slower. 5x on a 1.3 s loop is 6.5 s.
-	limit="${CT_P18_DEV_MAX:-5.0}"
+	# broken rather than merely got slower, on the CPU each loop costs
+	# ("THE GATE IS ON CPU TIME" in the header says how it was derived).
+	limit="${CT_P18_DEV_MAX:-8.0}"
 	# AGAINST `nim js`, NOT AGAINST NATIVE, and that is the whole point of the
 	# comparison: §5 asks whether ADOPTING the wasm core makes the loop worse,
 	# and what it would replace in Electron and the browser is `nim js`. The
 	# native figure is printed because a reader wants it and because it is the
 	# floor, not because it is the thing being decided.
-	verdict="$(awk -v j="${j}" -v w="${w}" -v lim="${limit}" 'BEGIN{
+	verdict="$(awk -v j="${jc}" -v w="${wc}" -v lim="${limit}" 'BEGIN{
 		if (j + 0 <= 0) { print "NOBASE 0"; exit }
 		r = (w + 0) / (j + 0);
 		printf "%s %.2f\n", (r <= lim + 0 ? "OK" : "SLOW"), r
 	}')"
 	read -r kind ratio <<<"${verdict}"
 	case "${kind}" in
-	OK) ok "one edit-compile-run is ${ratio}x the nim js loop under wasm (regression limit ${limit}x); native median ${n} ms, js ${j} ms, wasm ${w} ms" ;;
-	SLOW) fail "one edit-compile-run is ${ratio}x the nim js loop under wasm, above the ${limit}x regression limit" ;;
-	*) fail "the nim js median was ${j} ms — too short to divide by" ;;
+	OK) ok "one edit-compile-run costs ${ratio}x the nim js loop's CPU under wasm (regression limit ${limit}x); cpu js ${jc} ms, wasm ${wc} ms; wall native ${n} ms, js ${j} ms, wasm ${w} ms" ;;
+	SLOW) fail "one edit-compile-run costs ${ratio}x the nim js loop's CPU under wasm, above the ${limit}x regression limit (cpu js ${jc} ms, wasm ${wc} ms; wall js ${j} ms, wasm ${w} ms)" ;;
+	*) fail "the nim js loop's CPU median was ${jc} ms — too short to divide by" ;;
 	esac
 
 	# --- and, SEPARATELY, §5's criterion ---------------------------------
