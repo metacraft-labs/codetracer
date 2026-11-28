@@ -930,7 +930,6 @@ src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	e
 src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/run-nim-test-lane.sh	04c424b08d8e58312dae8d3d7aecfdc87e8b2e306fad2437e2b36cdf9b38d222	56cdbd4c9464bfaca1ae50c4d121048090e46d9579bb8f87e5827c9aa234bd30
 src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/lib/test-lane-files.sh	bec598b1dc9721ddca16f03205c1df4678c300c0157a45ee4fcfbba8f2579fdb	35ca6306a6ee89b0a5cd1473233ccdac82e3943c396136e2d8a789365f755370
 src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	ci/test/vm-unit-wasm-parity.sh	3cf7bf184200cef001990beb031fa23909bf7bf1d17c9061605566bd3f67583d	3a9b6c09f53ebfd6c9f4859c6c3b8d3eecef39df5f7544c5e749eb08183cff2f
-src/frontend/viewmodel/tests/unit/plat34-front-end-mutation-control.sha256	ci/lib/test-lane-files.sh	bec598b1dc9721ddca16f03205c1df4678c300c0157a45ee4fcfbba8f2579fdb	35ca6306a6ee89b0a5cd1473233ccdac82e3943c396136e2d8a789365f755370
 # The stop loader retries a failed flow when a move is reported at the stop it is already at
 # (stop_loader.nim, replay_data_store.nim stopReported, test_stop_loader.nim), unledgered.
 src/frontend/tui/tests/plat40-producer-mutation-control.sha256	src/frontend/viewmodel/store/replay_data_store.nim	5ae3b32a7f7e2e0d7ebe7de7ff9a4e02f1cc5a8a9b44440fdd321fa6a47ea2db	d0c3477d47aa0aec0e6b33674b55ceb5a74022dbd8fb4aa0678ae08ae657ef2c
