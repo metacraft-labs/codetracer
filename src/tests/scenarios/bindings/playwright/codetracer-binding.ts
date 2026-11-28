@@ -3327,6 +3327,19 @@ function copyCompanionGfxStream(recording: string, home: string | undefined, id:
   if (fs.existsSync(`${source}.ctfs`)) fs.copyFileSync(`${source}.ctfs`, `${target}.ctfs`);
 }
 
+/**
+ * Playwright's own video of a page the binding opens, as a launch or context
+ * option. An arm that records every page itself (`ctx.recordsPages`,
+ * DemoVideoScript-Playwright since its lossless recorder) needs none: a second
+ * recording would only cost CPU. An older arm copies the page's Playwright
+ * video into the run as its recording, the video the CI lanes upload with a
+ * failed run (DemoVideoScript's upload-failed-runs action), so it keeps it.
+ */
+export function playwrightVideo(ctx: Ctx, dir: string, size: { width: number; height: number }):
+    { recordVideo?: { dir: string; size: { width: number; height: number } } } {
+  return ctx.recordsPages === true ? {} : { recordVideo: { dir, size } };
+}
+
 async function launchElectron(ctx: Ctx, launch: any): Promise<void> {
   const env: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) if (v !== undefined) env[k] = v;
@@ -3385,7 +3398,7 @@ async function launchElectron(ctx: Ctx, launch: any): Promise<void> {
   fs.mkdirSync(ctx.videoDir, { recursive: true });
   const app = await _electron.launch({
     executablePath: ctBin, cwd: launch.workDir || srcDir, args, env,
-    recordVideo: { dir: ctx.videoDir, size: { width, height } },
+    ...playwrightVideo(ctx, ctx.videoDir, { width, height }),
   });
   ctx.state.app = app;
   ctx.videoStartedAt = Date.now();
@@ -3737,7 +3750,7 @@ const binding = {
         const vp = ctx.page.viewportSize() ?? { width: 1600, height: 1000 };
         const context = await ctx.browser.newContext({
           viewport: vp,
-          recordVideo: { dir: ctx.videoDir || path.join(process.env.TMPDIR ?? "/tmp", `ct-host-page-video-${process.pid}-${Date.now()}`), size: vp },
+          ...playwrightVideo(ctx, ctx.videoDir || path.join(process.env.TMPDIR ?? "/tmp", `ct-host-page-video-${process.pid}-${Date.now()}`), vp),
         });
         page = await context.newPage();
       }
