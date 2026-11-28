@@ -196,10 +196,16 @@ jobs:
   # minutes (run 45704429248: provisioning 25, ct 59, replay-server 11, the
   # lane 44), and was cancelled while it compiled. It needs none of them: it
   # builds the stylesheets, StoryBook's components and the shim itself.
+  #
+  # 180 minutes: on a cold runner the job's own work is about 70 (provisioning
+  # 27, the stylesheets' build-once, StoryBook, the shim and the captures), but
+  # run 46110840687 also spent 45 minutes with build-once waiting silently
+  # before its six actions ran in seconds, and was cancelled at 120 on the
+  # last capture.
   story-parity:
     name: zgui story parity (x86_64-linux)
     runs-on: [self-hosted, linux, x64]
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
       - name: Mint installation token for cross-repo sibling access
         id: ci_token
