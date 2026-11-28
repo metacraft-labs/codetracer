@@ -5,12 +5,11 @@
 ##
 ## Each refresh of the status bar's certificate indicator computes three
 ## content ids (W, H and S, Status-Bar.md) and reads the declared scopes. The
-## renderer used to compute them itself:
-## git in child processes, the recipe driven by
-## `certificate_content_id.runResumable`. That kept the renderer from WAITING
-## for git, but not from working: `runResumable` re-runs the whole recipe from
-## the start each time a git call answers, replaying the earlier answers from
-## a journal, so every later git call copies, splits and parses the full
+## renderer used to compute them itself: git in child processes, the recipe
+## driven by a resumable runner (since removed). That kept the renderer from
+## WAITING for git, but not from working: the runner re-ran the whole recipe
+## from the start each time a git call answered, replaying the earlier answers
+## from a journal, so every later git call copied, split and parsed the full
 ## `git ls-files -z -s -v` output again. Over a 25,000-entry index that is
 ## seconds of synchronous renderer time per refresh, landing on whatever the
 ## user is doing (a call-trace jump included).

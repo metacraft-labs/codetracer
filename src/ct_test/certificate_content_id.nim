@@ -53,16 +53,18 @@
 ## compute it in a temporary index, so the user's staging area is neither read
 ## as the tested state nor modified").
 ##
-## A host whose git answers later
-## ------------------------------
+## A host whose thread must not wait for git
+## ------------------------------------------
 ## The recipe is written synchronously — each git call returns its reply —
 ## and stays that way: it is the specification of the computation, and a
 ## second, callback-shaped copy of it would be the drift this module exists to
-## prevent. A host that must not wait for git (the Electron renderer's main
-## thread: Status-Bar.md, "A refresh never stalls the window") drives the SAME
-## recipe through ``runResumable``, which re-runs it from the start each time
-## a reply arrives and replays the answers it already has. See
-## ``runResumable`` for how, and for what that costs.
+## prevent. A host whose thread must not wait for git (the Electron renderer:
+## Status-Bar.md, "A refresh never stalls the window"; ``ct host``'s event
+## loop) runs it on a thread that may: the frontend's content-id worker
+## (``src/frontend/index/content_id_worker.nim``). A driver that re-ran the
+## recipe once per asynchronous git answer existed until 2026-11; it replayed
+## the full index listing per git call, on the very thread it was meant to
+## spare.
 
 import std/[algorithm, sequtils, strutils]
 
@@ -547,15 +549,6 @@ type
       ## at ``path``.
     removeDir*: proc(path: string) {.closure, gcsafe.}
       ## Remove a directory ``makeTempDir`` created, with its contents.
-    blobDigests: proc(toplevel: string; objectIds: seq[string]): BlobDigests
-                     {.closure, gcsafe.}
-      ## NOT EXPORTED, and ``nil`` on every host but one: the host
-      ## ``runResumable`` builds for each attempt, which answers the whole
-      ## list as ONE journaled operation (see "Driving the recipe over an
-      ## asynchronous git"). ``nil`` means ``readBlobDigests``' own loop of
-      ## ``git cat-file`` calls through ``git``. Private so that no host can
-      ## supply a second way of reading a blob: the driver that sets it lives
-      ## in this module and runs the very command the loop runs.
 
   BlobDigests = object
     ## ``readBlobDigests``' answer: the lowercase hex SHA-256 of each blob's
@@ -569,21 +562,10 @@ type
                                {.closure, gcsafe.}
     ## Run one git command and deliver its reply LATER, by calling ``done``
     ## exactly once. ``done`` may also be called before the runner returns
-    ## (a launch error reported inline); ``runResumable`` accepts both.
-
-  AsyncContentIdHost* = object
-    ## ``ContentIdHost`` for a host whose git answers asynchronously. The
-    ## file operations stay synchronous: they are a temporary directory, one
-    ## file copy and one ``utimes``, which no host has reason to defer, and
-    ## keeping them synchronous is what lets ``runResumable`` hand the recipe
-    ## a plain ``ContentIdHost``.
-    git*: AsyncContentGitRunner
-    makeTempDir*: proc(): HostFileResult {.closure, gcsafe.}
-    copyFile*: proc(source, destination: string): HostFileResult {.closure, gcsafe.}
-    setModificationTime*: proc(path: string; unixSeconds: int64): HostFileResult
-                                {.closure, gcsafe.}
-    pathExists*: proc(path: string): bool {.closure, gcsafe.}
-    removeDir*: proc(path: string) {.closure, gcsafe.}
+    ## (a launch error reported inline). The recipe never runs over one; the
+    ## frontend's short asynchronous git reads do
+    ## (``node_certificate_host.nodeAsyncGitRunner``), sharing ``GitCall`` and
+    ## ``GitReply`` with it.
 
   ContentStateKind* = enum
     ## The states Content-Id §5 computes an id for.
@@ -663,8 +645,7 @@ const StatDistrustTime* = 1'i64
   ## compared stat field unchanged.
 
 proc gitCallOf(cwd: string; args: openArray[string]; indexFile = ""): GitCall =
-  ## The exact command ``runGit`` runs for ``args`` — written once, because
-  ## ``runResumable``'s blob reader runs the same commands outside ``runGit``.
+  ## The exact command ``runGit`` runs for ``args``.
   var env = PathspecEnvironment
   var argv = @["git"]
   if indexFile.len > 0:
@@ -708,14 +689,9 @@ proc readBlobDigests(host: ContentIdHost; toplevel: string;
   ## carries (Content-Id §4.2) — or the first read that failed.
   ##
   ## One ``git cat-file blob`` per object, and each content hashed as soon as
-  ## it is read, so no more than one blob is held at a time. A host built by
-  ## ``runResumable`` answers the whole list itself (``blobDigests``),
-  ## running the same commands; see "Driving the recipe over an asynchronous
-  ## git" for why the list is one operation there.
+  ## it is read, so no more than one blob is held at a time.
   if objectIds.len == 0:
     return BlobDigests(ok: true)
-  if not host.blobDigests.isNil:
-    return host.blobDigests(toplevel, objectIds)
   for objectId in objectIds:
     let blob = runGit(host, toplevel, blobReadArgs(objectId))
     if not blob.ok:
@@ -898,9 +874,7 @@ proc manifestOfTree(host: ContentIdHost; toplevel, tree: string): ContentIdResul
     else:
       return failed("`git ls-tree -r` listed a " & kind & " entry `" & path &
                     "`, which a manifest has no record for")
-  # Every blob is read only once the whole listing is known to be readable,
-  # and as ONE list: under `runResumable` that is one journaled operation
-  # rather than one re-run of this recipe per file.
+  # Every blob is read only once the whole listing is known to be readable.
   let read = readBlobDigests(host, toplevel, blobs)
   if not read.ok:
     return failed(read.failure)
@@ -1077,387 +1051,3 @@ proc computeContentId*(host: ContentIdHost; repository: string;
     computed(treeAlgorithm, tree)
   finally:
     host.removeDir(scratch.path)
-
-# ---------------------------------------------------------------------------
-# Driving the recipe over an asynchronous git (runResumable)
-# ---------------------------------------------------------------------------
-#
-# WHY JOURNAL-AND-REPLAY, AND NOT A SECOND RECIPE. The recipe above is
-# synchronous, and it is the ONE implementation of Content-Id §4/§5 every
-# CodeTracer host drives (module header). A host that cannot wait for git —
-# the Electron renderer, whose main thread is the UI — could have been given a
-# continuation-passing copy of it, and the two would then have to agree
-# forever about every git argument, every parse and every refusal: the
-# producer/verifier drift Content-Id §1 warns about, inside one binary.
-#
-# Instead the recipe is RE-RUN. Each run ("attempt") goes through a
-# synthesized synchronous ``ContentIdHost`` that journals every operation by
-# its position in the run. On a later attempt the operations already in the
-# journal are answered from it — the same git reply, the same temporary
-# directory, the same file result — without performing anything again. The
-# first git call that is NOT in the journal is launched through the
-# asynchronous runner, and the attempt is "suspended": every further
-# operation in it returns an inert failure without side effects, so the
-# recipe runs to a (meaningless) end, and its answer is discarded. When the
-# reply arrives it is appended to the journal and the recipe is run again,
-# one step further. The attempt that completes without launching anything
-# is the answer.
-#
-# Sound because the recipe is deterministic in its host's answers: given the
-# same replies it asks the same questions in the same order. That is checked,
-# not assumed — a replayed git call whose argv, cwd or environment differs
-# from the journal's ends the computation with a failure reply naming
-# non-deterministic replay, rather than replaying a wrong answer or waiting
-# for one that will never come.
-#
-# WHAT IT COSTS, honestly. A computation that makes N journaled operations
-# runs N + 1 attempts, and attempt k replays the k - 1 answers before it, so
-# the in-process work is quadratic in N. That is acceptable only while N is a
-# handful and each answer is small, which is why the blobs of a
-# ``manifest-v1-sha256`` are ONE operation here, not one per file.
-#
-# * The tree algorithms make about eight git calls (W), and replaying them is
-#   string parsing measured in microseconds.
-# * ``manifest-v1-sha256`` reads every blob of the tree. Journaled one call at
-#   a time, as the synchronous loop issues them, attempt k would copy and the
-#   final attempt would hash the content of every file read so far: measured
-#   2026-10-22 over 400 files of 27 KB under node, 48 s of main-thread work
-#   instead of 3.6 s, with single tasks of 326 ms, growing with the tree. So
-#   ``readBlobDigests`` asks for the whole list at once (the private
-#   ``blobDigests`` hook of the attempt's host), and the driver answers it by
-#   running the SAME ``git cat-file blob`` commands one at a time, hashing each
-#   content in the task its reply arrives in and keeping only the digest. The
-#   journal then holds one entry of N digests, and the number of attempts no
-#   longer depends on the size of the tree. The longest task left is hashing
-#   the largest single file.
-#
-# Every attempt is one task between two git replies, so the work is spread
-# across the event loop, never one long block of the thread the user is
-# waiting on — the property this exists for.
-#
-# What is NOT replayed: ``removeDir``. The recipe removes its temporary
-# directory in a ``finally``, so every suspended attempt would reach it and
-# remove the directory the next attempt still needs. A removal is therefore
-# recorded and performed only by the attempt that completes without
-# suspending — exactly once, after the last git call.
-
-proc asyncContentIdHost*(files: ContentIdHost;
-                         git: AsyncContentGitRunner): AsyncContentIdHost =
-  ## An asynchronous host with ``files``' file operations and ``git`` for git
-  ## (``files.git`` is not used). One set of file-operation closures then
-  ## serves a host's synchronous and asynchronous forms alike.
-  AsyncContentIdHost(git: git, makeTempDir: files.makeTempDir,
-                     copyFile: files.copyFile,
-                     setModificationTime: files.setModificationTime,
-                     pathExists: files.pathExists, removeDir: files.removeDir)
-
-type
-  JournalKind = enum
-    jkGit, jkMakeTempDir, jkCopyFile, jkSetModificationTime, jkPathExists,
-    jkBlobDigests
-
-  JournalEntry = object
-    ## One operation a previous attempt performed, at its position in the run.
-    kind: JournalKind
-    call: GitCall
-      ## ``jkGit``: the call exactly as the recipe issued it.
-    reply: GitReply
-      ## ``jkGit``: git's answer.
-    arguments: seq[string]
-      ## A file operation's arguments, and ``jkBlobDigests``' top level and
-      ## object ids, so a replay can check it asks the same.
-    file: HostFileResult
-      ## ``jkMakeTempDir``, ``jkCopyFile``, ``jkSetModificationTime``.
-    exists: bool
-      ## ``jkPathExists``.
-    digests: BlobDigests
-      ## ``jkBlobDigests``.
-
-  ResumableAttempt = ref object
-    position: int
-      ## How many journal entries this attempt has consumed.
-    suspended: bool
-      ## This attempt launched a git call; its answer will be discarded.
-    diverged: string
-      ## Non-empty once a replayed operation did not match the journal: why.
-    removals: seq[string]
-      ## ``removeDir`` requests, performed only if the attempt completes.
-
-  ResumableRun = ref object
-    host: AsyncContentIdHost
-    journal: seq[JournalEntry]
-    waiting: bool
-      ## A launched operation — one git call, or one list of blob reads —
-      ## has not answered yet.
-    attempting: bool
-      ## An attempt is on the stack: an answer delivered now (inline, by the
-      ## runner) is journaled and picked up when the attempt returns, never
-      ## by re-entering the recipe from inside itself.
-    finished: bool
-    drive: proc() {.closure.}
-      ## Run attempts until one suspends or completes. Built by
-      ## ``runResumable``, which knows the computation's type.
-
-  BlobRead = ref object
-    ## One ``jkBlobDigests`` operation in progress: its blobs are read one
-    ## ``git cat-file`` at a time, each hashed when its reply arrives.
-    run: ResumableRun
-    toplevel: string
-    objectIds: seq[string]
-    arguments: seq[string]
-    digests: seq[string]
-    next: int
-      ## The blob being read.
-
-const
-  NotYetAnswered = "not performed: the computation is waiting for an " &
-                   "earlier git call to answer"
-  NonDeterministicReplay* = "non-deterministic replay"
-    ## Begins the reason a computation fails when a re-run asked for a
-    ## different operation than the run before it.
-
-proc describeCall(call: GitCall): string =
-  "`" & call.argv.join(" ") & "` in `" & call.cwd & "`"
-
-proc sameCall(a, b: GitCall): bool =
-  a.argv == b.argv and a.cwd == b.cwd and a.env == b.env
-
-type ReplayStep = enum
-  rsReplay      ## answer from the journal entry
-  rsDiverged    ## the journal disagrees; answer a failure
-  rsSuspended   ## not in the journal, and the attempt is suspended: inert
-  rsPerform     ## not in the journal: perform (or launch) it now
-
-proc replayStep(run: ResumableRun; attempt: ResumableAttempt;
-                kind: JournalKind; arguments: seq[string]): ReplayStep =
-  ## Decide how a non-``jkGit`` operation is answered in this attempt.
-  if attempt.diverged.len > 0:
-    return rsDiverged
-  if attempt.position < run.journal.len:
-    let entry = run.journal[attempt.position]
-    if entry.kind != kind or entry.arguments != arguments:
-      attempt.diverged = NonDeterministicReplay & ": the computation asked " &
-        "for " & $kind & " " & arguments.join(" ") & " where its previous " &
-        "run asked for " & $entry.kind & " " & entry.arguments.join(" ")
-      return rsDiverged
-    inc attempt.position
-    return rsReplay
-  if attempt.suspended:
-    return rsSuspended
-  rsPerform
-
-proc receive(run: ResumableRun; entry: JournalEntry) =
-  ## The launched operation answered: journal it and run the next attempt.
-  if run.finished or not run.waiting:
-    return
-  run.waiting = false
-  run.journal.add entry
-  if run.attempting:
-    # Delivered before the runner returned. The attempt that launched it is
-    # still running; `drive` sees `waiting == false` when it returns and runs
-    # the next attempt itself.
-    return
-  run.drive()
-
-proc launch(run: ResumableRun; call: GitCall) =
-  run.waiting = true
-  var delivered = false
-  let target = run
-  run.host.git(call, proc(reply: GitReply) {.closure, gcsafe.} =
-    # Exactly once, whatever the runner does: a node child can report both
-    # `error` and `close`, and a reply after the answer changes nothing.
-    if delivered:
-      return
-    delivered = true
-    # The continuation runs the recipe, which is not annotated gcsafe; it
-    # runs on the thread that delivered the reply, the only one this run is
-    # ever touched from (the bridge `outcome.thenOutcome` also casts).
-    {.cast(gcsafe).}:
-      target.receive(JournalEntry(kind: jkGit, call: call, reply: reply)))
-
-proc advance(read: BlobRead)
-
-proc accept(read: BlobRead; reply: GitReply): bool =
-  ## Fold the reply for blob ``read.next`` in: hash its content and keep
-  ## only the digest. True when the operation is over — a read failed (the
-  ## same sentence ``readBlobDigests``' loop gives), or this was the last.
-  let step = stepOf(reply, blobReadArgs(read.objectIds[read.next]))
-  var answer: BlobDigests
-  if not step.ok:
-    answer = BlobDigests(failure: step.failure)
-  else:
-    read.digests.add sha256Hex(step.stdout)
-    inc read.next
-    if read.next < read.objectIds.len:
-      return false
-    answer = BlobDigests(ok: true, digests: read.digests)
-  read.run.receive(JournalEntry(kind: jkBlobDigests,
-                                arguments: read.arguments, digests: answer))
-  true
-
-proc request(read: BlobRead): tuple[inline: bool; reply: GitReply] =
-  ## Launch the read of blob ``read.next``. A proc of its own so that each
-  ## call's flags live in an environment of their own: a Nim closure made in
-  ## a loop body shares ONE environment across iterations
-  ## (https://nim-lang.org/docs/manual.html#closures-creating-closures-in-loops).
-  ## A reply delivered before the runner returns is handed back to
-  ## ``advance``'s loop rather than handled here, so a runner that answers
-  ## every call inline cannot grow the stack with the number of files.
-  var returned = false
-  var inline = false
-  var inlineReply: GitReply
-  var delivered = false
-  read.run.host.git(gitCallOf(read.toplevel, blobReadArgs(read.objectIds[read.next])),
-    proc(reply: GitReply) {.closure, gcsafe.} =
-      if delivered:
-        return
-      delivered = true
-      if not returned:
-        inline = true
-        inlineReply = reply
-        return
-      {.cast(gcsafe).}:
-        if not read.accept(reply):
-          read.advance())
-  returned = true
-  (inline, inlineReply)
-
-proc advance(read: BlobRead) =
-  ## Read blobs from ``read.next`` on until one answers later or the
-  ## operation is over.
-  while true:
-    let (inline, reply) = read.request()
-    if not inline or read.accept(reply):
-      return
-
-proc readBlobs(run: ResumableRun; toplevel: string; objectIds: seq[string];
-               arguments: seq[string]) =
-  ## Launch one ``jkBlobDigests`` operation (``objectIds`` is not empty:
-  ## ``readBlobDigests`` answers an empty list itself).
-  run.waiting = true
-  BlobRead(run: run, toplevel: toplevel, objectIds: objectIds,
-           arguments: arguments).advance()
-
-proc attemptHost(run: ResumableRun; attempt: ResumableAttempt): ContentIdHost =
-  ## The synchronous host one attempt of the recipe runs against.
-  ContentIdHost(
-    git: proc(call: GitCall): GitReply {.closure, gcsafe.} =
-      if attempt.diverged.len > 0:
-        return GitReply(exitCode: -1, stderr: attempt.diverged, complete: true)
-      if attempt.position < run.journal.len:
-        let entry = run.journal[attempt.position]
-        if entry.kind != jkGit or not sameCall(entry.call, call):
-          attempt.diverged = NonDeterministicReplay & ": the computation ran " &
-            describeCall(call) & " where its previous run " &
-            (if entry.kind == jkGit: "ran " & describeCall(entry.call)
-             else: "performed " & $entry.kind)
-          return GitReply(exitCode: -1, stderr: attempt.diverged, complete: true)
-        inc attempt.position
-        return entry.reply
-      if not attempt.suspended:
-        # The first git call this run has no answer for: ask for it, and
-        # let the rest of this attempt run out inertly.
-        attempt.suspended = true
-        {.cast(gcsafe).}:
-          run.launch(call)
-      GitReply(exitCode: -1, stderr: NotYetAnswered, complete: true),
-    makeTempDir: proc(): HostFileResult {.closure, gcsafe.} =
-      case replayStep(run, attempt, jkMakeTempDir, @[])
-      of rsReplay: run.journal[attempt.position - 1].file
-      of rsDiverged: HostFileResult(error: attempt.diverged)
-      of rsSuspended: HostFileResult(error: NotYetAnswered)
-      of rsPerform:
-        let made = run.host.makeTempDir()
-        run.journal.add JournalEntry(kind: jkMakeTempDir, file: made)
-        inc attempt.position
-        made,
-    copyFile: proc(source, destination: string): HostFileResult {.closure, gcsafe.} =
-      let arguments = @[source, destination]
-      case replayStep(run, attempt, jkCopyFile, arguments)
-      of rsReplay: run.journal[attempt.position - 1].file
-      of rsDiverged: HostFileResult(error: attempt.diverged)
-      of rsSuspended: HostFileResult(error: NotYetAnswered)
-      of rsPerform:
-        let copied = run.host.copyFile(source, destination)
-        run.journal.add JournalEntry(kind: jkCopyFile, arguments: arguments,
-                                     file: copied)
-        inc attempt.position
-        copied,
-    setModificationTime: proc(path: string; unixSeconds: int64): HostFileResult
-                             {.closure, gcsafe.} =
-      let arguments = @[path, $unixSeconds]
-      case replayStep(run, attempt, jkSetModificationTime, arguments)
-      of rsReplay: run.journal[attempt.position - 1].file
-      of rsDiverged: HostFileResult(error: attempt.diverged)
-      of rsSuspended: HostFileResult(error: NotYetAnswered)
-      of rsPerform:
-        let aged = run.host.setModificationTime(path, unixSeconds)
-        run.journal.add JournalEntry(kind: jkSetModificationTime,
-                                     arguments: arguments, file: aged)
-        inc attempt.position
-        aged,
-    pathExists: proc(path: string): bool {.closure, gcsafe.} =
-      case replayStep(run, attempt, jkPathExists, @[path])
-      of rsReplay: run.journal[attempt.position - 1].exists
-      of rsDiverged, rsSuspended: false
-      of rsPerform:
-        let exists = run.host.pathExists(path)
-        run.journal.add JournalEntry(kind: jkPathExists, arguments: @[path],
-                                     exists: exists)
-        inc attempt.position
-        exists,
-    removeDir: proc(path: string) {.closure, gcsafe.} =
-      # Deferred to the end of the attempt, and dropped if it suspended: see
-      # the section header.
-      attempt.removals.add(path),
-    blobDigests: proc(toplevel: string; objectIds: seq[string]): BlobDigests
-                     {.closure, gcsafe.} =
-      # The whole list is ONE journaled operation: see the section header,
-      # "WHAT IT COSTS".
-      let arguments = @[toplevel] & objectIds
-      case replayStep(run, attempt, jkBlobDigests, arguments)
-      of rsReplay: run.journal[attempt.position - 1].digests
-      of rsDiverged: BlobDigests(failure: attempt.diverged)
-      of rsSuspended: BlobDigests(failure: NotYetAnswered)
-      of rsPerform:
-        attempt.suspended = true
-        {.cast(gcsafe).}:
-          run.readBlobs(toplevel, objectIds, arguments)
-        BlobDigests(failure: NotYetAnswered))
-
-proc runResumable*[T](host: AsyncContentIdHost;
-                      compute: proc(host: ContentIdHost): T;
-                      done: proc(value: T)) =
-  ## Run ``compute`` — the recipe, or anything that drives it, such as the
-  ## facade's ``contentIdOver`` with its ``git --version`` probe — over an
-  ## asynchronous git, and call ``done`` with its answer exactly once.
-  ##
-  ## ``compute`` is run once per git call it makes, plus once (see the
-  ## section header for how and at what cost); its value is used only from
-  ## the run that needed no new git call. It must be deterministic in its
-  ## host's answers — a run that asks something different from the run before
-  ## it is answered with a failure naming ``NonDeterministicReplay`` and
-  ## finishes — and it must not raise: an exception propagates to whatever
-  ## delivered the reply, and ``done`` is then never called.
-  ##
-  ## If ``compute`` needs no git at all (an invalid scope, a refusal), or the
-  ## runner answers every call inline, ``done`` runs before this returns.
-  let run = ResumableRun(host: host)
-  run.drive = proc() =
-    while not run.finished:
-      let attempt = ResumableAttempt()
-      run.attempting = true
-      var value: T
-      try:
-        value = compute(attemptHost(run, attempt))
-      finally:
-        run.attempting = false
-      if attempt.suspended:
-        if run.waiting:
-          return          # `receive` resumes when the reply arrives
-        continue          # it arrived inline and is journaled: go on
-      run.finished = true
-      for path in attempt.removals:
-        host.removeDir(path)
-      done(value)
-  run.drive()

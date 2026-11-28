@@ -903,7 +903,7 @@ src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/frontend/ui/i
 src/frontend/tui/tests/plat70f-pointer-mutation-control.sha256	src/db-backend/src/db.rs	8051651f4a8174b46e971cbbd295ffc02eba5a22c2276479f075faec9d9ad9f5	362fa4d42e8342493b35812a6383a79578112ba51f77922e9f68d02690349d4b
 # 2026-11-26: the desktop's certificate content ids moved to a main-process worker thread
 # (vcs.nim's docs, ipc_utils.nim's handler list, the lane list); these re-grades are owed.
-src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/viewmodel/platform/vcs.nim	4081198df3df8ecc4e1710ea30a4b6fc33a515c5fe9d292cb4b3bc520f54e72c	b0d0f2282feb428aa746a6e960fc297c760f198730af2580dfa71a0479644854
+src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/viewmodel/platform/vcs.nim	4081198df3df8ecc4e1710ea30a4b6fc33a515c5fe9d292cb4b3bc520f54e72c	f8bf34475eb0d0811d67440c0f72e95d1bf48e87d9f2932f06b586790a3e9d6c
 
 # Re-grades owed for subjects moved by aa75ead0407 cc304d4b682 without ledger lines;
 # the harnesses that digest them owe a re-grade of the arms that sit in them.

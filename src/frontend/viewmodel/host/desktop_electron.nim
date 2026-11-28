@@ -748,8 +748,9 @@ proc electronVcs*(profile: PlatformProfile): VcsFacade =
   # in its content-id worker thread (`index/content_id_service.nim`), and
   # this facade only asks for them. Computed here, they cost the renderer
   # seconds of work per refresh on a large repository even with git in child
-  # processes: `runResumable` replays the whole recipe once per git answer,
-  # re-reading the full index listing each time, on this thread. The
+  # processes: driven over an asynchronous git, the recipe is replayed once
+  # per git answer, re-reading the full index listing each time, on this
+  # thread. The
   # capability check stays here, so a profile without `capVcsRead` is refused
   # without a round trip.
   let contentIds = newMainRequests(ContentIdChannel, ContentIdReceivedChannel)

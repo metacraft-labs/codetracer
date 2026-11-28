@@ -39,9 +39,8 @@
 ## process, `ct host`'s event loop — runs `contentIdOver` on a thread that
 ## may: the content-id worker (`index/content_id_worker.nim`), through
 ## `index/content_id_service.nim`. Driving the recipe over an asynchronous
-## git on the calling thread instead (`certificate_content_id.runResumable`)
-## waits for nothing but replays the recipe once per git answer, which is
-## why no host here does.
+## git on the calling thread instead waits for nothing, but has to replay the
+## recipe once per git answer, which is why no host here does.
 
 import std/[algorithm, strutils]
 
