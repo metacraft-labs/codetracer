@@ -633,8 +633,14 @@ proc routeSharedEditorKey(name: string; ev: JsObject): bool =
   let routed = probe.route(desktopFacts(), desktopScopePath(), nmNormal, name,
                            int64(now()))
   if routed.kind == erOperation and
-     ('.' in routed.operation or routed.operation in HostIntents):
+     ('.' in routed.operation or routed.operation in HostIntents) and
+     not (ed.embeddedField and routed.isNativeBaseOperation):
     # Save is the host's (`HostIntents`), as GPUI's edit arm saves.
+    # A field's own operation (the input table's: `Enter` is
+    # `input.commit`) is left to the element, and in an embedded field (a
+    # tracepoint editor) the element IS this document: its keymap answers,
+    # as Monaco answers in Monaco's tracepoint editor. Leaving it to the DOM
+    # instead dropped the key, and `Enter` there added no line.
     return false
   let own = ed.probeKey(name)
   if own.kind == erOperation and own.operation in SharedEditorNativeOperations:
