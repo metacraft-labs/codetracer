@@ -15,6 +15,7 @@ import ../viewmodel/backend/mock_backend
 import ../viewmodel/store/replay_data_store
 import ../viewmodel/viewmodels/[agent_activity_vm, agent_prompt_context]
 import ../viewmodel/views/isonim_agent_activity_view
+import ../ui/pointer_stamp
 
 func buildArg(value: string): string {.compileTime.} =
   when hostOS == "windows": quoteShellWindows(value)
@@ -72,6 +73,9 @@ createRoot proc(dispose: proc()) =
   let panel = renderAgentActivityPanel[WebRenderer, Element](
     WebRenderer(), vm, componentId = 91, callbacks = callbacks)
   appendBody(panel)
+  # The desktop's pointer shapes: `data-pointer` stamped from the one shared
+  # function, which components/pointer.styl turns into the `cursor`.
+  installPointerStamp()
   let editor = menuItem("Editor selection")
   ck editor.attr("aria-disabled") == cstring"true"
   ck editor.attr("title") == cstring(AgentNoEditorSelectionReason)
