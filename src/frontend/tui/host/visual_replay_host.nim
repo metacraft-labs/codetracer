@@ -72,6 +72,22 @@ proc getInfo(url: string): JsonNode =
     raise newException(IOError, "/info answered " & $resp.code)
   parseJson(resp.body)
 
+proc playerArgs*(streamDir: string; port: int;
+                 backend = getEnv("CODETRACER_CT_GFX_PLAYER_BACKEND")): seq[string] =
+  ## The player's arguments for `streamDir` served on `port`, with
+  ## `--backend <backend>` when one is named. The desktop's host passes
+  ## `CODETRACER_CT_GFX_PLAYER_BACKEND` the same way
+  ## (`index/visual_replay_player`). Without it the player runs `auto`, which
+  ## on a host with no GPU driver fails to create its EGL context: on CI
+  ## runners every frame request failed, so the Video Player never showed
+  ## "Frame 0 / 59" (TUI shard 8/8 of run 45951898448, and the terminal
+  ## visual-replay-video-player scenario), while the same suites passed on a
+  ## workstation whose GPU `auto` finds.
+  result = @["--gfx-stream", streamDir, "--http", "--port", $port]
+  if backend.len > 0:
+    result.add "--backend"
+    result.add backend
+
 proc startGraphics*(folder: string; readinessMs = 30_000): GraphicsHost =
   ## The player for the recording in `folder`, ready, or nil when the
   ## recording has no gfx stream. A recording that has one but cannot be
@@ -92,8 +108,8 @@ proc startGraphics*(folder: string; readinessMs = 30_000): GraphicsHost =
   # pane server's stdout is the editor's protocol, and an undrained pipe
   # would stall the player.
   result.process = startProcess("/bin/sh",
-    args = @["-c", "exec \"$0\" \"$@\" >/dev/null 2>&1", player,
-             "--gfx-stream", dir, "--http", "--port", $port],
+    args = @["-c", "exec \"$0\" \"$@\" >/dev/null 2>&1", player] &
+           playerArgs(dir, port),
     options = {})
   let deadline = epochTime() + readinessMs.float / 1000.0
   while true:
