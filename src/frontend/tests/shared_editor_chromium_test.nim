@@ -31,7 +31,7 @@
 ## case prints `[OK]` / `[FAILED]`, and the tally is compared with a number
 ## written from a run.
 
-import std/[asyncjs, jsffi, strutils, json]
+import std/[asyncjs, jsffi, strutils, json, math]
 
 import ../ui/[shared_editor, shared_editor_facade, shared_diff_editor, editor_surface]
 from ../types import Config
@@ -140,7 +140,7 @@ proc endCase(name: string) =
 
 const
   Source = "def main():\n    x = 1\n    if x:\n        y = 2\n\n    return x\nprint(main())\n"
-  ExpectedChecks = 180
+  ExpectedChecks = 184
     ## Written from a run. See the end of `main`.
   HugeKeyRatio = 25.0
     ## `caseHugeFile`'s bound: a keystroke at 200,000 lines against one at
@@ -1139,6 +1139,60 @@ proc caseContentHeightAsMonaco() {.async.} =
   setUnexpectedErrorHandler(nil)
   endCase("the content height and listener errors are Monaco's")
 
+proc watchWheel(root: JsObject): JsObject {.importjs: """
+  ((root) => { const box = { wheelDeltaX: 0 };
+    root.addEventListener('wheel', (e) => { box.wheelDeltaX = e.wheelDeltaX; }, true);
+    return box; })(#)""".}
+  ## The legacy `wheelDeltaX` of the last wheel event `root` received.
+
+proc caseHorizontalRangeAsMonaco() {.async.} =
+  beginCase()
+  # Monaco's horizontal range (`ViewLayout._computeContentWidth`): the widest
+  # line drawn, `scrollBeyondLastColumn` characters more (4 by default) and
+  # the vertical scrollbar (14 px), less the text area. The flow raises
+  # `scrollBeyondLastColumn` to the width of the values it draws past the
+  # ends of the lines, and a value past a long line was out of reach while
+  # the shared editor stopped two characters after the line
+  # (scratchpad/flow-value-on-a-long-line-scrolled-into-view).
+  var lines: seq[string] = @[]
+  for i in 1 .. 20: lines.add "row_" & $i
+  lines[11] = "fn_" & repeat('x', 157)
+  let ed = fresh(lines.join("\n"))
+  let f = facadeOf(ed)
+  await settle()
+  let lineW = ceil(160.0 * ed.charWidth)
+  let view = ed.width - ed.gutterPx - 14
+  discard f.setScrollLeft(100_000)
+  await settle()
+  ck ed.scrollLeft == int(lineW + 4.0 * ed.charWidth + 14.0) - view,
+    "the default: four columns past the widest line (" & $ed.scrollLeft & ")"
+  ed.options[cstring"scrollBeyondLastColumn"] = 40
+  ed.render()
+  discard f.setScrollLeft(100_000)
+  await settle()
+  ck ed.scrollLeft == int(lineW + 40.0 * ed.charWidth + 14.0) - view,
+    "scrollBeyondLastColumn 40: forty columns past it (" & $ed.scrollLeft & ")"
+  ck float(ed.scrollLeft + view) >= lineW + 30.0 * ed.charWidth,
+    "a value drawn thirty columns past the line's end can be scrolled into view"
+  # A wheel notch moves the view as far as Monaco moves it
+  # (`StandardWheelEvent` over `ScrollableElement._onMouseWheel`): the
+  # event's `wheelDeltaX` over 120, times 50 pixels. The editor once moved
+  # by the raw pixel delta, twice Monaco's step, and a scenario's wheel
+  # steps measured on Monaco overshot here (flow/eye-icon-dual).
+  discard f.setScrollLeft(0)
+  await settle()
+  let seen = watchWheel(ed.root)
+  let r = rectOf(ed.root)
+  await ctMouse("move", num(r.left) + 200, num(r.top) + 100, "left", 1)
+  await ctMouse("wheel", 100, 0, "left", 1)
+  await settle()
+  let wheelLines = num(seen["wheelDeltaX"]) / 120.0
+  let monacoStep = -(if wheelLines * 50.0 < 0: int(floor(wheelLines * 50.0))
+                     else: int(ceil(wheelLines * 50.0)))
+  ck monacoStep > 0 and ed.scrollLeft == monacoStep,
+    "a 100 px wheel notch moves Monaco's " & $monacoStep & " px (" & $ed.scrollLeft & ")"
+  endCase("the horizontal range is Monaco's, scrollBeyondLastColumn included")
+
 proc caseRevealsAsMonaco() {.async.} =
   beginCase()
   # The editor API's reveals put the view where Monaco 0.54's
@@ -1348,6 +1402,7 @@ proc main() {.async.} =
   await guarded(caseScrollRangeAndViewState, "caseScrollRangeAndViewState")
   await guarded(caseRevealsAsMonaco, "caseRevealsAsMonaco")
   await guarded(caseContentHeightAsMonaco, "caseContentHeightAsMonaco")
+  await guarded(caseHorizontalRangeAsMonaco, "caseHorizontalRangeAsMonaco")
   await guarded(caseHugeFile, "caseHugeFile")
   beginCase()
   inc checks

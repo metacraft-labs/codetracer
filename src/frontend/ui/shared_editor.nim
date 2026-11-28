@@ -563,18 +563,24 @@ func visualColumns(s: string; tabSize = 4): int =
     if c == '\t': result += tabSize - (result mod tabSize)
     elif (ord(c) and 0xC0) != 0x80: inc result
 
+proc scrollWidthPx(ed: SharedEditor): float =
+  ## Monaco's `ViewLayout._computeContentWidth`: what scrolls sideways — the
+  ## widest line drawn, `scrollBeyondLastColumn` characters more and the
+  ## vertical scrollbar. The flow raises `scrollBeyondLastColumn` to the width
+  ## of the values it draws past the ends of the lines
+  ## (`flow.adjustEditorWidth`), so this is what brings a value drawn past a
+  ## long line into reach.
+  let beyondColumns = jsNum(ed.optionOr("", "scrollBeyondLastColumn", toJs(4)))
+  let vertical = jsNum(ed.optionOr("scrollbar", "verticalScrollbarSize", toJs(14)))
+  float(ed.maxLineWidthPx) + beyondColumns * ed.charWidth + vertical
+
 proc horizontalScrollbarPx(ed: SharedEditor): int =
   ## Monaco's `ViewLayout._getHorizontalScrollbarHeight`: the horizontal
   ## scrollbar's size while it shows, which is unless it is `hidden` and while
-  ## what scrolls (`_computeContentWidth`: the widest line drawn,
-  ## `scrollBeyondLastColumn` characters more and the vertical scrollbar) is
-  ## wider than the text area.
+  ## what scrolls (`scrollWidthPx`) is wider than the text area.
   if $jsStr(ed.optionOr("scrollbar", "horizontal", toJs(cstring"auto"))) == "hidden":
     return 0
-  let beyondColumns = jsNum(ed.optionOr("", "scrollBeyondLastColumn", toJs(4)))
-  let vertical = jsNum(ed.optionOr("scrollbar", "verticalScrollbarSize", toJs(14)))
-  let scrollWidth = float(ed.maxLineWidthPx) + beyondColumns * ed.charWidth + vertical
-  if float(max(0, ed.width - ed.gutterPx)) >= scrollWidth: return 0
+  if float(max(0, ed.width - ed.gutterPx)) >= ed.scrollWidthPx: return 0
   int(jsNum(ed.optionOr("scrollbar", "horizontalScrollbarSize", toJs(12))))
 
 proc contentHeight*(ed: SharedEditor): int =
@@ -599,8 +605,11 @@ proc scrollHeightPx*(ed: SharedEditor): int =
 
 proc clampScroll(ed: SharedEditor) =
   ed.scrollTop = clamp(ed.scrollTop, 0, ed.maxScrollTop)
+  # Monaco's horizontal range: what scrolls (`scrollWidthPx`) less the view.
+  # The drawn lines' own width stays a floor, as before.
   ed.scrollLeft = clamp(ed.scrollLeft, 0,
-                        max(0, ed.contentWidthPx - ed.textViewportWidth + ed.charWidth.int * 2))
+                        max(0, max(ed.contentWidthPx - ed.textViewportWidth + ed.charWidth.int * 2,
+                                   int(ed.scrollWidthPx) - ed.textViewportWidth)))
 
 # ---------------------------------------------------------------------------
 # Rendering
@@ -1707,15 +1716,41 @@ proc onContextMenu(ed: SharedEditor; ev: JsObject) =
   discard ev.preventDefault()
   ed.fire("contextMenu", ed.mouseEventOf(ev, h))
 
+const WheelScrollSensitivity = 50.0
+  ## Monaco's `SCROLL_WHEEL_SENSITIVITY` (`scrollableElement.ts`): the pixels
+  ## one wheel "line" of a `StandardWheelEvent` scrolls.
+
+proc monacoWheelLines(ev: JsObject; horizontal: bool): float =
+  ## Monaco's `StandardWheelEvent` delta on one axis, in its wheel lines
+  ## (positive scrolls up / left): the legacy `wheelDelta{X,Y}` over 120 where
+  ## the browser gives one (Chromium does), else the modern delta, by lines or
+  ## over 40 pixels.
+  let legacy = if horizontal: ev[cstring"wheelDeltaX"] else: ev[cstring"wheelDeltaY"]
+  if not isNilOrUndef(legacy):
+    return jsNum(legacy) / 120.0
+  let d = jsNum(if horizontal: ev.deltaX else: ev.deltaY)
+  if int(jsNum(ev.deltaMode)) == 1: -d else: -d / 40.0
+
+proc wheelPixels(lines: float): int =
+  ## Monaco's step for a wheel delta: `SCROLL_WHEEL_SENSITIVITY` pixels a line,
+  ## a fraction rounded away from zero so a slow wheel still moves.
+  let px = WheelScrollSensitivity * lines
+  -(if px < 0: int(floor(px)) else: int(ceil(px)))
+
 proc onWheel(ed: SharedEditor; ev: JsObject) =
-  var dy = jsNum(ev.deltaY)
-  var dx = jsNum(ev.deltaX)
-  if int(jsNum(ev.deltaMode)) == 1:
-    dy *= float(ed.lineHeight)
-    dx *= ed.charWidth
-  if ev.shiftKey.to(bool) and dx == 0:
-    dx = dy
-    dy = 0
+  # As Monaco scrolls for a wheel (`ScrollableElement._onMouseWheel`): its
+  # normalised delta, the predominant axis only, Shift turning a vertical
+  # wheel sideways, `SCROLL_WHEEL_SENSITIVITY` pixels a line. The raw pixel
+  # delta moved this editor twice as far as Monaco a notch, so a scenario's
+  # wheel steps measured on one editor overshot on the other.
+  var ly = monacoWheelLines(ev, horizontal = false)
+  var lx = monacoWheelLines(ev, horizontal = true)
+  if abs(ly) >= abs(lx): lx = 0 else: ly = 0
+  if ev.shiftKey.to(bool) and lx == 0:
+    lx = ly
+    ly = 0
+  let dy = float(wheelPixels(ly))
+  let dx = float(wheelPixels(lx))
   ed.setScroll(ed.scrollTop + int(dy), ed.scrollLeft + int(dx))
   let e = jsNew()
   e["browserEvent"] = ev
