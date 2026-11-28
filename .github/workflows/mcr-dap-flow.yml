@@ -176,7 +176,7 @@ jobs:
             codetracer-trace-format=2f01e602e70f69a04675293f3fa0d5bad9f196a1
             codetracer-trace-format-nim=3e50ca3f2bf6316e8f764952a84078cf59b11023
             # Private, so the public repro.lock cannot pin it: flake.lock's revision.
-            codetracer-visual-replay=360a8131ec9fc81d0ebd1cdbd1743238218346af
+            codetracer-visual-replay=cdbcf293486b53d1e2a89bc6ae0f0a3b73080342
 
       - name: Run MCR DAP flow tests
         # The single canonical target. scripts/detect-siblings.sh (sourced

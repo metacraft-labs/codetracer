@@ -111,7 +111,7 @@ jobs:
             # `/agents` inputs in flake.nix (7ab073a22), so `=dev` cloned a different tree than the
             # Nix lane builds. These are the revs flake.lock and repro.lock lock; refresh them with
             # the lock, as for the trace-format pair above.
-            codetracer-visual-replay=360a8131ec9fc81d0ebd1cdbd1743238218346af
+            codetracer-visual-replay=cdbcf293486b53d1e2a89bc6ae0f0a3b73080342
             codetracer-native-backend=367e7164f43453513681807eeadb8797b6d5bcde
             # The desktop scenario lane's recorders and recordings: the BEAM
             # recorder at repro.lock's pin, and the example recordings at the
