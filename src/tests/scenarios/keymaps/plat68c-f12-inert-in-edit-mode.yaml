@@ -12,6 +12,9 @@ stage:
 steps:
   - wait: { until: editor.loaded, timeout: 120s }
   - click: { at: 'editor[file="main.py"]/line[number="1"]', anchor: text-start }
+  # The notice leaves the status bar by itself after a few seconds: read it
+  # while it is up (no settle after the key), its words and that it is the
+  # only one in one observation.
   - key: F12
-  - wait: { until: { at: status-line, assert: "notifies(\"needs a replay session\")" }, timeout: 10s }
-  - expect: { at: status-line, notifications: { count: 1 } }
+    settle: false
+  - wait: { until: { at: status-line, notifications: { count: 1 }, assert: "notifies(\"needs a replay session\")" }, timeout: 10s }
