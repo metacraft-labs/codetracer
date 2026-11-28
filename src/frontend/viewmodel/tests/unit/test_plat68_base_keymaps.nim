@@ -39,7 +39,7 @@ import std/[strutils, tables, unittest]
 import ../../editing_core
 import ../../keymap/[overlay_rows, pointer_rows]
 
-const ExpectedAssertions = 1222
+const ExpectedAssertions = 1227
   ## +8 on 2026-11-08, measured: CUA's four `Ctrl+K T` rows and the four
   ## catalogued `editor.trace-*` operations they bind.
   ## +5 on 2026-10-30 (PLAT-70 Part E): CUA's `Menu`, `Ctrl+K Shift+F10` and
@@ -344,6 +344,25 @@ suite "PLAT-68: editing through the CUA base, one resolver":
     var kitty = docUnder(bkCua, "one\ntwo\n", KittyDelivery)
     ck "delete-line" notin kitty.press(["Ctrl+k", "Ctrl+k"])
     ck kitty.text == "one\ntwo\n"
+  test "Enter after typed text puts the caret on the new line":
+    # The newline goes in at the caret and the caret goes past it, whatever
+    # way the caret leans (its association). A caret left by typing leaned
+    # back towards its text, and `insert-newline-and-indent` mapped it with
+    # that lean, so it stayed in front of the newline: in a tracepoint
+    # editor, "fn", Enter and "x" read "fnx" over an empty line
+    # (keymaps/plat68b-tracepoint-editor-keys).
+    var d = docUnder(bkCua, "")
+    discard d.press(["f", "n", "Enter"])
+    ck d.text == "fn\n"
+    ck d.caretLine == 2 and d.caretColumn == 0
+    discard d.press(["x"])
+    ck d.text == "fn\nx"
+    var e = docUnder(bkCua, "")
+    discard e.press(["Enter"])
+    ck e.caretLine == 2
+    var i = docUnder(bkCua, "  ab")
+    discard i.press(["End", "Enter"])
+    ck i.text == "  ab\n  " and i.caretLine == 2 and i.caretColumn == 2
   test "Home is two-stage, as VS Code's":
     var d = docUnder(bkCua, "    indented\n")
     discard d.press(["End", "Home"])

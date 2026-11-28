@@ -1569,14 +1569,15 @@ proc cInsertNewlineAndIndent(env: OpEnv; st: EditorState; args: OpArgs): OpResul
   ## that needs no language service, and therefore the one this milestone can
   ## honestly implement. `reindent-selection` is the one that needs a parse and
   ## it refuses.
-  var edits: seq[Edit] = @[]
-  for r in st.selection:
-    let line = env.lineOf(r.rangeFrom)
-    let indent = env.lineTextOf(line)[0 ..< indentWidthOf(env.lineTextOf(line))]
-    edits.add Edit(fromPos: r.rangeFrom, toPos: r.rangeTo, insert: "\n" & indent)
-  if edits.len == 0: return settle(st, st)
-  let cs = changeSet(st.doc.len, edits)
-  settle(st, commitChange(st, cs, some(mapSelection(st.selection, cs))))
+  ##
+  ## Each caret goes past what it inserted, as typing does (`insertAtCaret`).
+  ## Mapping the selection through the change instead kept a caret that
+  ## leaned back (`assocBefore`, as typing leaves one) in front of the new
+  ## line, so the next character went at the end of the line above.
+  settle(st, editByRange(st, env, proc (r: SelectionRange): RangeOutcome =
+    let text = env.lineTextOf(env.lineOf(r.rangeFrom))
+    let s = "\n" & text[0 ..< indentWidthOf(text)]
+    replaceWith(r.rangeFrom, r.rangeTo, s, r.rangeFrom + s.len)))
 
 proc blankLine(env: OpEnv; st: EditorState; above: bool): EditorState =
   var edits: seq[Edit] = @[]
