@@ -27,8 +27,13 @@ steps:
     settle: false
   - wait: { until: { at: 'editor[file="shield.nr"]', current-line: 6 }, timeout: 60s }
   - wait: { until: replay-idle, timeout: 60s }
+  # The stop puts the loop's iteration control above line 4, which moves the
+  # lines under it down a row: press line 6 once it is where it stays (a press
+  # aimed before it lands on line 5 and makes a breakpoint there).
+  - wait: { until: { at: 'editor[file="shield.nr"]/loop-control', present: true }, timeout: 60s }
   - click: { at: 'editor[file="shield.nr"]/line[number="6"]', anchor: glyph }
   - expect: { at: 'editor[file="shield.nr"]/line[number="6"]', breakpoint: false }
+  - expect: { at: 'editor[file="shield.nr"]/line[number="5"]', breakpoint: false }
   - click: 'toolbar/toolbar-button[label="continue-image"]'
     settle: false
   - wait: { until: { at: status-line, location: { contains: "main.nr" } }, timeout: 60s }
