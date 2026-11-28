@@ -21,9 +21,11 @@ jobs:
     # Cold, the build is most of it: 50 minutes in run 45822112077, 40 of them
     # ct_cli's release compile, and on a loaded host that compile alone ran
     # past 64 minutes and the job past its old 150 (run 45959049981, after 36
-    # of provisioning). A warm job restores the products from the cache below
-    # and builds nothing.
-    timeout-minutes: 210
+    # of provisioning), and in run 46108428242 the compile ran past two hours
+    # and the job past 210. A cancelled job saves no cache, so the bound has to
+    # fit one cold build on a loaded host for the cache to fill at all; a warm
+    # job restores the products from the cache below and builds nothing.
+    timeout-minutes: 330
     name: Build the visual replay tools (once per run)
     steps:
       - name: Record when the job started
@@ -247,7 +249,7 @@ jobs:
           ATTIC_ENDPOINT: ${{ vars.ATTIC_ENDPOINT }}
           ATTIC_CACHE: ${{ vars.ATTIC_CACHE }}
           ATTIC_TOKEN: ${{ secrets.ATTIC_TOKEN }}
-          CT_JOB_TIMEOUT_MINUTES: 210
+          CT_JOB_TIMEOUT_MINUTES: 330
         # CT_JOB_TIMEOUT_MINUTES is this job's timeout-minutes (held equal by
         # push-built-closure-test.sh).
         run: bash ci/deploy/push-built-closure.sh --gcroots "${CT_GCROOT_DIR:-$RUNNER_TEMP/ct-gcroots}" --flake-inputs
