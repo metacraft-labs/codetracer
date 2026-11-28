@@ -773,9 +773,6 @@ src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/gpui/t
 src/frontend/tui/tests/plat48-topbar-mutation-control.sha256	src/frontend/gpui/tests/test_plat48_gpui_top_bar.nim	010d4d0a5d537c17e560ab6ca958237dd5962e4c9d95e04bd3cf31d299aa2997	678d7fe15e3f87c7535100e046c5e4350d58d8915a8381d72a8fa7f31db1e6af
 src/frontend/tui/tests/plat48-topbar-mutation-control.sha256	src/frontend/gpui/tests/test_plat48_gpui_plan.nim	088decf5ed147fff810d83f24468b044fa0fee5f78b4cce44ccf560352336dcf	7ee1f213270bf50b46992bbb4d87ef18e17994e0ea73fe11354dcdff7ee621fa
 src/frontend/tui/tests/plat49-chrome-mutation-control.sha256	src/frontend/gpui/tests/test_plat49_panes_gpui_plan.nim	7c74ced5a389d5e1fbfa18830207879c276cfe465da70d88e5e1a2e558885654	c545b7bb7c4bec284ab04dece82d2a46fdd0e59f1de847468b783acab63f6c91
-src/frontend/viewmodel/tests/unit/plat5-interaction-mutation-control.sha256	src/frontend/viewmodel/tests/unit/test_layout_interaction.nim	599aa6f135b102c88a4586e56c5b41fe8b3d4650e4d223046ecb1f4e9f05179a	f85106d769c5c68aac5ef5c4146c2b9b3ec0466b1df12d566a2f721cf46566ac
-src/frontend/viewmodel/tests/unit/plat5-interaction-mutation-control.sha256	src/frontend/headless_app/layout_model.nim	a1083e69d55c7d701ff22aceaf6a37c6fdb6a9a2920db19103313446bde1d55d	f31a4300672ca40e00b5ddd1d07b4d534185d1a829c28385e7f0e319cf6ce5cf
-src/frontend/viewmodel/tests/unit/plat5-interaction-mutation-control.sha256	src/frontend/tui/app/layout/binding.nim	8c3fb489dcb8c3afbdf3a6e8ff802b07e6635ce6362e5f8b48f1eb66c9867599	fac0190aca626b0ad8fdfe62cf8ba469f704e5a1c08f7a04c9345156e9aec3ee
 
 # 2026-11-24, the terminal's plugin source marker that names no glyph is drawn from the
 # glyph table's new grPluginMarker role instead of a literal in views/shell.nim, and the
