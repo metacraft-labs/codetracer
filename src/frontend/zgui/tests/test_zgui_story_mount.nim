@@ -33,7 +33,7 @@ import ../../stories/[story_frames, story_mount]
 import ../zgui_view_support
 
 var countedAssertions = 0
-const ExpectedAssertions = 22
+const ExpectedAssertions = 26
 
 template ck(condition: untyped) =
   inc countedAssertions
@@ -79,6 +79,22 @@ suite "a panel story mounted through ZguiRenderer":
       ck not panel.isNil
       ck "iterate_asteroids" in panel.textContent
       ck "calculate_damage" in panel.textContent
+    finally:
+      dispose()
+      closeHeadless()
+
+  test "the Calltrace story draws the browser's guide layer over its rows":
+    # `decorateCalltracePanel` gives the browser an `svg#svg-content-0` of
+    # `<line>`s in `.calltrace-lines`; a native renderer that draws inline SVG
+    # gets the same layer from the same geometry (`attachNativeCallGuides`).
+    let (host, dispose) = mountStory("calltrace", "Calltrace")
+    try:
+      let lines = firstWithClass(host, "calltrace-lines")
+      let guides = firstWithClass(host, "calltrace-svg-line")
+      ck not guides.isNil and guides.getAttribute("id") == "svg-content-0"
+      ck not lines.isNil and ZguiRenderer().parentNode(guides) == lines
+      ck guides.childCount > 1
+      ck guides.nthChild(0).getAttribute("stroke-width") == "0.5"
     finally:
       dispose()
       closeHeadless()

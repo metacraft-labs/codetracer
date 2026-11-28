@@ -200,6 +200,49 @@ func callGuideSegments*(depths: openArray[int]; pitch: float;
     if i < depths.high:
       result.add (x, bottomY, xOf(depths[i + 1]), bottomY)
 
+func callGuideExtent*(depths: openArray[int]; pitch: float;
+                      anchor: CallGuideAnchor): tuple[width, height: float] =
+  ## The guide layer's size: as wide as the deepest row's guide needs (a
+  ## hard-coded wide value inflates the scroll container horizontally) and as
+  ## tall as the rows.
+  var maxDepth = 0
+  for d in depths: maxDepth = max(maxDepth, d)
+  (anchor.originX + float(maxDepth) * CallDepthIndentPx + 16.0,
+   max(float(depths.len) * pitch, 1.0))
+
+proc attachNativeCallGuides[R, N](r: R; linesContainer: N; vm: CalltraceVM) =
+  ## The guide layer for a native renderer whose host draws an inline `<svg>`
+  ## built element by element (it says so with `drawsInlineSvg`, e.g.
+  ## `zgui_view_support`): the same `svg#svg-content-0.calltrace-svg-line` of
+  ## `<line>`s the browser's `decorateCalltracePanel` appends to
+  ## `.calltrace-lines`, from the same geometry, redrawn from the rows and the
+  ## row advance. The toggle anchor is the stylesheet's default: a native view
+  ## has no browser measurement of it.
+  mixin createElement, setAttribute, appendChild, clearChildren
+  let svg = r.createElement("svg")
+  r.setAttribute(svg, "id", "svg-content-0")
+  r.setAttribute(svg, "class", "calltrace-svg-line")
+  r.appendChild(linesContainer, svg)
+  createRenderEffect proc() =
+    let lines = vm.store.calltrace.lines.val
+    let pitch = vm.rowHeightPx.val
+    let a = defaultCallGuideAnchor(pitch)
+    var depths = newSeq[int](lines.len)
+    for i, line in lines: depths[i] = line.depth
+    let (width, height) = callGuideExtent(depths, pitch, a)
+    r.clearChildren(svg)
+    r.setAttribute(svg, "width", $width)
+    r.setAttribute(svg, "height", $height)
+    r.setAttribute(svg, "viewBox", "0 0 " & $width & " " & $height)
+    for seg in callGuideSegments(depths, pitch, a):
+      let line = r.createElement("line")
+      r.setAttribute(line, "x1", $seg.x1)
+      r.setAttribute(line, "y1", $seg.y1)
+      r.setAttribute(line, "x2", $seg.x2)
+      r.setAttribute(line, "y2", $seg.y2)
+      r.setAttribute(line, "stroke-width", "0.5")
+      r.appendChild(svg, line)
+
 when defined(js):
   proc createSvgElement(tag: cstring): isonim_dom.Element {.importjs: "document.createElementNS('http://www.w3.org/2000/svg', #)".}
   proc preventDefault(ev: isonim_dom.Event) {.importcpp: "#.preventDefault()".}
@@ -948,6 +991,11 @@ proc renderCalltracePanel*[R, N](r: R; vm: CalltraceVM;
       decorateCalltraceFrame(r, formEl, inputEl, scrollContainer,
                              linesContainer, vm)
   when not defined(js):
+    # A native renderer whose host draws an inline SVG built element by element
+    # gets the browser's guide layer (`attachNativeCallGuides`).
+    mixin drawsInlineSvg
+    when compiles(drawsInlineSvg(r)):
+      attachNativeCallGuides(r, linesContainer, vm)
     # A native renderer whose host draws the scrubber the browser draws
     # (`views/list_scrubber_native`, e.g. `zgui_view_support`). The browser's
     # current-call tracking stays its own; a native view opens at the stop.

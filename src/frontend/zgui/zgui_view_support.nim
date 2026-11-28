@@ -16,6 +16,13 @@ import ../viewmodel/views/list_scrubber_native
 
 template BadgeEvent*(r: ZguiRenderer): typedesc = ZguiDomEvent
 
+proc drawsInlineSvg*(r: ZguiRenderer): bool =
+  ## zgui draws an inline `<svg>` built element by element (isonim-zgui records
+  ## the attributes of `svg`, `line`, `path`, … and rewrites the vector's
+  ## document), so views draw their SVG layers here as the browser does: the
+  ## Call Trace's guide lines (`isonim_calltrace_view.attachNativeCallGuides`).
+  true
+
 template KeyEvent*(r: ZguiRenderer): typedesc = ZguiDomEvent
   ## The event a key listener takes (`views/isonim_terminal_output_view`).
 
