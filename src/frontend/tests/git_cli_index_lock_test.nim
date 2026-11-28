@@ -78,6 +78,15 @@ let workspace = $(nodeFs.mkdtempSync(
 setEnv(cstring"GIT_CONFIG_GLOBAL", cstring(workspace & "/absent-gitconfig"))
 setEnv(cstring"GIT_CONFIG_SYSTEM", cstring(workspace & "/absent-gitconfig"))
 setEnv(cstring"GIT_CONFIG_NOSYSTEM", cstring"1")
+proc unsetEnv(name: cstring) {.importjs: "delete process.env[#]".}
+# NOT INHERITED: GIT_OPTIONAL_LOCKS. A caller that exports
+# GIT_OPTIONAL_LOCKS=0 (agent shells and some CI runners do) turns off
+# the index refresh in EVERY git this process starts, the controls' plain
+# `git status` included, so the controls would fail and the reads would pass
+# for the caller's reason rather than their own. The suite starts without
+# it, as `electron_vcs_index_lock_test.nim` does; the code under test must
+# avoid the lock by itself.
+unsetEnv(cstring"GIT_OPTIONAL_LOCKS")
 setEnv(cstring"GIT_CEILING_DIRECTORIES", cstring(workspace))
 for role in ["AUTHOR", "COMMITTER"]:
   setEnv(cstring("GIT_" & role & "_NAME"), cstring"git_cli Index Lock Test")
