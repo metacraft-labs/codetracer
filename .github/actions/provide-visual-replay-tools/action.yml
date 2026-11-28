@@ -12,7 +12,9 @@ description: >
   steps). A job that builds the tools needs the
   sibling checkouts visual-replay-tools.yml clones (codetracer-native-backend
   with its submodules, codetracer-native-recorder, codetracer-visual-replay,
-  codetracer-snapshot-codecs) and the default dev shell.
+  codetracer-snapshot-codecs) and the default dev shell; the action clones
+  whichever of them is missing, at flake.lock's and ci/toolchain.pin's pins,
+  when it is given app-id and private-key.
 inputs:
   wait-for-artifact:
     description: >
@@ -29,6 +31,19 @@ inputs:
     description: Reads the run's artifacts while waiting.
     required: false
     default: ${{ github.token }}
+  app-id:
+    description: >
+      The GitHub App id (the CI_TOKEN_PROVIDER_APP_ID secret). With
+      private-key, it mints the token that clones the private siblings the
+      tools are built from, when they must be built here and the job has not
+      cloned them. Without them a job that has to build the tools and lacks
+      those siblings fails, naming them.
+    required: false
+    default: ""
+  private-key:
+    description: The GitHub App private key (the CI_TOKEN_PROVIDER_PRIVATE_KEY secret).
+    required: false
+    default: ""
 runs:
   using: composite
   # NO `continue-on-error` HERE: a composite action's steps do not honour it,
@@ -74,6 +89,64 @@ runs:
         else
           echo "The visual-replay-tools artifact did not unpack; the tools are built below."
         fi
+
+    - name: Which siblings must be cloned to build the tools
+      # Only when the restore above did not provide the tools. The pins are
+      # the ones visual-replay-tools.yml clones at.
+      id: siblings
+      shell: bash
+      env:
+        CAN_CLONE: ${{ inputs.app-id != '' && inputs.private-key != '' }}
+      run: |
+        set -euo pipefail
+        if [ -n "${CT_VISUAL_REPLAY_TOOLS_PREBUILT:-}" ]; then
+          echo "clone=false" >>"$GITHUB_OUTPUT"
+          exit 0
+        fi
+        flake_rev() { jq -er --arg r "$1" '[.nodes[] | .locked? | select(.owner? == "metacraft-labs" and .repo? == $r) | .rev] | unique | if length == 1 then .[0] else error("\($r): \(length) revisions in flake.lock") end' flake.lock; }
+        need=""
+        for r in codetracer-native-backend codetracer-native-recorder codetracer-visual-replay codetracer-snapshot-codecs; do
+          [ -d "../${r}/.git" ] || [ -f "../${r}/.git" ] || need="${need} ${r}"
+        done
+        declare -A pin=(
+          [codetracer-native-backend]="$(flake_rev codetracer-native-backend)"
+          [codetracer-native-recorder]="$(flake_rev codetracer-native-recorder)"
+          [codetracer-visual-replay]="$(flake_rev codetracer-visual-replay)"
+          [codetracer-snapshot-codecs]="$(sed -n 's/^PRIVATE_SIBLING_CODETRACER_SNAPSHOT_CODECS=\([0-9a-f]\{40\}\)$/\1/p' ci/toolchain.pin)"
+        )
+        list=""
+        for r in ${need}; do
+          [ -n "${pin[$r]}" ] || { echo "::error::no pin for ${r}"; exit 1; }
+          list="${list} ${r}=${pin[$r]}"
+        done
+        echo "need=${need}" | tee -a "$GITHUB_OUTPUT"
+        echo "list=${list# }" | tee -a "$GITHUB_OUTPUT"
+        if [ -z "${need}" ]; then
+          echo "clone=false" >>"$GITHUB_OUTPUT"
+        elif [ "${CAN_CLONE}" = true ]; then
+          echo "clone=true" >>"$GITHUB_OUTPUT"
+        else
+          echo "::error::the visual replay tools must be built here and these siblings are not checked out:${need}; pass app-id and private-key to provide-visual-replay-tools so it can clone them"
+          exit 1
+        fi
+
+    - name: Mint a token for the sibling clones
+      if: ${{ steps.siblings.outputs.clone == 'true' }}
+      id: clone_token
+      uses: ./.github/actions/refresh-github-token
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+
+    - name: Clone the siblings the tools are built from
+      # Through clone-siblings, the one approved way a composite action
+      # provisions siblings (ci/test/sibling-provisioning-test.sh), at the
+      # pins the step above read.
+      if: ${{ steps.siblings.outputs.clone == 'true' }}
+      uses: metacraft-labs/metacraft-github-actions/clone-siblings@dev
+      with:
+        gh-token: ${{ steps.clone_token.outputs.token }}
+        siblings: ${{ steps.siblings.outputs.list }}
 
     - name: Provide the tools, and export what names them
       shell: bash

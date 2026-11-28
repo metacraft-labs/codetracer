@@ -277,6 +277,11 @@ jobs:
         uses: ./.github/actions/provide-visual-replay-tools
         with:
           wait-for-artifact: 'true'
+          # This job clones none of the siblings the tools are built from;
+          # with these the action clones them when the artifact is missing
+          # (run 46108634099: the host had stopped the tools job).
+          app-id: ${{ secrets.CI_TOKEN_PROVIDER_APP_ID }}
+          private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: TUI Tier 1 — the suites that need no terminal
         # NOT the Tier-1 suites that open an rr recording of a native program
