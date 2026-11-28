@@ -156,10 +156,12 @@ recorders() {
 		# entered from its root, and the EVM recorder's installer refuses the
 		# runner git's own pre-push.sample and with it the shell ("hook
 		# installer failed; refusing to enter the dev shell", run 45822112077).
-		# A CI build needs no git hooks.
+		# A CI build needs no git hooks. Every recorder's `just build` is a plain
+		# `cargo build`; the Flow recorder's shell has no `just` (exit 127, run
+		# 45959049981), so cargo is run directly there.
 		# shellcheck disable=SC2016 # expanded by the inner bash, in the recorder's shell
 		env -u CARGO_TARGET_DIR CARGO_NET_GIT_FETCH_WITH_CLI=true \
-			nix develop "$ws/$repo" --no-write-lock-file --command bash -c 'cd "$1" && just build' build "$ws/$repo"
+			nix develop "$ws/$repo" --no-write-lock-file --command bash -c 'cd "$1" && if command -v just >/dev/null; then just build; else cargo build --locked; fi' build "$ws/$repo"
 		bin="$ws/$repo/target/debug/$repo"
 		test -x "$bin"
 		name="${repo#codetracer-}"

@@ -268,6 +268,7 @@ jobs:
           ( . "$RUNNER_TEMP/visual-replay.env"; env | grep -E '^(CODETRACER_|CT_)' ) >> "$GITHUB_ENV"
 
       - name: Mint a token for the clone below
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # Late in the job: the clone's own token, freshly minted.
         id: clone_token
         uses: ./.github/actions/refresh-github-token
@@ -276,6 +277,7 @@ jobs:
           private-key: ${{ secrets.CI_TOKEN_PROVIDER_PRIVATE_KEY }}
 
       - name: Clone codetracer-js-recorder sibling
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # The recorder the lane's JavaScript recordings are made with
         # (scripts/materialize-recording.sh), at `dev`, its default branch.
         uses: metacraft-labs/metacraft-github-actions/clone-repo@dev
@@ -287,6 +289,7 @@ jobs:
           submodules: 'false'
 
       - name: Build codetracer-js-recorder sibling
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # dist/ is produced, never committed; materialize-recording.sh opens
         # packages/cli/dist/index.js.
         run: |
