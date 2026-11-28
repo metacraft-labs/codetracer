@@ -849,7 +849,6 @@ src/frontend/tui/tests/plat47-parity-mutation-control.sha256	src/frontend/tui/ap
 # `add` throws past ~100 000 bytes (codetracer-pm 2026-11-24-under-ct-host-a-plugins-
 # mirror-never-learns-what-a-step-changed). process_link.nim and plugin_io.nim moved;
 # the harnesses that digest them owe a re-grade of the arms that sit in them.
-src/frontend/viewmodel/tests/unit/plat8-io-mutation-control.sha256	src/frontend/viewmodel/plugin_host/plugin_io.nim	d5de198bc351a80da5aa4c73b99ed7c6fd48d90d8a9a55ad3a59df7e1e664b26	932254616a1caa7a41c1c83c8d30a78b8588bb5933ca6fde9f8220552b4d2931
 
 # 2026-11-25: the pointer harness was re-graded at dcb44215427, on the pointer-stamp fix
 # (every arm as required, every control green, N1 the declared equivalent mutant). The
