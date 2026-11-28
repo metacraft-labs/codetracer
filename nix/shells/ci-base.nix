@@ -160,6 +160,10 @@ with pkgs;
   packages = [
     # Source control + scripting basics every step touches.
     git
+    # examples/recordings (codetracer-example-recordings) stores its rr
+    # traces in Git LFS: without git-lfs on PATH, a checkout of the submodule
+    # and every `git status` over it fail ("git-lfs: command not found").
+    git-lfs
     coreutils
     gnugrep
     gawk
