@@ -52,20 +52,27 @@
 # host: on 2026-11-19 ten wall-time pairs of one unchanged build, at load
 # 115-134, read release ratios from 0.37 to 8.67, and on 2026-11-28 a
 # behaviour-preserving edit of this script read 5.49x release at load ~100 and
-# failed the 3.0 limit. The scheduler decided those numbers. CPU time on one
-# tree (65b721a25ab), 2026-11-28, median of 9 pairs:
+# failed the 3.0 limit. The scheduler decided those numbers.
 #
-#   | condition                     | load | debug | release |
-#   |-------------------------------+------+-------+---------|
-#   | 6 cores                       |   94 | 1.77x | 1.87x   |
-#   | 2 cores, nice 19              |   85 | 1.89x | 2.19x   |
-#   | REGRESSION: SAFE_HEAP=1 and   |   65 | 15.02x| 9.93x   |
-#   |   ASSERTIONS=2 on the wasm    |      |       |         |
-#   |   link                        |      |       |         |
+# A run's CPU time also counts its fixed costs — node's boot, the wasm
+# module's compile, the JIT's warm-up — so each side is timed at N and at 2N
+# iterations in the same pair and the chain's cost is cpu(2N) - cpu(N); the
+# first version of this contract timed one run, and its release ratio read
+# 1.87x at the default 300,000 iterations and 3.28x at the 100,000 the
+# mutation harness uses, on one build. Two-point CPU ratios on one tree
+# (bd2bfbdc7b0 plus this change), 2026-11-28, median of 9 pairs:
 #
-# The limit stays 3.0x: about a third above the highest healthy reading and
-# far below the regression, which also reddens contract 2 (debug/wasm scored
-# 530 against the floor of 1000). The healthy figures agree with the wall-time
+#   | condition                           | N       | load | debug  | release |
+#   |-------------------------------------+---------+------+--------+---------|
+#   | 6 cores                             | 300,000 |   79 | 1.61x  | 1.35x   |
+#   | 6 cores                             | 100,000 |   67 | 1.57x  | 1.50x   |
+#   | 2 cores, nice 19                    | 100,000 |   64 | 1.42x  | 1.55x   |
+#   | REGRESSION: SAFE_HEAP=1 and         | 100,000 |   46 | 17.11x | 8.73x   |
+#   |   ASSERTIONS=2 on the wasm link     |         |      |        |         |
+#
+# The limit stays 3.0x: nearly twice the highest healthy reading and far
+# below the regression, which also reddens contract 2 (debug/wasm scored 618
+# against the floor of 1000). The healthy figures agree with the wall-time
 # ones published for this criterion (1.42x-1.96x), so the decision they
 # support is unchanged.
 #
@@ -213,8 +220,21 @@ run_build() {
 		w_out="$(cat "${out_dir}/wasm-${label}-${pair}.out")"
 		nw="$(row "${n_out}" FAKETIMER-WALL-MS)"
 		ww="$(row "${w_out}" FAKETIMER-WALL-MS)"
-		nc="$(awk 'END{printf "%d", ($1 + $2) * 1000}' "${out_dir}/native-${label}-${pair}.cpu")"
-		wc="$(awk 'END{printf "%d", ($1 + $2) * 1000}' "${out_dir}/wasm-${label}-${pair}.cpu")"
+		# TWO POINTS, AND THE RATIO IS OF THEIR DIFFERENCE. CPU time counts
+		# every fixed cost of a run — node's boot, the wasm module's compile,
+		# the JIT's warm-up, the native binary's load — which the wall time
+		# read inside the probe never did. Subtracting a one-iteration run took
+		# out the start but not the warm-up, and the release ratio still moved
+		# with the iteration count (2.49x at 100,000 against 1.94x at 300,000 on
+		# one build). So each side also runs 2N iterations in the same pair and
+		# the chain's cost is cpu(2N) - cpu(N): N more iterations and nothing
+		# else, which cancels every fixed cost whatever N the caller chose.
+		{ time ("${out_dir}/ft-native-${label}" "$((2 * ITERATIONS))" >/dev/null 2>&1); } 2>"${out_dir}/native-${label}-${pair}.cpu2"
+		{ time (node "${out_dir}/ft-wasm-${label}.js" "$((2 * ITERATIONS))" >/dev/null 2>&1); } 2>"${out_dir}/wasm-${label}-${pair}.cpu2"
+		nc="$(awk 'FNR == 1 && NR == 1 {t = -($1 + $2) * 1000} FNR == 1 && NR > 1 {t += ($1 + $2) * 1000} END {printf "%d", t}' \
+			"${out_dir}/native-${label}-${pair}.cpu" "${out_dir}/native-${label}-${pair}.cpu2")"
+		wc="$(awk 'FNR == 1 && NR == 1 {t = -($1 + $2) * 1000} FNR == 1 && NR > 1 {t += ($1 + $2) * 1000} END {printf "%d", t}' \
+			"${out_dir}/wasm-${label}-${pair}.cpu" "${out_dir}/wasm-${label}-${pair}.cpu2")"
 		min_into wall_of "${nkey}" "${nw:-0}"
 		min_into wall_of "${wkey}" "${ww:-0}"
 		n_ratios+=("$(row "${n_out}" FAKETIMER-RATIO)")
