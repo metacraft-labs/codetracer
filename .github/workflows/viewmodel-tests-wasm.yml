@@ -358,7 +358,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just build-once
 
       - name: Run recorder-gated ViewModel tests (JS recorder + replay-server)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # Builds the JS recorder sibling via scripts/build-siblings.sh, builds
         # replay-server, then runs the recorder-gated unit VM suites with a
         # zero-test guard that fails if they all skip (so a missing recorder
@@ -366,7 +366,7 @@ jobs:
         run: nix develop .#devShells.x86_64-linux.default --command just test-vm-recorder-gated
 
       - name: Run ct record CLI dispatch tests
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.ct.outcome == 'success' }}
         # Asserts that every language detection produces reaches a recorder,
         # that a missing recorder fails non-zero naming the language and the
         # remedy, and that a real `ct record` through the JS recorder sibling
