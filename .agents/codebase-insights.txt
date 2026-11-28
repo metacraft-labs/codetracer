@@ -7458,6 +7458,22 @@ ONE ROUTER ON EVERY FRONT-END (2026-10-12, PLAT-68 Phase B).
   status. A call flow at a location with no source position (`<unknown>:-1`,
   where a replay stands after running off the end of the recording) is refused
   before any worker is driven (`replayed_call_flow_refusal`).
+- A flow worker's query that outlives the read timeout is NOT a death: the
+  connection is abandoned and the next query starts a replacement worker at
+  the start of the recording, even in a `without_respawn_after_worker_death`
+  session. The seeks of the walk's first move (`seek_to_first_step`:
+  `location_jump`, then `jump_to_call` to widen or as the fallback) wait on a
+  busy worker (`set_waits_on_busy_motions`, progress-based up to
+  `CODETRACER_REPLAY_QUERY_MAX_SECS`); the per-step queries keep the plain
+  timeout. A call flow whose first move still fails is a `FlowUpdate::error`
+  ("could not reach its first step"), never an empty window. On a loaded host
+  (Pascal sudoku, load 72-160) both seeks timed out and `main`'s flow came back
+  as an empty, successful window.
+- The stop loader retries a FAILED pane when a move is reported at the stop it
+  is already at (`ReplayDataStore.stopReported`, bumped by
+  `updateDebuggerPosition`'s same-stop branch), at most once per pane and stop
+  (`retriedFor`): a click on the current call in the call trace is such a
+  move, and leaves `debugger` unchanged.
 - The db-backend test harness's `set_breakpoint` helpers require the breakpoint
   to come back `verified: true`. A fixture anchor that resolves to no code then
   fails as "breakpoint at X:N was not verified" instead of as an empty flow at

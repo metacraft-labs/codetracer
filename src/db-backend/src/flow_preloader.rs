@@ -887,40 +887,21 @@ impl<'a> CallFlowPreloader<'a> {
                     "  move_to_first_step: jumping to location at line {} rr_ticks={} event={}",
                     self.location.line, self.location.rr_ticks.0, self.location.event
                 );
-                if let Err(e) = replay.location_jump(&self.location) {
-                    warn!("  location_jump error: {e:?}, falling back to jump_to_call");
-                    if let Ok(location) = replay.jump_to_call(&self.location) {
-                        step_id = StepId(location.rr_ticks.0);
-                        progressing = true;
-                    } else {
-                        move_error = true;
-                    }
-                } else {
-                    match replay.load_location(&mut self.walk_expr_loader) {
-                        Ok(current_location) => {
-                            match replay.jump_to_call(&self.native_call_entry_request(current_location)) {
-                                Ok(call_start_loc) => {
-                                    step_id = StepId(call_start_loc.rr_ticks.0);
-                                    progressing = true;
-                                    info!(
-                                        "  flow: navigated to function call entry at step {} (line {})",
-                                        step_id.0, call_start_loc.line
-                                    );
-                                }
-                                Err(e) => {
-                                    warn!("  flow: jump_to_call failed, keeping current flow start: {e:?}");
-                                    step_id = replay.current_step_id();
-                                    progressing = true;
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            warn!("  flow: load_location after location_jump failed: {e:?}");
-                            step_id = replay.current_step_id();
-                            progressing = true;
-                        }
-                    }
-                }
+                // The seeks that bring the walk to its stop wait while the
+                // worker is still working (`WorkerProgress`, up to
+                // `CODETRACER_REPLAY_QUERY_MAX_SECS`), not only the read
+                // timeout: a side replay's worker starts fresh for every flow
+                // and must replay from the start of the recording to the
+                // stop, which on a loaded host takes longer than the timeout.
+                // Under the plain timeout both seeks of `main`'s flow in the
+                // Pascal sudoku solver (load 72-160) were cut off, the second
+                // on a replacement worker, and the flow came back empty. The
+                // walk's per-step queries keep the plain timeout, which is
+                // what replaces a worker that stalls mid-walk.
+                replay.set_waits_on_busy_motions(true);
+                let positioned = self.seek_to_first_step((step_id, progressing, move_error), replay);
+                replay.set_waits_on_busy_motions(false);
+                (step_id, progressing, move_error) = positioned;
             } else if let Ok(location) = replay.jump_to_call(&self.location) {
                 step_id = StepId(location.rr_ticks.0);
                 progressing = true;
@@ -939,6 +920,55 @@ impl<'a> CallFlowPreloader<'a> {
             }
         }
         Ok((step_id, progressing, move_error))
+    }
+
+    /// A replayed (rr) walk's first move: seek to the requested stop, then
+    /// widen to the entry of the call it is in. Returns the step to start
+    /// from, whether stepping can go on, and whether the stop was not reached.
+    fn seek_to_first_step(
+        &mut self,
+        from: (StepId, bool, bool),
+        replay: &mut dyn ReplaySession,
+    ) -> (StepId, bool, bool) {
+        let (mut step_id, mut progressing, mut move_error) = from;
+        if let Err(e) = replay.location_jump(&self.location) {
+            warn!("  location_jump error: {e:?}, falling back to jump_to_call");
+            let jumped = replay.jump_to_call(&self.location);
+            match jumped {
+                Ok(location) => {
+                    step_id = StepId(location.rr_ticks.0);
+                    progressing = true;
+                }
+                Err(e) => {
+                    warn!("  flow: jump_to_call fallback failed too: {e:?}");
+                    move_error = true;
+                }
+            }
+        } else {
+            match replay.load_location(&mut self.walk_expr_loader) {
+                Ok(current_location) => match replay.jump_to_call(&self.native_call_entry_request(current_location)) {
+                    Ok(call_start_loc) => {
+                        step_id = StepId(call_start_loc.rr_ticks.0);
+                        progressing = true;
+                        info!(
+                            "  flow: navigated to function call entry at step {} (line {})",
+                            step_id.0, call_start_loc.line
+                        );
+                    }
+                    Err(e) => {
+                        warn!("  flow: jump_to_call failed, keeping current flow start: {e:?}");
+                        step_id = replay.current_step_id();
+                        progressing = true;
+                    }
+                },
+                Err(e) => {
+                    warn!("  flow: load_location after location_jump failed: {e:?}");
+                    step_id = replay.current_step_id();
+                    progressing = true;
+                }
+            }
+        }
+        (step_id, progressing, move_error)
     }
 
     // returns new step_id/rr ticks(?) and `progressing`(if false, the flow loop should stop)
@@ -1059,6 +1089,17 @@ impl<'a> CallFlowPreloader<'a> {
             };
 
             if move_error {
+                // A walk that could not reach its first step has walked
+                // nothing, and an empty window is not "this call ran no
+                // lines": the client would draw nothing at the stop and never
+                // ask again. It is the flow's failure, so a client can retry.
+                if self.mode == FlowMode::Call && step_count == 0 && flow_view_update.steps.is_empty() {
+                    return Err(format!(
+                        "the flow could not reach its first step: the replay did not get to {}:{} (rr ticks {})",
+                        self.location.path, self.location.line, self.location.rr_ticks.0
+                    )
+                    .into());
+                }
                 info!("move error: break flow");
                 break;
             }
@@ -2038,6 +2079,16 @@ mod tests {
         /// How often the walk asked for the current step id, which on a
         /// replayed trace is a location query to the worker.
         step_id_reads: usize,
+        /// A worker slower than the read timeout: a seek fails as a timed-out
+        /// query does, unless the session waits on a busy worker
+        /// (`set_waits_on_busy_motions`).
+        slow_seeks: bool,
+        /// A worker that never gets there: every seek fails, waited on or not.
+        unreachable: bool,
+        /// Whether the session currently waits on a busy worker.
+        waits_on_busy: bool,
+        /// The seeks made while the session waited on a busy worker.
+        waited_seeks: Vec<String>,
     }
 
     impl MockReplay {
@@ -2051,7 +2102,26 @@ mod tests {
                 script: vec![],
                 script_index: 0,
                 step_id_reads: 0,
+                slow_seeks: false,
+                unreachable: false,
+                waits_on_busy: false,
+                waited_seeks: vec![],
             }
+        }
+
+        /// The error a seek gets from a worker that has not answered in time
+        /// (`RecreatorReplaySession::dispatch_replay_query`), if this one does.
+        fn seek_failure(&self, query: &str) -> Option<Box<dyn Error>> {
+            if self.unreachable || (self.slow_seeks && !self.waits_on_busy) {
+                return Some(
+                    format!(
+                        "dispatch_replay_query timed out (configured timeout Some(10s); elapsed 10.2s) \
+                         waiting for worker flow[1] pid Some(4242) response to: {query}"
+                    )
+                    .into(),
+                );
+            }
+            None
         }
 
         /// A replay that starts at `script[0]`, which is also the entry of
@@ -2172,8 +2242,14 @@ mod tests {
 
         fn jump_to_call(&mut self, location: &Location) -> Result<Location, Box<dyn Error>> {
             self.calls.push(format!("jump_to_call:{}", location.rr_ticks.0));
+            if self.waits_on_busy {
+                self.waited_seeks.push(format!("jump_to_call:{}", location.rr_ticks.0));
+            }
             if let Some(death) = &self.death {
                 return Err(death.clone().into());
+            }
+            if let Some(failure) = self.seek_failure("JumpToCall") {
+                return Err(failure);
             }
             self.current_step_id = StepId(self.call_entry_location.rr_ticks.0);
             Ok(self.call_entry_location.clone())
@@ -2189,8 +2265,14 @@ mod tests {
 
         fn location_jump(&mut self, location: &Location) -> Result<(), Box<dyn Error>> {
             self.calls.push(format!("location_jump:{}", location.rr_ticks.0));
+            if self.waits_on_busy {
+                self.waited_seeks.push(format!("location_jump:{}", location.rr_ticks.0));
+            }
             if let Some(death) = &self.death {
                 return Err(death.clone().into());
+            }
+            if let Some(failure) = self.seek_failure("LocationJump") {
+                return Err(failure);
             }
             self.current_step_id = StepId(location.rr_ticks.0);
             Ok(())
@@ -2218,6 +2300,10 @@ mod tests {
 
         fn worker_death(&self) -> Option<String> {
             self.death.clone()
+        }
+
+        fn set_waits_on_busy_motions(&mut self, on: bool) {
+            self.waits_on_busy = on;
         }
 
         fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
@@ -2497,6 +2583,105 @@ mod tests {
             update.error_message
         );
         assert!(update.view_updates.is_empty());
+    }
+
+    /// The positions of a call in `sudoku.pas`'s `main`, for the walks below:
+    /// the stop at line 97 (rr ticks 481) is the call's entry, then two more
+    /// lines, then a position in another call, which ends the walk.
+    fn pascal_main_walk() -> Vec<Location> {
+        let at = |line: i64, ticks: i64, key: &str| Location {
+            path: "/src/sudoku.pas".to_string(),
+            line,
+            rr_ticks: RRTicks(ticks),
+            key: key.to_string(),
+            ..Location::default()
+        };
+        vec![at(97, 481, "0"), at(98, 482, "0"), at(99, 483, "0"), at(30, 490, "1")]
+    }
+
+    /// A call flow whose replay never reaches the stop is an error, not an
+    /// empty window.
+    ///
+    /// Both seeks of the walk's first move fail here as timed-out queries do
+    /// (no worker died, so `worker_death` has nothing to report). The walk
+    /// used to break before its first step and deliver an empty window with
+    /// `error: false`: the desktop took it as the stop's flow, drew nothing,
+    /// and never asked again, so `main`'s flow in the Pascal sudoku solver
+    /// never appeared.
+    #[test]
+    fn a_call_flow_that_cannot_reach_its_stop_is_an_error_not_an_empty_window() {
+        let walk = pascal_main_walk();
+        let request = walk[0].clone();
+        let flow_preloader = FlowPreloader::new();
+        let mut replay = MockReplay::scripted(walk);
+        replay.unreachable = true;
+        let mut preloader = CallFlowPreloader::new(
+            &flow_preloader,
+            request.clone(),
+            HashSet::new(),
+            HashSet::new(),
+            FlowMode::Call,
+            TraceKind::Recreator,
+        );
+
+        let update = preloader.load_flow(request, &mut replay);
+
+        assert!(
+            update.error,
+            "an unreachable stop must be an error update, got {update:?}"
+        );
+        assert!(
+            update.error_message.contains("could not reach its first step")
+                && update.error_message.contains("/src/sudoku.pas:97"),
+            "the error must say where the walk could not get: {}",
+            update.error_message
+        );
+        assert!(update.view_updates.is_empty(), "no window: {:?}", update.view_updates);
+    }
+
+    /// The seeks of the walk's first move wait for a worker that is slow
+    /// but working, and the walk then draws the call.
+    ///
+    /// A side replay's worker starts fresh for each flow and replays from the
+    /// start of the recording to the stop, which on a loaded host takes
+    /// longer than the read timeout. Cut off at the timeout, both seeks
+    /// failed and the flow came back empty. The walk's per-step queries keep
+    /// the plain timeout.
+    #[test]
+    fn the_first_moves_seeks_wait_for_a_slow_worker() {
+        let walk = pascal_main_walk();
+        let request = walk[0].clone();
+        let flow_preloader = FlowPreloader::new();
+        let mut replay = MockReplay::scripted(walk);
+        replay.slow_seeks = true;
+        let mut preloader = CallFlowPreloader::new(
+            &flow_preloader,
+            request.clone(),
+            HashSet::new(),
+            HashSet::new(),
+            FlowMode::Call,
+            TraceKind::Recreator,
+        );
+
+        let update = preloader.load_flow(request, &mut replay);
+
+        assert!(!update.error, "the walk must succeed: {}", update.error_message);
+        assert_eq!(
+            replay.waited_seeks,
+            vec!["location_jump:481", "jump_to_call:481"],
+            "the seek to the stop and the widening to its call wait on the worker: {:?}",
+            replay.calls
+        );
+        assert!(!replay.waits_on_busy, "the wait must end with the first move");
+        assert_eq!(
+            update.view_updates[0]
+                .steps
+                .iter()
+                .map(|step| step.position.0)
+                .collect::<Vec<_>>(),
+            vec![97, 98, 99],
+            "the walk draws the call's lines"
+        );
     }
 
     /// A replayed call flow reads each walked position from the worker once.

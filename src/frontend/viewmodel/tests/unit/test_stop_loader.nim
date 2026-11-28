@@ -291,6 +291,69 @@ suite "2026-11-04: the flow window is delivered once, on the event":
     check loader.status[spFlow].val == plsFailed
     check session.flowVM.loadingState.val == lsError
 
+  test "a flow that failed at a stop is asked again on a move to that stop":
+    # codetracer-pm issue
+    # `2026-11-26-pascal-sudoku-flow-of-main-makes-the-renderer-unresponsive-on-both-renderers`:
+    # the replay could not reach main's first step on a loaded host, and the
+    # flow failed. The scenario then clicked main in the call trace, a move to
+    # the stop the debugger was already at, which leaves `debugger` as it
+    # was: the failed flow was never asked for again, and its chips never
+    # appeared. A move reported at the same stop now retries what failed
+    # there (`ReplayDataStore.stopReported`), and nothing else.
+    let mock = newMockBackendService(autoRespond = true)
+    let session = newLoaderSession(mock)
+    session.store.moveTo(481, 97)
+    mock.clearReceivedCommands()
+    mock.deferResponses = true
+    let loader = createStopLoader(session, {spFlow})
+    loader.follow()
+    check mock.sent("ct/load-flow") == 1
+    mock.settleDeferred(flowAcknowledgement())
+    mock.emitEvent(flowEvent(%*{"viewUpdates": [], "error": true,
+                                "errorMessage": "the flow could not reach its first step",
+                                "finished": true}))
+    check loader.status[spFlow].val == plsFailed
+
+    session.store.moveTo(481, 97)              # the same stop, moved to again
+    check mock.sent("ct/load-flow") == 2
+    check loader.status[spFlow].val == plsInFlight
+    mock.settleDeferred(flowAcknowledgement())
+    mock.emitEvent(flowEvent(flowWindowAnswer(481, 97)))
+    check loader.status[spFlow].val == plsApplied
+    check session.flowVM.layoutWindows.val.len == 1
+
+    # A flow that loaded is not asked for again at the same stop.
+    session.store.moveTo(481, 97)
+    check mock.sent("ct/load-flow") == 2
+    check loader.status[spFlow].val == plsApplied
+
+  test "a flow that keeps failing at a stop is retried once there, not on every report":
+    let mock = newMockBackendService(autoRespond = true)
+    let session = newLoaderSession(mock)
+    session.store.moveTo(481, 97)
+    mock.clearReceivedCommands()
+    mock.deferResponses = true
+    let loader = createStopLoader(session, {spFlow})
+    loader.follow()
+    let failure = %*{"viewUpdates": [], "error": true,
+                     "errorMessage": "the flow could not reach its first step",
+                     "finished": true}
+    mock.settleDeferred(flowAcknowledgement())
+    mock.emitEvent(flowEvent(failure))
+    session.store.moveTo(481, 97)              # retried once
+    check mock.sent("ct/load-flow") == 2
+    mock.settleDeferred(flowAcknowledgement())
+    mock.emitEvent(flowEvent(failure))
+    check loader.status[spFlow].val == plsFailed
+    for _ in 1 .. 5:                           # the same stop, reported again
+      session.store.moveTo(481, 97)
+    check mock.sent("ct/load-flow") == 2
+    # Somewhere else and back: an ordinary load of each stop.
+    session.store.moveTo(500, 99)
+    check mock.sent("ct/load-flow") == 3
+    session.store.moveTo(481, 97)
+    check mock.sent("ct/load-flow") == 4
+
   test "the diff flow: the acknowledgement first, then the event":
     let mock = newMockBackendService(autoRespond = true)
     let session = newLoaderSession(mock)

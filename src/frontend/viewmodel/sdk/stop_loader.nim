@@ -34,6 +34,10 @@
 ## A pane that is not open is not loaded (`setPaneOpen`). A load is issued once
 ## per stop: a second `loadStop` at the same stop and watch list sends nothing,
 ## unless the previous attempt failed (UI-Data-Loading-Guidelines Pattern 5).
+## A following loader makes that second `loadStop` when a move is reported at
+## the stop it is already at (`ReplayDataStore.stopReported`), so a load that
+## failed is retried by moving there again: once per stop, so a pane that
+## keeps failing is not re-sent on every report of the same stop.
 ##
 ## TWO WAYS TO DRIVE IT. `follow` installs an effect that loads on every stop
 ## and watch-list change — what a reactive host wants (the SDK default, see
@@ -99,6 +103,16 @@ type
     localsAskedBudget: int
       ## That load's budget: what the session holds, or is about to, for them.
     following: bool
+    retriedFor: array[StopPane, string]
+      ## The key a failed load was last retried at because the stop was
+      ## reported again (`loadStop`'s `sameStopReport`): one such retry per
+      ## pane and stop, so a pane that keeps failing cannot be re-sent on
+      ## every report of a stop the debugger never left.
+    followedStop: string
+    followedReports: int
+      ## The stop identity and `ReplayDataStore.stopReported` the following
+      ## effect last ran with, to tell a report at the same stop apart from a
+      ## new stop or a watch-list change.
     owner: OwnerBase
       ## The loader's reactive root, so `follow`'s effect is disposed with it.
 
@@ -317,8 +331,11 @@ proc loadLowLevelCode(l: StopLoader; key: string) =
           " could not be loaded: " & message)
       loader.settle(spLowLevelCode, key, plsFailed))
 
-proc loadStop*(l: StopLoader) =
+proc loadStop*(l: StopLoader; sameStopReport = false) =
   ## Issue each open pane's load for the stop the store is at, once per stop.
+  ## `sameStopReport`: the call is for a move reported at the stop the store
+  ## already held; a load that FAILED at this stop is then retried once, and
+  ## not again until the debugger has been somewhere else.
   ## On a transport whose futures settle through the platform callback queue
   ## (std `asyncdispatch`), the answers are applied when that queue is
   ## drained (`drainPlatformCallbacks`).
@@ -331,6 +348,10 @@ proc loadStop*(l: StopLoader) =
     let key = l.stopKey(pane)
     if l.sentFor[pane] == key:
       continue
+    if sameStopReport and l.status[pane].val == plsFailed:
+      if l.retriedFor[pane] == key:
+        continue
+      l.retriedFor[pane] = key
     l.sentFor[pane] = key
     l.status[pane].val = plsInFlight
     if key.len == 0:
@@ -378,7 +399,14 @@ proc follow*(l: StopLoader) =
     createEffect proc() =
       # The reads that subscribe: the stop, the watch list, the open panes
       # and, for the call-stack fallback, the call trace's presence.
-      discard stopIdentityOf(loader.session.store.debugger.val)
+      let stop = stopIdentityOf(loader.session.store.debugger.val)
+      # A move to the stop the debugger is already at: retries what failed
+      # there once (`settle` forgets a failed load's key), sends nothing else.
+      let reports = loader.session.store.stopReported.val
+      let sameStopReport =
+        stop == loader.followedStop and reports != loader.followedReports
+      loader.followedStop = stop
+      loader.followedReports = reports
       discard loader.watchList()
       discard loader.localsBudget()
       if spCallStackFallback in loader.openPanes.val:
@@ -397,4 +425,4 @@ proc follow*(l: StopLoader) =
         discard loader.session.lowLevelCodeVM.shown.val
         discard loader.session.lowLevelCodeVM.generatedAtStop.val
         discard loader.session.store.stop.val
-      untrack(proc() = loader.loadStop()))
+      untrack(proc() = loader.loadStop(sameStopReport)))

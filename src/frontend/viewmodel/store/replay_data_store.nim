@@ -395,6 +395,14 @@ type
       ## this instead (BlockTracer's `arrived`, moved here by
       ## Shared-DOM-Front-Ends D8). Set by every write of an engine-reported
       ## position (`updateDebuggerPosition`), whatever tick it names.
+    stopReported*: Signal[int]
+      ## Bumped each time a move is reported AT THE STOP the store already
+      ## holds (`updateDebuggerPosition`), which leaves `debugger` unchanged.
+      ## The stop loader reads it to retry a load that failed at this stop
+      ## (`sdk/stop_loader.follow`): with `debugger` alone, a user who moved
+      ## to the same stop again (a click on the current call in the call
+      ## trace) got nothing new, and a flow the engine failed to load was
+      ## never asked for again.
     currentGeid*: Signal[Option[uint64]]
     timeline*: Signal[TimelineState]
     agentSessions*: Signal[AgentSessionsState]
@@ -1076,6 +1084,7 @@ proc createReplayDataStore*(backend: BackendService): ReplayDataStore =
         threadId: 0'u32,
       )),
       positionReported: createSignal(false),
+      stopReported: createSignal(0),
       currentGeid: createSignal(none(uint64)),
       timeline: createSignal(TimelineState(
         minRRTicks: 0'u64,
@@ -1467,6 +1476,7 @@ proc updateDebuggerPosition*(store: ReplayDataStore;
      current.location.sourceGeneration == sourceGeneration:
     if geid.isSome:
       store.currentGeid.val = geid
+    store.stopReported.val = store.stopReported.val + 1
     return
   # Construct a NEW object — on JS backend, var = signal.val gets a
   # reference, so mutating and writing back the same object doesn't
