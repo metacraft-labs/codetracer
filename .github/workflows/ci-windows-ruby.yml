@@ -1,0 +1,20 @@
+name: Windows origin-DAP Ruby/JS proof (proof branch only)
+# Proof-only: runs the toolchain job and the nightly origin-DAP job, and
+# nothing else. Never lands.
+on:
+  push:
+    branches: [ci/windows-ruby]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  origin-dap-windows-toolchain:
+    uses: ./.github/workflows/origin-dap-windows-toolchain.yml
+    secrets: inherit
+
+  origin-dap-windows-nightly:
+    needs: origin-dap-windows-toolchain
+    uses: ./.github/workflows/origin-dap-windows-nightly.yml
+    secrets: inherit
