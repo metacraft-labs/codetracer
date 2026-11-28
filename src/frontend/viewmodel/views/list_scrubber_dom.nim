@@ -399,10 +399,22 @@ when defined(js):
 
   proc columnPxOf(el: JsObject): float {.importjs: """
     (function(e){
+      // A column of the TEXT, in the font its lines are drawn in: the
+      // output lines set their own face (`.terminal-line` is SpaceMono),
+      // which is not the scroll container's, and a column measured in the
+      // container's face moved Terminal Output five of its columns a step
+      // where that face is narrower (CI's fonts), not six.
+      const line = e.querySelector('.terminal-line, .build-stdout, .build-stderr');
       const s = document.createElement('span');
       s.textContent = 'MMMMMMMMMM';
       s.style.visibility = 'hidden'; s.style.position = 'absolute';
       s.style.whiteSpace = 'pre';
+      if (line) {
+        const cs = getComputedStyle(line);
+        s.style.fontFamily = cs.fontFamily; s.style.fontSize = cs.fontSize;
+        s.style.fontWeight = cs.fontWeight; s.style.fontStyle = cs.fontStyle;
+        s.style.letterSpacing = cs.letterSpacing;
+      }
       e.appendChild(s);
       const w = s.getBoundingClientRect().width / 10;
       e.removeChild(s);

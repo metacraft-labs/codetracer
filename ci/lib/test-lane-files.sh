@@ -1408,6 +1408,9 @@ test_lane_files() {
 		# late that is: a ResizeObserver and a real layout, which only a
 		# browser has.
 		echo src/frontend/tests/flow_loop_slider_chromium_test.nim
+		# An output pane's Right / Left step is six columns of its lines, in
+		# the face they are drawn in: text measured by a layout engine.
+		echo src/frontend/tests/horizontal_view_step_chromium_test.nim
 		# The desktop's shared editor (the `sharedEditor` developer setting):
 		# trusted clicks, an input method's composition, the accessibility
 		# tree a screen reader reads, a forced-colours theme — what only a
