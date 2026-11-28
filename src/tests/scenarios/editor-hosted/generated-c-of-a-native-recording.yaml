@@ -5,7 +5,8 @@ summary: >-
   In an editor hosting CodeTracer, on a native recording of a Nim program
   (replayed by the native backend), the plugin's command for View Generated
   C Source opens the Low Level Code pane beside the source with the C the
-  stop's line compiled to.
+  stop's line compiled to, and View Disassembly switches that pane to the
+  machine code at the stop.
 
 stage:
   - use: open-recording
@@ -17,7 +18,18 @@ steps:
     caption: { text: "A native Nim recording" }
     steps:
       - wait: { until: replay-idle, timeout: 300s }
-      - wait: { until: { at: 'editor[file="nim_flow_test.nim"]', assert: "stopped-within(1, 200)" }, timeout: 120s }
+      - wait: { until: { at: 'editor[file="nim_flow_test.nim"]', assert: "stopped-at(23)" }, timeout: 120s }
+
+  - beat: step-in
+    narration: { text: "Step into main, to the first line of the program's own code.", voice: narrator }
+    caption: { text: "Step into main()" }
+    steps:
+      # at the call of main() (line 23) there is no machine code of the
+      # program's own to show yet; inside main there is
+      - chord: { bound: debugger.step-into }
+        settle: false
+      - wait: { until: { at: 'editor[file="nim_flow_test.nim"]', assert: "stopped-within(15, 20)" }, timeout: 120s }
+        dwell: 1000ms
 
   - beat: generated-c
     narration: { text: "View Generated C Source shows the C this Nim line compiled to.", voice: narrator }
@@ -26,4 +38,15 @@ steps:
       - chord: { bound: view.generated-c-source }
         settle: false
       - wait: { until: { at: 'pane[title="lowLevelCode"]', assert: 'has-row("#line")' }, timeout: 180s }
+        dwell: 2500ms
+
+  - beat: machine-code
+    narration: { text: "And View Disassembly switches the same pane to the machine code the program is stopped in.", voice: narrator }
+    caption: { text: "The machine code at the stop" }
+    steps:
+      - chord: { bound: view.disassembly }
+        settle: false
+      # x86-64 in AT&T syntax: registers are %-named; the C listing is gone
+      - wait: { until: { at: 'pane[title="lowLevelCode"]', assert: 'has-row("%r")' }, timeout: 180s }
+      - expect: { at: 'pane[title="lowLevelCode"]', assert: 'lacks-row("#line ")' }
         dwell: 2500ms
