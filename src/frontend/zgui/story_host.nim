@@ -24,12 +24,13 @@
 ##     [--title=<tab title>] [--width=1600] [--height=1000] [--scale=1]
 ##     [--theme=dark|light] [--build-root=src/build-debug-repro]
 
-import std/[json, os, parseopt, strutils, tables]
+import std/[json, os, strutils, tables]
 
 import isonim_zgui/[renderer, png, testing]
 
 import ../stories/[story_frames, story_mount]
 import ./zgui_view_support
+import ./story_options
 import ../viewmodel/views/debug_control_marks
 
 const
@@ -40,11 +41,6 @@ const
     ## The IsoNim Editor's page preview document's own rule
     ## (`isonim_editor_codetracer.codeTracerPreviewDocument`, `page = true`).
 
-type
-  HostOptions = object
-    kind, surface, fixture, title, outPath, theme, buildRoot, repoRoot, boxesPath: string
-    width, height: int
-    scale: float
 
 # ---------------------------------------------------------------------------
 # The app's stylesheets, as the page links them
@@ -224,35 +220,6 @@ proc finishDefaultDebugLayout() =
   gDispose = proc() =
     for d in disposers: d()
 
-proc parseOptions(): HostOptions =
-  result = HostOptions(width: 1600, height: 1000, scale: 1.0, theme: "dark",
-                       buildRoot: "src/build-debug-repro", repoRoot: getCurrentDir(),
-                       fixture: "populated")
-  for kind, key, value in getopt():
-    if kind notin {cmdLongOption, cmdShortOption}: continue
-    case key
-    of "story":
-      let parts = value.split('/')
-      if parts.len < 2: quit("--story is <kind>/<surface>[/<fixture>]", 2)
-      result.kind = parts[0]
-      result.surface = parts[1]
-      if parts.len > 2: result.fixture = parts[2]
-    of "title": result.title = value
-    of "out": result.outPath = value
-    of "width": result.width = parseInt(value)
-    of "height": result.height = parseInt(value)
-    of "scale": result.scale = parseFloat(value)
-    of "theme": result.theme = value
-    of "build-root": result.buildRoot = value
-    of "repo-root": result.repoRoot = value
-    of "boxes": result.boxesPath = value
-    else: quit("unknown option --" & key, 2)
-  if result.kind.len == 0 or result.outPath.len == 0:
-    quit("usage: codetracer-zgui-story --story=<kind>/<surface>/<fixture> --out=<png> " &
-         "[--title=] [--width=] [--height=] [--scale=] [--theme=] [--build-root=]", 2)
-  result.buildRoot = absolutePath(result.buildRoot)
-  result.repoRoot = absolutePath(result.repoRoot)
-
 proc buildDocument(root: ZguiNode) =
   try:
     buildStory(root)
@@ -261,23 +228,28 @@ proc buildDocument(root: ZguiNode) =
     raise
 
 proc main() =
-  gOpts = parseOptions()
+  try:
+    gOpts = parseOptions(commandLineParams())
+  except ValueError as e:
+    quit(e.msg, 2)
   gReadRoot = readRoot(gOpts)
   gSheets = appSheets(gOpts)
   openHeadless(float32(gOpts.width), float32(gOpts.height), "", zrOffscreen, buildDocument)
   try:
     if gBuildError.len > 0:
       quit("codetracer-zgui-story: the story's build failed: " & gBuildError, 1)
+    # HiDPI first, as the DOM arm's window has its scale from the start: the default layout's
+    # GoldenLayout geometry is computed once from the laid-out `#ROOT`, so a scale applied after
+    # it left the panels at the geometry of the other scale.
+    if gOpts.scale != 1.0:
+      setHeadlessScale(gOpts.scale, float32(gOpts.width), float32(gOpts.height))
     for _ in 0 ..< 8: discard settle(512)
     if not gLayout.root.isNil:
       finishDefaultDebugLayout()
       for _ in 0 ..< 8: discard settle(512)
     # The scrubbers the views attached, placed from the laid-out boxes.
-    refreshScrubbers(1.0)
+    refreshScrubbers(gOpts.scale)
     for _ in 0 ..< 4: discard settle(512)
-    if gOpts.scale != 1.0:
-      setHeadlessScale(gOpts.scale, float32(gOpts.width), float32(gOpts.height))
-      for _ in 0 ..< 8: discard settle(512)
     if gOpts.boxesPath.len > 0: dumpBoxes(gOpts.boxesPath)
     let c = testing.capture()
     if c.width == 0: quit("zgui presented no frame to capture", 1)
