@@ -1153,11 +1153,14 @@ proc applyMarkerRowsResponse*(vm: EventLogVM; payload: JsonNode) =
   ## body's `markers` field carries the decoded MarkerPayload rows;
   ## this proc converts them to typed `MarkerEventRow`s without
   ## re-evaluating tracepoints (the §3.2.1 contract).
-  if payload.kind != JObject:
+  ##
+  ## `payload` is the answer as any transport resolves it: a bare body, or
+  ## the whole DAP response, which is what the WebAssembly core's transport
+  ## gives the desktop's Event Log (`responseBody`).
+  let body = responseBody(payload)
+  if not body.hasKey("markers"):
     return
-  if not payload.hasKey("markers"):
-    return
-  let markersNode = payload["markers"]
+  let markersNode = body["markers"]
   if markersNode.kind != JArray:
     return
   var rows: seq[MarkerEventRow] = @[]
@@ -1171,9 +1174,11 @@ proc applyPairIndexLookupResponse*(vm: EventLogVM; key: CounterpartKey; response
   ## decoded into a `MarkerEventRow` (with `recordingId` populated)
   ## so the jump button has every field it needs without a second
   ## DAP request.
+  ## `response` is a bare body or a whole DAP response (`responseBody`).
   var entries: seq[MarkerEventRow] = @[]
-  if response.kind == JObject and response.hasKey("counterparts"):
-    let arr = response["counterparts"]
+  let body = responseBody(response)
+  if body.hasKey("counterparts"):
+    let arr = body["counterparts"]
     if arr.kind == JArray:
       for entry in arr:
         entries.add(rowFromJson(entry))

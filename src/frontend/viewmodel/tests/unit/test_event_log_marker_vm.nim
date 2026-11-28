@@ -239,6 +239,28 @@ suite "M25b — EventLogVM populates marker row metadata":
     check mock.findCommand("ct/event-load").isNone
     check vm.markerRows.val.len == 3
 
+  test "an auto-load answered as a whole DAP response still carries its markers":
+    # The desktop's Event Log is drawn by the WebAssembly core, whose
+    # transport (`WorkerBackendService`) resolves a request with the whole
+    # DAP response, `{"success": true, "body": {...}}`, not with its body
+    # alone. The rows came through (`applyEventLogResponse` reads either
+    # shape); the markers, read from the top level only, did not, and the
+    # log drew every marker as an ordinary row.
+    let mock = newMockBackendService(autoRespond = true)
+    mock.expect("ct/event-load", %*{
+      "seq": 2, "type": "response", "request_seq": 1, "success": true,
+      "command": "ct/event-load",
+      "body": parseJson(SAMPLE_EVENT_LOAD_RESPONSE)})
+    let store = createReplayDataStore(mock.toBackendService())
+    let vm = createEventLogVM(store)
+    vm.setViewport(Viewport(rows: 20))
+    drain()
+
+    check mock.findCommand("ct/event-load").isSome
+    check vm.markerRows.val.len == 3
+    check vm.markerRows.val[0].boundaryId == "order-processing"
+    check vm.markerRows.val[1].direction == mdRecv
+
 # ---------------------------------------------------------------------------
 # Layer-2 Test 5 — counterpart set resolves against cached pair index.
 # ---------------------------------------------------------------------------
@@ -289,6 +311,27 @@ suite "M25b — counterpart set caching":
     vm.requestCounterparts(sendRow)
     drain()
     check mock.findCommand("ct/pairIndexLookup").isNone
+
+  test "a pair-index answer given as a whole DAP response fills the cache":
+    # As for `ct/event-load`: the WebAssembly core's transport resolves
+    # `ct/pairIndexLookup` with the whole response.
+    let (vm, _, mock) = makeEventLogVM()
+    vm.applyMarkerRowsResponse(parseJson(SAMPLE_EVENT_LOAD_RESPONSE))
+    mock.expect("ct/pairIndexLookup", %*{
+      "seq": 3, "type": "response", "request_seq": 2, "success": true,
+      "command": "ct/pairIndexLookup",
+      "body": {"counterparts": [{
+        "recordingId": "trace-B", "stepId": 22,
+        "sourcePath": "src/receiver.py", "sourceLine": 12, "markerId": 1,
+        "boundaryId": "order-processing", "direction": "recv",
+        "keyText": "env.id", "keyValue": "K1", "showText": "env.body",
+        "showValue": "inbound", "format": "json"}]}})
+    let sendRow = vm.markerRows.val[0]
+    vm.requestCounterparts(sendRow)
+    drain()
+    let cps = vm.counterpartsFor(sendRow)
+    check cps.len == 1
+    check cps.len == 1 and cps[0].recordingId == "trace-B"
 
   test "test_event_log_vm_counterpart_set_refreshes_on_incremental_reload":
     let (vm, _, mock) = makeEventLogVM()
