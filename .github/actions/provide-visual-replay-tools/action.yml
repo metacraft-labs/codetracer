@@ -31,35 +31,48 @@ inputs:
     default: ${{ github.token }}
 runs:
   using: composite
+  # NO `continue-on-error` HERE: a composite action's steps do not honour it,
+  # and a wait that found no artifact failed the whole action, where it should
+  # have built the tools (gpui-shell job 140924586761, whose run's tools job had
+  # been stopped by the host). Each fallback is decided inside its step and
+  # handed on as an output instead.
   steps:
     - name: Wait for the visual replay tools
       if: ${{ inputs.wait-for-artifact == 'true' }}
       id: wait
-      continue-on-error: true
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
-      run: nix develop .#ci --command bash ci/wait-for-run-artifact.sh visual-replay-tools "visual-replay-tools /" "${{ inputs.wait-seconds }}"
+      run: |
+        if nix develop .#ci --command bash ci/wait-for-run-artifact.sh visual-replay-tools "visual-replay-tools /" "${{ inputs.wait-seconds }}"; then
+          echo "ready=true" >>"$GITHUB_OUTPUT"
+        else
+          echo "No visual-replay-tools artifact to restore; the tools are built below."
+          echo "ready=false" >>"$GITHUB_OUTPUT"
+        fi
 
     - name: Restore the visual replay tools from the visual-replay-tools job
-      if: ${{ inputs.wait-for-artifact == 'true' && steps.wait.outcome == 'success' }}
+      if: ${{ inputs.wait-for-artifact == 'true' && steps.wait.outputs.ready == 'true' }}
       id: download
-      continue-on-error: true
       uses: actions/download-artifact@v4
       with:
         name: visual-replay-tools
         path: ${{ runner.temp }}/visual-replay-tools
 
     - name: Unpack them beside the siblings
-      if: ${{ inputs.wait-for-artifact == 'true' && steps.download.outcome == 'success' }}
-      continue-on-error: true
+      if: ${{ inputs.wait-for-artifact == 'true' && steps.wait.outputs.ready == 'true' }}
       shell: bash
       run: |
-        bash ci/unpack-ct-build-products.sh "${RUNNER_TEMP}/visual-replay-tools" visual-replay-tools.tar.gz
-        echo "CT_VISUAL_REPLAY_TOOLS_PREBUILT=1" >>"$GITHUB_ENV"
-        # The featureless isonim-gpui shim, when the tools job packed it.
-        if [ -e ../isonim-gpui/rust/target/debug/libgpui_nim_shim.so ]; then
-          echo "CT_GPUI_FEATURELESS_SHIM_PREBUILT=1" >>"$GITHUB_ENV"
+        # A short download makes the unpack exit non-zero; the tools are then
+        # built below rather than the job failing here.
+        if bash ci/unpack-ct-build-products.sh "${RUNNER_TEMP}/visual-replay-tools" visual-replay-tools.tar.gz; then
+          echo "CT_VISUAL_REPLAY_TOOLS_PREBUILT=1" >>"$GITHUB_ENV"
+          # The featureless isonim-gpui shim, when the tools job packed it.
+          if [ -e ../isonim-gpui/rust/target/debug/libgpui_nim_shim.so ]; then
+            echo "CT_GPUI_FEATURELESS_SHIM_PREBUILT=1" >>"$GITHUB_ENV"
+          fi
+        else
+          echo "The visual-replay-tools artifact did not unpack; the tools are built below."
         fi
 
     - name: Provide the tools, and export what names them
