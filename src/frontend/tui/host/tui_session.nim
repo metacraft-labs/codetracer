@@ -92,6 +92,7 @@ import ../app/timeline_binding
 import ../app/variables_binding
 import ../app/syntax/highlighter   # lexerContexts: the window's entry state
 import ../../host/native_host
+from ../../viewmodel/sdk/stop_loader import reload, spLowLevelCode
 import ../../host/project_definitions_host   # the checkout's .codetracer/, per session
 import ../../host/session_driver
 
@@ -2660,6 +2661,12 @@ proc header*(s: TuiSession; rt: TuiRuntime) =
     let vm = owner.session.session.lowLevelCodeVM
     if not vm.isNil and vm.generatedAtStop.val.len > 0:
       vm.clearInstructions()
+      # The stop loader had already loaded this stop's machine code before
+      # the C listing replaced it, so at the same stop it would ask nothing
+      # and the pane would say "No low-level code at this position": it is
+      # told to load the listing again.
+      owner.session.sdk.stops.reload(spLowLevelCode)
+      discard owner.session.loadStopPanes()
       owner.refreshLowLevel(rt)
   rt.editServices.showGeneratedCode = proc(targetId, path: string;
                                            line: int): string =

@@ -1050,14 +1050,19 @@ suite "HSF-E1: the pane server, over a real recording":
     let asmDeadline = epochTime() + 60.0
     while epochTime() < asmDeadline:
       discard paneRowsOf(seen, "lowLevelCode", asmRows)
-      if asmRows.len > 0 and not asmRows.anyIt(("#line " & $at.line & " ") in it) and
-         not asmRows.anyIt("No low-level code" in it):
+      if asmRows.len > 0 and asmRows.anyIt("%r" in it):
         break
       seen = srv.tick()
       sleep(100)
     checkpoint("after View Disassembly:\n" & asmRows[0 ..< min(asmRows.len, 20)].join("\n"))
     check asmRows.len > 0
     check not asmRows.anyIt(("#line " & $at.line & " ") in it)
+    # and the machine code itself: x86-64 in AT&T syntax names registers
+    # with `%` (until 2026-11-28 the C was cleared and nothing loaded in its
+    # place, "No low-level code at this position" — at a stop whose machine
+    # code the pane had shown before the C)
+    check not asmRows.anyIt("No low-level code" in it)
+    check asmRows.anyIt("%r" in it)
     # Outside a Nim source the operation refuses, with its reason.
     discard srv.request("source/cursor", %*{"session": sid,
       "file": "/somewhere/else.py", "line": 1, "column": 1})
