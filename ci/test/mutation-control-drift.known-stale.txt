@@ -929,3 +929,5 @@ src/frontend/tui/tests/plat54-agent-activity-mutation-control.sha256	src/fronten
 src/frontend/tui/tests/plat81-plugin-process-mutation-control.sha256	src/frontend/tui/app/runtime.nim	4538ef44314fb05aa6efbd5592c7126db50b83285ba761aeeba09c969afa3339	da449643b3ba2079623d78d28f12d60dd280a0bf064416a8437f01df91846226
 src/frontend/tui/tests/plat83-ct-lens-mutation-control.sha256	src/frontend/tui/app/runtime.nim	4538ef44314fb05aa6efbd5592c7126db50b83285ba761aeeba09c969afa3339	da449643b3ba2079623d78d28f12d60dd280a0bf064416a8437f01df91846226
 src/frontend/viewmodel/tests/unit/plat68-keymaps-mutation-control.sha256	src/frontend/tui/app/runtime.nim	4538ef44314fb05aa6efbd5592c7126db50b83285ba761aeeba09c969afa3339	da449643b3ba2079623d78d28f12d60dd280a0bf064416a8437f01df91846226
+# 186829bac7e (ci: run the image-diff consumers against a library change) moved the justfile; plat17-wasm owes a re-grade.
+src/frontend/viewmodel/tests/unit/plat17-wasm-mutation-control.sha256	justfile	edd6d5c2c3fe36ebd2a99256edb9ce8ecd35c15deba8cf48f0fb494c38a7145c	9f83fb7de38f9265bce6a92a5ee5735b3ae242304e7d59a17f1545c918d4a19a
