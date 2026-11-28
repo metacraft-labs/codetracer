@@ -5,7 +5,7 @@
 ##
 ## Each refresh of the status bar's certificate indicator computes three
 ## content ids (W, H and S, Status-Bar.md) and reads the declared scopes. The
-## renderer used to compute them itself, through `vcs.contentIdOverAsync`:
+## renderer used to compute them itself:
 ## git in child processes, the recipe driven by
 ## `certificate_content_id.runResumable`. That kept the renderer from WAITING
 ## for git, but not from working: `runResumable` re-runs the whole recipe from

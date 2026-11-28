@@ -38,10 +38,10 @@
 ## A host whose thread must not wait for git — the Electron renderer and main
 ## process, `ct host`'s event loop — runs `contentIdOver` on a thread that
 ## may: the content-id worker (`index/content_id_worker.nim`), through
-## `index/content_id_service.nim`. `contentIdOverAsync` runs the SAME
-## `contentIdOver` under `certificate_content_id.runResumable` over an
-## asynchronous git instead; it waits for nothing, but replays the recipe once
-## per git answer on the calling thread, so no product host uses it.
+## `index/content_id_service.nim`. Driving the recipe over an asynchronous
+## git on the calling thread instead (`certificate_content_id.runResumable`)
+## waits for nothing but replays the recipe once per git answer, which is
+## why no host here does.
 
 import std/[algorithm, strutils]
 
@@ -53,7 +53,6 @@ export outcome
 export certificate_content_id.NoContentIdCondition,
        certificate_content_id.NoContentIdState,
        certificate_content_id.ContentIdHost,
-       certificate_content_id.AsyncContentIdHost,
        certificate_content_id.ContentAlgorithm
 
 type
@@ -415,40 +414,6 @@ proc contentIdOver*(host: ContentIdHost; profile: PlatformProfile;
         (if probe.stderr.strip().len > 0: ": " & probe.stderr.strip() else: "")))
     failed[VcsContentId](pkFailed, computed.reason)
 
-proc contentIdOverAsync*(host: AsyncContentIdHost; profile: PlatformProfile;
-                         repository: string; state: VcsBlobSource;
-                         algorithm: string; scope: seq[string]
-                        ): PlatformFuture[PlatformOutcome[VcsContentId]] =
-  ## `contentIdOver`, over a host whose git answers later. The future settles
-  ## when the computation's last git call has answered; nothing waits for git
-  ## in between, so the calling thread runs on (Status-Bar.md, "A refresh
-  ## never stalls the window").
-  ##
-  ## Not a second implementation: `runResumable` re-runs `contentIdOver`
-  ## itself, journaling git's replies (see `certificate_content_id`, "Driving
-  ## the recipe over an asynchronous git"), so this answers exactly what the
-  ## synchronous form answers. A refusal or an unknown algorithm needs no git
-  ## and comes back already settled (`settledLater` → `resolved`).
-  ##
-  ## `runResumable` requires a computation that does not raise. The recipe
-  ## returns every failure as a value; the arms below are the backstop that
-  ## keeps an unforeseen raise from stranding the future, turning it into an
-  ## outcome the indicator reports as "could not be computed".
-  settledLater(proc(settle: proc(value: PlatformOutcome[VcsContentId])) =
-    runResumable(host,
-      proc(sync: ContentIdHost): PlatformOutcome[VcsContentId] =
-        try:
-          contentIdOver(sync, profile, repository, state, algorithm, scope)
-        except CatchableError as err:
-          failed[VcsContentId](pkFailed, "computing a content id raised",
-                               err.msg)
-        except:
-          # A BARE ARM: on the JS backend a node `Error` is not a Nim
-          # exception and a typed arm re-throws it (`desktop_electron.jsGuard`).
-          failed[VcsContentId](pkFailed, "computing a content id raised",
-                               getCurrentExceptionMsg()),
-      settle))
-
 # ---------------------------------------------------------------------------
 # Declared certificate scopes (test-certificates-spec Tooling §3.1)
 # ---------------------------------------------------------------------------
@@ -591,25 +556,6 @@ proc declaredScopesOver*(host: ContentIdHost; profile: PlatformProfile;
     failed[VcsDeclaredScopes](pkFailed,
       "the declared certificate scopes could not be read (git config " &
       "exited " & $reply.exitCode & ")", reply.stderr.strip())
-
-proc declaredScopesOverAsync*(host: AsyncContentIdHost;
-                              profile: PlatformProfile; repository: string
-                             ): PlatformFuture[PlatformOutcome[VcsDeclaredScopes]] =
-  ## `declaredScopesOver` over a host whose git answers later, through the
-  ## same `runResumable` driver `contentIdOverAsync` uses.
-  settledLater(proc(settle: proc(value: PlatformOutcome[VcsDeclaredScopes])) =
-    runResumable(host,
-      proc(sync: ContentIdHost): PlatformOutcome[VcsDeclaredScopes] =
-        try:
-          declaredScopesOver(sync, profile, repository)
-        except CatchableError as err:
-          failed[VcsDeclaredScopes](pkFailed,
-            "reading the declared certificate scopes raised", err.msg)
-        except:
-          failed[VcsDeclaredScopes](pkFailed,
-            "reading the declared certificate scopes raised",
-            getCurrentExceptionMsg()),
-      settle))
 
 proc unavailableVcs*(profile: PlatformProfile): VcsFacade =
   VcsFacade(

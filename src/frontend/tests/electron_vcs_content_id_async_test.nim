@@ -431,14 +431,11 @@ proc runCases() {.async.} =
        "a slow git: the event loop ticked while the root was resolved (" &
        $rootObs.ticks & " ticks)"
 
-  # Output past the capture bound: the asynchronous runner kills the child
-  # and marks the reply incomplete, which the recipe must report as a failure
-  # — never digest a prefix — exactly as `spawnSync`'s ENOBUFS does. The
-  # bound (64 KiB) is passed by one command only: `git cat-file` of a 256 KiB
-  # blob while `manifest-v1-sha256` reads it. (A bound so small that the
-  # facade's `git --version` probe overflows too is not a case either runner
-  # can answer deterministically: whether a child killed past the bound
-  # reports its exit status is a race in `spawnSync` as in `spawn`.)
+  # Output past the capture bound, on the host the content-id worker runs
+  # (`nodeContentIdHost`): `spawnSync` cuts the output (ENOBUFS), and the
+  # recipe must report that as a failure — never digest a prefix. The bound
+  # (64 KiB) is passed by one command only: `git cat-file` of a 256 KiB blob
+  # while `manifest-v1-sha256` reads it.
   block:
     let big = workspace & "/big"
     makeDir(big)
@@ -446,20 +443,10 @@ proc runCases() {.async.} =
     writeText(big & "/big.txt", repeat("0123456789abcdef", 16384))
     discard git(big, "add", "-A")
     discard git(big, "commit", "-q", "-m", "big")
-    let tinyAsync = nodeAsyncContentIdHost(captureLimit = 65536)
     let tinySync = nodeContentIdHost(captureLimit = 65536)
-    let obs = await observe(contentIdOverAsync(tinyAsync, profile, big,
-                                               vbsHead, "manifest-v1-sha256", @[]))
-    let expected = contentIdOver(tinySync, profile, big, vbsHead,
-                                 "manifest-v1-sha256", @[])
-    ck not obs.settledInline, "past the capture bound: not settled synchronously"
-    if not sameAnswer(obs.outcome, expected):
-      echo "    async: ", describe(obs.outcome)
-      echo "    sync:  ", describe(expected)
-    ck sameAnswer(obs.outcome, expected),
-       "past the capture bound: the synchronous recipe's answer"
-    ck not obs.outcome.ok and
-       "more output than could be captured" in obs.outcome.error.message,
+    let cut = contentIdOver(tinySync, profile, big, vbsHead,
+                            "manifest-v1-sha256", @[])
+    ck not cut.ok and "more output than could be captured" in cut.error.message,
        "past the capture bound: a failure that says the output was cut"
 
   ck $indexBytes(cstring(repo & "/.git/index")) == indexBefore,
@@ -467,7 +454,7 @@ proc runCases() {.async.} =
   ck leftovers().len == 0,
      "no ct-content-id-* directory is left under the host's temporary root"
 
-const ExpectedChecks = 73
+const ExpectedChecks = 71
 
 proc main() {.async.} =
   try:

@@ -4,9 +4,9 @@
 ##
 ## The status bar's certificate indicator reads three content ids (W, H, S)
 ## and the declared scopes on every refresh. The Electron renderer used to
-## compute them itself through `vcs.contentIdOverAsync`, whose resumable
-## driver replays the whole recipe once per git answer: seconds of renderer
-## work per refresh on a large repository. They are now computed by
+## compute them itself through a resumable driver that replays the whole
+## recipe once per git answer: seconds of renderer work per refresh on a
+## large repository. They are now computed by
 ## `index/content_id_service.nim` in a node `worker_thread`
 ## (`index/content_id_worker.nim`), once, through the synchronous recipe.
 ##

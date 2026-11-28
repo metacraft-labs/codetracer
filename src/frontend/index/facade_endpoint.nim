@@ -1033,7 +1033,7 @@ proc hVcsContentId(ep: FacadeEndpoint; args: JsonNode): PlatformFuture[VerbReply
   ## asks for it every 15 s; the computation holds neither the event loop nor
   ## any other client's answer.
   ##
-  ## It used to run here, through `vcs.contentIdOverAsync`: git in child
+  ## It used to run here: git in child
   ## processes, but the recipe driven by `runResumable`, which re-runs it once
   ## per git answer and so re-reads the whole index listing each time — on
   ## this thread, the one every client's IPC goes through.

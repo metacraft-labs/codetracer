@@ -30,13 +30,11 @@
 ## content-id worker (`index/content_id_worker.nim`, started by
 ## `index/content_id_service.nim` in the Electron main process and in `ct
 ## host`), where blocking is the point and the recipe runs once, start to
-## finish. `nodeAsyncContentIdHost` runs the same commands through
-## `child_process.spawn` for `certificate_content_id.runResumable`; no
-## product host uses it any more, because `runResumable` replays the recipe
-## once per git answer — on the calling thread, at a cost that grows with the
-## repository's index. Both runners fold node's outcomes into a `GitReply`
-## through `replyOf`, so a launch error, a signal and an over-long output mean
-## the same thing on both.
+## finish. The other runner, `nodeAsyncGitRunner`, runs a command through
+## `child_process.spawn` for the renderer's own short git reads
+## (`desktop_electron`'s `vcs.repositoryRoot`). Both runners fold node's
+## outcomes into a `GitReply` through `replyOf`, so a launch error, a signal
+## and an over-long output mean the same thing on both.
 ##
 ## FAILURES ARE VALUES. Every node call that can throw is caught here — with a
 ## bare `except:` where Nim code calls node, because on the JS backend a typed
@@ -54,7 +52,6 @@ import ../../../ct_test/certificate_content_id
 import ../../../ct_test/certificate_store_roots
 
 export certificate_content_id.ContentIdHost,
-       certificate_content_id.AsyncContentIdHost,
        certificate_content_id.AsyncContentGitRunner,
        certificate_content_id.GitCall, certificate_content_id.GitReply
 export certificate_store_roots.CertificateStoreRoots,
@@ -263,8 +260,8 @@ proc nodeAsyncGitRunner*(captureLimit = NodeContentIdCaptureLimit):
   ## blocks the renderer.
   ##
   ## `done` is called exactly once. It is called INLINE only when node
-  ## throws synchronously inside `spawn` (an invalid argument), which
-  ## `runResumable` accepts; every launched child answers later.
+  ## throws synchronously inside `spawn` (an invalid argument); every
+  ## launched child answers later.
   result = proc(call: GitCall; done: proc(reply: GitReply) {.closure, gcsafe.})
                {.closure, gcsafe.} =
     let (argv, env) = spawnArguments(call)
@@ -288,11 +285,7 @@ proc nodeFileOperations(tempRoot: string): ContentIdHost =
   ## The recipe's file operations through node's synchronous `fs`, with
   ## temporary indexes in fresh directories under `tempRoot` (default:
   ## `os.tmpdir()`, read when each is made), outside every repository.
-  ## Shared by both hosts below; `git` is left for each to fill in.
-  ##
-  ## Synchronous on purpose, also in the asynchronous host: one `mkdtemp`,
-  ## one copy of the index and one `utimes` per computation are not the cost
-  ## the renderer was paying, and `runResumable` needs them answered inline.
+  ## `git` is left for the host to fill in.
   let root = tempRoot
   ContentIdHost(
     makeTempDir: proc(): HostFileResult {.closure, gcsafe.} =
@@ -345,15 +338,6 @@ proc nodeContentIdHost*(tempRoot = "";
   ## the synchronous reference the suites compare other answers with.
   result = nodeFileOperations(tempRoot)
   result.git = nodeGitRunner(captureLimit)
-
-proc nodeAsyncContentIdHost*(tempRoot = "";
-                             captureLimit = NodeContentIdCaptureLimit):
-    AsyncContentIdHost =
-  ## The same host with git through `child_process.spawn`, for
-  ## `certificate_content_id.runResumable` (via `vcs.contentIdOverAsync`).
-  ## No product host uses it (module header); the suites hold its answers
-  ## to the synchronous host's.
-  asyncContentIdHost(nodeFileOperations(tempRoot), nodeAsyncGitRunner(captureLimit))
 
 # ---------------------------------------------------------------------------
 # The account the system root is partitioned by (Transport §2.1)

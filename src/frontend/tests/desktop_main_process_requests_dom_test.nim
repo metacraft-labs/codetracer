@@ -7,7 +7,7 @@
 ##
 ## The status bar's certificate indicator computes three content ids (W, H,
 ## S) and reads the declared scopes on every refresh. The Electron renderer's
-## VCS facade computed them itself, through `vcs.contentIdOverAsync`: git in
+## VCS facade computed them itself, with git in
 ## child processes, but the recipe driven by a resumable runner that replays
 ## the whole computation once per git answer, copying, splitting and parsing
 ## the full index listing again each time. On a 25,000-entry index a profile
