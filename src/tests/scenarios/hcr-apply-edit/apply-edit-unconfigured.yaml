@@ -23,6 +23,9 @@ steps:
   - expect: { at: omnibox, focused: true }
   - type: ":Apply Edit"
   - wait: { until: { at: 'omnibox/option[label="Apply Edit & Hot-Reload"]', kind: command }, timeout: 15s }
+  # The refusal leaves the status bar by itself after a few seconds: read it
+  # while it is up (no settle after the press), both of its claims in one
+  # observation.
   - click: 'omnibox/option[label="Apply Edit & Hot-Reload"]'
-  - wait: { until: { at: status-line, notifications: { contains: "refused: not-configured" } }, timeout: 60s }
-  - expect: { at: status-line, notifications: { contains: "CODETRACER_HCR_DRIVER" } }
+    settle: false
+  - wait: { until: { at: status-line, assert: ['notifies("refused: not-configured")', 'notifies("CODETRACER_HCR_DRIVER")'] }, timeout: 60s }
