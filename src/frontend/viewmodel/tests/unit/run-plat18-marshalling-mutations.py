@@ -977,7 +977,7 @@ BECAUSE: dict = {
 
     # --- the fake-timer contracts: RATIOS, so these ARE normalised ----------
     'F1': 'FAIL: debug/native scores N.N, below N — the chain is deferring to a host loop',
-    'F2': "FAIL: debug: wasm is N.Nx native's wall time, above N.Nx — §N's rejection criterion",
+    'F2': "FAIL: debug: wasm is N.Nx native's CPU time, above N.Nx — §N's rejection criterion",
     'F3': 'FAIL: debug/native wall time is N.N ms, under the N ms floor — raise CT_FAKE_TIMER_ITERATIONS; a N ms clock quantum is worth N.N% of this number',
 
     # --- the frame renderer as a library (2026-11-21) -----------------------
@@ -993,7 +993,7 @@ BECAUSE: dict = {
     'E5': 'FAIL: chromium/js: the log reads "keydown ctrl+V\\npaste ls -la\\nkeydown ctrl+shift+ArrowDown\\nwheel down\\ninner"',
 
     # --- the developer loop: also a ratio, so also normalised --------------
-    'D1': 'FAIL: one edit-compile-run is N.Nx the nim js loop under wasm, above the N.Nx regression limit',
+    'D1': "FAIL: one edit-compile-run costs N.Nx the nim js loop's CPU under wasm, above the N.Nx regression limit (cpu js N ms, wasm N ms; wall js N ms, wasm N ms)",
 }
 
 

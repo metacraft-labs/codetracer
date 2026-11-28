@@ -36,13 +36,38 @@
 #      1000), which is the MECHANISM threshold: a chain that reached a host
 #      timer scores about 1 and one that did not scores four or five orders of
 #      magnitude more, with nothing in between;
-#   3. the wasm/native wall ratio is taken over `CT_P18_PAIRS` (default 9)
+#   3. the wasm/native CPU-time ratio is taken over `CT_P18_PAIRS` (default 9)
 #      back-to-back native/wasm pairs per build, and the MEDIAN per-pair
 #      ratio is compared against `CT_P18_MAX_SLOWDOWN` (default 3.0). The threshold is the
 #      "materially slower" in §5 made a number, and it is deliberately loose:
 #      the criterion is about losing a testing PROPERTY, not about a constant
 #      factor, and a tight bound here would be the coin flip §12a describes on
 #      a host this campaign has measured at load 60 on 24 CPUs.
+#
+# ## CONTRACT 3 IS DECIDED ON CPU TIME
+#
+# Each side's run is timed with bash's `time` on its subshell: user+sys of the
+# native process, and of node with its GC and compiler threads. Wall time is
+# still printed beside it. Pairing and medians were not enough on a shared
+# host: on 2026-11-19 ten wall-time pairs of one unchanged build, at load
+# 115-134, read release ratios from 0.37 to 8.67, and on 2026-11-28 a
+# behaviour-preserving edit of this script read 5.49x release at load ~100 and
+# failed the 3.0 limit. The scheduler decided those numbers. CPU time on one
+# tree (65b721a25ab), 2026-11-28, median of 9 pairs:
+#
+#   | condition                     | load | debug | release |
+#   |-------------------------------+------+-------+---------|
+#   | 6 cores                       |   94 | 1.77x | 1.87x   |
+#   | 2 cores, nice 19              |   85 | 1.89x | 2.19x   |
+#   | REGRESSION: SAFE_HEAP=1 and   |   65 | 15.02x| 9.93x   |
+#   |   ASSERTIONS=2 on the wasm    |      |       |         |
+#   |   link                        |      |       |         |
+#
+# The limit stays 3.0x: about a third above the highest healthy reading and
+# far below the regression, which also reddens contract 2 (debug/wasm scored
+# 530 against the floor of 1000). The healthy figures agree with the wall-time
+# ones published for this criterion (1.42x-1.96x), so the decision they
+# support is unchanged.
 #
 # Exit 0 if every contract holds, 1 if any fails, 2 if a tool is missing —
 # a failure and never a skip.
@@ -176,21 +201,29 @@ run_build() {
 	local -a pair_ratios=() n_ratios=() w_ratios=()
 	local nkey="${label}-native" wkey="${label}-wasm"
 	for ((pair = 1; pair <= PAIRS; pair++)); do
-		n_out="$("${out_dir}/ft-native-${label}" "${ITERATIONS}" 2>&1)"
-		w_out="$(node "${out_dir}/ft-wasm-${label}.js" "${ITERATIONS}" 2>&1)"
-		printf '%s\n' "${n_out}" >"${out_dir}/native-${label}-${pair}.out"
-		printf '%s\n' "${w_out}" >"${out_dir}/wasm-${label}-${pair}.out"
+		# EACH SIDE'S CPU TIME, BESIDE ITS OWN WALL CLOCK: bash's `time` on
+		# the run's subshell reports user+sys of the process and its threads
+		# (node's GC and compiler threads included), which a busy scheduler
+		# does not stretch the way it stretches wall time. Contract 3 is
+		# decided on these; see "CONTRACT 3 IS DECIDED ON CPU TIME" below.
+		TIMEFORMAT='%3U %3S'
+		{ time ("${out_dir}/ft-native-${label}" "${ITERATIONS}" >"${out_dir}/native-${label}-${pair}.out" 2>&1); } 2>"${out_dir}/native-${label}-${pair}.cpu"
+		{ time (node "${out_dir}/ft-wasm-${label}.js" "${ITERATIONS}" >"${out_dir}/wasm-${label}-${pair}.out" 2>&1); } 2>"${out_dir}/wasm-${label}-${pair}.cpu"
+		n_out="$(cat "${out_dir}/native-${label}-${pair}.out")"
+		w_out="$(cat "${out_dir}/wasm-${label}-${pair}.out")"
 		nw="$(row "${n_out}" FAKETIMER-WALL-MS)"
 		ww="$(row "${w_out}" FAKETIMER-WALL-MS)"
+		nc="$(awk 'END{printf "%d", ($1 + $2) * 1000}' "${out_dir}/native-${label}-${pair}.cpu")"
+		wc="$(awk 'END{printf "%d", ($1 + $2) * 1000}' "${out_dir}/wasm-${label}-${pair}.cpu")"
 		min_into wall_of "${nkey}" "${nw:-0}"
 		min_into wall_of "${wkey}" "${ww:-0}"
 		n_ratios+=("$(row "${n_out}" FAKETIMER-RATIO)")
 		w_ratios+=("$(row "${w_out}" FAKETIMER-RATIO)")
 		min_into done_of "${nkey}" "$(row "${n_out}" FAKETIMER-COMPLETED | awk '{print $1}')"
 		min_into done_of "${wkey}" "$(row "${w_out}" FAKETIMER-COMPLETED | awk '{print $1}')"
-		pr="$(awk -v n="${nw:-0}" -v w="${ww:-0}" 'BEGIN{ if (n + 0 > 0) printf "%.4f", (w + 0) / (n + 0) }')"
+		pr="$(awk -v n="${nc:-0}" -v w="${wc:-0}" 'BEGIN{ if (n + 0 > 0) printf "%.4f", (w + 0) / (n + 0) }')"
 		[ -n "${pr}" ] && pair_ratios+=("${pr}")
-		echo "    ${label} pair ${pair}/${PAIRS}: native=${nw:-?} ms wasm=${ww:-?} ms ratio=${pr:-?}"
+		echo "    ${label} pair ${pair}/${PAIRS}: cpu native=${nc:-?} ms wasm=${wc:-?} ms ratio=${pr:-?}; wall native=${nw:-?} ms wasm=${ww:-?} ms"
 	done
 	ratio_of["${nkey}"]="$(median "${n_ratios[@]}")"
 	ratio_of["${wkey}"]="$(median "${w_ratios[@]}")"
@@ -314,9 +347,9 @@ else
 		}')"
 		read -r kind ratio <<<"${verdict}"
 		case "${kind}" in
-		OK) ok "${label}: wasm is ${ratio}x native's wall time, median of ${PAIRS} pairs (limit ${MAX_SLOWDOWN}x)" ;;
-		SLOW) fail "${label}: wasm is ${ratio}x native's wall time, above ${MAX_SLOWDOWN}x — §5's rejection criterion" ;;
-		*) fail "${label}: no pair produced a native wall time to divide by; raise CT_FAKE_TIMER_ITERATIONS" ;;
+		OK) ok "${label}: wasm is ${ratio}x native's CPU time, median of ${PAIRS} pairs (limit ${MAX_SLOWDOWN}x)" ;;
+		SLOW) fail "${label}: wasm is ${ratio}x native's CPU time, above ${MAX_SLOWDOWN}x — §5's rejection criterion" ;;
+		*) fail "${label}: no pair produced a native CPU time to divide by; raise CT_FAKE_TIMER_ITERATIONS" ;;
 		esac
 	done
 fi
