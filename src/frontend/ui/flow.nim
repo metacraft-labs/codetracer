@@ -715,6 +715,10 @@ proc openValue*(self: FlowComponent, stepCount: int, name: cstring, before: bool
         ValueWithExpression(expression: name, value: typedValue(value)))
   self.redraw()
 
+const FlowHoverDelayMs = 300
+  ## How long the pointer rests on a value box before its hover popup opens:
+  ## Monaco's `editor.hover.delay` default.
+
 proc displayTooltip(
     self: FlowComponent,
     containerId: cstring,
@@ -774,6 +778,15 @@ proc displayTooltip(
         # anchor, which is the hover case alone.
         options[cstring"followCursor"] = cast[JsObject](cstring"horizontal")
         options[cstring"plugins"] = cast[JsObject](@[followCursor])
+        # Open on a pointer that RESTS on the box, as Monaco's hover does
+        # (`editor.hover.delay`, 300 ms), not on one passing over it. The
+        # popup is interactive (its `+` adds the value to the scratchpad)
+        # and sits over the line above, so a popup opened in passing caught
+        # a pointer on its way up to the line above and covered the value it
+        # was going to (flow/eye-icon-dual in realistic mode: the before
+        # half of line 8 never opened, line 9's popup stayed). Hiding stays
+        # immediate.
+        options[cstring"delay"] = cast[JsObject](@[FlowHoverDelayMs, 0])
       # Passed as a one-element array so tippy returns an ARRAY of instances,
       # which is what `tippyElement`'s users (here and `clear`) iterate.
       let obj = ui_imports.misc_lib.tippy(@[anchor].toJs, options)
