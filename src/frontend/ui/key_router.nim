@@ -704,16 +704,29 @@ proc openContextMenuOfFocus(): bool =
   ## context-menu key raises one. In the Variables pane the element is the
   ## focused row.
   var target = activeElementJs()
-  for e in desktopScopePath():
-    if e.paneKind == "state":
-      let row = focusedStateRow()
-      if not row.isNil: target = row
-      break
+  var paneKind = ""
+  let path = desktopScopePath()
+  if path.innermostPane >= 0:
+    paneKind = path[path.innermostPane].paneKind
+  if paneKind == "state":
+    let row = focusedStateRow()
+    if not row.isNil: target = row
   if target.isNil or target.isUndefined: return false
   let rect = target.getBoundingClientRect()
   let x = rect.left.to(float) + 8.0
   let y = rect.top.to(float) + 8.0
   let ev = newMouseEventJs(cstring"contextmenu", x, y)
+  # A pane's element menu is opened as a right press opens it: the pointer
+  # row `context-menu.open`, performed by the pane's procedure on the element
+  # the press would hit (`dom_pointer`, `dom_pane_presses`). The views stopped
+  # listening for `contextmenu` when right presses moved to the pointer
+  # keymap, and a `contextmenu` event alone opened nothing in them.
+  if paneKind.len > 0 and hasElementOperation("context-menu.open", paneKind):
+    let hit = domElementAt(target, paneKind)
+    if hit.kind.len > 0 and runElementOperation("context-menu.open",
+        ElementPress(element: hit.element, event: ev, pane: paneKind)):
+      return true
+  # Anything else that answers the event itself (an editor's own menu).
   discard target.dispatchEvent(ev)
   true
 
