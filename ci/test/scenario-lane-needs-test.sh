@@ -39,7 +39,7 @@ users_of() {
 declare -A ere=(
 	[hcr]='use:[[:space:]]*hcr-flame'
 	[instrument]='cross-process-three-trace'
-	[ruby]='\.rb[[:space:]]*[,}]'
+	[ruby]='\.rb[[:space:]]*[,}]|label="Ruby: '
 	[solana]='lang:[[:space:]]*solana'
 	[polkavm]='lang:[[:space:]]*polkavm'
 	[evm]='\.sol[[:space:]]*[,}]'

@@ -10,14 +10,17 @@
 #   instrument=true|false  a scenario materializes the cross-process recording,
 #                      which needs ct-instrument (ci/test/scenario-lane-provision.sh
 #                      instrument)
-#   ruby=true|false    a scenario records a Ruby program (... ruby)
+#   ruby=true|false    a scenario records a Ruby program (... ruby): by its
+#                      `record-program` stage, or through a Ruby launch
+#                      configuration it picks from the menu
 #   recorders=a,b,...  the blockchain recorders its scenarios record with
 #                      (solana, polkavm, evm, cairo, leo, miden, cardano, flow,
 #                      move, fuel, ton), for ci/test/scenario-lane-provision.sh
 #                      recorders
 #
 # A scenario says what it records in its `record-program` stage's `with:`: a
-# language (`lang: solana`), or its program's source file or directory.
+# language (`lang: solana`), or its program's source file or directory; a
+# scenario that records through the UI by its launch configuration's label.
 # ci/test/scenario-lane-needs-test.sh fails unless every scenario that needs a
 # piece is on a shard this script flags for it, in every split the workflow uses.
 # Run from anywhere; needs python3 (codetracer's dev shell has it).
@@ -38,7 +41,7 @@ slice="$(python3 ci/test/scenario-lane-shard.py "${lanes}/${lane}.lane.yaml" "${
 declare -A pattern=(
 	[hcr]='^[[:space:]]*-[[:space:]]*use:[[:space:]]*hcr-flame[[:space:]]*$'
 	[instrument]='name:[[:space:]]*cross-process-three-trace'
-	[ruby]='program:[[:space:]]*[^,}]*\.rb([[:space:]]|,|\}|$)'
+	[ruby]='program:[[:space:]]*[^,}]*\.rb([[:space:]]|,|\}|$)|menu-item\[label="Ruby:'
 	[solana]='lang:[[:space:]]*solana([[:space:]]|,|\}|$)'
 	[polkavm]='lang:[[:space:]]*polkavm([[:space:]]|,|\}|$)'
 	[evm]='program:[[:space:]]*[^,}]*\.sol([[:space:]]|,|\}|$)'
